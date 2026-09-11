@@ -1,0 +1,645 @@
+import React, { useEffect, useState } from 'react';
+import {
+  LayoutTemplate, Users2, Plus, Trash2, X, GripVertical, Star, StarOff, Power, AlertCircle, CheckCircle2, Pencil
+} from 'lucide-react';
+import { ApprovalTemplate, ApprovalTemplateStep, ApprovalRequestType, User } from '../types';
+import { apiUrl } from '../lib/api';
+import { Spinner } from './Spinner';
+
+interface ApprovalTemplateManagerProps {
+  token: string;
+  user: User;
+  users: User[];
+}
+
+const REQUEST_TYPES: { key: ApprovalRequestType; label: string }[] = [
+  { key: 'conveyance', label: 'Conveyance Bill Claim' },
+  { key: 'leave', label: 'Leave Application' },
+  { key: 'timesheet', label: 'Timesheet (Attendance Correction)' }
+];
+
+// A step still being edited in the Template modal — approvers kept as plain
+// user_ids here; resolved to names via the `users` prop at render time.
+interface StepDraft {
+  approver_user_ids: number[];
+}
+
+// Admin Panel -> Approvals -> "Templates" / "Assign to Employees" — Part 2 of
+// the Dynamic Approval Engine. Templates are built here (Superadmin-only to
+// create/edit/delete); which Template applies to which Employee for which
+// Request Type is set on the "Assign to Employees" tab (any Admin with the
+// "approvals" module, same gate as the rest of this screen). Part 3 is what
+// actually reads these when a Conveyance/Leave/Timesheet request is submitted.
+export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = ({ token, user, users }) => {
+  const isSuperAdmin = user.role === 'superadmin';
+  const [subView, setSubView] = useState<'templates' | 'assign'>('templates');
+  const [requestType, setRequestType] = useState<ApprovalRequestType>('conveyance');
+
+  const [templates, setTemplates] = useState<ApprovalTemplate[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // --- Template editor modal ---
+  const [showEditor, setShowEditor] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [nameDraft, setNameDraft] = useState('');
+  const [typeDraft, setTypeDraft] = useState<ApprovalRequestType>('conveyance');
+  const [isDefaultDraft, setIsDefaultDraft] = useState(false);
+  const [isActiveDraft, setIsActiveDraft] = useState(true);
+  const [stepsDraft, setStepsDraft] = useState<StepDraft[]>([{ approver_user_ids: [] }]);
+  const [addApproverChoice, setAddApproverChoice] = useState<Record<number, string>>({});
+  const [dragStepIndex, setDragStepIndex] = useState<number | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [editorError, setEditorError] = useState<string | null>(null);
+
+  // --- Assignment tab ---
+  const [assignRows, setAssignRows] = useState<any[]>([]);
+  const [defaultTemplate, setDefaultTemplate] = useState<{ id: number; name: string } | null>(null);
+  const [assignLoading, setAssignLoading] = useState(false);
+  const [savingAssignFor, setSavingAssignFor] = useState<number | null>(null);
+
+  const userMap = new Map<number, User>(users.map((u) => [u.id, u]));
+
+  const fetchTemplates = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(apiUrl(`/api/approval-templates?request_type=${requestType}`), {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) setTemplates(await res.json());
+    } catch (err) {
+      console.error('Failed to load approval templates', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchAssignments = async () => {
+    setAssignLoading(true);
+    try {
+      const res = await fetch(apiUrl(`/api/template-assignments?request_type=${requestType}`), {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setAssignRows(data.employees || []);
+        setDefaultTemplate(data.default_template || null);
+      }
+    } catch (err) {
+      console.error('Failed to load template assignments', err);
+    } finally {
+      setAssignLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (subView === 'templates') fetchTemplates();
+    else fetchAssignments();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subView, requestType]);
+
+  const openCreateModal = () => {
+    setEditingId(null);
+    setNameDraft('');
+    setTypeDraft(requestType);
+    setIsDefaultDraft(false);
+    setIsActiveDraft(true);
+    setStepsDraft([{ approver_user_ids: [] }]);
+    setEditorError(null);
+    setShowEditor(true);
+  };
+
+  const openEditModal = async (id: number) => {
+    setEditorError(null);
+    try {
+      const res = await fetch(apiUrl(`/api/approval-templates/${id}`), { headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to load this template');
+      setEditingId(id);
+      setNameDraft(data.name);
+      setTypeDraft(data.request_type);
+      setIsDefaultDraft(!!data.is_default);
+      setIsActiveDraft(!!data.is_active);
+      setStepsDraft(
+        (data.steps || []).map((s: ApprovalTemplateStep) => ({ approver_user_ids: s.approvers.map((a) => a.user_id) }))
+      );
+      setShowEditor(true);
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message || 'Failed to load this template' });
+    }
+  };
+
+  const addStep = () => setStepsDraft((prev) => [...prev, { approver_user_ids: [] }]);
+  const removeStep = (idx: number) => setStepsDraft((prev) => prev.filter((_, i) => i !== idx));
+  const moveStep = (from: number, to: number) => {
+    if (to < 0 || to >= stepsDraft.length) return;
+    setStepsDraft((prev) => {
+      const next = [...prev];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      return next;
+    });
+  };
+  const addApproverToStep = (stepIdx: number) => {
+    const uid = Number(addApproverChoice[stepIdx]);
+    if (!uid) return;
+    setStepsDraft((prev) =>
+      prev.map((s, i) => (i === stepIdx && !s.approver_user_ids.includes(uid) ? { ...s, approver_user_ids: [...s.approver_user_ids, uid] } : s))
+    );
+    setAddApproverChoice((prev) => ({ ...prev, [stepIdx]: '' }));
+  };
+  const removeApproverFromStep = (stepIdx: number, uid: number) => {
+    setStepsDraft((prev) => prev.map((s, i) => (i === stepIdx ? { ...s, approver_user_ids: s.approver_user_ids.filter((x) => x !== uid) } : s)));
+  };
+
+  const handleSaveTemplate = async () => {
+    setSaving(true);
+    setEditorError(null);
+    try {
+      const payload = {
+        name: nameDraft.trim(),
+        request_type: typeDraft,
+        is_default: isDefaultDraft,
+        is_active: isActiveDraft,
+        steps: stepsDraft.map((s) => ({ approver_user_ids: s.approver_user_ids }))
+      };
+      const url = editingId ? apiUrl(`/api/approval-templates/${editingId}`) : apiUrl('/api/approval-templates');
+      const res = await fetch(url, {
+        method: editingId ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to save this template');
+      setShowEditor(false);
+      setMessage({ type: 'success', text: editingId ? 'Template updated.' : 'Template created.' });
+      if (typeDraft === requestType) fetchTemplates();
+      else setRequestType(typeDraft); // switches tab filter, which triggers its own fetch
+    } catch (err: any) {
+      setEditorError(err.message || 'Failed to save this template');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (id: number) => {
+    if (!window.confirm('Delete this template? This cannot be undone.')) return;
+    try {
+      const res = await fetch(apiUrl(`/api/approval-templates/${id}`), {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to delete this template');
+      setMessage({ type: 'success', text: 'Template deleted.' });
+      fetchTemplates();
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message || 'Failed to delete this template' });
+    }
+  };
+
+  const handleToggleDefault = async (t: ApprovalTemplate) => {
+    try {
+      const res = await fetch(apiUrl(`/api/approval-templates/${t.id}/default`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ is_default: !t.is_default })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to update default');
+      fetchTemplates();
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message || 'Failed to update default' });
+    }
+  };
+
+  const handleToggleActive = async (t: ApprovalTemplate) => {
+    try {
+      const res = await fetch(apiUrl(`/api/approval-templates/${t.id}/active`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ is_active: !t.is_active })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to update this template');
+      fetchTemplates();
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message || 'Failed to update this template' });
+    }
+  };
+
+  const handleAssignChange = async (employeeUserId: number, templateId: string) => {
+    setSavingAssignFor(employeeUserId);
+    try {
+      const res = await fetch(apiUrl('/api/template-assignments'), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          employee_user_id: employeeUserId,
+          request_type: requestType,
+          template_id: templateId ? Number(templateId) : null
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to save this assignment');
+      fetchAssignments();
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message || 'Failed to save this assignment' });
+    } finally {
+      setSavingAssignFor(null);
+    }
+  };
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+      <div className="p-6 border-b border-slate-200 flex flex-col gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+              <LayoutTemplate className="w-4 h-4 text-blue-600" /> Approval Templates
+            </h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Build named, ordered multi-step approval chains per Request Type, then assign one to each
+              Employee (or leave a company-wide default in place).
+            </p>
+          </div>
+          {subView === 'templates' && isSuperAdmin && (
+            <button
+              type="button"
+              onClick={openCreateModal}
+              className="flex items-center gap-1.5 text-xs font-semibold px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white transition-colors whitespace-nowrap"
+            >
+              <Plus className="w-3.5 h-3.5" /> New Template
+            </button>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex bg-slate-100 rounded-xl p-1">
+            <button
+              type="button"
+              onClick={() => setSubView('templates')}
+              className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors ${
+                subView === 'templates' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500'
+              }`}
+            >
+              <LayoutTemplate className="w-3.5 h-3.5" /> Templates
+            </button>
+            <button
+              type="button"
+              onClick={() => setSubView('assign')}
+              className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors ${
+                subView === 'assign' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-500'
+              }`}
+            >
+              <Users2 className="w-3.5 h-3.5" /> Assign to Employees
+            </button>
+          </div>
+
+          <select
+            value={requestType}
+            onChange={(e) => setRequestType(e.target.value as ApprovalRequestType)}
+            className="text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none"
+          >
+            {REQUEST_TYPES.map((rt) => (
+              <option key={rt.key} value={rt.key}>
+                {rt.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {message && (
+          <div
+            className={`flex items-center gap-2 text-xs px-3 py-2.5 rounded-xl ${
+              message.type === 'success' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
+            }`}
+          >
+            {message.type === 'success' ? <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> : <AlertCircle className="w-3.5 h-3.5 shrink-0" />}
+            <span>{message.text}</span>
+          </div>
+        )}
+      </div>
+
+      {/* --- TEMPLATES LIST --- */}
+      {subView === 'templates' && (
+        <div className="overflow-x-auto">
+          {loading ? (
+            <div className="p-10 flex justify-center">
+              <Spinner size={20} className="text-slate-400" />
+            </div>
+          ) : templates.length === 0 ? (
+            <div className="p-10 text-center text-sm text-slate-400">
+              No templates yet for {REQUEST_TYPES.find((r) => r.key === requestType)?.label}.
+              {isSuperAdmin ? ' Tap "New Template" to build one.' : ' Ask your Superadmin to build one.'}
+            </div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 text-[11px] uppercase tracking-wider text-slate-500">
+                <tr>
+                  <th className="text-left px-4 py-3 font-semibold">Name</th>
+                  <th className="text-left px-4 py-3 font-semibold">Layers</th>
+                  <th className="text-left px-4 py-3 font-semibold">Default</th>
+                  <th className="text-left px-4 py-3 font-semibold">Status</th>
+                  <th className="text-right px-4 py-3 font-semibold">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {templates.map((t) => (
+                  <tr key={t.id} className="hover:bg-slate-50/60">
+                    <td className="px-4 py-3 font-semibold text-slate-900">{t.name}</td>
+                    <td className="px-4 py-3 text-slate-600">{t.step_count ?? '—'}</td>
+                    <td className="px-4 py-3">
+                      {isSuperAdmin ? (
+                        <button
+                          type="button"
+                          onClick={() => handleToggleDefault(t)}
+                          className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-full transition-colors ${
+                            t.is_default ? 'bg-amber-50 text-amber-700' : 'bg-slate-100 text-slate-400 hover:text-slate-600'
+                          }`}
+                        >
+                          {t.is_default ? <Star className="w-3 h-3" /> : <StarOff className="w-3 h-3" />}
+                          {t.is_default ? 'Default' : 'Make default'}
+                        </button>
+                      ) : t.is_default ? (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-full bg-amber-50 text-amber-700">
+                          <Star className="w-3 h-3" /> Default
+                        </span>
+                      ) : (
+                        <span className="text-xs text-slate-300">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      {isSuperAdmin ? (
+                        <button
+                          type="button"
+                          onClick={() => handleToggleActive(t)}
+                          className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-full transition-colors ${
+                            t.is_active ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'
+                          }`}
+                        >
+                          <Power className="w-3 h-3" /> {t.is_active ? 'Active' : 'Inactive'}
+                        </button>
+                      ) : (
+                        <span className={`text-[11px] font-semibold px-2 py-1 rounded-full ${t.is_active ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                          {t.is_active ? 'Active' : 'Inactive'}
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      {isSuperAdmin && (
+                        <div className="flex justify-end gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => openEditModal(t.id)}
+                            className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDelete(t.id)}
+                            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
+      {/* --- ASSIGN TO EMPLOYEES --- */}
+      {subView === 'assign' && (
+        <div className="overflow-x-auto">
+          <div className="px-4 pt-4 text-xs text-slate-500">
+            {defaultTemplate ? (
+              <>
+                Anyone without an explicit pick below falls back to the default template:{' '}
+                <span className="font-semibold text-slate-700">{defaultTemplate.name}</span>.
+              </>
+            ) : (
+              <span className="text-amber-700">
+                No default template set for {REQUEST_TYPES.find((r) => r.key === requestType)?.label} — an Employee with no explicit
+                pick below will have their request auto-approved.
+              </span>
+            )}
+          </div>
+          {assignLoading ? (
+            <div className="p-10 flex justify-center">
+              <Spinner size={20} className="text-slate-400" />
+            </div>
+          ) : (
+            <table className="w-full text-sm mt-2">
+              <thead className="bg-slate-50 text-[11px] uppercase tracking-wider text-slate-500">
+                <tr>
+                  <th className="text-left px-4 py-3 font-semibold">Employee</th>
+                  <th className="text-left px-4 py-3 font-semibold">Assigned Template</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {assignRows.map((row) => (
+                  <tr key={row.employee_user_id} className="hover:bg-slate-50/60">
+                    <td className="px-4 py-3">
+                      <div className="font-medium text-slate-900">{row.employee_name}</div>
+                      <div className="text-[11px] text-slate-500">{row.employee_role}</div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <select
+                        value={row.assigned_template_id || ''}
+                        disabled={savingAssignFor === row.employee_user_id}
+                        onChange={(e) => handleAssignChange(row.employee_user_id, e.target.value)}
+                        className="w-64 text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none disabled:opacity-50"
+                      >
+                        <option value="">
+                          {defaultTemplate ? `Use default (${defaultTemplate.name})` : 'Use default (none — auto-approve)'}
+                        </option>
+                        {templates
+                          .filter((t) => t.is_active)
+                          .map((t) => (
+                            <option key={t.id} value={t.id}>
+                              {t.name}
+                            </option>
+                          ))}
+                      </select>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
+      {/* --- Template editor modal --- */}
+      {showEditor && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[85vh] flex flex-col">
+            <div className="flex items-start justify-between gap-4 p-5 border-b border-slate-200">
+              <div>
+                <h3 className="text-base font-bold text-slate-900">{editingId ? 'Edit Template' : 'New Template'}</h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Layer 1 is checked first; once ANY ONE of a Layer's approvers approves, the request moves to
+                  the next Layer.
+                </p>
+              </div>
+              <button
+                onClick={() => setShowEditor(false)}
+                className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-5 overflow-y-auto flex-1 space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-semibold text-slate-600 mb-1 block">Template Name</label>
+                  <input
+                    type="text"
+                    value={nameDraft}
+                    onChange={(e) => setNameDraft(e.target.value)}
+                    placeholder="e.g. Conveyance — Standard"
+                    className="w-full text-sm px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-slate-600 mb-1 block">Request Type</label>
+                  <select
+                    value={typeDraft}
+                    disabled={!!editingId}
+                    onChange={(e) => setTypeDraft(e.target.value as ApprovalRequestType)}
+                    className="w-full text-sm px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none disabled:opacity-60"
+                  >
+                    {REQUEST_TYPES.map((rt) => (
+                      <option key={rt.key} value={rt.key}>
+                        {rt.label}
+                      </option>
+                    ))}
+                  </select>
+                  {editingId && <p className="text-[11px] text-slate-400 mt-1">Can't change once created — make a new template instead.</p>}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-4">
+                <label className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+                  <input type="checkbox" checked={isDefaultDraft} onChange={(e) => setIsDefaultDraft(e.target.checked)} className="rounded" />
+                  Make this the default for this Request Type
+                </label>
+                <label className="flex items-center gap-2 text-xs font-semibold text-slate-600">
+                  <input type="checkbox" checked={isActiveDraft} onChange={(e) => setIsActiveDraft(e.target.checked)} className="rounded" />
+                  Active
+                </label>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-slate-600 block">Layers</label>
+                {stepsDraft.map((step, idx) => (
+                  <div
+                    key={idx}
+                    draggable
+                    onDragStart={() => setDragStepIndex(idx)}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={() => {
+                      if (dragStepIndex !== null && dragStepIndex !== idx) moveStep(dragStepIndex, idx);
+                      setDragStepIndex(null);
+                    }}
+                    className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2"
+                  >
+                    <div className="flex items-center gap-2">
+                      <GripVertical className="w-4 h-4 text-slate-300 shrink-0 cursor-move" />
+                      <span className="w-5 h-5 rounded-full bg-blue-600 text-white text-[10px] font-bold flex items-center justify-center shrink-0">
+                        {idx + 1}
+                      </span>
+                      <span className="text-xs font-semibold text-slate-700">Layer {idx + 1}</span>
+                      {stepsDraft.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => removeStep(idx)}
+                          className="ml-auto p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="flex flex-wrap gap-1.5 pl-7">
+                      {step.approver_user_ids.length === 0 && <span className="text-[11px] text-slate-400">No approvers yet — add at least one.</span>}
+                      {step.approver_user_ids.map((uid) => (
+                        <span
+                          key={uid}
+                          className="inline-flex items-center gap-1 text-[11px] font-medium pl-2.5 pr-1 py-1 rounded-full bg-white border border-slate-200 text-slate-700"
+                        >
+                          {userMap.get(uid)?.name || `User #${uid}`}
+                          <button type="button" onClick={() => removeApproverFromStep(idx, uid)} className="p-0.5 hover:text-rose-600">
+                            <X className="w-3 h-3" />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+
+                    <div className="flex gap-2 pl-7">
+                      <select
+                        value={addApproverChoice[idx] || ''}
+                        onChange={(e) => setAddApproverChoice((prev) => ({ ...prev, [idx]: e.target.value }))}
+                        className="flex-1 text-xs px-2.5 py-2 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                      >
+                        <option value="">Add an approver — one member per row, add the whole team to represent a Department…</option>
+                        {users
+                          .filter((u) => !step.approver_user_ids.includes(u.id))
+                          .map((u) => (
+                            <option key={u.id} value={u.id}>
+                              {u.name} ({u.role})
+                            </option>
+                          ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => addApproverToStep(idx)}
+                        disabled={!addApproverChoice[idx]}
+                        className="text-xs font-semibold px-3 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-white disabled:opacity-50 transition-colors whitespace-nowrap"
+                      >
+                        Add
+                      </button>
+                    </div>
+                  </div>
+                ))}
+
+                <button
+                  type="button"
+                  onClick={addStep}
+                  className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Add Layer
+                </button>
+              </div>
+
+              {editorError && <p className="text-xs text-rose-600">{editorError}</p>}
+            </div>
+
+            <div className="p-5 border-t border-slate-200 flex justify-end gap-2">
+              <button
+                onClick={() => setShowEditor(false)}
+                className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveTemplate}
+                disabled={saving || !nameDraft.trim()}
+                className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl transition-all disabled:opacity-50"
+              >
+                {saving ? 'Saving...' : editingId ? 'Save Changes' : 'Create Template'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};

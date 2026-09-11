@@ -1,0 +1,182 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+@import "tailwindcss";
+
+/* Used by App.tsx's PanelLoadingFallback (shown briefly after login while the
+   User/Admin Panel's own lazy-loaded JS chunk downloads) — kept global rather
+   than a CSS module since a matching copy of this same animation is also
+   defined inline in index.html for the very first paint, before this
+   stylesheet has loaded at all. */
+@keyframes mpr-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Used by GlobalSidebar.tsx's persistent desktop sidebar — the nav list still
+   scrolls (wheel/trackpad/keyboard) when it overflows, this just hides the
+   visible scrollbar track/thumb so the column reads as a clean fixed panel
+   instead of a scrollable widget. Mobile's overlay drawer keeps its normal
+   scrollbar (touch UIs don't show a persistent one anyway). */
+.gsidebar-no-scrollbar {
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* old Edge/IE */
+}
+.gsidebar-no-scrollbar::-webkit-scrollbar {
+  display: none; /* Chrome/Safari/new Edge */
+}
+
+/*
+  Design system - modeled on the Gemini app's visual language:
+  a quiet, near-white surface; a single colorful brand gradient reserved for the
+  logo mark and hero greeting; pill-shaped inputs/buttons; soft, diffuse shadows
+  instead of hard borders. Everything else stays restrained neutral gray so the
+  gradient reads as a signature, not decoration.
+*/
+:root {
+  --g-bg: #eaf4ff;
+  --g-bg-gradient: linear-gradient(160deg, #eaf6ff 0%, #dbeeff 30%, #e7dcff 65%, #ede0ff 100%);
+  --g-surface: #ffffff;
+  --g-surface-muted: #f0f4f9;
+  --g-border: #dde3ea;
+  --g-text: #1f1f1f;
+  --g-text-muted: #5f6368;
+
+  /*
+    Brand palette — Violet #7F00FF and its provided shade ramp. --g-accent is
+    the flagship color (buttons, links, focus rings); the numbered steps below
+    exist so every blue-###/violet-### Tailwind utility actually used across
+    the app (bg-blue-100, text-blue-900, border-blue-300, etc.) has a matching
+    step to translate to instead of just collapsing everything onto one shade.
+    100/200/300/400 are lighter tints synthesized from the same hue (270°),
+    since the seven shades supplied were all mid-to-dark; 500 through 900 are
+    the exact supplied hex values.
+  */
+  --g-accent: #7F00FF;
+  --g-accent-hover: #6300C6;
+  --g-accent-soft: #F3E8FF;
+  --g-accent-100: #EFE0FF;
+  --g-accent-200: #E5CCFF;
+  --g-accent-300: #D2A8FF;
+  --g-accent-400: #B36AFF;
+  --g-accent-500: #7F00FF;
+  --g-accent-600: #7100E3;
+  --g-accent-700: #6300C6;
+  --g-accent-800: #5500AA;
+  --g-accent-900: #47008E;
+  --g-accent-950: #380071;
+  --g-accent-975: #2A0055;
+
+  --g-gradient: linear-gradient(90deg, #7F00FF 0%, #6300C6 50%, #47008E 100%);
+  --g-radius-lg: 28px;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  /* Keeps content clear of the Android gesture nav bar / iOS home indicator, since
+     Capacitor renders edge-to-edge by default. paddingTop for the status bar is
+     handled on the sticky Navbar itself instead (see Navbar.tsx), since only the
+     header needs to push down — the rest of the page already starts below it. */
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  background: var(--g-bg-gradient);
+  background-attachment: fixed;
+  color: var(--g-text);
+}
+
+.gemini-gradient-text {
+  background: var(--g-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.gemini-gradient-bg {
+  background: var(--g-gradient);
+}
+
+.gemini-card {
+  background: var(--g-surface);
+  border: 1px solid var(--g-border);
+  border-radius: var(--g-radius-lg);
+  box-shadow: 0 1px 2px rgba(31, 31, 31, 0.04), 0 8px 24px -12px rgba(31, 31, 31, 0.10);
+}
+
+/*
+  App-wide palette reskin — the Admin/User panels use a large number of existing
+  Tailwind utility classes (bg-white, border-slate-200, bg-blue-600, etc.) that
+  were not rewritten line-by-line; this maps that existing utility vocabulary
+  onto the same brand tokens above so the whole app reads as one design system
+  instead of two. Every blue-###/variant combination actually used anywhere in
+  src/**/*.tsx is covered below (checked against the full component tree, not
+  just the handful used in the most common places) so no button/badge/border is
+  left showing the Tailwind default blue once the rest of the app goes violet.
+*/
+.bg-white { background-color: var(--g-surface) !important; }
+.bg-slate-50 { background-color: var(--g-surface-muted) !important; }
+.border-slate-100, .border-slate-200 { border-color: var(--g-border) !important; }
+.text-slate-900 { color: var(--g-text) !important; }
+.text-slate-400, .text-slate-500, .text-slate-600 { color: var(--g-text-muted) !important; }
+
+.bg-blue-600 { background-color: var(--g-accent) !important; }
+.hover\:bg-blue-700:hover { background-color: var(--g-accent-hover) !important; }
+.disabled\:hover\:bg-blue-600:disabled:hover { background-color: var(--g-accent) !important; }
+.bg-blue-50 { background-color: var(--g-accent-soft) !important; }
+.hover\:bg-blue-50:hover { background-color: var(--g-accent-soft) !important; }
+.bg-blue-100 { background-color: var(--g-accent-100) !important; }
+.hover\:bg-blue-100:hover { background-color: var(--g-accent-100) !important; }
+.active\:bg-blue-100:active { background-color: var(--g-accent-100) !important; }
+
+.text-blue-400 { color: var(--g-accent-400) !important; }
+.text-blue-500, .hover\:text-blue-500:hover { color: var(--g-accent) !important; }
+.text-blue-600, .hover\:text-blue-600:hover,
+.text-blue-700, .hover\:text-blue-700:hover,
+.text-blue-800, .hover\:text-blue-800:hover { color: var(--g-accent) !important; }
+.text-blue-900, .hover\:text-blue-900:hover { color: var(--g-accent-975) !important; }
+/* Arbitrary-variant utility used for links inside Superadmin/Admin-authored
+   Notice HTML content (NoticePopup.tsx / NoticeManager.tsx) — compiles to its
+   own selector, so it needs its own rule rather than falling under .text-blue-600. */
+.\[\&_a\]\:text-blue-600 a { color: var(--g-accent) !important; }
+
+.border-blue-100 { border-color: var(--g-accent-100) !important; }
+.border-blue-200, .hover\:border-blue-200:hover { border-color: var(--g-accent-200) !important; }
+.border-blue-300, .hover\:border-blue-300:hover { border-color: var(--g-accent-300) !important; }
+.border-blue-500, .focus\:border-blue-500:focus { border-color: var(--g-accent) !important; }
+.border-blue-600 { border-color: var(--g-accent) !important; }
+
+.ring-blue-500, .focus\:ring-blue-500:focus,
+.ring-blue-600, .focus\:ring-blue-600:focus { --tw-ring-color: var(--g-accent) !important; }
+
+.accent-blue-600 { accent-color: var(--g-accent) !important; }
+.shadow-blue-600 { --tw-shadow-color: var(--g-accent) !important; }
+.divide-blue-100 > :not([hidden]) ~ :not([hidden]) { border-color: var(--g-accent-100) !important; }
+
+/* Personal Data screen (PersonalDataForm.tsx) — bordered field boxes with a
+   leading icon, matching the reference design's input styling. */
+.profile-field-box {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border: 1px solid var(--g-border);
+  border-radius: 14px;
+  padding: 0.65rem 0.85rem;
+  background: var(--g-surface);
+}
+.profile-field-box:focus-within {
+  border-color: var(--g-accent);
+}
+.profile-field-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 0.875rem;
+  color: var(--g-text);
+}
+.profile-field-input::placeholder {
+  color: var(--g-text-muted);
+}
+.profile-field-readonly {
+  color: var(--g-text-muted);
+}

@@ -1,0 +1,628 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import React, { useState, useEffect, useRef, Suspense, lazy } from 'react';
+import { Capacitor } from '@capacitor/core';
+import { RefreshCw } from 'lucide-react';
+import { User, ClaimsNavRequest, AdminNavRequest, JobsNavRequest, AdminModuleKey } from './types';
+import { AuthScreen } from './components/AuthScreen';
+import { Navbar } from './components/Navbar';
+import { GlobalSidebar } from './components/GlobalSidebar';
+import { ProfilePage } from './components/ProfilePage';
+// UserPanel/AdminPanel are the two heaviest branches of the app (PDF export,
+// Leaflet maps, Excel import/export, etc. all live under one of these two) —
+// lazy-loading them means the Login screen only has to download/parse the
+// small shared shell first, instead of that code being forced into the same
+// eagerly-loaded bundle every visitor's phone has to fetch before they can
+// even see the login form. See the Suspense fallback below for what shows
+// during the brief gap while a panel's own chunk downloads after login.
+const UserPanel = lazy(() => import('./components/UserPanel').then(m => ({ default: m.UserPanel })));
+const AdminPanel = lazy(() => import('./components/AdminPanel').then(m => ({ default: m.AdminPanel })));
+
+import { AppLoader } from './components/AppLoader';
+import { Spinner } from './components/Spinner';
+import { ApkModal } from './components/ApkModal';
+import { LeaveApplication } from './components/LeaveApplication';
+import { LeaveManagement } from './components/LeaveManagement';
+import { LeaveApprovals } from './components/LeaveApprovals';
+import { ApproveApplications } from './components/ApproveApplications';
+import { Timesheet } from './components/Timesheet';
+import { NoticePopup } from './components/NoticePopup';
+import { useBackButtonClose } from './lib/useBackButtonClose';
+import { closeTopmostOrReturnFalse } from './lib/backButtonStack';
+import { installKeyboardScrollFix } from './lib/keyboardScrollFix';
+import { usePullToRefresh } from './lib/usePullToRefresh';
+import { apiUrl } from './lib/api';
+import { startBackgroundTracking, stopBackgroundTracking } from './lib/backgroundTracking';
+
+export default function App() {
+  const [token, setToken] = useState<string | null>(localStorage.getItem('mpr_token'));
+  const [user, setUser] = useState<User | null>(() => {
+    const saved = localStorage.getItem('mpr_user');
+    return saved ? JSON.parse(saved) : null;
+  });
+  const [isApkModalOpen, setIsApkModalOpen] = useState(false);
+  useBackButtonClose(isApkModalOpen, () => setIsApkModalOpen(false));
+
+  // Navbar's web-only "Claims" header menu — see ClaimsNavRequest in types.ts.
+  const [claimsNavRequest, setClaimsNavRequest] = useState<ClaimsNavRequest | null>(null);
+  // Navbar's web-only "Jobs" header menu — see JobsNavRequest in types.ts.
+  const [jobsNavRequest, setJobsNavRequest] = useState<JobsNavRequest | null>(null);
+  // Navbar's web-only "Budget" header menu — see AdminNavRequest in types.ts.
+  const [adminNavRequest, setAdminNavRequest] = useState<AdminNavRequest | null>(null);
+  // Navbar's web-only "Self Service" header menu — takes over the main area
+  // the same way the Claims/Jobs pages do (see the `main` block below),
+  // instead of living inside the Admin/User panel tab structure. null means
+  // neither Self Service page is showing (normal Admin/User Panel view).
+  const [selfServiceView, setSelfServiceView] = useState<'leaveApplication' | 'leaveManagement' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | null>(null);
+  // ProfilePage.tsx — opened from the avatar in Navbar (desktop header) or
+  // GlobalSidebar (mobile drawer's own profile header). Takes over the main
+  // area the same way Self Service does, and only ever clears itself via its
+  // own "Back" button.
+  const [showProfilePage, setShowProfilePage] = useState(false);
+
+  // Bumped right after a Personal Data photo upload succeeds (see
+  // ProfilePage's onPhotoUpdated below) — passed to every avatar spot
+  // (Navbar, GlobalSidebar, ProfilePage itself) as a dependency so
+  // useProfilePhoto.ts refetches and shows the new photo immediately,
+  // instead of only after the next full page reload.
+  const [photoVersion, setPhotoVersion] = useState(0);
+
+  // Manual "pull down from the top to reload" — see usePullToRefresh.ts for
+  // why this is safe to land back on the same screen (Admin tab / User Panel
+  // section / in-progress MPR Entry draft are all mirrored to localStorage).
+  const { pullDistance, ready, threshold, triggering, dragging } = usePullToRefresh();
+
+  // Keeps whichever input the user is typing into scrolled above the on-screen
+  // keyboard on mobile, instead of ending up hidden behind it (see
+  // keyboardScrollFix.ts for why this is needed on top of the native resize
+  // config in capacitor.config.ts). Attached once for the whole app.
+  useEffect(() => installKeyboardScrollFix(), []);
+
+
+  // Android hardware back button: closes whichever modal/drill-down is
+  // currently open (see backButtonStack.ts / useBackButtonClose.ts) instead of
+  // exiting the app. With nothing open — i.e. sitting at the main Admin/User
+  // dashboard — the first press just shows "Press back again to exit" instead
+  // of exiting immediately; a second press within 2 seconds actually exits.
+  // No-ops entirely on the web build (Capacitor's native APIs simply aren't
+  // there, so this whole effect silently does nothing).
+  const [showExitPrompt, setShowExitPrompt] = useState(false);
+  const awaitingExitConfirmRef = useRef(false);
+  const exitPromptTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    let removeListener: (() => void) | undefined;
+
+    (async () => {
+      try {
+        const [{ App: CapacitorApp }, { Capacitor }] = await Promise.all([
+          import('@capacitor/app'),
+          import('@capacitor/core')
+        ]);
+        if (!Capacitor.isNativePlatform()) return;
+
+        const subscription = await CapacitorApp.addListener('backButton', () => {
+          if (closeTopmostOrReturnFalse()) return;
+
+          if (awaitingExitConfirmRef.current) {
+            CapacitorApp.exitApp();
+            return;
+          }
+          awaitingExitConfirmRef.current = true;
+          setShowExitPrompt(true);
+          if (exitPromptTimerRef.current) clearTimeout(exitPromptTimerRef.current);
+          exitPromptTimerRef.current = setTimeout(() => {
+            awaitingExitConfirmRef.current = false;
+            setShowExitPrompt(false);
+          }, 2000);
+        });
+        removeListener = () => subscription.remove();
+      } catch {
+        // @capacitor/app isn't installed/loadable (e.g. a plain web checkout
+        // that hasn't run `npm install`) — nothing to wire up, safe to ignore.
+      }
+    })();
+
+    return () => {
+      removeListener?.();
+      if (exitPromptTimerRef.current) clearTimeout(exitPromptTimerRef.current);
+    };
+  }, []);
+
+  // Makes the native status bar strip (the OS clock/signal/battery row)
+  // TRANSPARENT and lets the WebView draw underneath it (overlay: true),
+  // instead of painting it as a solid approximate color. A solid strip
+  // can only ever pick ONE stop of the header's left-to-right gradient
+  // (see Navbar.tsx's `transparentHeader` / WelcomeBanner.tsx —
+  // linear-gradient(90deg, #7F00FF 0%, #6300C6 50%, #47008E 100%)) which
+  // always looks slightly off — light side of the gradient doesn't line
+  // up with the light side of a flat color. With overlay true, the
+  // header's OWN real gradient extends up under the status bar (Navbar.tsx
+  // already reserves `paddingTop: env(safe-area-inset-top)` for exactly
+  // this), so the join is pixel-perfect and the light side naturally
+  // stays on whichever side the header's gradient itself puts it — even
+  // if that gradient's direction ever changes later, nothing here needs
+  // to be updated to match. No-ops entirely on the web build.
+  useEffect(() => {
+    (async () => {
+      try {
+        const [{ StatusBar, Style }, { Capacitor }] = await Promise.all([
+          import('@capacitor/status-bar'),
+          import('@capacitor/core')
+        ]);
+        if (!Capacitor.isNativePlatform()) return;
+
+        await StatusBar.setOverlaysWebView({ overlay: true });
+        // Light (white) status bar icons/clock read correctly against the
+        // dark purple header showing through from underneath.
+        await StatusBar.setStyle({ style: Style.Dark });
+      } catch {
+        // @capacitor/status-bar isn't installed/loadable (e.g. a plain web
+        // checkout that hasn't run `npm install`) — nothing to wire up, safe
+        // to ignore.
+      }
+    })();
+  }, []);
+
+  const handleLoginSuccess = (newToken: string, newUser: User) => {
+    localStorage.setItem('mpr_token', newToken);
+    localStorage.setItem('mpr_user', JSON.stringify(newUser));
+    setToken(newToken);
+    setUser(newUser);
+    // Every fresh login lands on the User Panel dashboard — regardless of
+    // role, and regardless of which panel this account was last looking at
+    // on this device. Admin Panel (for whoever has it — see hasAdminPanel
+    // below) is now reached from there via the header, not the default
+    // landing screen.
+    setViewMode('user');
+  };
+
+  const handleLogout = () => {
+    // Also drop this account's remembered mobile/desktop User Panel section
+    // (see UserPanel.tsx) — otherwise the next login on this device restores
+    // whichever section (e.g. Claims) was on screen when this account last
+    // logged out, instead of landing on the Dashboard as intended above.
+    if (user) {
+      localStorage.removeItem(`mpr_user_section_${user.id}`);
+      localStorage.removeItem(`mpr_user_desktop_section_${user.id}`);
+    }
+    localStorage.removeItem('mpr_token');
+    localStorage.removeItem('mpr_user');
+    setToken(null);
+    setUser(null);
+    stopBackgroundTracking();
+  };
+
+  // Employee Tracking (Admin Panel -> Employee Tracking): starts/stops the
+  // APK's background location watcher whenever can_use_tracking changes for
+  // the signed-in account — granted right after login, or picked up next
+  // time the app opens via the /api/auth/me refresh above. No-ops entirely
+  // on the web build. Deliberately NOT tied to which panel (User/Admin) is
+  // on screen — an Admin/Superadmin who is also out in the field should
+  // still report location while looking at their Admin Panel.
+  useEffect(() => {
+    if (token && user?.can_use_tracking) {
+      startBackgroundTracking(token);
+    } else {
+      stopBackgroundTracking();
+    }
+  }, [token, user?.can_use_tracking]);
+
+  // Which panel the account is currently looking at. Every account now lands
+  // on the User Panel dashboard by default after logging in (see
+  // handleLoginSuccess above) — Admin Panel access for whoever has one (see
+  // hasAdminPanel below: Admin/Superadmin always, or a plain User granted one
+  // or more Admin Panel modules) is reached from there via the header's
+  // mobile menu / desktop Budget-Manage-Workforce-Jobs-Claims links, instead
+  // of being the screen everyone starts on.
+  //
+  // Restored from localStorage (see the save effect just below) so a manual
+  // "pull down to reload" — or a forced background reload — lands back on
+  // whichever panel (Admin/User) this account was actually looking at mid-
+  // session, instead of resetting to the User Panel dashboard every time.
+  const [viewMode, setViewMode] = useState<'admin' | 'user'>(() => {
+    try {
+      const saved = user ? localStorage.getItem(`mpr_view_mode_${user.id}`) : null;
+      if (saved === 'admin' || saved === 'user') return saved;
+    } catch {
+      // ignore — falls through to the User Panel default below
+    }
+    return 'user';
+  });
+  // Whether this account has an Admin Panel at all — a plain Superadmin/Admin
+  // always does; a plain User only does once the Superadmin has granted them
+  // at least one Admin Panel module (module_permissions). Same test Navbar.tsx
+  // uses for its own "Budget" menu (hasAdminPanel there).
+  const hasAdminPanel = !!user && (user.role === 'admin' || user.role === 'superadmin' ||
+    (user.role === 'user' && (user.module_permissions || []).length > 0));
+  // Every Admin/Superadmin can now switch into the User Panel — previously
+  // gated behind a Superadmin-granted can_access_user_panel toggle, but since
+  // the User Panel dashboard is everyone's default landing screen now, that
+  // toggle no longer has anything left to gate here.
+  const canSwitchToUserPanel = user?.role === 'admin' || user?.role === 'superadmin';
+  const canSwitchToAdminPanel = user?.role === 'user' && (user.module_permissions || []).length > 0;
+  const canSwitchPanels = canSwitchToUserPanel || canSwitchToAdminPanel;
+
+  useEffect(() => {
+    if (!user) return;
+    try {
+      localStorage.setItem(`mpr_view_mode_${user.id}`, viewMode);
+    } catch {
+      // localStorage can be unavailable in some embedded WebViews — safe to
+      // ignore, it just means a reload won't be able to restore this.
+    }
+  }, [viewMode, user]);
+
+  // Drives the single GlobalSidebar drawer — mobile-only (see Navbar.tsx's
+  // `md:hidden` hamburger and GlobalSidebar.tsx). Desktop keeps using the
+  // Navbar's own dropdown menus/switcher instead, untouched, so this state
+  // never opens anything on md-and-up screens.
+  const [globalSidebarOpen, setGlobalSidebarOpen] = useState(false);
+  // True only while an account with an Admin Panel (hasAdminPanel) has
+  // actively switched viewMode to 'admin' — no more hardcoded "Superadmin
+  // always sees Admin Panel" case, since Superadmin now starts on the User
+  // Panel dashboard like everyone else and switches in the same way.
+  const isAdminView = hasAdminPanel && viewMode === 'admin';
+
+  // Refresh the logged-in user's own record (role, and the Admin-toggleable
+  // can_edit_delivery_date / can_job_edit feature permissions) once per app open.
+  // These can change server-side at any time via the Admin Panel, and the cached
+  // copy in localStorage is only ever as fresh as the last login — without this,
+  // an Admin turning Job Edit on/off for a user wouldn't take effect until that
+  // user logged out and back in.
+  useEffect(() => {
+    if (!token) return;
+    (async () => {
+      try {
+        const res = await fetch(apiUrl('/api/auth/me'), { headers: { Authorization: `Bearer ${token}` } });
+        if (!res.ok) return;
+        const fresh = await res.json();
+        setUser((prev) => {
+          if (!prev) return prev;
+          const merged = { ...prev, ...fresh };
+          localStorage.setItem('mpr_user', JSON.stringify(merged));
+          return merged;
+        });
+      } catch {
+        // Offline or server unreachable — keep using the cached user from login.
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
+  // Small floating indicator shown while the user is mid-pull, so there's
+  // clear feedback that a swipe-down-from-the-top does something on
+  // purpose. Below the threshold it's a plain rotating-icon pill with a
+  // "Pull down to reload" hint; once it crosses the threshold the pill
+  // drops its text and swells into the app's own loader animation instead
+  // — the loader itself communicates "let go, it's ready" without needing
+  // a "Release to reload" label. `dragging` gates the transform transition
+  // so it only eases in for the snap-back-to-0 moment (finger lifted
+  // early), never while the finger is actively dragging the pill around.
+  const pullToRefreshIndicator = pullDistance > 0 && !triggering && (
+    <div
+      className="fixed top-0 left-1/2 z-[110] pointer-events-none transition-opacity"
+      style={{
+        transform: `translate(-50%, ${Math.max(pullDistance - 36, -36)}px)`,
+        opacity: Math.min(pullDistance / threshold, 1),
+        transition: dragging ? 'opacity 150ms ease-out' : 'transform 220ms ease-out, opacity 150ms ease-out'
+      }}
+    >
+      {ready ? (
+        <div className="p-1.5 rounded-full bg-white shadow-lg">
+          <Spinner size={26} />
+        </div>
+      ) : (
+        <div className="flex items-center gap-2 px-4 py-2 rounded-full text-xs font-medium text-white shadow-lg bg-slate-700">
+          <RefreshCw
+            className="w-3.5 h-3.5"
+            style={{ transform: `rotate(${Math.min(pullDistance * 3, 360)}deg)` }}
+          />
+          Pull down to reload
+        </div>
+      )}
+    </div>
+  );
+
+  // Fullscreen hand-off shown for the brief window between "finger
+  // released, reload committed" and the actual window.location.reload() —
+  // fades in the same app-wide AppLoader used for in-app loading states
+  // instead of letting the page just freeze/flash white the instant the
+  // reload fires, so the manual-reload gesture ends the same smooth way
+  // every other loading state in the app does.
+  const pullToRefreshFullscreenLoader = triggering && (
+    <div
+      className="fixed inset-0 z-[110] flex items-center justify-center bg-white"
+      style={{ animation: 'pullToRefreshFadeIn 220ms ease-out both' }}
+    >
+      <AppLoader label="Reloading…" size={72} minHeight={0} />
+      <style>{`
+        @keyframes pullToRefreshFadeIn {
+          0% { opacity: 0; }
+          100% { opacity: 1; }
+        }
+      `}</style>
+    </div>
+  );
+
+  if (!token || !user) {
+    return (
+      <>
+        <AuthScreen onLoginSuccess={handleLoginSuccess} />
+        {pullToRefreshIndicator}
+        {pullToRefreshFullscreenLoader}
+        {showExitPrompt && (
+          <div
+            className="fixed left-1/2 -translate-x-1/2 z-[100] px-4 py-2.5 rounded-full text-sm font-medium text-white shadow-lg"
+            style={{
+              bottom: 'calc(env(safe-area-inset-bottom, 0px) + 20px)',
+              background: 'rgba(15, 23, 42, 0.92)'
+            }}
+          >
+            Press back again to exit
+          </div>
+        )}
+      </>
+    );
+  }
+
+  // Shared nav handlers for GlobalSidebar — identical for the mobile overlay
+  // drawer (hamburger-triggered, unchanged) and the persistent desktop
+  // column that now sits beside <main> (see the layout below), so both stay
+  // in sync automatically instead of drifting apart as two copies.
+  const sidebarNavProps = {
+    user,
+    token: token || '',
+    photoVersion,
+    onLogout: handleLogout,
+    onOpenApkInfo: () => setIsApkModalOpen(true),
+    onGoToDashboard: () => {
+      setSelfServiceView(null);
+      setShowProfilePage(false);
+      setViewMode('user');
+    },
+    onGoToJobsTab: (target: 'entry' | 'jobs' | 'entryDetails' | 'jobEdit') => {
+      setSelfServiceView(null);
+      setShowProfilePage(false);
+      setViewMode('user');
+      setJobsNavRequest({ target, ts: Date.now() });
+    },
+    onGoToUserClaims: (target: 'movementClaims' | 'conveyanceBill') => {
+      setSelfServiceView(null);
+      setShowProfilePage(false);
+      setViewMode('user');
+      setClaimsNavRequest({ target, ts: Date.now() });
+    },
+    onGoToAdminClaims: (target: 'claims' | 'conveyance') => {
+      setSelfServiceView(null);
+      setShowProfilePage(false);
+      setViewMode('admin');
+      setClaimsNavRequest({ target: target === 'claims' ? 'movementClaims' : 'conveyanceBill', ts: Date.now() });
+    },
+    onGoToAdminModule: (target: Exclude<AdminModuleKey, 'claims' | 'conveyance'>) => {
+      setSelfServiceView(null);
+      setShowProfilePage(false);
+      setViewMode('admin');
+      setAdminNavRequest({ target, ts: Date.now() });
+    },
+    onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'leaveApprovals' | 'timesheet' | 'approveApplications') => {
+      setShowProfilePage(false);
+      setSelfServiceView(target);
+    },
+    onOpenProfile: () => {
+      setSelfServiceView(null);
+      setShowProfilePage(true);
+    },
+  };
+
+  return (
+    <div
+      className="min-h-screen flex flex-col selection:bg-indigo-500 selection:text-white"
+      style={{ background: 'var(--g-bg-gradient)', color: 'var(--g-text)' }}
+    >
+      {pullToRefreshIndicator}
+      {pullToRefreshFullscreenLoader}
+      <Navbar
+        user={user}
+        token={token || ''}
+        photoVersion={photoVersion}
+        isProfilePageOpen={showProfilePage}
+        onLogout={handleLogout}
+        onOpenApkInfo={() => setIsApkModalOpen(true)}
+        viewMode={canSwitchPanels ? viewMode : undefined}
+        onViewModeChange={
+          canSwitchPanels
+            ? (mode) => {
+                // Same stuck-on-Self-Service issue as the nav handlers below —
+                // the Admin Panel/User Panel switcher needs to exit Self
+                // Service too, or it stays stuck showing the Self Service page.
+                setSelfServiceView(null);
+                setShowProfilePage(false);
+                setViewMode(mode);
+              }
+            : undefined
+        }
+        onGoToDashboard={() => {
+          // Same "leave Self Service, land on the User Panel dashboard" reset
+          // GlobalSidebar's own Dashboard link already uses (see below) — the
+          // logo now does the same thing on desktop.
+          setSelfServiceView(null);
+          setShowProfilePage(false);
+          setViewMode('user');
+        }}
+        onGoToMovementClaims={() => {
+          // Self Service (Leave Application/Management/Approvals) and
+          // ProfilePage both take over the whole main area (see the `main`
+          // block below) and only ever clear themselves via their own "Back"
+          // button — so without this, clicking Claims/Jobs/Budget/Manage/
+          // Workforce while sitting on one of those pages left the UI stuck
+          // showing that page forever, since selfServiceView/showProfilePage
+          // stayed set and kept winning the ternary below regardless of
+          // claimsNavRequest/jobsNavRequest/adminNavRequest changing
+          // underneath it. Every other nav handler below needs the same reset.
+          setSelfServiceView(null);
+          setShowProfilePage(false);
+          setClaimsNavRequest({ target: 'movementClaims', ts: Date.now() });
+        }}
+        onGoToConveyanceBillClaim={() => {
+          setSelfServiceView(null);
+          setShowProfilePage(false);
+          setClaimsNavRequest({ target: 'conveyanceBill', ts: Date.now() });
+        }}
+        onGoToJobsTab={(target) => {
+          // Every "Jobs" menu target lives only in the User Panel — the mirror
+          // image of "Budget" below forcing 'admin' — so make sure an account
+          // with the Admin<->User panel-switcher is actually looking at the
+          // User Panel before UserPanel's own effect (below) tries to jump to
+          // that section.
+          setSelfServiceView(null);
+          setShowProfilePage(false);
+          if (canSwitchPanels) setViewMode('user');
+          setJobsNavRequest({ target, ts: Date.now() });
+        }}
+        onGoToBudgetTab={(target) => {
+          // Every "Budget" menu target lives only in the Admin Panel — unlike
+          // Claims above, so make sure an account with the Admin<->User
+          // panel-switcher is actually looking at the Admin Panel before
+          // AdminPanel's own effect (below) tries to jump to that tab.
+          setSelfServiceView(null);
+          setShowProfilePage(false);
+          if (canSwitchPanels) setViewMode('admin');
+          setAdminNavRequest({ target, ts: Date.now() });
+        }}
+        onGoToManageTab={(target) => {
+          setSelfServiceView(null);
+          setShowProfilePage(false);
+          if (canSwitchPanels) setViewMode('admin');
+          setAdminNavRequest({ target, ts: Date.now() });
+        }}
+        onGoToWorkforceTab={(target) => {
+          setSelfServiceView(null);
+          setShowProfilePage(false);
+          if (canSwitchPanels) setViewMode('admin');
+          setAdminNavRequest({ target, ts: Date.now() });
+        }}
+        onGoToSelfServiceTab={(target) => {
+          setShowProfilePage(false);
+          setSelfServiceView(target);
+        }}
+        onOpenMobileMenu={() => setGlobalSidebarOpen(true)}
+        onOpenProfile={() => {
+          setSelfServiceView(null);
+          setShowProfilePage(true);
+        }}
+      />
+
+      {/* Mobile-only overlay drawer (see Navbar.tsx's md:hidden hamburger) —
+          never opens on md-and-up screens; the persistent column just below
+          is what desktop web shows instead. */}
+      <GlobalSidebar
+        variant="overlay"
+        open={globalSidebarOpen}
+        onClose={() => setGlobalSidebarOpen(false)}
+        {...sidebarNavProps}
+      />
+
+      {/* Row below the header: the persistent desktop sidebar (hidden below
+          md — see GlobalSidebar's isPersistent branch) beside the main
+          content column. On mobile this is just <main>/<footer> stacked as
+          before, since the sidebar renders nothing there. */}
+      <div className="flex-1 flex flex-col md:flex-row">
+        <GlobalSidebar
+          variant="persistent"
+          open={true}
+          onClose={() => {}}
+          {...sidebarNavProps}
+        />
+
+        <div className="flex-1 min-w-0 flex flex-col">
+      <main className="flex-1">
+        <Suspense fallback={<AppLoader />}>
+        {showProfilePage ? (
+          <ProfilePage
+            user={user}
+            token={token || ''}
+            photoVersion={photoVersion}
+            onBack={() => setShowProfilePage(false)}
+            onLogout={handleLogout}
+            onPhotoUpdated={() => setPhotoVersion((v) => v + 1)}
+            onProfileNameUpdated={(fullName) => {
+              // Keep the header/sidebar avatar+name (and the cached user in
+              // localStorage) in sync immediately after Personal Data is
+              // saved, rather than waiting for the next /api/auth/me refresh.
+              setUser((prev) => {
+                if (!prev) return prev;
+                const merged = { ...prev, name: fullName };
+                localStorage.setItem('mpr_user', JSON.stringify(merged));
+                return merged;
+              });
+            }}
+          />
+        ) : selfServiceView === 'leaveApplication' ? (
+          <LeaveApplication token={token} onBack={() => setSelfServiceView(null)} />
+        ) : selfServiceView === 'leaveManagement' ? (
+          <LeaveManagement token={token} user={user} onBack={() => setSelfServiceView(null)} />
+        ) : selfServiceView === 'leaveApprovals' ? (
+          <LeaveApprovals token={token} user={user} onBack={() => setSelfServiceView(null)} />
+        ) : selfServiceView === 'approveApplications' ? (
+          <ApproveApplications token={token} onBack={() => setSelfServiceView(null)} />
+        ) : selfServiceView === 'timesheet' ? (
+          <Timesheet token={token} onBack={() => setSelfServiceView(null)} />
+        ) : isAdminView ? (
+          <AdminPanel
+            token={token}
+            user={user}
+            claimsNavRequest={claimsNavRequest}
+            adminNavRequest={adminNavRequest}
+            // AdminPanel's own mobile drawer (navigating BETWEEN admin tabs
+            // while already inside the Admin Panel) is now superseded by the
+            // single GlobalSidebar above — same tabs are reachable from
+            // there, so this drawer is permanently closed rather than
+            // wired to a second mobile hamburger.
+            mobileSidebarOpen={false}
+            onCloseMobileSidebar={() => {}}
+          />
+        ) : (
+          <>
+            <UserPanel token={token} user={user} claimsNavRequest={claimsNavRequest} jobsNavRequest={jobsNavRequest} />
+            {/* Superadmin/Admin-authored Notice popup — only shown on the plain
+                User's dashboard, right after they land here post-login. */}
+            <NoticePopup token={token} user={user} />
+          </>
+        )}
+        </Suspense>
+      </main>
+
+      {/* This footer line is web-only — hidden on the Capacitor Android APK
+          build so mobile app users never see it, while the website keeps
+          showing it exactly as before. */}
+      {!Capacitor.isNativePlatform() && (
+        <footer className="py-6 text-center text-xs" style={{ background: 'var(--g-text)', color: '#9aa0a6' }}>
+          <p>Monthly Budget Optimization • Powered by MySQL, Express & React • Android APK Ready via Capacitor</p>
+        </footer>
+      )}
+        </div>
+      </div>
+
+      <ApkModal
+        isOpen={isApkModalOpen}
+        onClose={() => setIsApkModalOpen(false)}
+      />
+
+      {showExitPrompt && (
+        <div
+          className="fixed left-1/2 -translate-x-1/2 z-[100] px-4 py-2.5 rounded-full text-sm font-medium text-white shadow-lg"
+          style={{
+            bottom: 'calc(env(safe-area-inset-bottom, 0px) + 20px)',
+            background: 'rgba(15, 23, 42, 0.92)'
+          }}
+        >
+          Press back again to exit
+        </div>
+      )}
+    </div>
+  );
+}
