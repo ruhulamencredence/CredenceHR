@@ -1,0 +1,14 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Monthly Budget Optimization</string>
+    <string name="title_activity_main">Monthly Budget Optimization</string>
+    <string name="package_name">com.mprtracker.app</string>
+    <string name="custom_url_scheme">com.mprtracker.app</string>
+
+    <!-- Employee Tracking (@capacitor-community/background-geolocation) —
+         text/icon for the persistent notification Android requires while the
+         background service is running. See src/lib/backgroundTracking.ts. -->
+    <string name="capacitor_background_geolocation_notification_channel_name">Employee Tracking</string>
+    <string name="capacitor_background_geolocation_notification_icon">mipmap/ic_launcher</string>
+    <string name="capacitor_background_geolocation_notification_color">#7F00FF</string>
+</resources>

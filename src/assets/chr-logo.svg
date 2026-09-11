@@ -1,0 +1,37 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <title>C-HR Logo — Credence Housing Limited</title>
+  <defs>
+    <linearGradient id="Background_Gradient" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="512" y2="512">
+      <stop offset="0" stop-color="#7F4FE0"/>
+      <stop offset="1" stop-color="#3C1494"/>
+    </linearGradient>
+    <clipPath id="Tile_Clip">
+      <rect x="0" y="0" width="512" height="512" rx="118"/>
+    </clipPath>
+    <mask id="C_Notch_Mask">
+      <rect x="0" y="0" width="512" height="512" fill="#ffffff"/>
+      <rect x="343" y="205" width="108" height="102" fill="#000000"/>
+    </mask>
+  </defs>
+
+  <g id="Background_Tile">
+    <g clip-path="url(#Tile_Clip)">
+      <rect x="0" y="0" width="512" height="512" fill="url(#Background_Gradient)"/>
+    </g>
+  </g>
+
+  <g id="C_Shape" mask="url(#C_Notch_Mask)">
+    <circle cx="256" cy="256" r="154" fill="#EA4B1E"/>
+  </g>
+
+  <g id="Roof_Glyph">
+    <path d="M215 213 L256 178 L297 213" fill="none" stroke="#FFFFFF" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <g id="People_Glyph">
+    <circle cx="223" cy="257" r="28" fill="#FFFFFF"/>
+    <path d="M177 350 a46 46 0 0 1 92 0 z" fill="#FFFFFF"/>
+    <circle cx="281" cy="269" r="23" fill="#FFFFFF"/>
+    <path d="M245 350 a36 36 0 0 1 72 0 z" fill="#FFFFFF"/>
+  </g>
+</svg>

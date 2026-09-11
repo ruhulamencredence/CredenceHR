@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <!-- Colors the browser chrome (Android Chrome's top strip, iOS Safari
+         status bar, PWA install) to match the app header's purple gradient
+         (linear-gradient(90deg, #7F00FF 0%, #6300C6 50%, #47008E 100%) — see
+         Navbar.tsx/WelcomeBanner.tsx) instead of the OS default black/white.
+         Same mid-stop color the native Android app uses via
+         StatusBar.setBackgroundColor() in App.tsx, so web and native match. -->
+    <meta name="theme-color" content="#6300C6" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <title>Credence | Monthly Budget Optimization</title>
+    <meta name="description" content="Monthly Budget Optimization by Credence." />
+    <meta property="og:title" content="Credence | Monthly Budget Optimization" />
+    <meta property="og:description" content="Monthly Budget Optimization by Credence." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" type="image/png" href="/favicon.png" />
+  </head>
+  <body>
+    <div id="root">
+      <!-- Static, JS-free loading screen — shows the INSTANT the HTML arrives,
+           before the (much larger) JS bundle has even started downloading.
+           React's first render on main.tsx replaces this div's content, so
+           this never lingers once the app is actually ready — it only covers
+           the gap that used to be a blank white screen while the bundle
+           downloads/parses, which is the slowest part on a mobile connection.
+
+           This can't be the real Infinity Lottie animation (that needs the
+           lottie-react JS chunk, i.e. exactly the thing this screen is
+           covering for), so it's a plain inline SVG infinity glyph instead —
+           pure CSS/SVG, no JS — pulsing to at least echo the same "infinity"
+           shape/motif used everywhere else in the app once it's mounted
+           (see AppLoader.tsx / Spinner.tsx). -->
+      <style>
+        #mpr-boot-spinner { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; background: linear-gradient(160deg, #eaf6ff 0%, #dbeeff 30%, #e7dcff 65%, #ede0ff 100%); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+        #mpr-boot-spinner .infinity-glyph { width: 56px; height: 34px; animation: mpr-pulse 1.1s ease-in-out infinite; }
+        #mpr-boot-spinner .label { font-size: 13px; color: #5f6368; }
+        @keyframes mpr-pulse { 0%, 100% { opacity: 0.45; transform: scale(0.92); } 50% { opacity: 1; transform: scale(1); } }
+      </style>
+      <div id="mpr-boot-spinner">
+        <svg class="infinity-glyph" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M18.178 8c5.096 0 5.096 8 0 8-5.095 0-7.133-8-12.229-8-5.096 0-5.096 8 0 8 5.096 0 7.135-8 12.229-8z" fill="#7F00FF"/>
+        </svg>
+        <div class="label">Loading…</div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

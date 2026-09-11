@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/AppTheme">
+        <activity
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode"
+            android:name=".MainActivity"
+            android:label="@string/title_activity_main"
+            android:theme="@style/AppTheme.NoActionBarLaunch"
+            android:launchMode="singleTask"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
+        </provider>
+    </application>
+
+    <!-- Permissions -->
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Required so the app can capture the device's coordinates at login
+         (see AuthScreen.tsx / @capacitor/geolocation). FINE gives GPS-level
+         accuracy; COARSE is kept as a fallback the OS may grant instead. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- Employee Tracking (Admin Panel -> Employee Tracking): lets the
+         background service (@capacitor-community/background-geolocation)
+         keep reporting location every ~5-10 min while the app is minimized
+         or fully backgrounded, not just while it's open. Only actually used
+         for an account with can_use_tracking granted (Admin Panel -> Users) —
+         see src/lib/backgroundTracking.ts. Android 10+ requires this as a
+         SEPARATE runtime grant from FINE/COARSE above (the user must pick
+         "Allow all the time" in the system permission dialog, not just
+         "While using the app"). -->
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <!-- Lets the background service keep running (and posting its "still
+         tracking" notification) after the app is swiped away. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <!-- Android 13+ requires this to show that foreground-service
+         notification at all. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+</manifest>
