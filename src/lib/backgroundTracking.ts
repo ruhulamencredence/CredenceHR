@@ -15,13 +15,14 @@
 // telling the user tracking is active (Android requires this; it can't be
 // hidden — see strings.xml for its text/icon/color).
 //
-// Design: the watcher's callback can fire far more often than we want to hit
-// the network (every GPS fix, potentially every few seconds), so we DON'T
-// send a request from inside it. Instead we just remember the latest fix in
-// memory, and a separate timer (PING_INTERVAL_MS) POSTs whatever the latest
-// fix is every 5-10 minutes. This decouples "how often the OS reports a GPS
-// fix" from "how often we hit the server", which is what actually matters for
-// battery/data usage.
+// Design: the watcher's callback can still fire more often than we want to
+// hit the network, so we DON'T send a request from inside it. Instead we just
+// remember the latest fix in memory, and a separate timer (PING_INTERVAL_MS)
+// POSTs whatever the latest fix is every 5-10 minutes. This decouples "how
+// often the OS reports a GPS fix" from "how often we hit the server" — but
+// the OS-reporting frequency itself is controlled separately by
+// DISTANCE_FILTER_M below, which is the actual battery lever; PING_INTERVAL_MS
+// only controls network/data usage, not GPS power draw.
 
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { apiUrl } from './api';
@@ -53,6 +54,18 @@ const BackgroundGeolocation = registerPlugin<BackgroundGeolocationPlugin>('Backg
 // Midpoint of the 5-10 minute range the person asked for — one ping every 7
 // minutes, whichever fix happens to be freshest at that moment.
 const PING_INTERVAL_MS = 7 * 60 * 1000;
+
+// How far (in meters) the device must move before the plugin delivers a new
+// fix. This is the actual battery lever, NOT PING_INTERVAL_MS above: since we
+// only network-ping every 7 minutes and just keep "whatever fix is freshest"
+// in memory (see design note up top), there's no benefit to the OS handing us
+// a fix every few seconds — every one of those in between gets thrown away,
+// but the GPS radio still had to cold-start and burn power to produce it.
+// A non-zero distanceFilter tells the native side to use a coarser, lower-
+// power location request instead of continuous high-accuracy polling.
+// Previously 0 (no filter at all == max-frequency, max-power updates), which
+// is what was driving the battery use seen in Android's battery stats.
+const DISTANCE_FILTER_M = 70;
 
 let watcherId: string | null = null;
 let pingTimer: ReturnType<typeof setInterval> | null = null;
@@ -110,7 +123,7 @@ export async function startBackgroundTracking(token: string): Promise<void> {
         backgroundMessage: 'Reporting your location for Employee Tracking. Tap to open the app.',
         requestPermissions: true,
         stale: false,
-        distanceFilter: 0
+        distanceFilter: DISTANCE_FILTER_M
       },
       (location) => {
         if (location) latestFix = location;
