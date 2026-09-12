@@ -5,10 +5,12 @@
 
 import React, { useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
-import { ArrowLeft, ShieldCheck, Inbox, CheckCircle2, XCircle, RefreshCw } from 'lucide-react';
+import { ArrowLeft, ShieldCheck, Inbox, CheckCircle2, XCircle, RefreshCw, MapPin } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
 import { ModulePath } from './ModulePath';
+import { UserClaimReference, ClaimRecord } from '../types';
+import ClaimLocationMap from './ClaimLocationMap';
 
 interface ApproveApplicationsProps {
   token: string;
@@ -28,6 +30,18 @@ interface MyApprovalItem {
   current_step: number | null;
   total_steps: number | null;
   created_at: string;
+  // Only present on a 'user_claim' item — every Movement Claim (check-in/out)
+  // this Conveyance Bill Claim's Amount was built from, each with its own
+  // location, so the approver can see exactly where it happened before
+  // deciding. Empty/absent when the claim has no Movement Claim attached
+  // (a plain hand-entered Amount).
+  claim_refs?: UserClaimReference[];
+  // Running Approved Amount — set once an EARLIER Layer (e.g. the
+  // Department/Direct Supervisor auto-layer at step 1) has already edited
+  // it on a still-pending 'user_claim'. Used as this Layer's pre-fill
+  // instead of the full Claim Amount, so a partial-approval edit carries
+  // forward through the rest of the chain. Null until someone has edited it.
+  source_approved_amount?: number | null;
 }
 
 const sourceTitle = (t: MyApprovalItem['source_type']) =>
@@ -70,12 +84,38 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
   const [actingKey, setActingKey] = useState<string | null>(null);
   const [remarksDraft, setRemarksDraft] = useState<Record<string, string>>({});
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  // Approved Amount draft for a 'user_claim' item on its LAST step — same idea
-  // as the Admin Panel's Approvals tab (ApprovalManager.tsx): pre-filled with
-  // the full Claim Amount (approve as claimed by default), editable down for
-  // a partial approval. Remaining Amount is derived from this, never its own
-  // state.
+  // Approved Amount draft for a 'user_claim' item — editable on EVERY Layer,
+  // not just the last one (so the Supervisor auto-layer, or any earlier
+  // Template Layer, can partially-approve just like the final approver
+  // always could). Pre-filled with source_approved_amount when an earlier
+  // Layer already set one, otherwise the full Claim Amount (approve as
+  // claimed by default). Remaining Amount is derived from this, never its
+  // own state. Edits made on a non-final Layer are recorded as a running
+  // draft server-side (see updateUserClaimApprovedAmountDraft) and carry
+  // forward as the next Layer's pre-fill.
   const [approvedAmountDraft, setApprovedAmountDraft] = useState<Record<string, string>>({});
+  // The referenced Movement Claim currently shown on the read-only location
+  // map (opened by tapping a claim_refs row below) — same ClaimLocationMap
+  // every other Conveyance Bill Claim view (ConveyanceClaimCard, the Admin
+  // Panel's Conveyance Bill Claim tab) already reuses for this.
+  const [viewingRef, setViewingRef] = useState<{ ref: UserClaimReference; item: MyApprovalItem } | null>(null);
+
+  const refToClaimRecord = (ref: UserClaimReference, item: MyApprovalItem): ClaimRecord => ({
+    id: ref.claim_id,
+    user_id: item.requested_by,
+    user_name: item.requested_by_name,
+    purpose: ref.purpose,
+    status: ref.check_out_at ? 'completed' : 'open',
+    check_in_at: ref.check_in_at,
+    check_in_lat: Number(ref.check_in_lat),
+    check_in_lng: Number(ref.check_in_lng),
+    check_out_at: ref.check_out_at,
+    check_out_lat: ref.check_out_lat != null ? Number(ref.check_out_lat) : null,
+    check_out_lng: ref.check_out_lng != null ? Number(ref.check_out_lng) : null,
+    distance_km: ref.distance_km,
+    check_in_approval: ref.check_in_approval,
+    check_out_approval: ref.check_out_approval
+  });
 
   const load = async () => {
     setLoading(true);
@@ -128,16 +168,16 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
   };
 
   // Wraps handleAct('approved', ...) with the same Approved Amount validation
-  // the Admin Panel's Approvals tab uses — only relevant for a 'user_claim'
-  // item on its last step (see isLastStep below); every other item just
-  // approves as-is.
+  // the Admin Panel's Approvals tab uses — relevant for a 'user_claim' item
+  // on ANY Layer (Supervisor auto-layer included), not just the last one;
+  // every other item just approves as-is.
   const handleApprove = (item: MyApprovalItem) => {
     const key = keyFor(item);
-    const isLastStep = item.current_step != null && item.total_steps != null && Number(item.current_step) === Number(item.total_steps);
-    if (item.source_type === 'user_claim' && isLastStep) {
+    if (item.source_type === 'user_claim') {
       const claimAmount = item.source_amount != null ? Number(item.source_amount) : null;
       const draft = approvedAmountDraft[key];
-      const approvedAmount = Number(draft != null && draft !== '' ? draft : claimAmount);
+      const fallback = item.source_approved_amount != null ? item.source_approved_amount : claimAmount;
+      const approvedAmount = Number(draft != null && draft !== '' ? draft : fallback);
       if (!Number.isFinite(approvedAmount) || approvedAmount <= 0) {
         setMessage({ type: 'error', text: 'Approved Amount must be a positive number.' });
         return;
@@ -220,15 +260,19 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
             <div className="divide-y divide-slate-100">
               {items.map((item) => {
                 const key = keyFor(item);
-                const isLastStep = item.current_step != null && item.total_steps != null && Number(item.current_step) === Number(item.total_steps);
-                const editable = item.source_type === 'user_claim' && isLastStep;
+                // Editable on EVERY Layer now (Supervisor auto-layer included),
+                // not just the last one — see the state comment above.
+                const editable = item.source_type === 'user_claim';
                 const claimAmount = item.source_amount != null ? Number(item.source_amount) : null;
+                // Pre-fill: an earlier Layer's running draft if one exists,
+                // otherwise the full Claim Amount.
+                const runningAmount = item.source_approved_amount != null ? Number(item.source_approved_amount) : claimAmount;
                 const fmt = (n: number) => `৳${n.toLocaleString('en-BD', { minimumFractionDigits: 2 })}`;
                 const draft = approvedAmountDraft[key];
                 const approvedAmount =
-                  editable && claimAmount != null
+                  editable && runningAmount != null
                     ? (() => {
-                        const parsed = Number(draft != null && draft !== '' ? draft : claimAmount);
+                        const parsed = Number(draft != null && draft !== '' ? draft : runningAmount);
                         return Number.isFinite(parsed) ? parsed : null;
                       })()
                     : null;
@@ -248,6 +292,28 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
                           From {item.requested_by_name || `User #${item.requested_by}`}
                           {item.total_steps ? <> &middot; Layer {item.current_step} of {item.total_steps}</> : null}
                         </p>
+
+                        {item.source_type === 'user_claim' && item.claim_refs && item.claim_refs.length > 0 && (
+                          <div className="mt-2 space-y-1 max-w-md">
+                            {item.claim_refs.map((r) => (
+                              <button
+                                key={r.claim_id}
+                                type="button"
+                                onClick={() => setViewingRef({ ref: r, item })}
+                                title="View check-in/out location"
+                                className="w-full flex items-center justify-between gap-2 text-[11px] px-2 py-1 bg-slate-50 hover:bg-blue-50 border border-slate-200 hover:border-blue-200 rounded-lg transition-colors text-left"
+                              >
+                                <span className="flex items-center gap-1 text-slate-600 min-w-0 truncate">
+                                  <MapPin className="w-3 h-3 text-blue-500 shrink-0" />
+                                  Movement Claim &middot; {r.purpose}
+                                </span>
+                                <span className="shrink-0 font-semibold text-slate-800">
+                                  ৳{Number(r.amount).toLocaleString('en-BD', { minimumFractionDigits: 2 })}
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     </div>
 
@@ -264,7 +330,7 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
                             step="0.01"
                             min={0}
                             max={claimAmount ?? undefined}
-                            value={draft ?? (claimAmount != null ? String(claimAmount) : '')}
+                            value={draft ?? (runningAmount != null ? String(runningAmount) : '')}
                             onChange={(e) => setApprovedAmountDraft((prev) => ({ ...prev, [key]: e.target.value }))}
                             className="w-full text-xs px-2 py-1 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
                           />
@@ -311,6 +377,10 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
           )}
         </div>
       </div>
+
+      {viewingRef && (
+        <ClaimLocationMap claim={refToClaimRecord(viewingRef.ref, viewingRef.item)} onClose={() => setViewingRef(null)} />
+      )}
     </div>
   );
 };

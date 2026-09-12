@@ -951,10 +951,12 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
                                   className={`shrink-0 px-2 py-0.5 rounded-full font-semibold border text-[10px] ${
                                     it.source === 'movement_claim'
                                       ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                      : it.source === 'user_claim'
+                                      ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
                                       : 'bg-slate-100 text-slate-600 border-slate-200'
                                   }`}
                                 >
-                                  {it.source === 'movement_claim' ? 'Movement Claim' : 'Manual'}
+                                  {it.source === 'movement_claim' ? 'Movement Claim' : it.source === 'user_claim' ? 'User Claim' : 'Manual'}
                                 </span>
                               </div>
 
@@ -969,6 +971,18 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
                               </div>
 
                               <div className="flex items-center gap-2 pt-1">
+                                {it.source === 'user_claim' && it.user_claim_id && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setViewingBillId(null);
+                                      setViewingUserClaimId(it.user_claim_id!);
+                                    }}
+                                    className="flex-1 flex items-center justify-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-indigo-50 border border-indigo-200 text-indigo-700 font-medium transition-colors"
+                                  >
+                                    <Clock className="w-3.5 h-3.5" /> History
+                                  </button>
+                                )}
                                 <button
                                   type="button"
                                   onClick={() => startEditItem(it)}
@@ -1043,10 +1057,12 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
                                     className={`px-2 py-0.5 rounded-full font-semibold border text-[10px] ${
                                       it.source === 'movement_claim'
                                         ? 'bg-blue-50 text-blue-700 border-blue-200'
+                                        : it.source === 'user_claim'
+                                        ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
                                         : 'bg-slate-100 text-slate-600 border-slate-200'
                                     }`}
                                   >
-                                    {it.source === 'movement_claim' ? 'Movement Claim' : 'Manual'}
+                                    {it.source === 'movement_claim' ? 'Movement Claim' : it.source === 'user_claim' ? 'User Claim' : 'Manual'}
                                   </span>
                                 </td>
                                 <td className="px-3 py-2.5 text-slate-700 max-w-[200px]">
@@ -1060,6 +1076,19 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
                                 <td className="px-3 py-2.5 whitespace-nowrap font-semibold text-slate-900">{it.amount.toFixed(2)}</td>
                                 <td className="px-3 py-2.5 whitespace-nowrap">
                                   <div className="flex items-center gap-1">
+                                    {it.source === 'user_claim' && it.user_claim_id && (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setViewingBillId(null);
+                                          setViewingUserClaimId(it.user_claim_id!);
+                                        }}
+                                        className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                                        title="View this claim's approval History"
+                                      >
+                                        <Clock className="w-3.5 h-3.5" />
+                                      </button>
+                                    )}
                                     <button
                                       type="button"
                                       onClick={() => startEditItem(it)}
@@ -1172,10 +1201,13 @@ const ItemFields: React.FC<{
   );
 };
 // Full detail view for ONE User Claim — opened by clicking a "User Claim" row
-// in the unified table above. Ported from the old always-expanded
-// UserClaimsReviewPanel list so nothing is lost (edit, delete, approve/reject
-// for legacy pending claims with no Approval Request, referenced check-in/out
-// map, attachment link) — just shown one claim at a time instead of a long list.
+// in the unified table above. Originally ported from a standalone
+// always-expanded list (UserClaimsReviewPanel.tsx) so nothing was lost
+// (edit, delete, approve/reject for legacy pending claims with no Approval
+// Request, referenced check-in/out map, attachment link) — just shown one
+// claim at a time instead of a long list. That standalone file was never
+// actually wired into App.tsx/AdminPanel.tsx (dead code) and has since been
+// deleted; this modal is the real, live "User Claim detail + History" view.
 const UserClaimDetailModal: React.FC<{
   claim: UserClaim;
   token: string;
@@ -1474,9 +1506,19 @@ const UserClaimDetailModal: React.FC<{
               {/* History — every log recorded against this claim: submission,
                   then each Approval Workflow Layer's decision (if it went
                   through a chain), or the single legacy decision (if it
-                  didn't). Newest last, same order things actually happened. */}
+                  didn't). Newest last, same order things actually happened.
+                  Each Layer's Approved Amount decision (and whether they
+                  actually changed it from what was on record) is shown too —
+                  see performApprovalAction/amount_edited server-side. */}
               <div className="pt-2 border-t border-slate-100">
-                <div className="text-[11px] font-semibold text-slate-400 mb-1.5">History</div>
+                <div className="flex items-center justify-between gap-2 mb-1.5">
+                  <div className="text-[11px] font-semibold text-slate-400">History</div>
+                  {claim.approval?.actions && claim.approval.actions.some((a) => a.amount_edited) && (
+                    <div className="text-[11px] font-semibold text-amber-600">
+                      Approved Amount edited {claim.approval.actions.filter((a) => a.amount_edited).length}x
+                    </div>
+                  )}
+                </div>
                 <div className="space-y-1.5">
                   <div className="flex items-start gap-2 text-xs">
                     <Clock className="w-3.5 h-3.5 text-slate-300 mt-0.5 shrink-0" />
@@ -1498,6 +1540,12 @@ const UserClaimDetailModal: React.FC<{
                           <div className={a.action === 'approved' ? 'text-emerald-700' : 'text-rose-700'}>
                             {a.approver_name} {a.action === 'approved' ? 'approved' : 'rejected'} (Layer {a.step_order})
                             {a.acted_at && <span className="text-slate-400"> &middot; {formatDate(a.acted_at)}</span>}
+                            {a.approved_amount != null && (
+                              <div className="text-slate-500">
+                                Approved Amount: ৳{Number(a.approved_amount).toLocaleString('en-BD', { minimumFractionDigits: 2 })}
+                                {a.amount_edited && <span className="text-amber-600 font-semibold"> (edited)</span>}
+                              </div>
+                            )}
                             {a.remarks && <div className="text-slate-500 mt-0.5">"{a.remarks}"</div>}
                           </div>
                         </div>
