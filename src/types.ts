@@ -229,6 +229,15 @@ export interface ApprovalAction {
   action: 'approved' | 'rejected';
   remarks: string | null;
   acted_at: string;
+  // Only present on a 'user_claim' Approve — the Approved Amount this Layer
+  // decided (whatever they submitted, or the running/original amount
+  // carried forward if they left it untouched). amount_edited is true only
+  // when this differs from whatever was on record just before this action,
+  // so the Admin's Conveyance Bill Claim history can tell "approved as-is"
+  // apart from "partially approved here" and count real edits across the
+  // whole chain. See performApprovalAction server-side.
+  approved_amount?: number | null;
+  amount_edited?: boolean;
 }
 
 // Lightweight summary embedded onto an AttendanceRecord/ClaimRecord (from
@@ -1078,7 +1087,11 @@ export interface ClaimsNavRequest {
 // tab with no User Panel equivalent, unlike Movement Claims/Conveyance Bill
 // Claim above which exist in both panels.
 export interface AdminNavRequest {
-  target: 'reports' | 'mprs' | 'imports' | 'editlog' | 'recycle' | 'projects' | 'branches' | 'users' | 'notices' | 'approvals' | 'attendance' | 'attendance_reports' | 'employees' | 'departments' | 'tracking' | 'holidays' | 'disbursement';
+  // 'my_conveyance' is NOT an AdminModuleKey/module_permissions entry — it's
+  // the "My Conveyance Bill Claim" sub-view (an Admin's own Bills/Claims,
+  // read-only), shown alongside the 'conveyance' tab to anyone who already
+  // has that module, not a separately-grantable permission of its own.
+  target: 'reports' | 'mprs' | 'imports' | 'editlog' | 'recycle' | 'projects' | 'branches' | 'users' | 'notices' | 'approvals' | 'attendance' | 'attendance_reports' | 'employees' | 'departments' | 'tracking' | 'holidays' | 'disbursement' | 'my_conveyance';
   ts: number;
 }
 

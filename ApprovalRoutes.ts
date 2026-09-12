@@ -39,6 +39,12 @@ interface ApprovalRouteDeps {
   getApprovalChain: () => Promise<any[]>;
   performApprovalAction: (...args: any[]) => Promise<any>;
   toDateOnlyString: (value: any) => string | null;
+  // Same helper ConveyanceBillClaimRoutes.ts uses to attach each Movement
+  // Claim's Approval Workflow status — reused here (GET /api/my-approvals)
+  // to attach lat/lng + status onto every Movement Claim referenced by a
+  // 'user_claim' item, so an approver can open its location on a map without
+  // a second permission-gated lookup.
+  attachApprovalStatuses: (sourceType: "attendance" | "claim", rows: any[]) => Promise<any[]>;
 }
 
 export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
@@ -50,8 +56,56 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
     queryDB,
     getApprovalChain,
     performApprovalAction,
-    toDateOnlyString
+    toDateOnlyString,
+    attachApprovalStatuses
   } = deps;
+
+  // Attaches a `claim_refs: [{ claim_id, amount, purpose, check_in_at,
+  // check_out_at, distance_km, check_in_lat/lng, check_out_lat/lng, ... }]`
+  // array onto every 'user_claim' item in a GET /api/my-approvals list (every
+  // other source_type is left untouched) — same shape/query as
+  // ConveyanceBillClaimRoutes.ts's own attachUserClaimRefs, duplicated here
+  // rather than imported since that one is private to that module's route
+  // factory. Lets the Approve Application page show a "View Location" button
+  // for any Movement Claim a Conveyance Bill Claim was built from, same as
+  // the Admin Panel's own Conveyance Bill Claim review already does.
+  async function attachClaimRefsToMyApprovals(rows: any[]): Promise<any[]> {
+    const userClaimIds = rows.filter((r: any) => r.source_type === "user_claim").map((r: any) => Number(r.source_id));
+    if (userClaimIds.length === 0) return rows;
+    const refRows = await queryDB(
+      `SELECT r.user_claim_id, r.claim_id, r.amount, c.purpose, c.check_in_at, c.check_out_at, c.distance_km,
+              c.check_in_lat, c.check_in_lng, c.check_out_lat, c.check_out_lng
+         FROM user_claim_references r
+         JOIN claims c ON c.id = r.claim_id
+        WHERE r.user_claim_id IN (${userClaimIds.map(() => "?").join(",")})
+        ORDER BY r.id ASC`,
+      userClaimIds
+    );
+    const withApproval = await attachApprovalStatuses(
+      "claim",
+      refRows.map((rr: any) => ({ ...rr, id: rr.claim_id }))
+    );
+    const byUserClaim: Record<number, any[]> = {};
+    for (const rr of withApproval) {
+      const key = Number(rr.user_claim_id);
+      if (!byUserClaim[key]) byUserClaim[key] = [];
+      byUserClaim[key].push({
+        claim_id: Number(rr.claim_id),
+        amount: Number(rr.amount),
+        purpose: rr.purpose,
+        check_in_at: rr.check_in_at,
+        check_out_at: rr.check_out_at,
+        distance_km: rr.distance_km !== null ? Number(rr.distance_km) : null,
+        check_in_lat: rr.check_in_lat !== null ? Number(rr.check_in_lat) : null,
+        check_in_lng: rr.check_in_lng !== null ? Number(rr.check_in_lng) : null,
+        check_out_lat: rr.check_out_lat !== null ? Number(rr.check_out_lat) : null,
+        check_out_lng: rr.check_out_lng !== null ? Number(rr.check_out_lng) : null,
+        check_in_approval: rr.check_in_approval,
+        check_out_approval: rr.check_out_approval
+      });
+    }
+    return rows.map((r: any) => (r.source_type === "user_claim" ? { ...r, claim_refs: byUserClaim[Number(r.source_id)] || [] } : r));
+  }
 
   // 2c-2. Approval Workflow — a single global, ORDERED chain of Admin/Superadmin
   // approvers (Superadmin-only to configure). Every Check In / Check Out (Remote
@@ -333,14 +387,21 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
         (la: any) => Number(la.reliever_id) === myId && la.reliever_status === "pending" && la.status === "pending"
       );
 
-      res.json([
+      const combined = [
         ...mine.map((r: any) => {
           let sourceLabel = "";
           let sourceAmount: number | null = null;
+          // Running Approved Amount (Part 6b) — if an EARLIER Layer (e.g. the
+          // Department/Direct Supervisor auto-layer, step 1) already edited the
+          // Approved Amount on a still-pending 'user_claim', this carries that
+          // value forward as this Layer's pre-fill instead of the full Claim
+          // Amount — see updateUserClaimApprovedAmountDraft in server.ts.
+          let sourceApprovedAmount: number | null = null;
           if (r.source_type === "user_claim") {
             const uc = userClaimMap.get(Number(r.source_id));
             sourceLabel = uc ? String(uc.description || `${uc.category} claim`) : "(claim removed)";
             sourceAmount = uc ? Number(uc.amount) : null;
+            sourceApprovedAmount = uc && uc.approved_amount != null ? Number(uc.approved_amount) : null;
           } else if (r.source_type === "attendance_correction") {
             const ac = attendanceCorrectionMap.get(Number(r.source_id));
             const proj = ac ? projectMap.get(Number(ac.project_id)) : null;
@@ -360,6 +421,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
             source_id: r.source_id,
             source_label: sourceLabel,
             source_amount: sourceAmount,
+            source_approved_amount: sourceApprovedAmount,
             requested_by: r.requested_by,
             requested_by_name: requesterMap.get(Number(r.requested_by))?.name || null,
             current_step: r.current_step,
@@ -382,7 +444,9 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
             created_at: la.created_at
           };
         })
-      ]);
+      ];
+
+      res.json(await attachClaimRefsToMyApprovals(combined));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

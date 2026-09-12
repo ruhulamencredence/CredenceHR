@@ -1860,13 +1860,35 @@ async function performApprovalAction(
   } catch {
     actions = [];
   }
+
+  // Approved Amount history (for the Admin's Conveyance Bill Claim "History" —
+  // ConveyanceBillPanel.tsx's UserClaimDetailModal): only meaningful for a
+  // 'user_claim' Approve. Records the amount THIS Layer actually decided
+  // (whatever was submitted, or whatever was already on record if they left
+  // it untouched) and whether that's a change from what was on record
+  // immediately before this action — so "who approved" and "how many times
+  // was the Approved Amount edited" can both be read straight off the
+  // actions trail already stored per request, without a separate history
+  // table.
+  let actionApprovedAmount: number | null = null;
+  let actionAmountEdited = false;
+  if (request.source_type === "user_claim" && action === "approved") {
+    const ucRows = await queryDB("SELECT amount, approved_amount FROM user_claims WHERE id = ?", [request.source_id]);
+    if (ucRows.length > 0) {
+      const priorAmount = ucRows[0].approved_amount != null ? Number(ucRows[0].approved_amount) : Number(ucRows[0].amount);
+      actionApprovedAmount = approvedAmount != null ? Number(approvedAmount) : priorAmount;
+      actionAmountEdited = actionApprovedAmount !== priorAmount;
+    }
+  }
+
   actions.push({
     step_order: Number(request.current_step),
     approver_id: actorUser.id,
     approver_name: actorUser.name,
     action,
     remarks,
-    acted_at: new Date().toISOString()
+    acted_at: new Date().toISOString(),
+    ...(actionApprovedAmount != null ? { approved_amount: actionApprovedAmount, amount_edited: actionAmountEdited } : {})
   });
 
   let newStatus = request.status;
@@ -1899,6 +1921,13 @@ async function performApprovalAction(
         billInfo = await finalizeUserClaimApproval(Number(request.source_id), actorUser.id, billId, remarks, approvedAmount);
       } else if (newStatus === "rejected") {
         await rejectUserClaimRecord(Number(request.source_id), actorUser.id, remarks);
+      } else if (action === "approved" && approvedAmount != null) {
+        // Approved on a NON-final step (e.g. the Supervisor auto-layer at
+        // step 1 of a multi-step chain) with an Approved Amount edit — same
+        // capability the last step already had, just recorded as a running
+        // draft instead of finalizing a Bill line item yet. See
+        // updateUserClaimApprovedAmountDraft.
+        await updateUserClaimApprovedAmountDraft(Number(request.source_id), approvedAmount);
       }
     } catch (finalizeErr: any) {
       // The Approval Request itself already recorded above — surface the
@@ -2115,10 +2144,14 @@ async function finalizeUserClaimApproval(
   if (uc.status !== "pending") throw new Error("This claim has already been reviewed.");
 
   // Approver may partially approve — Approved Amount must be a positive number
-  // no greater than what was actually claimed. Falls back to the full Claim
-  // Amount when not given (legacy /api/user-claims/:id/decision path, and any
-  // caller that doesn't support partial approval).
-  let finalAmount = Number(uc.amount);
+  // no greater than what was actually claimed. Falls back to whatever an
+  // EARLIER Layer already set as a running draft (see
+  // updateUserClaimApprovedAmountDraft — e.g. the Supervisor auto-layer
+  // editing it at step 1 of a multi-step chain), and only falls back further
+  // to the full Claim Amount when nobody has touched it yet (also covers the
+  // legacy /api/user-claims/:id/decision path, which never supports partial
+  // approval).
+  let finalAmount = uc.approved_amount != null ? Number(uc.approved_amount) : Number(uc.amount);
   if (approvedAmount != null) {
     const amt = Number(approvedAmount);
     if (!Number.isFinite(amt) || amt <= 0) {
@@ -2167,6 +2200,37 @@ async function finalizeUserClaimApproval(
   );
 
   return { bill_id: targetBillId, bill_item_id: item.insertId };
+}
+
+// Records an Approved Amount edit made at a NON-final step of a still-pending
+// 'user_claim' chain (e.g. the Department/Direct Supervisor auto-layer at
+// step 1 of a 2+ step chain, or any earlier Template Layer) — same Approved
+// Amount capability the LAST step already had via finalizeUserClaimApproval,
+// just without creating a Bill line item yet, since the claim isn't decided
+// until the chain finishes. The value is stored as a running draft on
+// user_claims.approved_amount so it carries forward as the next Layer's
+// pre-fill (GET /api/my-approvals' source_approved_amount) and as
+// finalizeUserClaimApproval's own fallback if the LAST approver doesn't
+// change it. Same validation as finalizeUserClaimApproval: positive, and
+// never more than the Claim Amount. No-ops quietly if the claim was somehow
+// already decided by the time this runs (status changed underneath it) or
+// the row is gone — the Approval Request's own step still advanced either
+// way, this only affects the pre-fill an approver later sees.
+async function updateUserClaimApprovedAmountDraft(userClaimId: number, approvedAmount: number) {
+  const rows = await queryDB("SELECT * FROM user_claims WHERE id = ?", [userClaimId]);
+  if (rows.length === 0) return;
+  const uc = rows[0];
+  if (uc.status !== "pending") return;
+
+  const amt = Number(approvedAmount);
+  if (!Number.isFinite(amt) || amt <= 0) {
+    throw new Error("Approved Amount must be a positive number.");
+  }
+  if (amt > Number(uc.amount)) {
+    throw new Error("Approved Amount can't be more than the Claim Amount.");
+  }
+
+  await queryDB("UPDATE user_claims SET approved_amount = ? WHERE id = ?", [amt, userClaimId]);
 }
 
 // Rejects a User Claim — frees up any referenced check-in/out(s) (a rejected claim
@@ -4874,7 +4938,8 @@ async function startServer() {
     queryDB,
     getApprovalChain,
     performApprovalAction,
-    toDateOnlyString
+    toDateOnlyString,
+    attachApprovalStatuses
   });
 
   // 2d. Notices — Superadmin/Admin composes a popup (title + text/HTML + an

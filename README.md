@@ -6,7 +6,7 @@ MySQL (XAMPP compatible) ডাটাবেজের উপর তৈরি। �
 tracking, Leave Management, Conveyance Claims, Remote (GPS) + Office
 (ZKTeco biometric) Attendance, Employee Tracking, Notices, Personal Alerts,
 Holiday Calendar, Role-based Admin Panel, এবং Capacitor দিয়ে Android APK
-বিল্ড সাপোর্ট। Ruhul
+বিল্ড সাপোর্ট।
 
 ---
 

@@ -12,6 +12,7 @@ import { NoticeManager } from './NoticeManager';
 import { EmployeesPanel } from './EmployeesPanel';
 import { ClaimsPanel } from './ClaimsPanel';
 import { ConveyanceBillPanel } from './ConveyanceBillPanel';
+import { MyConveyanceBillClaimPanel } from './MyConveyanceBillClaimPanel';
 import { DisbursementPanel } from './DisbursementPanel';
 import { ApprovalManager } from './ApprovalManager';
 import { ApprovalTemplateManager } from './ApprovalTemplateManager';
@@ -166,7 +167,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // have explicitly granted user.can_view_login_location.
   const canSeeLoginLocation = isSuperAdmin || !!user.can_view_login_location;
 
-  const [activeTab, setActiveTab] = useState<'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'disbursement' | 'holidays'>(
+  const [activeTab, setActiveTab] = useState<'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'my_conveyance' | 'disbursement' | 'holidays'>(
     () => {
       // Restores whichever tab this Admin was last looking at — see the
       // "pull down to reload" note in App.tsx: since a reload now has to be
@@ -174,7 +175,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       // localStorage (survives a reload) instead of living only in memory.
       try {
         const saved = localStorage.getItem(`mpr_admin_tab_${user.id}`);
-        if (saved && (isSuperAdmin || visibleModules.includes(saved as AdminModuleKey))) return saved as any;
+        // 'my_conveyance' isn't its own module_permissions entry — it rides
+        // along with 'conveyance' (see the tab-visibility effect below).
+        const savedVisible =
+          saved === 'my_conveyance' ? isSuperAdmin || visibleModules.includes('conveyance') : isSuperAdmin || visibleModules.includes(saved as AdminModuleKey);
+        if (saved && savedVisible) return saved as any;
       } catch {
         // ignore — falls through to the normal default below
       }
@@ -206,7 +211,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // groups (Reports / MPR Nos / Data Import / MPR Edit Log / Job Recycle).
   useEffect(() => {
     if (!adminNavRequest) return;
-    if (canSee(adminNavRequest.target as AdminModuleKey)) setActiveTab(adminNavRequest.target as any);
+    // 'my_conveyance' isn't its own module_permissions entry — it rides along
+    // with 'conveyance' (see the "My Conveyance Bill Claim" item in GlobalSidebar).
+    const visible = adminNavRequest.target === 'my_conveyance' ? canSee('conveyance') : canSee(adminNavRequest.target as AdminModuleKey);
+    if (visible) setActiveTab(adminNavRequest.target as any);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adminNavRequest]);
 
@@ -214,7 +222,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // fall back to the first tab they can actually see instead of showing a blank/
   // forbidden panel.
   useEffect(() => {
-    if (!canSee(activeTab) && visibleModules.length > 0) {
+    const activeTabStillVisible = activeTab === 'my_conveyance' ? canSee('conveyance') : canSee(activeTab);
+    if (!activeTabStillVisible && visibleModules.length > 0) {
       setActiveTab(visibleModules[0] as any);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -4707,6 +4716,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           hand, then export a printable PDF bill. */}
       {activeTab === 'conveyance' && (
         <ConveyanceBillPanel token={token} users={users} />
+      )}
+
+      {/* TAB: MY CONVEYANCE BILL CLAIM — same "conveyance" module grant as the
+          tab above, but scoped to THIS Admin's own Bills/Claims and read-only
+          (no Approve/Reject/Edit/Delete) — see MyConveyanceBillClaimPanel.tsx
+          for why this exists as a separate page. */}
+      {activeTab === 'my_conveyance' && (
+        <MyConveyanceBillClaimPanel token={token} user={user} />
       )}
 
       {/* TAB: CONVEYANCE DISBURSEMENT — Superadmin + explicitly-granted Admins
