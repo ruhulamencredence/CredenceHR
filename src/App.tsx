@@ -6,7 +6,7 @@
 import React, { useState, useEffect, useRef, Suspense, lazy } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { RefreshCw } from 'lucide-react';
-import { User, ClaimsNavRequest, AdminNavRequest, JobsNavRequest, AdminModuleKey } from './types';
+import { User, ClaimsNavRequest, AdminNavRequest, JobsNavRequest, AdminModuleKey, DashboardNavRequest } from './types';
 import { AuthScreen } from './components/AuthScreen';
 import { Navbar } from './components/Navbar';
 import { GlobalSidebar } from './components/GlobalSidebar';
@@ -25,10 +25,12 @@ import { AppLoader } from './components/AppLoader';
 import { Spinner } from './components/Spinner';
 import { ApkModal } from './components/ApkModal';
 import { LeaveApplication } from './components/LeaveApplication';
-import { LeaveManagement } from './components/LeaveManagement';
+import { LeaveManage } from './components/LeaveManage';
+import { MyLeave } from './components/MyLeave';
 import { LeaveApprovals } from './components/LeaveApprovals';
 import { ApproveApplications } from './components/ApproveApplications';
 import { Timesheet } from './components/Timesheet';
+import { PayrollModule } from './components/PayrollModule';
 import { NoticePopup } from './components/NoticePopup';
 import { useBackButtonClose } from './lib/useBackButtonClose';
 import { closeTopmostOrReturnFalse } from './lib/backButtonStack';
@@ -52,16 +54,66 @@ export default function App() {
   const [jobsNavRequest, setJobsNavRequest] = useState<JobsNavRequest | null>(null);
   // Navbar's web-only "Budget" header menu — see AdminNavRequest in types.ts.
   const [adminNavRequest, setAdminNavRequest] = useState<AdminNavRequest | null>(null);
+  // GlobalSidebar's "Dashboard" item — see DashboardNavRequest in types.ts.
+  const [dashboardNavRequest, setDashboardNavRequest] = useState<DashboardNavRequest | null>(null);
   // Navbar's web-only "Self Service" header menu — takes over the main area
   // the same way the Claims/Jobs pages do (see the `main` block below),
   // instead of living inside the Admin/User panel tab structure. null means
   // neither Self Service page is showing (normal Admin/User Panel view).
-  const [selfServiceView, setSelfServiceView] = useState<'leaveApplication' | 'leaveManagement' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | null>(null);
+  //
+  // Restored from localStorage (same pattern as viewMode above) so a manual
+  // reload — or the browser/WebView reloading the page on its own — lands
+  // back on whichever Self Service page (Leave Application, Timesheet, etc.)
+  // this account was actually looking at, instead of resetting to the
+  // Admin/User Panel default every time.
+  const selfServiceViewStorageKey = user ? `mpr_self_service_view_${user.id}` : null;
+  const [selfServiceView, setSelfServiceView] = useState<'leaveApplication' | 'leaveManagement' | 'myLeave' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll' | null>(() => {
+    try {
+      const saved = selfServiceViewStorageKey ? localStorage.getItem(selfServiceViewStorageKey) : null;
+      if (saved === 'leaveApplication' || saved === 'leaveManagement' || saved === 'myLeave' || saved === 'leaveApprovals' || saved === 'timesheet' || saved === 'approveApplications') {
+        return saved;
+      }
+    } catch {
+      // ignore — falls through to the "no Self Service page open" default below
+    }
+    return null;
+  });
+  useEffect(() => {
+    if (!selfServiceViewStorageKey) return;
+    try {
+      if (selfServiceView) localStorage.setItem(selfServiceViewStorageKey, selfServiceView);
+      else localStorage.removeItem(selfServiceViewStorageKey);
+    } catch {
+      // localStorage can be unavailable in some embedded WebViews — safe to
+      // ignore, it just means a reload won't be able to restore this page.
+    }
+  }, [selfServiceView, selfServiceViewStorageKey]);
   // ProfilePage.tsx — opened from the avatar in Navbar (desktop header) or
   // GlobalSidebar (mobile drawer's own profile header). Takes over the main
   // area the same way Self Service does, and only ever clears itself via its
   // own "Back" button.
-  const [showProfilePage, setShowProfilePage] = useState(false);
+  //
+  // Restored from localStorage same as selfServiceView above, so a reload
+  // while on the Profile page lands back on it instead of the Admin/User
+  // Panel default.
+  const showProfilePageStorageKey = user ? `mpr_show_profile_page_${user.id}` : null;
+  const [showProfilePage, setShowProfilePage] = useState(() => {
+    try {
+      return showProfilePageStorageKey ? localStorage.getItem(showProfilePageStorageKey) === '1' : false;
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    if (!showProfilePageStorageKey) return;
+    try {
+      if (showProfilePage) localStorage.setItem(showProfilePageStorageKey, '1');
+      else localStorage.removeItem(showProfilePageStorageKey);
+    } catch {
+      // localStorage can be unavailable in some embedded WebViews — safe to
+      // ignore, it just means a reload won't be able to restore this page.
+    }
+  }, [showProfilePage, showProfilePageStorageKey]);
 
   // Bumped right after a Personal Data photo upload succeeds (see
   // ProfilePage's onPhotoUpdated below) — passed to every avatar spot
@@ -176,8 +228,12 @@ export default function App() {
     // role, and regardless of which panel this account was last looking at
     // on this device. Admin Panel (for whoever has it — see hasAdminPanel
     // below) is now reached from there via the header, not the default
-    // landing screen.
+    // landing screen. Also clear any persisted Self Service / Profile page
+    // (see the lazy initializers above) so a fresh login doesn't jump
+    // straight back into whichever page was on screen at the last reload.
     setViewMode('user');
+    setSelfServiceView(null);
+    setShowProfilePage(false);
   };
 
   const handleLogout = () => {
@@ -185,9 +241,12 @@ export default function App() {
     // (see UserPanel.tsx) — otherwise the next login on this device restores
     // whichever section (e.g. Claims) was on screen when this account last
     // logged out, instead of landing on the Dashboard as intended above.
+    // Same for the Self Service / Profile page persisted just above.
     if (user) {
       localStorage.removeItem(`mpr_user_section_${user.id}`);
       localStorage.removeItem(`mpr_user_desktop_section_${user.id}`);
+      localStorage.removeItem(`mpr_self_service_view_${user.id}`);
+      localStorage.removeItem(`mpr_show_profile_page_${user.id}`);
     }
     localStorage.removeItem('mpr_token');
     localStorage.removeItem('mpr_user');
@@ -383,6 +442,13 @@ export default function App() {
       setSelfServiceView(null);
       setShowProfilePage(false);
       setViewMode('user');
+      // Also reset UserPanel's own persisted section (mobile tile menu /
+      // desktop tab) back to the dashboard default — see dashboardNavRequest
+      // and UserPanel.tsx's effect on it. Without this, switching viewMode
+      // to 'user' alone isn't enough: UserPanel keeps showing whichever
+      // section (e.g. a Claims page) was previously active or restored from
+      // localStorage on the last reload.
+      setDashboardNavRequest({ ts: Date.now() });
     },
     onGoToJobsTab: (target: 'entry' | 'jobs' | 'entryDetails' | 'jobEdit') => {
       setSelfServiceView(null);
@@ -408,7 +474,7 @@ export default function App() {
       setViewMode('admin');
       setAdminNavRequest({ target, ts: Date.now() });
     },
-    onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'leaveApprovals' | 'timesheet' | 'approveApplications') => {
+    onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'myLeave' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll') => {
       setShowProfilePage(false);
       setSelfServiceView(target);
     },
@@ -448,10 +514,14 @@ export default function App() {
         onGoToDashboard={() => {
           // Same "leave Self Service, land on the User Panel dashboard" reset
           // GlobalSidebar's own Dashboard link already uses (see below) — the
-          // logo now does the same thing on desktop.
+          // logo now does the same thing on desktop. Also bumps
+          // dashboardNavRequest (see sidebarNavProps.onGoToDashboard above)
+          // so UserPanel resets its own persisted section too, instead of
+          // staying stuck on whichever section was previously active.
           setSelfServiceView(null);
           setShowProfilePage(false);
           setViewMode('user');
+          setDashboardNavRequest({ ts: Date.now() });
         }}
         onGoToMovementClaims={() => {
           // Self Service (Leave Application/Management/Approvals) and
@@ -563,14 +633,18 @@ export default function App() {
           />
         ) : selfServiceView === 'leaveApplication' ? (
           <LeaveApplication token={token} onBack={() => setSelfServiceView(null)} />
+        ) : selfServiceView === 'myLeave' ? (
+          <MyLeave token={token} user={user} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'leaveManagement' ? (
-          <LeaveManagement token={token} user={user} onBack={() => setSelfServiceView(null)} />
+          <LeaveManage token={token} user={user} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'leaveApprovals' ? (
           <LeaveApprovals token={token} user={user} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'approveApplications' ? (
           <ApproveApplications token={token} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'timesheet' ? (
           <Timesheet token={token} onBack={() => setSelfServiceView(null)} />
+        ) : selfServiceView === 'payroll' ? (
+          <PayrollModule token={token} onBack={() => setSelfServiceView(null)} />
         ) : isAdminView ? (
           <AdminPanel
             token={token}
@@ -587,7 +661,7 @@ export default function App() {
           />
         ) : (
           <>
-            <UserPanel token={token} user={user} claimsNavRequest={claimsNavRequest} jobsNavRequest={jobsNavRequest} />
+            <UserPanel token={token} user={user} claimsNavRequest={claimsNavRequest} jobsNavRequest={jobsNavRequest} dashboardNavRequest={dashboardNavRequest} />
             {/* Superadmin/Admin-authored Notice popup — only shown on the plain
                 User's dashboard, right after they land here post-login. */}
             <NoticePopup token={token} user={user} />

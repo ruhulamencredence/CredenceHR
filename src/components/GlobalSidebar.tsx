@@ -44,7 +44,7 @@ interface GlobalSidebarProps {
   onGoToUserClaims: (target: 'movementClaims' | 'conveyanceBill') => void;
   // Everyday employee self-service items — not Admin-gated, shown to every
   // account regardless of role/module access.
-  onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'leaveApprovals' | 'timesheet' | 'approveApplications') => void;
+  onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'myLeave' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll') => void;
   // Admin Panel's own Movement Claims / Conveyance Bill Claim review tabs —
   // separate feature from onGoToUserClaims above, gated by module_permissions
   // like every other Admin Panel module.
@@ -145,8 +145,31 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   const selfServiceItems: NavItem[] = [
     { key: 'timesheet', label: 'Timesheet', icon: Clock, onClick: () => onGoToSelfServiceTab('timesheet') },
     { key: 'leaveApplication', label: 'Leave Application', icon: CalendarClock, onClick: () => onGoToSelfServiceTab('leaveApplication') },
-    { key: 'leaveManagement', label: 'My Leave', icon: ListChecks, onClick: () => onGoToSelfServiceTab('leaveManagement') },
+    // Always visible to every account — only ever shows THIS account's own
+    // Leave balance, read-only (see MyLeave.tsx). Distinct from "Leave
+    // Manage" below, which is gated and shows/edits every account's balance.
+    { key: 'myLeave', label: 'My Leave', icon: ListChecks, onClick: () => onGoToSelfServiceTab('myLeave') },
   ];
+  // "Payroll" — Coming Soon placeholder (PayrollModule.tsx/PayrollRoutes.ts),
+  // but permission-gated like every other module from the start: a
+  // Superadmin always sees it (canSeeModule), everyone else only once
+  // explicitly granted the 'payroll' module via Admin Panel -> Users ->
+  // Module Access. GET /api/payroll/status enforces the same gate
+  // server-side (requireModule('payroll')), so this is real access control,
+  // not just a hidden menu item.
+  if (canSeeModule('payroll')) {
+    selfServiceItems.push({ key: 'payroll', label: 'Payroll', icon: Banknote, onClick: () => onGoToSelfServiceTab('payroll') });
+  }
+  // "Leave Manage" — same access as LeaveManage.tsx's own canManageAll check
+  // (a Superadmin, or any Admin/User the Superadmin has granted
+  // can_manage_leave to via Admin Panel -> Users -> Module Access -> "Also
+  // allow editing Leave balances"). Everyone else never sees this item at
+  // all — same "Set Balance in Bulk" access as before, just its own page/
+  // menu entry now instead of living inside the "My Leave" page.
+  const canManageLeave = user.role === 'superadmin' || !!user.can_manage_leave;
+  if (canManageLeave) {
+    selfServiceItems.push({ key: 'leaveManagement', label: 'Leave Manage', icon: ListChecks, onClick: () => onGoToSelfServiceTab('leaveManagement') });
+  }
   if (user.role === 'admin' || user.role === 'superadmin') {
     selfServiceItems.push({ key: 'leaveApprovals', label: 'Leave Approvals', icon: CheckSquare, onClick: () => onGoToSelfServiceTab('leaveApprovals') });
   }

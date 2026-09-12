@@ -45,6 +45,36 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
     rejectLeaveApplicationReliever
   } = deps;
 
+  // Sum of day_count already deducted from an account's balance for leave
+  // taken THIS calendar year (status != 'rejected' — a rejected application's
+  // day_count was already given back at decision time, so it never actually
+  // reduced the balance). Scoped by the leave's start_date, since that's what
+  // "this year's usage" means for annual leave accounting, not when it was
+  // applied for.
+  //
+  // Used by both "Set Balance in Bulk" and the single-account PUT below, so
+  // setting a new balance never blindly overwrites what an account has
+  // already spent this year — the new balance becomes (new total - already
+  // used), floored at 0. This also doubles as the year-end reset: once the
+  // calendar year turns over, no leave has been taken against it yet, so
+  // "already used" is naturally 0 and re-running Set Balance in Bulk gives
+  // everyone a clean fresh balance with no separate year-end job needed.
+  async function getUsedThisYear(userId: number): Promise<{ casual: number; sick: number; without_pay: number }> {
+    const year = new Date().getFullYear();
+    const rows: any = await queryDB(
+      "SELECT leave_type, day_count FROM leave_applications WHERE user_id = ? AND status != 'rejected' AND YEAR(start_date) = ?",
+      [userId, year]
+    );
+    const used = { casual: 0, sick: 0, without_pay: 0 };
+    for (const r of rows) {
+      const dc = Number(r.day_count) || 0;
+      if (r.leave_type === "casual") used.casual += dc;
+      else if (r.leave_type === "sick") used.sick += dc;
+      else if (r.leave_type === "without_pay") used.without_pay += dc;
+    }
+    return used;
+  }
+
   // Self Service -> Leave Application / Leave Summary card (own balance only).
   // Always returns the requesting account's own single row, even if that
   // account also holds can_manage_leave (Leave Manager) access — unlike
@@ -174,16 +204,24 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
       }
 
       for (const userId of targetIds) {
+        // Already-spent-this-year comes off the new total per account, so
+        // someone who already took leave this year doesn't get handed the
+        // full fresh quota on top of what they've used.
+        const used = await getUsedThisYear(userId);
+        const adjCasual = Math.max(0, casual - used.casual);
+        const adjSick = Math.max(0, sick - used.sick);
+        const adjLwp = Math.max(0, lwp - used.without_pay);
+
         const existing: any = await queryDB("SELECT id FROM leave_balances WHERE user_id = ?", [userId]);
         if (existing.length > 0) {
           await queryDB(
             "UPDATE leave_balances SET casual_leave = ?, sick_leave = ?, leave_without_pay = ? WHERE user_id = ?",
-            [casual, sick, lwp, userId]
+            [adjCasual, adjSick, adjLwp, userId]
           );
         } else {
           await queryDB(
             "INSERT INTO leave_balances (user_id, casual_leave, sick_leave, leave_without_pay) VALUES (?, ?, ?, ?)",
-            [userId, casual, sick, lwp]
+            [userId, adjCasual, adjSick, adjLwp]
           );
         }
       }
@@ -191,6 +229,11 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
       res.json({
         success: true,
         updated_count: targetIds.length,
+        // Note: these are the entered annual totals, not necessarily each
+        // account's resulting balance — accounts with leave already taken
+        // this year were adjusted down individually above. The Leave
+        // Manage table is re-fetched right after this call, so it always
+        // shows each account's real adjusted balance.
         casual_leave: casual,
         sick_leave: sick,
         leave_without_pay: lwp
@@ -219,20 +262,27 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
         return res.status(400).json({ error: "Leave balances don't apply to the Superadmin account." });
       }
 
+      // Same already-spent-this-year adjustment as "Set Balance in Bulk"
+      // above — see getUsedThisYear for why.
+      const used = await getUsedThisYear(Number(userId));
+      const adjCasual = Math.max(0, casual - used.casual);
+      const adjSick = Math.max(0, sick - used.sick);
+      const adjLwp = Math.max(0, lwp - used.without_pay);
+
       const existing: any = await queryDB("SELECT id FROM leave_balances WHERE user_id = ?", [userId]);
       if (existing.length > 0) {
         await queryDB(
           "UPDATE leave_balances SET casual_leave = ?, sick_leave = ?, leave_without_pay = ? WHERE user_id = ?",
-          [casual, sick, lwp, userId]
+          [adjCasual, adjSick, adjLwp, userId]
         );
       } else {
         await queryDB(
           "INSERT INTO leave_balances (user_id, casual_leave, sick_leave, leave_without_pay) VALUES (?, ?, ?, ?)",
-          [userId, casual, sick, lwp]
+          [userId, adjCasual, adjSick, adjLwp]
         );
       }
 
-      res.json({ success: true, user_id: Number(userId), casual_leave: casual, sick_leave: sick, leave_without_pay: lwp });
+      res.json({ success: true, user_id: Number(userId), casual_leave: adjCasual, sick_leave: adjSick, leave_without_pay: adjLwp });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

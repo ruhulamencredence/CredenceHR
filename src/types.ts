@@ -3,7 +3,7 @@ export type UserRole = 'superadmin' | 'admin' | 'user';
 // Every Admin Panel tab. A Superadmin implicitly has all of these; a plain Admin
 // only sees/uses the ones the Superadmin has explicitly granted via
 // PUT /api/users/:id/module-permissions. Mirrors ADMIN_MODULE_KEYS in server.ts.
-export type AdminModuleKey = 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'recycle' | 'editlog' | 'attendance' | 'attendance_reports' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'disbursement' | 'employees' | 'departments' | 'tracking' | 'office_attendance' | 'holidays';
+export type AdminModuleKey = 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'recycle' | 'editlog' | 'attendance' | 'attendance_reports' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'disbursement' | 'employees' | 'departments' | 'tracking' | 'office_attendance' | 'holidays' | 'payroll';
 
 export const ADMIN_MODULES: { key: AdminModuleKey; label: string }[] = [
   { key: 'reports', label: 'Reports' },
@@ -24,6 +24,7 @@ export const ADMIN_MODULES: { key: AdminModuleKey; label: string }[] = [
   { key: 'approvals', label: 'Approvals' },
   { key: 'notices', label: 'Notices' },
   { key: 'holidays', label: 'Holidays (Global Calendar)' },
+  { key: 'payroll', label: 'Payroll' },
   { key: 'recycle', label: 'Job Recycle' },
   { key: 'editlog', label: 'MPR Edit Log' }
 ];
@@ -1102,5 +1103,16 @@ export interface AdminNavRequest {
 // Movement Claims/Conveyance Bill Claim which exist in both panels.
 export interface JobsNavRequest {
   target: 'entry' | 'jobs' | 'entryDetails' | 'jobEdit';
+  ts: number;
+}
+
+// Fired by GlobalSidebar's "Dashboard" item (and any other "go back to the
+// User Panel dashboard" action) — same bump-`ts`-on-every-click pattern as
+// ClaimsNavRequest above. Consumed by UserPanel only: clears its own
+// persisted mobileActiveSection/desktopActiveSection (see UserPanel.tsx) so
+// the dashboard/tile menu actually comes back on screen, instead of App.tsx
+// only switching viewMode to 'user' while UserPanel keeps showing whichever
+// section (e.g. a Claims page) was left active/persisted from before.
+export interface DashboardNavRequest {
   ts: number;
 }

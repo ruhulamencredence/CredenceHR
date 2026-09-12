@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Project, MprNumber, Entry, Budget, BudgetItem, User, MprUsage, ClaimsNavRequest, JobsNavRequest } from '../types';
+import { Project, MprNumber, Entry, Budget, BudgetItem, User, MprUsage, ClaimsNavRequest, JobsNavRequest, DashboardNavRequest } from '../types';
 import { Calendar, Building2, FileText, Package, Clock, Plus, AlertTriangle, CheckCircle2, ChevronRight, X, Trash2, Edit2, Lock, Wallet, ArrowLeft, FolderOpen, ListChecks, Search, Save, Briefcase, FileDown, Scissors, Route } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { formatDate, todayDateOnlyString, dateRangeOptions, formatDateLabel } from '../lib/formatDate';
@@ -36,6 +36,12 @@ interface UserPanelProps {
   // desktopActiveSection below). No effect on mobile, which keeps using its
   // own tile menu / mobileActiveSection regardless.
   jobsNavRequest?: JobsNavRequest | null;
+  // GlobalSidebar's "Dashboard" item (via App.tsx's onGoToDashboard) — clears
+  // mobileActiveSection/desktopActiveSection below back to the dashboard/tile
+  // menu default. Without this, App.tsx switching viewMode to 'user' isn't
+  // enough on its own: this panel keeps showing whichever section (e.g. a
+  // Claims page) was previously active/restored from localStorage.
+  dashboardNavRequest?: DashboardNavRequest | null;
 }
 
 // Unique id for one Item entry within an MPR row's itemNames list — see the uid field
@@ -672,7 +678,7 @@ const EntryCard = React.memo(function EntryCard({
   );
 });
 
-export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequest, jobsNavRequest }) => {
+export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequest, jobsNavRequest, dashboardNavRequest }) => {
   const [projects, setProjects] = useState<Project[]>([]);
   const [mprNumbers, setMprNumbers] = useState<MprNumber[]>([]);
   const [entries, setEntries] = useState<Entry[]>([]);
@@ -906,6 +912,18 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobsNavRequest]);
 
+  // GlobalSidebar's "Dashboard" item — see dashboardNavRequest above. Resets
+  // both the mobile tile menu (mobileActiveSection back to null) and the
+  // desktop section (desktopActiveSection back to 'budget', the everyday
+  // Entry landing tab) so the dashboard actually comes back on screen,
+  // instead of leaving whichever section was active/restored beforehand.
+  useEffect(() => {
+    if (!dashboardNavRequest) return;
+    setMobileActiveSection(null);
+    setDesktopActiveSection('budget');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dashboardNavRequest]);
 
   // Form state
   const [entryDate, setEntryDate] = useState<string>(todayDateOnlyString());
