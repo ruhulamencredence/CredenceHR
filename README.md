@@ -1,4 +1,4 @@
-# Monthly Budget Optimization (Full-Stack Web & Android APK)
+# CredenceHR (Full-Stack Web & Android APK)
 
 এই অ্যাপ্লিকেশনটি একটি ফুল-স্ট্যাক Employee/Project Management সিস্টেম —
 React (Vite) frontend, Node.js + Express (single `server.ts`) backend, এবং

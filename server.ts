@@ -4490,13 +4490,38 @@ async function startServer() {
       const rows = await queryDB("SELECT * FROM location_pings WHERE user_id = ? ORDER BY recorded_at DESC", [user_id]);
       const from = req.query.from ? String(req.query.from) : null;
       const to = req.query.to ? String(req.query.to) : null;
+      // Time-of-day window (HH:MM, 24h), independent of the from/to DATE filter
+      // above — e.g. from=2026-09-01&to=2026-09-30&from_time=09:00&to_time=18:00
+      // narrows a report to "office hours" across that whole month, for
+      // "where was this employee between X and Y" style reports. from_time >
+      // to_time (e.g. 22:00 -> 06:00) is treated as an overnight window that
+      // wraps past midnight rather than an always-empty one.
+      const from_time = req.query.from_time ? String(req.query.from_time) : null;
+      const to_time = req.query.to_time ? String(req.query.to_time) : null;
       const filtered = rows.filter((r: any) => {
-        const day = new Date(r.recorded_at).toISOString().slice(0, 10);
+        const iso = new Date(r.recorded_at).toISOString();
+        const day = iso.slice(0, 10);
         if (from && day < from) return false;
         if (to && day > to) return false;
+        if (from_time || to_time) {
+          const hm = iso.slice(11, 16); // "HH:MM"
+          if (from_time && to_time) {
+            const overnight = from_time > to_time;
+            const inWindow = overnight ? (hm >= from_time || hm <= to_time) : (hm >= from_time && hm <= to_time);
+            if (!inWindow) return false;
+          } else if (from_time && hm < from_time) {
+            return false;
+          } else if (to_time && hm > to_time) {
+            return false;
+          }
+        }
         return true;
       });
-      res.json(filtered.slice(0, 500));
+      // Was capped at 500 — fine for a quick "view path today" playback, but a
+      // report spanning a wider date/time range shouldn't silently lose points.
+      // At one ping every 5-10 min, 5000 rows covers roughly a month before
+      // truncating.
+      res.json(filtered.slice(0, 5000));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

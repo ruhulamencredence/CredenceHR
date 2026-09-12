@@ -1,5 +1,5 @@
 {
-  "name": "Monthly Budget Optimization",
+  "name": "CredenceHR",
   "description": "Full-stack project, job, and MPR tracking system with admin and user panels, MySQL backend, JWT authentication, and Capacitor mobile support.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
