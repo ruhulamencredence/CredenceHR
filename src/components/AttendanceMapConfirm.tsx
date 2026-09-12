@@ -7,7 +7,9 @@ import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { X, MapPin, Check, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { Capacitor } from '@capacitor/core';
+import { Geolocation } from '@capacitor/geolocation';
+import { X, MapPin, Check, AlertTriangle, CheckCircle2, LocateFixed } from 'lucide-react';
 import { Project } from '../types';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
 import { Spinner } from './Spinner';
@@ -19,6 +21,12 @@ interface AttendanceMapConfirmProps {
   submitting: boolean;
   onCancel: () => void;
   onConfirm: (remarks: string) => void;
+  // Fires whenever the "Use current location" button gets a fresh GPS fix —
+  // lets the parent (AttendanceCard) keep its own `pending.coords` in sync so
+  // the eventual check-in/out POST sends this refreshed point, not the
+  // original snapshot taken before the modal opened. Optional so older
+  // callers that don't pass it still work (falls back to the initial coords).
+  onCoordsChange?: (coords: { latitude: number; longitude: number }) => void;
 }
 
 const PROJECT_ZOOM = 17;
@@ -60,6 +68,46 @@ function formatDistance(m: number): string {
   return m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`;
 }
 
+// Same geolocation flow AttendanceCard.tsx already uses to get the initial
+// fix: Capacitor's plugin on the native Android app build (works without a
+// browser permission prompt inside the WebView), plain navigator.geolocation
+// on the web build. Kept as its own copy here (not imported) matching the
+// existing convention in this codebase of each file owning its own copy.
+async function getCurrentCoords(): Promise<{ latitude: number; longitude: number }> {
+  if (Capacitor.isNativePlatform()) {
+    let status: string;
+    try {
+      status = (await Geolocation.checkPermissions()).location;
+    } catch {
+      status = 'prompt';
+    }
+    if (status !== 'granted') {
+      try {
+        status = (await Geolocation.requestPermissions()).location;
+      } catch {
+        throw new Error('Location permission is required to mark attendance. Please allow location access and try again.');
+      }
+    }
+    if (status !== 'granted') {
+      throw new Error('Location permission is required to mark attendance. Please allow location access and try again.');
+    }
+    const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: true, timeout: 15000 });
+    return { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
+  }
+
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) {
+      reject(new Error("This browser can't access your location."));
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
+      () => reject(new Error("Couldn't get your location. Please allow location access and try again.")),
+      { enableHighAccuracy: true, timeout: 15000 }
+    );
+  });
+}
+
 // Shown after the device's GPS fix comes back and before the actual
 // check-in/check-out API call fires. Lets the user SEE where they are versus
 // the project's attendance circle (location_lat/lng/radius) on a map before
@@ -71,20 +119,29 @@ export default function AttendanceMapConfirm({
   coords,
   submitting,
   onCancel,
-  onConfirm
+  onConfirm,
+  onCoordsChange
 }: AttendanceMapConfirmProps) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
+  const userMarkerRef = useRef<L.Marker | null>(null);
+  const circleRef = useRef<L.Circle | null>(null);
 
   const [ready, setReady] = useState(false);
   const [remarks, setRemarks] = useState('');
+  // The point actually shown/submitted — starts as the snapshot the parent
+  // captured before opening this modal, but can be refreshed in place via the
+  // "Use current location" button below without closing/reopening the modal.
+  const [liveCoords, setLiveCoords] = useState(coords);
+  const [locating, setLocating] = useState(false);
+  const [locateError, setLocateError] = useState<string | null>(null);
 
   useBackButtonClose(true, submitting ? () => {} : onCancel);
 
   const hasSite = project.location_lat != null && project.location_lng != null;
   const hasRadius = hasSite && !!project.location_radius;
   const distance = hasSite
-    ? Math.round(haversineMeters(coords.latitude, coords.longitude, Number(project.location_lat), Number(project.location_lng)))
+    ? Math.round(haversineMeters(liveCoords.latitude, liveCoords.longitude, Number(project.location_lat), Number(project.location_lng)))
     : null;
   const inside = hasRadius && distance != null ? distance <= Number(project.location_radius) : null;
 
@@ -93,7 +150,7 @@ export default function AttendanceMapConfirm({
 
     const center: [number, number] = hasSite
       ? [Number(project.location_lat), Number(project.location_lng)]
-      : [coords.latitude, coords.longitude];
+      : [liveCoords.latitude, liveCoords.longitude];
     const map = L.map(mapContainerRef.current, { center, zoom: PROJECT_ZOOM });
     mapRef.current = map;
 
@@ -102,7 +159,7 @@ export default function AttendanceMapConfirm({
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
     }).addTo(map);
 
-    const bounds: L.LatLngExpression[] = [[coords.latitude, coords.longitude]];
+    const bounds: L.LatLngExpression[] = [[liveCoords.latitude, liveCoords.longitude]];
 
     if (hasSite) {
       L.marker([Number(project.location_lat), Number(project.location_lng)], { icon: projectPinIcon })
@@ -110,7 +167,7 @@ export default function AttendanceMapConfirm({
         .bindPopup(project.location_label || project.project_name);
       bounds.push([Number(project.location_lat), Number(project.location_lng)]);
       if (hasRadius) {
-        L.circle([Number(project.location_lat), Number(project.location_lng)], {
+        circleRef.current = L.circle([Number(project.location_lat), Number(project.location_lng)], {
           radius: Number(project.location_radius),
           color: inside ? '#059669' : '#dc2626',
           weight: 2,
@@ -120,7 +177,7 @@ export default function AttendanceMapConfirm({
       }
     }
 
-    L.marker([coords.latitude, coords.longitude], { icon: userDotIcon })
+    userMarkerRef.current = L.marker([liveCoords.latitude, liveCoords.longitude], { icon: userDotIcon })
       .addTo(map)
       .bindPopup('You are here');
 
@@ -136,9 +193,50 @@ export default function AttendanceMapConfirm({
     return () => {
       map.remove();
       mapRef.current = null;
+      userMarkerRef.current = null;
+      circleRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Re-reads GPS (same permission/flow as the initial fix) and moves the
+  // existing marker + recenters the map in place, instead of forcing the user
+  // to cancel and re-tap Check In/Out just to pick up a better fix — useful
+  // when the first fix came back stale/low-accuracy (e.g. indoors) and the
+  // banner below is showing "outside the attendance area" incorrectly.
+  const handleUseCurrentLocation = async () => {
+    setLocating(true);
+    setLocateError(null);
+    try {
+      const fresh = await getCurrentCoords();
+      setLiveCoords(fresh);
+      onCoordsChange?.(fresh);
+      userMarkerRef.current?.setLatLng([fresh.latitude, fresh.longitude]);
+      if (mapRef.current) {
+        const bounds: L.LatLngExpression[] = [[fresh.latitude, fresh.longitude]];
+        if (hasSite) bounds.push([Number(project.location_lat), Number(project.location_lng)]);
+        if (bounds.length > 1) {
+          mapRef.current.fitBounds(bounds, { padding: [48, 48], maxZoom: PROJECT_ZOOM });
+        } else {
+          mapRef.current.panTo([fresh.latitude, fresh.longitude]);
+        }
+      }
+    } catch (err: any) {
+      setLocateError(err?.message || 'Could not get current location');
+    } finally {
+      setLocating(false);
+    }
+  };
+
+  // Circle color follows inside/outside — recolor in place on every fresh fix
+  // rather than tearing down and recreating the circle.
+  useEffect(() => {
+    if (!circleRef.current || inside == null) return;
+    circleRef.current.setStyle({
+      color: inside ? '#059669' : '#dc2626',
+      fillColor: inside ? '#059669' : '#dc2626'
+    });
+  }, [inside]);
 
   // Rendered via a portal straight onto document.body instead of in place —
   // this component gets mounted deep inside UserPanel's dashboard tree,
@@ -196,6 +294,22 @@ export default function AttendanceMapConfirm({
               </div>
             )}
           </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={handleUseCurrentLocation}
+              disabled={locating || submitting}
+              className="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 disabled:opacity-60 text-slate-700 text-xs font-semibold rounded-xl border border-slate-200 transition-colors"
+            >
+              {locating ? <Spinner size={14} /> : <LocateFixed className="w-3.5 h-3.5" />}
+              {locating ? 'Locating…' : 'Use current location'}
+            </button>
+            <span className="text-xs font-mono text-slate-500">
+              {liveCoords.latitude.toFixed(6)}, {liveCoords.longitude.toFixed(6)}
+            </span>
+          </div>
+          {locateError && <p className="text-xs text-rose-600 px-1">{locateError}</p>}
 
           {hasSite ? (
             hasRadius ? (

@@ -18,7 +18,7 @@
 // Design: the watcher's callback can still fire more often than we want to
 // hit the network, so we DON'T send a request from inside it. Instead we just
 // remember the latest fix in memory, and a separate timer (PING_INTERVAL_MS)
-// POSTs whatever the latest fix is every 5-10 minutes. This decouples "how
+// POSTs whatever the latest fix is every few minutes. This decouples "how
 // often the OS reports a GPS fix" from "how often we hit the server" — but
 // the OS-reporting frequency itself is controlled separately by
 // DISTANCE_FILTER_M below, which is the actual battery lever; PING_INTERVAL_MS
@@ -51,21 +51,24 @@ interface BackgroundGeolocationPlugin {
 
 const BackgroundGeolocation = registerPlugin<BackgroundGeolocationPlugin>('BackgroundGeolocation');
 
-// Midpoint of the 5-10 minute range the person asked for — one ping every 7
-// minutes, whichever fix happens to be freshest at that moment.
-const PING_INTERVAL_MS = 7 * 60 * 1000;
+// Ping every 3 minutes instead of 7. Network pings themselves are cheap
+// (a tiny POST, not a GPS read), so tightening this doesn't meaningfully
+// touch battery — but it keeps the admin-side "last seen" fresh even when
+// the employee is standing still, so the panel doesn't look stale between
+// fixes. The real battery lever is DISTANCE_FILTER_M below.
+const PING_INTERVAL_MS = 3 * 60 * 1000;
 
 // How far (in meters) the device must move before the plugin delivers a new
-// fix. This is the actual battery lever, NOT PING_INTERVAL_MS above: since we
-// only network-ping every 7 minutes and just keep "whatever fix is freshest"
-// in memory (see design note up top), there's no benefit to the OS handing us
-// a fix every few seconds — every one of those in between gets thrown away,
-// but the GPS radio still had to cold-start and burn power to produce it.
-// A non-zero distanceFilter tells the native side to use a coarser, lower-
-// power location request instead of continuous high-accuracy polling.
-// Previously 0 (no filter at all == max-frequency, max-power updates), which
-// is what was driving the battery use seen in Android's battery stats.
-const DISTANCE_FILTER_M = 70;
+// fix. This is the actual battery lever, NOT PING_INTERVAL_MS above: every
+// fix costs GPS radio power to produce, whether or not we end up pinging it.
+// 70m was too coarse — someone walking around a building or a small campus
+// could go several minutes without a single new fix, so pings kept re-sending
+// a stale position and looked like the person wasn't "live". 25m still lets
+// the native side use a coarser/lower-power location request (vs. 0, which
+// is continuous max-frequency, max-power updates — that's what caused the
+// original battery drain), but is tight enough that normal walking-speed
+// movement shows up within a fix or two instead of minutes.
+const DISTANCE_FILTER_M = 25;
 
 let watcherId: string | null = null;
 let pingTimer: ReturnType<typeof setInterval> | null = null;

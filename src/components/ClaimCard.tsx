@@ -17,9 +17,11 @@ interface ClaimCardProps {
   // Fires after a successful Check In OR Check Out (not on error) — lets a
   // parent showing this form inside a sheet/modal (e.g. the Movement Claim
   // page's "Add Check In/Out" button) know to refresh its own list of past
-  // claims, without forcing the sheet itself to close (the user may still want
-  // to Check Out right after Checking In, in the same sheet).
-  onSuccess?: () => void;
+  // claims. Receives which action just completed: on 'in' the sheet is left
+  // open (the user may still want to Check Out right after Checking In, in
+  // the same sheet); on 'out' the claim is finished — the caller is expected
+  // to close its own sheet then, since there's nothing left to do here.
+  onSuccess?: (kind: 'in' | 'out') => void;
 }
 
 // Same geolocation flow AttendanceCard.tsx / AuthScreen.tsx already use:
@@ -165,7 +167,7 @@ export const ClaimCard: React.FC<ClaimCardProps> = ({ token, onSuccess }) => {
         }
       }
       await fetchStatus();
-      onSuccess?.();
+      onSuccess?.(kind);
     } catch (err: any) {
       // Leave the map open so the user can see the error and back out instead
       // of losing their place.
@@ -281,6 +283,7 @@ export const ClaimCard: React.FC<ClaimCardProps> = ({ token, onSuccess }) => {
             setPending(null);
           }}
           onConfirm={handleConfirmPending}
+          onCoordsChange={(coords) => setPending((p) => (p ? { ...p, coords } : p))}
         />
       )}
     </div>
