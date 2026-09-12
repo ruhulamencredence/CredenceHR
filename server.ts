@@ -18,7 +18,7 @@ import { registerDepartmentsAndBranchesRoutes } from "./DepartmentsAndBranches";
 import { registerAttendanceRoutes } from "./AttendanceRoutes";
 import { registerApprovalRoutes } from "./ApprovalRoutes";
 import { registerLeaveRoutes } from "./LeaveRoutes";
-import { registerPayrollRoutes } from "./PayrollRoutes";
+import { registerPayrollRoutes, ensurePayrollSchema } from "./PayrollRoutes";
 
 dotenv.config();
 
@@ -191,6 +191,11 @@ async function ensureSchemaMigrations() {
   // Alerts.ts, only the call site lives here, same as every other
   // self-healing migration in this function.
   await ensureAlertsSchema(dbPool);
+
+  // Payroll Module (salary_structures / employee_advances / payrolls) —
+  // table + schema owned by PayrollRoutes.ts, only the call site lives here,
+  // same as every other self-healing migration in this function.
+  await ensurePayrollSchema(dbPool);
 
   // Personal Data (ProfilePage.tsx -> PersonalDataForm.tsx) — one row per user,
   // created on first save. Position/Department are deliberately NOT columns
@@ -4903,14 +4908,17 @@ async function startServer() {
     }
   });
 
-  // Payroll Module (Self Service -> Payroll) — Coming Soon placeholder for
-  // now, kept in its own file (PayrollRoutes.ts) from the start.
-  // Permission-gated like every other module: requireModule('payroll') lets
-  // a Superadmin through unconditionally and otherwise requires the
-  // 'payroll' grant in admin_module_permissions (Admin Panel -> Users ->
-  // Module Access).
+  // Payroll Module (Self Service -> Payroll / Admin Panel -> Payroll) — full
+  // Salary Structure / Employee Advances / Payroll run workflow, kept in its
+  // own file (PayrollRoutes.ts) from the start. Permission-gated like every
+  // other module: requireModule('payroll') lets a Superadmin through
+  // unconditionally and otherwise requires the 'payroll' grant in
+  // admin_module_permissions (Admin Panel -> Users -> Module Access);
+  // requireAdmin is layered in front of it the same way every other
+  // Admin-Panel-gated module route in this file does.
   registerPayrollRoutes(app, {
     authenticateToken,
+    requireAdmin,
     requireModule,
     queryDB
   });
