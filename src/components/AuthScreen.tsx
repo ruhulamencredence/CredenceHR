@@ -163,7 +163,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
             Welcome back
           </h1>
           <p className="text-sm" style={{ color: 'var(--g-text-muted)' }}>
-            Sign in to Monthly Budget Optimization to continue
+            Sign in to CredenceHR to continue
           </p>
         </div>
         <div className="gemini-card px-6 py-6 sm:px-8 sm:py-8">

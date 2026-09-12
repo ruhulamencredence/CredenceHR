@@ -601,7 +601,7 @@ export default function App() {
           showing it exactly as before. */}
       {!Capacitor.isNativePlatform() && (
         <footer className="py-6 text-center text-xs" style={{ background: 'var(--g-text)', color: '#9aa0a6' }}>
-          <p>Monthly Budget Optimization • Powered by MySQL, Express & React • Android APK Ready via Capacitor</p>
+          <p>CredenceHR • Powered by MySQL, Express & React • Android APK Ready via Capacitor</p>
         </footer>
       )}
         </div>

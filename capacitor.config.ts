@@ -30,8 +30,8 @@ const USE_REAL_SERVER = false;
 const ACTIVE_SERVER_URL = USE_REAL_SERVER ? REAL_SERVER_URL : LOCAL_SERVER_URL;
 
 const config = {
-  appId: 'com.mprtracker.app',
-  appName: 'Monthly Budget Optimization',
+  appId: 'com.credencehr.app',
+  appName: 'CredenceHR',
   webDir: 'dist',
   server: {
     url: ACTIVE_SERVER_URL,

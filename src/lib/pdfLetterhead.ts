@@ -78,7 +78,7 @@ export function drawPdfLetterhead(
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
   doc.setTextColor(100, 116, 139);
-  doc.text('Monthly Budget Optimization', pageWidth / 2, 18.5, { align: 'center' });
+  doc.text('CredenceHR', pageWidth / 2, 18.5, { align: 'center' });
 
   // Separator line under the letterhead.
   doc.setDrawColor(203, 213, 225);
