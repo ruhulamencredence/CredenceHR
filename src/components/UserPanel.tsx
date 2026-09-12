@@ -2540,7 +2540,17 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                 </button>
               </div>
               <div className="p-5 overflow-y-auto min-h-0">
-                <ClaimCard token={token} onSuccess={() => setClaimListRefreshKey((k) => k + 1)} />
+                <ClaimCard
+                  token={token}
+                  onSuccess={(kind) => {
+                    setClaimListRefreshKey((k) => k + 1);
+                    // Check In: leave the sheet open — the user will likely
+                    // Check Out from right here later. Check Out: the claim
+                    // is finished, so close it back to the list instead of
+                    // leaving an empty/idle form sitting on screen.
+                    if (kind === 'out') setShowClaimFormSheet(false);
+                  }}
+                />
               </div>
             </div>
           </div>,

@@ -313,6 +313,7 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects 
             setPending(null);
           }}
           onConfirm={handleConfirmPending}
+          onCoordsChange={(coords) => setPending((p) => (p ? { ...p, coords } : p))}
         />
       )}
     </div>
