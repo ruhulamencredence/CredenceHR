@@ -3,7 +3,7 @@ import {
   X, LogOut, Home, Wallet, Briefcase, FileText, Edit2, Route, CreditCard,
   CalendarClock, ListChecks, CheckSquare, ChevronDown, Building2, Users, Users2,
   BarChart3, Upload, History, Recycle, Navigation, Bell, ShieldCheck,
-  Contact, Calendar, Clock, Fingerprint, Banknote,
+  Contact, Calendar, Clock, Fingerprint, Banknote, Package,
 } from 'lucide-react';
 import { User, AdminModuleKey } from '../types';
 import credenceLogo from '../assets/credence-logo.png';
@@ -230,6 +230,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     { key: 'approvals', label: 'Approvals', icon: ShieldCheck, onClick: () => onGoToAdminModule('approvals') },
     { key: 'tracking', label: 'Employee Tracking', icon: Navigation, onClick: () => onGoToAdminModule('tracking') },
     { key: 'holidays', label: 'Holidays', icon: Calendar, onClick: () => onGoToAdminModule('holidays') },
+    { key: 'asset_management', label: 'Asset Management', icon: Package, onClick: () => onGoToAdminModule('asset_management') },
     // Read-only "who applied for Leave" report, gated by its own
     // 'leave_applications' module (separate from can_manage_leave's "Leave
     // Manage" item and from the "Leave Approvals" item above) — see

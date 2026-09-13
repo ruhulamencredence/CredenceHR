@@ -347,6 +347,71 @@ CREATE TABLE IF NOT EXISTS user_profile_details (
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
+-- Asset Management (Employee Profile -> My Assets / New Requisition /
+-- Requisition Status, plus Admin Panel -> Asset Management,
+-- AssetManagementRoutes.ts) — inventory, employee requests, and the
+-- assignment/return history for each item. See AssetManagementRoutes.ts for
+-- the full approval workflow (Line Manager -> IT/Admin -> Handover).
+CREATE TABLE IF NOT EXISTS assets (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  asset_tag VARCHAR(50) NOT NULL UNIQUE,
+  name VARCHAR(255) NOT NULL,
+  category VARCHAR(100) NOT NULL,
+  serial_number VARCHAR(150) NULL,
+  purchase_date DATE NULL,
+  status ENUM('available','assigned','maintenance','disposed') NOT NULL DEFAULT 'available',
+  condition_note VARCHAR(255) NULL,
+  created_by INT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS asset_requisitions (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  employee_user_id INT NOT NULL,
+  asset_category VARCHAR(100) NOT NULL,
+  reason TEXT NOT NULL,
+  urgency ENUM('low','medium','high') NOT NULL DEFAULT 'medium',
+  target_date DATE NULL,
+  attachment_filename VARCHAR(255) NULL,
+  attachment_mimetype VARCHAR(150) NULL,
+  attachment_data LONGBLOB NULL,
+  status ENUM('pending','manager_approved','approved','rejected','dispatched','fulfilled') NOT NULL DEFAULT 'pending',
+  manager_id INT NULL,
+  manager_decided_at TIMESTAMP NULL DEFAULT NULL,
+  manager_remarks TEXT NULL,
+  admin_decided_by INT NULL,
+  admin_decided_at TIMESTAMP NULL DEFAULT NULL,
+  rejection_reason TEXT NULL,
+  assigned_asset_id INT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (employee_user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (manager_id) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY (admin_decided_by) REFERENCES users(id) ON DELETE SET NULL,
+  FOREIGN KEY (assigned_asset_id) REFERENCES assets(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS asset_assignments (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  asset_id INT NOT NULL,
+  employee_user_id INT NOT NULL,
+  requisition_id INT NULL,
+  assigned_date DATE NOT NULL,
+  returned_date DATE NULL,
+  condition_on_assign ENUM('new','good') NOT NULL DEFAULT 'good',
+  condition_on_return ENUM('good','damaged','lost') NULL,
+  assigned_by INT NOT NULL,
+  acknowledged_at TIMESTAMP NULL DEFAULT NULL,
+  return_requested_at TIMESTAMP NULL DEFAULT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE,
+  FOREIGN KEY (employee_user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (requisition_id) REFERENCES asset_requisitions(id) ON DELETE SET NULL,
+  FOREIGN KEY (assigned_by) REFERENCES users(id) ON DELETE CASCADE
+);
+
 -- Global Calendar (Admin Panel -> Holidays, holidayRoutes.ts) — one row per
 -- Weekend/Holiday date, gated behind the 'holidays' Admin Panel module. Every
 -- signed-in account can READ this table (GET /api/holidays); only accounts

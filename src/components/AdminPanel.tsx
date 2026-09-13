@@ -20,6 +20,7 @@ import { ApprovalBadge } from './ApprovalBadge';
 import { EmployeeTrackingPanel } from './EmployeeTrackingPanel';
 import { OfficeAttendancePanel } from './OfficeAttendancePanel';
 import { HolidayCalendarPanel } from './HolidayCalendarPanel';
+import { AssetManagementAdmin } from './AssetManagementAdmin';
 import { Spinner } from './Spinner';
 import { apiUrl } from '../lib/api';
 import { formatDate, todayDateOnlyString } from '../lib/formatDate';
@@ -168,7 +169,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // have explicitly granted user.can_view_login_location.
   const canSeeLoginLocation = isSuperAdmin || !!user.can_view_login_location;
 
-  const [activeTab, setActiveTab] = useState<'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'my_conveyance' | 'disbursement' | 'holidays'>(
+  const [activeTab, setActiveTab] = useState<'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'my_conveyance' | 'disbursement' | 'holidays' | 'asset_management'>(
     () => {
       // Restores whichever tab this Admin was last looking at — see the
       // "pull down to reload" note in App.tsx: since a reload now has to be
@@ -3241,6 +3242,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       {activeTab === 'holidays' && (
         <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6">
           <HolidayCalendarPanel token={token} />
+        </div>
+      )}
+
+      {/* TAB: ASSET MANAGEMENT — IT/Admin side: inventory, final approval
+          queue, and fulfilling/dispatching approved requests. Gated behind
+          the 'asset_management' AdminModuleKey like every other tab here. */}
+      {activeTab === 'asset_management' && (
+        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6">
+          <AssetManagementAdmin />
         </div>
       )}
 

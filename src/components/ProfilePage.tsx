@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { User } from '../types';
-import { ChevronLeft, Mail, ShieldCheck, User as UserIcon, Lock, Info, LogOut, BadgeCheck, Building2, UserCircle2 } from 'lucide-react';
+import { ChevronLeft, Mail, ShieldCheck, User as UserIcon, Lock, Info, LogOut, BadgeCheck, Building2, UserCircle2, Package } from 'lucide-react';
 import { PersonalDataForm } from './PersonalDataForm';
 import { ChangePasswordForm } from './ChangePasswordForm';
 import { ChangeUsernameForm } from './ChangeUsernameForm';
+import { AssetManagement } from './AssetManagement';
 import { useProfilePhoto } from '../lib/useProfilePhoto';
 
 interface ProfilePageProps {
@@ -45,6 +46,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
   const [showPersonalData, setShowPersonalData] = useState(false);
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [showChangeUsername, setShowChangeUsername] = useState(false);
+  const [showAssetManagement, setShowAssetManagement] = useState(false);
   const [username, setUsername] = useState(user.username || '');
   const initial = (user.name || user.username || '?').trim().charAt(0).toUpperCase();
   const roleLabel = user.role.charAt(0).toUpperCase() + user.role.slice(1);
@@ -76,6 +78,28 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
           onUsernameUpdated?.(newUsername);
         }}
       />
+    );
+  }
+
+  if (showAssetManagement) {
+    return (
+      <div className="w-full min-h-[calc(100vh-4rem)]" style={{ background: 'var(--g-surface-muted)' }}>
+        <div className="max-w-3xl mx-auto px-4 pt-3 pb-28">
+          <div className="flex items-center gap-2 mb-3">
+            <button
+              type="button"
+              onClick={() => setShowAssetManagement(false)}
+              className="w-9 h-9 rounded-full flex items-center justify-center hover:bg-black/5 transition-colors"
+              style={{ color: 'var(--g-text-muted)' }}
+              aria-label="Back"
+            >
+              <ChevronLeft className="w-5 h-5" />
+            </button>
+            <h1 className="text-base font-bold">Asset Management</h1>
+          </div>
+          <AssetManagement />
+        </div>
+      </div>
     );
   }
 
@@ -156,6 +180,11 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
                 icon={<UserIcon className="w-4 h-4" />}
                 label="Personal Data"
                 onClick={() => setShowPersonalData(true)}
+              />
+              <ProfileRow
+                icon={<Package className="w-4 h-4" />}
+                label="Asset Management"
+                onClick={() => setShowAssetManagement(true)}
               />
               <ProfileRow icon={<Building2 className="w-4 h-4" />} label="Organization" value="Credence Housing Limited" last />
             </section>
@@ -256,6 +285,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
           <p className="text-[11px] font-medium uppercase tracking-wide px-5 pt-4 pb-1" style={{ color: 'var(--g-text-muted)' }}>
             Settings
           </p>
+          <ProfileRow icon={<Package className="w-4 h-4" />} label="Asset Management" onClick={() => setShowAssetManagement(true)} padded />
           <ProfileRow icon={<Lock className="w-4 h-4" />} label="Change Password" onClick={() => setShowChangePassword(true)} padded />
           {!!username && (
             <ProfileRow icon={<UserCircle2 className="w-4 h-4" />} label="Change Username" onClick={() => setShowChangeUsername(true)} padded />
