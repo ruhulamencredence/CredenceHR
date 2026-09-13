@@ -2338,6 +2338,16 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // edited, if any) instead of being re-derived twice per render as before.
   const editMprOptions = filteredEditMprOptions();
 
+  // Attendance-only Project restriction: when an Admin/Superadmin has pinned
+  // this account to one Project (Admin Panel -> Users -> "Attend. Project"),
+  // the Attendance card below only ever offers that single Project — not the
+  // full `projects` list Budget/Jobs/MPR uses everywhere else on this page,
+  // which stays completely untouched by this. Falls back to the full list
+  // when nothing's pinned (today's behavior).
+  const attendanceProjects = user.attendance_project_id
+    ? projects.filter((p) => p.id === user.attendance_project_id)
+    : projects;
+
   return (
     <div className="relative w-full min-h-[calc(100vh-4rem)] text-slate-900 overflow-hidden" style={{ background: 'var(--g-bg-gradient)' }}>
       {/* Violet gradient welcome banner — now sits flush directly under the
@@ -2357,7 +2367,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
 
         {!!user.can_use_attendance && (
           <div className="relative z-10 px-4 -mt-6 pb-7">
-            <AttendanceCard token={token} projects={projects} />
+            <AttendanceCard token={token} projects={attendanceProjects} />
           </div>
         )}
 
@@ -2405,7 +2415,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           grant it per account before it shows at all. */}
       {!!user.can_use_attendance && (
         <div className={`hidden ${showingClaimsPage ? 'md:hidden' : 'md:block'}`}>
-          <AttendanceCard token={token} projects={projects} />
+          <AttendanceCard token={token} projects={attendanceProjects} />
         </div>
       )}
 
@@ -2478,7 +2488,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
       {/* Timesheet — same Self Service page GlobalSidebar's "Timesheet" item
           opens, reachable here too via the BottomNav "Timesheet" tab below. */}
       <div className={mobileActiveSection === 'timesheet' ? 'block max-md:!mt-0' : 'hidden'}>
-        <Timesheet token={token} onBack={() => goToMobileSection(null)} />
+        <Timesheet token={token} onBack={() => goToMobileSection(null)} attendanceProjectId={user.attendance_project_id} />
       </div>
 
       {/* Floating "Add Check In/Out" — mobile only, shown only while the

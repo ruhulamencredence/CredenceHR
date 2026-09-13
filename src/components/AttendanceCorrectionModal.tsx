@@ -26,6 +26,15 @@ interface AttendanceCorrectionModalProps {
   // AttendanceCard's own Check In/Out uses, since a correction always goes
   // through the Approval Workflow regardless of check-in access.
   projects: Project[];
+  // Superadmin/Admin-pinned Project for Remote Attendance (Admin Panel ->
+  // Users -> "Attend. Project", users.attendance_project_id). When set, the
+  // Project picker below is dropped entirely — the correction always targets
+  // this one Project, whether the day being corrected was originally a
+  // Remote (GPS) row, an Office Attendance (ZKT) row (which otherwise carries
+  // the placeholder project_id 0 — see /api/attendance/mine), or fully
+  // Absent. Undefined/null when this account isn't pinned, which keeps every
+  // existing behavior below unchanged.
+  pinnedProjectId?: number | null;
   onClose: () => void;
   onSubmitted: () => void;
 }
@@ -60,6 +69,7 @@ export const AttendanceCorrectionModal: React.FC<AttendanceCorrectionModalProps>
   dateStr,
   dayRecords,
   projects,
+  pinnedProjectId,
   onClose,
   onSubmitted
 }) => {
@@ -67,8 +77,21 @@ export const AttendanceCorrectionModal: React.FC<AttendanceCorrectionModalProps>
   // day is fully Absent — one option per Project the User has access to at
   // all. Auto-selects (and hides the dropdown for) the single-option case,
   // same convention AttendanceCard's own Check In/Out uses.
-  const options =
-    dayRecords.length > 0
+  //
+  // Pinned-Project override: once an account is locked to one Project for
+  // Attendance, that's the only option here too, full stop — even a day
+  // whose only existing row is the Office Attendance (ZKT) placeholder
+  // (project_id 0, name "Office Attendance") or, for older data, some other
+  // Project than the one now pinned. The In/Out Time still pre-fills from
+  // whatever row that day actually has (there's realistically at most one),
+  // just filed under the pinned Project instead.
+  const options = pinnedProjectId
+    ? [{
+        id: pinnedProjectId,
+        name: projects.find((p) => p.id === pinnedProjectId)?.project_name || `Project #${pinnedProjectId}`,
+        record: (dayRecords[0] as AttendanceRecord | undefined) || null
+      }]
+    : dayRecords.length > 0
       ? dayRecords.map((r) => ({ id: r.project_id, name: r.project_name || `Project #${r.project_id}`, record: r as AttendanceRecord | null }))
       : projects.map((p) => ({ id: p.id, name: p.project_name, record: null as AttendanceRecord | null }));
 
@@ -115,7 +138,7 @@ export const AttendanceCorrectionModal: React.FC<AttendanceCorrectionModalProps>
   };
 
   const validate = (): string | null => {
-    if (!projectId) return 'Select a Project.';
+    if (projectId === '' || projectId === null || projectId === undefined) return 'Select a Project.';
     if (!checkInTime && !checkOutTime) return 'Enter an In Time or Out Time to correct.';
     return null;
   };

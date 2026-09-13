@@ -21,6 +21,12 @@ interface TimesheetProps {
   // a Back button — matches ConveyanceClaimCard/ClaimCard, which accept this
   // same prop and rely on the bottom nav to leave the section instead.
   onBack?: () => void;
+  // Superadmin/Admin-pinned Project for Remote Attendance (Admin Panel ->
+  // Users -> "Attend. Project", users.attendance_project_id) — undefined/null
+  // when this account isn't pinned to one. Passed straight through to the
+  // Correct Attendance modal, which drops its own Project picker entirely
+  // once this is set (see AttendanceCorrectionModal.tsx).
+  attendanceProjectId?: number | null;
 }
 
 type TimesheetTab = 'month' | 'day' | 'range';
@@ -189,7 +195,7 @@ const DateCard: React.FC<{
 // Navbar's web-only "Self Service" header menu, GlobalSidebar's mobile
 // drawer, and (in future) a Dashboard tile — same "Back" pattern as
 // LeaveApplication/LeaveManagement.
-export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack }) => {
+export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceProjectId }) => {
   // Same isNativeApp split as LeaveManagement.tsx / LeaveApplication.tsx: the
   // web build keeps the "Self Service / Timesheet" module-path breadcrumb,
   // the Android APK build hides it — the bottom nav is the only way to leave
@@ -557,6 +563,7 @@ export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack }) => {
           dateStr={correctionDate}
           dayRecords={byDate.get(correctionDate) || []}
           projects={projects}
+          pinnedProjectId={attendanceProjectId}
           onClose={() => setCorrectionDate(null)}
           onSubmitted={() => {
             setCorrectionDate(null);

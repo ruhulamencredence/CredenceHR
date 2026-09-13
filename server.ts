@@ -504,6 +504,23 @@ async function ensureSchemaMigrations() {
     console.warn("⚠️ Could not add users.can_view_leave_summary column: " + err.message);
   }
   try {
+    // Admin/Superadmin-granted per account (Admin Panel -> Users -> "Attend.
+    // Project", right next to can_use_attendance): pins a 'user' OR 'admin'
+    // account to exactly one Project for Remote Attendance. NULL by default
+    // (unrestricted — same behavior as before this column existed). When set,
+    // the account's own Attendance card only offers this one Project and the
+    // server rejects check-in/check-out against any other one, even for
+    // role='admin' (who is otherwise unrestricted on Projects). Never applies
+    // to 'superadmin'. Nullable FK so a deleted Project just clears the pin
+    // instead of blocking the delete or leaving a dangling id.
+    await dbPool.query(`ALTER TABLE users ADD COLUMN attendance_project_id INT NULL`);
+    await dbPool.query(
+      `ALTER TABLE users ADD CONSTRAINT fk_users_attendance_project FOREIGN KEY (attendance_project_id) REFERENCES projects(id) ON DELETE SET NULL`
+    );
+  } catch (err: any) {
+    // Column/constraint already exists — safe to ignore on every server restart after the first.
+  }
+  try {
     // Project location pin (Admin Panel -> Projects -> "Set Location on Map"), a
     // free OpenStreetMap/Leaflet picker — no paid maps API key required.
     await dbPool.query(`ALTER TABLE projects ADD COLUMN location_lat DECIMAL(10, 7) NULL`);
@@ -2507,7 +2524,8 @@ async function queryDB(sql: string, params: any[] = []): Promise<any> {
         can_view_movement_claims: !!u.can_view_movement_claims,
         can_view_conveyance_claims: !!u.can_view_conveyance_claims,
         can_view_budget_module: u.can_view_budget_module !== false,
-        can_view_leave_summary: !!u.can_view_leave_summary
+        can_view_leave_summary: !!u.can_view_leave_summary,
+        attendance_project_id: u.attendance_project_id ?? null
       }));
     }
     if (lowerSql.startsWith("select id, name, email, role, created_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims from users")) {
@@ -2527,7 +2545,8 @@ async function queryDB(sql: string, params: any[] = []): Promise<any> {
         can_view_movement_claims: rest.can_view_movement_claims ? 1 : 0,
         can_view_conveyance_claims: rest.can_view_conveyance_claims ? 1 : 0,
         can_view_budget_module: rest.can_view_budget_module !== false ? 1 : 0,
-        can_view_leave_summary: rest.can_view_leave_summary ? 1 : 0
+        can_view_leave_summary: rest.can_view_leave_summary ? 1 : 0,
+        attendance_project_id: rest.attendance_project_id ?? null
       }];
     }
     if (lowerSql.startsWith("select can_view_budget_module from users where id")) {
@@ -2553,6 +2572,12 @@ async function queryDB(sql: string, params: any[] = []): Promise<any> {
       const user = memoryDb.users.find(u => u.id === id);
       if (!user) return [];
       return [{ can_view_conveyance_claims: user.can_view_conveyance_claims ? 1 : 0 }];
+    }
+    if (lowerSql.startsWith("select attendance_project_id from users where id")) {
+      const id = Number(params[0]);
+      const user = memoryDb.users.find(u => u.id === id);
+      if (!user) return [];
+      return [{ attendance_project_id: user.attendance_project_id ?? null }];
     }
     if (lowerSql.startsWith("select can_use_attendance from users where id")) {
       const id = Number(params[0]);
@@ -2612,12 +2637,15 @@ async function queryDB(sql: string, params: any[] = []): Promise<any> {
       return user ? [{ can_job_edit: user.can_job_edit ? 1 : 0 }] : [];
     }
     if (lowerSql.startsWith("update users set can_edit_delivery_date")) {
-      const [can_edit_delivery_date, can_job_edit, can_use_attendance, id] = params;
+      const [can_edit_delivery_date, can_job_edit, can_use_attendance, can_use_tracking, can_view_leave_summary, attendance_project_id, id] = params;
       const user = memoryDb.users.find(u => u.id === Number(id));
       if (user) {
         user.can_edit_delivery_date = !!Number(can_edit_delivery_date);
         user.can_job_edit = !!Number(can_job_edit);
         user.can_use_attendance = !!Number(can_use_attendance);
+        user.can_use_tracking = !!Number(can_use_tracking);
+        user.can_view_leave_summary = !!Number(can_view_leave_summary);
+        user.attendance_project_id = attendance_project_id === null ? null : Number(attendance_project_id);
       }
       return { affectedRows: user ? 1 : 0 };
     }
@@ -4266,6 +4294,11 @@ async function startServer() {
           // which is about reviewing everyone else's records, not this account's
           // own check-in ability.
           can_use_attendance: user.role === "superadmin" ? true : !!Number(user.can_use_attendance),
+          // Superadmin/Admin-granted (Admin Panel -> Users -> "Attend. Project"):
+          // pins this account to exactly one Project for Remote Attendance.
+          // Null/undefined for everyone unrestricted, and always null for
+          // 'superadmin' (never assigned one).
+          attendance_project_id: user.role === "superadmin" ? null : (user.attendance_project_id ?? null),
           // Superadmin-granted (or implicit for the Superadmin itself): lets THIS
           // account's APK send background location pings for Employee Tracking.
           // OFF by default — separate from the "tracking" Admin Panel module,
@@ -4316,7 +4349,7 @@ async function startServer() {
   app.get("/api/auth/me", authenticateToken, async (req: any, res) => {
     try {
       const users = await queryDB(
-        "SELECT id, name, email, role, created_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary FROM users WHERE id = ?",
+        "SELECT id, name, email, role, created_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, attendance_project_id FROM users WHERE id = ?",
         [req.user.id]
       );
       if (users.length === 0) return res.status(404).json({ error: "User not found" });
@@ -4326,6 +4359,7 @@ async function startServer() {
         can_edit_delivery_date: u.can_edit_delivery_date === undefined ? true : !!Number(u.can_edit_delivery_date),
         can_job_edit: !!Number(u.can_job_edit),
         can_use_attendance: u.role === "superadmin" ? true : !!Number(u.can_use_attendance),
+        attendance_project_id: u.role === "superadmin" ? null : (u.attendance_project_id ?? null),
         can_use_tracking: u.role === "superadmin" ? true : !!Number(u.can_use_tracking),
         can_view_login_location: u.role === "superadmin" ? true : !!Number(u.can_view_login_location),
         can_access_user_panel: u.role === "admin" ? !!Number(u.can_access_user_panel) : false,

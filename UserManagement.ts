@@ -137,7 +137,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
   app.get("/api/users", authenticateToken, requireAdmin, requireModule("users"), async (req: any, res) => {
     try {
       const users = await queryDB(
-        "SELECT id, name, email, username, role, created_at, last_login_lat, last_login_lng, last_login_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary FROM users ORDER BY created_at DESC"
+        "SELECT id, name, email, username, role, created_at, last_login_lat, last_login_lng, last_login_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, attendance_project_id FROM users ORDER BY created_at DESC"
       );
       // Attach each Admin's module_permissions so the Superadmin's "Module Access"
       // UI has them without a separate round trip per row. Only role='admin' rows
@@ -176,6 +176,10 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
         can_edit_delivery_date: u.can_edit_delivery_date === undefined ? true : !!Number(u.can_edit_delivery_date),
         can_job_edit: !!Number(u.can_job_edit),
         can_use_attendance: u.role === "superadmin" ? true : !!Number(u.can_use_attendance),
+        // Pinned Project for Remote Attendance (Admin Panel -> Users -> "Attend.
+        // Project", right next to can_use_attendance) — null means unrestricted.
+        // Never set for 'superadmin'.
+        attendance_project_id: u.role === "superadmin" ? null : (u.attendance_project_id ?? null),
         can_use_tracking: u.role === "superadmin" ? true : !!Number(u.can_use_tracking),
         can_view_login_location: u.role === "superadmin" ? true : !!Number(u.can_view_login_location),
         can_access_user_panel: u.role === "admin" ? !!Number(u.can_access_user_panel) : false,
@@ -508,12 +512,18 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
   //  - can_view_leave_summary: shows the Leave Summary card on the User's own
   //    Dashboard at all. OFF by default; the Admin must switch it on per user.
   //    Same toggle pattern as can_use_attendance above.
+  //  - attendance_project_id: pins this 'user' OR 'admin' account to exactly one
+  //    Project for Remote Attendance — send a Project id to set it, or null to
+  //    clear it back to unrestricted. Ignored for a 'superadmin' target (never
+  //    pinned). Completely separate from user_project_permissions (the "Projects"
+  //    column/Manage Projects modal), which only ever governs the Budget/Jobs/MPR
+  //    workflow, not Attendance.
   // Any field can be sent alone; the others keep their current value.
   app.put("/api/users/:id/feature-permissions", authenticateToken, requireAdmin, requireModule("users"), async (req, res) => {
     try {
       const { id } = req.params;
       const existingRows = await queryDB(
-        "SELECT role, can_edit_delivery_date, can_job_edit, can_use_attendance, can_use_tracking, can_view_leave_summary FROM users WHERE id = ?",
+        "SELECT role, can_edit_delivery_date, can_job_edit, can_use_attendance, can_use_tracking, can_view_leave_summary, attendance_project_id FROM users WHERE id = ?",
         [id]
       );
       if (existingRows.length === 0) return res.status(404).json({ error: "User not found" });
@@ -543,9 +553,21 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
         req.body.can_view_leave_summary !== undefined
           ? (req.body.can_view_leave_summary ? 1 : 0)
           : (current.can_view_leave_summary ? 1 : 0);
+      // Never lets a 'superadmin' target end up pinned, no matter what's sent.
+      let attendance_project_id: number | null =
+        current.attendance_project_id != null ? Number(current.attendance_project_id) : null;
+      if (existingRows[0].role !== "superadmin" && req.body.attendance_project_id !== undefined) {
+        attendance_project_id =
+          req.body.attendance_project_id === null || req.body.attendance_project_id === ""
+            ? null
+            : Number(req.body.attendance_project_id);
+        if (attendance_project_id !== null && !Number.isFinite(attendance_project_id)) {
+          return res.status(400).json({ error: "Invalid attendance_project_id" });
+        }
+      }
       await queryDB(
-        "UPDATE users SET can_edit_delivery_date = ?, can_job_edit = ?, can_use_attendance = ?, can_use_tracking = ?, can_view_leave_summary = ? WHERE id = ?",
-        [can_edit_delivery_date, can_job_edit, can_use_attendance, can_use_tracking, can_view_leave_summary, id]
+        "UPDATE users SET can_edit_delivery_date = ?, can_job_edit = ?, can_use_attendance = ?, can_use_tracking = ?, can_view_leave_summary = ?, attendance_project_id = ? WHERE id = ?",
+        [can_edit_delivery_date, can_job_edit, can_use_attendance, can_use_tracking, can_view_leave_summary, attendance_project_id, id]
       );
       res.json({
         success: true,
@@ -553,7 +575,8 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
         can_job_edit: !!can_job_edit,
         can_use_attendance: !!can_use_attendance,
         can_use_tracking: !!can_use_tracking,
-        can_view_leave_summary: !!can_view_leave_summary
+        can_view_leave_summary: !!can_view_leave_summary,
+        attendance_project_id
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
