@@ -612,6 +612,34 @@ CREATE TABLE IF NOT EXISTS employee_supervisors (
   FOREIGN KEY (supervisor_id) REFERENCES all_employees(id) ON DELETE CASCADE
 );
 
+-- Employee Transfer history (Admin Panel -> Employees -> "Transfer / Change
+-- Role"). One row per Department/Designation/Supervisor change made to an
+-- all_employees row — keeps the FROM and TO value of each field so the
+-- Employee's job history stays auditable instead of being silently
+-- overwritten the way a plain "Edit Employee" save does. Also self-healed by
+-- ensureEmployeeTransferSchema() in EmployeeTransferRoutes.ts for databases
+-- created before this table existed.
+CREATE TABLE IF NOT EXISTS employee_transfers (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  employee_id INT NOT NULL,
+  from_department_id INT NULL,
+  from_department_name VARCHAR(255) NULL,
+  to_department_id INT NULL,
+  to_department_name VARCHAR(255) NULL,
+  from_designation VARCHAR(255) NULL,
+  to_designation VARCHAR(255) NULL,
+  from_supervisor_id INT NULL,
+  to_supervisor_id INT NULL,
+  effective_date DATE NULL,
+  reason VARCHAR(255) NULL,
+  action_by INT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (employee_id) REFERENCES all_employees(id) ON DELETE CASCADE,
+  FOREIGN KEY (from_supervisor_id) REFERENCES all_employees(id) ON DELETE SET NULL,
+  FOREIGN KEY (to_supervisor_id) REFERENCES all_employees(id) ON DELETE SET NULL,
+  FOREIGN KEY (action_by) REFERENCES users(id) ON DELETE SET NULL
+);
+
 -- Movement Claims Table — a free-form (not tied to a fixed Project geofence) point
 -- A -> point B travel record: a User checks in with a Purpose (why/where they're
 -- heading out for office work), then later checks out once they reach/finish there.

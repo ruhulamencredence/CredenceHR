@@ -21,6 +21,8 @@ import { registerLeaveRoutes } from "./LeaveRoutes";
 import { registerPayrollRoutes, ensurePayrollSchema } from "./PayrollRoutes";
 import { registerAssetManagementRoutes, ensureAssetManagementSchema } from "./AssetManagementRoutes";
 import { registerEntriesRoutes } from "./EntriesRoutes";
+import { registerEmployeeTransferRoutes, ensureEmployeeTransferSchema } from "./EmployeeTransferRoutes";
+import { registerEmployeeDirectoryRoutes } from "./EmployeeDirectoryRoutes";
 
 dotenv.config();
 
@@ -204,6 +206,11 @@ async function ensureSchemaMigrations() {
   // schema owned by AssetManagementRoutes.ts, only the call site lives here,
   // same as every other self-healing migration in this function.
   await ensureAssetManagementSchema(dbPool);
+
+  // Employee Transfer (Admin Panel -> Employees -> "Transfer / Change Role")
+  // — table + schema owned by EmployeeTransferRoutes.ts, only the call site
+  // lives here, same as every other self-healing migration in this function.
+  await ensureEmployeeTransferSchema(dbPool);
 
   // Personal Data (ProfilePage.tsx -> PersonalDataForm.tsx) — one row per user,
   // created on first save. Position/Department are deliberately NOT columns
@@ -5077,6 +5084,28 @@ async function startServer() {
     requireModule,
     queryDB,
     createAlert
+  });
+
+  // Employee Transfer (Admin Panel -> Employees -> "Transfer / Change Role")
+  // — kept in its own file (EmployeeTransferRoutes.ts), same reasoning as
+  // AssetManagementRoutes.ts/PayrollRoutes.ts above. Lives under the existing
+  // 'employees' module rather than a new AdminModuleKey.
+  registerEmployeeTransferRoutes(app, {
+    authenticateToken,
+    requireAdmin,
+    requireModule,
+    queryDB
+  });
+
+  // Employee Directory (Self Service -> "Employee Directory") — kept in its
+  // own file (EmployeeDirectoryRoutes.ts), same reasoning as
+  // EmployeeTransferRoutes.ts above. Deliberately NOT requireAdmin/
+  // requireModule-gated — every signed-in account can browse the roster; see
+  // that file's own comment for why the SELECT stays limited to
+  // directory-safe columns.
+  registerEmployeeDirectoryRoutes(app, {
+    authenticateToken,
+    queryDB
   });
 
   // Conveyance Bill Claim (Admin Panel -> Conveyance, Conveyance
