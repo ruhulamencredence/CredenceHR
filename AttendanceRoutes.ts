@@ -39,6 +39,13 @@ interface AttendanceRouteDeps {
   attachAttendanceCorrectionApproval: (rows: any[]) => Promise<any[]>;
   getAdminModules: (userId: number) => Promise<string[]>;
   getHolidayMap: (...args: any[]) => any;
+  // Department-wise scope for the 'attendance_reports' module only — see the
+  // attendance_report_department_access table comment in server.ts's
+  // initDB() for the full design. null = unrestricted (every Department
+  // visible, same as before this feature existed); otherwise the exact list
+  // of Department names (matching the all_employees.department mirror
+  // column) this account may see on any of the three report routes below.
+  getAttendanceReportDeptScope: (userId: number) => Promise<string[] | null>;
 }
 
 export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps) {
@@ -56,7 +63,8 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
     attachApprovalStatuses,
     attachAttendanceCorrectionApproval,
     getAdminModules,
-    getHolidayMap
+    getHolidayMap,
+    getAttendanceReportDeptScope
   } = deps;
 
   // 2b. Remote Attendance — a User checks in/out for a Project they have access to;
@@ -669,7 +677,20 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
   app.get("/api/attendance/report/departments", authenticateToken, requireAdmin, requireModule("attendance_reports"), async (req: any, res) => {
     try {
       const rows = await queryDB("SELECT DISTINCT department FROM all_employees WHERE user_id IS NOT NULL AND department IS NOT NULL AND department <> ''");
-      const departments = rows.map((r: any) => r.department).sort((a: string, b: string) => a.localeCompare(b));
+      let departments = rows.map((r: any) => r.department).sort((a: string, b: string) => a.localeCompare(b));
+
+      // Department-wise scope (see the deps comment above) — a Superadmin, or
+      // an Admin/User with no scope rows at all, keeps seeing every
+      // Department exactly as before; a scoped account's filter dropdown
+      // only ever offers the Department(s) they've actually been granted.
+      if (req.user.role !== "superadmin") {
+        const scope = await getAttendanceReportDeptScope(req.user.id);
+        if (scope) {
+          const allowed = new Set(scope);
+          departments = departments.filter((d: string) => allowed.has(d));
+        }
+      }
+
       res.json(departments);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -686,6 +707,18 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
       const project_id = req.query.project_id ? Number(req.query.project_id) : null;
       const user_id = req.query.user_id ? Number(req.query.user_id) : null;
       const department = req.query.department ? String(req.query.department).trim() : null;
+
+      // Department-wise scope (see the deps comment above). null = unrestricted.
+      // A department query param outside the caller's scope is rejected up
+      // front (400) rather than silently returning an empty/wrong report —
+      // this only ever fires for a scoped Admin/User deliberately typing
+      // another Department into the request, since the UI's own dropdown
+      // (GET /api/attendance/report/departments) already only offers
+      // Departments they're allowed to see.
+      const deptScope = req.user.role === "superadmin" ? null : await getAttendanceReportDeptScope(req.user.id);
+      if (deptScope && department && !deptScope.includes(department)) {
+        return res.status(403).json({ error: "You don't have access to this Department's Attendance Report." });
+      }
 
       const rows = await queryDB("SELECT * FROM attendance");
       const projects = await queryDB("SELECT * FROM projects");
@@ -715,7 +748,15 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
         (u: any) =>
           (u.role === "user" || u.role === "admin") &&
           (!user_id || u.id === user_id) &&
-          (!department || departmentByUserId.get(u.id) === department)
+          (!department || departmentByUserId.get(u.id) === department) &&
+          // Department-wise scope, unfiltered-request case: `department` was
+          // already validated to be within deptScope above when given, so
+          // this only bites when the caller left the Department filter blank
+          // (wants "all Departments") but is actually scoped to a subset —
+          // narrow silently to their allowed Department(s) rather than
+          // erroring, same as leaving any other filter blank means "don't
+          // filter on this", not "you must pick one".
+          (!deptScope || deptScope.includes(departmentByUserId.get(u.id) || ""))
       );
 
       // Global Calendar (Admin Panel -> Holidays) — any date the Superadmin (or
@@ -861,6 +902,13 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
       const user_id = req.query.user_id ? Number(req.query.user_id) : null;
       const department = req.query.department ? String(req.query.department).trim() : null;
 
+      // Department-wise scope (see the deps comment above / the monthly
+      // report route's own copy of this check). null = unrestricted.
+      const deptScope = req.user.role === "superadmin" ? null : await getAttendanceReportDeptScope(req.user.id);
+      if (deptScope && department && !deptScope.includes(department)) {
+        return res.status(403).json({ error: "You don't have access to this Department's Attendance Report." });
+      }
+
       const rows = await queryDB("SELECT * FROM attendance");
       const projects = await queryDB("SELECT * FROM projects");
       const users = await queryDB("SELECT id, name, email, role, created_at FROM users");
@@ -884,7 +932,10 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
         (u: any) =>
           (u.role === "user" || u.role === "admin") &&
           (!user_id || u.id === user_id) &&
-          (!department || departmentByUserId.get(u.id) === department)
+          (!department || departmentByUserId.get(u.id) === department) &&
+          // Department-wise scope, unfiltered-request case — see the monthly
+          // report route's identical comment above.
+          (!deptScope || deptScope.includes(departmentByUserId.get(u.id) || ""))
       );
 
       // Office Attendance (ZKTeco) fallback — only for users with NO Remote (GPS)

@@ -696,6 +696,71 @@ async function ensureSchemaMigrations() {
   } catch (err: any) {
     console.warn("⚠️ Could not ensure admin_module_permissions table exists: " + err.message);
   }
+  // Department-wise scoping for the 'attendance_reports' module only — set by
+  // the Superadmin on top of admin_module_permissions (Admin Panel -> Users ->
+  // Module Access -> "Attendance Report Departments", shown once
+  // 'attendance_reports' itself is checked). A row here means the account may
+  // ONLY see that one Department's rows on the Monthly Attendance Report /
+  // Department filter / Date Wise report — GET /api/attendance/report/* in
+  // AttendanceRoutes.ts filters on it via getAttendanceReportDeptScope()
+  // below. No rows at all for a user (the common case — every existing grant
+  // before this feature) means unrestricted, exactly like today: every
+  // Department is visible. This is deliberately independent of whether the
+  // account is a Department Supervisor (departments.supervisor_user_id) —
+  // that's only used client-side to pre-tick a sensible default the first
+  // time the modal opens; a non-Supervisor account can be scoped here too,
+  // and a Supervisor can be left unscoped (full access) if the tick is
+  // removed. Stores the plain-text Department name (not department_id) so it
+  // reads the same way GET /api/attendance/report/departments and the
+  // department query param on the report routes already do — see the mirror-
+  // column comment there. PUT /api/departments/:id already re-writes
+  // all_employees.department on a rename; the same rename also re-writes this
+  // table's rows so a scoped grant doesn't silently go stale (see that route).
+  try {
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS attendance_report_department_access (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        department VARCHAR(150) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY unique_user_department (user_id, department),
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      )
+    `);
+  } catch (err: any) {
+    console.warn("⚠️ Could not ensure attendance_report_department_access table exists: " + err.message);
+  }
+  // Department-wise scoping for the 'leave_applications' module only —
+  // identical design to attendance_report_department_access above, just for
+  // the "Monthly Leave Application" report (Admin Panel -> Users -> Module
+  // Access -> "Leave Application Departments", shown once 'leave_applications'
+  // itself is checked) instead of the Attendance Report. A row here means the
+  // account may ONLY see Leave Applications from that one Department —
+  // GET /api/leave-applications/report* in LeaveRoutes.ts filters on it via
+  // getLeaveApplicationDeptScope() below. No rows at all for a user means
+  // unrestricted (every Department visible). Independent of whether the
+  // account is a Department Supervisor (departments.supervisor_user_id) —
+  // that's only used client-side to pre-tick a sensible default the first
+  // time the modal opens; a non-Supervisor account can be scoped here too,
+  // and a Supervisor can be left unscoped (full access) if the tick is
+  // removed. Stores the plain-text Department name (not department_id), same
+  // as attendance_report_department_access, so a rename (PUT
+  // /api/departments/:id) can re-write this table's rows too and keep a
+  // scoped grant from silently going stale.
+  try {
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS leave_application_department_access (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        department VARCHAR(150) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY unique_user_department (user_id, department),
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      )
+    `);
+  } catch (err: any) {
+    console.warn("⚠️ Could not ensure leave_application_department_access table exists: " + err.message);
+  }
   // "Remote Attendance" — one row per (user, project, calendar day). check_in_* is
   // filled when the User taps Check In (server-validated to be inside the Project's
   // location_radius circle around location_lat/location_lng); check_out_* likewise
@@ -1556,7 +1621,7 @@ async function ensureSchemaMigrations() {
 // of truth here and mirrored in src/types.ts (ADMIN_MODULES) for the UI.
 const USER_CLAIM_CATEGORIES = ["Transport", "Fuel", "Toll", "Parking", "Others"] as const;
 
-const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports", "users", "attendance", "attendance_reports", "recycle", "editlog", "notices", "claims", "approvals", "conveyance", "disbursement", "employees", "departments", "tracking", "office_attendance", "holidays", "payroll"] as const;
+const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports", "users", "attendance", "attendance_reports", "leave_applications", "recycle", "editlog", "notices", "claims", "approvals", "conveyance", "disbursement", "employees", "departments", "tracking", "office_attendance", "holidays", "payroll"] as const;
 
 // Employee Directory extended profile fields (Admin Panel -> Employees ->
 // Edit -> Employee Info / Status / Contact tabs). Single source of truth for
@@ -1607,6 +1672,38 @@ async function getAdminModules(userId: number): Promise<string[]> {
     return rows.map((r: any) => r.module_key);
   } catch {
     return [];
+  }
+}
+
+// Department-wise scope for the 'attendance_reports' module — see the
+// attendance_report_department_access table comment in initDB() for the full
+// design. Returns null for "unrestricted" (no rows for this user — every
+// Department is visible, same as before this feature existed) or the exact
+// list of Department names this account may see otherwise. A Superadmin is
+// never restricted; callers should check req.user.role themselves the same
+// way they already do for getAdminModules (this helper doesn't special-case
+// it, matching that function's own convention).
+async function getAttendanceReportDeptScope(userId: number): Promise<string[] | null> {
+  try {
+    const rows: any = await queryDB("SELECT department FROM attendance_report_department_access WHERE user_id = ?", [userId]);
+    if (rows.length === 0) return null;
+    return rows.map((r: any) => r.department);
+  } catch {
+    return null;
+  }
+}
+
+// Department-wise scope for the 'leave_applications' module — same shape and
+// same "no rows = unrestricted" convention as getAttendanceReportDeptScope
+// above, backed by leave_application_department_access instead. See that
+// table's comment in initDB() for the full design.
+async function getLeaveApplicationDeptScope(userId: number): Promise<string[] | null> {
+  try {
+    const rows: any = await queryDB("SELECT department FROM leave_application_department_access WHERE user_id = ?", [userId]);
+    if (rows.length === 0) return null;
+    return rows.map((r: any) => r.department);
+  } catch {
+    return null;
   }
 }
 
@@ -4515,7 +4612,8 @@ async function startServer() {
     attachApprovalStatuses,
     attachAttendanceCorrectionApproval,
     getAdminModules,
-    getHolidayMap
+    getHolidayMap,
+    getAttendanceReportDeptScope
   });
 
   // Employee Tracking — the APK's background service calls this roughly every
@@ -7845,6 +7943,9 @@ async function startServer() {
   registerLeaveRoutes(app, {
     authenticateToken,
     queryDB,
+    requireAdmin,
+    requireModule,
+    getLeaveApplicationDeptScope,
     requireLeaveManager,
     hasLeaveManageAccess,
     getCurrentStepApprovers,
