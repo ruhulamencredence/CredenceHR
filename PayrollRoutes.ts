@@ -233,6 +233,73 @@ export async function ensurePayrollSchema(dbPool: any): Promise<void> {
         INDEX idx_pending_bonuses_emp_month (employee_id, month_year)
       )
     `);
+    // ---- Late Attendance Policy ---------------------------------------------
+    // late_policy_settings — same "never update in place" history pattern as
+    // salary_structures: changing the shift start time / grace period / lates-
+    // per-deduction-day inserts a NEW row with a new effective_date rather than
+    // overwriting the old one, so a payroll run for an old month always applies
+    // whatever policy was actually in force that month, and Admin Panel can show
+    // a change history (who changed what, when). "Current" policy for a given
+    // month = the most recent row with effective_date <= that month's 1st.
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS late_policy_settings (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        shift_start_time TIME NOT NULL DEFAULT '09:00:00',
+        grace_minutes INT NOT NULL DEFAULT 10,
+        lates_per_deduction_day INT NOT NULL DEFAULT 3,
+        effective_date DATE NOT NULL,
+        created_by INT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
+        INDEX idx_late_policy_effective (effective_date)
+      )
+    `);
+    // Seed one default row (09:00 start, 10 min grace i.e. late past 9:10, 3
+    // lates = 1 day deducted) so the feature works out of the box on a fresh
+    // install — only when the table is completely empty, never overwriting an
+    // Admin's own settings.
+    const [existingPolicyRows] = await dbPool.query(`SELECT COUNT(*) AS c FROM late_policy_settings`);
+    if (Number(existingPolicyRows?.[0]?.c || 0) === 0) {
+      await dbPool.query(
+        `INSERT INTO late_policy_settings (shift_start_time, grace_minutes, lates_per_deduction_day, effective_date)
+         VALUES ('09:00:00', 10, 3, '2000-01-01')`
+      );
+    }
+    // late_waivers — HR/Admin excusing one specific (employee, date) late
+    // mark so it's dropped from that month's late count before the "3 lates =
+    // 1 day" threshold is evaluated. A row here means "don't count this day",
+    // nothing more — deleting the row un-waives it.
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS late_waivers (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        employee_id INT NOT NULL,
+        waiver_date DATE NOT NULL,
+        reason VARCHAR(255) NULL,
+        waived_by INT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (employee_id) REFERENCES all_employees(id) ON DELETE CASCADE,
+        FOREIGN KEY (waived_by) REFERENCES users(id) ON DELETE SET NULL,
+        UNIQUE KEY unique_employee_waiver_date (employee_id, waiver_date)
+      )
+    `);
+    // payrolls needs a place to record what the late policy actually charged
+    // on this specific run, for the payslip and for history — added via
+    // ALTER since the table above may already exist on a running database.
+    try {
+      await dbPool.query(`ALTER TABLE payrolls ADD COLUMN late_count INT NOT NULL DEFAULT 0`);
+    } catch (err: any) {
+      if (err.code !== "ER_DUP_FIELDNAME") console.warn("⚠️ Could not add payrolls.late_count column: " + err.message);
+    }
+    try {
+      await dbPool.query(`ALTER TABLE payrolls ADD COLUMN late_deduction_days INT NOT NULL DEFAULT 0`);
+    } catch (err: any) {
+      if (err.code !== "ER_DUP_FIELDNAME") console.warn("⚠️ Could not add payrolls.late_deduction_days column: " + err.message);
+    }
+    try {
+      await dbPool.query(`ALTER TABLE payrolls ADD COLUMN late_deduction_amount DECIMAL(10, 2) NOT NULL DEFAULT 0.00`);
+    } catch (err: any) {
+      if (err.code !== "ER_DUP_FIELDNAME") console.warn("⚠️ Could not add payrolls.late_deduction_amount column: " + err.message);
+    }
   } catch (err: any) {
     console.warn("⚠️ Could not ensure payroll tables exist: " + err.message);
   }
@@ -1314,6 +1381,262 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
     }
   });
 
+  // ---- Late Attendance Policy helpers ---------------------------------------
+  // Resolves whichever late_policy_settings row was actually in effect for a
+  // given month (most recent effective_date on or before that month's 1st) —
+  // same "look back to what was true then" resolution salary_structures uses,
+  // so re-running payroll math for an old month never picks up today's policy.
+  async function getLatePolicyForMonth(monthYear: string) {
+    const rows = await queryDB(
+      `SELECT * FROM late_policy_settings WHERE effective_date <= ? ORDER BY effective_date DESC, id DESC LIMIT 1`,
+      [`${monthYear}-01`]
+    );
+    return rows[0] || { shift_start_time: "09:00:00", grace_minutes: 10, lates_per_deduction_day: 3 };
+  }
+
+  // For every employee with a linked login, finds each calendar day in
+  // [monthStart, monthEnd] where their earliest check-in (Remote GPS or
+  // Office ZKTeco, whichever is earlier when both exist) is later than
+  // shift_start_time + grace_minutes. Returns a Map<employee_id, string[]> of
+  // the actual late dates (not just a count) so a waiver UI can show and
+  // toggle each one individually. Holidays and any date already in
+  // late_waivers for that employee are excluded before the caller ever sees
+  // them, so "late_count" downstream is always the number that should count
+  // toward the lates-per-deduction-day threshold.
+  async function computeLateDatesByEmployee(
+    employees: any[],
+    monthStart: string,
+    monthEnd: string,
+    holidayMap: Map<string, any>,
+    policy: any,
+    excludeWaivers: boolean = true
+  ): Promise<Map<number, string[]>> {
+    const userIds = employees.filter((e: any) => e.user_id).map((e: any) => Number(e.user_id));
+    const firstCheckInByUserDate = new Map<number, Map<string, Date>>();
+
+    if (userIds.length > 0) {
+      const placeholders = userIds.map(() => "?").join(",");
+      const remoteRows = await queryDB(
+        `SELECT user_id, attendance_date, MIN(check_in_at) AS first_check_in
+         FROM attendance
+         WHERE attendance_date BETWEEN ? AND ? AND check_in_at IS NOT NULL AND user_id IN (${placeholders})
+         GROUP BY user_id, attendance_date`,
+        [monthStart, monthEnd, ...userIds]
+      );
+      for (const r of remoteRows) {
+        const dateStr = String(r.attendance_date).slice(0, 10);
+        if (holidayMap.has(dateStr)) continue;
+        if (!firstCheckInByUserDate.has(r.user_id)) firstCheckInByUserDate.set(r.user_id, new Map());
+        firstCheckInByUserDate.get(r.user_id)!.set(dateStr, new Date(r.first_check_in));
+      }
+
+      const pinToUserId = new Map<string, number>();
+      for (const e of employees) {
+        if (e.user_id && e.zk_device_pin) pinToUserId.set(e.zk_device_pin, Number(e.user_id));
+      }
+      if (pinToUserId.size > 0) {
+        const pins = Array.from(pinToUserId.keys());
+        const pinPlaceholders = pins.map(() => "?").join(",");
+        const officeRows = await queryDB(
+          `SELECT device_user_pin, DATE(punch_time) AS attendance_date, MIN(punch_time) AS first_punch
+           FROM zk_attendance_logs WHERE DATE(punch_time) BETWEEN ? AND ? AND device_user_pin IN (${pinPlaceholders})
+           GROUP BY device_user_pin, DATE(punch_time)`,
+          [monthStart, monthEnd, ...pins]
+        );
+        for (const r of officeRows) {
+          const dateStr = String(r.attendance_date).slice(0, 10);
+          if (holidayMap.has(dateStr)) continue;
+          const userId = pinToUserId.get(r.device_user_pin);
+          if (!userId) continue;
+          const punchTime = new Date(r.first_punch);
+          if (!firstCheckInByUserDate.has(userId)) firstCheckInByUserDate.set(userId, new Map());
+          const existing = firstCheckInByUserDate.get(userId)!.get(dateStr);
+          // Keep whichever source's check-in was earlier that day.
+          if (!existing || punchTime < existing) firstCheckInByUserDate.get(userId)!.set(dateStr, punchTime);
+        }
+      }
+    }
+
+    // Waivers for this window, keyed the same "employeeId_date" way so a
+    // lookup is a single Set.has() per day below. The drill-down view passes
+    // excludeWaivers=false so it can show already-waived days too (flagged
+    // separately) instead of silently dropping them.
+    let waivedKeys = new Set<string>();
+    if (excludeWaivers) {
+      const waiverRows = await queryDB(
+        `SELECT employee_id, waiver_date FROM late_waivers WHERE waiver_date BETWEEN ? AND ?`,
+        [monthStart, monthEnd]
+      );
+      waivedKeys = new Set<string>(waiverRows.map((w: any) => `${w.employee_id}_${String(w.waiver_date).slice(0, 10)}`));
+    }
+
+    const [startH, startM] = String(policy.shift_start_time).split(":").map(Number);
+    const thresholdMinutes = startH * 60 + startM + Number(policy.grace_minutes);
+
+    const userIdToEmployeeId = new Map<number, number>();
+    for (const e of employees) {
+      if (e.user_id) userIdToEmployeeId.set(Number(e.user_id), Number(e.id));
+    }
+
+    const lateDatesByEmployee = new Map<number, string[]>();
+    for (const [userId, dateMap] of firstCheckInByUserDate.entries()) {
+      const employeeId = userIdToEmployeeId.get(userId);
+      if (!employeeId) continue;
+      for (const [dateStr, checkInAt] of dateMap.entries()) {
+        if (waivedKeys.has(`${employeeId}_${dateStr}`)) continue;
+        const minutesOfDay = checkInAt.getHours() * 60 + checkInAt.getMinutes();
+        if (minutesOfDay > thresholdMinutes) {
+          if (!lateDatesByEmployee.has(employeeId)) lateDatesByEmployee.set(employeeId, []);
+          lateDatesByEmployee.get(employeeId)!.push(dateStr);
+        }
+      }
+    }
+    for (const dates of lateDatesByEmployee.values()) dates.sort();
+    return lateDatesByEmployee;
+  }
+
+  // GET current policy + full change history (newest first) for the Settings
+  // screen — one call gives the form its defaults and the table its rows.
+  app.get("/api/payroll/late-policy", authenticateToken, requireAdmin, requireModule("payroll"), async (req: any, res) => {
+    try {
+      const rows = await queryDB(
+        `SELECT lp.*, u.name AS changed_by_name
+         FROM late_policy_settings lp LEFT JOIN users u ON u.id = lp.created_by
+         ORDER BY lp.effective_date DESC, lp.id DESC`
+      );
+      res.json(rows);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to load late policy history." });
+    }
+  });
+
+  // POST always INSERTs a new row (history preserved) rather than updating
+  // the existing one in place — identical reasoning to salary_structures: a
+  // month that already had payroll generated under the old policy must stay
+  // explainable, and a future-dated effective_date lets Admin schedule a
+  // change in advance.
+  app.post("/api/payroll/late-policy", authenticateToken, requireAdmin, requireModule("payroll"), async (req: any, res) => {
+    try {
+      const shiftStart = typeof req.body?.shift_start_time === "string" ? req.body.shift_start_time.trim() : "";
+      const graceMinutes = Math.round(num(req.body?.grace_minutes, NaN));
+      const latesPerDay = Math.round(num(req.body?.lates_per_deduction_day, NaN));
+      const effectiveDate = typeof req.body?.effective_date === "string" ? req.body.effective_date.trim() : "";
+
+      if (!/^\d{2}:\d{2}(:\d{2})?$/.test(shiftStart)) {
+        return res.status(400).json({ error: "shift_start_time must be in HH:MM format." });
+      }
+      if (!Number.isFinite(graceMinutes) || graceMinutes < 0) {
+        return res.status(400).json({ error: "grace_minutes must be a non-negative number." });
+      }
+      if (!Number.isFinite(latesPerDay) || latesPerDay < 1) {
+        return res.status(400).json({ error: "lates_per_deduction_day must be at least 1." });
+      }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(effectiveDate)) {
+        return res.status(400).json({ error: "effective_date must be in YYYY-MM-DD format." });
+      }
+
+      const normalizedTime = shiftStart.length === 5 ? `${shiftStart}:00` : shiftStart;
+      const result = await queryDB(
+        `INSERT INTO late_policy_settings (shift_start_time, grace_minutes, lates_per_deduction_day, effective_date, created_by)
+         VALUES (?, ?, ?, ?, ?)`,
+        [normalizedTime, graceMinutes, latesPerDay, effectiveDate, req.user.id]
+      );
+      res.json({ success: true, id: result.insertId });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to save late policy." });
+    }
+  });
+
+  // Per-employee, per-day drill-down for one month — backs the "View Late
+  // Days" modal, showing every late date plus whether it's currently waived,
+  // so HR can toggle a specific day on/off without affecting any other day.
+  app.get("/api/payroll/late-summary/:employeeId", authenticateToken, requireAdmin, requireModule("payroll"), async (req: any, res) => {
+    try {
+      const employeeId = Number(req.params.employeeId);
+      const requested = req.query.month_year ? String(req.query.month_year) : "";
+      const monthYear = MONTH_YEAR_RE.test(requested) ? requested : new Date().toISOString().slice(0, 7);
+      const [yy, mm] = monthYear.split("-").map(Number);
+      const daysInMonth = new Date(yy, mm, 0).getDate();
+      const monthStart = `${monthYear}-01`;
+      const monthEnd = `${monthYear}-${String(daysInMonth).padStart(2, "0")}`;
+
+      const empRows = await queryDB(
+        "SELECT id, name, employee_id AS employee_code, user_id, zk_device_pin FROM all_employees WHERE id = ?",
+        [employeeId]
+      );
+      if (empRows.length === 0) return res.status(404).json({ error: "Employee not found." });
+
+      const holidayMap = await getHolidayMap(queryDB, monthStart, monthEnd);
+      const policy = await getLatePolicyForMonth(monthYear);
+
+      // Reuse the same computation but unwaived (pass no waivers) so this
+      // view can show every raw late day, including already-waived ones,
+      // then mark which are currently waived separately.
+      const allWaivers = await queryDB(
+        "SELECT id, waiver_date, reason FROM late_waivers WHERE employee_id = ? AND waiver_date BETWEEN ? AND ?",
+        [employeeId, monthStart, monthEnd]
+      );
+      const waiverByDate = new Map<string, any>(allWaivers.map((w: any) => [String(w.waiver_date).slice(0, 10), w]));
+
+      const lateDatesByEmployee = await computeLateDatesByEmployee([empRows[0]], monthStart, monthEnd, holidayMap, policy, false);
+      const rawLateDates: string[] = lateDatesByEmployee.get(employeeId) || [];
+
+      const days = rawLateDates.map((d) => ({
+        date: d,
+        waived: waiverByDate.has(d),
+        waiver_id: waiverByDate.get(d)?.id || null,
+        reason: waiverByDate.get(d)?.reason || null
+      }));
+      const countedLate = days.filter((d) => !d.waived).length;
+
+      res.json({
+        employee_id: employeeId,
+        month_year: monthYear,
+        policy: {
+          shift_start_time: policy.shift_start_time,
+          grace_minutes: policy.grace_minutes,
+          lates_per_deduction_day: policy.lates_per_deduction_day
+        },
+        days,
+        late_count: countedLate,
+        deduction_days: Math.floor(countedLate / Number(policy.lates_per_deduction_day || 1))
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to load late-day details." });
+    }
+  });
+
+  // Excuse (or re-include) one specific late day for one employee. Unique
+  // key on (employee_id, waiver_date) means calling this twice for the same
+  // day just no-ops the second time rather than erroring.
+  app.post("/api/payroll/late-waivers", authenticateToken, requireAdmin, requireModule("payroll"), async (req: any, res) => {
+    try {
+      const employeeId = Number(req.body?.employee_id);
+      const waiverDate = typeof req.body?.waiver_date === "string" ? req.body.waiver_date.trim() : "";
+      const reason = typeof req.body?.reason === "string" ? req.body.reason.trim().slice(0, 255) : null;
+      if (!employeeId) return res.status(400).json({ error: "employee_id is required." });
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(waiverDate)) return res.status(400).json({ error: "waiver_date must be in YYYY-MM-DD format." });
+
+      const result = await queryDB(
+        `INSERT IGNORE INTO late_waivers (employee_id, waiver_date, reason, waived_by) VALUES (?, ?, ?, ?)`,
+        [employeeId, waiverDate, reason, req.user.id]
+      );
+      res.json({ success: true, id: result.insertId || null });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to waive late day." });
+    }
+  });
+
+  // Undo a waiver — the day counts toward lateness again from here on.
+  app.delete("/api/payroll/late-waivers/:id", authenticateToken, requireAdmin, requireModule("payroll"), async (req: any, res) => {
+    try {
+      await queryDB("DELETE FROM late_waivers WHERE id = ?", [Number(req.params.id)]);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to remove waiver." });
+    }
+  });
+
   // ---- Payroll Processing Wizard -------------------------------------------
   // Backs the 5-step "Run Payroll" wizard (Select Month -> Attendance & Leave
   // Sync -> Adjustments -> Preview & Calculate -> Submit). Attendance/Leave
@@ -1442,6 +1765,13 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         pendingBonusRows.map((r: any) => [Number(r.employee_id), Number(r.total) || 0])
       );
 
+      // Late Attendance Policy — whichever policy was in effect for this
+      // month, applied against each employee's actual check-in times. Lates
+      // already had any waived day dropped inside computeLateDatesByEmployee.
+      const latePolicy = await getLatePolicyForMonth(monthYear);
+      const lateDatesByEmployee = await computeLateDatesByEmployee(employees, monthStart, monthEnd, holidayMap, latePolicy);
+      const latesPerDay = Number(latePolicy.lates_per_deduction_day || 1);
+
       const result = employees.map((e: any) => {
         // has_attendance_data must mean "we actually found at least one
         // present day for this person", not just "their pin is registered
@@ -1452,6 +1782,8 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         const present = hasAttendanceData ? (presentDaysByUser.get(Number(e.user_id))?.size || 0) : workingDays;
         const leave = e.user_id ? Math.min(workingDays, leaveDaysByUser.get(Number(e.user_id)) || 0) : 0;
         const absent = Math.max(0, workingDays - present - leave);
+        const lateCount = lateDatesByEmployee.get(e.id)?.length || 0;
+        const lateDeductionDays = Math.floor(lateCount / latesPerDay);
         return {
           employee_id: e.id,
           employee_code: e.employee_code,
@@ -1464,6 +1796,8 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
           leave_days: leave,
           lwp_days: 0,
           overtime_hours: 0,
+          late_count: lateCount,
+          late_deduction_days: lateDeductionDays,
           pending_bonus_amount: pendingBonusByEmployee.get(e.id) || 0,
           has_attendance_data: hasAttendanceData,
           has_salary_structure: hasStructure.has(e.id),
@@ -1471,7 +1805,17 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         };
       });
 
-      res.json({ month_year: monthYear, days_in_month: daysInMonth, working_days: workingDays, employees: result });
+      res.json({
+        month_year: monthYear,
+        days_in_month: daysInMonth,
+        working_days: workingDays,
+        late_policy: {
+          shift_start_time: latePolicy.shift_start_time,
+          grace_minutes: latePolicy.grace_minutes,
+          lates_per_deduction_day: latePolicy.lates_per_deduction_day
+        },
+        employees: result
+      });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Failed to load attendance summary." });
     }
@@ -1516,6 +1860,8 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         const present = Math.max(0, Math.round(num(row.present_days)));
         const absent = Math.max(0, Math.round(num(row.absent_days)));
         const lwp = Math.max(0, Math.round(num(row.lwp_days)));
+        const lateCount = Math.max(0, Math.round(num(row.late_count)));
+        const lateDeductionDays = Math.max(0, Math.round(num(row.late_deduction_days)));
         const otAmount = money(num(row.overtime_amount));
         const bonus = money(num(row.bonus_amount));
         const otherDed = money(num(row.other_deduction));
@@ -1524,7 +1870,12 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         const basicSalary = Number(structure.basic_salary);
         const allowancesTotal = money(grossSalary - basicSalary);
         const perDayGross = grossSalary / workingDays;
-        const unpaidDays = absent + lwp;
+        // Late Attendance Policy folds in here as extra unpaid-equivalent
+        // days, same rate as an absence — "3 lates = 1 day" means the 4th
+        // "day" charged is priced exactly like an Absent/LWP day, not a
+        // separate line item.
+        const unpaidDays = absent + lwp + lateDeductionDays;
+        const lateDeductionAmount = money(perDayGross * lateDeductionDays);
         const basicAmount = money(basicSalary * (present / workingDays));
         const allowancesEarned = money(allowancesTotal * (present / workingDays));
         const absentDeduction = money(perDayGross * unpaidDays);
@@ -1555,6 +1906,9 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
           bonus_amount: bonus,
           gross_earned: grossEarned,
           absent_deduction: absentDeduction,
+          late_count: lateCount,
+          late_deduction_days: lateDeductionDays,
+          late_deduction_amount: lateDeductionAmount,
           tax_deduction: taxDeduction,
           pf_deduction: pfDeduction,
           advance_deduction: advanceDeduction,
@@ -1616,6 +1970,8 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
           const absent = Math.max(0, Math.round(num(row.absent_days)));
           const leave = Math.max(0, Math.round(num(row.leave_days)));
           const lwp = Math.max(0, Math.round(num(row.lwp_days)));
+          const lateCount = Math.max(0, Math.round(num(row.late_count)));
+          const lateDeductionDays = Math.max(0, Math.round(num(row.late_deduction_days)));
           const otHours = num(row.overtime_hours);
           const otAmount = money(num(row.overtime_amount));
           const bonus = money(num(row.bonus_amount));
@@ -1626,7 +1982,8 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
           const basicSalary = Number(structure.basic_salary);
           const allowancesTotal = money(grossSalary - basicSalary);
           const perDayGross = grossSalary / workingDays;
-          const unpaidDays = absent + lwp;
+          const unpaidDays = absent + lwp + lateDeductionDays;
+          const lateDeductionAmount = money(perDayGross * lateDeductionDays);
           const basicAmount = money(basicSalary * (present / workingDays));
           const allowancesEarned = money(allowancesTotal * (present / workingDays));
           const absentDeduction = money(perDayGross * unpaidDays);
@@ -1653,13 +2010,15 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
             `INSERT INTO payrolls
                (employee_id, month_year, total_working_days, present_days, absent_days, leave_days, lwp_days, overtime_hours,
                 basic_amount, allowances_total, overtime_amount, bonus_amount, gross_earned,
-                absent_deduction, tax_deduction, pf_deduction, advance_deduction, other_deduction, total_deduction,
+                absent_deduction, late_count, late_deduction_days, late_deduction_amount,
+                tax_deduction, pf_deduction, advance_deduction, other_deduction, total_deduction,
                 net_salary, payment_status, payment_method, remarks, generated_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unpaid', ?, ?, ?)`,
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unpaid', ?, ?, ?)`,
             [
               employeeId, monthYear, workingDays, present, absent, leave, lwp, otHours,
               basicAmount, allowancesEarned, otAmount, bonus, grossEarned,
-              absentDeduction, taxDeduction, pfDeduction, advanceDeduction, otherDed, totalDeduction,
+              absentDeduction, lateCount, lateDeductionDays, lateDeductionAmount,
+              taxDeduction, pfDeduction, advanceDeduction, otherDed, totalDeduction,
               netSalary, method, note, req.user.id
             ]
           );
@@ -1695,6 +2054,8 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         absent_days,
         leave_days,
         lwp_days,
+        late_count,
+        late_deduction_days,
         overtime_hours,
         overtime_amount,
         bonus_amount,
@@ -1731,6 +2092,8 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       const absent = Math.max(0, Math.round(num(absent_days)));
       const leave = Math.max(0, Math.round(num(leave_days)));
       const lwp = Math.max(0, Math.round(num(lwp_days)));
+      const lateCount = Math.max(0, Math.round(num(late_count)));
+      const lateDeductionDays = Math.max(0, Math.round(num(late_deduction_days)));
       const otHours = num(overtime_hours);
       const otAmount = money(num(overtime_amount));
       const bonus = money(num(bonus_amount));
@@ -1743,10 +2106,11 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       const allowancesTotal = money(grossSalary - basicSalary);
       const perDayGross = grossSalary / workingDays;
 
-      // Basic + Allowances scale with days actually present; Absent/LWP days
-      // are the ones that cost the employee pay (Leave days are paid, hence
-      // excluded here).
-      const unpaidDays = absent + lwp;
+      // Basic + Allowances scale with days actually present; Absent/LWP/Late-
+      // deduction days are the ones that cost the employee pay (Leave days
+      // are paid, hence excluded here).
+      const unpaidDays = absent + lwp + lateDeductionDays;
+      const lateDeductionAmount = money(perDayGross * lateDeductionDays);
       const basicAmount = money(basicSalary * (present / workingDays));
       const allowancesEarned = money(allowancesTotal * (present / workingDays));
       const absentDeduction = money(perDayGross * unpaidDays);
@@ -1777,13 +2141,15 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         `INSERT INTO payrolls
            (employee_id, month_year, total_working_days, present_days, absent_days, leave_days, lwp_days, overtime_hours,
             basic_amount, allowances_total, overtime_amount, bonus_amount, gross_earned,
-            absent_deduction, tax_deduction, pf_deduction, advance_deduction, other_deduction, total_deduction,
+            absent_deduction, late_count, late_deduction_days, late_deduction_amount,
+            tax_deduction, pf_deduction, advance_deduction, other_deduction, total_deduction,
             net_salary, payment_status, payment_method, remarks, generated_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unpaid', ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unpaid', ?, ?, ?)`,
         [
           Number(employee_id), month_year, workingDays, present, absent, leave, lwp, otHours,
           basicAmount, allowancesEarned, otAmount, bonus, grossEarned,
-          absentDeduction, taxDeduction, pfDeduction, advanceDeduction, otherDed, totalDeduction,
+          absentDeduction, lateCount, lateDeductionDays, lateDeductionAmount,
+          taxDeduction, pfDeduction, advanceDeduction, otherDed, totalDeduction,
           netSalary, method, note, req.user.id
         ]
       );

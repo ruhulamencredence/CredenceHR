@@ -19,7 +19,7 @@
 // PayrollModule.tsx.
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { X, ChevronRight, ChevronLeft, RefreshCw, CheckCircle2, AlertTriangle, Info } from 'lucide-react';
+import { X, ChevronRight, ChevronLeft, RefreshCw, CheckCircle2, AlertTriangle, Info, Clock, Undo2 } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
 
@@ -41,6 +41,8 @@ interface WizardRow {
   absent_days: number;
   leave_days: number;
   lwp_days: number;
+  late_count: number;
+  late_deduction_days: number;
   overtime_hours: number;
   overtime_amount: number;
   bonus_amount: number;
@@ -63,6 +65,8 @@ interface PreviewResult {
   bonus_amount?: number;
   gross_earned?: number;
   absent_deduction?: number;
+  late_deduction_days?: number;
+  late_deduction_amount?: number;
   tax_deduction?: number;
   pf_deduction?: number;
   advance_deduction?: number;
@@ -89,6 +93,23 @@ const monthLabel = (my: string) => {
   return new Date(y, m - 1, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
 };
 
+// "09:00:00" + 10 -> "9:10 AM" — used to spell out the actual late-cutoff
+// clock time next to the raw shift-start/grace numbers.
+const addMinutesToTime = (time: string, minutes: number) => {
+  const [h, m] = String(time || '09:00:00').split(':').map(Number);
+  const total = h * 60 + m + Number(minutes || 0);
+  const hh = Math.floor((total % 1440) / 60);
+  const mm = total % 60;
+  const period = hh >= 12 ? 'PM' : 'AM';
+  const hour12 = hh % 12 === 0 ? 12 : hh % 12;
+  return `${hour12}:${String(mm).padStart(2, '0')} ${period}`;
+};
+
+const dateLabel = (iso: string) => {
+  const d = new Date(iso + 'T00:00:00');
+  return d.toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short' });
+};
+
 export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initialMonthYear, onClose, onCompleted }) => {
   const authHeaders = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
@@ -101,6 +122,9 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
   const [previewResults, setPreviewResults] = useState<Map<number, PreviewResult>>(new Map());
   const [calculating, setCalculating] = useState(false);
   const [previewError, setPreviewError] = useState('');
+
+  const [latePolicy, setLatePolicy] = useState<{ shift_start_time: string; grace_minutes: number; lates_per_deduction_day: number } | null>(null);
+  const [viewingLateFor, setViewingLateFor] = useState<WizardRow | null>(null);
 
   const [paymentMethod, setPaymentMethod] = useState('Bank Transfer');
   const [submitting, setSubmitting] = useState(false);
@@ -117,6 +141,7 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
         setSummaryError(data.error || 'Failed to load attendance summary.');
         return;
       }
+      setLatePolicy(data.late_policy || null);
       setRows(
         (data.employees || []).map((e: any) => ({
           ...e,
@@ -165,6 +190,8 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
             absent_days: r.absent_days,
             leave_days: r.leave_days,
             lwp_days: r.lwp_days,
+            late_count: r.late_count,
+            late_deduction_days: r.late_deduction_days,
             overtime_amount: r.overtime_amount,
             bonus_amount: r.bonus_amount,
             other_deduction: r.other_deduction
@@ -212,6 +239,8 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
             absent_days: r.absent_days,
             leave_days: r.leave_days,
             lwp_days: r.lwp_days,
+            late_count: r.late_count,
+            late_deduction_days: r.late_deduction_days,
             overtime_hours: r.overtime_hours,
             overtime_amount: r.overtime_amount,
             bonus_amount: r.bonus_amount,
@@ -259,6 +288,7 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
   );
 
   return (
+    <>
     <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-5xl max-h-[92vh] flex flex-col overflow-hidden">
         {/* Header */}
@@ -310,9 +340,18 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
           {step === 2 && (
             <div>
               <div className="flex items-center justify-between mb-3">
-                <p className="text-xs text-slate-500">
-                  Present/Absent/Leave days for {monthLabel(monthYear)}, auto-filled where attendance data exists — edit any row as needed.
-                </p>
+                <div>
+                  <p className="text-xs text-slate-500">
+                    Present/Absent/Leave days for {monthLabel(monthYear)}, auto-filled where attendance data exists — edit any row as needed.
+                  </p>
+                  {latePolicy && (
+                    <p className="text-[10px] text-slate-400 mt-0.5">
+                      Late Policy: shift starts {latePolicy.shift_start_time?.slice(0, 5)}, grace {latePolicy.grace_minutes} min (late past{' '}
+                      {addMinutesToTime(latePolicy.shift_start_time, latePolicy.grace_minutes)}), {latePolicy.lates_per_deduction_day} lates ={' '}
+                      1 day's pay deducted.
+                    </p>
+                  )}
+                </div>
                 <button
                   onClick={fetchSummary}
                   className="flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-semibold text-slate-500 hover:text-blue-600 border border-slate-200 rounded-lg shrink-0"
@@ -336,6 +375,7 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
                         <th className="px-3 py-2 text-right">Absent</th>
                         <th className="px-3 py-2 text-right">Leave</th>
                         <th className="px-3 py-2 text-right">LWP</th>
+                        <th className="px-3 py-2 text-right">Late</th>
                         <th className="px-3 py-2 text-left">Note</th>
                       </tr>
                     </thead>
@@ -359,6 +399,23 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
                           <td className="px-3 py-2 text-right">{numInput(r, 'absent_days')}</td>
                           <td className="px-3 py-2 text-right">{numInput(r, 'leave_days')}</td>
                           <td className="px-3 py-2 text-right">{numInput(r, 'lwp_days')}</td>
+                          <td className="px-3 py-2 text-right whitespace-nowrap">
+                            <button
+                              onClick={() => setViewingLateFor(r)}
+                              disabled={!r.late_count}
+                              className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] font-semibold ${
+                                r.late_count > 0
+                                  ? 'text-amber-700 bg-amber-50 hover:bg-amber-100'
+                                  : 'text-slate-300 cursor-default'
+                              }`}
+                              title={r.late_count ? 'View / waive late days' : 'No late days this month'}
+                            >
+                              <Clock className="w-3 h-3" /> {r.late_count || 0}
+                            </button>
+                            {r.late_deduction_days > 0 && (
+                              <p className="text-[9px] text-rose-500 mt-0.5">−{r.late_deduction_days} day{r.late_deduction_days === 1 ? '' : 's'} pay</p>
+                            )}
+                          </td>
                           <td className="px-3 py-2 whitespace-nowrap">
                             {r.already_generated ? (
                               <span className="text-[10px] font-semibold text-amber-600">Already generated</span>
@@ -594,6 +651,183 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
             ) : null}
           </div>
         )}
+      </div>
+    </div>
+    {viewingLateFor && (
+      <LateDaysModal
+        authHeaders={authHeaders}
+        employeeId={viewingLateFor.employee_id}
+        employeeName={viewingLateFor.employee_name}
+        monthYear={monthYear}
+        onClose={() => {
+          setViewingLateFor(null);
+          // Waiving/un-waiving changes late_count for this employee, which
+          // changes late_deduction_days and therefore the payroll math — a
+          // full re-sync keeps Step 2 (and any already-calculated Step 4
+          // preview, on its own Recalculate) consistent with the server.
+          fetchSummary();
+        }}
+      />
+    )}
+    </>
+  );
+};
+
+// Per-employee, per-day late drill-down — lists every late day this month
+// (from real check-in times, per the current Late Policy) and lets HR waive
+// or un-waive any single one, e.g. a documented traffic/medical exception
+// that shouldn't count toward the "3 lates = 1 day" threshold. Closing this
+// always re-syncs Step 2 so the row's Late count reflects whatever changed.
+interface LateDay {
+  date: string;
+  waived: boolean;
+  waiver_id: number | null;
+  reason: string | null;
+}
+
+const LateDaysModal: React.FC<{
+  authHeaders: Record<string, string>;
+  employeeId: number;
+  employeeName: string;
+  monthYear: string;
+  onClose: () => void;
+}> = ({ authHeaders, employeeId, employeeName, monthYear, onClose }) => {
+  const [days, setDays] = useState<LateDay[]>([]);
+  const [policy, setPolicy] = useState<{ shift_start_time: string; grace_minutes: number; lates_per_deduction_day: number } | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [busyDate, setBusyDate] = useState<string | null>(null);
+  const [reasonDraft, setReasonDraft] = useState<Record<string, string>>({});
+
+  const load = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const res = await fetch(apiUrl(`/api/payroll/late-summary/${employeeId}?month_year=${monthYear}`), { headers: authHeaders });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || 'Failed to load late-day details.');
+        return;
+      }
+      setDays(data.days || []);
+      setPolicy(data.policy || null);
+    } catch {
+      setError('Failed to load late-day details.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [employeeId, monthYear]);
+
+  const waive = async (date: string) => {
+    setBusyDate(date);
+    try {
+      const res = await fetch(apiUrl('/api/payroll/late-waivers'), {
+        method: 'POST',
+        headers: { ...authHeaders, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ employee_id: employeeId, waiver_date: date, reason: reasonDraft[date] || null })
+      });
+      if (res.ok) await load();
+    } finally {
+      setBusyDate(null);
+    }
+  };
+
+  const unwaive = async (day: LateDay) => {
+    if (!day.waiver_id) return;
+    setBusyDate(day.date);
+    try {
+      const res = await fetch(apiUrl(`/api/payroll/late-waivers/${day.waiver_id}`), { method: 'DELETE', headers: authHeaders });
+      if (res.ok) await load();
+    } finally {
+      setBusyDate(null);
+    }
+  };
+
+  const countedLate = days.filter((d) => !d.waived).length;
+  const deductionDays = policy ? Math.floor(countedLate / Number(policy.lates_per_deduction_day || 1)) : 0;
+
+  return (
+    <div className="fixed inset-0 bg-black/40 z-[60] flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md max-h-[85vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-800">Late Days — {employeeName}</h2>
+            <p className="text-[11px] text-slate-400">{monthLabel(monthYear)}</p>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-5 space-y-3">
+          {loading ? (
+            <div className="flex justify-center py-10"><Spinner size={24} /></div>
+          ) : error ? (
+            <p className="text-xs text-rose-600 text-center py-10">{error}</p>
+          ) : days.length === 0 ? (
+            <p className="text-xs text-slate-400 text-center py-10">No late days this month.</p>
+          ) : (
+            <>
+              <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-[11px] text-slate-600">
+                {countedLate} counted late day{countedLate === 1 ? '' : 's'}
+                {policy ? ` — every ${policy.lates_per_deduction_day} lates deducts 1 day's pay` : ''} →{' '}
+                <span className="font-semibold text-rose-600">{deductionDays} day{deductionDays === 1 ? '' : 's'}</span> deducted this run.
+              </div>
+              <div className="space-y-2">
+                {days.map((d) => (
+                  <div
+                    key={d.date}
+                    className={`border rounded-lg p-2.5 ${d.waived ? 'border-slate-200 bg-slate-50/60' : 'border-amber-200 bg-amber-50/60'}`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className={`text-xs font-medium ${d.waived ? 'text-slate-400 line-through' : 'text-slate-800'}`}>{dateLabel(d.date)}</p>
+                        {d.waived && d.reason && <p className="text-[10px] text-slate-400 mt-0.5">Waived: {d.reason}</p>}
+                      </div>
+                      {d.waived ? (
+                        <button
+                          onClick={() => unwaive(d)}
+                          disabled={busyDate === d.date}
+                          className="flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-slate-500 hover:text-blue-600 border border-slate-200 rounded-md disabled:opacity-50"
+                        >
+                          {busyDate === d.date ? <Spinner size={12} /> : <Undo2 className="w-3 h-3" />} Un-waive
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => waive(d.date)}
+                          disabled={busyDate === d.date}
+                          className="px-2 py-1 text-[11px] font-semibold text-amber-700 hover:text-amber-900 bg-amber-100 hover:bg-amber-200 rounded-md disabled:opacity-50"
+                        >
+                          {busyDate === d.date ? <Spinner size={12} /> : 'Waive'}
+                        </button>
+                      )}
+                    </div>
+                    {!d.waived && (
+                      <input
+                        type="text"
+                        value={reasonDraft[d.date] || ''}
+                        onChange={(e) => setReasonDraft((prev) => ({ ...prev, [d.date]: e.target.value }))}
+                        placeholder="Reason (optional) — e.g. approved late start"
+                        className="w-full mt-2 px-2 py-1 text-[11px] border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-400"
+                      />
+                    )}
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+
+        <div className="px-5 py-4 border-t border-slate-200">
+          <button onClick={onClose} className="w-full px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg">
+            Done
+          </button>
+        </div>
       </div>
     </div>
   );

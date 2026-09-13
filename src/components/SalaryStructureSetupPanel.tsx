@@ -30,6 +30,8 @@ import {
   User,
   Search,
   ChevronDown,
+  Clock,
+  History,
   TrendingUp,
   TrendingDown,
   RefreshCw
@@ -100,7 +102,7 @@ const money = (n: number | null | undefined) =>
 
 export const SalaryStructureSetupPanel: React.FC<SalaryStructureSetupPanelProps> = ({ token }) => {
   const authHeaders = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
-  const [subTab, setSubTab] = useState<'components' | 'grades' | 'individual'>('components');
+  const [subTab, setSubTab] = useState<'components' | 'grades' | 'individual' | 'late_policy'>('components');
 
   return (
     <div className="space-y-4">
@@ -129,14 +131,24 @@ export const SalaryStructureSetupPanel: React.FC<SalaryStructureSetupPanelProps>
         >
           <User className="w-3.5 h-3.5" /> Employee Salary
         </button>
+        <button
+          onClick={() => setSubTab('late_policy')}
+          className={`flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+            subTab === 'late_policy' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-blue-600'
+          }`}
+        >
+          <Clock className="w-3.5 h-3.5" /> Late Policy
+        </button>
       </div>
 
       {subTab === 'components' ? (
         <SalaryComponentsPanel authHeaders={authHeaders} />
       ) : subTab === 'grades' ? (
         <PayGradesPanel authHeaders={authHeaders} />
-      ) : (
+      ) : subTab === 'individual' ? (
         <IndividualSalaryPanel authHeaders={authHeaders} />
+      ) : (
+        <LatePolicyPanel authHeaders={authHeaders} />
       )}
     </div>
   );
@@ -1340,6 +1352,253 @@ const IndividualSalaryModal: React.FC<{
             {submitting ? <Spinner size={14} /> : isEdit ? 'Save Changes' : 'Create'}
           </button>
         </div>
+      </div>
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// Late Attendance Policy — shift start time + grace period + how many lates
+// equal one deducted day, with the same "never overwrite, always add a new
+// history row" behavior as Pay Grades/Salary Structures: saving a change
+// inserts a new effective-dated row, so a payroll run for an old month keeps
+// using whatever policy actually applied then, and the table below the form
+// is a full audit trail of who changed what and when.
+// ---------------------------------------------------------------------------
+interface LatePolicyRow {
+  id: number;
+  shift_start_time: string;
+  grace_minutes: number;
+  lates_per_deduction_day: number;
+  effective_date: string;
+  changed_by_name: string | null;
+  created_at: string;
+}
+
+const LatePolicyPanel: React.FC<{ authHeaders: Record<string, string> }> = ({ authHeaders }) => {
+  const [history, setHistory] = useState<LatePolicyRow[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const current = history[0] || null;
+
+  const [shiftStart, setShiftStart] = useState('09:00');
+  const [graceMinutes, setGraceMinutes] = useState('10');
+  const [latesPerDay, setLatesPerDay] = useState('3');
+  const [effectiveDate, setEffectiveDate] = useState(new Date().toISOString().slice(0, 10));
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
+  const [saved, setSaved] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const res = await fetch(apiUrl('/api/payroll/late-policy'), { headers: authHeaders });
+      if (!res.ok) {
+        setError("Failed to load Late Policy — you may not have access.");
+        return;
+      }
+      const data: LatePolicyRow[] = await res.json();
+      setHistory(data);
+      if (data.length > 0) {
+        setShiftStart(String(data[0].shift_start_time).slice(0, 5));
+        setGraceMinutes(String(data[0].grace_minutes));
+        setLatesPerDay(String(data[0].lates_per_deduction_day));
+      }
+    } catch {
+      setError('Failed to load Late Policy.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const lateCutoff = useMemo(() => {
+    const [h, m] = shiftStart.split(':').map(Number);
+    if (!Number.isFinite(h) || !Number.isFinite(m)) return '';
+    const total = h * 60 + m + (Number(graceMinutes) || 0);
+    const hh = Math.floor((total % 1440) / 60);
+    const mm = total % 60;
+    const period = hh >= 12 ? 'PM' : 'AM';
+    const hour12 = hh % 12 === 0 ? 12 : hh % 12;
+    return `${hour12}:${String(mm).padStart(2, '0')} ${period}`;
+  }, [shiftStart, graceMinutes]);
+
+  const save = async () => {
+    setSaveError('');
+    setSaved(false);
+    if (!shiftStart) {
+      setSaveError('Shift start time is required.');
+      return;
+    }
+    if (!(Number(graceMinutes) >= 0)) {
+      setSaveError('Grace period must be 0 or more minutes.');
+      return;
+    }
+    if (!(Number(latesPerDay) >= 1)) {
+      setSaveError('Lates-per-deduction-day must be at least 1.');
+      return;
+    }
+    if (!effectiveDate) {
+      setSaveError('Effective date is required.');
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await fetch(apiUrl('/api/payroll/late-policy'), {
+        method: 'POST',
+        headers: { ...authHeaders, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          shift_start_time: shiftStart,
+          grace_minutes: Number(graceMinutes),
+          lates_per_deduction_day: Number(latesPerDay),
+          effective_date: effectiveDate
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setSaveError(data.error || 'Failed to save Late Policy.');
+        return;
+      }
+      setSaved(true);
+      await load();
+    } catch {
+      setSaveError('Failed to save Late Policy.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+      <div className="lg:col-span-2 bg-white rounded-2xl shadow-sm border border-slate-200 p-5 space-y-4 h-fit">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-800">Late Attendance Policy</h3>
+          <p className="text-[11px] text-slate-400 mt-0.5">
+            Applies from the Effective Date onward — a payroll run for an earlier month keeps using whatever was set for that month.
+          </p>
+        </div>
+
+        {current && (
+          <div className="bg-blue-50 border border-blue-100 rounded-lg px-3 py-2 text-[11px] text-blue-700">
+            Currently active: shift starts <strong>{String(current.shift_start_time).slice(0, 5)}</strong>, grace{' '}
+            <strong>{current.grace_minutes} min</strong>, <strong>{current.lates_per_deduction_day}</strong> lates = 1 day's pay deducted
+            (since {current.effective_date?.slice(0, 10)}).
+          </div>
+        )}
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-[11px] text-slate-500 mb-1">Shift Start Time</label>
+            <input
+              type="time"
+              value={shiftStart}
+              onChange={(e) => setShiftStart(e.target.value)}
+              className="w-full px-2.5 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
+            />
+          </div>
+          <div>
+            <label className="block text-[11px] text-slate-500 mb-1">Grace Period (minutes)</label>
+            <input
+              type="number"
+              min="0"
+              value={graceMinutes}
+              onChange={(e) => setGraceMinutes(e.target.value)}
+              className="w-full px-2.5 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
+            />
+          </div>
+        </div>
+
+        {lateCutoff && (
+          <p className="text-[11px] text-slate-500 -mt-2">
+            → An employee checking in after <strong>{lateCutoff}</strong> is marked late that day.
+          </p>
+        )}
+
+        <div>
+          <label className="block text-[11px] text-slate-500 mb-1">Lates per Deducted Day</label>
+          <input
+            type="number"
+            min="1"
+            value={latesPerDay}
+            onChange={(e) => setLatesPerDay(e.target.value)}
+            className="w-full px-2.5 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
+          />
+          <p className="text-[10px] text-slate-400 mt-1">
+            e.g. 3 means every 3rd, 6th, 9th... late in a month deducts one full day's gross pay.
+          </p>
+        </div>
+
+        <div>
+          <label className="block text-[11px] text-slate-500 mb-1">Effective Date</label>
+          <input
+            type="date"
+            value={effectiveDate}
+            onChange={(e) => setEffectiveDate(e.target.value)}
+            className="w-full px-2.5 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
+          />
+          <p className="text-[10px] text-slate-400 mt-1">
+            Saving adds a new history row rather than overwriting the current one — you can also schedule a future change by picking a later date.
+          </p>
+        </div>
+
+        {saveError && <p className="text-xs text-rose-600">{saveError}</p>}
+        {saved && <p className="text-xs text-emerald-600">Saved — this is now logged in the history.</p>}
+
+        <button
+          onClick={save}
+          disabled={saving}
+          className="w-full flex items-center justify-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg disabled:opacity-50"
+        >
+          {saving ? <Spinner size={14} /> : 'Save Policy Change'}
+        </button>
+      </div>
+
+      <div className="lg:col-span-3 bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden h-fit">
+        <div className="flex items-center gap-1.5 px-4 py-3 border-b border-slate-200">
+          <History className="w-3.5 h-3.5 text-slate-400" />
+          <h3 className="text-xs font-semibold text-slate-700">Change History</h3>
+        </div>
+        {loading ? (
+          <div className="flex justify-center py-10"><Spinner size={22} /></div>
+        ) : error ? (
+          <p className="text-xs text-rose-600 text-center py-10">{error}</p>
+        ) : history.length === 0 ? (
+          <p className="text-xs text-slate-400 text-center py-10">No policy set yet.</p>
+        ) : (
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="bg-slate-50 text-slate-500 text-left">
+                <th className="px-4 py-2 font-semibold">Effective From</th>
+                <th className="px-4 py-2 font-semibold">Shift Start</th>
+                <th className="px-4 py-2 font-semibold">Grace</th>
+                <th className="px-4 py-2 font-semibold">Lates/Day</th>
+                <th className="px-4 py-2 font-semibold">Changed By</th>
+              </tr>
+            </thead>
+            <tbody>
+              {history.map((h, idx) => (
+                <tr key={h.id} className="border-t border-slate-100">
+                  <td className="px-4 py-2 text-slate-700">
+                    {h.effective_date?.slice(0, 10)}
+                    {idx === 0 && (
+                      <span className="ml-2 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700">Current</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2 text-slate-600">{String(h.shift_start_time).slice(0, 5)}</td>
+                  <td className="px-4 py-2 text-slate-600">{h.grace_minutes} min</td>
+                  <td className="px-4 py-2 text-slate-600">{h.lates_per_deduction_day}</td>
+                  <td className="px-4 py-2 text-slate-500">{h.changed_by_name || '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
     </div>
   );
