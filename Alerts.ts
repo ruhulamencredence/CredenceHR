@@ -26,7 +26,7 @@
 
 import type { Express } from "express";
 
-export type AlertType = "leave_application" | "conveyance_claim" | "conveyance_disbursed";
+export type AlertType = "leave_application" | "conveyance_claim" | "conveyance_disbursed" | "asset_requisition";
 
 export interface AlertRow {
   id: number;

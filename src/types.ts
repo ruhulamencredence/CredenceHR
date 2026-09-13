@@ -3,7 +3,7 @@ export type UserRole = 'superadmin' | 'admin' | 'user';
 // Every Admin Panel tab. A Superadmin implicitly has all of these; a plain Admin
 // only sees/uses the ones the Superadmin has explicitly granted via
 // PUT /api/users/:id/module-permissions. Mirrors ADMIN_MODULE_KEYS in server.ts.
-export type AdminModuleKey = 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'recycle' | 'editlog' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'disbursement' | 'employees' | 'departments' | 'tracking' | 'office_attendance' | 'holidays' | 'payroll';
+export type AdminModuleKey = 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'recycle' | 'editlog' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'disbursement' | 'employees' | 'departments' | 'tracking' | 'office_attendance' | 'holidays' | 'payroll' | 'asset_management';
 
 export const ADMIN_MODULES: { key: AdminModuleKey; label: string }[] = [
   { key: 'reports', label: 'Reports' },
@@ -33,6 +33,7 @@ export const ADMIN_MODULES: { key: AdminModuleKey; label: string }[] = [
   { key: 'notices', label: 'Notices' },
   { key: 'holidays', label: 'Holidays (Global Calendar)' },
   { key: 'payroll', label: 'Payroll' },
+  { key: 'asset_management', label: 'Asset Management' },
   { key: 'recycle', label: 'Job Recycle' },
   { key: 'editlog', label: 'MPR Edit Log' }
 ];
@@ -1117,7 +1118,7 @@ export interface AdminNavRequest {
   // the "My Conveyance Bill Claim" sub-view (an Admin's own Bills/Claims,
   // read-only), shown alongside the 'conveyance' tab to anyone who already
   // has that module, not a separately-grantable permission of its own.
-  target: 'reports' | 'mprs' | 'imports' | 'editlog' | 'recycle' | 'projects' | 'branches' | 'users' | 'notices' | 'approvals' | 'attendance' | 'attendance_reports' | 'employees' | 'departments' | 'tracking' | 'holidays' | 'disbursement' | 'my_conveyance';
+  target: 'reports' | 'mprs' | 'imports' | 'editlog' | 'recycle' | 'projects' | 'branches' | 'users' | 'notices' | 'approvals' | 'attendance' | 'attendance_reports' | 'employees' | 'departments' | 'tracking' | 'holidays' | 'disbursement' | 'my_conveyance' | 'asset_management';
   ts: number;
 }
 
