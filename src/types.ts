@@ -143,6 +143,29 @@ export interface Employee {
   permanent_zip?: string | null;
 }
 
+// One row of Self Service -> Employee Directory (GET /api/employee-directory)
+// — the read-only, company-wide roster every signed-in account can browse.
+// Deliberately a narrower shape than Employee above: only directory-safe
+// fields (see EmployeeDirectoryRoutes.ts's own comment for why).
+export interface EmployeeDirectoryEntry {
+  id: number;
+  employee_id: string | null;
+  name: string;
+  designation: string | null;
+  department: string | null;
+  department_id: number | null;
+  email: string | null;
+  phone: string | null;
+  mobile: string | null;
+  telephone: string | null;
+  branch: string | null;
+  division: string | null;
+  unit: string | null;
+  is_active: boolean;
+  user_id: number | null;
+  supervisor_name: string | null;
+}
+
 // One row of Admin Panel -> Employees -> Edit -> Supervisor tab. The
 // Supervisor is always another Employee picked from the same directory
 // (never typed free-hand) — supervisor_id points at that Employee's id;
@@ -157,6 +180,30 @@ export interface EmployeeSupervisor {
   supervisor_employee_code?: string | null;
   effective_date: string | null;
   is_direct: boolean;
+}
+
+// One row of Admin Panel -> Employees -> "Transfer / Change Role" history
+// (GET /api/employees/:id/transfers). Keeps the FROM and TO value of
+// Department/Designation/Supervisor for a given change, so an Employee's job
+// history stays auditable — see EmployeeTransferRoutes.ts.
+export interface EmployeeTransfer {
+  id: number;
+  employee_id: number;
+  from_department_id: number | null;
+  from_department_name: string | null;
+  to_department_id: number | null;
+  to_department_name: string | null;
+  from_designation: string | null;
+  to_designation: string | null;
+  from_supervisor_id: number | null;
+  to_supervisor_id: number | null;
+  from_supervisor_name?: string | null;
+  to_supervisor_name?: string | null;
+  effective_date: string | null;
+  reason: string | null;
+  action_by: number | null;
+  action_by_name?: string | null;
+  created_at?: string;
 }
 
 // Admin Panel -> Departments (its own 'departments' AdminModuleKey) — real

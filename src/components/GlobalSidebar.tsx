@@ -44,7 +44,7 @@ interface GlobalSidebarProps {
   onGoToUserClaims: (target: 'movementClaims' | 'conveyanceBill') => void;
   // Everyday employee self-service items — not Admin-gated, shown to every
   // account regardless of role/module access.
-  onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'myLeave' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll') => void;
+  onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'myLeave' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory') => void;
   // Admin Panel's own Movement Claims / Conveyance Bill Claim review tabs —
   // separate feature from onGoToUserClaims above, gated by module_permissions
   // like every other Admin Panel module.
@@ -149,6 +149,11 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     // Leave balance, read-only (see MyLeave.tsx). Distinct from "Leave
     // Manage" below, which is gated and shows/edits every account's balance.
     { key: 'myLeave', label: 'My Leave', icon: ListChecks, onClick: () => onGoToSelfServiceTab('myLeave') },
+    // Company-wide roster, browsable by every account regardless of role or
+    // Admin Panel module access (unlike Admin Panel -> Employees, which is
+    // the HR-editing view gated behind the 'employees' module) — see
+    // EmployeeDirectory.tsx / EmployeeDirectoryRoutes.ts.
+    { key: 'employeeDirectory', label: 'Employee Directory', icon: Contact, onClick: () => onGoToSelfServiceTab('employeeDirectory') },
   ];
   // "Payroll" — Coming Soon placeholder (PayrollModule.tsx/PayrollRoutes.ts),
   // but permission-gated like every other module from the start: a

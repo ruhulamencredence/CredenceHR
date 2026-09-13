@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Contact, Plus, Trash2, Edit2, X, Search, Eye, EyeOff, Mail, Phone, Briefcase, Building2, KeyRound, ShieldCheck,
-  FolderKanban, LayoutGrid, UserCircle2, ClipboardList, MapPin, Users2, Star, Link2
+  FolderKanban, LayoutGrid, UserCircle2, ClipboardList, MapPin, Users2, Star, Link2, ArrowLeftRight, History, ArrowRight
 } from 'lucide-react';
-import { Employee, EmployeeSupervisor, User, Project, Department, AdminModuleKey, ADMIN_MODULES } from '../types';
+import { Employee, EmployeeSupervisor, EmployeeTransfer, User, Project, Department, AdminModuleKey, ADMIN_MODULES } from '../types';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
 
@@ -177,6 +177,27 @@ interface SupervisorFormState {
 
 const emptySupervisorForm: SupervisorFormState = { supervisor_id: '', effective_date: '', is_direct: false };
 
+// "Transfer / Change Role" modal form (Admin Panel -> Employees -> row
+// action) — POST /api/employees/:id/transfer. New Department/New Supervisor
+// left blank means "keep as-is"; only New Designation and Effective Date are
+// required, matching the reference HR workflow's own Modal (New Department /
+// New Designation / New Supervisor / Effective Date / Remarks).
+interface TransferFormState {
+  to_department_id: string;
+  to_designation: string;
+  to_supervisor_id: string;
+  effective_date: string;
+  reason: string;
+}
+
+const emptyTransferForm: TransferFormState = {
+  to_department_id: '',
+  to_designation: '',
+  to_supervisor_id: '',
+  effective_date: '',
+  reason: ''
+};
+
 export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) => {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
@@ -227,6 +248,16 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
   const [selectedLinkUserId, setSelectedLinkUserId] = useState<number | null>(null);
   const [linkingUser, setLinkingUser] = useState(false);
   const [unlinkingId, setUnlinkingId] = useState<number | null>(null);
+
+  // "Transfer / Change Role" modal — Department/Designation/Supervisor
+  // change with history, kept as its own row-action modal (not a tab on the
+  // Add/Edit form) since it's an action taken on an already-saved Employee,
+  // not a field edit — see EmployeeTransferRoutes.ts.
+  const [transferringFor, setTransferringFor] = useState<Employee | null>(null);
+  const [transferForm, setTransferForm] = useState<TransferFormState>(emptyTransferForm);
+  const [savingTransfer, setSavingTransfer] = useState(false);
+  const [transferHistory, setTransferHistory] = useState<EmployeeTransfer[]>([]);
+  const [loadingTransferHistory, setLoadingTransferHistory] = useState(false);
 
   const authHeaders = { Authorization: `Bearer ${token}` };
 
@@ -566,6 +597,75 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
     }
   };
 
+  // Loads the Transfer History list for whichever Employee the modal is
+  // currently open for — called on open, and again after a successful
+  // transfer so the newly-added row shows up immediately.
+  const fetchTransferHistory = async (employeeId: number) => {
+    setLoadingTransferHistory(true);
+    try {
+      const res = await fetch(apiUrl(`/api/employees/${employeeId}/transfers`), { headers: authHeaders });
+      if (res.ok) setTransferHistory(await res.json());
+    } catch {
+      // History is supplementary — a failed load here shouldn't block the
+      // Transfer form itself, so it's left to just show an empty list.
+    } finally {
+      setLoadingTransferHistory(false);
+    }
+  };
+
+  const openTransferForm = (emp: Employee) => {
+    setTransferringFor(emp);
+    setTransferForm({
+      to_department_id: emp.department_id ? String(emp.department_id) : '',
+      to_designation: emp.designation || '',
+      to_supervisor_id: '',
+      effective_date: '',
+      reason: ''
+    });
+    setTransferHistory([]);
+    fetchTransferHistory(emp.id);
+  };
+
+  const closeTransferForm = () => {
+    setTransferringFor(null);
+    setTransferForm(emptyTransferForm);
+    setTransferHistory([]);
+  };
+
+  const handleSaveTransfer = async () => {
+    if (!transferringFor) return;
+    if (!transferForm.effective_date) {
+      return setMessage({ type: 'error', text: 'Effective Date is required.' });
+    }
+    if (transferForm.to_supervisor_id && Number(transferForm.to_supervisor_id) === transferringFor.id) {
+      return setMessage({ type: 'error', text: 'An employee cannot be their own supervisor.' });
+    }
+    setSavingTransfer(true);
+    try {
+      const res = await fetch(apiUrl(`/api/employees/${transferringFor.id}/transfer`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        body: JSON.stringify({
+          to_department_id: transferForm.to_department_id ? Number(transferForm.to_department_id) : null,
+          to_designation: transferForm.to_designation.trim() || null,
+          to_supervisor_id: transferForm.to_supervisor_id ? Number(transferForm.to_supervisor_id) : null,
+          effective_date: transferForm.effective_date,
+          reason: transferForm.reason.trim() || null
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to transfer employee');
+      setMessage({ type: 'success', text: `${transferringFor.name} transferred successfully.` });
+      await fetchAll();
+      await fetchTransferHistory(transferringFor.id);
+      setTransferForm((f) => ({ ...f, to_supervisor_id: '', effective_date: '', reason: '' }));
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message || 'Something went wrong' });
+    } finally {
+      setSavingTransfer(false);
+    }
+  };
+
   const openCreateLoginForm = (emp: Employee) => {
     setCreatingLoginFor(emp);
     setLoginForm(emptyLoginForm);
@@ -853,6 +953,14 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap text-right">
                       <div className="flex items-center justify-end gap-1">
+                        <button
+                          type="button"
+                          onClick={() => openTransferForm(emp)}
+                          className="p-2 text-slate-400 hover:text-violet-600 hover:bg-violet-50 rounded-lg transition-colors"
+                          title="Transfer / Change Role"
+                        >
+                          <ArrowLeftRight className="w-4 h-4" />
+                        </button>
                         <button
                           type="button"
                           onClick={() => openEditForm(emp)}
@@ -1343,6 +1451,137 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                 )}
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* --- Transfer / Change Role Modal --- */}
+      {transferringFor && (
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div className="p-5 border-b border-slate-200 flex items-center justify-between sticky top-0 bg-white z-10">
+              <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                <ArrowLeftRight className="w-4.5 h-4.5 text-violet-600" /> Transfer / Change Role
+              </h3>
+              <button onClick={closeTransferForm} className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors">
+                <X className="w-4.5 h-4.5" />
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              <p className="text-xs text-slate-500">
+                Moving <span className="font-semibold text-slate-700">{transferringFor.name}</span> to a new Department, Designation, and/or Supervisor. Leave a field as-is to keep it unchanged — every change is kept on record below.
+              </p>
+
+              <div className="grid sm:grid-cols-2 gap-3">
+                <div>
+                  <label className={fieldLabelClass}>New Department</label>
+                  <select
+                    value={transferForm.to_department_id}
+                    onChange={(e) => setTransferForm((f) => ({ ...f, to_department_id: e.target.value }))}
+                    className={fieldInputClass}
+                  >
+                    <option value="">
+                      {transferringFor.department ? `Keep — ${transferringFor.department}` : 'No Department set'}
+                    </option>
+                    {departments.map((d) => (
+                      <option key={d.id} value={d.id}>{d.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <TextField
+                  label="New Designation"
+                  value={transferForm.to_designation}
+                  onChange={(v) => setTransferForm((f) => ({ ...f, to_designation: v }))}
+                  placeholder={transferringFor.designation || 'e.g. Senior Engineer'}
+                />
+              </div>
+
+              <div>
+                <label className={fieldLabelClass}>New Supervisor</label>
+                <EmployeeSearchSelect
+                  employees={employees}
+                  value={transferForm.to_supervisor_id}
+                  onChange={(v) => setTransferForm((f) => ({ ...f, to_supervisor_id: v }))}
+                  excludeId={transferringFor.id}
+                  placeholder="Keep current supervisor…"
+                />
+              </div>
+
+              <div className="grid sm:grid-cols-2 gap-3">
+                <DateField
+                  label="Effective Date *"
+                  value={transferForm.effective_date}
+                  onChange={(v) => setTransferForm((f) => ({ ...f, effective_date: v }))}
+                />
+                <TextField
+                  label="Remarks / Reason"
+                  value={transferForm.reason}
+                  onChange={(v) => setTransferForm((f) => ({ ...f, reason: v }))}
+                  placeholder="e.g. Promotion, Departmental Shift"
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleSaveTransfer}
+                  disabled={savingTransfer}
+                  className="px-4 py-2 bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold rounded-xl shadow-sm transition-all disabled:opacity-50"
+                >
+                  {savingTransfer ? 'Transferring…' : 'Confirm Transfer'}
+                </button>
+                <button type="button" onClick={closeTransferForm} className="px-3 py-2 text-xs font-semibold text-slate-500 hover:bg-slate-100 rounded-xl transition-colors">
+                  Close
+                </button>
+              </div>
+
+              <div className="pt-2 border-t border-slate-100">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-600 flex items-center gap-1.5 mb-2">
+                  <History className="w-3.5 h-3.5 text-slate-400" /> Transfer History
+                </p>
+                {loadingTransferHistory ? (
+                  <p className="text-xs text-slate-400">Loading…</p>
+                ) : transferHistory.length === 0 ? (
+                  <p className="text-xs text-slate-400">No transfers recorded yet for this employee.</p>
+                ) : (
+                  <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
+                    {transferHistory.map((t) => (
+                      <div key={t.id} className="rounded-xl border border-slate-200 p-3 text-xs text-slate-600 space-y-1">
+                        <div className="flex items-center justify-between">
+                          <span className="font-semibold text-slate-700">{toDateInput(t.effective_date) || '—'}</span>
+                          {t.action_by_name && <span className="text-slate-400">by {t.action_by_name}</span>}
+                        </div>
+                        {(t.from_department_name || t.to_department_name) && (
+                          <div className="flex items-center gap-1.5">
+                            <Building2 className="w-3 h-3 text-slate-400" />
+                            <span>{t.from_department_name || '—'}</span>
+                            <ArrowRight className="w-3 h-3 text-slate-300" />
+                            <span className="font-medium text-slate-800">{t.to_department_name || '—'}</span>
+                          </div>
+                        )}
+                        {(t.from_designation || t.to_designation) && (
+                          <div className="flex items-center gap-1.5">
+                            <Briefcase className="w-3 h-3 text-slate-400" />
+                            <span>{t.from_designation || '—'}</span>
+                            <ArrowRight className="w-3 h-3 text-slate-300" />
+                            <span className="font-medium text-slate-800">{t.to_designation || '—'}</span>
+                          </div>
+                        )}
+                        {(t.from_supervisor_name || t.to_supervisor_name) && (
+                          <div className="flex items-center gap-1.5">
+                            <Users2 className="w-3 h-3 text-slate-400" />
+                            <span>{t.from_supervisor_name || '—'}</span>
+                            <ArrowRight className="w-3 h-3 text-slate-300" />
+                            <span className="font-medium text-slate-800">{t.to_supervisor_name || '—'}</span>
+                          </div>
+                        )}
+                        {t.reason && <p className="text-slate-500 italic">"{t.reason}"</p>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       )}
