@@ -21,6 +21,7 @@ import { EmployeeTrackingPanel } from './EmployeeTrackingPanel';
 import { OfficeAttendancePanel } from './OfficeAttendancePanel';
 import { HolidayCalendarPanel } from './HolidayCalendarPanel';
 import { AssetManagementAdmin } from './AssetManagementAdmin';
+import { AdminDashboard } from './AdminDashboard';
 import { Spinner } from './Spinner';
 import { apiUrl } from '../lib/api';
 import { formatDate, todayDateOnlyString } from '../lib/formatDate';
@@ -164,12 +165,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     ? ADMIN_MODULES.map((m) => m.key)
     : (user.module_permissions || []);
   const canSee = (key: AdminModuleKey) => visibleModules.includes(key);
+  // The new Admin Dashboard tab isn't a grantable module (see GlobalSidebar's
+  // adminDashboardItem) — it's this account's own home screen, so it's
+  // visible whenever the real role is admin/superadmin, regardless of
+  // module_permissions (and never for a plain 'user' role account, even one
+  // holding module_permissions).
+  const isAdminRole = user.role === 'admin' || user.role === 'superadmin';
   // Whether THIS logged-in Admin/Superadmin can see the "Last Login Location"
   // column. Always true for a Superadmin; a plain Admin needs the Superadmin to
   // have explicitly granted user.can_view_login_location.
   const canSeeLoginLocation = isSuperAdmin || !!user.can_view_login_location;
 
-  const [activeTab, setActiveTab] = useState<'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'my_conveyance' | 'disbursement' | 'holidays' | 'asset_management'>(
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'my_conveyance' | 'disbursement' | 'holidays' | 'asset_management'>(
     () => {
       // Restores whichever tab this Admin was last looking at — see the
       // "pull down to reload" note in App.tsx: since a reload now has to be
@@ -180,12 +187,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         // 'my_conveyance' isn't its own module_permissions entry — it rides
         // along with 'conveyance' (see the tab-visibility effect below).
         const savedVisible =
+          saved === 'dashboard' ? isAdminRole :
           saved === 'my_conveyance' ? isSuperAdmin || visibleModules.includes('conveyance') : isSuperAdmin || visibleModules.includes(saved as AdminModuleKey);
         if (saved && savedVisible) return saved as any;
       } catch {
         // ignore — falls through to the normal default below
       }
-      return (visibleModules[0] as any) || 'reports';
+      return isAdminRole ? 'dashboard' : ((visibleModules[0] as any) || 'reports');
     }
   );
 
@@ -213,6 +221,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // groups (Reports / MPR Nos / Data Import / MPR Edit Log / Job Recycle).
   useEffect(() => {
     if (!adminNavRequest) return;
+    if (adminNavRequest.target === 'dashboard') {
+      if (isAdminRole) setActiveTab('dashboard');
+      return;
+    }
     // 'my_conveyance' isn't its own module_permissions entry — it rides along
     // with 'conveyance' (see the "My Conveyance Bill Claim" item in GlobalSidebar).
     const visible = adminNavRequest.target === 'my_conveyance' ? canSee('conveyance') : canSee(adminNavRequest.target as AdminModuleKey);
@@ -224,7 +236,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // fall back to the first tab they can actually see instead of showing a blank/
   // forbidden panel.
   useEffect(() => {
-    const activeTabStillVisible = activeTab === 'my_conveyance' ? canSee('conveyance') : canSee(activeTab);
+    const activeTabStillVisible =
+      activeTab === 'dashboard' ? isAdminRole :
+      activeTab === 'my_conveyance' ? canSee('conveyance') : canSee(activeTab);
     if (!activeTabStillVisible && visibleModules.length > 0) {
       setActiveTab(visibleModules[0] as any);
     }
@@ -2343,7 +2357,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         </p>
       </div>
 
-      {visibleModules.length === 0 && (
+      {visibleModules.length === 0 && activeTab !== 'dashboard' && (
         <div className="p-6 rounded-xl border border-amber-200 bg-amber-50 text-amber-800 text-sm">
           Your Superadmin hasn't granted you access to any Admin Panel section yet. Please contact them.
         </div>
@@ -2356,6 +2370,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           <span>{message.text}</span>
           <button onClick={() => setMessage(null)} className="text-xs underline opacity-70 hover:opacity-100">Dismiss</button>
         </div>
+      )}
+
+      {/* TAB 0: DASHBOARD — role admin/superadmin only (see isAdminRole above) */}
+      {activeTab === 'dashboard' && isAdminRole && (
+        <AdminDashboard token={token} user={user} />
       )}
 
       {/* TAB 1: REPORTS */}

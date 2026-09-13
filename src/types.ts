@@ -1165,7 +1165,7 @@ export interface AdminNavRequest {
   // the "My Conveyance Bill Claim" sub-view (an Admin's own Bills/Claims,
   // read-only), shown alongside the 'conveyance' tab to anyone who already
   // has that module, not a separately-grantable permission of its own.
-  target: 'reports' | 'mprs' | 'imports' | 'editlog' | 'recycle' | 'projects' | 'branches' | 'users' | 'notices' | 'approvals' | 'attendance' | 'attendance_reports' | 'employees' | 'departments' | 'tracking' | 'holidays' | 'disbursement' | 'my_conveyance' | 'asset_management';
+  target: 'dashboard' | 'reports' | 'mprs' | 'imports' | 'editlog' | 'recycle' | 'projects' | 'branches' | 'users' | 'notices' | 'approvals' | 'attendance' | 'attendance_reports' | 'employees' | 'departments' | 'tracking' | 'holidays' | 'disbursement' | 'my_conveyance' | 'asset_management';
   ts: number;
 }
 
