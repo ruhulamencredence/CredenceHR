@@ -3,7 +3,7 @@ import {
   X, LogOut, Home, Wallet, Briefcase, FileText, Edit2, Route, CreditCard,
   CalendarClock, ListChecks, CheckSquare, ChevronDown, Building2, Users, Users2,
   BarChart3, Upload, History, Recycle, Navigation, Bell, ShieldCheck,
-  Contact, Calendar, Clock, Fingerprint, Banknote, Package,
+  Contact, Calendar, Clock, Fingerprint, Banknote, Package, LayoutDashboard,
 } from 'lucide-react';
 import { User, AdminModuleKey } from '../types';
 import credenceLogo from '../assets/credence-logo.png';
@@ -54,7 +54,7 @@ interface GlobalSidebarProps {
   // 'my_conveyance' is the one exception below: not its own module_permissions
   // entry, just the "My Conveyance Bill Claim" sub-view shown alongside
   // 'conveyance' in claimsGroup, gated on the same 'conveyance' grant.
-  onGoToAdminModule: (target: Exclude<AdminModuleKey, 'claims' | 'conveyance'> | 'my_conveyance') => void;
+  onGoToAdminModule: (target: Exclude<AdminModuleKey, 'claims' | 'conveyance'> | 'my_conveyance' | 'dashboard') => void;
   // Android APK build info modal — previously a header icon, moved in here so
   // the header itself can stay down to just hamburger + profile + logout.
   onOpenApkInfo: () => void;
@@ -181,6 +181,17 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // NOT Admin-gated — a Template Layer or a Leave Application's Reliever can
   // be ANY account, so every account gets this.
   selfServiceItems.push({ key: 'approveApplications', label: 'Approve Application', icon: ShieldCheck, onClick: () => onGoToSelfServiceTab('approveApplications') });
+
+  // "Admin Dashboard" — the new HR-overview landing page (stat tiles, quick
+  // view, charts, notices, leave balances). Unlike every other Admin Panel
+  // item below, this is NOT module_permissions-gated — it's not a grantable
+  // module, it's the Admin/Superadmin's own home screen — so a plain 'user'
+  // role account (even one holding module_permissions) never sees it, only
+  // real role === 'admin' | 'superadmin' accounts do.
+  const isAdminRole = user.role === 'admin' || user.role === 'superadmin';
+  const adminDashboardItem: NavItem | null = isAdminRole
+    ? { key: 'admin_dashboard', label: 'Admin Dashboard', icon: LayoutDashboard, onClick: () => onGoToAdminModule('dashboard') }
+    : null;
 
   // "Admin Panel" — Reports group (expandable) + flat items, same grouping
   // the old AdminSidebar used, each filtered by canSeeModule.
@@ -359,9 +370,11 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
           <p className="px-2.5 mt-3 mb-1.5 text-[10px] font-semibold tracking-wide text-white/50">SELF SERVICE</p>
           {selfServiceItems.map(renderItem)}
 
-          {hasAdminPanel && (reportsGroup.length > 0 || claimsGroup.length > 0 || attendanceGroup.length > 0 || adminFlatItems.length > 0) && (
+          {(!!adminDashboardItem || reportsGroup.length > 0 || claimsGroup.length > 0 || attendanceGroup.length > 0 || adminFlatItems.length > 0) && (
             <>
               <p className="px-2.5 mt-3 mb-1.5 text-[10px] font-semibold tracking-wide text-white/50">ADMIN PANEL</p>
+
+              {adminDashboardItem && renderItem(adminDashboardItem)}
 
               {reportsGroup.length > 0 && (
                 <div>
