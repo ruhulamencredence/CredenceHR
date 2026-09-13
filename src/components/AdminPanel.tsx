@@ -5,8 +5,8 @@ import autoTable from 'jspdf-autotable';
 import credenceLogo from '../assets/credence-logo.png';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
 import { savePdfCrossPlatform } from '../lib/saveFile';
-import { Project, Branch, MprNumber, Entry, User, Budget, BudgetItem, UserProjectPermission, EntryEditHistory, BulkUserRow, BulkUserResultItem, AdminModuleKey, ADMIN_MODULES, AttendanceRecord, ClaimsNavRequest, AdminNavRequest, Department } from '../types';
-import { Building2, FileText, Users, Users2, BarChart3, Plus, Trash2, Edit2, Search, Filter, UserCheck, Calendar, Download, Upload, FolderPlus, X, Eye, FileSpreadsheet, KeyRound, History, RotateCcw, Recycle, ListChecks, FileDown, MapPin, LayoutGrid, Navigation, LogIn, LogOut, Bell, Route, ShieldCheck, Wallet, Contact, Lock, Mail } from 'lucide-react';
+import { Project, Branch, MprNumber, Entry, User, Budget, BudgetItem, UserProjectPermission, EntryEditHistory, BulkUserRow, BulkUserResultItem, AdminModuleKey, ADMIN_MODULES, AttendanceRecord, ClaimsNavRequest, AdminNavRequest, Department, LeaveApplication } from '../types';
+import { Building2, FileText, Users, Users2, BarChart3, Plus, Trash2, Edit2, Search, Filter, UserCheck, Calendar, CalendarClock, Download, Upload, FolderPlus, X, Eye, FileSpreadsheet, KeyRound, History, RotateCcw, Recycle, ListChecks, FileDown, MapPin, LayoutGrid, Navigation, LogIn, LogOut, Bell, Route, ShieldCheck, Wallet, Contact, Lock, Mail } from 'lucide-react';
 import LocationMapPicker from './LocationMapPicker';
 import { NoticeManager } from './NoticeManager';
 import { EmployeesPanel } from './EmployeesPanel';
@@ -20,6 +20,7 @@ import { ApprovalBadge } from './ApprovalBadge';
 import { EmployeeTrackingPanel } from './EmployeeTrackingPanel';
 import { OfficeAttendancePanel } from './OfficeAttendancePanel';
 import { HolidayCalendarPanel } from './HolidayCalendarPanel';
+import { Spinner } from './Spinner';
 import { apiUrl } from '../lib/api';
 import { formatDate, todayDateOnlyString } from '../lib/formatDate';
 import { useStableCallback } from '../lib/useStableCallback';
@@ -167,7 +168,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // have explicitly granted user.can_view_login_location.
   const canSeeLoginLocation = isSuperAdmin || !!user.can_view_login_location;
 
-  const [activeTab, setActiveTab] = useState<'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'my_conveyance' | 'disbursement' | 'holidays'>(
+  const [activeTab, setActiveTab] = useState<'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'my_conveyance' | 'disbursement' | 'holidays'>(
     () => {
       // Restores whichever tab this Admin was last looking at — see the
       // "pull down to reload" note in App.tsx: since a reload now has to be
@@ -244,6 +245,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [newEmailInput, setNewEmailInput] = useState('');
   const [changingEmail, setChangingEmail] = useState(false);
   const [selectedModules, setSelectedModules] = useState<Set<AdminModuleKey>>(new Set());
+  // Department-wise scope for the 'attendance_reports' module only — layered
+  // on top of the checkbox above (see PUT /api/users/:id/attendance-report-
+  // departments). Empty set = unrestricted (every Department visible), same
+  // as before this existed; only meaningful while 'attendance_reports' is
+  // checked in selectedModules, but kept even if unchecked mid-edit so
+  // re-checking it doesn't lose what was picked in this same modal session.
+  const [attendanceReportDepts, setAttendanceReportDepts] = useState<Set<string>>(new Set());
+  const [loadingAttendanceReportDepts, setLoadingAttendanceReportDepts] = useState(false);
+  // Department-wise scope for the 'leave_applications' module — same idea as
+  // attendanceReportDepts above, backed by PUT /api/users/:id/leave-
+  // application-departments instead. Empty set = unrestricted.
+  const [leaveApplicationDepts, setLeaveApplicationDepts] = useState<Set<string>>(new Set());
+  const [loadingLeaveApplicationDepts, setLoadingLeaveApplicationDepts] = useState(false);
   const [userPanelAccessEnabled, setUserPanelAccessEnabled] = useState(false);
   const [leaveManagementAccessEnabled, setLeaveManagementAccessEnabled] = useState(false);
   const [movementClaimAccessEnabled, setMovementClaimAccessEnabled] = useState(false);
@@ -262,6 +276,71 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     setConveyanceClaimAccessEnabled(!!u.can_view_conveyance_claims);
     setBudgetModuleAccessEnabled(u.can_view_budget_module !== false);
     setManagingModulesFor(u);
+
+    // Attendance Report Department scope — fetched fresh every time this
+    // modal opens (never trust stale state from a previously-managed user).
+    // Departments this account already supervises (departments.
+    // supervisor_user_id) are pre-ticked ONLY the first time a Superadmin
+    // ever sets this up (no saved scope rows yet) — a sensible starting
+    // point, not a rule: an already-saved scope (even an empty/cleared one)
+    // is trusted as-is and never has the Supervisor default re-applied over
+    // it, and the pre-tick itself can simply be unticked before Save either way.
+    setAttendanceReportDepts(new Set());
+    setLoadingAttendanceReportDepts(true);
+    fetch(apiUrl(`/api/users/${u.id}/attendance-report-departments`), {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+      .then((res) => (res.ok ? res.json() : { departments: [] }))
+      .then((data) => {
+        const saved: string[] = Array.isArray(data?.departments) ? data.departments : [];
+        if (saved.length > 0) {
+          setAttendanceReportDepts(new Set(saved));
+        } else {
+          const supervised = departments.filter((d) => d.supervisor_user_id === u.id).map((d) => d.name);
+          setAttendanceReportDepts(new Set(supervised));
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoadingAttendanceReportDepts(false));
+
+    // Leave Application Department scope — same fetch-fresh-on-open and
+    // Supervisor-pre-tick-only-if-nothing-saved-yet rules as above, just
+    // against the 'leave_applications' module's own endpoint.
+    setLeaveApplicationDepts(new Set());
+    setLoadingLeaveApplicationDepts(true);
+    fetch(apiUrl(`/api/users/${u.id}/leave-application-departments`), {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+      .then((res) => (res.ok ? res.json() : { departments: [] }))
+      .then((data) => {
+        const saved: string[] = Array.isArray(data?.departments) ? data.departments : [];
+        if (saved.length > 0) {
+          setLeaveApplicationDepts(new Set(saved));
+        } else {
+          const supervised = departments.filter((d) => d.supervisor_user_id === u.id).map((d) => d.name);
+          setLeaveApplicationDepts(new Set(supervised));
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoadingLeaveApplicationDepts(false));
+  };
+
+  const toggleAttendanceReportDept = (name: string) => {
+    setAttendanceReportDepts((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  };
+
+  const toggleLeaveApplicationDept = (name: string) => {
+    setLeaveApplicationDepts((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
   };
 
   const toggleSelectedModule = (key: AdminModuleKey) => {
@@ -284,6 +363,34 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to update module access');
+
+      // Department-wise scope for the 'attendance_reports' module — only
+      // meaningful (and only saved) while that module is actually checked
+      // above; leaving it unchecked here means the account loses
+      // 'attendance_reports' access entirely regardless of any scope rows,
+      // so there's nothing useful to persist.
+      if (selectedModules.has('attendance_reports')) {
+        const deptRes = await fetch(apiUrl(`/api/users/${managingModulesFor.id}/attendance-report-departments`), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ departments: Array.from(attendanceReportDepts) })
+        });
+        const deptData = await deptRes.json();
+        if (!deptRes.ok) throw new Error(deptData.error || 'Failed to update Attendance Report Department access');
+      }
+
+      // Department-wise scope for the 'leave_applications' module — same
+      // "only save while the module checkbox is actually ticked" rule as
+      // attendance_reports above.
+      if (selectedModules.has('leave_applications')) {
+        const leaveDeptRes = await fetch(apiUrl(`/api/users/${managingModulesFor.id}/leave-application-departments`), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ departments: Array.from(leaveApplicationDepts) })
+        });
+        const leaveDeptData = await leaveDeptRes.json();
+        if (!leaveDeptRes.ok) throw new Error(leaveDeptData.error || 'Failed to update Leave Application Department access');
+      }
 
       // Also save the "User Panel Access" toggle, only if it actually changed —
       // this is a separate Superadmin-only switch from the tab checkboxes above.
@@ -481,6 +588,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // the actual Check In/Out time stacked in the cell, for when the Admin
   // wants to read times off the grid directly instead of hovering every cell.
   const [monthlyCellDisplay, setMonthlyCellDisplay] = useState<'symbol' | 'times'>('symbol');
+
+  // Admin Panel -> Monthly Leave Application (its own 'leave_applications'
+  // module — separate from the 'attendance_reports' module above, and from
+  // can_manage_leave / the old approver-based "Leave Approvals" page). A
+  // read-only list of every submitted Leave Application, Department-scoped
+  // server-side (GET /api/leave-applications/report) the same way the
+  // Attendance Report is above.
+  const [leaveApplicationsReport, setLeaveApplicationsReport] = useState<LeaveApplication[]>([]);
+  const [leaveApplicationsReportLoading, setLeaveApplicationsReportLoading] = useState(false);
+  const [leaveApplicationsReportError, setLeaveApplicationsReportError] = useState('');
+  const [leaveApplicationsReportSearch, setLeaveApplicationsReportSearch] = useState('');
+  const [leaveApplicationsReportDeptFilter, setLeaveApplicationsReportDeptFilter] = useState('');
+  const [leaveApplicationsReportDepartments, setLeaveApplicationsReportDepartments] = useState<string[]>([]);
 
   const [reportYear, setReportYear] = useState(now.getFullYear());
   const [reportMonth, setReportMonth] = useState(now.getMonth() + 1);
@@ -688,6 +808,43 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     if (reportDepartments.length === 0) fetchReportDepartments();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, attendanceReportView]);
+
+  // Monthly Leave Application report — fetched fresh whenever the Department
+  // filter changes (the filter is applied server-side, same as Attendance
+  // Report's ?department= above) and whenever this tab is opened.
+  const fetchLeaveApplicationsReport = async () => {
+    setLeaveApplicationsReportLoading(true);
+    setLeaveApplicationsReportError('');
+    try {
+      const qs = leaveApplicationsReportDeptFilter ? `?department=${encodeURIComponent(leaveApplicationsReportDeptFilter)}` : '';
+      const res = await fetch(apiUrl(`/api/leave-applications/report${qs}`), {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to load Leave Applications');
+      setLeaveApplicationsReport(Array.isArray(data) ? data : []);
+    } catch (err: any) {
+      setLeaveApplicationsReportError(err.message || 'Failed to load Leave Applications');
+    } finally {
+      setLeaveApplicationsReportLoading(false);
+    }
+  };
+
+  const fetchLeaveApplicationsReportDepartments = async () => {
+    try {
+      const res = await fetch(apiUrl('/api/leave-applications/report/departments'), { headers: { Authorization: `Bearer ${token}` } });
+      if (res.ok) setLeaveApplicationsReportDepartments(await res.json());
+    } catch (err) {
+      console.error('Failed to load department list', err);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab !== 'leave_applications') return;
+    fetchLeaveApplicationsReport();
+    if (leaveApplicationsReportDepartments.length === 0) fetchLeaveApplicationsReportDepartments();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, leaveApplicationsReportDeptFilter]);
 
   // Groups the flat edit-log rows by calendar day (in the local timezone), newest day
   // first, so the tab reads as "which MPR rows were edited on which day" instead of one
@@ -2956,6 +3113,103 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   </ul>
                 )}
               </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB: MONTHLY LEAVE APPLICATION — read-only, Department-scoped list of
+          every submitted Leave Application, gated by its own
+          'leave_applications' module (see ADMIN_MODULES in types.ts). Distinct
+          from "Leave Approvals" (approver-only, decision workflow) and from
+          "Leave Manage" (can_manage_leave, balances) — this is purely a
+          viewing report, the same "Monthly Attendance Report" pattern applied
+          to Leave Applications instead of attendance. */}
+      {activeTab === 'leave_applications' && (
+        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+          <div className="p-6 border-b border-slate-200 flex flex-col gap-4">
+            <div>
+              <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                <CalendarClock className="w-5 h-5 text-blue-600" />
+                Monthly Leave Application
+              </h3>
+              <p className="text-sm text-slate-500 mt-1">
+                Every submitted Leave Application{leaveApplicationsReportDeptFilter ? ` — ${leaveApplicationsReportDeptFilter}` : ''}.
+                {leaveApplicationsReportDepartments.length > 0 && ' Only Departments you have access to are listed below.'}
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-3 items-center">
+              <div className="relative flex-1 min-w-[200px]">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={leaveApplicationsReportSearch}
+                  onChange={(e) => setLeaveApplicationsReportSearch(e.target.value)}
+                  placeholder="Search by name..."
+                  className="w-full pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <select
+                value={leaveApplicationsReportDeptFilter}
+                onChange={(e) => setLeaveApplicationsReportDeptFilter(e.target.value)}
+                className="px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">All Departments</option>
+                {leaveApplicationsReportDepartments.map((d) => (
+                  <option key={d} value={d}>{d}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {leaveApplicationsReportLoading ? (
+            <div className="p-10 flex justify-center"><Spinner /></div>
+          ) : leaveApplicationsReportError ? (
+            <p className="p-6 text-sm text-rose-600">{leaveApplicationsReportError}</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-slate-50 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                  <tr>
+                    <th className="px-4 py-3">Employee</th>
+                    <th className="px-4 py-3">Department</th>
+                    <th className="px-4 py-3">Leave Type</th>
+                    <th className="px-4 py-3">Start Date</th>
+                    <th className="px-4 py-3">End Date</th>
+                    <th className="px-4 py-3">Days</th>
+                    <th className="px-4 py-3">Status</th>
+                    <th className="px-4 py-3">Approver</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {leaveApplicationsReport
+                    .filter((a) => (a.user_name || '').toLowerCase().includes(leaveApplicationsReportSearch.trim().toLowerCase()))
+                    .map((a) => (
+                      <tr key={a.id} className="hover:bg-slate-50">
+                        <td className="px-4 py-3 font-medium text-slate-900">{a.user_name || '(account removed)'}</td>
+                        <td className="px-4 py-3 text-slate-600">{a.department || '—'}</td>
+                        <td className="px-4 py-3 text-slate-600 capitalize">{a.leave_type.replace('_', ' ')}</td>
+                        <td className="px-4 py-3 text-slate-600">{formatDate(a.start_date)}</td>
+                        <td className="px-4 py-3 text-slate-600">{formatDate(a.end_date)}</td>
+                        <td className="px-4 py-3 text-slate-600">{a.day_count}</td>
+                        <td className="px-4 py-3">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold ${
+                            a.status === 'approved' ? 'bg-emerald-50 text-emerald-700' :
+                            a.status === 'rejected' ? 'bg-rose-50 text-rose-700' : 'bg-amber-50 text-amber-700'
+                          }`}>
+                            {a.status}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-slate-600">{a.approver_name || '—'}</td>
+                      </tr>
+                    ))}
+                  {leaveApplicationsReport.length === 0 && (
+                    <tr>
+                      <td colSpan={8} className="px-4 py-10 text-center text-slate-400">No Leave Applications found.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
           )}
         </div>
@@ -5439,18 +5693,99 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                     <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">{group.label}</p>
                     <div className="space-y-1.5">
                       {groupModules.map((m) => (
-                        <label
-                          key={m.key}
-                          className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-100 transition-colors"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={selectedModules.has(m.key)}
-                            onChange={() => toggleSelectedModule(m.key)}
-                            className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-600 cursor-pointer"
-                          />
-                          <span className="text-sm font-medium text-slate-900">{m.label}</span>
-                        </label>
+                        <React.Fragment key={m.key}>
+                          <label
+                            className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-100 transition-colors"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selectedModules.has(m.key)}
+                              onChange={() => toggleSelectedModule(m.key)}
+                              className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-600 cursor-pointer"
+                            />
+                            <span className="text-sm font-medium text-slate-900">{m.label}</span>
+                          </label>
+                          {m.key === 'attendance_reports' && selectedModules.has('attendance_reports') && (
+                            <div className="ml-2 mt-1 mb-1 p-3 bg-amber-50 border border-amber-200 rounded-xl">
+                              <p className="text-[11px] font-semibold text-slate-700 flex items-center gap-1.5 mb-1">
+                                <Building2 className="w-3.5 h-3.5 text-amber-600" />
+                                Department Access for this Report
+                              </p>
+                              <p className="text-[11px] text-slate-500 mb-2">
+                                Leave every Department unchecked to keep seeing all of them (default). Tick one or
+                                more to restrict {managingModulesFor?.role === 'user' ? 'this User' : 'this Admin'} to
+                                only those Department(s) on the Monthly Attendance Report — a Department they
+                                supervise is pre-ticked here the first time this is set up, but that can be
+                                unticked, and this can be set for any account either way.
+                              </p>
+                              {loadingAttendanceReportDepts ? (
+                                <p className="text-[11px] text-slate-400">Loading…</p>
+                              ) : departments.length === 0 ? (
+                                <p className="text-[11px] text-slate-400">No Departments set up yet (Admin Panel -&gt; Departments).</p>
+                              ) : (
+                                <div className="space-y-1 max-h-40 overflow-y-auto pr-1">
+                                  {departments.map((d) => (
+                                    <label
+                                      key={d.id}
+                                      className="flex items-center gap-2 px-2 py-1.5 bg-white border border-amber-100 rounded-lg cursor-pointer hover:bg-amber-100/40"
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={attendanceReportDepts.has(d.name)}
+                                        onChange={() => toggleAttendanceReportDept(d.name)}
+                                        className="w-3.5 h-3.5 rounded border-slate-300 text-amber-600 focus:ring-amber-600 cursor-pointer"
+                                      />
+                                      <span className="text-xs text-slate-800">{d.name}</span>
+                                      {d.supervisor_user_id === managingModulesFor?.id && (
+                                        <span className="text-[10px] text-amber-700 font-semibold">Supervisor</span>
+                                      )}
+                                    </label>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                          {m.key === 'leave_applications' && selectedModules.has('leave_applications') && (
+                            <div className="ml-2 mt-1 mb-1 p-3 bg-amber-50 border border-amber-200 rounded-xl">
+                              <p className="text-[11px] font-semibold text-slate-700 flex items-center gap-1.5 mb-1">
+                                <Building2 className="w-3.5 h-3.5 text-amber-600" />
+                                Department Access for this Report
+                              </p>
+                              <p className="text-[11px] text-slate-500 mb-2">
+                                Leave every Department unchecked to keep seeing all of them (default). Tick one or
+                                more to restrict {managingModulesFor?.role === 'user' ? 'this User' : 'this Admin'} to
+                                only those Department(s) on the Monthly Leave Application report — a Department they
+                                supervise is pre-ticked here the first time this is set up, but that can be
+                                unticked, and this can be set for any account either way.
+                              </p>
+                              {loadingLeaveApplicationDepts ? (
+                                <p className="text-[11px] text-slate-400">Loading…</p>
+                              ) : departments.length === 0 ? (
+                                <p className="text-[11px] text-slate-400">No Departments set up yet (Admin Panel -&gt; Departments).</p>
+                              ) : (
+                                <div className="space-y-1 max-h-40 overflow-y-auto pr-1">
+                                  {departments.map((d) => (
+                                    <label
+                                      key={d.id}
+                                      className="flex items-center gap-2 px-2 py-1.5 bg-white border border-amber-100 rounded-lg cursor-pointer hover:bg-amber-100/40"
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={leaveApplicationDepts.has(d.name)}
+                                        onChange={() => toggleLeaveApplicationDept(d.name)}
+                                        className="w-3.5 h-3.5 rounded border-slate-300 text-amber-600 focus:ring-amber-600 cursor-pointer"
+                                      />
+                                      <span className="text-xs text-slate-800">{d.name}</span>
+                                      {d.supervisor_user_id === managingModulesFor?.id && (
+                                        <span className="text-[10px] text-amber-700 font-semibold">Supervisor</span>
+                                      )}
+                                    </label>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </React.Fragment>
                       ))}
                     </div>
                   </div>

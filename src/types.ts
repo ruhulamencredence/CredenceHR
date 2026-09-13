@@ -3,7 +3,7 @@ export type UserRole = 'superadmin' | 'admin' | 'user';
 // Every Admin Panel tab. A Superadmin implicitly has all of these; a plain Admin
 // only sees/uses the ones the Superadmin has explicitly granted via
 // PUT /api/users/:id/module-permissions. Mirrors ADMIN_MODULE_KEYS in server.ts.
-export type AdminModuleKey = 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'recycle' | 'editlog' | 'attendance' | 'attendance_reports' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'disbursement' | 'employees' | 'departments' | 'tracking' | 'office_attendance' | 'holidays' | 'payroll';
+export type AdminModuleKey = 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'recycle' | 'editlog' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'disbursement' | 'employees' | 'departments' | 'tracking' | 'office_attendance' | 'holidays' | 'payroll';
 
 export const ADMIN_MODULES: { key: AdminModuleKey; label: string }[] = [
   { key: 'reports', label: 'Reports' },
@@ -16,6 +16,14 @@ export const ADMIN_MODULES: { key: AdminModuleKey; label: string }[] = [
   { key: 'departments', label: 'Departments' },
   { key: 'attendance', label: 'Remote Attendance' },
   { key: 'attendance_reports', label: 'Monthly Attendance Report' },
+  // Read-only "who applied for Leave" report — separate from the
+  // can_manage_leave (Leave Manage/Leave Balances) toggle and from the old
+  // approver-based "Leave Approvals" page. Grantable to an Admin OR a plain
+  // User account, with the same optional per-account Department scope as
+  // 'attendance_reports' — see leave_application_department_access /
+  // getLeaveApplicationDeptScope() in server.ts and
+  // GET /api/leave-applications/report* in LeaveRoutes.ts.
+  { key: 'leave_applications', label: 'Monthly Leave Application' },
   { key: 'office_attendance', label: 'Office Attendance' },
   { key: 'tracking', label: 'Employee Tracking' },
   { key: 'claims', label: 'Movement Claims' },
@@ -404,6 +412,12 @@ export interface LeaveApplication {
   purpose: string;
   approver_id: number;
   approver_name?: string;
+  // From the Employee Directory row linked to the applicant's login account
+  // (all_employees.user_id) — only ever populated by GET
+  // /api/leave-applications/report (the 'leave_applications' module's
+  // Department-scoped report); null/absent everywhere else. Same lookup
+  // LeaveBalance.department already uses.
+  department?: string | null;
   status: 'pending' | 'approved' | 'rejected';
   apply_date: string;
   remarks?: string | null;

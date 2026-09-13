@@ -223,6 +223,28 @@ export function registerDepartmentsAndBranchesRoutes(app: Express, deps: Departm
       // mirror in sync with a rename (Notices targeting, Attendance Reports,
       // the Employees panel's own search — see resolveEmployeeDepartment).
       await queryDB("UPDATE all_employees SET department = ? WHERE department_id = ?", [name, id]);
+      // Same reasoning for any Superadmin-granted per-user Attendance Report
+      // Department scope (attendance_report_department_access) that names the
+      // OLD Department name — otherwise a rename would silently drop that
+      // account back to "no rows for this name" (which reads as fully
+      // unrestricted, not fully blocked, so this is a quiet privilege change
+      // if left un-synced, not just a display bug).
+      if (existing[0].name !== name) {
+        try {
+          await queryDB("UPDATE attendance_report_department_access SET department = ? WHERE department = ?", [name, existing[0].name]);
+        } catch {
+          // Non-fatal: at worst a rare (user_id, department) unique-key clash
+          // (that account already had a scope row under the new name too) —
+          // never block the Department rename itself over this side effect.
+        }
+        // Same reasoning for the 'leave_applications' module's own per-user
+        // Department scope (leave_application_department_access).
+        try {
+          await queryDB("UPDATE leave_application_department_access SET department = ? WHERE department = ?", [name, existing[0].name]);
+        } catch {
+          // Non-fatal — see comment above.
+        }
+      }
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });

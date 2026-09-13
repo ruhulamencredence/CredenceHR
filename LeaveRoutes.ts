@@ -25,6 +25,16 @@ import type { Express } from "express";
 interface LeaveRouteDeps {
   authenticateToken: any;
   queryDB: (sql: string, params?: any[]) => Promise<any>;
+  // Same requireAdmin / requireModule(moduleKey) gates every other Admin Panel
+  // module in server.ts uses — threaded through here for the 'leave_applications'
+  // module's own read-only report (GET /api/leave-applications/report*), kept
+  // separate from requireLeaveManager below (that's the can_manage_leave
+  // toggle, a different feature).
+  requireAdmin: (req: any, res: any, next: any) => Promise<any>;
+  requireModule: (moduleKey: string) => any;
+  // Department-wise scope for the 'leave_applications' module — see
+  // leave_application_department_access table comment in server.ts's initDB().
+  getLeaveApplicationDeptScope: (userId: number) => Promise<string[] | null>;
   requireLeaveManager: (req: any, res: any, next: any) => Promise<any>;
   hasLeaveManageAccess: (userId: number, role: string) => Promise<boolean>;
   getCurrentStepApprovers: (request: any) => Promise<{ user_id: number; user_name: string | null }[]>;
@@ -37,6 +47,9 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
   const {
     authenticateToken,
     queryDB,
+    requireAdmin,
+    requireModule,
+    getLeaveApplicationDeptScope,
     requireLeaveManager,
     hasLeaveManageAccess,
     getCurrentStepApprovers,
@@ -569,6 +582,126 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
             include_extra_work_dates: !!Number(a.include_extra_work_dates),
             is_foreign_leave: !!Number(a.is_foreign_leave),
             user_name: userMap.get(Number(a.user_id))?.name || "(account removed)",
+            approver_name: approverName,
+            decided_by_name: a.decided_by ? (userMap.get(Number(a.decided_by))?.name || null) : null,
+            current_step: currentStep,
+            total_steps: totalSteps,
+            reliever_name: a.reliever_id ? (userMap.get(Number(a.reliever_id))?.name || null) : null,
+            reliever_status: a.reliever_status || null
+          };
+        })
+      );
+      res.json(enriched);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Monthly Leave Application report (Admin Panel -> Users -> Module Access ->
+  // "Monthly Leave Application"). Gated by its own 'leave_applications'
+  // module — separate from can_manage_leave (Leave Manage/Leave Balances,
+  // above) and from the old approver-based GET /api/leave-applications /
+  // "Leave Approvals" page — so a Superadmin can grant just "see every Leave
+  // Application" (optionally narrowed to one or more Departments) to an Admin
+  // OR a plain User account, without also handing them Approve/Reject power
+  // or a Leave-balance-editing role. requireAdmin here also lets a plain
+  // 'user' role through once they hold ANY module (same convention every
+  // other Admin Panel tab uses), so this module works for role 'user' too,
+  // exactly as the example in the spec asks for.
+  //
+  // Distinct Department list for this report's Department filter dropdown —
+  // same plain-text `department` mirror column (all_employees.department)
+  // GET /api/attendance/report/departments already reads, kept in sync with
+  // the structured Department by resolveEmployeeDepartment. A Superadmin, or
+  // an Admin/User with no scope rows at all (see getLeaveApplicationDeptScope),
+  // sees every real Department; a scoped account's dropdown only ever offers
+  // the Department(s) they've actually been granted.
+  app.get("/api/leave-applications/report/departments", authenticateToken, requireAdmin, requireModule("leave_applications"), async (req: any, res) => {
+    try {
+      const rows = await queryDB("SELECT DISTINCT department FROM all_employees WHERE user_id IS NOT NULL AND department IS NOT NULL AND department <> ''");
+      let departmentsList = rows.map((r: any) => r.department).sort((a: string, b: string) => a.localeCompare(b));
+
+      if (req.user.role !== "superadmin") {
+        const scope = await getLeaveApplicationDeptScope(req.user.id);
+        if (scope) {
+          const allowed = new Set(scope);
+          departmentsList = departmentsList.filter((d: string) => allowed.has(d));
+        }
+      }
+
+      res.json(departmentsList);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET: every submitted Leave Application (every applicant, every status),
+  // each enriched with the applicant's Department — unlike GET
+  // /api/leave-applications above, visibility here is driven ENTIRELY by the
+  // Department scope, never by who the Approver is. A Superadmin, or an
+  // Admin/User with no scope rows at all, sees every application; a scoped
+  // account only ever sees applications from accounts whose linked Employee
+  // Directory row (all_employees.user_id) has a Department they've been
+  // granted. An applicant with no linked Employee row (so no Department at
+  // all) is only ever visible to an unrestricted (unscoped) viewer — a
+  // scoped account can't accidentally see them just because they're
+  // "uncategorized". An optional ?department= filter narrows further (or is
+  // rejected 403 if it names a Department outside the caller's own scope,
+  // same convention GET /api/attendance/report/monthly uses).
+  app.get("/api/leave-applications/report", authenticateToken, requireAdmin, requireModule("leave_applications"), async (req: any, res) => {
+    try {
+      const requestedDepartment = req.query.department ? String(req.query.department).trim() : null;
+
+      const deptScope = req.user.role === "superadmin" ? null : await getLeaveApplicationDeptScope(req.user.id);
+      if (deptScope && requestedDepartment && !deptScope.includes(requestedDepartment)) {
+        return res.status(403).json({ error: "You don't have access to this Department's Leave Applications." });
+      }
+
+      const [applications, users, employees, approvalRequests] = await Promise.all([
+        queryDB("SELECT * FROM leave_applications ORDER BY created_at DESC"),
+        queryDB("SELECT id, name, role FROM users"),
+        queryDB("SELECT user_id, department FROM all_employees WHERE user_id IS NOT NULL"),
+        queryDB("SELECT * FROM approval_requests WHERE source_type = 'leave_application'")
+      ]);
+      const userMap = new Map<number, any>(users.map((u: any) => [Number(u.id), u]));
+      const departmentByUserId = new Map<number, string>();
+      for (const e of employees) {
+        if (e.user_id != null && e.department) departmentByUserId.set(Number(e.user_id), e.department);
+      }
+      const approvalByLeaveId = new Map<number, any>(approvalRequests.map((ar: any) => [Number(ar.source_id), ar]));
+
+      const visible = applications.filter((a: any) => {
+        const dept = departmentByUserId.get(Number(a.user_id)) || null;
+        if (requestedDepartment) return dept === requestedDepartment;
+        if (!deptScope) return true;
+        return !!dept && deptScope.includes(dept);
+      });
+
+      const enriched = await Promise.all(
+        visible.map(async (a: any) => {
+          const ar = approvalByLeaveId.get(Number(a.id));
+          let approverName = userMap.get(Number(a.approver_id))?.name || null;
+          let currentStep: number | null = null;
+          let totalSteps: number | null = null;
+          if (ar) {
+            totalSteps = Number(ar.total_steps);
+            currentStep = Number(ar.current_step);
+            if (ar.status === "pending") {
+              const approvers = await getCurrentStepApprovers(ar);
+              approverName = approvers.length > 0 ? approvers.map((x: any) => x.user_name || `User #${x.user_id}`).join(" or ") : null;
+            }
+          }
+          return {
+            ...a,
+            day_count: Number(a.day_count),
+            is_continuous: !!Number(a.is_continuous),
+            is_prefix: !!Number(a.is_prefix),
+            is_suffix: !!Number(a.is_suffix),
+            is_half_day: !!Number(a.is_half_day),
+            include_extra_work_dates: !!Number(a.include_extra_work_dates),
+            is_foreign_leave: !!Number(a.is_foreign_leave),
+            user_name: userMap.get(Number(a.user_id))?.name || "(account removed)",
+            department: departmentByUserId.get(Number(a.user_id)) || null,
             approver_name: approverName,
             decided_by_name: a.decided_by ? (userMap.get(Number(a.decided_by))?.name || null) : null,
             current_step: currentStep,

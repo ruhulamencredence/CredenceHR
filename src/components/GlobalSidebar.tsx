@@ -230,6 +230,11 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     { key: 'approvals', label: 'Approvals', icon: ShieldCheck, onClick: () => onGoToAdminModule('approvals') },
     { key: 'tracking', label: 'Employee Tracking', icon: Navigation, onClick: () => onGoToAdminModule('tracking') },
     { key: 'holidays', label: 'Holidays', icon: Calendar, onClick: () => onGoToAdminModule('holidays') },
+    // Read-only "who applied for Leave" report, gated by its own
+    // 'leave_applications' module (separate from can_manage_leave's "Leave
+    // Manage" item and from the "Leave Approvals" item above) — see
+    // ADMIN_MODULES in types.ts.
+    { key: 'leave_applications', label: 'Monthly Leave Application', icon: CalendarClock, onClick: () => onGoToAdminModule('leave_applications') },
   ].filter((i) => canSeeModule(i.key as AdminModuleKey));
 
   const renderItem = (item: NavItem) => (
