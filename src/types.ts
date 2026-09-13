@@ -289,6 +289,17 @@ export interface User {
   // Panel module (AdminModuleKey), which is about reviewing everyone ELSE's
   // records, not this account's own ability to check in/out.
   can_use_attendance?: boolean;
+  // Admin/Superadmin-granted: pins this account (role 'user' OR 'admin') to
+  // exactly one Project for Remote Attendance — set via the "Attend. Project"
+  // column next to can_use_attendance above (Admin Panel -> Users). Null/
+  // undefined means unrestricted (falls back to whatever Projects the account
+  // can otherwise see). When set, the account's own Attendance card only
+  // offers this one Project and the server rejects check-in/check-out against
+  // any other — even for role 'admin', which is otherwise unrestricted on
+  // Projects. Never applies to 'superadmin'. Completely separate from
+  // user_project_permissions (the "Projects" column/Manage Projects modal),
+  // which is only ever about the Budget/Jobs/MPR workflow.
+  attendance_project_id?: number | null;
   // Admin/Superadmin-granted: lets THIS account's APK send background location
   // pings for Employee Tracking (see LocationPing below). Always true for role
   // === 'superadmin'. OFF by default for 'admin'/'user', switched on per account

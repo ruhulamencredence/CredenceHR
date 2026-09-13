@@ -1884,6 +1884,28 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     }
   };
 
+  // Sets or clears the single Project a user/admin account is pinned to for
+  // Remote Attendance (Admin Panel -> Users -> "Attend. Project", right next
+  // to the can_use_attendance toggle). Reuses the same feature-permissions
+  // endpoint as the toggles above — sending just this one field leaves every
+  // other permission untouched. `projectId` is null to clear back to
+  // unrestricted (falls back to whatever Projects the account can otherwise
+  // see for Attendance).
+  const handleAttendanceProjectChange = async (userId: number, projectId: number | null) => {
+    try {
+      const res = await fetch(apiUrl(`/api/users/${userId}/feature-permissions`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ attendance_project_id: projectId })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to update attendance project');
+      fetchAllData();
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message });
+    }
+  };
+
   // Superadmin-only: grant/revoke a given Admin's ability to see the "Last Login
   // Location" column for other users (Admin Panel -> Users). OFF by default for
   // every Admin; a Superadmin always sees it regardless of this toggle.
@@ -4235,6 +4257,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   <th className="w-16 px-3 py-2.5 text-left">Delivery</th>
                   <th className="w-16 px-3 py-2.5 text-left">Job Edit</th>
                   <th className="w-16 px-3 py-2.5 text-left">Attend.</th>
+                  <th className="w-32 px-3 py-2.5 text-left">Attend. Project</th>
                   <th className="w-16 px-3 py-2.5 text-left">Tracking</th>
                   <th className="w-16 px-3 py-2.5 text-left">Leave</th>
                   <th className="w-16 px-3 py-2.5 text-right">Actions</th>
@@ -4419,6 +4442,30 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                             }`}
                           />
                         </button>
+                      )}
+                    </td>
+                    <td className="px-3 py-3 whitespace-nowrap text-xs">
+                      {u.role === 'superadmin' ? (
+                        <span className="text-slate-300">—</span>
+                      ) : (
+                        <select
+                          value={u.attendance_project_id ?? ''}
+                          onChange={(e) =>
+                            handleAttendanceProjectChange(u.id, e.target.value ? Number(e.target.value) : null)
+                          }
+                          disabled={!u.can_use_attendance}
+                          title={
+                            u.can_use_attendance
+                              ? 'Locks this account to one Project for Remote Attendance — leave unset for no restriction. Budget/Jobs/MPR project selection is unaffected.'
+                              : 'Grant Remote Attendance first to pin a Project.'
+                          }
+                          className="w-full text-xs px-2 py-1.5 bg-white border border-slate-200 rounded-lg disabled:bg-slate-50 disabled:text-slate-300 focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                        >
+                          <option value="">Unrestricted</option>
+                          {projects.map((p) => (
+                            <option key={p.id} value={p.id}>{p.project_name}</option>
+                          ))}
+                        </select>
                       )}
                     </td>
                     <td className="px-3 py-3 whitespace-nowrap text-xs">
