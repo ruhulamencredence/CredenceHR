@@ -1,27 +1,12 @@
 import React from 'react';
-import { LayoutGrid, Wallet, Briefcase, FileText, Edit2, Route, Clock } from 'lucide-react';
+import { Home, Route, Clock, CalendarClock } from 'lucide-react';
 
 export type MobileSection = 'budget' | 'jobs' | 'entries' | 'jobEdit' | 'claim' | 'claims' | 'conveyanceClaim' | 'leave' | 'timesheet' | null;
 
 interface BottomNavProps {
   active: MobileSection;
   onChange: (section: MobileSection) => void;
-  canJobEdit: boolean;
-  jobsCount?: number;
-  entriesCount?: number;
-  // Superadmin-gated, same as every other module (see UserPanel's
-  // canSeeMovementClaim) — hides the "Claim" tab entirely until the Superadmin
-  // grants can_view_movement_claims. Defaults to true so any other caller of
-  // this component keeps its previous behavior.
   canViewMovementClaim?: boolean;
-  // Same idea, gates the "Budget"/"Jobs"/"Entries" tabs (see UserPanel's
-  // canSeeBudgetModule) — ON by default, so any other caller keeps today's
-  // behavior unless it explicitly passes false.
-  canViewBudgetModule?: boolean;
-  // Gates the "Timesheet" tab — Self Service's own Timesheet is not
-  // Admin-gated (every account sees it, see GlobalSidebar's selfServiceItems),
-  // but ON by default here too so a future permission can hide this tab the
-  // same way the others are hidden without another caller needing changes.
   canViewTimesheet?: boolean;
 }
 
@@ -29,69 +14,150 @@ interface NavItem {
   key: MobileSection;
   label: string;
   icon: React.ComponentType<{ className?: string }>;
-  badge?: number;
 }
 
-// Mobile-only (APK) bottom tab bar — mirrors the same sections as the
-// dashboard tile menu (see UserPanel's mobileActiveSection) so every menu
-// item is reachable from a persistent bar instead of only from the tiles.
-// Hidden on md+ where all sections already sit side by side.
-export function BottomNav({ active, onChange, canJobEdit, jobsCount = 0, entriesCount = 0, canViewMovementClaim = true, canViewBudgetModule = true, canViewTimesheet = true }: BottomNavProps) {
+const BAR_W = 400;
+const BAR_H = 80;
+const CORNER_R = 26;
+const CORNER_BUFFER = 6;
+// Extra breathing room reserved on the left/right edges of the icon row
+// (in BAR_W units) so the first/last tabs (Home/Leave) sit inset from the
+// bar's edges, like the reference image, instead of being flush against
+// the rounded corners. Expressed as a % of BAR_W so it applies identically
+// to the SVG dip math below and the CSS-positioned icon row, keeping the
+// floating circle and its cutout aligned.
+const EDGE_PAD = 34;
+const EDGE_PAD_PCT = `${(EDGE_PAD / BAR_W) * 100}%`;
+
+function buildBarPath(dip: { center: number; halfWidth: number; depth: number } | null): string {
+  const r = CORNER_R;
+  const topLeft = `M0 ${r} C0 ${r * 0.45} ${r * 0.45} 0 ${r} 0`;
+  const topRight = `H${BAR_W - r} C${BAR_W - r * 0.45} 0 ${BAR_W} ${r * 0.45} ${BAR_W} ${r}`;
+  const bottom = `V${BAR_H} H0 Z`;
+
+  if (!dip) {
+    return `${topLeft} ${topRight} ${bottom}`;
+  }
+
+  const { center, depth } = dip;
+  const maxHalfWidth = Math.min(center - (r + CORNER_BUFFER), BAR_W - r - CORNER_BUFFER - center);
+  const halfWidth = Math.min(dip.halfWidth, maxHalfWidth);
+
+  if (halfWidth < 16) {
+    return `${topLeft} ${topRight} ${bottom}`;
+  }
+
+  const left = center - halfWidth;
+  const right = center + halfWidth;
+  // Wider, gentler shoulders (was 0.62) and a rounder trough floor (was 0.4)
+  // so the dip reads as one smooth, shallow wave like image 1, instead of a
+  // tighter U with straighter side-walls.
+  const outerT = halfWidth * 0.78;
+  const innerT = halfWidth * 0.26;
+
+  const dipPath =
+    `H${left} ` +
+    `C${left + outerT} 0 ${center - innerT} ${depth} ${center} ${depth} ` +
+    `C${center + innerT} ${depth} ${right - outerT} 0 ${right} 0`;
+
+  return `${topLeft} ${dipPath} ${topRight} ${bottom}`;
+}
+
+export function BottomNav({ active, onChange, canViewMovementClaim = true, canViewTimesheet = true }: BottomNavProps) {
   const items: NavItem[] = [
-    { key: null, label: 'Dashboard', icon: LayoutGrid },
-    ...(canViewBudgetModule ? [{ key: 'budget' as MobileSection, label: 'Budget', icon: Wallet }] : []),
-    ...(canViewBudgetModule ? [{ key: 'jobs' as MobileSection, label: 'Jobs', icon: Briefcase, badge: jobsCount }] : []),
+    { key: null, label: 'Home', icon: Home },
     ...(canViewMovementClaim ? [{ key: 'claim' as MobileSection, label: 'Claim', icon: Route }] : []),
-    ...(canViewBudgetModule ? [{ key: 'entries' as MobileSection, label: 'Entries', icon: FileText, badge: entriesCount }] : []),
     ...(canViewTimesheet ? [{ key: 'timesheet' as MobileSection, label: 'Timesheet', icon: Clock }] : []),
-    ...(canJobEdit ? [{ key: 'jobEdit' as MobileSection, label: 'Job Edit', icon: Edit2 }] : [])
+    { key: 'leave' as MobileSection, label: 'Leave', icon: CalendarClock }
   ];
 
+  const activeIndex = items.findIndex((item) => item.key === active);
+  // Items are laid out only within the padded region (BAR_W minus the two
+  // edge pads), so each of the 4 columns is the same width and the gaps
+  // between icon centers come out equal — only the outer margins grow.
+  const itemWidth = (BAR_W - 2 * EDGE_PAD) / items.length;
+  const dip =
+    activeIndex >= 0
+      ? {
+          center: EDGE_PAD + itemWidth * (activeIndex + 0.5),
+          // Slightly wider flare (0.82 -> 0.92) and shallower depth (50 -> 36,
+          // ~45% of bar height instead of ~62%) to match image 1's low, wide
+          // wave instead of a deep narrow notch.
+          halfWidth: Math.min(110, itemWidth * 0.92),
+          depth: 36
+        }
+      : null;
+  const pathD = buildBarPath(dip);
+
   return (
-    <nav
-      className="md:hidden fixed bottom-0 left-0 right-0 z-40 flex items-stretch gap-1 rounded-t-[26px] px-2 pt-2.5 shadow-[0_-8px_24px_rgba(127,0,255,0.25)]"
-      style={{ background: 'var(--g-accent)', paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 12px)' }}
-    >
-      {items.map(({ key, label, icon: Icon, badge }) => {
-        const isActive = active === key;
-        return (
-          <button
-            key={label}
-            type="button"
-            onClick={() => onChange(key)}
-            className="relative flex-1 min-w-0 flex flex-col items-center justify-center gap-1 py-1.5 active:scale-95 transition-transform"
-          >
-            {/* Active-tab indicator pill riding the top edge of the bar. */}
-            <span
-              className={`absolute -top-2.5 h-1 w-8 rounded-full bg-white transition-opacity duration-200 ${
-                isActive ? 'opacity-100' : 'opacity-0'
-              }`}
-            />
-            <span
-              className={`relative inline-flex items-center justify-center w-11 h-11 rounded-2xl transition-colors duration-200 ${
-                isActive ? 'bg-white/20' : ''
-              }`}
-            >
-              <Icon className={`transition-all duration-200 ${isActive ? 'w-6 h-6 text-white' : 'w-5 h-5 text-white/55'}`} />
-              {!!badge && badge > 0 && (
+    <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40">
+      <div className="relative" style={{ height: BAR_H }}>
+        <svg
+          viewBox={`0 0 ${BAR_W} ${BAR_H}`}
+          preserveAspectRatio="none"
+          className="absolute inset-0 w-full h-full drop-shadow-[0_-8px_24px_rgba(127,0,255,0.25)]"
+        >
+          <path d={pathD} fill="var(--g-accent)" />
+        </svg>
+
+        <div
+          className="absolute inset-0 flex items-end gap-1 pb-1"
+          style={{ paddingLeft: EDGE_PAD_PCT, paddingRight: EDGE_PAD_PCT }}
+        >
+          {items.map(({ key, label, icon: Icon }, index) => {
+            const isActive = index === activeIndex;
+            return (
+              <button
+                key={label}
+                type="button"
+                onClick={() => onChange(key)}
+                className="relative flex-1 min-w-0 flex flex-col items-center justify-end gap-1 pt-1.5 pb-1 active:scale-95 transition-transform"
+              >
+                {/* Circle raised less far above the bar (-top-6 -> -top-4) to
+                    match the shallower 36px-deep dip above, so it sits nested
+                    into the cutout rather than floating clear of it. Icon
+                    bumped from w-5/h-5 to w-6/h-6 so it reads centered and
+                    proportionate inside the 52px circle, matching image 1's
+                    icon-to-circle ratio. */}
                 <span
-                  className="absolute top-0.5 right-0.5 text-[9px] font-bold text-white rounded-full min-w-[16px] h-[16px] flex items-center justify-center px-1 shadow-sm"
-                  style={{ background: 'var(--g-accent-950)' }}
+                  className={`absolute -top-4 left-1/2 -translate-x-1/2 flex items-center justify-center w-[52px] h-[52px] rounded-full bg-white bg-clip-padding border-[4px] border-transparent transition-all duration-200 ${
+                    isActive ? 'opacity-100 scale-100' : 'opacity-0 scale-75 pointer-events-none'
+                  }`}
+                  style={
+                    isActive
+                      ? {
+                          boxShadow: '0 6px 14px rgba(42,0,85,0.35)'
+                        }
+                      : undefined
+                  }
                 >
-                  {badge > 99 ? '99+' : badge}
+                  <Icon className="w-6 h-6" style={{ color: 'var(--g-accent)' }} />
                 </span>
-              )}
-            </span>
-            <span
-              className={`text-[10.5px] leading-tight truncate max-w-[68px] transition-colors duration-200 ${
-                isActive ? 'text-white font-bold' : 'text-white/55 font-medium'
-              }`}
-            >
-              {label}
-            </span>
-          </button>
-        );
-      })}
+                {/* Inactive icon container: unchanged size, but centered with
+                    the same flex rules as the active circle so the icon's
+                    optical center lines up across active/inactive states
+                    instead of shifting when the circle toggles in/out. */}
+                <span
+                  className={`relative inline-flex items-center justify-center w-11 h-11 rounded-2xl transition-opacity duration-200 ${
+                    isActive ? 'opacity-0' : ''
+                  }`}
+                >
+                  <Icon className="w-5 h-5 text-white/55" />
+                </span>
+                <span
+                  className={`text-[10.5px] leading-tight truncate max-w-[68px] transition-colors duration-200 ${
+                    isActive ? 'text-white font-bold' : 'text-white/55 font-medium'
+                  }`}
+                >
+                  {label}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div style={{ height: 'env(safe-area-inset-bottom, 0px)', background: 'var(--g-accent)' }} />
     </nav>
   );
 }

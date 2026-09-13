@@ -2349,7 +2349,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
     : projects;
 
   return (
-    <div className="relative w-full min-h-[calc(100vh-4rem)] text-slate-900 overflow-hidden" style={{ background: 'var(--g-bg-gradient)' }}>
+    <div className="relative w-full min-h-[calc(100vh-4rem)] min-h-[calc(100dvh-4rem)] text-slate-900 overflow-hidden" style={{ background: 'var(--g-bg-gradient)' }}>
       {/* Violet gradient welcome banner — now sits flush directly under the
           header (no gap/margin above it, unlike before) so it reads as part
           of the header instead of a separate card further down the page.
@@ -2392,7 +2392,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
         </div>
       </div>
 
-      <div className={`relative z-10 w-full px-2 sm:px-6 lg:px-8 ${mobileActiveSection === null ? 'pt-3' : 'pt-0 md:pt-8'} pb-[calc(7.5rem+env(safe-area-inset-bottom,0px))] md:pb-8 space-y-8 max-md:space-y-3`}>
+      <div className={`relative z-10 w-full px-2 sm:px-6 lg:px-8 ${mobileActiveSection === null ? 'pt-3' : 'pt-0 md:pt-8'} pb-[calc(9rem+env(safe-area-inset-bottom,0px))] md:pb-8 space-y-8 max-md:space-y-3`}>
       {/* Desktop-only plain welcome banner (no avatar/bell/drop-notch — those
           are the mobile-specific drop-banner design above). Same gating the
           single banner used before this change. */}
@@ -4480,17 +4480,15 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
         }}
       />
 
-      {/* Mobile (APK) bottom bar — every menu section (Dashboard, Budget,
-          Jobs, Entries, Job Edit) reachable from one persistent bar, in
-          addition to the dashboard tiles above. Hidden on md+. */}
+      {/* Mobile (APK) bottom bar — trimmed to four everyday sections (Home,
+          Claim, Timesheet, Leave). My Bill (Conveyance Bill Claim) is
+          reachable from the dashboard tile / GlobalSidebar instead, and
+          Budget/Jobs/Entries/Job Edit stay GlobalSidebar-only too. Hidden
+          on md+. */}
       <BottomNav
         active={mobileActiveSection}
         onChange={goToMobileSection}
-        canJobEdit={!!user.can_job_edit}
-        jobsCount={totalJobsCount}
-        entriesCount={filteredEntries.length}
         canViewMovementClaim={canSeeMovementClaim}
-        canViewBudgetModule={canSeeBudgetModule}
         canViewTimesheet={canSeeTimesheet}
       />
     </div>
