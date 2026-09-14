@@ -6,7 +6,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X, AlertTriangle, CheckCircle2, CalendarDays, UserCheck } from 'lucide-react';
-import { LeaveType, LeaveBalance, LeaveApprover } from '../types';
+import { LeaveType, LeaveBalance, LeaveApprover, LeaveCategory } from '../types';
 import { apiUrl } from '../lib/api';
 import { todayDateOnlyString, formatDate } from '../lib/formatDate';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
@@ -19,7 +19,7 @@ interface NewLeaveApplicationModalProps {
   onSubmitted: () => void;
 }
 
-const LEAVE_TYPE_OPTIONS: { value: LeaveType; label: string }[] = [
+const FIXED_LEAVE_TYPE_OPTIONS: { value: LeaveType; label: string }[] = [
   { value: 'casual', label: 'Casual Leave' },
   { value: 'sick', label: 'Sick Leave' },
   { value: 'without_pay', label: 'Leave Without Pay' }
@@ -65,9 +65,15 @@ export const NewLeaveApplicationModal: React.FC<NewLeaveApplicationModalProps> =
 
   const [balance, setBalance] = useState<LeaveBalance | null>(null);
   const [relievers, setRelievers] = useState<LeaveApprover[]>([]);
+  // Custom Leave Categories (Leave Manage -> Set Balance in Bulk -> Add
+  // Category) — GET /api/leave-categories, appended to the fixed 3 in the
+  // Leave Type dropdown below so an account can apply against one just like
+  // Casual/Sick/LWP. Any authenticated account can call this endpoint (see
+  // its route comment), not just Leave Managers.
+  const [categories, setCategories] = useState<LeaveCategory[]>([]);
   const [loadingContext, setLoadingContext] = useState(true);
 
-  const [leaveType, setLeaveType] = useState<LeaveType | ''>('');
+  const [leaveType, setLeaveType] = useState<string>('');
   const [startDate, setStartDate] = useState(today);
   const [endDate, setEndDate] = useState(today);
   const [isContinuous, setIsContinuous] = useState(false);
@@ -106,6 +112,13 @@ export const NewLeaveApplicationModal: React.FC<NewLeaveApplicationModalProps> =
           const relRows = await relRes.json();
           setRelievers(Array.isArray(relRows) ? relRows : []);
         }
+        // Custom Leave Categories — appended to the fixed 3 in the Leave
+        // Type dropdown below.
+        const catRes = await fetch(apiUrl('/api/leave-categories'), { headers: authHeaders });
+        if (!cancelled && catRes.ok) {
+          const catRows = await catRes.json();
+          setCategories(Array.isArray(catRows) ? catRows : []);
+        }
       } catch {
         // Offline/unreachable — balance strip just stays empty; the form
         // itself is still usable once connectivity returns.
@@ -121,13 +134,29 @@ export const NewLeaveApplicationModal: React.FC<NewLeaveApplicationModalProps> =
 
   const dayCount = useMemo(() => calcDayCount(startDate, endDate, isHalfDay), [startDate, endDate, isHalfDay]);
 
-  // The balance column this Leave Type spends from — same mapping the server
-  // uses to decide which LeaveBalance column to deduct day_count from.
+  // Fixed 3 + every custom Leave Category (GET /api/leave-categories) —
+  // what actually populates the Leave Type dropdown below. This is the fix:
+  // a custom category used to only ever show up in "Set Balance in Bulk" and
+  // the balance views (LeaveManage/MyLeave), never here, so there was no way
+  // to actually apply for one.
+  const leaveTypeOptions = useMemo(
+    () => [
+      ...FIXED_LEAVE_TYPE_OPTIONS,
+      ...categories.map((c) => ({ value: c.key, label: c.label }))
+    ],
+    [categories]
+  );
+
+  // The balance this Leave Type spends from — same mapping the server uses
+  // to decide which balance to deduct day_count from (leave_balances' fixed
+  // column for the 3 built-in types, or this account's leave_category_balances
+  // row for a custom category, surfaced here as LeaveBalance.custom_leaves).
   const availableBalance = useMemo(() => {
     if (!balance || !leaveType) return null;
     if (leaveType === 'casual') return balance.casual_leave;
     if (leaveType === 'sick') return balance.sick_leave;
-    return balance.leave_without_pay;
+    if (leaveType === 'without_pay') return balance.leave_without_pay;
+    return balance.custom_leaves?.find((c) => c.key === leaveType)?.balance ?? 0;
   }, [balance, leaveType]);
 
   const validate = (): string | null => {
@@ -229,6 +258,12 @@ export const NewLeaveApplicationModal: React.FC<NewLeaveApplicationModalProps> =
                 <span className="text-xs text-slate-600">
                   Leave Without Pay : <span className="font-bold text-slate-900">{balance ? balance.leave_without_pay : '—'}</span>
                 </span>
+                {leaveType && !['casual', 'sick', 'without_pay'].includes(leaveType) && (
+                  <span className="text-xs text-slate-600">
+                    {leaveTypeOptions.find((o) => o.value === leaveType)?.label || 'Selected Category'} :{' '}
+                    <span className="font-bold text-slate-900">{availableBalance ?? '—'}</span>
+                  </span>
+                )}
               </>
             )}
             <span className="flex-1" />
@@ -258,11 +293,11 @@ export const NewLeaveApplicationModal: React.FC<NewLeaveApplicationModalProps> =
               </label>
               <select
                 value={leaveType}
-                onChange={(e) => setLeaveType(e.target.value as LeaveType)}
+                onChange={(e) => setLeaveType(e.target.value)}
                 className="w-full text-sm px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none"
               >
                 <option value="">Select Type</option>
-                {LEAVE_TYPE_OPTIONS.map((o) => (
+                {leaveTypeOptions.map((o) => (
                   <option key={o.value} value={o.value}>
                     {o.label}
                   </option>

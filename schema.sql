@@ -174,6 +174,41 @@ CREATE TABLE IF NOT EXISTS leave_balances (
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
+-- Custom Leave Categories (Self Service -> Leave Manage -> "Set Balance in
+-- Bulk" -> "Add Category"). Lets a Leave Manager define extra leave types on
+-- the fly (e.g. "Maternity Leave", "Earned Leave") beyond the fixed
+-- Casual/Sick/Leave-without-Pay columns on leave_balances above, without a
+-- schema change per new type. category_key is the stable slug the frontend
+-- and API key balances by (e.g. "custom_maternity_leave"); label is what's
+-- shown on screen. See POST /api/leave-categories and PUT
+-- /api/leave-balances/bulk's custom_categories handling in LeaveRoutes.ts.
+CREATE TABLE IF NOT EXISTS leave_categories (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  category_key VARCHAR(100) NOT NULL,
+  label VARCHAR(100) NOT NULL,
+  created_by INT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY unique_leave_category_key (category_key),
+  FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+);
+
+-- One row per Admin/User account per custom Leave Category above — the
+-- dynamic-category equivalent of leave_balances' fixed casual_leave/
+-- sick_leave/leave_without_pay columns. A missing row simply means 0, same
+-- convention as leave_balances. No usage-deduction tracking yet (unlike the
+-- three fixed types via leave_applications) — Set Balance in Bulk just
+-- overwrites this directly.
+CREATE TABLE IF NOT EXISTS leave_category_balances (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  category_id INT NOT NULL,
+  balance DECIMAL(5, 1) NOT NULL DEFAULT 0,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY unique_user_category (user_id, category_id),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (category_id) REFERENCES leave_categories(id) ON DELETE CASCADE
+);
+
 -- Leave Applications Table (Self Service -> Leave Application). One row per
 -- submitted application. Submitting one (POST /api/leave-applications)
 -- immediately deducts day_count from the matching leave_balances column for

@@ -408,6 +408,18 @@ export interface User {
   can_view_leave_summary?: boolean;
 }
 
+// One custom Leave Category a Leave Manager has defined from Leave Manage ->
+// Set Balance in Bulk -> Add Category (GET/POST /api/leave-categories) —
+// beyond the fixed Casual/Sick/Leave-without-Pay columns on LeaveBalance
+// below. `key` is the stable slug balances are keyed by (both in
+// LeaveBalance.custom_leaves and in the bulk PUT's custom_categories body);
+// `label` is what's shown on screen.
+export interface LeaveCategory {
+  id: number;
+  key: string;
+  label: string;
+}
+
 // One row of Self Service -> Leave Management (GET/PUT /api/leave-balances). A
 // Superadmin or any account with can_manage_leave sees/edits every Admin/User's
 // balances; everyone else only ever gets back their own single row.
@@ -424,12 +436,20 @@ export interface LeaveBalance {
   sick_leave: number;
   leave_without_pay: number;
   updated_at?: string | null;
+  // This account's balance for each custom Leave Category (see LeaveCategory
+  // above) that has ever been set via Set Balance in Bulk. Omitted/empty for
+  // accounts with no custom-category balance set yet.
+  custom_leaves?: { key: string; label: string; balance: number }[];
 }
 
-// Self Service -> Leave Application. The three Leave types a user can apply
-// for — same three columns as LeaveBalance above (casual_leave/sick_leave/
+// Self Service -> Leave Application. The three built-in Leave types —
+// same three columns as LeaveBalance above (casual_leave/sick_leave/
 // leave_without_pay), just written without the "_leave"/"leave_" padding
-// since this is a value, not a balance column name.
+// since this is a value, not a balance column name. LeaveApplication.leave_type
+// itself is typed as `string` (not LeaveType) below since it can ALSO be a
+// custom Leave Category's key (LeaveCategory.key, e.g. "custom_maternity_leave")
+// — LeaveType alone still covers the built-in three, e.g. for LEAVE_TYPE_OPTIONS'
+// fixed part in NewLeaveApplicationModal.
 export type LeaveType = 'casual' | 'sick' | 'without_pay';
 
 // One selectable entry in the New Leave Application's Approver picker — every
@@ -447,7 +467,18 @@ export interface LeaveApplication {
   id: number;
   user_id: number;
   user_name?: string;
-  leave_type: LeaveType;
+  // Either one of the 3 fixed LeaveType values, or a custom Leave Category's
+  // key (LeaveCategory.key) — see the LeaveType comment above. Always use
+  // leave_type_label below for display; never assume leave_type itself is a
+  // fixed LeaveType when rendering.
+  leave_type: string;
+  // Server-resolved display label for leave_type — "Casual"/"Sick"/"Leave
+  // Without Pay" for the 3 fixed types, or the matching LeaveCategory's label
+  // for a custom category (falling back to the raw key if that category was
+  // since deleted). Always present on every GET route that returns a
+  // LeaveApplication; optional here only so a freshly-POSTed local object
+  // (before the list is refetched) doesn't need to fake one.
+  leave_type_label?: string;
   start_date: string;
   end_date: string;
   day_count: number;

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
-import { ArrowLeft, ListChecks, Search, Save, Layers, Building2, ChevronDown, ChevronUp, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, ListChecks, Search, Save, Layers, Building2, ChevronDown, ChevronUp, CheckCircle2, AlertTriangle, Plus, X } from 'lucide-react';
 import { User, LeaveBalance } from '../types';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
@@ -49,7 +49,11 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
   const [showBulkPanel, setShowBulkPanel] = useState(false);
   const [bulkApplyToAll, setBulkApplyToAll] = useState(true);
   const [bulkDepartments, setBulkDepartments] = useState<string[]>([]);
-  const [bulkDraft, setBulkDraft] = useState<{ casual_leave: string; sick_leave: string; leave_without_pay: string }>({
+  // Fixed categories are always present; bulkDraft is otherwise keyed by
+  // whatever's in bulkCategories below, so it grows/shrinks as custom
+  // categories are added/removed. Kept as Record<string,string> (not the old
+  // fixed 3-key shape) so dynamic keys can share the same draft object.
+  const [bulkDraft, setBulkDraft] = useState<Record<string, string>>({
     casual_leave: '',
     sick_leave: '',
     leave_without_pay: ''
@@ -57,6 +61,88 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
   const [bulkSaving, setBulkSaving] = useState(false);
   const [bulkError, setBulkError] = useState('');
   const [bulkSuccess, setBulkSuccess] = useState('');
+
+  // Custom Leave Categories — Leave Manager can define extra categories on
+  // the fly (e.g. "Maternity Leave", "Earned Leave") right from the bulk
+  // panel, beyond the fixed Casual/Sick/LWP set. Persisted via
+  // GET/POST /api/leave-categories (shared across every Leave Manager, not
+  // just this session) and applied per-account through the bulk PUT's
+  // `custom_categories` map, keyed by category `key` — see applyBulk below.
+  const [customCategories, setCustomCategories] = useState<{ key: string; label: string }[]>([]);
+  const [showAddCategory, setShowAddCategory] = useState(false);
+  const [newCategoryLabel, setNewCategoryLabel] = useState('');
+  const [addingCategory, setAddingCategory] = useState(false);
+
+  const BUILTIN_CATEGORIES: { key: string; label: string }[] = [
+    { key: 'casual_leave', label: 'Casual Leave' },
+    { key: 'sick_leave', label: 'Sick Leave' },
+    { key: 'leave_without_pay', label: 'Leave without Pay' }
+  ];
+  // What the bulk panel actually renders — fixed categories first, then
+  // whatever custom ones exist (fetched) or were just added this session.
+  const bulkCategories = [...BUILTIN_CATEGORIES, ...customCategories];
+
+  const fetchCategories = async () => {
+    try {
+      const res = await fetch(apiUrl('/api/leave-categories'), {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to load Leave categories');
+      const cats = Array.isArray(data) ? data.map((c: any) => ({ key: c.key, label: c.label })) : [];
+      setCustomCategories(cats);
+      setBulkDraft((prev) => {
+        const next = { ...prev };
+        for (const c of cats) if (!(c.key in next)) next[c.key] = '';
+        return next;
+      });
+    } catch {
+      // Non-fatal — the bulk panel still works with just the fixed 3
+      // categories, and "Add Category" can still create new ones.
+    }
+  };
+
+  const addCustomCategory = async () => {
+    const label = newCategoryLabel.trim();
+    if (!label) return;
+    if (bulkCategories.some((c) => c.label.toLowerCase() === label.toLowerCase())) {
+      setBulkError('This category already exists.');
+      return;
+    }
+    setAddingCategory(true);
+    setBulkError('');
+    try {
+      const res = await fetch(apiUrl('/api/leave-categories'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ label })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to add category');
+      if (!bulkCategories.some((c) => c.key === data.key)) {
+        setCustomCategories((prev) => [...prev, { key: data.key, label: data.label }]);
+      }
+      setBulkDraft((prev) => ({ ...prev, [data.key]: prev[data.key] ?? '' }));
+      setNewCategoryLabel('');
+      setShowAddCategory(false);
+    } catch (err: any) {
+      setBulkError(err.message || 'Failed to add category');
+    } finally {
+      setAddingCategory(false);
+    }
+  };
+
+  // Removes a category from THIS bulk panel's view only (so it's not applied
+  // this time) — the category itself stays defined server-side for every
+  // Leave Manager, since Add Category has no separate delete endpoint.
+  const removeCustomCategory = (key: string) => {
+    setCustomCategories((prev) => prev.filter((c) => c.key !== key));
+    setBulkDraft((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  };
 
   const departmentOptions = Array.from(
     new Set(balances.map((b) => b.department).filter((d): d is string => !!d))
@@ -81,6 +167,7 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
 
   useEffect(() => {
     fetchBalances();
+    if (canManageAll) fetchCategories();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -147,12 +234,29 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
   };
 
   const applyBulk = async () => {
-    const casual = Number(bulkDraft.casual_leave);
-    const sick = Number(bulkDraft.sick_leave);
-    const lwp = Number(bulkDraft.leave_without_pay);
-    if ([casual, sick, lwp].some((n) => !Number.isFinite(n) || n < 0)) {
+    // Only categories the admin actually typed a value for get applied —
+    // this lets e.g. just "Maternity Leave" be bulk-set without being forced
+    // to also re-enter Casual/Sick/LWP for accounts that shouldn't change.
+    const fixedValues: { casual_leave?: number; sick_leave?: number; leave_without_pay?: number } = {};
+    const customValues: Record<string, number> = {};
+    for (const cat of bulkCategories) {
+      const raw = (bulkDraft[cat.key] ?? '').trim();
+      if (raw === '') continue;
+      const num = Number(raw);
+      if (!Number.isFinite(num) || num < 0) {
+        setBulkSuccess('');
+        setBulkError(`"${cat.label}" must be a non-negative number.`);
+        return;
+      }
+      if (cat.key === 'casual_leave' || cat.key === 'sick_leave' || cat.key === 'leave_without_pay') {
+        fixedValues[cat.key] = num;
+      } else {
+        customValues[cat.key] = num;
+      }
+    }
+    if (Object.keys(fixedValues).length === 0 && Object.keys(customValues).length === 0) {
       setBulkSuccess('');
-      setBulkError('Leave balances must be non-negative numbers.');
+      setBulkError('Enter at least one leave balance to apply.');
       return;
     }
     if (!bulkApplyToAll && bulkDepartments.length === 0) {
@@ -169,15 +273,22 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           departments: bulkApplyToAll ? [] : bulkDepartments,
-          casual_leave: casual,
-          sick_leave: sick,
-          leave_without_pay: lwp
+          ...fixedValues,
+          // Dynamic/custom categories, keyed by category `key` (the same
+          // slug GET/POST /api/leave-categories uses) and stored in the
+          // separate leave_categories/leave_category_balances tables since
+          // there are no fixed columns for them.
+          custom_categories: customValues
         })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to update balances');
       setBulkSuccess(`Updated ${data.updated_count} account${data.updated_count === 1 ? '' : 's'}.`);
-      setBulkDraft({ casual_leave: '', sick_leave: '', leave_without_pay: '' });
+      setBulkDraft((prev) => {
+        const cleared: Record<string, string> = {};
+        Object.keys(prev).forEach((k) => (cleared[k] = ''));
+        return cleared;
+      });
       await fetchBalances();
     } catch (err: any) {
       setBulkError(err.message || 'Failed to update balances');
@@ -289,22 +400,84 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
                   </div>
 
                   <div className="flex flex-wrap items-end gap-3">
-                    {(['casual_leave', 'sick_leave', 'leave_without_pay'] as const).map((field) => (
-                      <div key={field}>
-                        <label className="block text-[10px] font-semibold text-slate-500 mb-1">
-                          {field === 'casual_leave' ? 'Casual Leave' : field === 'sick_leave' ? 'Sick Leave' : 'Leave without Pay'}
+                    {bulkCategories.map((cat) => (
+                      <div key={cat.key} className="relative">
+                        <label className="flex items-center gap-1 text-[10px] font-semibold text-slate-500 mb-1">
+                          {cat.label}
+                          {cat.key.startsWith('custom_') && (
+                            <button
+                              type="button"
+                              onClick={() => removeCustomCategory(cat.key)}
+                              title="Remove this category"
+                              className="text-slate-300 hover:text-rose-500 transition-colors"
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          )}
                         </label>
                         <input
                           type="number"
                           min={0}
                           step={0.5}
-                          value={bulkDraft[field]}
-                          onChange={(e) => setBulkDraft((prev) => ({ ...prev, [field]: e.target.value }))}
+                          value={bulkDraft[cat.key] ?? ''}
+                          onChange={(e) => setBulkDraft((prev) => ({ ...prev, [cat.key]: e.target.value }))}
                           placeholder="0"
                           className="w-28 px-3 py-2 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
                         />
                       </div>
                     ))}
+
+                    {showAddCategory ? (
+                      <div className="flex items-end gap-1.5">
+                        <div>
+                          <label className="block text-[10px] font-semibold text-slate-500 mb-1">Category name</label>
+                          <input
+                            type="text"
+                            autoFocus
+                            disabled={addingCategory}
+                            value={newCategoryLabel}
+                            onChange={(e) => setNewCategoryLabel(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') addCustomCategory();
+                              if (e.key === 'Escape') {
+                                setShowAddCategory(false);
+                                setNewCategoryLabel('');
+                              }
+                            }}
+                            placeholder="e.g. Maternity Leave"
+                            className="w-40 px-3 py-2 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={addCustomCategory}
+                          disabled={addingCategory}
+                          className="flex items-center gap-1 px-3 py-2 bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold rounded-xl transition-colors disabled:opacity-50"
+                        >
+                          {addingCategory && <Spinner size={12} />}
+                          {addingCategory ? 'Adding…' : 'Add'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowAddCategory(false);
+                            setNewCategoryLabel('');
+                          }}
+                          className="px-2.5 py-2 text-slate-400 hover:text-slate-600 text-xs"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setShowAddCategory(true)}
+                        className="flex items-center gap-1 px-3 py-2 text-xs font-semibold text-blue-600 border border-dashed border-blue-300 rounded-xl hover:bg-blue-50 transition-colors"
+                      >
+                        <Plus className="w-3.5 h-3.5" /> Add Category
+                      </button>
+                    )}
+
                     <button
                       type="button"
                       onClick={applyBulk}
@@ -397,24 +570,81 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
                       </p>
                     )}
 
-                    <div className="grid grid-cols-3 gap-2 mb-3">
-                      {(['casual_leave', 'sick_leave', 'leave_without_pay'] as const).map((field) => (
-                        <div key={field}>
-                          <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide leading-tight">
-                            {field === 'casual_leave' ? 'Casual' : field === 'sick_leave' ? 'Sick' : 'LWP'}
+                    <div className="grid grid-cols-2 gap-2 mb-3">
+                      {bulkCategories.map((cat) => (
+                        <div key={cat.key} className="relative">
+                          <p className="flex items-center gap-1 text-[10px] font-semibold text-slate-400 uppercase tracking-wide leading-tight truncate">
+                            {cat.label}
+                            {cat.key.startsWith('custom_') && (
+                              <button
+                                type="button"
+                                onClick={() => removeCustomCategory(cat.key)}
+                                className="text-slate-300 shrink-0"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            )}
                           </p>
                           <input
                             type="number"
                             min={0}
                             step={0.5}
-                            value={bulkDraft[field]}
-                            onChange={(e) => setBulkDraft((prev) => ({ ...prev, [field]: e.target.value }))}
+                            value={bulkDraft[cat.key] ?? ''}
+                            onChange={(e) => setBulkDraft((prev) => ({ ...prev, [cat.key]: e.target.value }))}
                             placeholder="0"
                             className="w-full mt-1 px-2 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                           />
                         </div>
                       ))}
                     </div>
+
+                    {showAddCategory ? (
+                      <div className="flex items-center gap-1.5 mb-3">
+                        <input
+                          type="text"
+                          autoFocus
+                          disabled={addingCategory}
+                          value={newCategoryLabel}
+                          onChange={(e) => setNewCategoryLabel(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') addCustomCategory();
+                            if (e.key === 'Escape') {
+                              setShowAddCategory(false);
+                              setNewCategoryLabel('');
+                            }
+                          }}
+                          placeholder="e.g. Maternity Leave"
+                          className="flex-1 px-2 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                        />
+                        <button
+                          type="button"
+                          onClick={addCustomCategory}
+                          disabled={addingCategory}
+                          className="flex items-center gap-1 px-3 py-2 bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold rounded-lg transition-colors shrink-0 disabled:opacity-50"
+                        >
+                          {addingCategory && <Spinner size={12} />}
+                          {addingCategory ? 'Adding…' : 'Add'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowAddCategory(false);
+                            setNewCategoryLabel('');
+                          }}
+                          className="p-2 text-slate-400 shrink-0"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setShowAddCategory(true)}
+                        className="w-full flex items-center justify-center gap-1.5 py-2 mb-3 text-xs font-semibold text-blue-600 border border-dashed border-blue-300 rounded-lg"
+                      >
+                        <Plus className="w-3.5 h-3.5" /> Add Category
+                      </button>
+                    )}
 
                     <button
                       type="button"
@@ -500,6 +730,26 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
                           </div>
                         ))}
                       </div>
+
+                      {/* Custom Leave Categories a Leave Manager added via
+                          "Set Balance in Bulk" -> Add Category. GET
+                          /api/leave-balances already returns these per-user
+                          under custom_leaves — shown here read-only (Set
+                          Balance in Bulk is the only place that writes them
+                          today, same as the fixed three used to be before
+                          per-row Edit existed). */}
+                      {!!b.custom_leaves?.length && (
+                        <div className="grid grid-cols-3 gap-3 mt-3 pt-3 border-t border-slate-100">
+                          {b.custom_leaves.map((c) => (
+                            <div key={c.key}>
+                              <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide leading-tight truncate" title={c.label}>
+                                {c.label}
+                              </p>
+                              <p className="text-sm text-slate-700 font-medium mt-0.5">{c.balance}</p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
 
                     <div className="grid grid-cols-2 border-t border-slate-100">
@@ -550,6 +800,16 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
                     <th className="px-6 py-3 text-left">Casual Leave</th>
                     <th className="px-6 py-3 text-left">Sick Leave</th>
                     <th className="px-6 py-3 text-left">Leave without Pay</th>
+                    {/* One column per custom Leave Category defined so far
+                        (fetchCategories -> customCategories) — same list the
+                        bulk panel's "Add Category" grows, so a brand-new
+                        category shows up as a column here immediately, even
+                        for accounts that don't have a balance row for it yet
+                        (falls back to 0 below). Read-only here — Set Balance
+                        in Bulk is still the only way to write these. */}
+                    {customCategories.map((cat) => (
+                      <th key={cat.key} className="px-6 py-3 text-left">{cat.label}</th>
+                    ))}
                     <th className="px-6 py-3 text-right">Actions</th>
                   </tr>
                 </thead>
@@ -589,6 +849,14 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
                             )}
                           </td>
                         ))}
+                        {customCategories.map((cat) => {
+                          const bal = b.custom_leaves?.find((c) => c.key === cat.key)?.balance ?? 0;
+                          return (
+                            <td key={cat.key} className="px-6 py-4 whitespace-nowrap text-xs text-slate-700">
+                              {bal}
+                            </td>
+                          );
+                        })}
                         <td className="px-6 py-4 whitespace-nowrap text-right">
                           {isEditing ? (
                             <div className="flex items-center justify-end gap-2">
@@ -622,7 +890,7 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
                   })}
                   {filtered.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="px-6 py-10 text-center text-xs text-slate-400">
+                      <td colSpan={6 + customCategories.length} className="px-6 py-10 text-center text-xs text-slate-400">
                         No accounts found.
                       </td>
                     </tr>

@@ -125,7 +125,9 @@ const memoryDb = {
   approvalChainSteps: [] as any[],
   approvalRequests: [] as any[],
   leaveBalances: [] as any[],
-  leaveApplications: [] as any[]
+  leaveApplications: [] as any[],
+  leaveCategories: [] as any[],
+  leaveCategoryBalances: [] as any[]
 };
 
 async function initDB() {
@@ -1413,6 +1415,41 @@ async function ensureSchemaMigrations() {
   } catch (err: any) {
     console.warn("⚠️ Could not ensure leave_balances table exists: " + err.message);
   }
+  // Custom Leave Categories (Leave Manage -> Set Balance in Bulk -> Add
+  // Category) — see schema.sql's comment on leave_categories for the design.
+  try {
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS leave_categories (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        category_key VARCHAR(100) NOT NULL,
+        label VARCHAR(100) NOT NULL,
+        created_by INT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY unique_leave_category_key (category_key),
+        FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+      )
+    `);
+  } catch (err: any) {
+    console.warn("⚠️ Could not ensure leave_categories table exists: " + err.message);
+  }
+  // Per-account balance for each Custom Leave Category above — the dynamic
+  // equivalent of leave_balances' fixed three columns.
+  try {
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS leave_category_balances (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        category_id INT NOT NULL,
+        balance DECIMAL(5, 1) NOT NULL DEFAULT 0,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY unique_user_category (user_id, category_id),
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (category_id) REFERENCES leave_categories(id) ON DELETE CASCADE
+      )
+    `);
+  } catch (err: any) {
+    console.warn("⚠️ Could not ensure leave_category_balances table exists: " + err.message);
+  }
   // Self Service -> Leave Application — one row per submitted application.
   // Submitting one immediately deducts day_count from the matching
   // leave_balances column (see POST /api/leave-applications below).
@@ -1421,7 +1458,7 @@ async function ensureSchemaMigrations() {
       CREATE TABLE IF NOT EXISTS leave_applications (
         id INT AUTO_INCREMENT PRIMARY KEY,
         user_id INT NOT NULL,
-        leave_type ENUM('casual', 'sick', 'without_pay') NOT NULL,
+        leave_type VARCHAR(64) NOT NULL,
         start_date DATE NOT NULL,
         end_date DATE NOT NULL,
         day_count DECIMAL(5, 1) NOT NULL,
@@ -1462,6 +1499,22 @@ async function ensureSchemaMigrations() {
     await dbPool.query(`ALTER TABLE leave_applications ADD COLUMN decided_at TIMESTAMP NULL`);
   } catch (err: any) {
     // Already exists on a fresh install — ignore silently.
+  }
+  // Custom Leave Categories in Leave Type (see leave_categories/
+  // leave_category_balances above) — leave_type used to be a hardcoded
+  // ENUM('casual', 'sick', 'without_pay'), which made it impossible to submit
+  // a Leave Application against a custom category (only its balance could be
+  // set, never spent). Widened to VARCHAR so it can also hold a Leave
+  // Category's category_key (e.g. "custom_maternity_leave") — see
+  // isValidLeaveType/getLeaveTypeLabel/getLeaveTypeBalance/
+  // adjustLeaveTypeBalance below for how both kinds of value are handled from
+  // here on. MODIFY COLUMN is naturally idempotent — safe to run on every
+  // startup, unlike an ADD COLUMN, and a fresh install already gets VARCHAR(64)
+  // from the CREATE TABLE above so this is a no-op there.
+  try {
+    await dbPool.query(`ALTER TABLE leave_applications MODIFY COLUMN leave_type VARCHAR(64) NOT NULL`);
+  } catch (err: any) {
+    console.warn("⚠️ Could not widen leave_applications.leave_type to VARCHAR: " + err.message);
   }
   // Dynamic Approval Engine (Part 5) — Leave Application no longer has the
   // applicant pick their own Approver at submission; it's now routed through
@@ -2387,6 +2440,103 @@ async function rejectUserClaimRecord(userClaimId: number, rejectedBy: number, re
 // to move. Shared by the no-Template auto-approve edge case and
 // performApprovalAction's LAST-step approval — same pattern as
 // finalizeAttendanceCorrection/finalizeUserClaimApproval above.
+// --- Leave Type helpers (fixed Casual/Sick/Leave-without-Pay + custom Leave
+// Categories) ---
+// leave_applications.leave_type (and, before it, POST /api/leave-applications'
+// validation) used to only ever be one of the three fixed columns on
+// leave_balances. Custom Leave Categories (leave_categories +
+// leave_category_balances, added for Leave Manage -> Set Balance in Bulk ->
+// Add Category) could hold a balance, but a Leave Application could never
+// actually be submitted against one. These four helpers are the one place
+// that now understands BOTH kinds of Leave Type, so every caller below
+// (submit, reject/refund, approve, reliever, notifications) goes through
+// them instead of re-deriving casual/sick/without_pay by hand.
+
+const FIXED_LEAVE_TYPES = ["casual", "sick", "without_pay"] as const;
+
+function isFixedLeaveType(leaveType: string): leaveType is (typeof FIXED_LEAVE_TYPES)[number] {
+  return (FIXED_LEAVE_TYPES as readonly string[]).includes(leaveType);
+}
+
+// True for one of the 3 fixed types, or a category_key that actually exists
+// in leave_categories — never trusts a client-supplied key without checking.
+async function isValidLeaveType(leaveType: string): Promise<boolean> {
+  if (isFixedLeaveType(leaveType)) return true;
+  const rows = await queryDB("SELECT id, category_key, label FROM leave_categories WHERE category_key = ?", [leaveType]);
+  return rows.length > 0;
+}
+
+// Human label for a Leave Type — fixed types use the same static labels
+// every caller used to hardcode; a custom category looks up its stored
+// label (falling back to the raw key itself if it's somehow gone missing,
+// e.g. deleted after an application already referenced it).
+async function getLeaveTypeLabel(leaveType: string): Promise<string> {
+  if (leaveType === "casual") return "Casual";
+  if (leaveType === "sick") return "Sick";
+  if (leaveType === "without_pay") return "Leave Without Pay";
+  const rows = await queryDB("SELECT id, category_key, label FROM leave_categories WHERE category_key = ?", [leaveType]);
+  return rows[0]?.label || leaveType;
+}
+
+// This account's current balance for a Leave Type — fixed types read the
+// matching leave_balances column; a custom category reads its
+// leave_category_balances row (0 if that account has never had one set).
+async function getLeaveTypeBalance(userId: number, leaveType: string): Promise<number> {
+  if (isFixedLeaveType(leaveType)) {
+    const balanceColumn = leaveType === "casual" ? "casual_leave" : leaveType === "sick" ? "sick_leave" : "leave_without_pay";
+    const rows = await queryDB("SELECT * FROM leave_balances WHERE user_id = ?", [userId]);
+    return rows.length > 0 ? Number(rows[0][balanceColumn]) : 0;
+  }
+  const catRows = await queryDB("SELECT id, category_key, label FROM leave_categories WHERE category_key = ?", [leaveType]);
+  if (catRows.length === 0) return 0;
+  const balRows = await queryDB("SELECT * FROM leave_category_balances WHERE user_id = ?", [userId]);
+  const row = balRows.find((b: any) => Number(b.category_id) === Number(catRows[0].id));
+  return row ? Number(row.balance) : 0;
+}
+
+// Adds `delta` days to an account's balance for a Leave Type (negative delta
+// to deduct at submission time, positive to refund on reject) — fixed types
+// update the leave_balances row (insert one if it's never had one), a
+// custom category upserts its leave_category_balances row. Shared by submit,
+// reject (both the Dynamic Approval Engine path and the legacy
+// approver-picked decision route), so a day_count is always moved the exact
+// same way regardless of which kind of Leave Type it's for.
+async function adjustLeaveTypeBalance(userId: number, leaveType: string, delta: number): Promise<void> {
+  if (isFixedLeaveType(leaveType)) {
+    const balanceColumn = leaveType === "casual" ? "casual_leave" : leaveType === "sick" ? "sick_leave" : "leave_without_pay";
+    const rows = await queryDB("SELECT * FROM leave_balances WHERE user_id = ?", [userId]);
+    const casual = Number(rows[0]?.casual_leave || 0) + (balanceColumn === "casual_leave" ? delta : 0);
+    const sick = Number(rows[0]?.sick_leave || 0) + (balanceColumn === "sick_leave" ? delta : 0);
+    const lwp = Number(rows[0]?.leave_without_pay || 0) + (balanceColumn === "leave_without_pay" ? delta : 0);
+    if (rows.length > 0) {
+      await queryDB("UPDATE leave_balances SET casual_leave = ?, sick_leave = ?, leave_without_pay = ? WHERE user_id = ?", [
+        casual,
+        sick,
+        lwp,
+        userId
+      ]);
+    } else {
+      await queryDB("INSERT INTO leave_balances (user_id, casual_leave, sick_leave, leave_without_pay) VALUES (?, ?, ?, ?)", [
+        userId,
+        casual,
+        sick,
+        lwp
+      ]);
+    }
+    return;
+  }
+  const catRows = await queryDB("SELECT id, category_key, label FROM leave_categories WHERE category_key = ?", [leaveType]);
+  if (catRows.length === 0) return; // Shouldn't happen — isValidLeaveType already checked at submission time.
+  const categoryId = Number(catRows[0].id);
+  const balRows = await queryDB("SELECT * FROM leave_category_balances WHERE user_id = ?", [userId]);
+  const existing = balRows.find((b: any) => Number(b.category_id) === categoryId);
+  const next = Number(existing?.balance || 0) + delta;
+  await queryDB(
+    "INSERT INTO leave_category_balances (user_id, category_id, balance) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE balance = VALUES(balance)",
+    [userId, categoryId, next]
+  );
+}
+
 async function finalizeLeaveApplicationApproval(leaveId: number, approvedBy: number | null, remarks: string | null) {
   const rows = await queryDB("SELECT * FROM leave_applications WHERE id = ?", [leaveId]);
   if (rows.length === 0) throw new Error("Leave Application not found");
@@ -2399,7 +2549,7 @@ async function finalizeLeaveApplicationApproval(leaveId: number, approvedBy: num
     leaveId
   ]);
 
-  const leaveTypeLabel = application.leave_type === "casual" ? "Casual" : application.leave_type === "sick" ? "Sick" : "Leave Without Pay";
+  const leaveTypeLabel = await getLeaveTypeLabel(application.leave_type);
   await createAlert(queryDB, {
     userId: application.user_id,
     type: "leave_application",
@@ -2420,26 +2570,7 @@ async function rejectLeaveApplicationRecord(leaveId: number, rejectedBy: number 
   const application = rows[0];
   if (application.status !== "pending") throw new Error("This Leave Application has already been reviewed.");
 
-  const balanceColumn = application.leave_type === "casual" ? "casual_leave" : application.leave_type === "sick" ? "sick_leave" : "leave_without_pay";
-  const balanceRows = await queryDB("SELECT * FROM leave_balances WHERE user_id = ?", [application.user_id]);
-  const casual = Number(balanceRows[0]?.casual_leave || 0) + (balanceColumn === "casual_leave" ? Number(application.day_count) : 0);
-  const sick = Number(balanceRows[0]?.sick_leave || 0) + (balanceColumn === "sick_leave" ? Number(application.day_count) : 0);
-  const lwp = Number(balanceRows[0]?.leave_without_pay || 0) + (balanceColumn === "leave_without_pay" ? Number(application.day_count) : 0);
-  if (balanceRows.length > 0) {
-    await queryDB("UPDATE leave_balances SET casual_leave = ?, sick_leave = ?, leave_without_pay = ? WHERE user_id = ?", [
-      casual,
-      sick,
-      lwp,
-      application.user_id
-    ]);
-  } else {
-    await queryDB("INSERT INTO leave_balances (user_id, casual_leave, sick_leave, leave_without_pay) VALUES (?, ?, ?, ?)", [
-      application.user_id,
-      casual,
-      sick,
-      lwp
-    ]);
-  }
+  await adjustLeaveTypeBalance(application.user_id, application.leave_type, Number(application.day_count));
 
   await queryDB("UPDATE leave_applications SET status = 'rejected', remarks = ?, decided_by = ?, decided_at = NOW() WHERE id = ?", [
     remarks,
@@ -2447,7 +2578,7 @@ async function rejectLeaveApplicationRecord(leaveId: number, rejectedBy: number 
     leaveId
   ]);
 
-  const leaveTypeLabel = application.leave_type === "casual" ? "Casual" : application.leave_type === "sick" ? "Sick" : "Leave Without Pay";
+  const leaveTypeLabel = await getLeaveTypeLabel(application.leave_type);
   await createAlert(queryDB, {
     userId: application.user_id,
     type: "leave_application",
@@ -2485,7 +2616,7 @@ async function approveLeaveApplicationReliever(leaveId: number, relieverUserId: 
   if (autoApproved) {
     await finalizeLeaveApplicationApproval(leaveId, relieverUserId, "Auto-approved (no Approval Template configured for Leave) after Reliever approval.");
   } else {
-    const leaveTypeLabel = application.leave_type === "casual" ? "Casual" : application.leave_type === "sick" ? "Sick" : "Leave Without Pay";
+    const leaveTypeLabel = await getLeaveTypeLabel(application.leave_type);
     await createAlert(queryDB, {
       userId: application.user_id,
       type: "leave_application",
@@ -3956,6 +4087,57 @@ async function queryDB(sql: string, params: any[] = []): Promise<any> {
         row.updated_at = new Date();
       }
       return { affectedRows: row ? 1 : 0 };
+    }
+
+    // CUSTOM LEAVE CATEGORIES (Leave Manage -> Set Balance in Bulk -> Add Category)
+    if (lowerSql.startsWith("select id, category_key, label from leave_categories where category_key")) {
+      const key = params[0];
+      return memoryDb.leaveCategories.filter((c: any) => c.category_key === key);
+    }
+    if (lowerSql.startsWith("select id, category_key, label from leave_categories")) {
+      return [...memoryDb.leaveCategories]
+        .map((c: any) => ({ id: c.id, category_key: c.category_key, label: c.label }))
+        .sort((a: any, b: any) => String(a.label).localeCompare(String(b.label)));
+    }
+    if (lowerSql.startsWith("insert into leave_categories")) {
+      const [categoryKey, label, createdBy] = params;
+      const newId = memoryDb.leaveCategories.length > 0 ? Math.max(...memoryDb.leaveCategories.map((c: any) => c.id)) + 1 : 1;
+      memoryDb.leaveCategories.push({
+        id: newId,
+        category_key: categoryKey,
+        label,
+        created_by: createdBy ?? null,
+        created_at: new Date()
+      });
+      return { insertId: newId };
+    }
+    if (lowerSql.startsWith("select * from leave_category_balances where user_id")) {
+      const userId = Number(params[0]);
+      return memoryDb.leaveCategoryBalances.filter((b: any) => b.user_id === userId);
+    }
+    if (lowerSql.startsWith("select * from leave_category_balances")) {
+      return [...memoryDb.leaveCategoryBalances];
+    }
+    if (lowerSql.startsWith("insert into leave_category_balances")) {
+      const [userId, categoryId, balance] = params;
+      const existing = memoryDb.leaveCategoryBalances.find(
+        (b: any) => b.user_id === Number(userId) && b.category_id === Number(categoryId)
+      );
+      if (existing) {
+        existing.balance = Number(balance);
+        existing.updated_at = new Date();
+        return { affectedRows: 1 };
+      }
+      const newId =
+        memoryDb.leaveCategoryBalances.length > 0 ? Math.max(...memoryDb.leaveCategoryBalances.map((b: any) => b.id)) + 1 : 1;
+      memoryDb.leaveCategoryBalances.push({
+        id: newId,
+        user_id: Number(userId),
+        category_id: Number(categoryId),
+        balance: Number(balance),
+        updated_at: new Date()
+      });
+      return { insertId: newId };
     }
 
     // LEAVE APPLICATIONS (Self Service -> Leave Application)
@@ -6730,7 +6912,11 @@ async function startServer() {
     getCurrentStepApprovers,
     createAlert,
     approveLeaveApplicationReliever,
-    rejectLeaveApplicationReliever
+    rejectLeaveApplicationReliever,
+    isValidLeaveType,
+    getLeaveTypeLabel,
+    getLeaveTypeBalance,
+    adjustLeaveTypeBalance
   });
 
   // --- Vite Middleware / Static Serving ---
