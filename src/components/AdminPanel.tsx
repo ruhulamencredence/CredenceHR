@@ -5,8 +5,8 @@ import autoTable from 'jspdf-autotable';
 import credenceLogo from '../assets/credence-logo.png';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
 import { savePdfCrossPlatform } from '../lib/saveFile';
-import { Project, Branch, MprNumber, Entry, User, Budget, BudgetItem, UserProjectPermission, EntryEditHistory, BulkUserRow, BulkUserResultItem, AdminModuleKey, ADMIN_MODULES, AttendanceRecord, ClaimsNavRequest, AdminNavRequest, Department, LeaveApplication } from '../types';
-import { Building2, FileText, Users, Users2, BarChart3, Plus, Trash2, Edit2, Search, Filter, UserCheck, Calendar, CalendarClock, Download, Upload, FolderPlus, X, Eye, FileSpreadsheet, KeyRound, History, RotateCcw, Recycle, ListChecks, FileDown, MapPin, LayoutGrid, Navigation, LogIn, LogOut, Bell, Route, ShieldCheck, Wallet, Contact, Lock, Mail } from 'lucide-react';
+import { Project, Branch, MprNumber, Entry, User, Budget, BudgetItem, UserProjectPermission, EntryEditHistory, BulkUserRow, BulkUserResultItem, AdminModuleKey, ADMIN_MODULES, AttendanceRecord, ClaimsNavRequest, AdminNavRequest, Department, LeaveApplication, PendingJobEdit } from '../types';
+import { Building2, FileText, Users, Users2, BarChart3, Plus, Trash2, Edit2, Search, Filter, UserCheck, Calendar, CalendarClock, Download, Upload, FolderPlus, X, Eye, FileSpreadsheet, KeyRound, History, RotateCcw, Recycle, ListChecks, FileDown, MapPin, LayoutGrid, Navigation, LogIn, LogOut, Bell, Route, ShieldCheck, Wallet, Contact, Lock, Mail, CheckCircle2, XCircle, Clock3 } from 'lucide-react';
 import LocationMapPicker from './LocationMapPicker';
 import { NoticeManager } from './NoticeManager';
 import { EmployeesPanel } from './EmployeesPanel';
@@ -589,6 +589,72 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     if (activeTab === 'editlog') fetchMprEditLog();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
+
+  // Job Edit Approvals — Job Edit's Add MPR / Delete MPR requests queued for review
+  // (see EntriesRoutes.ts's job_edit_requests), shown at the top of the same "Edit
+  // Log" tab since it's the same "editlog" module access and the same subject
+  // (Job Edit) as the log table below it.
+  const [jobEditRequests, setJobEditRequests] = useState<PendingJobEdit[]>([]);
+  const [loadingJobEditRequests, setLoadingJobEditRequests] = useState(false);
+  // Which request id currently has an approve/reject call in flight, so its two
+  // buttons (and only its two) disable instead of the whole list.
+  const [actingJobEditId, setActingJobEditId] = useState<number | null>(null);
+  const [jobEditActionError, setJobEditActionError] = useState('');
+
+  const fetchJobEditRequests = async () => {
+    setLoadingJobEditRequests(true);
+    try {
+      const res = await fetch(apiUrl('/api/job-edits'), { headers: { Authorization: `Bearer ${token}` } });
+      if (res.ok) setJobEditRequests(await res.json());
+    } catch (err) {
+      console.error('Failed to load Job Edit requests', err);
+    } finally {
+      setLoadingJobEditRequests(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'editlog') fetchJobEditRequests();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+
+  const pendingJobEditRequests = jobEditRequests.filter((r) => r.status === 'pending');
+  // Approved/Rejected within roughly the same window the server itself keeps
+  // returning them for (see GET /api/job-edits/mine's 2-day window) — just for
+  // context under "Recently Reviewed", not meant to be a full audit trail (the MPR
+  // Edit Log table below already covers approved Add MPRs permanently).
+  const recentlyReviewedJobEditRequests = jobEditRequests.filter((r) => r.status !== 'pending');
+
+  const actOnJobEditRequest = async (id: number, action: 'approve' | 'reject') => {
+    if (action === 'reject' && !window.confirm('Reject this Job Edit request?')) return;
+    setActingJobEditId(id);
+    setJobEditActionError('');
+    try {
+      const res = await fetch(apiUrl(`/api/job-edits/${id}/act`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to act on this request');
+      // An approved Add MPR shows up in the MPR Edit Log table too — refresh both.
+      await Promise.all([fetchJobEditRequests(), fetchMprEditLog()]);
+    } catch (err: any) {
+      setJobEditActionError(err.message || 'Something went wrong');
+    } finally {
+      setActingJobEditId(null);
+    }
+  };
+
+  // One line describing what a Job Edit request is actually proposing — used by
+  // both the pending list and the recently-reviewed list below.
+  const describeJobEditRequest = (r: PendingJobEdit) => {
+    if (r.action === 'add_item') {
+      const p = r.payload || {};
+      return `Add MPR ${p.mpr_no || '—'} · ${p.item_name || '—'} · Qty ${p.requisitioned_qty ?? '—'} · Delivery ${formatDate(p.delivery_date || '') || '—'}`;
+    }
+    return `Delete MPR ${r.entry_mpr_no || '—'} · ${r.entry_item_name || '—'} · Qty ${r.entry_requisitioned_qty ?? '—'} · Delivery ${formatDate(r.entry_delivery_date || '') || '—'}`;
+  };
 
   // Remote Attendance (separate Admin tab, Superadmin always sees it) — every
   // Check In / Check Out a User has recorded, system-wide, filterable by
@@ -3411,6 +3477,107 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           happened, so an Admin can see at a glance which day which Job/MPR rows were
           touched (and by whom) without opening each entry's own history one at a time. */}
       {activeTab === 'editlog' && (
+        <>
+        {/* Job Edit Approvals — pending first, so an Admin with "editlog" access sees
+            what needs action before scrolling into the (much longer) permanent log
+            below. Only an Admin/User account with the "editlog" module actually gets
+            data back from GET /api/job-edits — this section simply doesn't render
+            anything for anyone else since this whole tab is already gated the same way. */}
+        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden mb-4">
+          <div className="p-6 border-b border-slate-200">
+            <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+              <Clock3 className="w-4 h-4 text-amber-600" /> Job Edit Approvals
+              {pendingJobEditRequests.length > 0 && (
+                <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">
+                  {pendingJobEditRequests.length} pending
+                </span>
+              )}
+            </h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Add MPR / Delete MPR requests a User submitted through Job Edit on an already Final Submitted
+              Job (via the can_job_edit permission) — each one needs your Approve or Reject before it takes effect.
+            </p>
+          </div>
+
+          {jobEditActionError && (
+            <div className="mx-6 mt-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs">
+              {jobEditActionError}
+            </div>
+          )}
+
+          {loadingJobEditRequests ? (
+            <p className="text-xs text-slate-400 text-center py-10">Loading Job Edit requests...</p>
+          ) : pendingJobEditRequests.length === 0 ? (
+            <p className="text-xs text-slate-400 text-center py-10">No Job Edit requests are pending review.</p>
+          ) : (
+            <div className="divide-y divide-slate-100">
+              {pendingJobEditRequests.map((r) => (
+                <div key={r.id} className="px-6 py-3.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs font-semibold text-blue-600">{r.job_no}</span>
+                      <span
+                        className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
+                          r.action === 'add_item'
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            : 'bg-rose-50 text-rose-700 border-rose-200'
+                        }`}
+                      >
+                        {r.action === 'add_item' ? 'Add MPR' : 'Delete MPR'}
+                      </span>
+                    </div>
+                    <p className="text-sm text-slate-800 mt-1 break-words">{describeJobEditRequest(r)}</p>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      Requested by {r.requested_by_name || '—'} on {formatDate(r.created_at) || r.created_at}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <button
+                      type="button"
+                      disabled={actingJobEditId === r.id}
+                      onClick={() => actOnJobEditRequest(r.id, 'approve')}
+                      className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50 transition-colors"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5" /> Approve
+                    </button>
+                    <button
+                      type="button"
+                      disabled={actingJobEditId === r.id}
+                      onClick={() => actOnJobEditRequest(r.id, 'reject')}
+                      className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 disabled:opacity-50 transition-colors"
+                    >
+                      <XCircle className="w-3.5 h-3.5" /> Reject
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {recentlyReviewedJobEditRequests.length > 0 && (
+            <div className="border-t border-slate-200">
+              <p className="px-6 pt-3 pb-1 text-[11px] font-semibold text-slate-400 uppercase tracking-wide">
+                Recently Reviewed
+              </p>
+              <div className="divide-y divide-slate-100">
+                {recentlyReviewedJobEditRequests.map((r) => (
+                  <div key={r.id} className="px-6 py-2.5 flex items-center justify-between gap-3">
+                    <p className="text-xs text-slate-500 truncate">{describeJobEditRequest(r)}</p>
+                    <span
+                      className={`text-[10px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0 ${
+                        r.status === 'approved'
+                          ? 'bg-emerald-50 text-emerald-700'
+                          : 'bg-rose-50 text-rose-700'
+                      }`}
+                    >
+                      {r.status === 'approved' ? 'Approved' : 'Rejected'} by {r.reviewed_by_name || '—'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
         <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
           <div className="p-6 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div>
@@ -3511,6 +3678,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
             </div>
           )}
         </div>
+        </>
       )}
 
       {/* TAB 2: PROJECTS */}

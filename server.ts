@@ -261,6 +261,32 @@ async function ensureSchemaMigrations() {
     console.warn("⚠️ Could not ensure entry_edit_history table exists: " + err.message);
   }
 
+  // Job Edit Approval queue — same self-healing pattern as entry_edit_history above.
+  // See schema.sql's job_edit_requests comment for the full explanation.
+  try {
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS job_edit_requests (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        job_id INT NOT NULL,
+        entry_id INT NULL,
+        action ENUM('add_item', 'delete_entry') NOT NULL,
+        payload TEXT NULL,
+        status ENUM('pending', 'approved', 'rejected') NOT NULL DEFAULT 'pending',
+        requested_by INT NOT NULL,
+        reviewed_by INT NULL,
+        reviewed_at TIMESTAMP NULL DEFAULT NULL,
+        review_note VARCHAR(500) NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE,
+        FOREIGN KEY (entry_id) REFERENCES entries(id) ON DELETE SET NULL,
+        FOREIGN KEY (requested_by) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL
+      )
+    `);
+  } catch (err: any) {
+    console.warn("⚠️ Could not ensure job_edit_requests table exists: " + err.message);
+  }
+
   // Self-healing column additions for the Admin-set Delivery Date window feature —
   // ignore the error if the column already exists (older MySQL doesn't support
   // "ADD COLUMN IF NOT EXISTS" reliably, so this is the portable approach).

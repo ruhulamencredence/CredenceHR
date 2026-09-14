@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>CredenceHR</title>
+<style>
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: linear-gradient(160deg, #eaf6ff 0%, #dbeeff 30%, #e7dcff 65%, #ede0ff 100%);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    overscroll-behavior: none;
+  }
+  #wrap {
+    min-height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 32px 28px;
+    box-sizing: border-box;
+    text-align: center;
+  }
+
+  /* Same infinity glyph/motif used on the app's own boot screen
+     (index.html) and AppLoader.tsx, just animated to feel like it's
+     "searching" for a connection instead of only pulsing. */
+  .infinity-wrap { width: 84px; height: 52px; margin-bottom: 22px; }
+  .infinity-glyph {
+    width: 100%;
+    height: 100%;
+    animation: pulse 1.4s ease-in-out infinite;
+    transform-origin: center;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 0.35; transform: scale(0.88); }
+    50%      { opacity: 1;    transform: scale(1); }
+  }
+
+  h1 { font-size: 17px; color: #2d2140; margin: 0 0 8px; font-weight: 700; }
+  p  { font-size: 13.5px; color: #6b6580; margin: 0 0 26px; max-width: 280px; line-height: 1.5; }
+
+  #retryBtn {
+    background: linear-gradient(90deg, #7F00FF 0%, #6300C6 50%, #47008E 100%);
+    color: #fff;
+    border: none;
+    padding: 12px 36px;
+    border-radius: 24px;
+    font-size: 14.5px;
+    font-weight: 600;
+    box-shadow: 0 6px 16px rgba(127, 0, 255, 0.28);
+  }
+  #retryBtn:active { opacity: 0.85; }
+  #retryBtn:disabled { opacity: 0.6; }
+
+  #status { margin-top: 14px; font-size: 12px; color: #8a84a0; min-height: 16px; }
+</style>
+</head>
+<body>
+  <div id="wrap">
+    <div class="infinity-wrap">
+      <svg class="infinity-glyph" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M18.178 8c5.096 0 5.096 8 0 8-5.095 0-7.133-8-12.229-8-5.096 0-5.096 8 0 8 5.096 0 7.135-8 12.229-8z" fill="#7F00FF"/>
+      </svg>
+    </div>
+    <h1>Can't reach the server</h1>
+    <p>Please check your internet or Wi-Fi connection, then try again.</p>
+    <button id="retryBtn" onclick="retry()">Try Again</button>
+    <div id="status"></div>
+  </div>
+
+  <script>
+    var params = new URLSearchParams(location.search);
+    var targetUrl = params.get('url');
+    var statusEl = document.getElementById('status');
+    var btn = document.getElementById('retryBtn');
+    var countdown = 8;
+    var timer = null;
+
+    function retry() {
+      clearInterval(timer);
+      if (targetUrl) {
+        location.href = targetUrl;
+      } else {
+        location.reload();
+      }
+    }
+
+    function tick() {
+      countdown -= 1;
+      if (countdown <= 0) {
+        statusEl.textContent = 'Retrying…';
+        retry();
+        return;
+      }
+      statusEl.textContent = 'Retrying automatically in ' + countdown + 's';
+    }
+
+    // Auto-retry every 8s so the app reconnects on its own once the network
+    // or server comes back, without the user needing to tap anything.
+    timer = setInterval(tick, 1000);
+    statusEl.textContent = 'Retrying automatically in ' + countdown + 's';
+  </script>
+</body>
+</html>

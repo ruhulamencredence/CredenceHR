@@ -687,6 +687,40 @@ export interface EntryEditHistory {
   entry_owner_name?: string | null;
 }
 
+// One row of the Job Edit Approval queue — a "Job Edit" (Add MPR to a Final-
+// Submitted Job / Delete an MPR from one) made by a User who only has the
+// can_job_edit permission, sitting pending Admin review instead of being applied
+// immediately. Returned by GET /api/job-edits/mine (this user's own, scoped to a
+// Job) and GET /api/job-edits (Admin Panel -> PEPM Manage -> Edit Log, every
+// User's, for the "editlog" module to review/act on via POST /api/job-edits/:id/act).
+export interface PendingJobEdit {
+  id: number;
+  job_id: number;
+  job_no?: string | null;
+  job_name?: string | null;
+  // Which existing MPR row this request is against — set for 'delete_entry', null
+  // for a still-pending 'add_item' (there's no real entries row yet).
+  entry_id: number | null;
+  action: 'add_item' | 'delete_entry';
+  status: 'pending' | 'approved' | 'rejected';
+  // add_item: { mpr_no, mpr_id, budget_item_id, item_name, requisitioned_qty,
+  // delivery_date } — the proposed new MPR row. delete_entry: {} (the row to
+  // delete is entry_id above; entry/mpr_no/item_name/requisitioned_qty/
+  // delivery_date below carry its current values for display, joined server-side).
+  payload: any;
+  entry_mpr_no?: string | null;
+  entry_item_name?: string | null;
+  entry_requisitioned_qty?: number | null;
+  entry_delivery_date?: string | null;
+  requested_by?: number;
+  requested_by_name?: string | null;
+  reviewed_by?: number | null;
+  reviewed_by_name?: string | null;
+  reviewed_at?: string | null;
+  review_note?: string | null;
+  created_at: string;
+}
+
 export interface Budget {
   id: number;
   budget_name: string;
