@@ -480,6 +480,33 @@ CREATE TABLE IF NOT EXISTS entry_edit_history (
   FOREIGN KEY (edited_by) REFERENCES users(id) ON DELETE SET NULL
 );
 
+-- Job Edit Approval queue (Job Edit -> Add MPR to a Final-Submitted Job / Delete an
+-- MPR from one, when the acting User only has the can_job_edit permission, not
+-- Admin/Superadmin). Instead of applying immediately, the action is queued here and
+-- only takes effect once an Admin with the "editlog" module (Admin Panel -> PEPM
+-- Manage -> Edit Log) approves it — see POST /api/job-edits/:id/act. payload holds
+-- the proposed change as JSON text (add_item: mpr_no/mpr_id/budget_item_id/item_name/
+-- requisitioned_qty/delivery_date; delete_entry: not needed, entry_id below already
+-- points at the row). entry_id is NULL for a still-pending add_item (there is no real
+-- entries row yet) and set once approved (see POST /api/job-edits/:id/act).
+CREATE TABLE IF NOT EXISTS job_edit_requests (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  job_id INT NOT NULL,
+  entry_id INT NULL,
+  action ENUM('add_item', 'delete_entry') NOT NULL,
+  payload TEXT NULL,
+  status ENUM('pending', 'approved', 'rejected') NOT NULL DEFAULT 'pending',
+  requested_by INT NOT NULL,
+  reviewed_by INT NULL,
+  reviewed_at TIMESTAMP NULL DEFAULT NULL,
+  review_note VARCHAR(500) NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE,
+  FOREIGN KEY (entry_id) REFERENCES entries(id) ON DELETE SET NULL,
+  FOREIGN KEY (requested_by) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL
+);
+
 -- Remote Attendance Table (one row per User per Project per calendar day)
 -- A User checks in/out for a Project they have access to from the User Panel; the
 -- server only accepts it if the device's reported coordinates fall inside that
@@ -1157,6 +1184,29 @@ CREATE TABLE IF NOT EXISTS approval_requests (
 --   location_label VARCHAR(255) NULL,
 --   location_radius INT NULL,
 --   FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+-- );
+
+-- If you already have an existing database, run this once to add the Job Edit
+-- Approval queue (Job Edit -> Add MPR to a Final-Submitted Job / Delete an MPR from
+-- one, when the acting User only has the can_job_edit permission, not an Admin/
+-- Superadmin) — the server also auto-creates this on startup, so this is only needed
+-- if that self-healing migration is skipped:
+-- CREATE TABLE IF NOT EXISTS job_edit_requests (
+--   id INT AUTO_INCREMENT PRIMARY KEY,
+--   job_id INT NOT NULL,
+--   entry_id INT NULL,
+--   action ENUM('add_item', 'delete_entry') NOT NULL,
+--   payload TEXT NULL,
+--   status ENUM('pending', 'approved', 'rejected') NOT NULL DEFAULT 'pending',
+--   requested_by INT NOT NULL,
+--   reviewed_by INT NULL,
+--   reviewed_at TIMESTAMP NULL DEFAULT NULL,
+--   review_note VARCHAR(500) NULL,
+--   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+--   FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE,
+--   FOREIGN KEY (entry_id) REFERENCES entries(id) ON DELETE SET NULL,
+--   FOREIGN KEY (requested_by) REFERENCES users(id) ON DELETE CASCADE,
+--   FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL
 -- );
 
 -- No demo/seed data here.

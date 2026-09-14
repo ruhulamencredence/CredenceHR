@@ -513,6 +513,13 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
       if (jobRows.length === 0) return res.status(404).json({ error: "Job not found" });
       const job = jobRows[0];
 
+      // Set below when this add must be QUEUED for Admin approval instead of applied
+      // immediately — a non-admin, Final-Submitted Job, relying on the can_job_edit
+      // permission (as opposed to editing before Final Submit, which needs no special
+      // permission at all and is never queued). See the queuing branch further down,
+      // right before the insert loop.
+      let queueForApproval = false;
+
       if (req.user.role !== "admin" && req.user.role !== "superadmin" && job.created_by !== req.user.id) {
         return res.status(403).json({ error: "You can only edit your own Jobs." });
       }
@@ -531,6 +538,10 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
           if (!canJobEdit) {
             return res.status(403).json({ error: "You don't have permission to edit Jobs. Ask your Admin to enable Job Edit for your account." });
           }
+          // can_job_edit unlocks Add MPR on a Final-Submitted Job, but the change
+          // itself must still go through Admin approval before it actually lands —
+          // see PEPM Manage -> Edit Log (requireModule("editlog")) below.
+          queueForApproval = true;
         }
       }
 
@@ -664,6 +675,39 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
             error: "One of the selected MPR Nos has already been used in another entry under this Budget."
           });
         }
+      }
+
+      // Job Edit (can_job_edit), on a Final-Submitted Job, never applies directly —
+      // every proposed MPR row is queued as its own job_edit_requests row (so the
+      // reviewing Admin, and this user's own "Edit Pending Admin Approval" badge,
+      // can act on/track each one independently) and only lands in `entries` once
+      // an Admin with the "editlog" module approves it (see POST /api/job-edits/:id/act
+      // further down, and GET /api/job-edits for the Admin-side review list).
+      if (queueForApproval) {
+        const queuedIds: number[] = [];
+        for (const it of items) {
+          const mprNo = mprNoById.get(Number(it.mpr_id)) || "";
+          const payload = {
+            mpr_no: mprNo,
+            mpr_id: it.mpr_id,
+            budget_item_id: it.budget_item_id,
+            item_name: it.item_name,
+            requisitioned_qty: Number(it.requisitioned_qty),
+            delivery_date: it.delivery_date
+          };
+          const result = await queryDB(
+            "INSERT INTO job_edit_requests (job_id, entry_id, action, payload, status, requested_by) VALUES (?, NULL, 'add_item', ?, 'pending', ?)",
+            [jobId, JSON.stringify(payload), req.user.id]
+          );
+          queuedIds.push(result.insertId);
+        }
+        return res.json({
+          success: true,
+          pending: true,
+          message: `Submitted — ${queuedIds.length > 1 ? "these MPR rows are" : "this MPR row is"} pending Admin approval.`,
+          job_id: jobId,
+          count: queuedIds.length
+        });
       }
 
       const entry_date = todayInDhaka();
@@ -1271,7 +1315,8 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
       // it's locked — deleting must be blocked here too, same rule as editing. A
       // non-admin with the Job Edit permission (Admin Panel -> Users) is exempt: that
       // permission is specifically what lets them delete an MPR out of an already
-      // Final-Submitted Job.
+      // Final-Submitted Job — but even then, the delete is QUEUED for Admin approval
+      // (job_edit_requests) rather than applied immediately, same as Add MPR above.
       if (entry.budget_id && req.user.role !== "admin" && req.user.role !== "superadmin") {
         const submittedRows = await queryDB(
           "SELECT id FROM budget_submissions WHERE budget_id = ? AND user_id = ?",
@@ -1285,6 +1330,25 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
               error: "This entry's Budget has already been submitted. It can no longer be deleted."
             });
           }
+          // Refuse a second delete request while one against this same entry is
+          // already pending review — the UI already disables the Delete button once
+          // pending, this is just the server-side backstop against a direct API call.
+          const existingPending = await queryDB(
+            "SELECT id FROM job_edit_requests WHERE entry_id = ? AND action = 'delete_entry' AND status = 'pending'",
+            [id]
+          );
+          if (existingPending.length > 0) {
+            return res.status(400).json({ error: "A delete request for this MPR is already pending Admin approval." });
+          }
+          await queryDB(
+            "INSERT INTO job_edit_requests (job_id, entry_id, action, payload, status, requested_by) VALUES (?, ?, 'delete_entry', NULL, 'pending', ?)",
+            [entry.job_id, id, req.user.id]
+          );
+          return res.json({
+            success: true,
+            pending: true,
+            message: "Submitted — this MPR's deletion is pending Admin approval."
+          });
         }
       }
 
@@ -1326,6 +1390,208 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Failed to permanently delete entry" });
+    }
+  });
+
+  // Shared SELECT for both GET /api/job-edits/mine and GET /api/job-edits below —
+  // joins the requester/reviewer names and (for a 'delete_entry' request) the
+  // target entry's current MPR No / Item / Qty / Delivery Date, so the client never
+  // needs a second round trip to show what's actually pending.
+  const JOB_EDIT_REQUEST_SELECT = `
+    SELECT r.id, r.job_id, j.job_no, e.job_name, r.entry_id, r.action, r.payload, r.status,
+      r.requested_by, ru.name AS requested_by_name,
+      r.reviewed_by, rv.name AS reviewed_by_name, r.reviewed_at, r.review_note, r.created_at,
+      m.mpr_no AS entry_mpr_no, e.item_name AS entry_item_name,
+      e.requisitioned_qty AS entry_requisitioned_qty, e.delivery_date AS entry_delivery_date
+    FROM job_edit_requests r
+    JOIN jobs j ON r.job_id = j.id
+    JOIN users ru ON r.requested_by = ru.id
+    LEFT JOIN users rv ON r.reviewed_by = rv.id
+    LEFT JOIN entries e ON r.entry_id = e.id
+    LEFT JOIN mpr_numbers m ON e.mpr_id = m.id
+  `;
+
+  // Parses the TEXT `payload` column back into an object (or null for a
+  // 'delete_entry' row, which never has one) — shared by both list endpoints below.
+  const parseJobEditRequestRow = (row: any) => ({
+    ...row,
+    payload: row.payload ? JSON.parse(row.payload) : null
+  });
+
+  // This user's own queued Job Edit requests — pending ones (drives the "Edit/Delete
+  // Pending Admin Approval" badges) plus anything reviewed in the last 2 days (so a
+  // rejection is still visible for a bit, not just silently gone) — see JobEditPanel.tsx.
+  app.get("/api/job-edits/mine", authenticateToken, async (req: any, res) => {
+    try {
+      const rows = await queryDB(
+        `${JOB_EDIT_REQUEST_SELECT}
+         WHERE r.requested_by = ?
+           AND (r.status = 'pending' OR (r.status <> 'pending' AND r.reviewed_at >= NOW() - INTERVAL 2 DAY))
+         ORDER BY r.created_at DESC`,
+        [req.user.id]
+      );
+      res.json(rows.map(parseJobEditRequestRow));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to load your pending Job Edit requests" });
+    }
+  });
+
+  // Admin Panel -> PEPM Manage -> Edit Log's "Job Edit Approvals" list — every User's
+  // queued Job Edit requests (pending first, most recent first), for an Admin with the
+  // "editlog" module specifically — NOT every Admin, matching how Job Edit's own
+  // approval is meant to stay scoped to whoever already reviews the Edit Log.
+  app.get("/api/job-edits", authenticateToken, requireAdmin, requireModule("editlog"), async (req, res) => {
+    try {
+      // Every still-pending request, plus anything reviewed in the last 30 days for
+      // the "Recently Reviewed" list — bounded so this never grows unbounded; the
+      // MPR Edit Log table below already keeps the permanent record of an approved
+      // Add MPR, and an old rejection isn't useful to keep surfacing here.
+      const rows = await queryDB(
+        `${JOB_EDIT_REQUEST_SELECT}
+         WHERE r.status = 'pending' OR r.reviewed_at >= NOW() - INTERVAL 30 DAY
+         ORDER BY (r.status = 'pending') DESC, r.created_at DESC`
+      );
+      res.json(rows.map(parseJobEditRequestRow));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to load Job Edit requests" });
+    }
+  });
+
+  // Approve or reject a queued Job Edit request — same "editlog" gate as the list
+  // above. Approving actually performs the underlying change now (INSERT for
+  // add_item, soft-delete for delete_entry); rejecting just marks it reviewed and
+  // leaves the Job untouched. Either way the request itself is terminal afterwards —
+  // it can't be acted on twice.
+  app.post("/api/job-edits/:id/act", authenticateToken, requireAdmin, requireModule("editlog"), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const { action, note } = req.body;
+      if (action !== "approve" && action !== "reject") {
+        return res.status(400).json({ error: "action must be 'approve' or 'reject'" });
+      }
+
+      const rows = await queryDB("SELECT * FROM job_edit_requests WHERE id = ?", [id]);
+      if (rows.length === 0) return res.status(404).json({ error: "Job Edit request not found" });
+      const request = rows[0];
+      if (request.status !== "pending") {
+        return res.status(400).json({ error: "This request has already been reviewed." });
+      }
+
+      if (action === "reject") {
+        await queryDB(
+          "UPDATE job_edit_requests SET status = 'rejected', reviewed_by = ?, reviewed_at = NOW(), review_note = ? WHERE id = ?",
+          [req.user.id, note || null, id]
+        );
+        return res.json({ success: true, status: "rejected" });
+      }
+
+      // action === "approve" — apply the change the request was queued for.
+      if (request.action === "add_item") {
+        const payload = JSON.parse(request.payload);
+
+        const jobRows = await queryDB("SELECT * FROM jobs WHERE id = ?", [request.job_id]);
+        if (jobRows.length === 0) {
+          return res.status(400).json({ error: "The Job this request was for no longer exists." });
+        }
+        const job = jobRows[0];
+        const anyEntryRows = await queryDB(
+          "SELECT project_id, job_name FROM entries WHERE job_id = ? AND deleted_at IS NULL LIMIT 1",
+          [request.job_id]
+        );
+        if (anyEntryRows.length === 0) {
+          return res.status(400).json({ error: "This Job has no active MPR entries left to attach to." });
+        }
+
+        // Re-validate against current data before actually inserting — time has
+        // passed since the User submitted this request, so the remaining Qty or the
+        // MPR No's availability may have changed since (e.g. another Job Edit was
+        // approved, or the MPR No got used elsewhere in the meantime).
+        const budgetItemRows = await queryDB(
+          "SELECT id, req_qty FROM budget_items WHERE id = ? AND budget_id = ?",
+          [payload.budget_item_id, job.budget_id]
+        );
+        if (budgetItemRows.length === 0) {
+          return res.status(400).json({
+            error: "The selected Item no longer matches the imported Budget Excel. This request can no longer be approved as-is."
+          });
+        }
+        const totalQty = parseQtyNumber(budgetItemRows[0].req_qty);
+        if (totalQty !== null) {
+          const consumedRows = await queryDB(
+            "SELECT COALESCE(SUM(requisitioned_qty), 0) AS consumed FROM entries WHERE budget_item_id = ? AND created_by = ? AND deleted_at IS NULL",
+            [payload.budget_item_id, job.created_by]
+          );
+          const remaining = totalQty - Number(consumedRows[0]?.consumed || 0);
+          if (Number(payload.requisitioned_qty) > remaining + 0.001) {
+            return res.status(400).json({
+              error: `Requisitioned Qty for "${payload.item_name}" now exceeds the remaining available Qty (${remaining}). This request can no longer be approved as-is.`
+            });
+          }
+        }
+        const usedRows = await queryDB(
+          "SELECT id FROM entries WHERE mpr_id = ? AND budget_id = ? AND deleted_at IS NULL",
+          [payload.mpr_id, job.budget_id]
+        );
+        if (usedRows.length > 0) {
+          return res.status(400).json({
+            error: "That MPR No has since been used in another entry under this Budget. This request can no longer be approved as-is."
+          });
+        }
+
+        const entry_date = todayInDhaka();
+        const result = await queryDB(
+          `INSERT INTO entries (entry_date, job_name, budget_id, project_id, job_id, mpr_id, budget_item_id, item_name, requisitioned_qty, delivery_date, created_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            entry_date,
+            anyEntryRows[0].job_name,
+            job.budget_id,
+            anyEntryRows[0].project_id,
+            request.job_id,
+            payload.mpr_id,
+            payload.budget_item_id,
+            payload.item_name,
+            Number(payload.requisitioned_qty),
+            payload.delivery_date,
+            job.created_by
+          ]
+        );
+        await queryDB(
+          "INSERT INTO entry_edit_history (entry_id, edited_by, field_name, old_value, new_value) VALUES (?, ?, ?, ?, ?)",
+          [
+            result.insertId,
+            request.requested_by,
+            "job_edit_add",
+            "",
+            `Qty: ${payload.requisitioned_qty}, Delivery Date: ${payload.delivery_date}`
+          ]
+        );
+        await queryDB(
+          "UPDATE job_edit_requests SET status = 'approved', entry_id = ?, reviewed_by = ?, reviewed_at = NOW(), review_note = ? WHERE id = ?",
+          [result.insertId, req.user.id, note || null, id]
+        );
+      } else {
+        // delete_entry
+        if (!request.entry_id) {
+          return res.status(400).json({ error: "This request no longer points at a valid entry." });
+        }
+        const entryRows = await queryDB("SELECT id, deleted_at FROM entries WHERE id = ?", [request.entry_id]);
+        if (entryRows.length === 0 || entryRows[0].deleted_at) {
+          return res.status(400).json({ error: "This MPR row no longer exists or was already deleted." });
+        }
+        await queryDB("UPDATE entries SET deleted_at = NOW(), deleted_by = ? WHERE id = ?", [
+          request.requested_by,
+          request.entry_id
+        ]);
+        await queryDB(
+          "UPDATE job_edit_requests SET status = 'approved', reviewed_by = ?, reviewed_at = NOW(), review_note = ? WHERE id = ?",
+          [req.user.id, note || null, id]
+        );
+      }
+
+      res.json({ success: true, status: "approved" });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to act on this Job Edit request" });
     }
   });
 }
