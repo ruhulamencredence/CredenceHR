@@ -893,9 +893,11 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   }, [canSeeBudgetModule]);
 
   // Navbar's web-only "Jobs" header menu — see desktopActiveSection above.
-  // Also leaves any Claims page (mobileActiveSection back to null) so the
-  // targeted section is actually visible underneath instead of staying
-  // hidden behind showingClaimsPage.
+  // Also puts the same section on screen on mobile (mirrors claimsNavRequest
+  // above) — previously this bounced mobileActiveSection back to null (the
+  // dashboard tile menu) instead of opening the requested section, so tapping
+  // Entry/Jobs/Entry Details/Job Edits from the sidebar looked like it did
+  // nothing on mobile even though desktop opened correctly.
   useEffect(() => {
     if (!jobsNavRequest) return;
     const map: Record<JobsNavRequest['target'], 'budget' | 'jobs' | 'entries' | 'jobEdit'> = {
@@ -907,7 +909,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
     const wantsJobEdit = jobsNavRequest.target === 'jobEdit';
     if (wantsJobEdit ? !user.can_job_edit : !canSeeBudgetModule) return;
     setDesktopActiveSection(map[jobsNavRequest.target]);
-    setMobileActiveSection(null);
+    setMobileActiveSection(map[jobsNavRequest.target]);
     window.scrollTo({ top: 0, behavior: 'smooth' });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobsNavRequest]);
