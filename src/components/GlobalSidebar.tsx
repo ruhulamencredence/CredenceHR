@@ -95,9 +95,11 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   };
 
   // Whether this account has a User Panel at all — a plain User always does;
-  // an Admin only does once granted can_access_user_panel; a Superadmin never
-  // does. Mirrors the old Navbar's hasUserPanel test exactly.
-  const hasUserPanel = user.role === 'user' || (user.role === 'admin' && !!user.can_access_user_panel);
+  // an Admin only does once granted can_access_user_panel; a Superadmin
+  // always does too now (every Superadmin can switch into the User Panel —
+  // see App.tsx's canSwitchToUserPanel — so it was a bug for this sidebar to
+  // hide Entry/Jobs/Entry Details/Job Edits from Superadmin accounts).
+  const hasUserPanel = user.role === 'user' || user.role === 'superadmin' || (user.role === 'admin' && !!user.can_access_user_panel);
 
   // Whether this account has an Admin Panel at all — a plain Superadmin/Admin
   // always does; a plain User only does once granted at least one module.
@@ -193,8 +195,10 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     ? { key: 'admin_dashboard', label: 'Admin Dashboard', icon: LayoutDashboard, onClick: () => onGoToAdminModule('dashboard') }
     : null;
 
-  // "Admin Panel" — Reports group (expandable) + flat items, same grouping
-  // the old AdminSidebar used, each filtered by canSeeModule.
+  // "Admin Panel" — PEPM Manage group (expandable) + flat items, same grouping
+  // the old AdminSidebar used, each filtered by canSeeModule. (Group label
+  // shown to the user is "PEPM Manage"; internal names kept as reportsGroup/
+  // reportsOpen to minimize diff.)
   const reportsGroup: NavItem[] = [
     { key: 'reports', label: 'Reports', icon: BarChart3, onClick: () => onGoToAdminModule('reports') },
     { key: 'mprs', label: 'MPR Nos', icon: FileText, onClick: () => onGoToAdminModule('mprs') },
@@ -384,7 +388,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
                     className="w-full flex items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-white/85 hover:bg-white/10 transition-colors"
                   >
                     <BarChart3 className="w-[18px] h-[18px] shrink-0" />
-                    <span className="text-[13px] font-semibold flex-1 text-left">Reports</span>
+                    <span className="text-[13px] font-semibold flex-1 text-left">PEPM Manage</span>
                     <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${reportsOpen ? 'rotate-180' : ''}`} />
                   </button>
                   {reportsOpen && (

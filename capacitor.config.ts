@@ -17,7 +17,7 @@
 // without a valid scheme.
 
 // Your PC's LAN IP, for testing on a phone connected to the same WiFi.
-const LOCAL_SERVER_URL = 'http://192.168.66.11:3000';
+const LOCAL_SERVER_URL = 'http://192.168.66.4';
 
 // Your real deployed domain or public IP — fill this in once it's live, e.g.
 // 'https://mpr.yourcompany.com' or 'http://<public IP>:3000'.
