@@ -406,6 +406,17 @@ export interface User {
   // /api/users/:id/feature-permissions — same toggle pattern as
   // can_use_attendance above.
   can_view_leave_summary?: boolean;
+  // Superadmin-only grants: can this Admin or User account see/use Self
+  // Service -> Timesheet / Leave Application / My Leave at all? Always true
+  // for role === 'superadmin'. OFF by default for 'admin'/'user', switched on
+  // by the Superadmin (PUT /api/users/:id/timesheet-access,
+  // .../leave-application-access, .../my-leave-access) — same on/off pattern
+  // as can_view_movement_claims/can_view_conveyance_claims above. Self
+  // Service -> Employee Directory deliberately has NO such flag — every
+  // account keeps seeing it regardless (see GlobalSidebar.tsx).
+  can_view_timesheet?: boolean;
+  can_view_leave_application?: boolean;
+  can_view_my_leave?: boolean;
 }
 
 // One custom Leave Category a Leave Manager has defined from Leave Manage ->

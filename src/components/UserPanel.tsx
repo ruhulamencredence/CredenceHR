@@ -795,13 +795,11 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // GlobalSidebar "Jobs" menu's Entry/Jobs/Entry Details items. Job Edit stays
   // on its own separate can_job_edit gate.
   const canSeeBudgetModule = user.role === 'superadmin' || user.can_view_budget_module !== false;
-  // Timesheet (Self Service) isn't gated by any module_permissions flag
-  // anywhere else in the app either — see GlobalSidebar's selfServiceItems,
-  // which shows it to every account regardless of role. Kept as its own
-  // named constant (rather than inlining `true` at the BottomNav call below)
-  // so a future can_view_timesheet-style grant only needs to change this one
-  // line.
-  const canSeeTimesheet = true;
+  // Superadmin-gated, same as can_view_movement_claims/can_view_conveyance_claims
+  // above — OFF by default, granted per account via Admin Panel -> Users ->
+  // Module Access (PUT /api/users/:id/timesheet-access). Also mirrored in
+  // GlobalSidebar's selfServiceItems.
+  const canSeeTimesheet = user.role === 'superadmin' || !!user.can_view_timesheet;
   // Guards a section restored from localStorage (see the lazy initializer above,
   // which runs before these grants are known) or a permission the Superadmin
   // revokes mid-session — bounces back to the tile menu instead of leaving a
@@ -820,9 +818,11 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
       // Superadmin revokes mid-session — bounces back to the tile menu
       // instead of leaving a now-unauthorized page on screen.
       setMobileActiveSection(null);
+    } else if (mobileActiveSection === 'timesheet' && !canSeeTimesheet) {
+      setMobileActiveSection(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canSeeMovementClaim, canSeeConveyanceClaim, canSeeBudgetModule]);
+  }, [canSeeMovementClaim, canSeeConveyanceClaim, canSeeBudgetModule, canSeeTimesheet]);
   // Movement Claim page: the "Add Check In/Out" floating button opens the actual
   // Check In/Out form in a sheet (see below); claimListRefreshKey bumps every
   // time that form reports a successful Check In/Out, so MyClaimsCard's list

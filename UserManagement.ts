@@ -137,7 +137,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
   app.get("/api/users", authenticateToken, requireAdmin, requireModule("users"), async (req: any, res) => {
     try {
       const users = await queryDB(
-        "SELECT id, name, email, username, role, created_at, last_login_lat, last_login_lng, last_login_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, attendance_project_id FROM users ORDER BY created_at DESC"
+        "SELECT id, name, email, username, role, created_at, last_login_lat, last_login_lng, last_login_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, attendance_project_id FROM users ORDER BY created_at DESC"
       );
       // Attach each Admin's module_permissions so the Superadmin's "Module Access"
       // UI has them without a separate round trip per row. Only role='admin' rows
@@ -188,6 +188,9 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
         can_view_conveyance_claims: u.role === "superadmin" ? true : !!Number(u.can_view_conveyance_claims),
         can_view_budget_module: u.role === "superadmin" ? true : u.can_view_budget_module === undefined ? true : !!Number(u.can_view_budget_module),
         can_view_leave_summary: u.role === "superadmin" ? true : !!Number(u.can_view_leave_summary),
+        can_view_timesheet: u.role === "superadmin" ? true : !!Number(u.can_view_timesheet),
+        can_view_leave_application: u.role === "superadmin" ? true : !!Number(u.can_view_leave_application),
+        can_view_my_leave: u.role === "superadmin" ? true : !!Number(u.can_view_my_leave),
         module_permissions: (u.role === "admin" || u.role === "user") ? (modulesByUser.get(u.id) || []) : []
       })));
     } catch (err: any) {
@@ -605,6 +608,69 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
 
       await queryDB("UPDATE users SET can_view_budget_module = ? WHERE id = ?", [canView ? 1 : 0, id]);
       res.json({ success: true, can_view_budget_module: canView });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Superadmin-only: grant/revoke a given Admin OR User account's ability to
+  // see/use Self Service -> Timesheet at all — same on/off switch pattern as
+  // movement-claim-access above.
+  app.put("/api/users/:id/timesheet-access", authenticateToken, requireSuperAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const canView = !!req.body?.can_view_timesheet;
+
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "Timesheet access only applies to Admin and User accounts." });
+      }
+
+      await queryDB("UPDATE users SET can_view_timesheet = ? WHERE id = ?", [canView ? 1 : 0, id]);
+      res.json({ success: true, can_view_timesheet: canView });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Superadmin-only: grant/revoke a given Admin OR User account's ability to
+  // see/use Self Service -> Leave Application at all — same on/off switch
+  // pattern as movement-claim-access above.
+  app.put("/api/users/:id/leave-application-access", authenticateToken, requireSuperAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const canView = !!req.body?.can_view_leave_application;
+
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "Leave Application access only applies to Admin and User accounts." });
+      }
+
+      await queryDB("UPDATE users SET can_view_leave_application = ? WHERE id = ?", [canView ? 1 : 0, id]);
+      res.json({ success: true, can_view_leave_application: canView });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Superadmin-only: grant/revoke a given Admin OR User account's ability to
+  // see/use Self Service -> My Leave at all — same on/off switch pattern as
+  // movement-claim-access above.
+  app.put("/api/users/:id/my-leave-access", authenticateToken, requireSuperAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const canView = !!req.body?.can_view_my_leave;
+
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "My Leave access only applies to Admin and User accounts." });
+      }
+
+      await queryDB("UPDATE users SET can_view_my_leave = ? WHERE id = ?", [canView ? 1 : 0, id]);
+      res.json({ success: true, can_view_my_leave: canView });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

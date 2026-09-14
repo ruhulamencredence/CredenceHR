@@ -528,6 +528,25 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
     }
   });
 
+  // Gate for Self Service -> Leave Application (the Reliever picker and the
+  // actual submit route below) — an account needs can_view_leave_application
+  // (Superadmin implicit) before it can open/use the New Leave Application
+  // flow at all, same on/off pattern as requireLeaveManager. NOT applied to
+  // GET /api/leave-applications/mine — that route is also shared by
+  // LeaveSummaryCard/LeaveReviewPage (gated separately by
+  // can_view_leave_summary), so gating it here would wrongly hide those too.
+  const requireLeaveApplicationAccess = async (req: any, res: any, next: any) => {
+    if (!req.user) return res.status(401).json({ error: "Access token required" });
+    if (req.user.role === "superadmin") return next();
+    try {
+      const rows: any = await queryDB("SELECT can_view_leave_application FROM users WHERE id = ?", [req.user.id]);
+      if (rows.length > 0 && !!Number(rows[0].can_view_leave_application)) return next();
+      return res.status(403).json({ error: "You don't have access to Leave Application. Ask your Superadmin to grant it." });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  };
+
   // Self Service -> Leave Application
   // GET: every Admin/Superadmin account, for the New Leave Application modal's
   // Approver picker. Any authenticated account can call this (unlike
@@ -546,7 +565,7 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
   // picker above, a Reliever can be ANY account (role='user' included, same
   // "role permissiveness" as a Template step's approvers), just never the
   // applicant themselves.
-  app.get("/api/leave-applications/relievers", authenticateToken, async (req: any, res) => {
+  app.get("/api/leave-applications/relievers", authenticateToken, requireLeaveApplicationAccess, async (req: any, res) => {
     try {
       const relievers = await queryDB("SELECT id, name FROM users WHERE id != ? ORDER BY name ASC", [req.user.id]);
       res.json(relievers);
@@ -633,7 +652,7 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
   // neither exists. Old, already-pending applications from before this change
   // (which DO have an approver_id) are untouched and keep working exactly as
   // before via POST /api/leave-applications/:id/decision below.
-  app.post("/api/leave-applications", authenticateToken, async (req: any, res) => {
+  app.post("/api/leave-applications", authenticateToken, requireLeaveApplicationAccess, async (req: any, res) => {
     try {
       const {
         leave_type, start_date, end_date, is_continuous, is_prefix, is_suffix,

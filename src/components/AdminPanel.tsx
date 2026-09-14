@@ -281,6 +281,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // — Select a Budget / Jobs / Job Entry Details are on for every account until
   // a Superadmin explicitly turns this off for one.
   const [budgetModuleAccessEnabled, setBudgetModuleAccessEnabled] = useState(true);
+  // OFF by default, same pattern as movement/conveyance claim access above —
+  // gates Self Service -> Timesheet / Leave Application / My Leave. Employee
+  // Directory has no such toggle; every account keeps seeing it.
+  const [timesheetAccessEnabled, setTimesheetAccessEnabled] = useState(false);
+  const [leaveApplicationAccessEnabled, setLeaveApplicationAccessEnabled] = useState(false);
+  const [myLeaveAccessEnabled, setMyLeaveAccessEnabled] = useState(false);
   const [savingModules, setSavingModules] = useState(false);
 
   const openManageModules = (u: User) => {
@@ -290,6 +296,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     setMovementClaimAccessEnabled(!!u.can_view_movement_claims);
     setConveyanceClaimAccessEnabled(!!u.can_view_conveyance_claims);
     setBudgetModuleAccessEnabled(u.can_view_budget_module !== false);
+    setTimesheetAccessEnabled(!!u.can_view_timesheet);
+    setLeaveApplicationAccessEnabled(!!u.can_view_leave_application);
+    setMyLeaveAccessEnabled(!!u.can_view_my_leave);
     setManagingModulesFor(u);
 
     // Attendance Report Department scope — fetched fresh every time this
@@ -465,6 +474,37 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         });
         const bmaData = await bmaRes.json();
         if (!bmaRes.ok) throw new Error(bmaData.error || 'Failed to update Budget/Jobs access');
+      }
+
+      // Also save the Timesheet / Leave Application / My Leave access toggles,
+      // only if each changed — same "Superadmin-only, off by default" pattern
+      // as Movement Claim/Conveyance Bill Claim above.
+      if (timesheetAccessEnabled !== !!managingModulesFor.can_view_timesheet) {
+        const tsaRes = await fetch(apiUrl(`/api/users/${managingModulesFor.id}/timesheet-access`), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ can_view_timesheet: timesheetAccessEnabled })
+        });
+        const tsaData = await tsaRes.json();
+        if (!tsaRes.ok) throw new Error(tsaData.error || 'Failed to update Timesheet access');
+      }
+      if (leaveApplicationAccessEnabled !== !!managingModulesFor.can_view_leave_application) {
+        const laaRes = await fetch(apiUrl(`/api/users/${managingModulesFor.id}/leave-application-access`), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ can_view_leave_application: leaveApplicationAccessEnabled })
+        });
+        const laaData = await laaRes.json();
+        if (!laaRes.ok) throw new Error(laaData.error || 'Failed to update Leave Application access');
+      }
+      if (myLeaveAccessEnabled !== !!managingModulesFor.can_view_my_leave) {
+        const mlaRes = await fetch(apiUrl(`/api/users/${managingModulesFor.id}/my-leave-access`), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ can_view_my_leave: myLeaveAccessEnabled })
+        });
+        const mlaData = await mlaRes.json();
+        if (!mlaRes.ok) throw new Error(mlaData.error || 'Failed to update My Leave access');
       }
 
       setManagingModulesFor(null);
@@ -5704,6 +5744,81 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   <span
                     className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
                       conveyanceClaimAccessEnabled ? 'translate-x-[18px]' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </label>
+              <label
+                className="flex items-center justify-between gap-3 p-3 mb-3 bg-sky-50 border border-sky-200 rounded-xl cursor-pointer"
+              >
+                <span>
+                  <span className="text-sm font-semibold text-slate-900 block">Also allow Timesheet</span>
+                  <span className="text-[11px] text-slate-500">
+                    Lets this {managingModulesFor.role === 'user' ? 'User' : 'Admin'} see and use Self Service → Timesheet
+                    (own Attendance history, Correct Attendance). Off by default, like every other module here.
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setTimesheetAccessEnabled((v) => !v)}
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${
+                    timesheetAccessEnabled ? 'bg-emerald-500' : 'bg-slate-300'
+                  }`}
+                  title={timesheetAccessEnabled ? 'On — click to turn off' : 'Off — click to turn on'}
+                >
+                  <span
+                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                      timesheetAccessEnabled ? 'translate-x-[18px]' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </label>
+              <label
+                className="flex items-center justify-between gap-3 p-3 mb-3 bg-sky-50 border border-sky-200 rounded-xl cursor-pointer"
+              >
+                <span>
+                  <span className="text-sm font-semibold text-slate-900 block">Also allow Leave Application</span>
+                  <span className="text-[11px] text-slate-500">
+                    Lets this {managingModulesFor.role === 'user' ? 'User' : 'Admin'} see and use Self Service → Leave
+                    Application (submit a new Leave request). Off by default, like every other module here.
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setLeaveApplicationAccessEnabled((v) => !v)}
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${
+                    leaveApplicationAccessEnabled ? 'bg-emerald-500' : 'bg-slate-300'
+                  }`}
+                  title={leaveApplicationAccessEnabled ? 'On — click to turn off' : 'Off — click to turn on'}
+                >
+                  <span
+                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                      leaveApplicationAccessEnabled ? 'translate-x-[18px]' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </label>
+              <label
+                className="flex items-center justify-between gap-3 p-3 mb-3 bg-sky-50 border border-sky-200 rounded-xl cursor-pointer"
+              >
+                <span>
+                  <span className="text-sm font-semibold text-slate-900 block">Also allow My Leave</span>
+                  <span className="text-[11px] text-slate-500">
+                    Lets this {managingModulesFor.role === 'user' ? 'User' : 'Admin'} see Self Service → My Leave (own
+                    Casual/Sick/Leave-without-Pay balance, read-only). Off by default, like every other module here.
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setMyLeaveAccessEnabled((v) => !v)}
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${
+                    myLeaveAccessEnabled ? 'bg-emerald-500' : 'bg-slate-300'
+                  }`}
+                  title={myLeaveAccessEnabled ? 'On — click to turn off' : 'Off — click to turn on'}
+                >
+                  <span
+                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                      myLeaveAccessEnabled ? 'translate-x-[18px]' : 'translate-x-1'
                     }`}
                   />
                 </button>

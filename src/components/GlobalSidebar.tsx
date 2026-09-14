@@ -143,20 +143,32 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     mainItems.push({ key: 'userConveyanceClaims', label: 'Conveyance Bill Claim', icon: CreditCard, onClick: () => onGoToUserClaims('conveyanceBill') });
   }
 
-  // "Self Service" — everyday employee items, not Admin-gated.
-  const selfServiceItems: NavItem[] = [
-    { key: 'timesheet', label: 'Timesheet', icon: Clock, onClick: () => onGoToSelfServiceTab('timesheet') },
-    { key: 'leaveApplication', label: 'Leave Application', icon: CalendarClock, onClick: () => onGoToSelfServiceTab('leaveApplication') },
-    // Always visible to every account — only ever shows THIS account's own
-    // Leave balance, read-only (see MyLeave.tsx). Distinct from "Leave
-    // Manage" below, which is gated and shows/edits every account's balance.
-    { key: 'myLeave', label: 'My Leave', icon: ListChecks, onClick: () => onGoToSelfServiceTab('myLeave') },
-    // Company-wide roster, browsable by every account regardless of role or
-    // Admin Panel module access (unlike Admin Panel -> Employees, which is
-    // the HR-editing view gated behind the 'employees' module) — see
-    // EmployeeDirectory.tsx / EmployeeDirectoryRoutes.ts.
-    { key: 'employeeDirectory', label: 'Employee Directory', icon: Contact, onClick: () => onGoToSelfServiceTab('employeeDirectory') },
-  ];
+  // "Self Service" — everyday employee items. Employee Directory stays
+  // ungated for every account (company-wide roster); Timesheet/Leave
+  // Application/My Leave are gated the same way as Movement Claim/
+  // Conveyance Bill Claim below — OFF by default, granted per account via
+  // Admin Panel -> Users -> Module Access.
+  const canSeeTimesheet = isSuperAdmin || !!user.can_view_timesheet;
+  const canSeeLeaveApplication = isSuperAdmin || !!user.can_view_leave_application;
+  const canSeeMyLeave = isSuperAdmin || !!user.can_view_my_leave;
+  const selfServiceItems: NavItem[] = [];
+  if (canSeeTimesheet) {
+    selfServiceItems.push({ key: 'timesheet', label: 'Timesheet', icon: Clock, onClick: () => onGoToSelfServiceTab('timesheet') });
+  }
+  if (canSeeLeaveApplication) {
+    selfServiceItems.push({ key: 'leaveApplication', label: 'Leave Application', icon: CalendarClock, onClick: () => onGoToSelfServiceTab('leaveApplication') });
+  }
+  // Always visible to every account — only ever shows THIS account's own
+  // Leave balance, read-only (see MyLeave.tsx). Distinct from "Leave
+  // Manage" below, which is gated and shows/edits every account's balance.
+  if (canSeeMyLeave) {
+    selfServiceItems.push({ key: 'myLeave', label: 'My Leave', icon: ListChecks, onClick: () => onGoToSelfServiceTab('myLeave') });
+  }
+  // Company-wide roster, browsable by every account regardless of role or
+  // Admin Panel module access (unlike Admin Panel -> Employees, which is
+  // the HR-editing view gated behind the 'employees' module) — see
+  // EmployeeDirectory.tsx / EmployeeDirectoryRoutes.ts.
+  selfServiceItems.push({ key: 'employeeDirectory', label: 'Employee Directory', icon: Contact, onClick: () => onGoToSelfServiceTab('employeeDirectory') });
   // "Payroll" — Coming Soon placeholder (PayrollModule.tsx/PayrollRoutes.ts),
   // but permission-gated like every other module from the start: a
   // Superadmin always sees it (canSeeModule), everyone else only once
