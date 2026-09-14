@@ -23,16 +23,15 @@
 // from the reference PDF this app has no backing feature for yet
 // (break-time reconciliation, visit applications, on-break tracking,
 // employee status-effective-date, profile-image approval, document
-// requests, a company Leave Calendar overview, and Task management). They
-// render as the same tile shape, greyed out with a "Coming Soon" pill,
-// so the layout already has a slot for them the day those features exist —
-// nothing here is a mocked/fake number.
+// requests, and Task management). They render as the same tile shape,
+// greyed out with a "Coming Soon" pill, so the layout already has a slot
+// for them the day those features exist — nothing here is a mocked number.
 
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   CalendarClock, CalendarDays, Clock3, Wallet, Banknote, Package, HandCoins,
   Bell, Users, ListChecks, Gift, Fingerprint, MapPinned, FileQuestion,
-  ImageIcon, ClipboardList, ShieldAlert, UserCog, Search,
+  ImageIcon, ClipboardList, ShieldAlert, UserCog, Search, ChevronLeft, ChevronRight,
 } from 'lucide-react';
 import { User } from '../types';
 import { apiUrl } from '../lib/api';
@@ -91,6 +90,46 @@ function avatarColorFor(seed: number): string {
   return AVATAR_COLORS[Math.abs(seed) % AVATAR_COLORS.length];
 }
 
+// --- Leave Calendar grid helpers (same fixed 6-row/42-cell approach as
+// HolidayCalendarWidget's own buildGrid, so leading/trailing days from the
+// neighbouring months keep the grid height constant while navigating). ---
+const WEEKDAY_LABELS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+const pad2 = (n: number) => String(n).padStart(2, '0');
+const toDateStr = (y: number, m: number, d: number) => `${y}-${pad2(m + 1)}-${pad2(d)}`;
+const daysInMonthOf = (y: number, m: number) => new Date(y, m + 1, 0).getDate();
+
+interface CalGridCell {
+  dateStr: string;
+  day: number;
+  inCurrentMonth: boolean;
+}
+
+function buildMonthGrid(year: number, month: number): CalGridCell[] {
+  const firstWeekday = new Date(year, month, 1).getDay();
+  const totalInMonth = daysInMonthOf(year, month);
+  const prevMonth = month === 0 ? 11 : month - 1;
+  const prevYear = month === 0 ? year - 1 : year;
+  const totalInPrevMonth = daysInMonthOf(prevYear, prevMonth);
+  const nextMonth = month === 11 ? 0 : month + 1;
+  const nextYear = month === 11 ? year + 1 : year;
+
+  const cells: CalGridCell[] = [];
+  for (let i = 0; i < 42; i++) {
+    const offset = i - firstWeekday;
+    if (offset < 0) {
+      const day = totalInPrevMonth + offset + 1;
+      cells.push({ dateStr: toDateStr(prevYear, prevMonth, day), day, inCurrentMonth: false });
+    } else if (offset >= totalInMonth) {
+      const day = offset - totalInMonth + 1;
+      cells.push({ dateStr: toDateStr(nextYear, nextMonth, day), day, inCurrentMonth: false });
+    } else {
+      const day = offset + 1;
+      cells.push({ dateStr: toDateStr(year, month, day), day, inCurrentMonth: true });
+    }
+  }
+  return cells;
+}
+
 interface StatTile {
   key: string;
   label: string;
@@ -112,14 +151,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user }) =
   const [conveyanceBills, setConveyanceBills] = useState<any[] | null>(null);
   const [notices, setNotices] = useState<any[] | null>(null);
   const [employees, setEmployees] = useState<any[] | null>(null);
-  const [attendanceRows, setAttendanceRows] = useState<any[] | null>(null);
+  const [attendanceReport, setAttendanceReport] = useState<{ year: number; month: number; days_in_month: number; users: any[] } | null>(null);
+  const [holidays, setHolidays] = useState<any[] | null>(null);
+  const [latePolicy, setLatePolicy] = useState<any | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setLoading(true);
+      const now0 = new Date();
       const [
-        leaveApps, balances, advances, assetReqs, claims, bills, activeNotices, empDir, attendance,
+        leaveApps, balances, advances, assetReqs, claims, bills, activeNotices, empDir, monthlyReport, holidayRows, latePolicyRows,
       ] = await Promise.all([
         safeGet<any[]>('/api/leave-applications', authHeaders),
         safeGet<any[]>('/api/leave-balances', authHeaders),
@@ -129,7 +171,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user }) =
         safeGet<any[]>('/api/conveyance-bills', authHeaders),
         safeGet<any[]>('/api/notices/active', authHeaders),
         safeGet<any[]>('/api/employee-directory', authHeaders),
-        safeGet<any[]>('/api/attendance', authHeaders),
+        safeGet<{ year: number; month: number; days_in_month: number; users: any[] }>(
+          `/api/attendance/report/monthly?year=${now0.getFullYear()}&month=${now0.getMonth() + 1}`,
+          authHeaders
+        ),
+        safeGet<any[]>('/api/holidays', authHeaders),
+        safeGet<any[]>('/api/payroll/late-policy', authHeaders),
       ]);
       if (cancelled) return;
       setLeaveApplications(leaveApps);
@@ -140,7 +187,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user }) =
       setConveyanceBills(bills);
       setNotices(activeNotices);
       setEmployees(empDir);
-      setAttendanceRows(attendance);
+      setAttendanceReport(monthlyReport);
+      setHolidays(holidayRows);
+      setLatePolicy(latePolicyRows && latePolicyRows.length > 0 ? latePolicyRows[0] : null);
       setLoading(false);
     })();
     return () => { cancelled = true; };
@@ -205,44 +254,94 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user }) =
   }, [conveyanceBills, thisMonth]);
 
   // --- Attendance Summary (current month, Present vs Absent by day) ---
+  // Sourced from the same Monthly Attendance Report (Admin Panel -> Attendance
+  // Reports) Quick View below now checks — Remote (GPS) attendance, falling
+  // back to Office/ZKTeco punches, with Global Calendar holidays excluded
+  // from the "absent" count for that day (a holiday isn't a normal working day).
   const attendanceSummary = useMemo(() => {
-    if (!attendanceRows || !employees) return null;
-    const headcount = employees.filter((e) => e.is_active).length || employees.length;
+    if (!attendanceReport) return null;
+    const headcount = attendanceReport.users.length;
     if (!headcount) return null;
-    const now = new Date();
-    const daysInMonth = now.getDate(); // up to today only — no data for future days yet
+    const upToDay = new Date().getDate();
     const byDay: { day: number; present: number; absent: number }[] = [];
-    for (let day = 1; day <= daysInMonth; day++) {
-      const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-      const present = new Set(attendanceRows.filter((r) => r.attendance_date === dateStr && r.check_in_at).map((r) => r.user_id)).size;
-      byDay.push({ day, present, absent: Math.max(headcount - present, 0) });
+    for (let day = 1; day <= Math.min(upToDay, attendanceReport.days_in_month); day++) {
+      let present = 0;
+      let absent = 0;
+      for (const u of attendanceReport.users) {
+        const d = u.days[day - 1];
+        if (!d) continue;
+        if (d.present) present++;
+        else if (!d.day_type) absent++; // day_type set -> holiday/weekend, doesn't count as absent
+      }
+      byDay.push({ day, present, absent });
     }
     return { headcount, byDay };
-  }, [attendanceRows, employees]);
+  }, [attendanceReport]);
 
-  // --- Quick View (today's attendance status per employee) ---
+  // --- Quick View (today's attendance status per employee, from the same
+  // Monthly Attendance Report used by Admin Panel -> Attendance Reports) ---
   const quickViewRows = useMemo(() => {
-    if (!employees) return null;
-    const byUser = new Map<number, any>();
-    for (const r of attendanceRows || []) {
-      if (r.attendance_date === today) byUser.set(Number(r.user_id), r);
+    if (!employees || !attendanceReport) return null;
+    const todayDay = new Date().getDate();
+    const byUser = new Map<number, any>(attendanceReport.users.map((u) => [Number(u.user_id), u]));
+    let thresholdMinutes: number | null = null;
+    if (latePolicy) {
+      const [h, m] = String(latePolicy.shift_start_time).split(':').map(Number);
+      thresholdMinutes = h * 60 + m + Number(latePolicy.grace_minutes || 0);
     }
     const rows = employees
       .filter((e) => e.is_active && e.user_id)
       .map((e) => {
-        const att = byUser.get(Number(e.user_id));
+        const u = byUser.get(Number(e.user_id));
+        const d = u?.days?.[todayDay - 1];
+        let isDelay = false;
+        if (d?.check_in_at && thresholdMinutes != null) {
+          const ci = new Date(d.check_in_at);
+          isDelay = ci.getHours() * 60 + ci.getMinutes() > thresholdMinutes;
+        }
         return {
           id: e.id,
           name: e.name,
           designation: e.designation || '—',
-          inTime: att ? formatTime(att.check_in_at) : '—',
-          outTime: att?.check_out_at ? formatTime(att.check_out_at) : null,
-          present: !!att?.check_in_at,
+          inTime: d?.check_in_at ? formatTime(d.check_in_at) : '—',
+          outTime: d?.check_out_at ? formatTime(d.check_out_at) : null,
+          present: !!d?.present,
+          holiday: d?.day_type ? (d.holiday_title || 'Holiday') : null,
+          onLeaveToday: false, // filled in below once leaveApplications is cross-referenced
+          isDelay,
         };
       });
+    // Cross-reference today's approved leave so someone on leave shows as
+    // "Leave" instead of "Absent" — same approved-leave set the "On Leave
+    // Today" stat tile above already computes.
+    const onLeaveUserIds = new Set<number>();
+    for (const a of leaveApplications || []) {
+      if (a.status === 'approved' && a.start_date <= today && a.end_date >= today) onLeaveUserIds.add(Number(a.user_id));
+    }
+    const withLeave = rows.map((r) => {
+      const e = employees.find((emp) => emp.id === r.id);
+      const onLeave = e?.user_id ? onLeaveUserIds.has(Number(e.user_id)) : false;
+      return { ...r, onLeaveToday: onLeave };
+    });
     const q = search.trim().toLowerCase();
-    return q ? rows.filter((r) => r.name.toLowerCase().includes(q) || r.designation.toLowerCase().includes(q)) : rows;
-  }, [employees, attendanceRows, today, search]);
+    return q ? withLeave.filter((r) => r.name.toLowerCase().includes(q) || r.designation.toLowerCase().includes(q)) : withLeave;
+  }, [employees, attendanceReport, latePolicy, leaveApplications, today, search]);
+
+  // Summary badges above the Quick View table — Total/Present/Absent/Leave
+  // are all real counts from the data above; Extreme Delay has no second
+  // threshold tier in the app's Late Policy (Admin Panel -> Payroll ->
+  // Late Policy only defines one grace-period cutoff), so it stays a
+  // Coming Soon badge rather than inventing an arbitrary second cutoff.
+  const quickViewSummary = useMemo(() => {
+    if (!quickViewRows) return null;
+    const total = quickViewRows.length;
+    const onLeave = quickViewRows.filter((r) => r.onLeaveToday).length;
+    const holiday = quickViewRows.filter((r) => r.holiday).length;
+    const present = quickViewRows.filter((r) => r.present && !r.onLeaveToday).length;
+    const absent = quickViewRows.filter((r) => !r.present && !r.onLeaveToday && !r.holiday).length;
+    const delay = latePolicy ? quickViewRows.filter((r) => r.isDelay).length : null;
+    return { total, present, absent, onLeave, delay, holiday };
+  }, [quickViewRows, latePolicy]);
 
   // --- Current Leave Balance (allocated vs taken-this-year) ---
   const leaveBalanceRows = useMemo(() => {
@@ -269,6 +368,44 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user }) =
       })
       .sort((a, b) => b.remaining - a.remaining);
   }, [leaveBalances, leaveApplications]);
+
+  // --- Leave Calendar (company-wide month grid) ---
+  const now = new Date();
+  const [calYear, setCalYear] = useState(now.getFullYear());
+  const [calMonth, setCalMonth] = useState(now.getMonth()); // 0-indexed
+  const todayDateStr = toDateStr(now.getFullYear(), now.getMonth(), now.getDate());
+  const calGridCells = useMemo(() => buildMonthGrid(calYear, calMonth), [calYear, calMonth]);
+  const goPrevMonth = () => { if (calMonth === 0) { setCalYear((y) => y - 1); setCalMonth(11); } else { setCalMonth((m) => m - 1); } };
+  const goNextMonth = () => { if (calMonth === 11) { setCalYear((y) => y + 1); setCalMonth(0); } else { setCalMonth((m) => m + 1); } };
+  const calMonthLabel = new Date(calYear, calMonth, 1).toLocaleString(undefined, { month: 'long', year: 'numeric' });
+
+  // Who's on leave which day, built entirely from leaveApplications already
+  // fetched above (no extra request). Both 'approved' and 'pending' are
+  // plotted — a pending one still occupies the roster, just shown lighter.
+  const leaveByDate = useMemo(() => {
+    const map = new Map<string, { user_id: number; name: string; status: string }[]>();
+    if (!leaveApplications) return map;
+    for (const a of leaveApplications) {
+      if (a.status !== 'approved' && a.status !== 'pending') continue;
+      const start = String(a.start_date);
+      const end = String(a.end_date);
+      // Only walk days that actually fall inside the grid currently on
+      // screen, so a long leave application doesn't loop hundreds of dates.
+      for (const cell of calGridCells) {
+        if (cell.dateStr < start || cell.dateStr > end) continue;
+        const list = map.get(cell.dateStr) || [];
+        list.push({ user_id: Number(a.user_id), name: a.user_name || `User #${a.user_id}`, status: a.status });
+        map.set(cell.dateStr, list);
+      }
+    }
+    return map;
+  }, [leaveApplications, calGridCells]);
+
+  const holidayByDate = useMemo(() => {
+    const map = new Map<string, { day_type: string; title: string }>();
+    for (const h of holidays || []) map.set(String(h.entry_date), { day_type: h.day_type, title: h.title });
+    return map;
+  }, [holidays]);
 
   const statTiles: StatTile[] = [
     { key: 'leave_today', label: 'On Leave Today', icon: CalendarClock, value: onLeaveTodayCount != null ? String(onLeaveTodayCount) : null },
@@ -346,6 +483,39 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user }) =
                   />
                 </div>
               </div>
+
+              {quickViewSummary && (
+                <div className="flex flex-wrap items-center gap-3 mb-4 pb-4 border-b border-slate-100">
+                  <span className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-600">
+                    <span className="w-6 h-6 rounded-full bg-slate-800 text-white flex items-center justify-center text-[10px] font-bold">{quickViewSummary.total}</span>
+                    Total Employee
+                  </span>
+                  <span className="flex items-center gap-1.5 text-[11px] font-semibold text-emerald-600">
+                    <span className="w-6 h-6 rounded-full bg-emerald-500 text-white flex items-center justify-center text-[10px] font-bold">{quickViewSummary.present}</span>
+                    Present
+                  </span>
+                  <span className="flex items-center gap-1.5 text-[11px] font-semibold text-rose-600">
+                    <span className="w-6 h-6 rounded-full bg-rose-500 text-white flex items-center justify-center text-[10px] font-bold">{quickViewSummary.absent}</span>
+                    Absent
+                  </span>
+                  <span className="flex items-center gap-1.5 text-[11px] font-semibold text-blue-600">
+                    <span className="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px] font-bold">{quickViewSummary.onLeave}</span>
+                    Leave
+                  </span>
+                  <span className={`flex items-center gap-1.5 text-[11px] font-semibold ${quickViewSummary.delay != null ? 'text-orange-600' : 'text-slate-300'}`}>
+                    <span className={`w-6 h-6 rounded-full text-white flex items-center justify-center text-[10px] font-bold ${quickViewSummary.delay != null ? 'bg-orange-500' : 'bg-slate-200'}`}>
+                      {quickViewSummary.delay != null ? quickViewSummary.delay : '—'}
+                    </span>
+                    Delay
+                  </span>
+                  <span className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-300">
+                    <span className="w-6 h-6 rounded-full bg-slate-200 text-white flex items-center justify-center text-[10px] font-bold">—</span>
+                    Extreme Delay
+                    <span className="text-[8px] font-semibold uppercase tracking-wide text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-full">Soon</span>
+                  </span>
+                </div>
+              )}
+
               {!quickViewRows && (
                 <p className="text-xs text-slate-400 py-6 text-center">No data available.</p>
               )}
@@ -378,9 +548,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user }) =
                           <td className="px-2 py-2.5 text-slate-500">{r.designation}</td>
                           <td className="px-2 py-2.5 text-slate-600">{r.inTime}</td>
                           <td className="px-2 py-2.5">
-                            <span className={`px-2 py-0.5 rounded-md font-medium ${r.present ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-600'}`}>
-                              {r.present ? 'Present' : 'Absent'}
+                            <span className={`px-2 py-0.5 rounded-md font-medium ${
+                              r.holiday ? 'bg-amber-50 text-amber-600' :
+                              r.onLeaveToday ? 'bg-blue-50 text-blue-600' :
+                              r.present ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-600'
+                            }`}>
+                              {r.holiday ? r.holiday : r.onLeaveToday ? 'Leave' : r.present ? 'Present' : 'Absent'}
                             </span>
+                            {r.isDelay && (
+                              <span className="ml-1 px-1.5 py-0.5 rounded-md font-medium bg-orange-50 text-orange-600">Delay</span>
+                            )}
                           </td>
                         </tr>
                       ))}
@@ -519,20 +696,80 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user }) =
             </div>
           </div>
 
-          {/* Coming Soon: Leave Calendar + Task Status Overview */}
+          {/* Leave Calendar (now real, wired to leave applications + holidays) + Coming Soon: Task Status Overview */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            <div className="lg:col-span-2 bg-white border border-slate-100 rounded-2xl p-5 shadow-sm opacity-70">
+            <div className="lg:col-span-2 bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                  <CalendarDays className="w-4 h-4 text-slate-400" /> Leave Calendar
+                  <CalendarDays className="w-4 h-4 text-blue-600" /> Leave Calendar
                 </h3>
-                <span className="text-[9px] font-semibold uppercase tracking-wide text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-full">
-                  Coming Soon
-                </span>
+                <div className="flex items-center gap-1.5">
+                  <button type="button" onClick={goPrevMonth} className="w-6 h-6 rounded-full flex items-center justify-center text-slate-400 hover:bg-slate-50 hover:text-blue-600 transition-colors" aria-label="Previous month">
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                  </button>
+                  <span className="text-xs font-semibold text-slate-700 w-28 text-center">{calMonthLabel}</span>
+                  <button type="button" onClick={goNextMonth} className="w-6 h-6 rounded-full flex items-center justify-center text-slate-400 hover:bg-slate-50 hover:text-blue-600 transition-colors" aria-label="Next month">
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               </div>
-              <p className="text-xs text-slate-400 py-10 text-center">
-                A company-wide "who's on leave, which day" calendar view is planned — not built yet.
-              </p>
+
+              {!leaveApplications && <p className="text-xs text-slate-400 py-10 text-center">No data available.</p>}
+
+              {leaveApplications && (
+                <>
+                  <div className="grid grid-cols-7 gap-1 mb-1">
+                    {WEEKDAY_LABELS.map((w, i) => (
+                      <div key={i} className="text-center text-[10px] font-semibold text-slate-400 py-1">{w}</div>
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-7 gap-1">
+                    {calGridCells.map((cell) => {
+                      const holiday = holidayByDate.get(cell.dateStr);
+                      const onLeave = leaveByDate.get(cell.dateStr) || [];
+                      const isToday = cell.dateStr === todayDateStr;
+                      return (
+                        <div
+                          key={cell.dateStr}
+                          title={onLeave.length > 0 ? onLeave.map((p) => p.name).join(', ') : holiday?.title || undefined}
+                          className={`min-h-[52px] rounded-lg p-1 border text-left flex flex-col gap-0.5 ${
+                            !cell.inCurrentMonth ? 'border-transparent opacity-40' :
+                            isToday ? 'border-blue-600 bg-blue-50' :
+                            holiday ? 'border-amber-100 bg-amber-50/60' : 'border-slate-100'
+                          }`}
+                        >
+                          <span className={`text-[10px] font-semibold ${isToday ? 'text-blue-600' : 'text-slate-600'}`}>{cell.day}</span>
+                          {holiday && cell.inCurrentMonth && (
+                            <span className="text-[8px] leading-tight text-amber-600 font-medium truncate">{holiday.title}</span>
+                          )}
+                          {onLeave.length > 0 && cell.inCurrentMonth && (
+                            <div className="flex items-center gap-0.5 flex-wrap">
+                              {onLeave.slice(0, 2).map((p, i2) => (
+                                <span
+                                  key={`${p.user_id}-${i2}`}
+                                  className="w-3.5 h-3.5 rounded-full flex items-center justify-center text-[7px] font-bold text-white shrink-0"
+                                  style={{ background: avatarColorFor(p.user_id), opacity: p.status === 'pending' ? 0.5 : 1 }}
+                                >
+                                  {initialsOf(p.name)[0]}
+                                </span>
+                              ))}
+                              {onLeave.length > 2 && (
+                                <span className="text-[7px] font-semibold text-slate-400">+{onLeave.length - 2}</span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="flex items-center gap-4 mt-3 text-[10px] text-slate-500">
+                    <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-600 inline-block" /> On Leave</span>
+                    <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-600 inline-block opacity-50" /> Pending</span>
+                    <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-400 inline-block" /> Holiday</span>
+                    <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded border border-blue-600 inline-block" /> Today</span>
+                  </div>
+                </>
+              )}
             </div>
 
             <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm opacity-70">
