@@ -521,6 +521,20 @@ async function ensureSchemaMigrations() {
     if (err.code !== 'ER_DUP_FIELDNAME') console.warn("⚠️ Could not add users.can_view_leave_summary column: " + err.message);
   }
   try {
+    // Superadmin-only grants: whether this Admin or User account can see/use
+    // the Self Service -> Timesheet / Leave Application / My Leave sections at
+    // all — same on/off pattern as can_view_movement_claims/can_view_
+    // conveyance_claims above, applying to BOTH 'admin' and 'user' roles. OFF
+    // by default; a Superadmin always has all three implicitly. Employee
+    // Directory deliberately keeps NO such gate — every account can browse it
+    // regardless of role or module access (see GlobalSidebar.tsx).
+    await dbPool.query(`ALTER TABLE users ADD COLUMN can_view_timesheet TINYINT(1) NOT NULL DEFAULT 0`);
+    await dbPool.query(`ALTER TABLE users ADD COLUMN can_view_leave_application TINYINT(1) NOT NULL DEFAULT 0`);
+    await dbPool.query(`ALTER TABLE users ADD COLUMN can_view_my_leave TINYINT(1) NOT NULL DEFAULT 0`);
+  } catch (err: any) {
+    if (err.code !== 'ER_DUP_FIELDNAME') console.warn("⚠️ Could not add users.can_view_timesheet/can_view_leave_application/can_view_my_leave columns: " + err.message);
+  }
+  try {
     // Admin/Superadmin-granted per account (Admin Panel -> Users -> "Attend.
     // Project", right next to can_use_attendance): pins a 'user' OR 'admin'
     // account to exactly one Project for Remote Attendance. NULL by default
@@ -2768,6 +2782,9 @@ async function queryDB(sql: string, params: any[] = []): Promise<any> {
         can_view_conveyance_claims: !!u.can_view_conveyance_claims,
         can_view_budget_module: u.can_view_budget_module !== false,
         can_view_leave_summary: !!u.can_view_leave_summary,
+        can_view_timesheet: !!u.can_view_timesheet,
+        can_view_leave_application: !!u.can_view_leave_application,
+        can_view_my_leave: !!u.can_view_my_leave,
         attendance_project_id: u.attendance_project_id ?? null
       }));
     }
@@ -2789,6 +2806,9 @@ async function queryDB(sql: string, params: any[] = []): Promise<any> {
         can_view_conveyance_claims: rest.can_view_conveyance_claims ? 1 : 0,
         can_view_budget_module: rest.can_view_budget_module !== false ? 1 : 0,
         can_view_leave_summary: rest.can_view_leave_summary ? 1 : 0,
+        can_view_timesheet: rest.can_view_timesheet ? 1 : 0,
+        can_view_leave_application: rest.can_view_leave_application ? 1 : 0,
+        can_view_my_leave: rest.can_view_my_leave ? 1 : 0,
         attendance_project_id: rest.attendance_project_id ?? null
       }];
     }
@@ -2815,6 +2835,24 @@ async function queryDB(sql: string, params: any[] = []): Promise<any> {
       const user = memoryDb.users.find(u => u.id === id);
       if (!user) return [];
       return [{ can_view_conveyance_claims: user.can_view_conveyance_claims ? 1 : 0 }];
+    }
+    if (lowerSql.startsWith("select can_view_timesheet from users where id")) {
+      const id = Number(params[0]);
+      const user = memoryDb.users.find(u => u.id === id);
+      if (!user) return [];
+      return [{ can_view_timesheet: user.can_view_timesheet ? 1 : 0 }];
+    }
+    if (lowerSql.startsWith("select can_view_leave_application from users where id")) {
+      const id = Number(params[0]);
+      const user = memoryDb.users.find(u => u.id === id);
+      if (!user) return [];
+      return [{ can_view_leave_application: user.can_view_leave_application ? 1 : 0 }];
+    }
+    if (lowerSql.startsWith("select can_view_my_leave from users where id")) {
+      const id = Number(params[0]);
+      const user = memoryDb.users.find(u => u.id === id);
+      if (!user) return [];
+      return [{ can_view_my_leave: user.can_view_my_leave ? 1 : 0 }];
     }
     if (lowerSql.startsWith("select attendance_project_id from users where id")) {
       const id = Number(params[0]);
@@ -2926,6 +2964,24 @@ async function queryDB(sql: string, params: any[] = []): Promise<any> {
       const [can_view_budget_module, id] = params;
       const user = memoryDb.users.find(u => u.id === Number(id));
       if (user) user.can_view_budget_module = !!Number(can_view_budget_module);
+      return { affectedRows: user ? 1 : 0 };
+    }
+    if (lowerSql.startsWith("update users set can_view_timesheet")) {
+      const [can_view_timesheet, id] = params;
+      const user = memoryDb.users.find(u => u.id === Number(id));
+      if (user) user.can_view_timesheet = !!Number(can_view_timesheet);
+      return { affectedRows: user ? 1 : 0 };
+    }
+    if (lowerSql.startsWith("update users set can_view_leave_application")) {
+      const [can_view_leave_application, id] = params;
+      const user = memoryDb.users.find(u => u.id === Number(id));
+      if (user) user.can_view_leave_application = !!Number(can_view_leave_application);
+      return { affectedRows: user ? 1 : 0 };
+    }
+    if (lowerSql.startsWith("update users set can_view_my_leave")) {
+      const [can_view_my_leave, id] = params;
+      const user = memoryDb.users.find(u => u.id === Number(id));
+      if (user) user.can_view_my_leave = !!Number(can_view_my_leave);
       return { affectedRows: user ? 1 : 0 };
     }
     if (lowerSql.startsWith("update users set can_view_login_location = 0, can_access_user_panel = 0 where id")) {
@@ -4629,6 +4685,13 @@ async function startServer() {
           // shows the Leave Summary card on THIS account's own Dashboard. OFF
           // by default — same toggle pattern as can_use_attendance above.
           can_view_leave_summary: user.role === "superadmin" ? true : !!Number(user.can_view_leave_summary),
+          // Superadmin-granted (or implicit for the Superadmin itself): can this
+          // account see/use Self Service -> Timesheet / Leave Application / My
+          // Leave at all? Applies to both 'admin' and 'user' roles, OFF by
+          // default — same pattern as can_view_movement_claims above.
+          can_view_timesheet: user.role === "superadmin" ? true : !!Number(user.can_view_timesheet),
+          can_view_leave_application: user.role === "superadmin" ? true : !!Number(user.can_view_leave_application),
+          can_view_my_leave: user.role === "superadmin" ? true : !!Number(user.can_view_my_leave),
           // So the Admin Panel can show/hide tabs right after login, before any
           // other fetch. Empty for Users and for Superadmin (who has every module
           // implicitly, not through explicit grants).
@@ -4643,7 +4706,7 @@ async function startServer() {
   app.get("/api/auth/me", authenticateToken, async (req: any, res) => {
     try {
       const users = await queryDB(
-        "SELECT id, name, email, role, created_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, attendance_project_id FROM users WHERE id = ?",
+        "SELECT id, name, email, role, created_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, attendance_project_id FROM users WHERE id = ?",
         [req.user.id]
       );
       if (users.length === 0) return res.status(404).json({ error: "User not found" });
@@ -4662,6 +4725,9 @@ async function startServer() {
         can_view_conveyance_claims: u.role === "superadmin" ? true : !!Number(u.can_view_conveyance_claims),
         can_view_budget_module: u.role === "superadmin" ? true : u.can_view_budget_module === undefined ? true : !!Number(u.can_view_budget_module),
         can_view_leave_summary: u.role === "superadmin" ? true : !!Number(u.can_view_leave_summary),
+        can_view_timesheet: u.role === "superadmin" ? true : !!Number(u.can_view_timesheet),
+        can_view_leave_application: u.role === "superadmin" ? true : !!Number(u.can_view_leave_application),
+        can_view_my_leave: u.role === "superadmin" ? true : !!Number(u.can_view_my_leave),
         module_permissions: (u.role === "admin" || u.role === "user") ? await getAdminModules(u.id) : []
       });
     } catch (err: any) {

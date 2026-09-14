@@ -164,6 +164,26 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
     }
   };
 
+  // Gate for Self Service -> Timesheet (GET /api/attendance/mine and
+  // /api/attendance/corrections/mine below) — an account needs
+  // can_view_timesheet (Superadmin implicit) before it can open Timesheet at
+  // all, same on/off pattern as requireAttendanceAccess above but a separate
+  // flag: can_use_attendance is about checking in/out, can_view_timesheet is
+  // about browsing the resulting history. Both of these GET routes are used
+  // ONLY by Timesheet.tsx / AttendanceCorrectionModal.tsx (opened from
+  // there), so gating them here can't affect any other feature.
+  const requireTimesheetAccess = async (req: any, res: any, next: any) => {
+    if (!req.user) return res.status(401).json({ error: "Access token required" });
+    if (req.user.role === "superadmin") return next();
+    try {
+      const rows: any = await queryDB("SELECT can_view_timesheet FROM users WHERE id = ?", [req.user.id]);
+      if (rows.length > 0 && !!Number(rows[0].can_view_timesheet)) return next();
+      return res.status(403).json({ error: "You don't have access to Timesheet. Ask your Superadmin to grant it." });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  };
+
   app.post("/api/attendance/check-in", authenticateToken, requireAttendanceAccess, async (req: any, res) => {
     try {
       const parsed = parseAttendanceCoords(req.body);
@@ -373,7 +393,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
   });
 
   // The calling user's own attendance history (most recent first).
-  app.get("/api/attendance/mine", authenticateToken, async (req: any, res) => {
+  app.get("/api/attendance/mine", authenticateToken, requireTimesheetAccess, async (req: any, res) => {
     try {
       const rows = await queryDB("SELECT * FROM attendance WHERE user_id = ? ORDER BY attendance_date DESC, id DESC", [req.user.id]);
       const projects = await queryDB("SELECT * FROM projects");
@@ -533,7 +553,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
   // lets Timesheet show a Pending/Rejected badge on the affected date's row
   // (an Approved one just shows up as that day's normal Present/In/Out Time,
   // since `attendance` itself was already updated).
-  app.get("/api/attendance/corrections/mine", authenticateToken, async (req: any, res) => {
+  app.get("/api/attendance/corrections/mine", authenticateToken, requireTimesheetAccess, async (req: any, res) => {
     try {
       const rows = await queryDB(
         `SELECT id, user_id, project_id, attendance_date, requested_check_in_at, requested_check_out_at, remarks,
