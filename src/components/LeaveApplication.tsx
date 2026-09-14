@@ -6,7 +6,7 @@
 import React, { useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { ArrowLeft, CalendarClock, CalendarDays, Plus, Inbox, Clock, CheckCircle2, XCircle } from 'lucide-react';
-import { LeaveApplication as LeaveApplicationRecord, LeaveType } from '../types';
+import { LeaveApplication as LeaveApplicationRecord } from '../types';
 import { apiUrl } from '../lib/api';
 import { formatDate } from '../lib/formatDate';
 import { NewLeaveApplicationModal } from './NewLeaveApplicationModal';
@@ -18,11 +18,13 @@ interface LeaveApplicationProps {
   onBack: () => void;
 }
 
-const LEAVE_TYPE_LABELS: Record<LeaveType, string> = {
-  casual: 'Casual Leave',
-  sick: 'Sick Leave',
-  without_pay: 'Leave Without Pay'
-};
+// Server-resolved label (LeaveApplication.leave_type_label) covers both the
+// 3 fixed Leave types and any custom Leave Category now — falls back to the
+// raw leave_type value only for the unlikely case of an old cached record
+// that predates this field.
+function leaveTypeLabel(a: LeaveApplicationRecord): string {
+  return a.leave_type_label || a.leave_type;
+}
 
 type ReviewTab = 'pending' | 'approved' | 'rejected';
 
@@ -192,7 +194,7 @@ export const LeaveApplication: React.FC<LeaveApplicationProps> = ({ token, onBac
                         <div className="mt-2 flex items-center justify-between text-xs">
                           <div>
                             <p className="text-[10px] uppercase tracking-wide text-slate-400">
-                              {LEAVE_TYPE_LABELS[a.leave_type]}
+                              {leaveTypeLabel(a)}
                             </p>
                             <p className="font-semibold text-slate-700 mt-0.5">
                               {formatDate(a.start_date)} – {formatDate(a.end_date)}
@@ -262,7 +264,7 @@ export const LeaveApplication: React.FC<LeaveApplicationProps> = ({ token, onBac
                   {applications.map((a) => (
                     <tr key={a.id} className="hover:bg-slate-50/80 transition-colors">
                       <td className="px-4 py-3 whitespace-nowrap text-slate-500 text-xs">{formatDate(a.apply_date)}</td>
-                      <td className="px-4 py-3 whitespace-nowrap font-medium text-slate-800">{LEAVE_TYPE_LABELS[a.leave_type]}</td>
+                      <td className="px-4 py-3 whitespace-nowrap font-medium text-slate-800">{leaveTypeLabel(a)}</td>
                       <td className="px-4 py-3 whitespace-nowrap text-slate-600 text-xs">
                         {formatDate(a.start_date)} – {formatDate(a.end_date)}
                       </td>

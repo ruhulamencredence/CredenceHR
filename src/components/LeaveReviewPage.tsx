@@ -5,7 +5,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { ArrowLeft, CalendarDays, CheckCircle2, XCircle, Clock, Inbox, Plus } from 'lucide-react';
-import { LeaveApplication, LeaveType } from '../types';
+import { LeaveApplication } from '../types';
 import { apiUrl } from '../lib/api';
 import { formatDate } from '../lib/formatDate';
 import { NewLeaveApplicationModal } from './NewLeaveApplicationModal';
@@ -18,11 +18,13 @@ interface LeaveReviewPageProps {
   onBack: () => void;
 }
 
-const LEAVE_TYPE_LABELS: Record<LeaveType, string> = {
-  casual: 'Casual Leave',
-  sick: 'Sick Leave',
-  without_pay: 'Leave Without Pay'
-};
+// Server-resolved label (LeaveApplication.leave_type_label) covers both the
+// 3 fixed Leave types and any custom Leave Category now — falls back to the
+// raw leave_type value only for the unlikely case of an old cached record
+// that predates this field.
+function leaveTypeLabel(a: LeaveApplication): string {
+  return a.leave_type_label || a.leave_type;
+}
 
 type ReviewTab = 'pending' | 'approved' | 'rejected';
 
@@ -158,7 +160,7 @@ export const LeaveReviewPage: React.FC<LeaveReviewPageProps> = ({ token, onBack 
                 <div className="mt-2 flex items-center justify-between text-xs">
                   <div>
                     <p className="text-[10px] uppercase tracking-wide text-slate-400">
-                      {LEAVE_TYPE_LABELS[a.leave_type]}
+                      {leaveTypeLabel(a)}
                     </p>
                     <p className="font-semibold text-slate-700 mt-0.5">
                       {formatDate(a.start_date)} – {formatDate(a.end_date)}

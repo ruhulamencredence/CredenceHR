@@ -18,11 +18,13 @@ interface LeaveApprovalsProps {
   onBack: () => void;
 }
 
-const LEAVE_TYPE_LABELS: Record<string, string> = {
-  casual: 'Casual Leave',
-  sick: 'Sick Leave',
-  without_pay: 'Leave Without Pay'
-};
+// Server-resolved label (LeaveApplication.leave_type_label) covers both the
+// 3 fixed Leave types and any custom Leave Category now — falls back to the
+// raw leave_type value only for the unlikely case of an old cached record
+// that predates this field.
+function leaveTypeLabel(a: LeaveApplication): string {
+  return a.leave_type_label || a.leave_type;
+}
 
 const StatusBadge: React.FC<{ status: LeaveApplication['status'] }> = ({ status }) => {
   if (status === 'approved') {
@@ -196,7 +198,7 @@ export const LeaveApprovals: React.FC<LeaveApprovalsProps> = ({ token, user, onB
                         <StatusBadge status={a.status} />
                       </div>
                       <p className="text-xs text-slate-500 mt-0.5">
-                        {LEAVE_TYPE_LABELS[a.leave_type]} &middot; {formatDate(a.start_date)} – {formatDate(a.end_date)} &middot;{' '}
+                        {leaveTypeLabel(a)} &middot; {formatDate(a.start_date)} – {formatDate(a.end_date)} &middot;{' '}
                         {a.day_count} day{a.day_count === 1 ? '' : 's'}
                       </p>
                       {a.purpose && <p className="text-xs text-slate-600 mt-1.5 max-w-md">{a.purpose}</p>}

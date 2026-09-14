@@ -112,6 +112,17 @@ export const MyLeave: React.FC<MyLeaveProps> = ({ token, user, onBack }) => {
                     <p className="text-[11px] uppercase tracking-wider text-slate-500 mb-1">Leave without Pay</p>
                     <p className="text-2xl font-bold text-slate-900">{balance.leave_without_pay}</p>
                   </div>
+                  {/* Custom Leave Categories (e.g. "Maternity Leave") a Leave
+                      Manager added via Leave Manage -> Set Balance in Bulk ->
+                      Add Category — GET /api/leave-balances/mine already
+                      returns these under custom_leaves, same grid so they
+                      just wrap onto additional rows below the fixed three. */}
+                  {balance.custom_leaves?.map((c) => (
+                    <div key={c.key} className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-center">
+                      <p className="text-[11px] uppercase tracking-wider text-slate-500 mb-1">{c.label}</p>
+                      <p className="text-2xl font-bold text-slate-900">{c.balance}</p>
+                    </div>
+                  ))}
                 </>
               )}
             </div>

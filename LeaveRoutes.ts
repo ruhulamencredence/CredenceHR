@@ -41,6 +41,15 @@ interface LeaveRouteDeps {
   createAlert: (...args: any[]) => Promise<any>;
   approveLeaveApplicationReliever: (leaveId: number, relieverUserId: number, remarks: string | null) => Promise<any>;
   rejectLeaveApplicationReliever: (leaveId: number, relieverUserId: number, remarks: string | null) => Promise<any>;
+  // Custom Leave Categories in Leave Type — shared with server.ts's own
+  // finalizeLeaveApplicationApproval/rejectLeaveApplicationRecord/
+  // approveLeaveApplicationReliever so every caller resolves a Leave Type
+  // (fixed OR custom category key) the exact same way. See their doc
+  // comments in server.ts for the full design.
+  isValidLeaveType: (leaveType: string) => Promise<boolean>;
+  getLeaveTypeLabel: (leaveType: string) => Promise<string>;
+  getLeaveTypeBalance: (userId: number, leaveType: string) => Promise<number>;
+  adjustLeaveTypeBalance: (userId: number, leaveType: string, delta: number) => Promise<void>;
 }
 
 export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
@@ -55,8 +64,28 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
     getCurrentStepApprovers,
     createAlert,
     approveLeaveApplicationReliever,
-    rejectLeaveApplicationReliever
+    rejectLeaveApplicationReliever,
+    isValidLeaveType,
+    getLeaveTypeLabel,
+    getLeaveTypeBalance,
+    adjustLeaveTypeBalance
   } = deps;
+
+  // Every custom Leave Category defined so far, as a category_key -> label
+  // map — used by the list endpoints below to attach leave_type_label to
+  // each row in one query instead of an async getLeaveTypeLabel() call per
+  // row. Fixed types use the same static labels getLeaveTypeLabel does.
+  async function buildLeaveTypeLabelResolver(): Promise<(leaveType: string) => string> {
+    const categories: any = await queryDB("SELECT id, category_key, label FROM leave_categories");
+    const labelByKey = new Map<string, string>();
+    for (const c of categories) labelByKey.set(c.category_key, c.label);
+    return (leaveType: string) => {
+      if (leaveType === "casual") return "Casual";
+      if (leaveType === "sick") return "Sick";
+      if (leaveType === "without_pay") return "Leave Without Pay";
+      return labelByKey.get(leaveType) || leaveType;
+    };
+  }
 
   // Sum of day_count already deducted from an account's balance for leave
   // taken THIS calendar year (status != 'rejected' — a rejected application's
@@ -72,20 +101,64 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
   // calendar year turns over, no leave has been taken against it yet, so
   // "already used" is naturally 0 and re-running Set Balance in Bulk gives
   // everyone a clean fresh balance with no separate year-end job needed.
-  async function getUsedThisYear(userId: number): Promise<{ casual: number; sick: number; without_pay: number }> {
+  // custom: category_key -> days used this year, for any custom Leave
+  // Category that's actually been applied for (Set Balance in Bulk/the
+  // single-account PUT below can now dock this off a custom category's new
+  // total the same way it already did for the 3 fixed ones — see both
+  // callers below).
+  async function getUsedThisYear(userId: number): Promise<{ casual: number; sick: number; without_pay: number; custom: Record<string, number> }> {
     const year = new Date().getFullYear();
     const rows: any = await queryDB(
       "SELECT leave_type, day_count FROM leave_applications WHERE user_id = ? AND status != 'rejected' AND YEAR(start_date) = ?",
       [userId, year]
     );
-    const used = { casual: 0, sick: 0, without_pay: 0 };
+    const used = { casual: 0, sick: 0, without_pay: 0, custom: {} as Record<string, number> };
     for (const r of rows) {
       const dc = Number(r.day_count) || 0;
       if (r.leave_type === "casual") used.casual += dc;
       else if (r.leave_type === "sick") used.sick += dc;
       else if (r.leave_type === "without_pay") used.without_pay += dc;
+      else used.custom[r.leave_type] = (used.custom[r.leave_type] || 0) + dc;
     }
     return used;
+  }
+
+  // Turns a Leave Category's display label into its stable slug/key — same
+  // algorithm the frontend uses to preview the key before POSTing (see
+  // LeaveManage.tsx's slugifyCategory), but this is the authoritative copy:
+  // the server always derives the key itself from the label it stores/looks
+  // up, never trusts one passed in from the client.
+  function slugifyCategoryLabel(label: string): string {
+    return (
+      "custom_" +
+      label
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "_")
+        .replace(/^_+|_+$/g, "")
+    );
+  }
+
+  // Resolves a Leave Category's key to its id, creating the category (with a
+  // best-effort title-cased label derived from the key) if it doesn't exist
+  // yet. Normally every key reaching here was already created via POST
+  // /api/leave-categories when the admin added it in the bulk panel — this is
+  // just a safety net so a stale/unknown key in a bulk-apply payload never
+  // silently fails instead of being applied.
+  async function findOrCreateCategoryByKey(key: string, createdBy: number): Promise<number> {
+    const existing: any = await queryDB("SELECT id, category_key, label FROM leave_categories WHERE category_key = ?", [key]);
+    if (existing.length > 0) return Number(existing[0].id);
+    const fallbackLabel =
+      key
+        .replace(/^custom_/, "")
+        .replace(/_/g, " ")
+        .replace(/\b\w/g, (c: string) => c.toUpperCase())
+        .trim() || key;
+    const result: any = await queryDB(
+      "INSERT INTO leave_categories (category_key, label, created_by) VALUES (?, ?, ?)",
+      [key, fallbackLabel, createdBy]
+    );
+    return Number(result.insertId);
   }
 
   // Self Service -> Leave Application / Leave Summary card (own balance only).
@@ -97,8 +170,20 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
   // leave_balances row just reads as 0/0/0.
   app.get("/api/leave-balances/mine", authenticateToken, async (req: any, res) => {
     try {
-      const rows: any = await queryDB("SELECT * FROM leave_balances WHERE user_id = ?", [req.user.id]);
+      const [rows, categories, myCategoryBalances] = await Promise.all([
+        queryDB("SELECT * FROM leave_balances WHERE user_id = ?", [req.user.id]),
+        queryDB("SELECT id, category_key, label FROM leave_categories"),
+        queryDB("SELECT * FROM leave_category_balances WHERE user_id = ?", [req.user.id])
+      ]);
       const b = rows[0];
+      const categoryById = new Map<number, any>();
+      for (const c of categories) categoryById.set(Number(c.id), c);
+      const customLeaves = myCategoryBalances
+        .map((cb: any) => {
+          const cat = categoryById.get(Number(cb.category_id));
+          return cat ? { key: cat.category_key, label: cat.label, balance: Number(cb.balance) } : null;
+        })
+        .filter(Boolean);
       res.json([{
         user_id: req.user.id,
         user_name: req.user.name,
@@ -106,7 +191,8 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
         casual_leave: b ? Number(b.casual_leave) : 0,
         sick_leave: b ? Number(b.sick_leave) : 0,
         leave_without_pay: b ? Number(b.leave_without_pay) : 0,
-        updated_at: b ? b.updated_at : null
+        updated_at: b ? b.updated_at : null,
+        custom_leaves: customLeaves
       }]);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -125,17 +211,31 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
 
       if (canManageAll) {
         const users: any = await queryDB("SELECT id, name, role FROM users WHERE role IN ('admin', 'user')");
-        const balances: any = await queryDB("SELECT * FROM leave_balances");
-        // Department comes from the Employee Directory row linked to this login
-        // account (all_employees.user_id) — no department column of its own on
-        // users/leave_balances, so "Set Balance in Bulk" below can group/filter
-        // by it without a schema change.
-        const employees: any = await queryDB("SELECT * FROM all_employees");
+        const [balances, employees, categories, categoryBalances] = await Promise.all([
+          queryDB("SELECT * FROM leave_balances"),
+          // Department comes from the Employee Directory row linked to this
+          // login account (all_employees.user_id) — no department column of
+          // its own on users/leave_balances, so "Set Balance in Bulk" below
+          // can group/filter by it without a schema change.
+          queryDB("SELECT * FROM all_employees"),
+          queryDB("SELECT id, category_key, label FROM leave_categories"),
+          queryDB("SELECT * FROM leave_category_balances")
+        ]);
         const byUser = new Map<number, any>();
         for (const b of balances) byUser.set(Number(b.user_id), b);
         const departmentByUserId = new Map<number, string>();
         for (const e of employees) {
           if (e.user_id != null && e.department) departmentByUserId.set(Number(e.user_id), e.department);
+        }
+        const categoryById = new Map<number, any>();
+        for (const c of categories) categoryById.set(Number(c.id), c);
+        const customLeavesByUser = new Map<number, { key: string; label: string; balance: number }[]>();
+        for (const cb of categoryBalances) {
+          const cat = categoryById.get(Number(cb.category_id));
+          if (!cat) continue;
+          const uid = Number(cb.user_id);
+          if (!customLeavesByUser.has(uid)) customLeavesByUser.set(uid, []);
+          customLeavesByUser.get(uid)!.push({ key: cat.category_key, label: cat.label, balance: Number(cb.balance) });
         }
 
         res.json(users.map((u: any) => {
@@ -148,12 +248,25 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
             casual_leave: b ? Number(b.casual_leave) : 0,
             sick_leave: b ? Number(b.sick_leave) : 0,
             leave_without_pay: b ? Number(b.leave_without_pay) : 0,
-            updated_at: b ? b.updated_at : null
+            updated_at: b ? b.updated_at : null,
+            custom_leaves: customLeavesByUser.get(Number(u.id)) || []
           };
         }));
       } else {
-        const rows: any = await queryDB("SELECT * FROM leave_balances WHERE user_id = ?", [req.user.id]);
+        const [rows, categories, myCategoryBalances] = await Promise.all([
+          queryDB("SELECT * FROM leave_balances WHERE user_id = ?", [req.user.id]),
+          queryDB("SELECT id, category_key, label FROM leave_categories"),
+          queryDB("SELECT * FROM leave_category_balances WHERE user_id = ?", [req.user.id])
+        ]);
         const b = rows[0];
+        const categoryById = new Map<number, any>();
+        for (const c of categories) categoryById.set(Number(c.id), c);
+        const customLeaves = myCategoryBalances
+          .map((cb: any) => {
+            const cat = categoryById.get(Number(cb.category_id));
+            return cat ? { key: cat.category_key, label: cat.label, balance: Number(cb.balance) } : null;
+          })
+          .filter(Boolean);
         res.json([{
           user_id: req.user.id,
           user_name: req.user.name,
@@ -161,7 +274,8 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
           casual_leave: b ? Number(b.casual_leave) : 0,
           sick_leave: b ? Number(b.sick_leave) : 0,
           leave_without_pay: b ? Number(b.leave_without_pay) : 0,
-          updated_at: b ? b.updated_at : null
+          updated_at: b ? b.updated_at : null,
+          custom_leaves: customLeaves
         }]);
       }
     } catch (err: any) {
@@ -169,26 +283,101 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
     }
   });
 
-  // PUT: "Set Balance in Bulk" — apply the same Casual/Sick/Leave-without-Pay
-  // balance to many accounts in one go instead of editing rows one at a time.
-  // req.body.departments: [] or omitted = every Admin/User account (Global);
-  // otherwise every account linked (via all_employees.user_id) to one of the
-  // given Department names. Same requireLeaveManager gate as the single-account
-  // PUT below, and the same per-account upsert it uses — just looped.
+  // Leave Manage -> Set Balance in Bulk -> Add Category, AND Self Service ->
+  // Leave Application's Leave Type dropdown (NewLeaveApplicationModal) —
+  // every custom Leave Category defined so far. Open to ANY authenticated
+  // account (not just Leave Managers, unlike POST below): a plain User still
+  // needs this list to see/apply for a custom category on their own Leave
+  // Application, the same way they can already see Casual/Sick/LWP.
+  app.get("/api/leave-categories", authenticateToken, async (req: any, res) => {
+    try {
+      const rows: any = await queryDB("SELECT id, category_key, label FROM leave_categories ORDER BY label ASC");
+      res.json(rows.map((r: any) => ({ id: Number(r.id), key: r.category_key, label: r.label })));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST: define a new custom Leave Category. The key is always derived
+  // server-side from the label (slugifyCategoryLabel) — never trusts a key
+  // from the client. If a category with the same resulting key already
+  // exists (e.g. two Leave Managers typed the same/similar name), that
+  // existing one is handed back instead of erroring, so "Add Category" in
+  // the bulk panel always ends up pointing at one shared category.
+  app.post("/api/leave-categories", authenticateToken, requireLeaveManager, async (req: any, res) => {
+    try {
+      const label = typeof req.body?.label === "string" ? req.body.label.trim().slice(0, 100) : "";
+      if (!label) return res.status(400).json({ error: "Category name is required." });
+      const key = slugifyCategoryLabel(label);
+      if (key === "custom_") {
+        return res.status(400).json({ error: "Category name must contain at least one letter or number." });
+      }
+
+      const existing: any = await queryDB("SELECT id, category_key, label FROM leave_categories WHERE category_key = ?", [key]);
+      if (existing.length > 0) {
+        return res.json({ id: Number(existing[0].id), key: existing[0].category_key, label: existing[0].label });
+      }
+
+      const result: any = await queryDB(
+        "INSERT INTO leave_categories (category_key, label, created_by) VALUES (?, ?, ?)",
+        [key, label, req.user.id]
+      );
+      res.json({ id: Number(result.insertId), key, label });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // PUT: "Set Balance in Bulk" — apply Casual/Sick/Leave-without-Pay and/or any
+  // custom Leave Category balances to many accounts in one go instead of
+  // editing rows one at a time. req.body.departments: [] or omitted = every
+  // Admin/User account (Global); otherwise every account linked (via
+  // all_employees.user_id) to one of the given Department names. Same
+  // requireLeaveManager gate as the single-account PUT below.
+  //
+  // Every field is now OPTIONAL — only casual_leave/sick_leave/
+  // leave_without_pay keys actually present in the body get touched; the
+  // others are left exactly as they already are in the DB. This lets the bulk
+  // panel apply e.g. just a custom "Maternity Leave" balance without also
+  // being forced to re-enter the three fixed ones. custom_categories (if
+  // present) is a { [category_key]: balance } map — see
+  // findOrCreateCategoryByKey above for how unknown keys are handled.
   // NOTE: registered BEFORE PUT /api/leave-balances/:userId on purpose — Express
   // matches routes in registration order and :userId would otherwise swallow
   // this exact path (matching "bulk" as if it were a userId) and 404 first.
   app.put("/api/leave-balances/bulk", authenticateToken, requireLeaveManager, async (req: any, res) => {
     try {
-      const casual = Number(req.body?.casual_leave);
-      const sick = Number(req.body?.sick_leave);
-      const lwp = Number(req.body?.leave_without_pay);
-      if ([casual, sick, lwp].some((n) => !Number.isFinite(n) || n < 0)) {
-        return res.status(400).json({ error: "Leave balances must be non-negative numbers." });
+      const body = req.body || {};
+
+      const fixedFieldKeys = ["casual_leave", "sick_leave", "leave_without_pay"] as const;
+      const fixedValues: Partial<Record<(typeof fixedFieldKeys)[number], number>> = {};
+      for (const field of fixedFieldKeys) {
+        const raw = body[field];
+        if (raw === undefined || raw === null || raw === "") continue;
+        const n = Number(raw);
+        if (!Number.isFinite(n) || n < 0) {
+          return res.status(400).json({ error: "Leave balances must be non-negative numbers." });
+        }
+        fixedValues[field] = n;
       }
 
-      const departments: string[] = Array.isArray(req.body?.departments)
-        ? req.body.departments.map((d: any) => String(d).trim()).filter(Boolean)
+      const customCategoriesInput =
+        body.custom_categories && typeof body.custom_categories === "object" ? body.custom_categories : {};
+      const customValues: Record<string, number> = {};
+      for (const key of Object.keys(customCategoriesInput)) {
+        const n = Number(customCategoriesInput[key]);
+        if (!Number.isFinite(n) || n < 0) {
+          return res.status(400).json({ error: "Leave balances must be non-negative numbers." });
+        }
+        customValues[key] = n;
+      }
+
+      if (Object.keys(fixedValues).length === 0 && Object.keys(customValues).length === 0) {
+        return res.status(400).json({ error: "Enter at least one leave balance to apply." });
+      }
+
+      const departments: string[] = Array.isArray(body.departments)
+        ? body.departments.map((d: any) => String(d).trim()).filter(Boolean)
         : [];
 
       const users: any = await queryDB("SELECT id, name, role FROM users WHERE role IN ('admin', 'user')");
@@ -216,25 +405,65 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
         return res.status(400).json({ error: "No matching accounts found for that selection." });
       }
 
-      for (const userId of targetIds) {
-        // Already-spent-this-year comes off the new total per account, so
-        // someone who already took leave this year doesn't get handed the
-        // full fresh quota on top of what they've used.
-        const used = await getUsedThisYear(userId);
-        const adjCasual = Math.max(0, casual - used.casual);
-        const adjSick = Math.max(0, sick - used.sick);
-        const adjLwp = Math.max(0, lwp - used.without_pay);
+      // Resolve every custom category key to its id ONCE up front (creating
+      // it if it's somehow missing) rather than once per account.
+      const categoryIdByKey = new Map<string, number>();
+      for (const key of Object.keys(customValues)) {
+        categoryIdByKey.set(key, await findOrCreateCategoryByKey(key, req.user.id));
+      }
 
-        const existing: any = await queryDB("SELECT id FROM leave_balances WHERE user_id = ?", [userId]);
-        if (existing.length > 0) {
+      for (const userId of targetIds) {
+        // Already-spent-this-year comes off the new total per account (both
+        // the 3 fixed fields below and any custom category), so someone who
+        // already took leave this year doesn't get handed the full fresh
+        // quota on top of what they've used. Fetched once per account,
+        // shared by both sections below.
+        const used = Object.keys(fixedValues).length > 0 || Object.keys(customValues).length > 0
+          ? await getUsedThisYear(userId)
+          : null;
+
+        if (Object.keys(fixedValues).length > 0) {
+          // Fields NOT present in fixedValues keep the account's existing
+          // stored value untouched.
+          const existingRows: any = await queryDB("SELECT * FROM leave_balances WHERE user_id = ?", [userId]);
+          const existing = existingRows[0];
+          const nextCasual =
+            fixedValues.casual_leave !== undefined
+              ? Math.max(0, fixedValues.casual_leave - used!.casual)
+              : Number(existing?.casual_leave || 0);
+          const nextSick =
+            fixedValues.sick_leave !== undefined
+              ? Math.max(0, fixedValues.sick_leave - used!.sick)
+              : Number(existing?.sick_leave || 0);
+          const nextLwp =
+            fixedValues.leave_without_pay !== undefined
+              ? Math.max(0, fixedValues.leave_without_pay - used!.without_pay)
+              : Number(existing?.leave_without_pay || 0);
+
+          if (existing) {
+            await queryDB(
+              "UPDATE leave_balances SET casual_leave = ?, sick_leave = ?, leave_without_pay = ? WHERE user_id = ?",
+              [nextCasual, nextSick, nextLwp, userId]
+            );
+          } else {
+            await queryDB(
+              "INSERT INTO leave_balances (user_id, casual_leave, sick_leave, leave_without_pay) VALUES (?, ?, ?, ?)",
+              [userId, nextCasual, nextSick, nextLwp]
+            );
+          }
+        }
+
+        // Same already-spent-this-year adjustment as the 3 fixed fields above
+        // — a custom category can now actually be applied against (Leave
+        // Type dropdown), so Set Balance in Bulk has to dock what's already
+        // been taken this year the same way, or re-running it would hand
+        // back the full fresh quota on top of leave already used.
+        for (const key of Object.keys(customValues)) {
+          const nextBalance = Math.max(0, customValues[key] - (used!.custom[key] || 0));
           await queryDB(
-            "UPDATE leave_balances SET casual_leave = ?, sick_leave = ?, leave_without_pay = ? WHERE user_id = ?",
-            [adjCasual, adjSick, adjLwp, userId]
-          );
-        } else {
-          await queryDB(
-            "INSERT INTO leave_balances (user_id, casual_leave, sick_leave, leave_without_pay) VALUES (?, ?, ?, ?)",
-            [userId, adjCasual, adjSick, adjLwp]
+            "INSERT INTO leave_category_balances (user_id, category_id, balance) VALUES (?, ?, ?) " +
+              "ON DUPLICATE KEY UPDATE balance = VALUES(balance)",
+            [userId, categoryIdByKey.get(key), nextBalance]
           );
         }
       }
@@ -247,9 +476,7 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
         // this year were adjusted down individually above. The Leave
         // Manage table is re-fetched right after this call, so it always
         // shows each account's real adjusted balance.
-        casual_leave: casual,
-        sick_leave: sick,
-        leave_without_pay: lwp
+        ...fixedValues
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -344,6 +571,7 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
          WHERE la.user_id = ? ORDER BY la.created_at DESC`,
         [req.user.id]
       );
+      const leaveTypeLabelFor = await buildLeaveTypeLabelResolver();
       let approvalByLeaveId = new Map<number, any>();
       if (rows.length > 0) {
         // requested_by, not an IN (source_id...) list — queryDB uses
@@ -381,7 +609,8 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
             approver_name: currentApproverName,
             current_step: currentStep,
             total_steps: totalSteps,
-            reliever_name: r.reliever_name || null
+            reliever_name: r.reliever_name || null,
+            leave_type_label: leaveTypeLabelFor(r.leave_type)
           };
         })
       );
@@ -411,7 +640,7 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
         is_half_day, include_extra_work_dates, is_foreign_leave, purpose, reliever_id
       } = req.body || {};
 
-      if (!["casual", "sick", "without_pay"].includes(leave_type)) {
+      if (typeof leave_type !== "string" || !(await isValidLeaveType(leave_type))) {
         return res.status(400).json({ error: "Select a valid Leave Type." });
       }
       if (!start_date || !end_date || String(end_date) < String(start_date)) {
@@ -442,20 +671,11 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
       const dayCount = diffDays <= 0 ? 0 : (is_half_day ? Math.max(0.5, diffDays - 0.5) : diffDays);
       if (dayCount <= 0) return res.status(400).json({ error: "Day Count must be greater than 0." });
 
-      const balanceColumn = leave_type === "casual" ? "casual_leave" : leave_type === "sick" ? "sick_leave" : "leave_without_pay";
-      const balanceRows: any = await queryDB("SELECT * FROM leave_balances WHERE user_id = ?", [req.user.id]);
-      const currentBalance = balanceRows.length > 0 ? Number(balanceRows[0][balanceColumn]) : 0;
+      const currentBalance = await getLeaveTypeBalance(req.user.id, leave_type);
       if (dayCount > currentBalance) {
         return res.status(400).json({ error: `Day Count (${dayCount}) exceeds your remaining balance (${currentBalance}) for this Leave Type.` });
       }
-
-      const newCasual = balanceColumn === "casual_leave" ? currentBalance - dayCount : Number(balanceRows[0]?.casual_leave || 0);
-      const newSick = balanceColumn === "sick_leave" ? currentBalance - dayCount : Number(balanceRows[0]?.sick_leave || 0);
-      const newLwp = balanceColumn === "leave_without_pay" ? currentBalance - dayCount : Number(balanceRows[0]?.leave_without_pay || 0);
-      await queryDB(
-        "UPDATE leave_balances SET casual_leave = ?, sick_leave = ?, leave_without_pay = ? WHERE user_id = ?",
-        [newCasual, newSick, newLwp, req.user.id]
-      );
+      await adjustLeaveTypeBalance(req.user.id, leave_type, -dayCount);
 
       const result: any = await queryDB(
         `INSERT INTO leave_applications
@@ -554,6 +774,7 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
       ]);
       const userMap = new Map<number, any>(users.map((u: any) => [Number(u.id), u]));
       const approvalByLeaveId = new Map<number, any>(approvalRequests.map((ar: any) => [Number(ar.source_id), ar]));
+      const leaveTypeLabelFor = await buildLeaveTypeLabelResolver();
       const visible = req.user.role === "superadmin"
         ? applications
         : applications.filter((a: any) => Number(a.approver_id) === Number(req.user.id));
@@ -587,7 +808,8 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
             current_step: currentStep,
             total_steps: totalSteps,
             reliever_name: a.reliever_id ? (userMap.get(Number(a.reliever_id))?.name || null) : null,
-            reliever_status: a.reliever_status || null
+            reliever_status: a.reliever_status || null,
+            leave_type_label: leaveTypeLabelFor(a.leave_type)
           };
         })
       );
@@ -669,6 +891,7 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
         if (e.user_id != null && e.department) departmentByUserId.set(Number(e.user_id), e.department);
       }
       const approvalByLeaveId = new Map<number, any>(approvalRequests.map((ar: any) => [Number(ar.source_id), ar]));
+      const leaveTypeLabelFor = await buildLeaveTypeLabelResolver();
 
       const visible = applications.filter((a: any) => {
         const dept = departmentByUserId.get(Number(a.user_id)) || null;
@@ -707,7 +930,8 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
             current_step: currentStep,
             total_steps: totalSteps,
             reliever_name: a.reliever_id ? (userMap.get(Number(a.reliever_id))?.name || null) : null,
-            reliever_status: a.reliever_status || null
+            reliever_status: a.reliever_status || null,
+            leave_type_label: leaveTypeLabelFor(a.leave_type)
           };
         })
       );
@@ -762,22 +986,7 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
       }
 
       if (action === "reject") {
-        const balanceColumn = application.leave_type === "casual" ? "casual_leave" : application.leave_type === "sick" ? "sick_leave" : "leave_without_pay";
-        const balanceRows: any = await queryDB("SELECT * FROM leave_balances WHERE user_id = ?", [application.user_id]);
-        const casual = Number(balanceRows[0]?.casual_leave || 0) + (balanceColumn === "casual_leave" ? Number(application.day_count) : 0);
-        const sick = Number(balanceRows[0]?.sick_leave || 0) + (balanceColumn === "sick_leave" ? Number(application.day_count) : 0);
-        const lwp = Number(balanceRows[0]?.leave_without_pay || 0) + (balanceColumn === "leave_without_pay" ? Number(application.day_count) : 0);
-        if (balanceRows.length > 0) {
-          await queryDB(
-            "UPDATE leave_balances SET casual_leave = ?, sick_leave = ?, leave_without_pay = ? WHERE user_id = ?",
-            [casual, sick, lwp, application.user_id]
-          );
-        } else {
-          await queryDB(
-            "INSERT INTO leave_balances (user_id, casual_leave, sick_leave, leave_without_pay) VALUES (?, ?, ?, ?)",
-            [application.user_id, casual, sick, lwp]
-          );
-        }
+        await adjustLeaveTypeBalance(application.user_id, application.leave_type, Number(application.day_count));
       }
 
       await queryDB(
@@ -787,8 +996,7 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
 
       // Notify the applicant via their Alerts bell (web + mobile, same
       // component). First alert type wired up — more modules to follow later.
-      const leaveTypeLabel =
-        application.leave_type === "casual" ? "Casual" : application.leave_type === "sick" ? "Sick" : "Leave Without Pay";
+      const leaveTypeLabel = await getLeaveTypeLabel(application.leave_type);
       await createAlert(queryDB, {
         userId: application.user_id,
         type: "leave_application",
