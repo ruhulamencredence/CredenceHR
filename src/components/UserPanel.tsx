@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Project, MprNumber, Entry, Budget, BudgetItem, User, MprUsage, ClaimsNavRequest, JobsNavRequest, DashboardNavRequest } from '../types';
-import { Calendar, Building2, FileText, Package, Clock, Plus, AlertTriangle, CheckCircle2, ChevronRight, X, Trash2, Edit2, Lock, Wallet, ArrowLeft, FolderOpen, ListChecks, Search, Save, Briefcase, FileDown, Scissors, Route } from 'lucide-react';
+import { Calendar, Building2, FileText, Package, Clock, Plus, AlertTriangle, CheckCircle2, ChevronRight, X, Trash2, Edit2, Lock, Wallet, ArrowLeft, FolderOpen, ListChecks, Search, Save, Briefcase, FileDown, Scissors, Route, Info } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { formatDate, todayDateOnlyString, dateRangeOptions, formatDateLabel } from '../lib/formatDate';
 import { useStableCallback } from '../lib/useStableCallback';
@@ -3461,16 +3461,26 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                               {row.itemNames.map((opt) => (
                                 <li key={opt.uid} className="bg-slate-50">
                                   <div className="flex items-center gap-1">
+                                    {/* Blue "Info" badge + "Details" label (not just a faint
+                                        chevron) so this reads as a tappable control on first
+                                        glance, not plain static text — matches the single-item
+                                        card's design below. */}
                                     <button
                                       type="button"
                                       onClick={() => {
                                         const bi = budgetItems.find((b) => b.id === opt.budgetItemId);
                                         if (bi) setViewingBudgetItem(bi);
                                       }}
-                                      className="flex-1 min-w-0 flex items-center justify-between gap-2 px-3.5 py-2 text-left text-sm text-slate-700 hover:bg-slate-100 transition-colors"
+                                      className="flex-1 min-w-0 flex items-center gap-2 px-3.5 py-2 text-left text-sm text-slate-700 hover:bg-slate-100 active:bg-slate-200 transition-colors"
                                     >
-                                      <span className="truncate">{opt.name}</span>
-                                      <ChevronRight className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                                      <span className="flex-shrink-0 w-5 h-5 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center">
+                                        <Info className="w-3 h-3" />
+                                      </span>
+                                      <span className="flex-1 min-w-0 truncate">{opt.name}</span>
+                                      <span className="flex-shrink-0 inline-flex items-center gap-0.5 text-[11px] font-medium text-blue-600">
+                                        Details
+                                        <ChevronRight className="w-3.5 h-3.5" />
+                                      </span>
                                     </button>
                                     {/* Lets the user drop just this Item out of an MPR No
                                         that auto-filled several — not every Item under an
@@ -3549,16 +3559,27 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                             </ul>
                           ) : row.itemNames.length === 1 ? (
                             <div className="border border-slate-200 rounded-xl overflow-hidden bg-slate-50">
+                              {/* Same "Info" badge + "Details" chip treatment as the
+                                  multi-item list above — a plain grey row with a faint
+                                  chevron read as static/disabled (too close to the
+                                  read-only placeholder input below it); this makes the
+                                  tap target visually obvious. */}
                               <button
                                 type="button"
                                 onClick={() => {
                                   const bi = budgetItems.find((b) => b.id === row.itemNames[0].budgetItemId);
                                   if (bi) setViewingBudgetItem(bi);
                                 }}
-                                className="w-full flex items-center justify-between gap-2 px-4 py-3.5 sm:py-3 text-slate-700 text-base sm:text-sm text-left hover:bg-slate-100 transition-colors"
+                                className="w-full flex items-center gap-2.5 px-4 py-3.5 sm:py-3 text-slate-700 text-base sm:text-sm text-left hover:bg-slate-100 active:bg-slate-200 transition-colors"
                               >
-                                <span className="truncate">{row.itemNames[0].name}</span>
-                                <ChevronRight className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                                <span className="flex-shrink-0 w-6 h-6 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center">
+                                  <Info className="w-3.5 h-3.5" />
+                                </span>
+                                <span className="flex-1 min-w-0 truncate">{row.itemNames[0].name}</span>
+                                <span className="flex-shrink-0 inline-flex items-center gap-0.5 text-xs font-medium text-blue-600">
+                                  Details
+                                  <ChevronRight className="w-4 h-4" />
+                                </span>
                               </button>
                               <div className="flex items-center gap-2 px-4 pb-3">
                                 <label className="text-xs text-slate-500 whitespace-nowrap">Requisitioned Qty *</label>

@@ -673,6 +673,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     return `Delete MPR ${r.entry_mpr_no || '—'} · ${r.entry_item_name || '—'} · Qty ${r.entry_requisitioned_qty ?? '—'} · Delivery ${formatDate(r.entry_delivery_date || '') || '—'}`;
   };
 
+  // The Edit Reason the requesting user gave — same payload.reason field across all
+  // three actions (add_item, add_job, delete_entry) — used alongside
+  // describeJobEditRequest above.
+  const jobEditRequestReason = (r: PendingJobEdit): string => String((r.payload || {}).reason || '').trim();
+
   // Remote Attendance (separate Admin tab, Superadmin always sees it) — every
   // Check In / Check Out a User has recorded, system-wide, filterable by
   // Project/User/date. Loaded on demand only when that tab is opened.
@@ -3563,6 +3568,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                       </span>
                     </div>
                     <p className="text-sm text-slate-800 mt-1 break-words">{describeJobEditRequest(r)}</p>
+                    {jobEditRequestReason(r) && (
+                      <p className="text-xs text-slate-500 mt-1 italic break-words">Reason: {jobEditRequestReason(r)}</p>
+                    )}
                     <p className="text-[11px] text-slate-400 mt-0.5">
                       Requested by {r.requested_by_name || '—'} on {formatDate(r.created_at) || r.created_at}
                     </p>

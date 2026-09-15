@@ -504,7 +504,7 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
   app.post("/api/entries/job/:jobId/items", authenticateToken, async (req: any, res) => {
     try {
       const jobId = Number(req.params.jobId);
-      const { items } = req.body;
+      const { items, reason } = req.body;
       if (!Array.isArray(items) || items.length === 0) {
         return res.status(400).json({ error: "At least one MPR row is required" });
       }
@@ -542,6 +542,12 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
           // itself must still go through Admin approval before it actually lands —
           // see PEPM Manage -> Edit Log (requireModule("editlog")) below.
           queueForApproval = true;
+          // Job Edit always requires an Edit Reason once it's actually going to a
+          // queued Admin-approval request — the normal (not-yet-locked) path above
+          // never reaches here, so this doesn't affect ordinary Job Entry editing.
+          if (!reason || !String(reason).trim()) {
+            return res.status(400).json({ error: "Edit Reason is required." });
+          }
         }
       }
 
@@ -693,7 +699,8 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
             budget_item_id: it.budget_item_id,
             item_name: it.item_name,
             requisitioned_qty: Number(it.requisitioned_qty),
-            delivery_date: it.delivery_date
+            delivery_date: it.delivery_date,
+            reason: String(reason).trim()
           };
           const result = await queryDB(
             "INSERT INTO job_edit_requests (job_id, entry_id, action, payload, status, requested_by) VALUES (?, NULL, 'add_item', ?, 'pending', ?)",
@@ -767,7 +774,7 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
   // below, the `request.action === "add_job"` branch).
   app.post("/api/job-edits/new-job", authenticateToken, async (req: any, res) => {
     try {
-      const { budget_id, project_id, job_name, job_duration, items } = req.body;
+      const { budget_id, project_id, job_name, job_duration, items, reason } = req.body;
 
       if (
         !budget_id ||
@@ -777,10 +784,12 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
         !job_duration ||
         !String(job_duration).trim() ||
         !Array.isArray(items) ||
-        items.length === 0
+        items.length === 0 ||
+        !reason ||
+        !String(reason).trim()
       ) {
         return res.status(400).json({
-          error: "Budget, Project, Job Name, Job Duration and at least one MPR No entry are required"
+          error: "Budget, Project, Job Name, Job Duration, Edit Reason and at least one MPR No entry are required"
         });
       }
 
@@ -927,6 +936,7 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
         project_name: projectName,
         job_name: String(job_name).trim(),
         job_duration: String(job_duration).trim(),
+        reason: String(reason).trim(),
         items: items.map((it: any) => ({
           mpr_id: it.mpr_id,
           mpr_no: mprNoById.get(Number(it.mpr_id)) || "",
@@ -1494,6 +1504,7 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
   app.delete("/api/entries/:id", authenticateToken, async (req: any, res) => {
     try {
       const { id } = req.params;
+      const { reason } = req.body || {};
       const rows = await queryDB(
         `SELECT e.*, j.job_duration AS current_job_duration, m.mpr_no AS current_mpr_no
          FROM entries e
@@ -1541,9 +1552,15 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
           if (existingPending.length > 0) {
             return res.status(400).json({ error: "A delete request for this MPR is already pending Admin approval." });
           }
+          // Job Edit always requires an Edit Reason once the delete is actually
+          // going to a queued Admin-approval request — a plain (not-yet-locked)
+          // delete never reaches this branch, so ordinary deletes are unaffected.
+          if (!reason || !String(reason).trim()) {
+            return res.status(400).json({ error: "Edit Reason is required." });
+          }
           await queryDB(
-            "INSERT INTO job_edit_requests (job_id, entry_id, action, payload, status, requested_by) VALUES (?, ?, 'delete_entry', NULL, 'pending', ?)",
-            [entry.job_id, id, req.user.id]
+            "INSERT INTO job_edit_requests (job_id, entry_id, action, payload, status, requested_by) VALUES (?, ?, 'delete_entry', ?, 'pending', ?)",
+            [entry.job_id, id, JSON.stringify({ reason: String(reason).trim() }), req.user.id]
           );
           return res.json({
             success: true,
