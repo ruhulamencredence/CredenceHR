@@ -38,7 +38,17 @@ const config = {
     // Allows plain http:// (not just https://). Only matters if
     // ACTIVE_SERVER_URL above uses http:// — harmless to leave on otherwise.
     cleartext: true,
-    androidScheme: 'https'
+    androidScheme: 'https',
+    // Without this, navigating to any origin OTHER than ACTIVE_SERVER_URL
+    // above (e.g. GlobalSidebar's "Set Server" switcher doing
+    // window.location.href = <a different admin-added IP/URL>) gets treated
+    // as an "external link" and kicked out to the system browser (Chrome)
+    // instead of just loading in this WebView — that's Capacitor's default
+    // safety behavior for cross-origin navigation. The server catalog is
+    // managed at runtime from the web (Admin Panel -> Servers) so the exact
+    // list of IPs/URLs isn't known at build time; '*' allows navigating to
+    // any origin from inside the WebView rather than only ACTIVE_SERVER_URL.
+    allowNavigation: ['*']
   },
   // Employee Tracking (@capacitor-community/background-geolocation) stops
   // getting location updates after ~5 minutes backgrounded on stock Android

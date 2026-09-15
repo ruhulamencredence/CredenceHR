@@ -125,6 +125,15 @@ interface EntryRowProps {
   idx: number;
   isEditing: boolean;
   canEdit: boolean;
+  // True when this entry can ONLY have its Delivery Date changed — its Budget is
+  // already Final Submitted (budget_locked) and the current user has the Job Edit
+  // permission (can_job_edit), same permission/condition the separate Job Edit
+  // panel already uses for its own direct Delivery-Date edit. Restores the older
+  // policy where a Job Edit user could also make that same Delivery Date change
+  // right here from Job Entry Details, not just from the Job Edit panel. Ignored
+  // when canEdit is false (nothing is editable either way) and has no effect once
+  // the Budget isn't locked (that case is already fully editable via canEdit alone).
+  dateOnlyEdit: boolean;
   deletingEntryId: number | null;
   onStartEdit: (entry: Entry) => void;
   onCancelEdit: () => void;
@@ -177,7 +186,7 @@ interface EntryRowProps {
 // filters, etc.) does not force React to re-diff every row of a potentially long
 // entries table — only the row(s) whose props actually changed re-render.
 const EntryRow = React.memo(function EntryRow({
-  it, idx, isEditing, canEdit, deletingEntryId,
+  it, idx, isEditing, canEdit, dateOnlyEdit, deletingEntryId,
   onStartEdit, onCancelEdit, onSaveEdit, onDelete, onSelectEditMpr,
   editJobName, setEditJobName,
   editMprSearchText, setEditMprSearchText,
@@ -197,9 +206,12 @@ const EntryRow = React.memo(function EntryRow({
       {/* Job Name, MPR No, Item Name, Qty and Job Duration stay freely editable
           right up until this entry's Budget is Final Submitted — canEdit is false
           (and the Edit button never even renders, see the "Locked" fallback below)
-          once that happens, so isEditing here always implies canEdit === true. */}
+          once that happens, so isEditing here always implies canEdit === true.
+          The one exception is dateOnlyEdit (Job Edit permission on an already-
+          locked entry) — isEditing can be true there too, but every field below
+          except Delivery Date renders as plain text instead of an input. */}
       <td className="px-3 py-2.5 min-w-[140px] text-slate-900 font-medium">
-        {isEditing ? (
+        {isEditing && !dateOnlyEdit ? (
           <input
             type="text"
             value={editJobName}
@@ -211,7 +223,7 @@ const EntryRow = React.memo(function EntryRow({
         )}
       </td>
       <td className="px-3 py-2.5 min-w-[150px] text-slate-900">
-        {isEditing ? (
+        {isEditing && !dateOnlyEdit ? (
           <div className="relative">
             <input
               type="text"
@@ -254,7 +266,7 @@ const EntryRow = React.memo(function EntryRow({
         )}
       </td>
       <td className="px-3 py-2.5 min-w-[180px] text-slate-700">
-        {isEditing ? (
+        {isEditing && !dateOnlyEdit ? (
           editLoadingOptions ? (
             <span className="text-xs text-slate-400">Loading items...</span>
           ) : editItemOptions.length > 0 ? (
@@ -280,7 +292,7 @@ const EntryRow = React.memo(function EntryRow({
       </td>
       <td className="px-3 py-2.5 min-w-[150px] text-slate-600">{it.specification || '—'}</td>
       <td className="px-3 py-2.5 min-w-[110px] text-slate-600 align-top">
-        {isEditing ? (
+        {isEditing && !dateOnlyEdit ? (
           <div className="space-y-1">
             <input
               type="number"
@@ -313,7 +325,7 @@ const EntryRow = React.memo(function EntryRow({
         )}
       </td>
       <td className="px-3 py-2.5 min-w-[110px] text-slate-600">
-        {isEditing ? (
+        {isEditing && !dateOnlyEdit ? (
           <input
             type="text"
             inputMode="numeric"
@@ -391,19 +403,25 @@ const EntryRow = React.memo(function EntryRow({
               type="button"
               onClick={() => onStartEdit(it)}
               className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-              title="Edit"
+              title={dateOnlyEdit ? 'Edit Delivery Date' : 'Edit'}
             >
               <Edit2 className="w-3.5 h-3.5" />
             </button>
-            <button
-              type="button"
-              onClick={() => onDelete(it.id)}
-              disabled={deletingEntryId === it.id}
-              className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg transition-colors disabled:opacity-50"
-              title="Delete this Job Entry"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-            </button>
+            {dateOnlyEdit ? (
+              <span className="text-[9px] text-slate-400 flex items-center gap-0.5" title="Budget already Final Submitted — only Delivery Date can be changed">
+                <Lock className="w-3 h-3" /> Date only
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={() => onDelete(it.id)}
+                disabled={deletingEntryId === it.id}
+                className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg transition-colors disabled:opacity-50"
+                title="Delete this Job Entry"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
         ) : (
           <span className="text-[10px] text-slate-300 flex items-center gap-1">
@@ -419,7 +437,7 @@ const EntryRow = React.memo(function EntryRow({
 // used on narrow screens so the "Job Entry Details" list never needs horizontal
 // scrolling on mobile (see the `md:hidden` / `hidden md:block` split further down).
 const EntryCard = React.memo(function EntryCard({
-  it, idx, isEditing, canEdit, deletingEntryId,
+  it, idx, isEditing, canEdit, dateOnlyEdit, deletingEntryId,
   onStartEdit, onCancelEdit, onSaveEdit, onDelete, onSelectEditMpr,
   editJobName, setEditJobName,
   editMprSearchText, setEditMprSearchText,
@@ -479,19 +497,25 @@ const EntryCard = React.memo(function EntryCard({
               type="button"
               onClick={() => onStartEdit(it)}
               className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-              title="Edit"
+              title={dateOnlyEdit ? 'Edit Delivery Date' : 'Edit'}
             >
               <Edit2 className="w-4 h-4" />
             </button>
-            <button
-              type="button"
-              onClick={() => onDelete(it.id)}
-              disabled={deletingEntryId === it.id}
-              className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg transition-colors disabled:opacity-50"
-              title="Delete this Job Entry"
-            >
-              <Trash2 className="w-4 h-4" />
-            </button>
+            {dateOnlyEdit ? (
+              <span className="text-[9px] text-slate-400 flex items-center gap-0.5 px-1" title="Budget already Final Submitted — only Delivery Date can be changed">
+                <Lock className="w-3 h-3" /> Date only
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={() => onDelete(it.id)}
+                disabled={deletingEntryId === it.id}
+                className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg transition-colors disabled:opacity-50"
+                title="Delete this Job Entry"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            )}
           </div>
         ) : (
           <span className="text-[10px] text-slate-300 flex items-center gap-1 flex-shrink-0">
@@ -517,6 +541,73 @@ const EntryCard = React.memo(function EntryCard({
             {statRow('Job Duration', it.job_duration)}
             {statRow('Delivery Date', formatDate(it.delivery_date))}
             {statRow('Budget', it.budget_name || '—')}
+          </div>
+        </div>
+      ) : dateOnlyEdit ? (
+        // --- Delivery-Date-only edit form: this entry's Budget is already Final
+        //     Submitted, so every field below Delivery Date is read-only here —
+        //     same values as the compact read-only layout above, just kept visible
+        //     for context while the date itself is being changed. ---
+        <div className="mt-2 space-y-3">
+          <div>
+            <div className={fieldLabel}>Job Name</div>
+            <div className="text-sm text-slate-700">{it.job_name}</div>
+          </div>
+          <div>
+            <div className={fieldLabel}>MPR No</div>
+            <div className="text-sm text-slate-700">{it.mpr_no}</div>
+          </div>
+          <div>
+            <div className={fieldLabel}>Item Name</div>
+            <div className="text-sm text-slate-700">{it.item_name}</div>
+          </div>
+          <div className="grid grid-cols-2 gap-3 text-xs">
+            <div>
+              <div className={fieldLabel}>Specification</div>
+              <div className="text-slate-600">{it.specification || '—'}</div>
+            </div>
+            <div>
+              <div className={fieldLabel}>Requisitioned Qty</div>
+              <div className="text-slate-600">
+                {it.requisitioned_qty !== null && it.requisitioned_qty !== undefined
+                  ? `${it.requisitioned_qty}${it.req_qty ? ` / ${it.req_qty}` : ''}`
+                  : it.req_qty || '—'}
+              </div>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <div className={fieldLabel}>Job Duration</div>
+              <div className="text-sm text-slate-700">{it.job_duration}</div>
+            </div>
+            <div>
+              <div className={fieldLabel}>Delivery Date</div>
+              {editDeliveryRange.from && editDeliveryRange.to ? (
+                <select
+                  value={editDeliveryDate}
+                  onChange={(e) => setEditDeliveryDate(e.target.value)}
+                  className={`${inputCls} appearance-none`}
+                >
+                  <option value="">Select...</option>
+                  {dateRangeOptions(editDeliveryRange.from, editDeliveryRange.to).map((d) => (
+                    <option key={d} value={d}>{formatDateLabel(d)}</option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type="date"
+                  value={editDeliveryDate}
+                  onChange={(e) => setEditDeliveryDate(e.target.value)}
+                  min={editDeliveryRange.from || undefined}
+                  max={editDeliveryRange.to || undefined}
+                  className={inputCls}
+                />
+              )}
+            </div>
+          </div>
+          <div>
+            <div className={fieldLabel}>Budget</div>
+            <div className="text-sm text-slate-500">{it.budget_name || '—'}</div>
           </div>
         </div>
       ) : (
@@ -716,6 +807,16 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // Column filters live in a collapsible panel on mobile (there's no room for 9 inline
   // filter boxes above a card list the way there is above a table's header row).
   const [showMobileFilters, setShowMobileFilters] = useState(false);
+  // The Item Name filter's "type or select" suggestions used to rely on a native
+  // <datalist>, which many mobile browsers/WebViews (including the Capacitor Android
+  // APK this app ships as) simply never render a dropdown for — so on mobile the
+  // filter still worked, but no suggestion list ever showed while typing. Replaced
+  // with the same custom absolute-positioned dropdown pattern used elsewhere in this
+  // file (e.g. Project Name above). Separate open/close state for the mobile filter
+  // sheet's input vs the desktop table header's input since both can exist in the DOM
+  // at once.
+  const [showItemNameFilterDropdownMobile, setShowItemNameFilterDropdownMobile] = useState(false);
+  const [showItemNameFilterDropdownDesktop, setShowItemNameFilterDropdownDesktop] = useState(false);
 
   // Tapping an auto-filled Item Name in the MPR Entry form opens this popup with the
   // rest of that imported Budget Excel row's detail — Description, Unit, Specification,
@@ -1621,6 +1722,39 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
     [entries]
   );
 
+  // A locked entry (its Budget already Final Submitted) still gets an Edit button —
+  // Delivery-Date-only — when the current user has the can_job_edit permission,
+  // mirroring the direct Delivery Date edit the separate Job Edit panel already
+  // offers (see JobEditPanel.tsx's own saveEdit, which PUTs just the date). This
+  // restores the older policy where Job Edit permission also unlocked that same
+  // change right here from Job Entry Details, not only from the Job Edit panel.
+  const isDateOnlyEditableEntry = (entry: Entry): boolean =>
+    entry.created_by === user.id && !!entry.budget_locked && !!user.can_job_edit;
+  // Whether the Edit button should show at all for this entry — fully unlocked
+  // (own entry, Budget not yet Final Submitted) OR the Delivery-Date-only case above.
+  const isEntryEditable = (entry: Entry): boolean =>
+    (entry.created_by === user.id && !entry.budget_locked) || isDateOnlyEditableEntry(entry);
+
+  // Every distinct Item Name already present across this user's own "Job Entry
+  // Details" rows — offered as a type-or-select dropdown on the Item Name filter
+  // (both the desktop table header input and the mobile filter panel input) below,
+  // so typing narrows to a matching dropdown the same way MPR No pickers elsewhere
+  // in the app already do, instead of a plain free-text box.
+  const itemNameFilterOptions = React.useMemo(
+    () => [...new Set(entries.map((e) => String(e.item_name || '').trim()).filter(Boolean))].sort(),
+    [entries]
+  );
+
+  // Item Name filter options narrowed to whatever's currently typed — case-insensitive
+  // substring match, same convention as filteredScopedProjects/filteredMprFor above.
+  // Blank input shows every known Item Name (so tapping into an empty filter still
+  // offers the full list to pick from, not nothing).
+  const filteredItemNameFilterOptions = React.useMemo(() => {
+    const q = entryColumnFilters.item_name.trim().toLowerCase();
+    if (!q) return itemNameFilterOptions;
+    return itemNameFilterOptions.filter((name) => name.toLowerCase().includes(q));
+  }, [itemNameFilterOptions, entryColumnFilters.item_name]);
+
   // Each column filter narrows "Job Entry Details" independently (AND across columns) —
   // case-insensitive substring match, blank filter = no restriction on that column.
   const filteredEntries: Entry[] = React.useMemo(() => {
@@ -2066,6 +2200,10 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
       from: owningBudget?.delivery_date_from || null,
       to: owningBudget?.delivery_date_to || null
     });
+    // Delivery-Date-only edit (see isDateOnlyEditableEntry) never touches Item
+    // Name/MPR No/Qty/Job Name/Job Duration, so there's nothing to pick an Item
+    // option for — skip the Budget Items fetch entirely for that case.
+    if (isDateOnlyEditableEntry(entry)) return;
     await loadEditItemOptions(entry.budget_id, entry.mpr_no);
   };
 
@@ -2156,6 +2294,51 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   };
 
   const saveEditEntry = async (entryId: number) => {
+    const currentEntry = entries.find((e) => e.id === entryId);
+    // Delivery-Date-only path (see isDateOnlyEditableEntry) — this entry's Budget is
+    // already Final Submitted, so only Delivery Date is validated/sent here; Item
+    // Name/MPR No/Budget Item stay exactly what they already were (same minimal
+    // payload shape the Job Edit panel's own direct date edit already sends).
+    if (currentEntry && isDateOnlyEditableEntry(currentEntry)) {
+      if (!editDeliveryDate) {
+        setEditError('Delivery Date is required.');
+        return;
+      }
+      if (
+        (editDeliveryRange.from && editDeliveryDate < editDeliveryRange.from) ||
+        (editDeliveryRange.to && editDeliveryDate > editDeliveryRange.to)
+      ) {
+        setEditError(
+          `Delivery Date must be between ${editDeliveryRange.from || '—'} and ${editDeliveryRange.to || '—'} for this Budget.`
+        );
+        return;
+      }
+      setEditSaving(true);
+      setEditError('');
+      try {
+        const res = await fetch(apiUrl(`/api/entries/${entryId}`), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({
+            item_name: currentEntry.item_name,
+            delivery_date: editDeliveryDate,
+            mpr_id: currentEntry.mpr_id,
+            budget_item_id: currentEntry.budget_item_id
+          })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to update entry');
+        setEntries((prev) => prev.map((e) => (e.id === entryId ? { ...e, delivery_date: editDeliveryDate } : e)));
+        cancelEditEntry();
+        fetchEntries();
+      } catch (err: any) {
+        setEditError(err.message);
+      } finally {
+        setEditSaving(false);
+      }
+      return;
+    }
+
     if (!editItemName.trim() || !editDeliveryDate || !editJobName.trim() || !editJobDuration.trim() || !editMprId) {
       setEditError('Job Name, Job Duration, MPR No, Item Name and Delivery Date are all required.');
       return;
@@ -3015,7 +3198,8 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                     <div className="max-h-72 overflow-y-auto space-y-2 pr-0.5">
                       {editingJobExistingEntries.map((it, idx) => {
                         const isEditingThis = editingEntryId === it.id;
-                        const canEditThis = it.created_by === user.id && !it.budget_locked;
+                        const canEditThis = isEntryEditable(it);
+                        const dateOnlyEditThis = isDateOnlyEditableEntry(it);
                         return (
                           <EntryCard
                             key={it.id}
@@ -3023,6 +3207,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                             idx={idx}
                             isEditing={isEditingThis}
                             canEdit={canEditThis}
+                            dateOnlyEdit={dateOnlyEditThis}
                             deletingEntryId={deletingEntryId}
                             onStartEdit={stableStartEditEntry}
                             onCancelEdit={stableCancelEditEntry}
@@ -3785,13 +3970,39 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                           placeholder="MPR No"
                           className="px-2.5 py-2 bg-white border border-slate-200 rounded-lg text-xs focus:ring-2 focus:ring-blue-600 focus:outline-none"
                         />
-                        <input
-                          type="text"
-                          value={entryColumnFilters.item_name}
-                          onChange={(e) => setEntryColumnFilters((prev) => ({ ...prev, item_name: e.target.value }))}
-                          placeholder="Item Name"
-                          className="px-2.5 py-2 bg-white border border-slate-200 rounded-lg text-xs focus:ring-2 focus:ring-blue-600 focus:outline-none"
-                        />
+                        <div className="relative">
+                          <input
+                            type="text"
+                            value={entryColumnFilters.item_name}
+                            onChange={(e) => {
+                              setEntryColumnFilters((prev) => ({ ...prev, item_name: e.target.value }));
+                              setShowItemNameFilterDropdownMobile(true);
+                            }}
+                            onFocus={() => setShowItemNameFilterDropdownMobile(true)}
+                            onBlur={() => setTimeout(() => setShowItemNameFilterDropdownMobile(false), 150)}
+                            placeholder="Item Name"
+                            autoComplete="off"
+                            className="w-full px-2.5 py-2 bg-white border border-slate-200 rounded-lg text-xs focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                          />
+                          {showItemNameFilterDropdownMobile && filteredItemNameFilterOptions.length > 0 && (
+                            <div className="absolute z-20 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-md max-h-40 overflow-y-auto">
+                              {filteredItemNameFilterOptions.map((name) => (
+                                <button
+                                  type="button"
+                                  key={name}
+                                  onMouseDown={(e) => e.preventDefault()}
+                                  onClick={() => {
+                                    setEntryColumnFilters((prev) => ({ ...prev, item_name: name }));
+                                    setShowItemNameFilterDropdownMobile(false);
+                                  }}
+                                  className="w-full text-left px-2.5 py-1.5 text-xs text-slate-700 hover:bg-slate-50 transition-colors truncate"
+                                >
+                                  {name}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                         <input
                           type="text"
                           value={entryColumnFilters.specification}
@@ -3910,7 +4121,8 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                 ) : (
                   filteredEntries.map((it, idx) => {
                     const isEditing = editingEntryId === it.id;
-                    const canEdit = it.created_by === user.id && !it.budget_locked;
+                    const canEdit = isEntryEditable(it);
+                    const dateOnlyEdit = isDateOnlyEditableEntry(it);
                     return (
                       <EntryCard
                         key={it.id}
@@ -3918,6 +4130,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                         idx={idx}
                         isEditing={isEditing}
                         canEdit={canEdit}
+                        dateOnlyEdit={dateOnlyEdit}
                         deletingEntryId={deletingEntryId}
                         onStartEdit={stableStartEditEntry}
                         onCancelEdit={stableCancelEditEntry}
@@ -4023,13 +4236,39 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                         />
                       </th>
                       <th className="px-3 pb-2.5">
-                        <input
-                          type="text"
-                          value={entryColumnFilters.item_name}
-                          onChange={(e) => setEntryColumnFilters((prev) => ({ ...prev, item_name: e.target.value }))}
-                          placeholder="Filter..."
-                          className="w-full px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 text-[11px] font-normal focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400"
-                        />
+                        <div className="relative">
+                          <input
+                            type="text"
+                            value={entryColumnFilters.item_name}
+                            onChange={(e) => {
+                              setEntryColumnFilters((prev) => ({ ...prev, item_name: e.target.value }));
+                              setShowItemNameFilterDropdownDesktop(true);
+                            }}
+                            onFocus={() => setShowItemNameFilterDropdownDesktop(true)}
+                            onBlur={() => setTimeout(() => setShowItemNameFilterDropdownDesktop(false), 150)}
+                            placeholder="Filter..."
+                            autoComplete="off"
+                            className="w-full px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 text-[11px] font-normal focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400"
+                          />
+                          {showItemNameFilterDropdownDesktop && filteredItemNameFilterOptions.length > 0 && (
+                            <div className="absolute z-20 mt-1 w-48 bg-white border border-slate-200 rounded-lg shadow-md max-h-40 overflow-y-auto normal-case">
+                              {filteredItemNameFilterOptions.map((name) => (
+                                <button
+                                  type="button"
+                                  key={name}
+                                  onMouseDown={(e) => e.preventDefault()}
+                                  onClick={() => {
+                                    setEntryColumnFilters((prev) => ({ ...prev, item_name: name }));
+                                    setShowItemNameFilterDropdownDesktop(false);
+                                  }}
+                                  className="w-full text-left px-2.5 py-1.5 text-[11px] text-slate-700 hover:bg-slate-50 transition-colors truncate"
+                                >
+                                  {name}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       </th>
                       <th className="px-3 pb-2.5">
                         <input
@@ -4096,7 +4335,8 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                     ) : (
                     filteredEntries.map((it, idx) => {
                       const isEditing = editingEntryId === it.id;
-                      const canEdit = it.created_by === user.id && !it.budget_locked;
+                      const canEdit = isEntryEditable(it);
+                      const dateOnlyEdit = isDateOnlyEditableEntry(it);
                       return (
                         <EntryRow
                           key={it.id}
@@ -4104,6 +4344,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                           idx={idx}
                           isEditing={isEditing}
                           canEdit={canEdit}
+                          dateOnlyEdit={dateOnlyEdit}
                           deletingEntryId={deletingEntryId}
                           onStartEdit={stableStartEditEntry}
                           onCancelEdit={stableCancelEditEntry}
@@ -4405,7 +4646,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
             // Plain tappable summary row — tapping it edits THIS entry right here
             // in the preview (no closing/navigating away to the Job Entry Details
             // table underneath).
-            const canEditThis = entry.created_by === user.id && !entry.budget_locked;
+            const canEditThis = isEntryEditable(entry);
             return (
               <button
                 type="button"
@@ -4436,7 +4677,8 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
               it={entry}
               idx={entries.findIndex((e) => e.id === entry.id)}
               isEditing
-              canEdit={entry.created_by === user.id && !entry.budget_locked}
+              canEdit={isEntryEditable(entry)}
+              dateOnlyEdit={isDateOnlyEditableEntry(entry)}
               deletingEntryId={deletingEntryId}
               onStartEdit={stableStartEditEntry}
               onCancelEdit={stableCancelEditEntry}

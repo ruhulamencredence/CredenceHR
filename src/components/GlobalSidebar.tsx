@@ -3,11 +3,13 @@ import {
   X, LogOut, Home, Wallet, Briefcase, FileText, Edit2, Route, CreditCard,
   CalendarClock, ListChecks, CheckSquare, ChevronDown, Building2, Users, Users2,
   BarChart3, Upload, History, Recycle, Navigation, Bell, ShieldCheck,
-  Contact, Calendar, Clock, Fingerprint, Banknote, Package, LayoutDashboard,
+  Contact, Calendar, Clock, Fingerprint, Banknote, Package, LayoutDashboard, Server,
 } from 'lucide-react';
+import { Capacitor } from '@capacitor/core';
 import { User, AdminModuleKey } from '../types';
 import credenceLogo from '../assets/credence-logo.png';
 import { useProfilePhoto } from '../lib/useProfilePhoto';
+import { ServerSwitcherModal } from './ServerSwitcherModal';
 
 interface NavItem {
   key: string;
@@ -54,7 +56,7 @@ interface GlobalSidebarProps {
   // 'my_conveyance' is the one exception below: not its own module_permissions
   // entry, just the "My Conveyance Bill Claim" sub-view shown alongside
   // 'conveyance' in claimsGroup, gated on the same 'conveyance' grant.
-  onGoToAdminModule: (target: Exclude<AdminModuleKey, 'claims' | 'conveyance'> | 'my_conveyance' | 'dashboard') => void;
+  onGoToAdminModule: (target: Exclude<AdminModuleKey, 'claims' | 'conveyance'> | 'my_conveyance' | 'dashboard' | 'servers') => void;
   // Android APK build info modal — previously a header icon, moved in here so
   // the header itself can stay down to just hamburger + profile + logout.
   onOpenApkInfo: () => void;
@@ -80,6 +82,19 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   const [claimsOpen, setClaimsOpen] = useState(true);
   const [attendanceOpen, setAttendanceOpen] = useState(true);
   const photoUrl = useProfilePhoto(token, photoVersion);
+
+  // Server switcher — every account, native app only (the Web build always
+  // just uses the relative "/api/..." origin it's served from, so switching
+  // servers is meaningless there). Opens a modal that navigates the WebView
+  // to a different deployment entirely (see ServerSwitcherModal.tsx) — the
+  // label below just shows this device's current host, straight off
+  // window.location, since that's the actual source of truth now (no more
+  // separate "active profile" bookkeeping — see src/lib/api.ts). Adding/
+  // editing/removing entries in that catalog stays Superadmin-only (Admin
+  // Panel -> Servers, "servers" item above).
+  const isNativeApp = Capacitor.isNativePlatform();
+  const [showServerModal, setShowServerModal] = useState(false);
+  const currentServerHost = typeof window !== 'undefined' ? window.location.host : '';
 
   const initials = user.name
     .split(' ')
@@ -269,6 +284,20 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     // ADMIN_MODULES in types.ts.
     { key: 'leave_applications', label: 'Monthly Leave Application', icon: CalendarClock, onClick: () => onGoToAdminModule('leave_applications') },
   ].filter((i) => canSeeModule(i.key as AdminModuleKey));
+
+  // "Servers" — Admin Panel tab (full catalog CRUD), Superadmin-only on any
+  // platform (this is the WEB-oriented management surface — see
+  // ServerProfilesPanel.tsx). Not a grantable module_permissions item like
+  // the rest of adminFlatItems above (canSeeModule wouldn't apply), so
+  // pushed on separately, gated directly on isSuperAdmin.
+  if (isSuperAdmin) {
+    adminFlatItems.push({
+      key: 'servers',
+      label: 'Servers',
+      icon: Server,
+      onClick: () => onGoToAdminModule('servers'),
+    });
+  }
 
   const renderItem = (item: NavItem) => (
     <button
@@ -485,7 +514,24 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
 
         </nav>
 
-        <div className="p-3 pb-[calc(env(safe-area-inset-bottom,0px)+12px)]">
+        <div className="p-3 pb-[calc(env(safe-area-inset-bottom,0px)+12px)] space-y-2">
+          {/* "Set Server" — native-app-only, EVERY account (not just Superadmin):
+              any employee's device may need to point at a different
+              company/deployment server, same as picking a different site to sign
+              into. Opens a picker (ServerSwitcherModal.tsx) fetched from the
+              catalog a Superadmin manages on the web (Admin Panel -> Servers,
+              still Superadmin-only to add/edit/delete). Kept out of the "ADMIN
+              PANEL" section above since it isn't an admin-only action. */}
+          {isNativeApp && (
+            <button
+              type="button"
+              onClick={() => selectAndClose(() => setShowServerModal(true))}
+              className="w-full flex items-center justify-center gap-2 rounded-full py-2.5 text-[13px] font-semibold text-white bg-white/10 hover:bg-white/15 active:scale-[0.98] transition-transform"
+            >
+              <Navigation className="w-4 h-4" />
+              {currentServerHost ? `Server: ${currentServerHost}` : 'Set Server'}
+            </button>
+          )}
           <button
             type="button"
             onClick={() => selectAndClose(onLogout)}
@@ -496,6 +542,13 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
           </button>
         </div>
       </aside>
+
+      {showServerModal && (
+        <ServerSwitcherModal
+          token={token}
+          onClose={() => setShowServerModal(false)}
+        />
+      )}
     </div>
   );
 };

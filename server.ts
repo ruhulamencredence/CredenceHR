@@ -15,6 +15,7 @@ import { registerAlertRoutes, ensureAlertsSchema, createAlert } from "./Alerts";
 import { registerUserManagementRoutes } from "./UserManagement";
 import { registerConveyanceBillClaimRoutes } from "./ConveyanceBillClaimRoutes";
 import { registerDepartmentsAndBranchesRoutes } from "./DepartmentsAndBranches";
+import { registerServerProfileRoutes, ensureServerProfilesSchema } from "./ServerProfileRoutes";
 import { registerAttendanceRoutes } from "./AttendanceRoutes";
 import { registerApprovalRoutes } from "./ApprovalRoutes";
 import { registerLeaveRoutes } from "./LeaveRoutes";
@@ -214,6 +215,11 @@ async function ensureSchemaMigrations() {
   // lives here, same as every other self-healing migration in this function.
   await ensureEmployeeTransferSchema(dbPool);
 
+  // Server Profiles (Admin Panel -> Servers, Superadmin-only) — table +
+  // schema owned by ServerProfileRoutes.ts, only the call site lives here,
+  // same as every other self-healing migration in this function.
+  await ensureServerProfilesSchema(dbPool);
+
   // Personal Data (ProfilePage.tsx -> PersonalDataForm.tsx) — one row per user,
   // created on first save. Position/Department are deliberately NOT columns
   // here — they're read live from all_employees (via all_employees.user_id)
@@ -267,9 +273,11 @@ async function ensureSchemaMigrations() {
     await dbPool.query(`
       CREATE TABLE IF NOT EXISTS job_edit_requests (
         id INT AUTO_INCREMENT PRIMARY KEY,
-        job_id INT NOT NULL,
+        -- NULL for a still-pending 'add_job' request — there's no real Job yet to
+        -- point at, only what's proposed in payload; backfilled once approved.
+        job_id INT NULL,
         entry_id INT NULL,
-        action ENUM('add_item', 'delete_entry') NOT NULL,
+        action ENUM('add_item', 'delete_entry', 'add_job') NOT NULL,
         payload TEXT NULL,
         status ENUM('pending', 'approved', 'rejected') NOT NULL DEFAULT 'pending',
         requested_by INT NOT NULL,
@@ -285,6 +293,22 @@ async function ensureSchemaMigrations() {
     `);
   } catch (err: any) {
     console.warn("⚠️ Could not ensure job_edit_requests table exists: " + err.message);
+  }
+
+  // Job Edit's "Add New Job" — self-heal an existing job_edit_requests table (created
+  // before 'add_job' existed) onto the new shape: job_id must become nullable (a
+  // brand-new Job doesn't exist yet while its request is pending) and the action
+  // ENUM needs the new 'add_job' member. Both MODIFY COLUMN calls are naturally
+  // idempotent — safe to run on every startup, fresh installs included.
+  try {
+    await dbPool.query(`ALTER TABLE job_edit_requests MODIFY COLUMN job_id INT NULL`);
+  } catch (err: any) {
+    console.warn("⚠️ Could not make job_edit_requests.job_id nullable: " + err.message);
+  }
+  try {
+    await dbPool.query(`ALTER TABLE job_edit_requests MODIFY COLUMN action ENUM('add_item', 'delete_entry', 'add_job') NOT NULL`);
+  } catch (err: any) {
+    console.warn("⚠️ Could not add 'add_job' to job_edit_requests.action: " + err.message);
   }
 
   // Self-healing column additions for the Admin-set Delivery Date window feature —
@@ -4499,6 +4523,13 @@ async function startServer() {
   // reasoning as profileRoutes.ts/holidayRoutes.ts/Alerts.ts/UserManagement.ts
   // above.
   registerDepartmentsAndBranchesRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB });
+
+  // Server Profiles (Admin Panel -> Servers) — kept in their own file
+  // (ServerProfileRoutes.ts), same reasoning as profileRoutes.ts/
+  // holidayRoutes.ts/Alerts.ts/UserManagement.ts above. Superadmin-only
+  // (requireSuperAdmin), not module-gated — this isn't a grantable Admin
+  // Panel module, same convention as User Management's promote/demote.
+  registerServerProfileRoutes(app, { authenticateToken, requireSuperAdmin, queryDB });
 
   // Self Service -> Leave Management: true for a Superadmin (implicit, every
   // account), or for an Admin/User the Superadmin has explicitly granted

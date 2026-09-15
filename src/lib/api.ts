@@ -5,53 +5,24 @@
 
 // Where the backend REST API lives.
 //
-// On the WEB build, the frontend is served by the same Express server that
-// exposes /api/*, so a relative path ("/api/entries") already resolves to the
-// right place — no base URL needed, this stays "".
+// Both the WEB build and the ANDROID APK build are served the SAME way now:
+// Capacitor's WebView is pointed straight at a real server URL (see
+// capacitor.config.ts's `server.url` — NOT the older "bundle the frontend
+// inside the APK" mode). That means the app — UI shell, JS, and every
+// relative "/api/..." call — always resolves against whichever single
+// origin it was loaded from, on both platforms, with zero base-URL
+// bookkeeping needed here.
 //
-// On the ANDROID APK build, the frontend is bundled INSIDE the app (Capacitor
-// loads it from a local origin), so a relative "/api/entries" would try to
-// call the phone itself, not your backend server. The user enters a Server
-// Address on the Sign In screen instead (their PC's LAN IP for same-WiFi use,
-// or a real/public IP or domain for use over mobile data) — it's saved here
-// and prepended to every API call.
-const STORAGE_KEY = 'mpr_api_base_url';
-
-// Turns whatever the user typed ("192.168.0.10:3000", "http://192.168.0.10:3000",
-// "https://myserver.com") into a clean "http(s)://host[:port]" base URL with no
-// trailing slash. Defaults to http:// when no scheme is given, since a LAN IP
-// almost never has a TLS certificate.
-export function normalizeApiBase(input: string): string {
-  const trimmed = (input || '').trim();
-  if (!trimmed) return '';
-  const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
-  return withScheme.replace(/\/+$/, '');
-}
-
-export function getApiBase(): string {
-  try {
-    return localStorage.getItem(STORAGE_KEY) || '';
-  } catch {
-    return '';
-  }
-}
-
-export function setApiBase(rawInput: string): string {
-  const normalized = normalizeApiBase(rawInput);
-  try {
-    if (normalized) localStorage.setItem(STORAGE_KEY, normalized);
-    else localStorage.removeItem(STORAGE_KEY);
-  } catch {
-    // localStorage can be unavailable in some embedded WebViews — safe to ignore,
-    // it just means the base URL won't persist across app restarts.
-  }
-  return normalized;
-}
-
-// Every API call in the app should be built with this instead of a bare
-// "/api/..." string. When no Server Address has been set (the normal case for
-// the Web build) it behaves exactly like the relative path did before.
+// Switching an Android device to a DIFFERENT deployment (see GlobalSidebar's
+// "Set Server" -> ServerSwitcherModal.tsx, fed by the catalog a Superadmin
+// manages from the WEB Admin Panel -> Servers / ServerProfileRoutes.ts) is a
+// full page navigation (window.location.href = thatServer'sUrl) — the
+// WebView just loads that other server's app fresh, exactly like opening a
+// different website, rather than this file quietly redirecting only SOME
+// fetch() calls to a different origin than the one the page (and everything
+// on it — login, assets, everything) actually came from. That split — UI
+// from server A, API calls from server B — was the earlier design here and
+// is exactly what caused "switching doesn't actually switch" confusion.
 export function apiUrl(path: string): string {
-  const base = getApiBase();
-  return base ? `${base}${path}` : path;
+  return path;
 }

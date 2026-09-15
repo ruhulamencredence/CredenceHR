@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect, useRef, Suspense, lazy } from 'react';
 import { Capacitor } from '@capacitor/core';
-import { RefreshCw } from 'lucide-react';
+import { RefreshCw, ArrowLeft } from 'lucide-react';
 import { User, ClaimsNavRequest, AdminNavRequest, JobsNavRequest, AdminModuleKey, DashboardNavRequest } from './types';
 import { AuthScreen } from './components/AuthScreen';
 import { Navbar } from './components/Navbar';
@@ -408,12 +408,45 @@ export default function App() {
     </div>
   );
 
+  // "Back to previous server" — global, ALWAYS present in the APK (not just
+  // on the Sign In screen) after using GlobalSidebar's "Set Server" switcher,
+  // so it's reachable even after signing in and moving around the new
+  // server's app, not just in the one moment right after switching. Only
+  // shown when window.history genuinely has a previous server's page to go
+  // back to (see AuthScreen.tsx's original version of this same check) —
+  // window.history.back() itself still works fine even though the hardware
+  // back button is intercepted for the exit-app-confirmation flow above.
+  const backToServerBadge = Capacitor.isNativePlatform() && typeof window !== 'undefined' && window.history.length > 1 && (
+    <div
+      className="fixed left-1/2 -translate-x-1/2 z-[90] flex items-center gap-2.5 pl-3.5 pr-2 py-2 rounded-full shadow-lg"
+      style={{
+        top: 'calc(env(safe-area-inset-top, 0px) + 10px)',
+        background: 'var(--g-surface)',
+        border: '1px solid var(--g-border)'
+      }}
+    >
+      <span className="text-xs font-medium whitespace-nowrap" style={{ color: 'var(--g-text)' }}>
+        Switched server
+      </span>
+      <button
+        type="button"
+        onClick={() => window.history.back()}
+        className="flex items-center gap-1 pl-2.5 pr-3 py-1.5 rounded-full text-xs font-semibold text-white whitespace-nowrap"
+        style={{ background: 'var(--g-accent)' }}
+      >
+        <ArrowLeft className="w-3 h-3" />
+        Back
+      </button>
+    </div>
+  );
+
   if (!token || !user) {
     return (
       <>
         <AuthScreen onLoginSuccess={handleLoginSuccess} />
         {pullToRefreshIndicator}
         {pullToRefreshFullscreenLoader}
+        {backToServerBadge}
         {showExitPrompt && (
           <div
             className="fixed left-1/2 -translate-x-1/2 z-[100] px-4 py-2.5 rounded-full text-sm font-medium text-white shadow-lg"
@@ -469,7 +502,7 @@ export default function App() {
       setViewMode('admin');
       setClaimsNavRequest({ target: target === 'claims' ? 'movementClaims' : 'conveyanceBill', ts: Date.now() });
     },
-    onGoToAdminModule: (target: Exclude<AdminModuleKey, 'claims' | 'conveyance'> | 'my_conveyance' | 'dashboard') => {
+    onGoToAdminModule: (target: Exclude<AdminModuleKey, 'claims' | 'conveyance'> | 'my_conveyance' | 'dashboard' | 'servers') => {
       setSelfServiceView(null);
       setShowProfilePage(false);
       setViewMode('admin');
@@ -492,6 +525,7 @@ export default function App() {
     >
       {pullToRefreshIndicator}
       {pullToRefreshFullscreenLoader}
+      {backToServerBadge}
       <Navbar
         user={user}
         token={token || ''}

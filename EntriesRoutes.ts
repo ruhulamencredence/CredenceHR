@@ -755,6 +755,203 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
     }
   });
 
+  // "Job Edit" — add a brand-new Job (unlike POST /api/entries/job/:jobId/items just
+  // above, which only ever extends a Job that already exists). Reachable ONLY for a
+  // non-admin who both (a) already has can_job_edit ON (Admin Panel -> Users) and (b)
+  // has already Final Submitted the selected Budget — same two-part gate as adding an
+  // MPR to an existing Job above, just applied to "create one" instead of "extend
+  // one". Exactly like that endpoint, this never lands in `jobs`/`entries` directly:
+  // it's queued as a single job_edit_requests row (action = 'add_job', job_id NULL —
+  // there's no real Job yet) and only actually creates the Job + its MPR rows once an
+  // Admin with the "editlog" module approves it (see POST /api/job-edits/:id/act
+  // below, the `request.action === "add_job"` branch).
+  app.post("/api/job-edits/new-job", authenticateToken, async (req: any, res) => {
+    try {
+      const { budget_id, project_id, job_name, job_duration, items } = req.body;
+
+      if (
+        !budget_id ||
+        !project_id ||
+        !job_name ||
+        !String(job_name).trim() ||
+        !job_duration ||
+        !String(job_duration).trim() ||
+        !Array.isArray(items) ||
+        items.length === 0
+      ) {
+        return res.status(400).json({
+          error: "Budget, Project, Job Name, Job Duration and at least one MPR No entry are required"
+        });
+      }
+
+      // Only a non-admin who has ALREADY Final Submitted the selected Budget even
+      // reaches Job Edit in the first place (see JobEditPanel.tsx) — so unlike
+      // POST /api/entries, this endpoint requires that submission to already exist
+      // instead of blocking on it, and always requires can_job_edit (there's no
+      // "not yet locked, no permission needed" case here the way there is for
+      // extending an existing Job).
+      if (req.user.role !== "admin" && req.user.role !== "superadmin") {
+        const ownSubmissionRows = await queryDB(
+          "SELECT id FROM budget_submissions WHERE budget_id = ? AND user_id = ?",
+          [budget_id, req.user.id]
+        );
+        if (ownSubmissionRows.length === 0) {
+          return res.status(403).json({ error: "You can only add a new Job through Job Edit for a Budget you've already Final Submitted." });
+        }
+        const permRows = await queryDB("SELECT can_job_edit FROM users WHERE id = ?", [req.user.id]);
+        const canJobEdit = permRows.length > 0 && !!Number(permRows[0].can_job_edit);
+        if (!canJobEdit) {
+          return res.status(403).json({ error: "You don't have permission to edit Jobs. Ask your Admin to enable Job Edit for your account." });
+        }
+      }
+
+      const budgetRows = await queryDB("SELECT id, budget_name FROM budgets WHERE id = ?", [budget_id]);
+      if (budgetRows.length === 0) {
+        return res.status(400).json({ error: "Invalid Budget selected. Please choose from the list." });
+      }
+      const projectRows = await queryDB("SELECT id, project_name FROM projects WHERE id = ?", [project_id]);
+      if (projectRows.length === 0) {
+        return res.status(400).json({ error: "Invalid Project selected. Please choose from the list." });
+      }
+      const projectName = projectRows[0].project_name;
+
+      const budgetItemRows = await queryDB(
+        "SELECT id, mrf_no, description, req_qty FROM budget_items WHERE budget_id = ? AND LOWER(TRIM(project_name)) = LOWER(TRIM(?))",
+        [budget_id, projectName]
+      );
+      const validItemsById = new Map<number, any>(budgetItemRows.map((r: any) => [Number(r.id), r]));
+
+      for (const it of items) {
+        if (
+          !it ||
+          !it.mpr_id ||
+          !it.budget_item_id ||
+          !it.delivery_date ||
+          it.requisitioned_qty === undefined ||
+          it.requisitioned_qty === null ||
+          String(it.requisitioned_qty).trim() === "" ||
+          !(Number(it.requisitioned_qty) > 0)
+        ) {
+          return res.status(400).json({
+            error: "Every MPR row needs an MPR No, a Requisitioned Qty greater than 0, and a Delivery Date"
+          });
+        }
+        const row = validItemsById.get(Number(it.budget_item_id));
+        if (!row) {
+          return res.status(400).json({
+            error: "One of the selected Items no longer matches the imported Budget Excel for this Project. Please refresh and try again."
+          });
+        }
+      }
+
+      // Same combined-per-Item Qty cap as POST /api/entries — two rows in this same
+      // submission can legitimately share a budget_item_id (the "split remaining Qty"
+      // pattern), so the cap is checked against their COMBINED requested Qty.
+      const mprNoById = new Map<number, string>();
+      const batchTotalsByItem = new Map<number, number>();
+      for (const it of items) {
+        const key = Number(it.budget_item_id);
+        batchTotalsByItem.set(key, (batchTotalsByItem.get(key) || 0) + Number(it.requisitioned_qty));
+        if (!mprNoById.has(Number(it.mpr_id))) {
+          const mprRowForCheck = await queryDB("SELECT mpr_no FROM mpr_numbers WHERE id = ?", [it.mpr_id]);
+          mprNoById.set(Number(it.mpr_id), mprRowForCheck[0]?.mpr_no || "");
+        }
+      }
+      const checkedItemIds = new Set<number>();
+      for (const it of items) {
+        const key = Number(it.budget_item_id);
+        if (checkedItemIds.has(key)) continue;
+        checkedItemIds.add(key);
+        const row = validItemsById.get(key);
+        const totalQty = parseQtyNumber(row?.req_qty);
+        if (totalQty !== null) {
+          const consumedRows = await queryDB(
+            "SELECT COALESCE(SUM(requisitioned_qty), 0) AS consumed FROM entries WHERE budget_item_id = ? AND created_by = ? AND deleted_at IS NULL",
+            [key, req.user.id]
+          );
+          const remaining = totalQty - Number(consumedRows[0]?.consumed || 0);
+          const requestedTotal = batchTotalsByItem.get(key) || 0;
+          if (requestedTotal > remaining + 0.001) {
+            return res.status(400).json({
+              error: `Requisitioned Qty for "${row?.description || "an Item"}" can't exceed the remaining available Qty (${remaining}).`
+            });
+          }
+        }
+      }
+
+      // An MPR No can only ever be used ONCE, system-wide — same rule as POST
+      // /api/entries and Add MPR above.
+      for (const it of items) {
+        const usedRows = await queryDB(
+          "SELECT id FROM entries WHERE mpr_id = ? AND budget_id = ? AND deleted_at IS NULL",
+          [it.mpr_id, budget_id]
+        );
+        if (usedRows.length > 0) {
+          return res.status(400).json({
+            error: "One of the selected MPR Nos has already been used in another entry under this Budget."
+          });
+        }
+      }
+
+      // If the Admin has set an allowed Delivery Date window for this Budget, every
+      // row's Delivery Date must fall inside it (inclusive) — same rule as
+      // POST /api/entries.
+      const rangeRows = await queryDB("SELECT delivery_date_from, delivery_date_to FROM budgets WHERE id = ?", [
+        budget_id
+      ]);
+      const deliveryFrom = toDateOnlyString(rangeRows[0]?.delivery_date_from);
+      const deliveryTo = toDateOnlyString(rangeRows[0]?.delivery_date_to);
+      if (deliveryFrom || deliveryTo) {
+        for (const it of items) {
+          const d = String(it.delivery_date).slice(0, 10);
+          if ((deliveryFrom && d < deliveryFrom) || (deliveryTo && d > deliveryTo)) {
+            return res.status(400).json({
+              error: `Delivery Date must be between ${deliveryFrom || "—"} and ${deliveryTo || "—"} for this Budget.`
+            });
+          }
+        }
+      }
+
+      // Everything checks out — queue ONE job_edit_requests row carrying the WHOLE
+      // proposed Job (unlike Add MPR above, which queues one row PER MPR row) since
+      // there's no Job yet for separate rows to each point at; the Admin approves or
+      // rejects the new Job as a single unit, and every row lands together or not at
+      // all. budget_name/project_name/mpr_no are denormalized into the payload purely
+      // for display (Admin Panel + this user's own pending badge) without a second
+      // round trip — the server always re-validates against live data again at
+      // approval time regardless of what's cached here.
+      const payload = {
+        budget_id,
+        budget_name: budgetRows[0].budget_name,
+        project_id,
+        project_name: projectName,
+        job_name: String(job_name).trim(),
+        job_duration: String(job_duration).trim(),
+        items: items.map((it: any) => ({
+          mpr_id: it.mpr_id,
+          mpr_no: mprNoById.get(Number(it.mpr_id)) || "",
+          budget_item_id: it.budget_item_id,
+          item_name: String(validItemsById.get(Number(it.budget_item_id))?.description || "").trim(),
+          requisitioned_qty: Number(it.requisitioned_qty),
+          delivery_date: it.delivery_date
+        }))
+      };
+      const result = await queryDB(
+        "INSERT INTO job_edit_requests (job_id, entry_id, action, payload, status, requested_by) VALUES (NULL, NULL, 'add_job', ?, 'pending', ?)",
+        [JSON.stringify(payload), req.user.id]
+      );
+
+      res.json({
+        success: true,
+        pending: true,
+        message: "Submitted — this new Job is pending Admin approval.",
+        id: result.insertId
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to submit new Job" });
+    }
+  });
+
   // Edit an existing MPR entry. Item Name and Delivery Date are always required; Job
   // Name, Job Duration and MPR No are optional in the request body and only touched
   // when the client actually sends a changed value (undefined = leave as-is). Allowed
@@ -856,10 +1053,14 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
       // Once this entry's Budget has been Final Submitted, a non-admin User without Job
       // Edit can only ever change its Delivery Date — Job Name, Job Duration, MPR No,
       // Item Name/selection and Requisitioned Qty are all locked from that point on. If
-      // the user doesn't even have the Delivery Date permission, Delivery Date is locked
-      // too. The UI no longer offers inputs for the locked fields, but that alone
-      // doesn't stop a direct API call, so re-check here: any of these fields sent with
-      // a value different from what's already stored is rejected outright.
+      // the user doesn't have EITHER the Delivery Date permission OR Job Edit, Delivery
+      // Date is locked too — Job Edit unlocks this same Delivery-Date-only change here
+      // (both from the Job Edit panel's own direct edit and, now, from Job Entry Details
+      // itself), independent of the separate can_edit_delivery_date toggle, matching the
+      // Job Edit permission's original intent. The UI no longer offers inputs for the
+      // locked fields, but that alone doesn't stop a direct API call, so re-check here:
+      // any of these fields sent with a value different from what's already stored is
+      // rejected outright.
       if (!fullyUnlocked) {
         const lockedMismatches: string[] = [];
         if (item_name !== undefined && String(item_name).trim() !== String(entry.item_name)) {
@@ -886,7 +1087,7 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
         }
         const newDeliveryDateForCheck = String(delivery_date).slice(0, 10);
         const oldDeliveryDateForCheck = toDateOnlyString(entry.delivery_date) || "";
-        if (!canEditDeliveryDate && newDeliveryDateForCheck !== oldDeliveryDateForCheck) {
+        if (!canEditDeliveryDate && !canJobEdit && newDeliveryDateForCheck !== oldDeliveryDateForCheck) {
           lockedMismatches.push("Delivery Date");
         }
         if (lockedMismatches.length > 0) {
@@ -1397,6 +1598,11 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
   // joins the requester/reviewer names and (for a 'delete_entry' request) the
   // target entry's current MPR No / Item / Qty / Delivery Date, so the client never
   // needs a second round trip to show what's actually pending.
+  // j is a LEFT JOIN (not JOIN) because a still-pending 'add_job' request has
+  // job_id NULL — there's no real Job to join to yet, only the proposed Job Name /
+  // Job No etc. sitting in its payload (see describeJobEditRequest in
+  // AdminPanel.tsx / JobEditPanel.tsx, which fall back to payload.job_name when
+  // j.job_no comes back null).
   const JOB_EDIT_REQUEST_SELECT = `
     SELECT r.id, r.job_id, j.job_no, e.job_name, r.entry_id, r.action, r.payload, r.status,
       r.requested_by, ru.name AS requested_by_name,
@@ -1404,7 +1610,7 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
       m.mpr_no AS entry_mpr_no, e.item_name AS entry_item_name,
       e.requisitioned_qty AS entry_requisitioned_qty, e.delivery_date AS entry_delivery_date
     FROM job_edit_requests r
-    JOIN jobs j ON r.job_id = j.id
+    LEFT JOIN jobs j ON r.job_id = j.id
     JOIN users ru ON r.requested_by = ru.id
     LEFT JOIN users rv ON r.reviewed_by = rv.id
     LEFT JOIN entries e ON r.entry_id = e.id
@@ -1569,6 +1775,115 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
         await queryDB(
           "UPDATE job_edit_requests SET status = 'approved', entry_id = ?, reviewed_by = ?, reviewed_at = NOW(), review_note = ? WHERE id = ?",
           [result.insertId, req.user.id, note || null, id]
+        );
+      } else if (request.action === "add_job") {
+        const payload = JSON.parse(request.payload);
+
+        // Re-validate against current data before actually creating anything — see
+        // the identical comment on the add_item branch above for why.
+        const budgetItemRows = await queryDB(
+          "SELECT id, mrf_no, description, req_qty FROM budget_items WHERE budget_id = ? AND LOWER(TRIM(project_name)) = LOWER(TRIM(?))",
+          [payload.budget_id, payload.project_name]
+        );
+        const validItemsById = new Map<number, any>(budgetItemRows.map((r: any) => [Number(r.id), r]));
+        for (const it of payload.items) {
+          if (!validItemsById.has(Number(it.budget_item_id))) {
+            return res.status(400).json({
+              error: `"${it.item_name}" no longer matches the imported Budget Excel for this Project. This request can no longer be approved as-is.`
+            });
+          }
+        }
+        const batchTotalsByItem = new Map<number, number>();
+        for (const it of payload.items) {
+          const key = Number(it.budget_item_id);
+          batchTotalsByItem.set(key, (batchTotalsByItem.get(key) || 0) + Number(it.requisitioned_qty));
+        }
+        const checkedItemIds = new Set<number>();
+        for (const it of payload.items) {
+          const key = Number(it.budget_item_id);
+          if (checkedItemIds.has(key)) continue;
+          checkedItemIds.add(key);
+          const row = validItemsById.get(key);
+          const totalQty = parseQtyNumber(row?.req_qty);
+          if (totalQty !== null) {
+            const consumedRows = await queryDB(
+              "SELECT COALESCE(SUM(requisitioned_qty), 0) AS consumed FROM entries WHERE budget_item_id = ? AND created_by = ? AND deleted_at IS NULL",
+              [key, request.requested_by]
+            );
+            const remaining = totalQty - Number(consumedRows[0]?.consumed || 0);
+            const requestedTotal = batchTotalsByItem.get(key) || 0;
+            if (requestedTotal > remaining + 0.001) {
+              return res.status(400).json({
+                error: `Requisitioned Qty for "${row?.description || it.item_name}" now exceeds the remaining available Qty (${remaining}). This request can no longer be approved as-is.`
+              });
+            }
+          }
+        }
+        for (const it of payload.items) {
+          const usedRows = await queryDB(
+            "SELECT id FROM entries WHERE mpr_id = ? AND budget_id = ? AND deleted_at IS NULL",
+            [it.mpr_id, payload.budget_id]
+          );
+          if (usedRows.length > 0) {
+            return res.status(400).json({
+              error: `MPR No "${it.mpr_no}" has since been used in another entry under this Budget. This request can no longer be approved as-is.`
+            });
+          }
+        }
+
+        // Auto-generate the Job No exactly like POST /api/entries does — sequential
+        // PER USER PER BUDGET, using the requesting user (not the approving Admin)
+        // as the owner.
+        const jobCountRows = await queryDB("SELECT COUNT(*) as cnt FROM jobs WHERE created_by = ? AND budget_id = ?", [
+          request.requested_by,
+          payload.budget_id
+        ]);
+        const nextJobSeq = (jobCountRows[0]?.cnt || 0) + 1;
+        const job_no = `JOB-${String(nextJobSeq).padStart(4, "0")}`;
+
+        const jobResult = await queryDB(
+          "INSERT INTO jobs (job_no, job_duration, created_by, budget_id) VALUES (?, ?, ?, ?)",
+          [job_no, payload.job_duration, request.requested_by, payload.budget_id]
+        );
+        const jobId = jobResult.insertId;
+
+        const entry_date = todayInDhaka();
+        for (const it of payload.items) {
+          const result = await queryDB(
+            `INSERT INTO entries (entry_date, job_name, budget_id, project_id, job_id, mpr_id, budget_item_id, item_name, requisitioned_qty, delivery_date, created_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              entry_date,
+              payload.job_name,
+              payload.budget_id,
+              payload.project_id,
+              jobId,
+              it.mpr_id,
+              it.budget_item_id,
+              it.item_name,
+              Number(it.requisitioned_qty),
+              it.delivery_date,
+              request.requested_by
+            ]
+          );
+          await queryDB(
+            "INSERT INTO entry_edit_history (entry_id, edited_by, field_name, old_value, new_value) VALUES (?, ?, ?, ?, ?)",
+            [
+              result.insertId,
+              request.requested_by,
+              "job_edit_new_job",
+              "",
+              `Job No: ${job_no}, Qty: ${it.requisitioned_qty}, Delivery Date: ${it.delivery_date}`
+            ]
+          );
+        }
+
+        // Backfill job_id onto the request row itself (was NULL while pending) so
+        // it now points at the real Job that was just created — this is what lets
+        // the "Recently Reviewed" list show a proper Job No instead of blank.
+        await queryDB(
+          "UPDATE job_edit_requests SET status = 'approved', job_id = ?, reviewed_by = ?, reviewed_at = NOW(), review_note = ? WHERE id = ?",
+          [jobId, req.user.id, note || null, id]
         );
       } else {
         // delete_entry
