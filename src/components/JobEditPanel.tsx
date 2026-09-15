@@ -346,11 +346,23 @@ const JobEditRow: React.FC<JobEditRowProps> = ({ job, token, mprNumbers, isOpen,
   const [editDate, setEditDate] = useState('');
   const [savingEdit, setSavingEdit] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  // Which existing MPR row is currently showing its "why are you deleting this"
+  // confirmation, and the reason typed into it so far — Delete no longer fires
+  // straight off window.confirm; it opens this inline prompt first (same row-level
+  // pattern as editingId/editDate above) so an Edit Reason can be required and sent
+  // up to the server alongside the delete request.
+  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
+  const [deleteReason, setDeleteReason] = useState('');
 
   const [showAddForm, setShowAddForm] = useState(false);
   const [budgetItems, setBudgetItems] = useState<BudgetItem[]>([]);
   const [loadingItems, setLoadingItems] = useState(false);
   const [addMprNo, setAddMprNo] = useState('');
+  // Whether the MPR No dropdown below is open — a native <datalist> doesn't show a
+  // dropdown on the Capacitor Android WebView (see UserPanel.tsx's identical note),
+  // so this field uses the same custom type-to-search dropdown pattern used
+  // everywhere else in the app instead.
+  const [showAddMprDropdown, setShowAddMprDropdown] = useState(false);
   // Every Item under the selected MPR No, auto-filled the moment it's picked — same
   // "New Job Entry" behavior as UserPanel.tsx's MPR row, instead of making the user
   // pick one Item at a time.
@@ -363,6 +375,10 @@ const JobEditRow: React.FC<JobEditRowProps> = ({ job, token, mprNumbers, isOpen,
   const [addItemDeliveryDraft, setAddItemDeliveryDraft] = useState('');
   const [addSaving, setAddSaving] = useState(false);
   const [addError, setAddError] = useState('');
+  // Required justification for adding this MPR into an already Final-Submitted
+  // Job — sent up alongside the items so the Admin reviewing it (Edit Log ->
+  // Job Edit Approvals) sees WHY, not just what.
+  const [addReason, setAddReason] = useState('');
 
   // Job Edit only ever lets an EXISTING MPR row's Delivery Date change — Qty (and
   // everything else) is locked once a row exists, same rule as everywhere else in
@@ -438,16 +454,38 @@ const JobEditRow: React.FC<JobEditRowProps> = ({ job, token, mprNumbers, isOpen,
     }
   };
 
-  const deleteEntry = async (e: Entry) => {
+  // Opens the inline "Delete MPR" confirmation for one row — the Edit Reason has to
+  // be typed here before the actual delete fires, see confirmDelete below.
+  const startDelete = (e: Entry) => {
     if (pendingByEntryId.has(e.id)) return; // Delete disabled while a request is pending — see the button below.
-    if (!window.confirm(`Delete MPR "${e.mpr_no}" — "${e.item_name}" from this Job?`)) return;
+    setRowError('');
+    setRowNotice('');
+    setConfirmDeleteId(e.id);
+    setDeleteReason('');
+  };
+
+  const cancelDelete = () => {
+    setConfirmDeleteId(null);
+    setDeleteReason('');
+  };
+
+  const confirmDelete = async (e: Entry) => {
+    if (!deleteReason.trim()) {
+      setRowError('Edit Reason is required to delete this MPR.');
+      return;
+    }
     setDeletingId(e.id);
     setRowError('');
     setRowNotice('');
     try {
-      const res = await fetch(apiUrl(`/api/entries/${e.id}`), { method: 'DELETE', headers: authHeaders });
+      const res = await fetch(apiUrl(`/api/entries/${e.id}`), {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        body: JSON.stringify({ reason: deleteReason.trim() })
+      });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to delete');
+      cancelDelete();
       if (data.pending) setRowNotice(data.message || 'Submitted — pending Admin approval.');
       onChanged();
     } catch (err: any) {
@@ -489,6 +527,9 @@ const JobEditRow: React.FC<JobEditRowProps> = ({ job, token, mprNumbers, isOpen,
   };
 
   const mprNoOptions = [...new Set(budgetItems.map((it) => String(it.mrf_no).trim()))].sort();
+  // MPR No options narrowed to whatever's currently typed into the "Add MPR" field —
+  // feeds the custom dropdown below (see showAddMprDropdown).
+  const filteredAddMprNoOptions = mprNoOptions.filter((mo) => mo.toLowerCase().includes(addMprNo.trim().toLowerCase()));
 
   // Every Item under a given MPR No, scoped to this Job's Budget/Project — exact same
   // rule as UserPanel.tsx's "New Job Entry" form's itemsForMprInBudget: an Item this
@@ -609,6 +650,7 @@ const JobEditRow: React.FC<JobEditRowProps> = ({ job, token, mprNumbers, isOpen,
     setAddEditingItemUid(null);
     setAddItemDeliveryDraft('');
     setAddError('');
+    setAddReason('');
   };
 
   // Floor/ceiling for every Delivery Date in this form — every new row added here is
@@ -623,6 +665,10 @@ const JobEditRow: React.FC<JobEditRowProps> = ({ job, token, mprNumbers, isOpen,
     setAddError('');
     if (!addMprNo || addItems.length === 0) {
       setAddError('Select an MPR No.');
+      return;
+    }
+    if (!addReason.trim()) {
+      setAddError('Edit Reason is required.');
       return;
     }
     for (const opt of addItems) {
@@ -660,7 +706,8 @@ const JobEditRow: React.FC<JobEditRowProps> = ({ job, token, mprNumbers, isOpen,
             budget_item_id: opt.budgetItemId,
             requisitioned_qty: Number(opt.qty),
             delivery_date: getAddItemDeliveryDate(opt, addDeliveryDate)
-          }))
+          })),
+          reason: addReason.trim()
         })
       });
       const data = await res.json();
@@ -760,8 +807,23 @@ const JobEditRow: React.FC<JobEditRowProps> = ({ job, token, mprNumbers, isOpen,
                       )}
                     </div>
                   </div>
+                  {pending && pending.action === 'delete_entry' && pending.payload?.reason && (
+                    <p className="mt-2 text-[11px] text-slate-500 italic">Reason: {pending.payload.reason}</p>
+                  )}
                   {rejected && (
                     <p className="mt-2 text-[11px] text-rose-600">Your last request for this MPR was rejected by Admin.</p>
+                  )}
+                  {confirmDeleteId === e.id && (
+                    <div className="mt-3 pt-3 border-t border-slate-100">
+                      <label className="block text-[11px] font-medium text-slate-500 mb-1">Edit Reason (required)</label>
+                      <textarea
+                        value={deleteReason}
+                        onChange={(ev) => setDeleteReason(ev.target.value)}
+                        rows={2}
+                        placeholder={`Why are you deleting MPR "${e.mpr_no}"?`}
+                        className="w-full px-2.5 py-2 rounded-lg border border-slate-300 text-xs bg-white"
+                      />
+                    </div>
                   )}
                 </div>
 
@@ -784,6 +846,24 @@ const JobEditRow: React.FC<JobEditRowProps> = ({ job, token, mprNumbers, isOpen,
                         <X className="w-3.5 h-3.5" /> Cancel
                       </button>
                     </>
+                  ) : confirmDeleteId === e.id ? (
+                    <>
+                      <button
+                        type="button"
+                        disabled={deletingId === e.id}
+                        onClick={() => confirmDelete(e)}
+                        className="flex items-center justify-center gap-1.5 py-2.5 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-700 disabled:opacity-50 transition-colors"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" /> {deletingId === e.id ? 'Deleting…' : 'Confirm Delete'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={cancelDelete}
+                        className="flex items-center justify-center gap-1.5 py-2.5 text-xs font-semibold text-slate-600 bg-slate-50 hover:bg-slate-100 border-l border-slate-100 transition-colors"
+                      >
+                        <X className="w-3.5 h-3.5" /> Cancel
+                      </button>
+                    </>
                   ) : pending ? (
                     <div className="col-span-2 flex items-center justify-center gap-1.5 py-2.5 text-xs font-semibold text-amber-700 bg-amber-50/70">
                       Awaiting Admin review — editing disabled
@@ -800,7 +880,7 @@ const JobEditRow: React.FC<JobEditRowProps> = ({ job, token, mprNumbers, isOpen,
                       <button
                         type="button"
                         disabled={deletingId === e.id}
-                        onClick={() => deleteEntry(e)}
+                        onClick={() => startDelete(e)}
                         className="flex items-center justify-center gap-1.5 py-2.5 text-xs font-semibold text-rose-600 bg-rose-50 hover:bg-rose-100 border-l border-slate-100 disabled:opacity-50 transition-colors"
                       >
                         <Trash2 className="w-3.5 h-3.5" /> {deletingId === e.id ? 'Deleting…' : 'Delete'}
@@ -835,6 +915,9 @@ const JobEditRow: React.FC<JobEditRowProps> = ({ job, token, mprNumbers, isOpen,
                       <p className="text-sm text-slate-700 font-medium mt-0.5">{formatDate(p.payload.delivery_date || '')}</p>
                     </div>
                   </div>
+                  {p.payload.reason && (
+                    <p className="text-[11px] text-slate-500 mt-2 italic">Reason: {p.payload.reason}</p>
+                  )}
                 </div>
               </div>
             ))}
@@ -857,7 +940,8 @@ const JobEditRow: React.FC<JobEditRowProps> = ({ job, token, mprNumbers, isOpen,
                   const pending = pendingByEntryId.get(e.id);
                   const rejected = rejectedByEntryId.get(e.id);
                   return (
-                  <tr key={e.id} className={pending ? 'bg-amber-50/40' : undefined}>
+                  <React.Fragment key={e.id}>
+                  <tr className={pending ? 'bg-amber-50/40' : undefined}>
                     <td className="px-3 py-2 font-medium text-slate-800">{e.mpr_no}</td>
                     <td className="px-3 py-2 text-slate-600 max-w-[220px] truncate" title={e.item_name}>
                       {e.item_name}
@@ -896,6 +980,21 @@ const JobEditRow: React.FC<JobEditRowProps> = ({ job, token, mprNumbers, isOpen,
                             <X className="w-3 h-3" />
                           </button>
                         </div>
+                      ) : confirmDeleteId === e.id ? (
+                        <div className="inline-flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            disabled={deletingId === e.id}
+                            onClick={() => confirmDelete(e)}
+                            className="p-1.5 rounded-md bg-rose-600 text-white disabled:opacity-50"
+                            title="Confirm Delete"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                          <button type="button" onClick={cancelDelete} className="p-1.5 rounded-md bg-slate-100 text-slate-600">
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
                       ) : pending ? (
                         <span className="text-[10px] text-amber-700">Awaiting review</span>
                       ) : (
@@ -910,7 +1009,7 @@ const JobEditRow: React.FC<JobEditRowProps> = ({ job, token, mprNumbers, isOpen,
                           <button
                             type="button"
                             disabled={deletingId === e.id}
-                            onClick={() => deleteEntry(e)}
+                            onClick={() => startDelete(e)}
                             className="p-1.5 rounded-md bg-rose-50 text-rose-600 hover:bg-rose-100 disabled:opacity-50"
                           >
                             <Trash2 className="w-3 h-3" />
@@ -919,10 +1018,28 @@ const JobEditRow: React.FC<JobEditRowProps> = ({ job, token, mprNumbers, isOpen,
                       )}
                     </td>
                   </tr>
+                  {confirmDeleteId === e.id && (
+                    <tr className="bg-rose-50/40">
+                      <td colSpan={6} className="px-3 py-2.5">
+                        <label className="block text-[11px] font-medium text-slate-500 mb-1">
+                          Edit Reason (required) — why are you deleting MPR "{e.mpr_no}"?
+                        </label>
+                        <textarea
+                          value={deleteReason}
+                          onChange={(ev) => setDeleteReason(ev.target.value)}
+                          rows={2}
+                          placeholder="Reason for deleting this MPR"
+                          className="w-full px-2.5 py-2 rounded-lg border border-slate-300 text-xs bg-white"
+                        />
+                      </td>
+                    </tr>
+                  )}
+                  </React.Fragment>
                   );
                 })}
                 {pendingAddRows.map((p) => (
-                  <tr key={`pending-add-${p.id}`} className="bg-amber-50/40 border-dashed">
+                  <React.Fragment key={`pending-add-${p.id}`}>
+                  <tr className="bg-amber-50/40 border-dashed">
                     <td className="px-3 py-2 font-medium text-slate-800">{p.payload.mpr_no}</td>
                     <td className="px-3 py-2 text-slate-600 max-w-[220px] truncate" title={p.payload.item_name}>
                       {p.payload.item_name}
@@ -934,6 +1051,12 @@ const JobEditRow: React.FC<JobEditRowProps> = ({ job, token, mprNumbers, isOpen,
                     </td>
                     <td className="px-3 py-2 text-right whitespace-nowrap text-[10px] text-amber-700">Awaiting review</td>
                   </tr>
+                  {p.payload.reason && (
+                    <tr className="bg-amber-50/40 border-dashed">
+                      <td colSpan={6} className="px-3 pb-2 text-[11px] text-slate-500 italic">Reason: {p.payload.reason}</td>
+                    </tr>
+                  )}
+                  </React.Fragment>
                 ))}
               </tbody>
             </table>
@@ -962,22 +1085,47 @@ const JobEditRow: React.FC<JobEditRowProps> = ({ job, token, mprNumbers, isOpen,
                       the "New Job Entry" form's MPR row (see itemsForAddMpr). */}
                   <div>
                     <label className="block text-[11px] font-medium text-slate-500 mb-1">MPR No</label>
-                    {/* Type-or-select: a text input with a native datalist, so the MPR No
-                        can be typed directly (autocompleting against the system list) or
-                        picked from the same dropdown of options as before. */}
-                    <input
-                      type="text"
-                      list="add-mpr-no-options"
-                      value={addMprNo}
-                      onChange={(ev) => selectAddMprNo(ev.target.value)}
-                      placeholder="Type or select MPR No"
-                      className="w-full px-2.5 py-2 rounded-lg border border-slate-300 text-xs bg-white"
-                    />
-                    <datalist id="add-mpr-no-options">
-                      {mprNoOptions.map((mo) => (
-                        <option key={mo} value={mo} />
-                      ))}
-                    </datalist>
+                    {/* Type-to-search custom dropdown (not a native <datalist> — see
+                        showAddMprDropdown above for why) — type to filter, tap a row
+                        to pick it, same pattern as UserPanel.tsx's MPR No fields. */}
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={addMprNo}
+                        onChange={(ev) => selectAddMprNo(ev.target.value)}
+                        onFocus={() => setShowAddMprDropdown(true)}
+                        onBlur={() => setTimeout(() => setShowAddMprDropdown(false), 150)}
+                        placeholder="Type to search MPR No..."
+                        autoComplete="off"
+                        className="w-full px-2.5 py-2 rounded-lg border border-slate-300 text-xs bg-white"
+                      />
+                      {showAddMprDropdown && (
+                        <div className="absolute z-20 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-md max-h-48 overflow-y-auto">
+                          {filteredAddMprNoOptions.length > 0 ? (
+                            filteredAddMprNoOptions.map((mo) => (
+                              <button
+                                type="button"
+                                key={mo}
+                                onMouseDown={(ev) => ev.preventDefault()}
+                                onClick={() => {
+                                  selectAddMprNo(mo);
+                                  setShowAddMprDropdown(false);
+                                }}
+                                className={`w-full text-left px-3 py-1.5 text-xs transition-colors ${
+                                  addMprNo.trim().toLowerCase() === mo.toLowerCase()
+                                    ? 'bg-blue-50 text-blue-700 font-medium'
+                                    : 'text-slate-700 hover:bg-slate-50'
+                                }`}
+                              >
+                                {mo}
+                              </button>
+                            ))
+                          ) : (
+                            <div className="px-3 py-1.5 text-xs text-slate-400">No matching MPR No found</div>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </div>
 
                   {/* Item Name — every imported Excel row under the selected MPR No,
@@ -1162,6 +1310,17 @@ const JobEditRow: React.FC<JobEditRowProps> = ({ job, token, mprNumbers, isOpen,
                     </div>
                   )}
 
+                  <div>
+                    <label className="block text-[11px] font-medium text-slate-500 mb-1">Edit Reason (required)</label>
+                    <textarea
+                      value={addReason}
+                      onChange={(ev) => setAddReason(ev.target.value)}
+                      rows={2}
+                      placeholder="Why is this MPR being added to an already Final Submitted Job?"
+                      className="w-full px-2.5 py-2 rounded-lg border border-slate-300 text-xs bg-white"
+                    />
+                  </div>
+
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
@@ -1299,6 +1458,9 @@ const PendingNewJobRequests: React.FC<PendingNewJobRequestsProps> = ({ requests 
               {p.budget_name ? `${p.budget_name} · ` : ''}
               Duration {p.job_duration || '—'} · {items.length} MPR row{items.length === 1 ? '' : 's'}
             </p>
+            {p.reason && (
+              <p className="text-[11px] text-slate-500 mt-1 italic">Reason: {p.reason}</p>
+            )}
           </div>
         );
       })}
@@ -1368,8 +1530,14 @@ const NewJobRequestForm: React.FC<NewJobRequestFormProps> = ({ token, jobs, mprN
   const [loadingItems, setLoadingItems] = useState(false);
   const [rows, setRows] = useState<NewJobItemRow[]>([]);
   const [mprNoInput, setMprNoInput] = useState('');
+  // Whether the MPR No dropdown below is open — see showAddMprDropdown in
+  // JobEditRow above for why this can't just be a native <datalist>.
+  const [showMprNoDropdown, setShowMprNoDropdown] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  // Required justification for this brand-new Job — same purpose as addReason in
+  // JobEditRow's "Add MPR to this Job" form, just scoped to the whole new Job here.
+  const [reason, setReason] = useState('');
 
   const selectBudgetProject = async (key: string) => {
     setSelectedKey(key);
@@ -1399,6 +1567,9 @@ const NewJobRequestForm: React.FC<NewJobRequestFormProps> = ({ token, jobs, mprN
   };
 
   const mprNoOptions = [...new Set(budgetItems.map((it) => String(it.mrf_no).trim()))].sort();
+  // MPR No options narrowed to whatever's currently typed into the field — feeds the
+  // custom dropdown below (see showMprNoDropdown).
+  const filteredMprNoOptions = mprNoOptions.filter((mo) => mo.toLowerCase().includes(mprNoInput.trim().toLowerCase()));
 
   // Every Item under a given MPR No not already present in `rows` — same rule as
   // JobEditRow's itemsForAddMpr (an Item this user has already fully requisitioned
@@ -1443,6 +1614,7 @@ const NewJobRequestForm: React.FC<NewJobRequestFormProps> = ({ token, jobs, mprN
     }
     setRows((prev) => [...prev, ...toAdd]);
     setMprNoInput('');
+    setShowMprNoDropdown(false);
   };
 
   const removeRow = (uid: string) => {
@@ -1453,6 +1625,37 @@ const NewJobRequestForm: React.FC<NewJobRequestFormProps> = ({ token, jobs, mprN
     setRows((prev) => prev.map((r) => (r.uid === uid ? { ...r, qty } : r)));
   };
 
+  // Splits a row's leftover Qty into a NEW row right below it, under the same MPR No —
+  // for when only part of an Item's available Qty should go out against one Delivery
+  // Date and the rest needs a different one. Mirrors splitLeftoverInAdd in JobEditRow
+  // above (and splitLeftoverInSameRow in UserPanel.tsx) exactly, just operating on this
+  // form's flat `rows` list instead of a per-MPR item list.
+  const splitRowLeftover = (uid: string) => {
+    const row = rows.find((r) => r.uid === uid);
+    if (!row) return;
+    const entered = Number(row.qty);
+    if (row.remainingQty === null || !Number.isFinite(entered) || entered <= 0 || entered >= row.remainingQty) return;
+    const leftover = row.remainingQty - entered;
+    const newRow: NewJobItemRow = {
+      uid: makeItemUid(),
+      mprNo: row.mprNo,
+      budgetItemId: row.budgetItemId,
+      name: row.name,
+      reqQty: row.reqQty,
+      remainingQty: leftover,
+      qty: String(leftover),
+      deliveryDate: ''
+    };
+    setRows((prev) => {
+      const idx = prev.findIndex((r) => r.uid === uid);
+      if (idx === -1) return prev;
+      const updated = prev.map((r) => (r.uid === uid ? { ...r, remainingQty: entered } : r));
+      const next = [...updated];
+      next.splice(idx + 1, 0, newRow);
+      return next;
+    });
+  };
+
   const updateRowDelivery = (uid: string, date: string) => {
     setRows((prev) => prev.map((r) => (r.uid === uid ? { ...r, deliveryDate: date } : r)));
   };
@@ -1460,8 +1663,7 @@ const NewJobRequestForm: React.FC<NewJobRequestFormProps> = ({ token, jobs, mprN
   const deliveryFloor = latestDateStr(todayDateOnlyString(), selected?.delivery_date_from);
   const deliveryTo = selected?.delivery_date_to || undefined;
 
-  const renderDeliveryPicker = (row: NewJobItemRow) => {
-    const className = 'w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs bg-white';
+  const renderDeliveryPicker = (row: NewJobItemRow, className: string = 'w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs bg-white') => {
     if (deliveryFloor && deliveryTo) {
       return (
         <select value={row.deliveryDate} onChange={(ev) => updateRowDelivery(row.uid, ev.target.value)} className={className}>
@@ -1492,6 +1694,7 @@ const NewJobRequestForm: React.FC<NewJobRequestFormProps> = ({ token, jobs, mprN
     setRows([]);
     setMprNoInput('');
     setError('');
+    setReason('');
   };
 
   const submit = async () => {
@@ -1506,6 +1709,10 @@ const NewJobRequestForm: React.FC<NewJobRequestFormProps> = ({ token, jobs, mprN
     }
     if (rows.length === 0) {
       setError('Add at least one MPR row.');
+      return;
+    }
+    if (!reason.trim()) {
+      setError('Edit Reason is required.');
       return;
     }
     for (const row of rows) {
@@ -1547,7 +1754,8 @@ const NewJobRequestForm: React.FC<NewJobRequestFormProps> = ({ token, jobs, mprN
           project_id: selected.project_id,
           job_name: jobName.trim(),
           job_duration: jobDuration.trim(),
-          items: itemsPayload
+          items: itemsPayload,
+          reason: reason.trim()
         })
       });
       const data = await res.json();
@@ -1599,11 +1807,16 @@ const NewJobRequestForm: React.FC<NewJobRequestFormProps> = ({ token, jobs, mprN
           </div>
           <div>
             <label className="block text-[11px] font-medium text-slate-500 mb-1">Job Duration</label>
+            {/* Number-only, same as the "New Entry" form's Job Duration field
+                (UserPanel.tsx) — a plain digits-only text input (not type="number")
+                so a leading "0" etc. isn't silently stripped mid-typing. */}
             <input
               type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
               value={jobDuration}
-              onChange={(ev) => setJobDuration(ev.target.value)}
-              placeholder="e.g. 15 days"
+              onChange={(ev) => setJobDuration(ev.target.value.replace(/\D/g, ''))}
+              placeholder="e.g. 15"
               className="w-full px-2.5 py-2 rounded-lg border border-slate-300 text-xs bg-white"
             />
           </div>
@@ -1620,19 +1833,47 @@ const NewJobRequestForm: React.FC<NewJobRequestFormProps> = ({ token, jobs, mprN
             <div>
               <label className="block text-[11px] font-medium text-slate-500 mb-1">MPR No</label>
               <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  list="new-job-mpr-no-options"
-                  value={mprNoInput}
-                  onChange={(ev) => setMprNoInput(ev.target.value)}
-                  placeholder="Type or select MPR No"
-                  className="flex-1 min-w-0 px-2.5 py-2 rounded-lg border border-slate-300 text-xs bg-white"
-                />
-                <datalist id="new-job-mpr-no-options">
-                  {mprNoOptions.map((mo) => (
-                    <option key={mo} value={mo} />
-                  ))}
-                </datalist>
+                {/* Type-to-search custom dropdown (not a native <datalist> — see
+                    showMprNoDropdown above for why) — pick from the list or type a
+                    full MPR No, then press Add to add its Items to the table below. */}
+                <div className="relative flex-1 min-w-0">
+                  <input
+                    type="text"
+                    value={mprNoInput}
+                    onChange={(ev) => setMprNoInput(ev.target.value)}
+                    onFocus={() => setShowMprNoDropdown(true)}
+                    onBlur={() => setTimeout(() => setShowMprNoDropdown(false), 150)}
+                    placeholder="Type to search MPR No..."
+                    autoComplete="off"
+                    className="w-full px-2.5 py-2 rounded-lg border border-slate-300 text-xs bg-white"
+                  />
+                  {showMprNoDropdown && (
+                    <div className="absolute z-20 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-md max-h-48 overflow-y-auto">
+                      {filteredMprNoOptions.length > 0 ? (
+                        filteredMprNoOptions.map((mo) => (
+                          <button
+                            type="button"
+                            key={mo}
+                            onMouseDown={(ev) => ev.preventDefault()}
+                            onClick={() => {
+                              setMprNoInput(mo);
+                              setShowMprNoDropdown(false);
+                            }}
+                            className={`w-full text-left px-3 py-1.5 text-xs transition-colors ${
+                              mprNoInput.trim().toLowerCase() === mo.toLowerCase()
+                                ? 'bg-blue-50 text-blue-700 font-medium'
+                                : 'text-slate-700 hover:bg-slate-50'
+                            }`}
+                          >
+                            {mo}
+                          </button>
+                        ))
+                      ) : (
+                        <div className="px-3 py-1.5 text-xs text-slate-400">No matching MPR No found</div>
+                      )}
+                    </div>
+                  )}
+                </div>
                 <button
                   type="button"
                   onClick={addMprRows}
@@ -1644,53 +1885,146 @@ const NewJobRequestForm: React.FC<NewJobRequestFormProps> = ({ token, jobs, mprN
             </div>
 
             {rows.length > 0 && (
-              <div className="border border-slate-200 rounded-xl overflow-hidden">
-                <table className="w-full text-xs">
-                  <thead className="bg-slate-50 text-slate-500">
-                    <tr>
-                      <th className="px-3 py-2 text-left">MPR No</th>
-                      <th className="px-3 py-2 text-left">Item</th>
-                      <th className="px-3 py-2 text-left">Qty</th>
-                      <th className="px-3 py-2 text-left">Delivery Date</th>
-                      <th className="px-3 py-2 text-right">—</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {rows.map((row) => (
-                      <tr key={row.uid}>
-                        <td className="px-3 py-2 font-medium text-slate-800 whitespace-nowrap">{row.mprNo}</td>
-                        <td className="px-3 py-2 text-slate-600 max-w-[220px] truncate" title={row.name}>{row.name}</td>
-                        <td className="px-3 py-2">
-                          <input
-                            type="number"
-                            inputMode="decimal"
-                            min="0"
-                            step="any"
-                            max={row.remainingQty ?? undefined}
-                            value={row.qty}
-                            onChange={(ev) => updateRowQty(row.uid, ev.target.value)}
-                            className={`w-20 px-2 py-1 rounded-md border text-xs bg-white focus:outline-none ${
-                              row.remainingQty !== null && row.qty !== '' && Number(row.qty) > row.remainingQty
-                                ? 'border-rose-500 ring-1 ring-rose-500'
-                                : 'border-slate-300'
-                            }`}
-                          />
-                          {row.remainingQty !== null && (
-                            <span className="text-[10px] text-slate-400 ml-1">/ {row.remainingQty}</span>
-                          )}
-                        </td>
-                        <td className="px-3 py-2">{renderDeliveryPicker(row)}</td>
-                        <td className="px-3 py-2 text-right">
-                          <button type="button" onClick={() => removeRow(row.uid)} className="p-1 rounded-md text-slate-400 hover:text-rose-600 hover:bg-rose-50">
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </td>
+              <>
+                {/* Card list on narrow/mobile screens — a wide table (MPR No, Item,
+                    Qty, Delivery Date, remove) always overflowed the mobile viewport
+                    once Item Name got long, since a plain <table> can't wrap its
+                    columns to fit. Stacked cards below sm: instead, same underlying
+                    row data; the table below (sm:block) takes over on wider screens. */}
+                <div className="sm:hidden space-y-2.5">
+                  {rows.map((row) => (
+                    <div key={row.uid} className="rounded-xl border border-slate-200 bg-white p-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 text-[11px] font-semibold">
+                            {row.mprNo}
+                          </span>
+                          <p className="text-xs text-slate-700 font-medium leading-snug break-words mt-1.5">{row.name}</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => removeRow(row.uid)}
+                          className="shrink-0 p-1.5 rounded-md text-slate-400 hover:text-rose-600 hover:bg-rose-50"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2.5 mt-2.5">
+                        <div>
+                          <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1">Qty</label>
+                          <div className="flex items-center gap-1">
+                            <input
+                              type="number"
+                              inputMode="decimal"
+                              min="0"
+                              step="any"
+                              max={row.remainingQty ?? undefined}
+                              value={row.qty}
+                              onChange={(ev) => updateRowQty(row.uid, ev.target.value)}
+                              className={`w-full px-2 py-1.5 rounded-md border text-xs bg-white focus:outline-none ${
+                                row.remainingQty !== null && row.qty !== '' && Number(row.qty) > row.remainingQty
+                                  ? 'border-rose-500 ring-1 ring-rose-500'
+                                  : 'border-slate-300'
+                              }`}
+                            />
+                            {row.remainingQty !== null && (
+                              <span className="text-[10px] text-slate-400 whitespace-nowrap">/ {row.remainingQty}</span>
+                            )}
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-semibold text-slate-400 uppercase tracking-wide mb-1">Delivery Date</label>
+                          {renderDeliveryPicker(row, 'w-full px-2 py-1.5 rounded-md border border-slate-300 text-xs bg-white')}
+                        </div>
+                      </div>
+                      {row.remainingQty !== null && row.qty !== '' && Number(row.qty) > 0 && Number(row.qty) < row.remainingQty && (
+                        <button
+                          type="button"
+                          onClick={() => splitRowLeftover(row.uid)}
+                          className="mt-2.5 inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-amber-50 border border-amber-200 text-amber-700 hover:bg-amber-100 rounded-lg text-[11px] font-medium transition-colors"
+                        >
+                          <Scissors className="w-3 h-3 flex-shrink-0" />
+                          Split remaining {row.remainingQty - Number(row.qty)} into a new item here
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                {/* Same rows as a table, sm: and up. */}
+                <div className="hidden sm:block border border-slate-200 rounded-xl overflow-hidden">
+                  <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead className="bg-slate-50 text-slate-500">
+                      <tr>
+                        <th className="px-3 py-2 text-left">MPR No</th>
+                        <th className="px-3 py-2 text-left">Item</th>
+                        <th className="px-3 py-2 text-left">Qty</th>
+                        <th className="px-3 py-2 text-left">Delivery Date</th>
+                        <th className="px-3 py-2 text-right">—</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {rows.map((row) => (
+                        <tr key={row.uid}>
+                          <td className="px-3 py-2 font-medium text-slate-800 whitespace-nowrap">{row.mprNo}</td>
+                          <td className="px-3 py-2 text-slate-600 max-w-[220px] truncate" title={row.name}>{row.name}</td>
+                          <td className="px-3 py-2">
+                            <input
+                              type="number"
+                              inputMode="decimal"
+                              min="0"
+                              step="any"
+                              max={row.remainingQty ?? undefined}
+                              value={row.qty}
+                              onChange={(ev) => updateRowQty(row.uid, ev.target.value)}
+                              className={`w-20 px-2 py-1 rounded-md border text-xs bg-white focus:outline-none ${
+                                row.remainingQty !== null && row.qty !== '' && Number(row.qty) > row.remainingQty
+                                  ? 'border-rose-500 ring-1 ring-rose-500'
+                                  : 'border-slate-300'
+                              }`}
+                            />
+                            {row.remainingQty !== null && (
+                              <span className="text-[10px] text-slate-400 ml-1">/ {row.remainingQty}</span>
+                            )}
+                            {row.remainingQty !== null && row.qty !== '' && Number(row.qty) > 0 && Number(row.qty) < row.remainingQty && (
+                              <div className="mt-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => splitRowLeftover(row.uid)}
+                                  className="inline-flex items-center gap-1 px-2 py-1 bg-amber-50 border border-amber-200 text-amber-700 hover:bg-amber-100 rounded-md text-[10px] font-medium transition-colors whitespace-nowrap"
+                                >
+                                  <Scissors className="w-3 h-3 flex-shrink-0" />
+                                  Split remaining {row.remainingQty - Number(row.qty)}
+                                </button>
+                              </div>
+                            )}
+                          </td>
+                          <td className="px-3 py-2">{renderDeliveryPicker(row)}</td>
+                          <td className="px-3 py-2 text-right">
+                            <button type="button" onClick={() => removeRow(row.uid)} className="p-1 rounded-md text-slate-400 hover:text-rose-600 hover:bg-rose-50">
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  </div>
+                </div>
+              </>
             )}
+
+            <div>
+              <label className="block text-[11px] font-medium text-slate-500 mb-1">Edit Reason (required)</label>
+              <textarea
+                value={reason}
+                onChange={(ev) => setReason(ev.target.value)}
+                rows={2}
+                placeholder="Why is this new Job being added under an already Final Submitted Budget?"
+                className="w-full px-2.5 py-2 rounded-lg border border-slate-300 text-xs bg-white"
+              />
+            </div>
 
             <button
               type="button"

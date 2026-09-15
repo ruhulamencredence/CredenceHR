@@ -707,14 +707,15 @@ export interface PendingJobEdit {
   action: 'add_item' | 'delete_entry' | 'add_job';
   status: 'pending' | 'approved' | 'rejected';
   // add_item: { mpr_no, mpr_id, budget_item_id, item_name, requisitioned_qty,
-  // delivery_date } — the proposed new MPR row.
+  // delivery_date, reason } — the proposed new MPR row, plus the Edit Reason the
+  // user gave for adding it.
   // add_job: { budget_id, budget_name, project_id, project_name, job_name,
-  // job_duration, items: [{ mpr_no, mpr_id, budget_item_id, item_name,
+  // job_duration, reason, items: [{ mpr_no, mpr_id, budget_item_id, item_name,
   // requisitioned_qty, delivery_date }] } — the proposed brand-new Job, with every
-  // MPR row it would be created with.
-  // delete_entry: {} (the row to delete is entry_id above; entry/mpr_no/item_name/
-  // requisitioned_qty/delivery_date below carry its current values for display,
-  // joined server-side).
+  // MPR row it would be created with, plus the Edit Reason.
+  // delete_entry: { reason } — the row to delete is entry_id above; entry/mpr_no/
+  // item_name/requisitioned_qty/delivery_date below carry its current values for
+  // display, joined server-side.
   payload: any;
   entry_mpr_no?: string | null;
   entry_item_name?: string | null;
