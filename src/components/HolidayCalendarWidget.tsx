@@ -122,11 +122,19 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
 
   return (
     <div
-      className={`bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden ${
-        large ? 'max-w-2xl' : 'max-w-sm mx-auto md:mx-0'
-      }`}
+      className={
+        large
+          ? 'bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden max-w-2xl'
+          : 'relative rounded-[28px] overflow-hidden border border-white/70 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-sky-100/70 via-white/50 to-blue-50/40 backdrop-blur-xl max-w-sm mx-auto md:mx-0'
+      }
     >
-      <div className={`flex items-center justify-between border-b border-slate-100 ${large ? 'px-6 py-4' : 'px-4 py-3'}`}>
+      <div
+        className={
+          large
+            ? 'flex items-center justify-between border-b border-slate-100 px-6 py-4'
+            : 'flex items-center justify-between border-b border-white/50 px-4 py-3'
+        }
+      >
         <div className="flex items-center gap-2">
           <CalendarDays className={large ? 'w-5 h-5 text-blue-600' : 'w-4 h-4 text-blue-600'} />
           <span className={large ? 'text-lg font-bold text-slate-900' : 'text-sm font-bold text-slate-900'}>
@@ -137,7 +145,9 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
           <button
             type="button"
             onClick={goPrevMonth}
-            className={`text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors ${large ? 'p-2' : 'p-1'}`}
+            className={`text-slate-400 hover:text-slate-900 rounded-lg transition-colors ${
+              large ? 'p-2 hover:bg-slate-100' : 'p-1 hover:bg-white/50'
+            }`}
             aria-label="Previous month"
           >
             <ChevronLeft className={large ? 'w-5 h-5' : 'w-4 h-4'} />
@@ -145,7 +155,9 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
           <button
             type="button"
             onClick={goNextMonth}
-            className={`text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors ${large ? 'p-2' : 'p-1'}`}
+            className={`text-slate-400 hover:text-slate-900 rounded-lg transition-colors ${
+              large ? 'p-2 hover:bg-slate-100' : 'p-1 hover:bg-white/50'
+            }`}
             aria-label="Next month"
           >
             <ChevronRight className={large ? 'w-5 h-5' : 'w-4 h-4'} />
@@ -153,23 +165,19 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
         </div>
       </div>
 
-      <div className={large ? 'px-5 pt-4' : 'px-3 pt-3'}>
-        <div className="grid grid-cols-7">
-          {WEEKDAY_LABELS.map((w, i) => (
-            <div
-              key={i}
-              className={`text-center font-bold uppercase tracking-wide text-slate-400 ${large ? 'text-xs pb-2' : 'text-[10px] pb-1.5'}`}
-            >
-              {w}
-            </div>
-          ))}
-        </div>
-        <div className={`grid grid-cols-7 ${large ? 'gap-1' : 'gap-y-1'}`}>
-          {gridCells.map((cell) => {
-            const entry = entryByDate.get(cell.dateStr);
-            const isToday = cell.dateStr === todayStr;
-
-            if (large) {
+      {large ? (
+        <div className="px-5 pt-4">
+          <div className="grid grid-cols-7">
+            {WEEKDAY_LABELS.map((w, i) => (
+              <div key={i} className="text-center font-bold uppercase tracking-wide text-slate-400 text-xs pb-2">
+                {w}
+              </div>
+            ))}
+          </div>
+          <div className="grid grid-cols-7 gap-1">
+            {gridCells.map((cell) => {
+              const entry = entryByDate.get(cell.dateStr);
+              const isToday = cell.dateStr === todayStr;
               // Bigger square cells with room for a day-type label under the
               // number, same look HolidayCalendarPanel's own Admin grid uses.
               return (
@@ -196,36 +204,69 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
                   )}
                 </div>
               );
-            }
-
-            return (
-              <div key={cell.dateStr} className="flex items-center justify-center py-0.5">
-                <span
+            })}
+          </div>
+        </div>
+      ) : (
+        // Compact (mobile Dashboard) — same bordered table-style grid as
+        // HolidayCalendarPanel's Admin calendar (weekday-label header row +
+        // hard grid lines between day cells, each showing its Weekend/
+        // Holiday label under the number) instead of the old small circular
+        // day badges, now in the same liquid-glass tinted/blurred finish as
+        // the rest of this card. Edge-to-edge (no side padding) so the grid
+        // lines actually reach the card's own rounded corners, same as the
+        // Admin grid reaching its bordered container's edges.
+        <div>
+          <div className="grid grid-cols-7 bg-white/30 backdrop-blur border-b border-white/40">
+            {WEEKDAY_LABELS.map((w, i) => (
+              <div key={i} className="py-2 text-center text-[10px] font-bold uppercase tracking-wide text-slate-500">
+                {w}
+              </div>
+            ))}
+          </div>
+          <div className="grid grid-cols-7">
+            {gridCells.map((cell) => {
+              const entry = entryByDate.get(cell.dateStr);
+              const isToday = cell.dateStr === todayStr;
+              return (
+                <div
+                  key={cell.dateStr}
                   title={entry ? `${entry.title} (${entry.day_type === 'weekend' ? 'Weekend' : 'Holiday'})` : undefined}
-                  className={`w-7 h-7 flex items-center justify-center rounded-full text-[11px] font-semibold ${
+                  className={`relative h-12 flex flex-col items-center justify-center gap-0.5 border-b border-r border-white/40 text-[11px] backdrop-blur transition-colors ${
                     !cell.inCurrentMonth
-                      ? 'text-slate-200'
-                      : isToday
-                        ? 'bg-blue-600 text-white'
-                        : entry
-                          ? entry.day_type === 'weekend'
-                            ? 'bg-sky-100 text-sky-700'
-                            : 'bg-amber-100 text-amber-700'
-                          : 'text-slate-700'
+                      ? 'text-slate-300'
+                      : entry
+                        ? entry.day_type === 'weekend'
+                          ? 'bg-sky-100/50 text-sky-700'
+                          : 'bg-amber-100/50 text-amber-700'
+                        : 'text-slate-700'
                   }`}
                 >
-                  {cell.day}
-                </span>
-              </div>
-            );
-          })}
+                  <span
+                    className={`font-semibold ${
+                      isToday && cell.inCurrentMonth ? 'w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center' : ''
+                    }`}
+                  >
+                    {cell.day}
+                  </span>
+                  {entry && cell.inCurrentMonth && (
+                    <span className="text-[7px] font-bold uppercase tracking-wide truncate max-w-[90%]">
+                      {entry.day_type === 'weekend' ? 'Weekend' : 'Holiday'}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
-      </div>
+      )}
 
       <div
-        className={`flex items-center gap-4 border-t border-slate-100 font-medium text-slate-500 ${
-          large ? 'px-6 py-3 mt-2 text-xs' : 'px-4 py-2.5 mt-1 text-[10px]'
-        }`}
+        className={
+          large
+            ? 'flex items-center gap-4 border-t border-slate-100 font-medium text-slate-500 px-6 py-3 mt-2 text-xs'
+            : 'flex items-center gap-4 border-t border-white/40 bg-white/30 backdrop-blur font-medium text-slate-500 px-4 py-2.5 text-[10px]'
+        }
       >
         <span className="flex items-center gap-1.5">
           <span className="w-2.5 h-2.5 rounded-full bg-amber-400" /> Holiday

@@ -75,7 +75,7 @@ export const LeaveSummaryCard: React.FC<LeaveSummaryCardProps> = ({ token, onOpe
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') onOpen();
         }}
-        className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden text-left cursor-pointer hover:shadow-md transition-shadow"
+        className="relative rounded-[28px] overflow-hidden border border-white/70 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-violet-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl text-left cursor-pointer hover:shadow-lg hover:border-white transition-all"
       >
       {/* Violet gradient header — same drop-notch corner treatment as the
           mobile Dashboard banner (rounded-b on this card's own top instead,
@@ -99,9 +99,12 @@ export const LeaveSummaryCard: React.FC<LeaveSummaryCardProps> = ({ token, onOpe
       </div>
 
       {/* Total Leave strip — overlaps the header the same way AttendanceCard
-          overlaps the Dashboard banner, so this reads as one connected card. */}
+          overlaps the Dashboard banner, so this reads as one connected card.
+          Same liquid-glass treatment as the outer card (translucent white +
+          backdrop-blur instead of a flat white box), so the violet header
+          shows softly through it. */}
       <div className="px-5 sm:px-6 -mt-4 pb-5">
-        <div className="bg-white border border-slate-200 rounded-xl px-4 py-3 shadow-sm">
+        <div className="bg-white/50 backdrop-blur-xl border border-white/60 rounded-2xl px-4 py-3 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)]">
           <p className="text-xs font-bold text-slate-900">Total Leave</p>
           <p className="text-[11px] text-slate-500 mt-0.5">Period 1 Jan {year} – 31 Dec {year}</p>
           <div className="mt-2.5 flex items-center gap-6">

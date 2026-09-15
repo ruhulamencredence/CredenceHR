@@ -1,13 +1,17 @@
 import React from 'react';
-import { Home, Route, Clock, CalendarClock } from 'lucide-react';
+import { Home, Route, Clock, CalendarClock, Contact } from 'lucide-react';
 
-export type MobileSection = 'budget' | 'jobs' | 'entries' | 'jobEdit' | 'claim' | 'claims' | 'conveyanceClaim' | 'leave' | 'timesheet' | null;
+export type MobileSection = 'budget' | 'jobs' | 'entries' | 'jobEdit' | 'claim' | 'claims' | 'conveyanceClaim' | 'leave' | 'timesheet' | 'employeeDirectory' | null;
 
 interface BottomNavProps {
   active: MobileSection;
   onChange: (section: MobileSection) => void;
   canViewMovementClaim?: boolean;
   canViewTimesheet?: boolean;
+  // Gates the last tab: shows "Leave" when granted, otherwise falls back to
+  // "Directory" (Employee Directory, ungated for every account — see
+  // EmployeeDirectory.tsx) so the bar never collapses down to Home alone.
+  canViewLeave?: boolean;
 }
 
 interface NavItem {
@@ -63,12 +67,14 @@ function buildBarPath(dip: { center: number; halfWidth: number; depth: number } 
   return `${topLeft} ${dipPath} ${topRight} ${bottom}`;
 }
 
-export function BottomNav({ active, onChange, canViewMovementClaim = true, canViewTimesheet = true }: BottomNavProps) {
+export function BottomNav({ active, onChange, canViewMovementClaim = true, canViewTimesheet = true, canViewLeave = true }: BottomNavProps) {
   const items: NavItem[] = [
     { key: null, label: 'Home', icon: Home },
     ...(canViewMovementClaim ? [{ key: 'claim' as MobileSection, label: 'Claim', icon: Route }] : []),
     ...(canViewTimesheet ? [{ key: 'timesheet' as MobileSection, label: 'Timesheet', icon: Clock }] : []),
-    { key: 'leave' as MobileSection, label: 'Leave', icon: CalendarClock }
+    canViewLeave
+      ? { key: 'leave' as MobileSection, label: 'Leave', icon: CalendarClock }
+      : { key: 'employeeDirectory' as MobileSection, label: 'Directory', icon: Contact }
   ];
 
   const activeIndex = items.findIndex((item) => item.key === active);
