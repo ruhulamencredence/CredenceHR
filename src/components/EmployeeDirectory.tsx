@@ -6,7 +6,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import {
-  Contact, Search, X, Users2, Building2, UserCheck, LayoutGrid, List,
+  Contact, Search, X, Users2, Building2, LayoutGrid, List,
   Mail, Phone, PhoneCall, Briefcase, MapPin, ChevronLeft, ChevronRight
 } from 'lucide-react';
 import { User, Department, EmployeeDirectoryEntry } from '../types';
@@ -34,6 +34,18 @@ const AVATAR_PALETTE = [
   'bg-cyan-100 text-cyan-700'
 ];
 
+// Soft pastel gradient tints for the "liquid glass" mobile card background —
+// same hash as the avatar color so a given employee's card and avatar tint
+// stay visually paired instead of clashing.
+const CARD_TINT_PALETTE = [
+  'from-blue-100/70 via-white/50 to-indigo-50/40',
+  'from-violet-100/70 via-white/50 to-fuchsia-50/40',
+  'from-emerald-100/70 via-white/50 to-teal-50/40',
+  'from-amber-100/70 via-white/50 to-orange-50/40',
+  'from-rose-100/70 via-white/50 to-pink-50/40',
+  'from-cyan-100/70 via-white/50 to-sky-50/40'
+];
+
 function initialsOf(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) return '?';
@@ -47,6 +59,12 @@ function avatarColorClass(name: string): string {
   return AVATAR_PALETTE[hash % AVATAR_PALETTE.length];
 }
 
+function cardTintClass(name: string): string {
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) hash = (hash * 31 + name.charCodeAt(i)) >>> 0;
+  return CARD_TINT_PALETTE[hash % CARD_TINT_PALETTE.length];
+}
+
 // Office location line for a directory row — Branch is the closest thing
 // all_employees has to a physical "sitting place" (Status tab); Division/
 // Unit are appended when on file, since a department alone doesn't say
@@ -56,11 +74,73 @@ function officeLocationOf(emp: EmployeeDirectoryEntry): string | null {
   return parts.length ? parts.join(' · ') : null;
 }
 
-const Avatar: React.FC<{ name: string; sizeClass?: string }> = ({ name, sizeClass = 'w-12 h-12 text-sm' }) => (
-  <div className={`${sizeClass} rounded-full flex items-center justify-center font-bold shrink-0 ${avatarColorClass(name)}`}>
+const Avatar: React.FC<{ name: string; sizeClass?: string; glass?: boolean }> = ({ name, sizeClass = 'w-12 h-12 text-sm', glass = false }) => (
+  <div
+    className={`${sizeClass} rounded-full flex items-center justify-center font-bold shrink-0 ${avatarColorClass(name)} ${
+      glass ? 'ring-2 ring-white/80 shadow-sm' : ''
+    }`}
+  >
     {initialsOf(name)}
   </div>
 );
+
+// In-memory cache so the same employee's photo (once fetched as a blob
+// object URL) isn't re-requested every time their card re-renders or the
+// user pages back to a row they've already seen this session. Keyed by
+// user_id — entries without a linked user_id never had a login account to
+// upload a photo against, so they always fall back to initials.
+const photoUrlCache = new Map<number, string | null>();
+
+// Employee Directory's photo shows the account's uploaded profile photo
+// (Self Service -> Personal Data, same source as the Navbar/GlobalSidebar
+// avatar) via GET /api/profile/photo/:userId, falling back to the initials
+// Avatar while loading, when the employee has no linked user_id, or when
+// they simply haven't uploaded a photo (404).
+const EmployeePhoto: React.FC<{
+  userId: number | null;
+  token: string;
+  name: string;
+  sizeClass?: string;
+  glass?: boolean;
+}> = ({ userId, token, name, sizeClass, glass }) => {
+  const [url, setUrl] = useState<string | null>(userId ? photoUrlCache.get(userId) ?? null : null);
+
+  useEffect(() => {
+    if (!userId || photoUrlCache.has(userId)) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(apiUrl(`/api/profile/photo/${userId}`), {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (!res.ok) {
+          photoUrlCache.set(userId, null);
+          return;
+        }
+        const blob = await res.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        photoUrlCache.set(userId, objectUrl);
+        if (!cancelled) setUrl(objectUrl);
+      } catch {
+        photoUrlCache.set(userId, null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, token]);
+
+  if (url) {
+    return (
+      <img
+        src={url}
+        alt={name}
+        className={`${sizeClass} rounded-full object-cover shrink-0 ${glass ? 'ring-2 ring-white/80 shadow-sm' : ''}`}
+      />
+    );
+  }
+  return <Avatar name={name} sizeClass={sizeClass} glass={glass} />;
+};
 
 const StatusBadge: React.FC<{ isActive: boolean }> = ({ isActive }) => (
   <span
@@ -166,9 +246,9 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
           </>
         )}
 
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+        <div className="bg-transparent sm:bg-white rounded-none sm:rounded-2xl shadow-none sm:shadow-sm border-0 sm:border sm:border-slate-200 overflow-hidden">
           {/* Header */}
-          <div className="p-6 border-b border-slate-200 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+          <div className="p-6 border-b border-slate-200 hidden sm:flex sm:flex-row sm:items-start sm:justify-between gap-4">
             <div className="flex items-start gap-3">
               <div className="w-10 h-10 rounded-full bg-violet-50 flex items-center justify-center shrink-0">
                 <Contact className="w-5 h-5 text-violet-600" />
@@ -226,57 +306,61 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
               )}
             </div>
 
-            <select
-              value={departmentFilter}
-              onChange={(e) => setDepartmentFilter(e.target.value)}
-              className="px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-700 focus:ring-2 focus:ring-blue-600 focus:outline-none"
-            >
-              <option value="">All Departments</option>
-              {departments.map((d) => (
-                <option key={d.id} value={d.id}>{d.name}</option>
-              ))}
-            </select>
+            {!isNativeApp && (
+              <div className="hidden sm:contents">
+                <select
+                  value={departmentFilter}
+                  onChange={(e) => setDepartmentFilter(e.target.value)}
+                  className="px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-700 focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                >
+                  <option value="">All Departments</option>
+                  {departments.map((d) => (
+                    <option key={d.id} value={d.id}>{d.name}</option>
+                  ))}
+                </select>
 
-            <select
-              value={designationFilter}
-              onChange={(e) => setDesignationFilter(e.target.value)}
-              className="px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-700 focus:ring-2 focus:ring-blue-600 focus:outline-none"
-            >
-              <option value="">All Designations</option>
-              {designations.map((d) => (
-                <option key={d} value={d}>{d}</option>
-              ))}
-            </select>
+                <select
+                  value={designationFilter}
+                  onChange={(e) => setDesignationFilter(e.target.value)}
+                  className="px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-700 focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                >
+                  <option value="">All Designations</option>
+                  {designations.map((d) => (
+                    <option key={d} value={d}>{d}</option>
+                  ))}
+                </select>
 
-            {(search || departmentFilter || designationFilter) && (
-              <button
-                type="button"
-                onClick={clearFilters}
-                className="px-3 py-2 text-xs font-semibold text-slate-500 hover:bg-slate-100 rounded-xl transition-colors whitespace-nowrap"
-              >
-                Clear Filters
-              </button>
+                {(search || departmentFilter || designationFilter) && (
+                  <button
+                    type="button"
+                    onClick={clearFilters}
+                    className="px-3 py-2 text-xs font-semibold text-slate-500 hover:bg-slate-100 rounded-xl transition-colors whitespace-nowrap"
+                  >
+                    Clear Filters
+                  </button>
+                )}
+
+                {/* View Switcher */}
+                <div className="flex items-center bg-slate-100 rounded-xl p-1 self-start lg:self-auto">
+                  <button
+                    type="button"
+                    onClick={() => setViewMode('grid')}
+                    className={`p-1.5 rounded-lg transition-colors ${viewMode === 'grid' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}
+                    title="Grid View"
+                  >
+                    <LayoutGrid className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setViewMode('list')}
+                    className={`p-1.5 rounded-lg transition-colors ${viewMode === 'list' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}
+                    title="Table / List View"
+                  >
+                    <List className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
             )}
-
-            {/* View Switcher */}
-            <div className="flex items-center bg-slate-100 rounded-xl p-1 self-start lg:self-auto">
-              <button
-                type="button"
-                onClick={() => setViewMode('grid')}
-                className={`p-1.5 rounded-lg transition-colors ${viewMode === 'grid' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}
-                title="Grid View"
-              >
-                <LayoutGrid className="w-4 h-4" />
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewMode('list')}
-                className={`p-1.5 rounded-lg transition-colors ${viewMode === 'list' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}
-                title="Table / List View"
-              >
-                <List className="w-4 h-4" />
-              </button>
-            </div>
           </div>
 
           {/* Body */}
@@ -312,39 +396,80 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
                 <p className="text-xs text-slate-400 mt-1">Try a different name, Employee ID, or clear the filters.</p>
               </div>
             ) : viewMode === 'grid' ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
                 {paginated.map((emp) => (
                   <button
                     key={emp.id}
                     type="button"
                     onClick={() => setSelectedEmployee(emp)}
-                    className="text-left rounded-2xl border border-slate-200 p-4 space-y-3 hover:border-blue-300 hover:shadow-md transition-all bg-white"
+                    className={`relative text-left rounded-[28px] sm:rounded-2xl overflow-hidden border border-white/70 sm:border-slate-200 p-3 sm:p-4 space-y-2 sm:space-y-3 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] sm:shadow-sm bg-gradient-to-br ${cardTintClass(emp.name)} sm:bg-none sm:bg-white backdrop-blur-xl sm:backdrop-blur-none hover:shadow-lg hover:border-white sm:hover:border-blue-200 transition-all`}
                   >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <Avatar name={emp.name} />
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+                        <div className="relative shrink-0">
+                          <EmployeePhoto
+                            userId={emp.user_id}
+                            token={token}
+                            name={emp.name}
+                            sizeClass="w-10 h-10 text-xs sm:w-12 sm:h-12 sm:text-sm"
+                            glass
+                          />
+                          <span
+                            className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white ${
+                              emp.is_active ? 'bg-emerald-400' : 'bg-slate-300'
+                            }`}
+                          />
+                        </div>
                         <div className="min-w-0">
                           <p className="font-semibold text-slate-900 text-sm truncate">{emp.name}</p>
-                          <p className="text-xs text-slate-500 truncate">{emp.designation || '—'}</p>
+                          <p className="text-xs text-slate-600 sm:text-slate-500 truncate">{emp.designation || '—'}</p>
                         </div>
                       </div>
-                      <StatusBadge isActive={emp.is_active} />
+                      <ChevronRight className="w-4 h-4 text-slate-500 sm:text-slate-300 shrink-0 sm:hidden" />
+                      <div className="hidden sm:block shrink-0">
+                        <StatusBadge isActive={emp.is_active} />
+                      </div>
                     </div>
 
-                    <div className="flex flex-wrap gap-1.5">
-                      {emp.employee_id && (
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-slate-100 text-slate-600 border border-slate-200">
-                          ID: {emp.employee_id}
-                        </span>
-                      )}
-                      {emp.department && (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200">
-                          <Building2 className="w-3 h-3" /> {emp.department}
-                        </span>
-                      )}
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex flex-wrap gap-1 sm:gap-1.5 min-w-0">
+                        {emp.employee_id && (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-white/50 sm:bg-slate-100 backdrop-blur sm:backdrop-blur-none text-slate-700 sm:text-slate-600 border border-white/60 sm:border-slate-200">
+                            ID: {emp.employee_id}
+                          </span>
+                        )}
+                        {emp.department && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-white/50 sm:bg-blue-50 backdrop-blur sm:backdrop-blur-none text-blue-800 sm:text-blue-700 border border-white/60 sm:border-blue-200">
+                            <Building2 className="w-3 h-3" /> {emp.department}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0 sm:hidden">
+                        {emp.email && (
+                          <a
+                            href={`mailto:${emp.email}`}
+                            onClick={(e) => e.stopPropagation()}
+                            className="w-8 h-8 rounded-full bg-white/60 backdrop-blur border border-white/60 shadow-sm flex items-center justify-center text-slate-600 hover:bg-white hover:text-blue-600 transition-colors"
+                            title={emp.email}
+                          >
+                            <Mail className="w-3.5 h-3.5" />
+                          </a>
+                        )}
+                        {(emp.mobile || emp.phone) && (
+                          <a
+                            href={`tel:${emp.mobile || emp.phone}`}
+                            onClick={(e) => e.stopPropagation()}
+                            className="w-8 h-8 rounded-full bg-white/60 backdrop-blur border border-white/60 shadow-sm flex items-center justify-center text-slate-600 hover:bg-white hover:text-emerald-600 transition-colors"
+                            title={emp.mobile || emp.phone}
+                          >
+                            <Phone className="w-3.5 h-3.5" />
+                          </a>
+                        )}
+                      </div>
                     </div>
 
-                    <div className="space-y-1 text-xs text-slate-600 border-t border-slate-100 pt-2">
+                    <div className="hidden sm:block space-y-1 text-xs text-slate-600 border-t border-slate-100 pt-2">
                       {emp.email && (
                         <a
                           href={`mailto:${emp.email}`}
@@ -387,7 +512,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
                       <tr key={emp.id} className="hover:bg-slate-50/80 transition-colors">
                         <td className="px-3 py-2.5 whitespace-nowrap">
                           <div className="flex items-center gap-2">
-                            <Avatar name={emp.name} sizeClass="w-8 h-8 text-[10px]" />
+                            <EmployeePhoto userId={emp.user_id} token={token} name={emp.name} sizeClass="w-8 h-8 text-[10px]" />
                             <div>
                               <p className="font-semibold text-slate-900 text-xs">{emp.name}</p>
                               {emp.employee_id && <p className="text-[10px] text-slate-400 font-mono">{emp.employee_id}</p>}
@@ -464,38 +589,85 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
       {/* Employee Details Modal */}
       {selectedEmployee && (
         <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl max-h-[90vh] overflow-y-auto">
-            <div className="p-5 bg-gradient-to-br from-violet-600 to-blue-600 rounded-t-2xl text-white relative">
+          <div className={`rounded-[32px] max-w-md w-full shadow-2xl max-h-[90vh] overflow-y-auto border border-white/60 backdrop-blur-2xl bg-gradient-to-br ${cardTintClass(selectedEmployee.name)}`}>
+            {/* Hero */}
+            <div className="relative h-44 sm:h-48 bg-gradient-to-br from-violet-500 via-indigo-500 to-blue-500 flex items-center justify-center shrink-0">
               <button
                 onClick={() => setSelectedEmployee(null)}
-                className="absolute top-3 right-3 p-1.5 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+                className="absolute top-4 left-4 w-9 h-9 rounded-full bg-white/25 backdrop-blur flex items-center justify-center text-white hover:bg-white/40 transition-colors"
               >
                 <X className="w-4.5 h-4.5" />
               </button>
-              <div className="flex items-center gap-3">
-                <div className="w-16 h-16 rounded-full bg-white/20 flex items-center justify-center font-bold text-lg shrink-0">
-                  {initialsOf(selectedEmployee.name)}
-                </div>
-                <div className="min-w-0">
-                  <p className="font-bold text-base truncate">{selectedEmployee.name}</p>
-                  <p className="text-xs text-white/80 truncate">{selectedEmployee.designation || '—'}</p>
-                  {selectedEmployee.department && (
-                    <p className="text-xs text-white/80 truncate flex items-center gap-1 mt-0.5">
-                      <Building2 className="w-3 h-3" /> {selectedEmployee.department}
-                    </p>
-                  )}
-                </div>
+
+              <div className="absolute top-4 right-4 flex items-center gap-2">
+                {(selectedEmployee.mobile || selectedEmployee.phone) && (
+                  <a
+                    href={`tel:${selectedEmployee.mobile || selectedEmployee.phone}`}
+                    className="w-9 h-9 rounded-full bg-white/25 backdrop-blur flex items-center justify-center text-white hover:bg-white/40 transition-colors"
+                  >
+                    <Phone className="w-4 h-4" />
+                  </a>
+                )}
+                {selectedEmployee.email && (
+                  <a
+                    href={`mailto:${selectedEmployee.email}`}
+                    className="w-9 h-9 rounded-full bg-white/25 backdrop-blur flex items-center justify-center text-white hover:bg-white/40 transition-colors"
+                  >
+                    <Mail className="w-4 h-4" />
+                  </a>
+                )}
               </div>
+
+              <EmployeePhoto
+                userId={selectedEmployee.user_id}
+                token={token}
+                name={selectedEmployee.name}
+                sizeClass="w-24 h-24 text-2xl"
+                glass
+              />
+
+              <span
+                className={`absolute bottom-4 right-4 inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-semibold backdrop-blur ${
+                  selectedEmployee.is_active ? 'bg-emerald-400/90 text-white' : 'bg-slate-400/80 text-white'
+                }`}
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-white" /> {selectedEmployee.is_active ? 'Active' : 'Inactive'}
+              </span>
             </div>
 
-            <div className="p-5 space-y-4">
-              <div className="flex items-center gap-2">
-                <StatusBadge isActive={selectedEmployee.is_active} />
+            {/* Overlapping card */}
+            <div className="relative -mt-6 rounded-t-[32px] bg-white/50 backdrop-blur-2xl border-t border-white/60 px-5 pt-5 pb-6 space-y-4">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <h2 className="text-xl font-bold text-slate-900 truncate">{selectedEmployee.name}</h2>
+                  <p className="text-sm text-slate-500 mt-0.5 truncate">
+                    {selectedEmployee.designation || '—'}
+                    {selectedEmployee.department ? ` · ${selectedEmployee.department}` : ''}
+                  </p>
+                </div>
                 {selectedEmployee.employee_id && (
-                  <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-slate-100 text-slate-600 border border-slate-200">
+                  <span className="shrink-0 inline-flex items-center gap-1 px-3 py-1 rounded-full text-[11px] font-semibold bg-violet-50 text-violet-700 border border-violet-100">
                     ID: {selectedEmployee.employee_id}
                   </span>
                 )}
+              </div>
+
+              {/* Quick stat pills */}
+              <div className="grid grid-cols-3 divide-x divide-white/50 bg-white/40 backdrop-blur rounded-2xl border border-white/60 overflow-hidden">
+                <div className="px-2 py-3 text-center min-w-0">
+                  <p className="text-[10px] text-slate-400 uppercase tracking-wider">Department</p>
+                  <p className="text-xs font-semibold text-slate-800 mt-1 truncate">{selectedEmployee.department || '—'}</p>
+                </div>
+                <div className="px-2 py-3 text-center min-w-0">
+                  <p className="text-[10px] text-slate-400 uppercase tracking-wider">Status</p>
+                  <p className={`text-xs font-semibold mt-1 ${selectedEmployee.is_active ? 'text-emerald-600' : 'text-slate-500'}`}>
+                    {selectedEmployee.is_active ? 'Active' : 'Inactive'}
+                  </p>
+                </div>
+                <div className="px-2 py-3 text-center min-w-0">
+                  <p className="text-[10px] text-slate-400 uppercase tracking-wider">Reports To</p>
+                  <p className="text-xs font-semibold text-slate-800 mt-1 truncate">{selectedEmployee.supervisor_name || '—'}</p>
+                </div>
               </div>
 
               <div className="space-y-2.5">
@@ -529,15 +701,6 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
                   <p className="text-xs text-slate-400">No contact info on file.</p>
                 )}
               </div>
-
-              {selectedEmployee.supervisor_name && (
-                <div className="space-y-1.5 border-t border-slate-100 pt-3">
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Reporting Line</p>
-                  <p className="flex items-center gap-2 text-sm text-slate-700">
-                    <UserCheck className="w-4 h-4 text-slate-400" /> Reports to {selectedEmployee.supervisor_name}
-                  </p>
-                </div>
-              )}
             </div>
           </div>
         </div>

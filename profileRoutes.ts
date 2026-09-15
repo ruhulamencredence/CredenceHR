@@ -168,15 +168,14 @@ export function registerProfileRoutes(app: Express, deps: ProfileRouteDeps) {
   });
 
   // GET /api/profile/photo — this account's own photo. GET
-  // /api/profile/photo/:userId lets an Admin/Superadmin fetch another
-  // account's photo the same way (e.g. from a future Users/Employees list);
-  // a plain 'user' role may only ever fetch their own.
+  // /api/profile/photo/:userId lets any signed-in account fetch another
+  // account's photo the same way — used by Self Service -> Employee
+  // Directory, which is already a company-wide, every-signed-in-account
+  // roster (see EmployeeDirectoryRoutes.ts), so a colleague's photo isn't
+  // any more sensitive than the email/phone it already shows.
   app.get("/api/profile/photo/:userId?", authenticateToken, async (req: any, res) => {
     try {
       const targetId = req.params.userId ? Number(req.params.userId) : req.user.id;
-      if (targetId !== req.user.id && req.user.role === "user") {
-        return res.status(403).json({ error: "Not authorized." });
-      }
       const rows = await queryDB(
         "SELECT photo_mimetype, photo_data FROM user_profile_details WHERE user_id = ?",
         [targetId]
