@@ -5,7 +5,6 @@
 
 import React, { useEffect, useState } from 'react';
 import { Plus, Trash2, Save, X, Briefcase, Lock, ChevronDown, ChevronRight, Pencil, Calendar, Hash, Scissors } from 'lucide-react';
-import { Capacitor } from '@capacitor/core';
 import { apiUrl } from '../lib/api';
 import { formatDate, todayDateOnlyString, dateRangeOptions, formatDateLabel } from '../lib/formatDate';
 import { Entry, BudgetItem, MprNumber, PendingJobEdit } from '../types';
@@ -108,11 +107,6 @@ export const JobEditPanel: React.FC<JobEditPanelProps> = ({ token }) => {
   const [showNewJobForm, setShowNewJobForm] = useState(false);
 
   const authHeaders = { Authorization: `Bearer ${token}` };
-
-  // The card layout (below) is only for the Android app — the web build keeps the
-  // original table exactly as it was, per the Admin's request. Computed once here
-  // and passed down instead of re-checking per row.
-  const isNativeApp = Capacitor.isNativePlatform();
 
   const loadJobs = async () => {
     setLoading(true);
@@ -274,7 +268,6 @@ export const JobEditPanel: React.FC<JobEditPanelProps> = ({ token }) => {
               isOpen={openJobId === job.job_id}
               onToggle={() => setOpenJobId(openJobId === job.job_id ? null : job.job_id)}
               onChanged={refresh}
-              isNativeApp={isNativeApp}
               pendingForJob={pendingEdits.filter((p) => p.job_id === job.job_id)}
             />
           ))}
@@ -293,7 +286,6 @@ interface JobEditRowProps {
   isOpen: boolean;
   onToggle: () => void;
   onChanged: () => void;
-  isNativeApp: boolean;
   // This user's own pending/recently-reviewed Job Edit requests scoped to this Job.
   pendingForJob: PendingJobEdit[];
 }
@@ -319,7 +311,7 @@ const PendingBadge: React.FC<{ label: string }> = ({ label }) => (
   </span>
 );
 
-const JobEditRow: React.FC<JobEditRowProps> = ({ job, token, mprNumbers, isOpen, onToggle, onChanged, isNativeApp, pendingForJob }) => {
+const JobEditRow: React.FC<JobEditRowProps> = ({ job, token, mprNumbers, isOpen, onToggle, onChanged, pendingForJob }) => {
   const authHeaders = { Authorization: `Bearer ${token}` };
 
   // This Job's existing MPR rows that currently have a pending (unreviewed) request
@@ -762,8 +754,13 @@ const JobEditRow: React.FC<JobEditRowProps> = ({ job, token, mprNumbers, isOpen,
               {rowNotice}
             </div>
           )}
-          {isNativeApp ? (
-          <div className="space-y-2.5">
+          {/* Card layout below sm: (mobile web AND the native app — Capacitor
+              WebViews are always under the sm: breakpoint anyway), the
+              original table at sm: and up. Used to be native-app-only (a
+              plain isNativeApp check), which left mobile web stuck with the
+              desktop table squeezed into a narrow viewport — same fix as the
+              "Add MPR"/"Add New Job" forms elsewhere in this file. */}
+          <div className="sm:hidden space-y-2.5">
             {job.entries.map((e) => {
               const pending = pendingByEntryId.get(e.id);
               const rejected = rejectedByEntryId.get(e.id);
@@ -922,8 +919,8 @@ const JobEditRow: React.FC<JobEditRowProps> = ({ job, token, mprNumbers, isOpen,
               </div>
             ))}
           </div>
-          ) : (
-          <div className="border border-slate-200 rounded-xl overflow-hidden">
+
+          <div className="hidden sm:block border border-slate-200 rounded-xl overflow-hidden">
             <table className="w-full text-xs">
               <thead className="bg-slate-50 text-slate-500">
                 <tr>
@@ -1061,7 +1058,6 @@ const JobEditRow: React.FC<JobEditRowProps> = ({ job, token, mprNumbers, isOpen,
               </tbody>
             </table>
           </div>
-          )}
 
           {!showAddForm ? (
             <button

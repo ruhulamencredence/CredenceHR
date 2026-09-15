@@ -16,6 +16,12 @@ import { Spinner } from './Spinner';
 interface AttendanceCardProps {
   token: string;
   projects: Project[];
+  // True while the parent's own Project list fetch is still in flight — lets
+  // this card render a skeleton in its usual spot immediately instead of
+  // rendering nothing at all until that fetch resolves (which used to make
+  // the whole card visibly pop in a moment after the rest of the Dashboard,
+  // unlike every other card that's already in place on first paint).
+  loading?: boolean;
 }
 
 // Splits a timestamp into its clock face ("08:58") and meridiem ("AM") so they
@@ -70,7 +76,7 @@ async function getCurrentCoords(): Promise<{ latitude: number; longitude: number
 // location_radius circle. Shown near the top of the User Panel, always
 // visible (not tied to the mobile Budget/Jobs/Entries tile menu) since
 // marking attendance is a quick, separate daily action.
-export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects }) => {
+export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects, loading }) => {
   const [projectId, setProjectId] = useState<string>('');
   const [status, setStatus] = useState<AttendanceRecord | null>(null);
   const [loadingStatus, setLoadingStatus] = useState(false);
@@ -182,6 +188,22 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects 
     }
   };
 
+  // Still waiting on the parent's Project list fetch — show a skeleton in the
+  // exact same spot/shape the real card renders in, instead of nothing, so
+  // this card is already in place on first paint like every other Dashboard
+  // card and only its data (not the card itself) shows up a beat later.
+  if (loading && projects.length === 0) {
+    return (
+      <div className="relative rounded-[24px] overflow-hidden border border-white/70 p-3.5 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-blue-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl animate-pulse">
+        <div className="h-4 w-32 bg-white/60 rounded-md mb-3" />
+        <div className="grid grid-cols-2 gap-2">
+          <div className="rounded-xl px-3 py-2 bg-white/40 border border-white/50 h-14" />
+          <div className="rounded-xl px-3 py-2 bg-white/40 border border-white/50 h-14" />
+        </div>
+      </div>
+    );
+  }
+
   if (projects.length === 0) return null;
 
   const inParts = status?.check_in_at ? formatTimeParts(status.check_in_at as string) : null;
@@ -189,17 +211,21 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects 
   const busy = working !== null || !!pending || loadingStatus;
 
   return (
-    <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
-      <h3 className="text-sm font-bold text-slate-900 mb-3 flex items-center gap-2">
-        <UserCheck className="w-4 h-4 text-blue-600" /> My Attendance
+    <div className="relative rounded-[24px] overflow-hidden border border-white/70 p-3.5 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-blue-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white transition-all">
+      <h3 className="text-sm font-bold text-slate-900 mb-2 flex items-center gap-2 min-w-0">
+        <UserCheck className="w-4 h-4 text-blue-600 shrink-0" />
+        <span className="truncate">My Attendance</span>
+        {selectedProject && (
+          <span className="text-xs font-medium text-slate-500 truncate">— {selectedProject.project_name}</span>
+        )}
       </h3>
 
       {projects.length > 1 && (
-        <div className="mb-3">
+        <div className="mb-2">
           <select
             value={projectId}
             onChange={(e) => setProjectId(e.target.value)}
-            className="w-full text-sm px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none"
+            className="w-full text-sm px-3 py-2 bg-white/50 backdrop-blur border border-white/60 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none"
           >
             <option value="">Select a project…</option>
             {projects.map((p) => (
@@ -209,15 +235,15 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects 
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-2 gap-2">
         {/* In Time */}
-        <div className={`rounded-xl px-4 py-3 ${hasCheckedIn ? 'bg-blue-50' : 'bg-slate-50'}`}>
+        <div className={`rounded-xl px-3 py-2 backdrop-blur border ${hasCheckedIn ? 'bg-blue-100/50 border-white/60' : 'bg-white/40 border-white/50'}`}>
           <div className="text-xs font-medium text-slate-500">In Time</div>
           {hasCheckedIn && inParts ? (
             <>
               <div className="mt-0.5 font-bold text-blue-700">
-                <span className="text-lg">{inParts.time}</span>{' '}
-                <span className="text-xs align-middle">{inParts.meridiem}</span>
+                <span className="text-base">{inParts.time}</span>{' '}
+                <span className="text-[11px] align-middle">{inParts.meridiem}</span>
               </div>
               {status?.check_in_source === 'office' && (
                 <div className="mt-0.5 text-[10px] font-semibold text-sky-700">via Office Attendance</div>
@@ -228,7 +254,7 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects 
               type="button"
               onClick={() => handleMark('in')}
               disabled={!projectId || busy}
-              className="mt-1 flex items-center gap-1 text-sm font-bold text-blue-600 hover:text-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              className="mt-0.5 flex items-center gap-1 text-xs font-bold text-blue-600 hover:text-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
               {working === 'in' ? <Spinner size={14} /> : <Play className="w-3.5 h-3.5 fill-current" />}
               Set Now
@@ -237,13 +263,13 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects 
         </div>
 
         {/* Out Time */}
-        <div className={`rounded-xl px-4 py-3 ${hasCheckedOut ? 'bg-blue-50' : 'bg-slate-50'}`}>
+        <div className={`rounded-xl px-3 py-2 backdrop-blur border ${hasCheckedOut ? 'bg-blue-100/50 border-white/60' : 'bg-white/40 border-white/50'}`}>
           <div className="text-xs font-medium text-slate-500">Out Time</div>
           {hasCheckedOut && outParts ? (
             <>
               <div className="mt-0.5 font-bold text-blue-700">
-                <span className="text-lg">{outParts.time}</span>{' '}
-                <span className="text-xs align-middle">{outParts.meridiem}</span>
+                <span className="text-base">{outParts.time}</span>{' '}
+                <span className="text-[11px] align-middle">{outParts.meridiem}</span>
               </div>
               {status?.check_out_source === 'office' && (
                 <div className="mt-0.5 text-[10px] font-semibold text-sky-700">via Office Attendance</div>
@@ -254,7 +280,7 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects 
               type="button"
               onClick={() => handleMark('out')}
               disabled={!projectId || busy || !hasCheckedIn}
-              className="mt-1 flex items-center gap-1 text-sm font-bold text-blue-600 hover:text-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              className="mt-0.5 flex items-center gap-1 text-xs font-bold text-blue-600 hover:text-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
               {working === 'out' ? <Spinner size={14} /> : <Play className="w-3.5 h-3.5 fill-current" />}
               Set Now
@@ -264,16 +290,15 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects 
       </div>
 
       {selectedProject && !loadingStatus && (
-        <div className="mt-3 pt-3 border-t border-slate-100 space-y-1 text-[11px] text-slate-500">
+        <div className="mt-2 pt-2 border-t border-white/50 space-y-1 text-[11px] text-slate-500">
           <div className="flex flex-wrap items-center gap-2">
             <MapPin className="w-3 h-3" />
             {hasCheckedIn ? (
               <span>
-                {selectedProject.project_name}
-                {status?.check_in_distance_m != null ? ` — ${status.check_in_distance_m}m from site` : ''}
+                {status?.check_in_distance_m != null ? `${status.check_in_distance_m}m from site` : 'Checked in'}
               </span>
             ) : (
-              <span>Not checked in for {selectedProject.project_name} today yet.</span>
+              <span>Not checked in today yet.</span>
             )}
             {hasCheckedIn && <ApprovalBadge approval={status?.check_in_approval} />}
             {hasCheckedOut && <ApprovalBadge approval={status?.check_out_approval} />}
@@ -293,7 +318,7 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects 
 
       {message && (
         <div
-          className={`mt-3 flex items-center gap-2 text-xs px-3 py-2.5 rounded-xl ${
+          className={`mt-2 flex items-center gap-2 text-xs px-3 py-2 rounded-xl ${
             message.type === 'success' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
           }`}
         >

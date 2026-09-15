@@ -18,6 +18,7 @@ import { LeaveSummaryCard } from './LeaveSummaryCard';
 import { PendingApprovalsCard } from './PendingApprovalsCard';
 import { HolidayCalendarWidget } from './HolidayCalendarWidget';
 import { LeaveReviewPage } from './LeaveReviewPage';
+import { EmployeeDirectory } from './EmployeeDirectory';
 import { Timesheet } from './Timesheet';
 import { ClaimCard } from './ClaimCard';
 import { MyClaimsCard } from './MyClaimsCard';
@@ -771,6 +772,12 @@ const EntryCard = React.memo(function EntryCard({
 
 export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequest, jobsNavRequest, dashboardNavRequest }) => {
   const [projects, setProjects] = useState<Project[]>([]);
+  // True once the initial Project list fetch (fetchMasterData below) has
+  // resolved (success or failure) — lets AttendanceCard tell "still loading"
+  // apart from "genuinely no Projects assigned", so it can show a skeleton
+  // in its usual spot on first paint instead of only appearing once this
+  // fetch completes.
+  const [projectsLoaded, setProjectsLoaded] = useState(false);
   const [mprNumbers, setMprNumbers] = useState<MprNumber[]>([]);
   const [entries, setEntries] = useState<Entry[]>([]);
   // System-wide "which Job is this MPR No already used under" lookup — kept separate
@@ -839,7 +846,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // initializer) so "pull down to reload" — see App.tsx — lands back on the exact
   // same section instead of resetting to the tile menu.
   const userSectionStorageKey = `mpr_user_section_${user.id}`;
-  const [mobileActiveSection, setMobileActiveSection] = useState<'budget' | 'jobs' | 'entries' | 'jobEdit' | 'claim' | 'claims' | 'conveyanceClaim' | 'leave' | 'timesheet' | null>(
+  const [mobileActiveSection, setMobileActiveSection] = useState<'budget' | 'jobs' | 'entries' | 'jobEdit' | 'claim' | 'claims' | 'conveyanceClaim' | 'leave' | 'timesheet' | 'employeeDirectory' | null>(
     () => {
       try {
         const saved = localStorage.getItem(userSectionStorageKey);
@@ -881,7 +888,8 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
     mobileActiveSection === 'claims' ||
     mobileActiveSection === 'conveyanceClaim' ||
     mobileActiveSection === 'leave' ||
-    mobileActiveSection === 'timesheet';
+    mobileActiveSection === 'timesheet' ||
+    mobileActiveSection === 'employeeDirectory';
   // Superadmin-gated, same as every other module in this app: an Admin/User only
   // sees Movement Claim / Conveyance Bill Claim once the Superadmin has granted
   // can_view_movement_claims / can_view_conveyance_claims (Admin Panel -> Users
@@ -901,6 +909,13 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // Module Access (PUT /api/users/:id/timesheet-access). Also mirrored in
   // GlobalSidebar's selfServiceItems.
   const canSeeTimesheet = user.role === 'superadmin' || !!user.can_view_timesheet;
+  // Gates the BottomNav "Leave" tab (and the LeaveReviewPage it opens) — same
+  // grant as the Leave Summary card above (can_view_leave_summary), since
+  // that card's "tap to open" target IS this same page. Previously ungated
+  // (every account saw "Leave" in the bottom bar regardless of permission);
+  // now an account without it falls back to "Directory" instead — see
+  // BottomNav.tsx.
+  const canSeeLeave = user.role === 'superadmin' || !!user.can_view_leave_summary;
   // Guards a section restored from localStorage (see the lazy initializer above,
   // which runs before these grants are known) or a permission the Superadmin
   // revokes mid-session — bounces back to the tile menu instead of leaving a
@@ -921,9 +936,11 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
       setMobileActiveSection(null);
     } else if (mobileActiveSection === 'timesheet' && !canSeeTimesheet) {
       setMobileActiveSection(null);
+    } else if (mobileActiveSection === 'leave' && !canSeeLeave) {
+      setMobileActiveSection(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canSeeMovementClaim, canSeeConveyanceClaim, canSeeBudgetModule, canSeeTimesheet]);
+  }, [canSeeMovementClaim, canSeeConveyanceClaim, canSeeBudgetModule, canSeeTimesheet, canSeeLeave]);
   // Movement Claim page: the "Add Check In/Out" floating button opens the actual
   // Check In/Out form in a sheet (see below); claimListRefreshKey bumps every
   // time that form reports a successful Check In/Out, so MyClaimsCard's list
@@ -1051,7 +1068,11 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   const [editingJob, setEditingJob] = useState<{ jobId: number; jobNo: string } | null>(null);
 
   const [loading, setLoading] = useState(false);
-  const [submittingBudget, setSubmittingBudget] = useState(false);
+  // Tracks which Budget is currently being Submitted (Finished) — the button now
+  // lives per-Job in the Jobs list (any Job under that Budget can trigger it), so
+  // this holds a Budget id instead of a single flag to disable only the row whose
+  // Submit was actually clicked.
+  const [submittingBudgetId, setSubmittingBudgetId] = useState<number | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error' | 'warning'; text: string } | null>(null);
   // Popup shown right after a Job is successfully saved — separate from the
   // inline Message Banner above (which can be scrolled out of view), so the
@@ -1151,6 +1172,8 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
       if (budgetRes.ok) setBudgets(await budgetRes.json());
     } catch (err) {
       console.error('Failed to load master data', err);
+    } finally {
+      setProjectsLoaded(true);
     }
   };
 
@@ -1362,15 +1385,6 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
     });
 
   const hasActiveEntryColumnFilter = Object.values(entryColumnFilters).some((v) => v.trim());
-
-  // Whether the CURRENT user has already created at least one entry under the
-  // selected Budget — "Submit This Budget" only makes sense once there's something
-  // to submit, so the button stays disabled (and the request is rejected server-side
-  // too) until this is true.
-  const hasOwnEntriesInSelectedBudget = React.useMemo(() => {
-    if (!selectedBudget) return false;
-    return entries.some((e) => e.budget_id === selectedBudget.id && e.created_by === user.id);
-  }, [entries, selectedBudget, user.id]);
 
   // Live preview of what this User's next Job No under the selected Budget WILL
   // become on submit — mirrors the server's own "JOB-000X, sequential per user per
@@ -2107,37 +2121,42 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
     }
   };
 
-  // Marks the currently selected Budget as finished for THIS user. After this, the
-  // server rejects any new entries from this user under this Budget — irreversible
-  // from the User side, so confirm before firing.
-  const handleSubmitBudget = async () => {
-    if (!selectedBudget || selectedBudget.submitted) return;
-    if (!hasOwnEntriesInSelectedBudget) {
-      setMessage({ type: 'error', text: 'Add at least one MPR entry to this Budget before submitting it as finished.' });
-      return;
-    }
+  // Marks a Budget as finished for THIS user. After this, the server rejects any
+  // new entries from this user under this Budget — irreversible from the User side,
+  // so confirm before firing. Now triggered per-Job from the Jobs list (any Job's
+  // row can submit the Budget it belongs to), so it takes the target Budget
+  // explicitly instead of always assuming the currently selected one.
+  const handleSubmitBudget = async (target: { id: number; budget_name: string; submitted?: boolean }) => {
+    if (!target || target.submitted) return;
+
     const confirmed = window.confirm(
-      `Submit "${selectedBudget.budget_name}"? Once submitted, you won't be able to add any more entries to this Budget.`
+      `Submit "${target.budget_name}"? Once submitted, you won't be able to add any more entries to this Budget.`
     );
     if (!confirmed) return;
 
-    setSubmittingBudget(true);
+    setSubmittingBudgetId(target.id);
     setMessage(null);
     try {
-      const res = await fetch(apiUrl(`/api/budgets/${selectedBudget.id}/submit`), {
+      const res = await fetch(apiUrl(`/api/budgets/${target.id}/submit`), {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to submit budget');
 
-      setMessage({ type: 'success', text: `Budget "${selectedBudget.budget_name}" submitted. No more entries can be added to it.` });
-      setSelectedBudget((prev) => (prev ? { ...prev, submitted: true } : prev));
-      setBudgets((prev) => prev.map((b) => (b.id === selectedBudget.id ? { ...b, submitted: true } : b)));
+      // Submitting a Budget changes what a bunch of other pages/screens would show
+      // (that Budget's entries lock, its Jobs move out of the "still open" list,
+      // etc.) — instead of trying to patch every one of those places by hand, just
+      // reload the whole app so everything comes back fresh from the server, same
+      // as a manual page refresh. Message flashes briefly first so the confirmation
+      // is actually seen before the reload wipes it. submittingBudgetId is left set
+      // (not cleared in this path) so the button stays disabled through the wait
+      // instead of becoming clickable again right before the reload happens.
+      setMessage({ type: 'success', text: `Budget "${target.budget_name}" submitted. Reloading...` });
+      setTimeout(() => window.location.reload(), 900);
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message });
-    } finally {
-      setSubmittingBudget(false);
+      setSubmittingBudgetId(null);
     }
   };
 
@@ -2552,7 +2571,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
 
         {!!user.can_use_attendance && (
           <div className="relative z-10 px-4 -mt-6 pb-7">
-            <AttendanceCard token={token} projects={attendanceProjects} />
+            <AttendanceCard token={token} projects={attendanceProjects} loading={!projectsLoaded} />
           </div>
         )}
 
@@ -2600,7 +2619,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           grant it per account before it shows at all. */}
       {!!user.can_use_attendance && (
         <div className={`hidden ${showingClaimsPage ? 'md:hidden' : 'md:block'}`}>
-          <AttendanceCard token={token} projects={attendanceProjects} />
+          <AttendanceCard token={token} projects={attendanceProjects} loading={!projectsLoaded} />
         </div>
       )}
 
@@ -2663,11 +2682,20 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
 
       {/* Leave Applications (Review/Approved/Rejected) — reachable by tapping
           the Leave Summary card above, on both mobile and desktop (same
-          dedicated-page pattern as Conveyance Bill Claim). Not gated by any
-          permission, same as the Leave Summary card itself — every account
-          can apply for and review its own Leave. */}
-      <div className={mobileActiveSection === 'leave' ? 'block max-md:!mt-0' : 'hidden'}>
+          dedicated-page pattern as Conveyance Bill Claim). Gated by
+          can_view_leave_summary — see canSeeLeave above — same as the Leave
+          Summary card itself and the BottomNav "Leave" tab that opens this. */}
+      <div className={mobileActiveSection === 'leave' && canSeeLeave ? 'block max-md:!mt-0' : 'hidden'}>
         <LeaveReviewPage token={token} onBack={() => goToMobileSection(null)} />
+      </div>
+
+      {/* Employee Directory — company-wide roster, ungated for every account
+          (see EmployeeDirectory.tsx / GlobalSidebar.tsx). Reachable here as
+          the BottomNav's fallback last tab for any account without Leave
+          access (canSeeLeave above), so the bar never collapses to just
+          Home. */}
+      <div className={mobileActiveSection === 'employeeDirectory' ? 'block max-md:!mt-0' : 'hidden'}>
+        <EmployeeDirectory token={token} user={user} onBack={() => goToMobileSection(null)} />
       </div>
 
       {/* Timesheet — same Self Service page GlobalSidebar's "Timesheet" item
@@ -2753,17 +2781,22 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
         )}
 
       {/* Mobile-only tile menu — "Select a Budget", "Jobs", and "Job Entry Details" open
-          one at a time below md instead of always sitting stacked on top of each other. */}
+          one at a time below md instead of always sitting stacked on top of each other.
+          Styled as "liquid glass" cards (soft pastel gradient + backdrop-blur + big
+          rounded corners) to match Employee Directory's mobile card look
+          (EmployeeDirectory.tsx's cardTintClass grid cards), instead of the old flat
+          white tiles — each tile gets its own pastel tint so the row doesn't read as
+          one flat block. */}
       {mobileActiveSection === null && (
         <div className="md:hidden grid grid-cols-3 gap-2.5">
           {canSeeBudgetModule && (
           <button
             type="button"
             onClick={() => goToMobileSection('budget')}
-            className="flex flex-col items-center gap-1.5 bg-white border border-slate-200 rounded-2xl p-3 shadow-sm active:bg-slate-50"
+            className="relative flex flex-col items-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-blue-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
           >
-            <div className="p-2.5 bg-indigo-50 rounded-xl">
-              <Wallet className="w-6 h-6 text-indigo-600" />
+            <div className="p-2.5 bg-white/50 backdrop-blur border border-white/60 shadow-sm rounded-xl">
+              <Wallet className="w-6 h-6 text-blue-600" />
             </div>
             <span className="text-xs font-semibold text-slate-700 text-center leading-tight">
               {selectedBudget ? 'MPR Entry' : 'Select a Budget'}
@@ -2774,12 +2807,12 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           <button
             type="button"
             onClick={() => goToMobileSection('jobs')}
-            className="flex flex-col items-center gap-1.5 bg-white border border-slate-200 rounded-2xl p-3 shadow-sm active:bg-slate-50"
+            className="relative flex flex-col items-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-violet-100/70 via-white/50 to-fuchsia-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
           >
-            <div className="p-2.5 bg-indigo-50 rounded-xl relative">
-              <Briefcase className="w-6 h-6 text-indigo-600" />
+            <div className="p-2.5 bg-white/50 backdrop-blur border border-white/60 shadow-sm rounded-xl relative">
+              <Briefcase className="w-6 h-6 text-violet-600" />
               {totalJobsCount > 0 && (
-                <span className="absolute -top-1.5 -right-1.5 text-[10px] font-semibold bg-indigo-600 text-white rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
+                <span className="absolute -top-1.5 -right-1.5 text-[10px] font-semibold bg-violet-600 text-white rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 border border-white/70">
                   {totalJobsCount}
                 </span>
               )}
@@ -2791,10 +2824,10 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
             <button
               type="button"
               onClick={() => goToMobileSection('claim')}
-              className="flex flex-col items-center gap-1.5 bg-white border border-slate-200 rounded-2xl p-3 shadow-sm active:bg-slate-50"
+              className="relative flex flex-col items-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-emerald-100/70 via-white/50 to-teal-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
             >
-              <div className="p-2.5 bg-indigo-50 rounded-xl">
-                <Route className="w-6 h-6 text-indigo-600" />
+              <div className="p-2.5 bg-white/50 backdrop-blur border border-white/60 shadow-sm rounded-xl">
+                <Route className="w-6 h-6 text-emerald-600" />
               </div>
               <span className="text-xs font-semibold text-slate-700 text-center leading-tight">Movement Claim</span>
             </button>
@@ -2803,10 +2836,10 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
             <button
               type="button"
               onClick={() => goToMobileSection('conveyanceClaim')}
-              className="flex flex-col items-center gap-1.5 bg-white border border-slate-200 rounded-2xl p-3 shadow-sm active:bg-slate-50"
+              className="relative flex flex-col items-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-amber-100/70 via-white/50 to-orange-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
             >
-              <div className="p-2.5 bg-indigo-50 rounded-xl">
-                <Wallet className="w-6 h-6 text-indigo-600" />
+              <div className="p-2.5 bg-white/50 backdrop-blur border border-white/60 shadow-sm rounded-xl">
+                <Wallet className="w-6 h-6 text-amber-600" />
               </div>
               <span className="text-xs font-semibold text-slate-700 text-center leading-tight">Conveyance Bill Claim</span>
             </button>
@@ -2815,12 +2848,12 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           <button
             type="button"
             onClick={() => goToMobileSection('entries')}
-            className="flex flex-col items-center gap-1.5 bg-white border border-slate-200 rounded-2xl p-3 shadow-sm active:bg-slate-50"
+            className="relative flex flex-col items-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-rose-100/70 via-white/50 to-pink-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
           >
-            <div className="p-2.5 bg-indigo-50 rounded-xl relative">
-              <FileText className="w-6 h-6 text-indigo-600" />
+            <div className="p-2.5 bg-white/50 backdrop-blur border border-white/60 shadow-sm rounded-xl relative">
+              <FileText className="w-6 h-6 text-rose-600" />
               {filteredEntries.length > 0 && (
-                <span className="absolute -top-1.5 -right-1.5 text-[10px] font-semibold bg-indigo-600 text-white rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
+                <span className="absolute -top-1.5 -right-1.5 text-[10px] font-semibold bg-rose-600 text-white rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 border border-white/70">
                   {filteredEntries.length}
                 </span>
               )}
@@ -2832,16 +2865,17 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
             <button
               type="button"
               onClick={() => goToMobileSection('jobEdit')}
-              className="flex flex-col items-center gap-1.5 bg-white border border-slate-200 rounded-2xl p-3 shadow-sm active:bg-slate-50"
+              className="relative flex flex-col items-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-cyan-100/70 via-white/50 to-sky-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
             >
-              <div className="p-2.5 bg-indigo-50 rounded-xl">
-                <Edit2 className="w-6 h-6 text-indigo-600" />
+              <div className="p-2.5 bg-white/50 backdrop-blur border border-white/60 shadow-sm rounded-xl">
+                <Edit2 className="w-6 h-6 text-cyan-600" />
               </div>
               <span className="text-xs font-semibold text-slate-700 text-center leading-tight">Job Edit</span>
             </button>
           )}
         </div>
       )}
+
 
       {/* Global Calendar (Admin Panel -> Holidays) — read-only "pocket
           calendar" of every set Weekend/Holiday date, same widget every role
@@ -3773,26 +3807,6 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                 {loading ? 'Saving Entry...' : editingJob ? 'Add MPR to Job' : 'Submit MPR Entry'}
               </button>
             </form>
-
-            {/* Submit Budget — locks THIS user out of adding any more entries under
-                this Budget once every Job they intend to enter has been saved above. */}
-            <div className="mt-5 pt-5 border-t border-dashed border-slate-200">
-              <p className="text-[11px] text-slate-500 mb-2">
-                {hasOwnEntriesInSelectedBudget
-                  ? "Finished entering every Job for this Budget? Submitting it will lock it — you won't be able to add more entries here afterward."
-                  : 'Add at least one MPR entry to this Budget before you can submit it as finished.'}
-              </p>
-              <button
-                type="button"
-                onClick={handleSubmitBudget}
-                disabled={submittingBudget || !hasOwnEntriesInSelectedBudget}
-                title={!hasOwnEntriesInSelectedBudget ? 'Add at least one entry to this Budget first' : undefined}
-                className="w-full py-2.5 px-4 bg-white hover:bg-rose-50 border border-rose-200 text-rose-700 font-semibold rounded-xl transition-all text-sm disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-white flex items-center justify-center gap-2"
-              >
-                <Lock className="w-4 h-4" />
-                {submittingBudget ? 'Submitting Budget...' : 'Submit This Budget (Finish)'}
-              </button>
-            </div>
             </>
             )}
           </div>
@@ -3888,6 +3902,33 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                               <Edit2 className="w-3.5 h-3.5" />
                             </button>
                           )}
+                          {/* Submit This Budget (Finish) — moved here from the New MPR Entry
+                              form so it sits right on the Job it's tied to instead of as one
+                              shared button below the form. Every Job under the same Budget
+                              triggers the same underlying "submit this Budget" action (there's
+                              no per-Job submit on the server, only per-Budget) — whichever
+                              Job's button is tapped submits the whole Budget group it's
+                              listed under. Hidden once that Budget is already submitted, and
+                              only shown for Jobs that actually belong to a Budget. */}
+                          {group.budget_id !== null &&
+                            !(budgets.find((b) => b.id === group.budget_id)?.submitted) && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleSubmitBudget({
+                                    id: group.budget_id as number,
+                                    budget_name: group.budget_name || 'this Budget',
+                                    submitted: budgets.find((b) => b.id === group.budget_id)?.submitted
+                                  })
+                                }
+                                disabled={submittingBudgetId === group.budget_id}
+                                title={`Submit "${group.budget_name || 'this Budget'}" (Finish)`}
+                                className="flex-shrink-0 flex items-center gap-1 px-2 py-1.5 mr-2 rounded-lg text-[11px] font-semibold text-rose-700 bg-white border border-rose-200 hover:bg-rose-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                              >
+                                <Lock className="w-3 h-3" />
+                                {submittingBudgetId === group.budget_id ? 'Submitting...' : 'Submit'}
+                              </button>
+                            )}
                         </div>
                       ))}
                     </div>
@@ -4755,6 +4796,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
         onChange={goToMobileSection}
         canViewMovementClaim={canSeeMovementClaim}
         canViewTimesheet={canSeeTimesheet}
+        canViewLeave={canSeeLeave}
       />
     </div>
   );

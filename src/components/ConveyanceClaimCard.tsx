@@ -77,24 +77,18 @@ export const ConveyanceClaimCard: React.FC<ConveyanceClaimCardProps> = ({ token,
 
   return (
     <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
-      {/* Top Header Action */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
-        <div className="flex items-center gap-2">
-          <div className="p-1.5 bg-indigo-50 rounded-lg">
-            <Wallet className="w-4 h-4 text-indigo-600" />
-          </div>
-          <div>
-            <div className="text-sm font-medium text-slate-900">Conveyance Bill Claim</div>
-            <div className="text-xs text-slate-400">Submit an expense claim for approval</div>
-          </div>
+      {/* Top Header — the "+ New Claim" action used to live here as a small
+          corner button; it's now the floating pill button at the bottom of
+          this page instead (same style/position as Movement Claim's
+          "Add Check In/Out"), so this header is just the title now. */}
+      <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-100">
+        <div className="p-1.5 bg-indigo-50 rounded-lg">
+          <Wallet className="w-4 h-4 text-indigo-600" />
         </div>
-        <button
-          type="button"
-          onClick={() => setShowNewClaim(true)}
-          className="flex items-center gap-1 text-xs font-semibold px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white transition-colors whitespace-nowrap"
-        >
-          <Plus className="w-3.5 h-3.5" /> New Claim
-        </button>
+        <div>
+          <div className="text-sm font-medium text-slate-900">Conveyance Bill Claim</div>
+          <div className="text-xs text-slate-400">Submit an expense claim for approval</div>
+        </div>
       </div>
 
       {message && <div className="mx-4 mt-2 text-xs px-3 py-2 rounded-lg bg-emerald-50 text-emerald-700">{message}</div>}
@@ -185,6 +179,20 @@ export const ConveyanceClaimCard: React.FC<ConveyanceClaimCardProps> = ({ token,
           ))}
         </div>
       )}
+
+      {/* Floating "New Claim" — mobile only, same style/position as Movement
+          Claim's floating "Add Check In/Out" button (bottom-right, sitting
+          above BottomNav's fixed bar) instead of the old small header
+          button, so the two Claims pages match. z-50 for the same reason
+          that one uses it — always paints on top of BottomNav (z-40). */}
+      <button
+        type="button"
+        onClick={() => setShowNewClaim(true)}
+        className="md:hidden fixed right-4 z-50 flex items-center gap-2 pl-4 pr-5 py-3 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-full shadow-lg shadow-indigo-600/30 active:scale-95 transition-transform"
+        style={{ bottom: 'calc(6.5rem + env(safe-area-inset-bottom, 0px))' }}
+      >
+        <Plus className="w-4 h-4" /> New Claim
+      </button>
 
       {showNewClaim && (
         <NewConveyanceClaimModal token={token} onClose={() => setShowNewClaim(false)} onSubmitted={handleSubmitted} />
