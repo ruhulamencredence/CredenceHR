@@ -402,6 +402,20 @@ CREATE TABLE IF NOT EXISTS assets (
   FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
 );
 
+-- Server Profiles (Admin Panel -> Servers, Superadmin-only,
+-- ServerProfileRoutes.ts) — the centrally managed catalog of backend
+-- deployments (IP/URL) the Android APK build can switch between after
+-- login. See ServerProfileRoutes.ts for the full reasoning.
+CREATE TABLE IF NOT EXISTS server_profiles (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(150) NOT NULL,
+  url VARCHAR(255) NOT NULL,
+  created_by INT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+);
+
 CREATE TABLE IF NOT EXISTS asset_requisitions (
   id INT AUTO_INCREMENT PRIMARY KEY,
   employee_user_id INT NOT NULL,
@@ -491,9 +505,12 @@ CREATE TABLE IF NOT EXISTS entry_edit_history (
 -- entries row yet) and set once approved (see POST /api/job-edits/:id/act).
 CREATE TABLE IF NOT EXISTS job_edit_requests (
   id INT AUTO_INCREMENT PRIMARY KEY,
-  job_id INT NOT NULL,
+  -- NULL for a still-pending 'add_job' request (Job Edit's "Add New Job") — there's
+  -- no real Job yet to point at, only what's proposed in payload; backfilled with
+  -- the newly created Job's id once an Admin approves it.
+  job_id INT NULL,
   entry_id INT NULL,
-  action ENUM('add_item', 'delete_entry') NOT NULL,
+  action ENUM('add_item', 'delete_entry', 'add_job') NOT NULL,
   payload TEXT NULL,
   status ENUM('pending', 'approved', 'rejected') NOT NULL DEFAULT 'pending',
   requested_by INT NOT NULL,

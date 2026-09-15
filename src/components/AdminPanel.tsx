@@ -21,6 +21,7 @@ import { EmployeeTrackingPanel } from './EmployeeTrackingPanel';
 import { OfficeAttendancePanel } from './OfficeAttendancePanel';
 import { HolidayCalendarPanel } from './HolidayCalendarPanel';
 import { AssetManagementAdmin } from './AssetManagementAdmin';
+import { ServerProfilesPanel } from './ServerProfilesPanel';
 import { AdminDashboard } from './AdminDashboard';
 import { Spinner } from './Spinner';
 import { apiUrl } from '../lib/api';
@@ -176,7 +177,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // have explicitly granted user.can_view_login_location.
   const canSeeLoginLocation = isSuperAdmin || !!user.can_view_login_location;
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'my_conveyance' | 'disbursement' | 'holidays' | 'asset_management'>(
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'my_conveyance' | 'disbursement' | 'holidays' | 'asset_management' | 'servers'>(
     () => {
       // Restores whichever tab this Admin was last looking at — see the
       // "pull down to reload" note in App.tsx: since a reload now has to be
@@ -186,9 +187,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         const saved = localStorage.getItem(`mpr_admin_tab_${user.id}`);
         // 'my_conveyance' isn't its own module_permissions entry — it rides
         // along with 'conveyance' (see the tab-visibility effect below).
+        // 'servers' isn't one either — it's Superadmin-only, never granted
+        // via module_permissions (see ServerProfileRoutes.ts).
         const savedVisible =
           saved === 'dashboard' ? isAdminRole :
-          saved === 'my_conveyance' ? isSuperAdmin || visibleModules.includes('conveyance') : isSuperAdmin || visibleModules.includes(saved as AdminModuleKey);
+          saved === 'my_conveyance' ? isSuperAdmin || visibleModules.includes('conveyance') :
+          saved === 'servers' ? isSuperAdmin : isSuperAdmin || visibleModules.includes(saved as AdminModuleKey);
         if (saved && savedVisible) return saved as any;
       } catch {
         // ignore — falls through to the normal default below
@@ -225,6 +229,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       if (isAdminRole) setActiveTab('dashboard');
       return;
     }
+    // 'servers' isn't an AdminModuleKey/module_permissions entry either —
+    // Superadmin-only (see ServerProfileRoutes.ts), same reasoning as
+    // 'my_conveyance' below.
+    if (adminNavRequest.target === 'servers') {
+      if (isSuperAdmin) setActiveTab('servers');
+      return;
+    }
     // 'my_conveyance' isn't its own module_permissions entry — it rides along
     // with 'conveyance' (see the "My Conveyance Bill Claim" item in GlobalSidebar).
     const visible = adminNavRequest.target === 'my_conveyance' ? canSee('conveyance') : canSee(adminNavRequest.target as AdminModuleKey);
@@ -238,6 +249,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   useEffect(() => {
     const activeTabStillVisible =
       activeTab === 'dashboard' ? isAdminRole :
+      activeTab === 'servers' ? isSuperAdmin :
       activeTab === 'my_conveyance' ? canSee('conveyance') : canSee(activeTab);
     if (!activeTabStillVisible && visibleModules.length > 0) {
       setActiveTab(visibleModules[0] as any);
@@ -653,6 +665,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       const p = r.payload || {};
       return `Add MPR ${p.mpr_no || '—'} · ${p.item_name || '—'} · Qty ${p.requisitioned_qty ?? '—'} · Delivery ${formatDate(p.delivery_date || '') || '—'}`;
     }
+    if (r.action === 'add_job') {
+      const p = r.payload || {};
+      const items = Array.isArray(p.items) ? p.items : [];
+      return `New Job "${p.job_name || '—'}" · ${p.project_name || '—'} · ${p.budget_name || '—'} · ${items.length} MPR row${items.length === 1 ? '' : 's'}`;
+    }
     return `Delete MPR ${r.entry_mpr_no || '—'} · ${r.entry_item_name || '—'} · Qty ${r.entry_requisitioned_qty ?? '—'} · Delivery ${formatDate(r.entry_delivery_date || '') || '—'}`;
   };
 
@@ -1001,7 +1018,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     // Edit" feature (Admin Panel -> Users -> Job Edit permission) — distinct from an
     // edit to an existing row, since there's no "old value" to show, just what was
     // newly added (see new_value on this row for its Qty/Delivery Date).
-    job_edit_add: 'MPR Added (Job Edit)'
+    job_edit_add: 'MPR Added (Job Edit)',
+    // A brand-new Job created via Job Edit's "Add New Job" (same permission, same
+    // Admin approval flow as job_edit_add above) — new_value carries the new Job No
+    // plus this row's Qty/Delivery Date, since there's no "old value" either.
+    job_edit_new_job: 'New Job Added (Job Edit)'
   };
 
   // --- Export the (currently searched/filtered) MPR Edit Log to Excel (.xlsx) ---
@@ -3379,6 +3400,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         </div>
       )}
 
+      {/* TAB: SERVERS — Superadmin-only catalog of backend deployments
+          (IP/URL) the Android app can switch between after login. Not a
+          grantable AdminModuleKey (see ServerProfileRoutes.ts) — access is
+          gated purely by isSuperAdmin in the effects above, same as the
+          "Users" tab's role-promotion controls. */}
+      {activeTab === 'servers' && (
+        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6">
+          <ServerProfilesPanel token={token} />
+        </div>
+      )}
+
       {/* TAB: JOB RECYCLE — every soft-deleted entry, with Restore + permanently erase */}
       {activeTab === 'recycle' && (
         <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
@@ -3494,8 +3526,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
               )}
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">
-              Add MPR / Delete MPR requests a User submitted through Job Edit on an already Final Submitted
-              Job (via the can_job_edit permission) — each one needs your Approve or Reject before it takes effect.
+              Add MPR / Delete MPR / New Job requests a User submitted through Job Edit on an already Final
+              Submitted Budget (via the can_job_edit permission) — each one needs your Approve or Reject before it takes effect.
             </p>
           </div>
 
@@ -3515,15 +3547,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 <div key={r.id} className="px-6 py-3.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-xs font-semibold text-blue-600">{r.job_no}</span>
+                      <span className="text-xs font-semibold text-blue-600">
+                        {r.job_no || (r.action === 'add_job' ? (r.payload || {}).job_name : '') || '—'}
+                      </span>
                       <span
                         className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
                           r.action === 'add_item'
                             ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            : r.action === 'add_job'
+                            ? 'bg-blue-50 text-blue-700 border-blue-200'
                             : 'bg-rose-50 text-rose-700 border-rose-200'
                         }`}
                       >
-                        {r.action === 'add_item' ? 'Add MPR' : 'Delete MPR'}
+                        {r.action === 'add_item' ? 'Add MPR' : r.action === 'add_job' ? 'New Job' : 'Delete MPR'}
                       </span>
                     </div>
                     <p className="text-sm text-slate-800 mt-1 break-words">{describeJobEditRequest(r)}</p>

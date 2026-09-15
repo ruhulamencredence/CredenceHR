@@ -48,6 +48,14 @@ interface AddItemOption {
 // set, otherwise the shared "Delivery Date" field.
 const getAddItemDeliveryDate = (opt: AddItemOption, sharedDate: string): string => opt.deliveryDate || sharedDate;
 
+// One row in the "Add New Job" form's item list — same shape as AddItemOption (see
+// above) plus its own MPR No, since unlike the "Add MPR to this Job" form (which is
+// always scoped to ONE MPR No at a time), a brand-new Job can carry several
+// different MPR Nos at once, each contributing its own Item rows.
+interface NewJobItemRow extends AddItemOption {
+  mprNo: string;
+}
+
 // Latest ("max") of any given date strings, ignoring null/undefined/empty ones —
 // used to combine several floors (today, the Budget's delivery_date_from, an
 // entry's own entry_date) into a single min= for a date picker. Plain
@@ -92,10 +100,12 @@ export const JobEditPanel: React.FC<JobEditPanelProps> = ({ token }) => {
   const [openJobId, setOpenJobId] = useState<number | null>(null);
   const [mprNumbers, setMprNumbers] = useState<MprNumber[]>([]);
   // This user's own queued Job Edit changes (Delivery Date edit / add MPR / delete
-  // MPR) that are pending Admin approval, or were reviewed within the last couple of
-  // days — see GET /api/job-edits/mine. Drives the "Edit Pending for Admin Approval"
-  // badges below.
+  // MPR / add new Job) that are pending Admin approval, or were reviewed within the
+  // last couple of days — see GET /api/job-edits/mine. Drives the "Edit Pending for
+  // Admin Approval" badges below.
   const [pendingEdits, setPendingEdits] = useState<PendingJobEdit[]>([]);
+  // Whether the "Add New Job" form (below the header, above the Job list) is open.
+  const [showNewJobForm, setShowNewJobForm] = useState(false);
 
   const authHeaders = { Authorization: `Bearer ${token}` };
 
@@ -197,16 +207,26 @@ export const JobEditPanel: React.FC<JobEditPanelProps> = ({ token }) => {
 
   return (
     <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden flex flex-col min-h-[calc(100dvh-14rem)] md:min-h-0 md:h-[calc(100vh-4rem)] md:rounded-none md:border-0 md:border-t md:shadow-none">
-      <div className="px-6 py-4 border-b border-slate-200 flex items-center gap-2.5 shrink-0">
-        <div className="p-2 bg-blue-50 rounded-lg">
-          <Briefcase className="w-4 h-4 text-blue-600" />
+      <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between gap-2.5 shrink-0">
+        <div className="flex items-center gap-2.5">
+          <div className="p-2 bg-blue-50 rounded-lg">
+            <Briefcase className="w-4 h-4 text-blue-600" />
+          </div>
+          <div>
+            <h2 className="text-sm font-semibold text-slate-800">Job Edit</h2>
+            <p className="text-[11px] text-slate-400">
+              Add, edit or delete an MPR inside a Job you've already Final Submitted — or add a brand-new Job.
+            </p>
+          </div>
         </div>
-        <div>
-          <h2 className="text-sm font-semibold text-slate-800">Job Edit</h2>
-          <p className="text-[11px] text-slate-400">
-            Add, edit or delete an MPR inside a Job you've already Final Submitted.
-          </p>
-        </div>
+        <button
+          type="button"
+          onClick={() => setShowNewJobForm((v) => !v)}
+          className="shrink-0 inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors"
+        >
+          {showNewJobForm ? <X className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
+          {showNewJobForm ? 'Cancel' : 'Add New Job'}
+        </button>
       </div>
 
       {/* Everything below the header bar above scrolls WITHIN this pane on
@@ -216,6 +236,22 @@ export const JobEditPanel: React.FC<JobEditPanelProps> = ({ token }) => {
           it. Mobile keeps the old plain-flow behavior (no separate scroll
           region) since the whole page already scrolls there. */}
       <div className="flex-1 md:overflow-y-auto">
+        {showNewJobForm && (
+          <div className="p-6 border-b border-slate-200 bg-slate-50/60">
+            <NewJobRequestForm
+              token={token}
+              jobs={jobs}
+              mprNumbers={mprNumbers}
+              onSubmitted={() => {
+                setShowNewJobForm(false);
+                refresh();
+              }}
+            />
+          </div>
+        )}
+
+        <PendingNewJobRequests requests={pendingEdits.filter((p) => p.action === 'add_job')} />
+
         {loadError && (
           <div className="mx-6 mt-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs">
             {loadError}
@@ -1219,6 +1255,453 @@ const JobEditRow: React.FC<JobEditRowProps> = ({ job, token, mprNumbers, isOpen,
             );
           })()}
         </div>
+      )}
+    </div>
+  );
+};
+
+// ---- "Pending New Job Requests" — this user's own queued "Add New Job" requests
+// (action === 'add_job'), shown between the header and the Job list since (unlike
+// a pending Add MPR / Delete MPR) they don't belong to any existing Job's accordion
+// row — there's no real Job for them to nest under until an Admin approves one. ----
+
+interface PendingNewJobRequestsProps {
+  requests: PendingJobEdit[];
+}
+
+const PendingNewJobRequests: React.FC<PendingNewJobRequestsProps> = ({ requests }) => {
+  if (requests.length === 0) return null;
+  return (
+    <div className="px-6 pt-4 space-y-2.5">
+      {requests.map((r) => {
+        const p = r.payload || {};
+        const items: any[] = Array.isArray(p.items) ? p.items : [];
+        return (
+          <div
+            key={`pending-new-job-${r.id}`}
+            className={`rounded-xl border p-3.5 ${
+              r.status === 'rejected' ? 'border-rose-200 bg-rose-50/40' : 'border-dashed border-amber-300 bg-amber-50/30'
+            }`}
+          >
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <p className="text-sm font-semibold text-slate-800 truncate">
+                {p.job_name || 'New Job'} · {p.project_name || '—'}
+              </p>
+              {r.status === 'pending' ? (
+                <PendingBadge label="New Job Pending Admin Approval" />
+              ) : r.status === 'rejected' ? (
+                <span className="text-[10px] font-semibold text-rose-700">Rejected by Admin</span>
+              ) : (
+                <span className="text-[10px] font-semibold text-emerald-700">Approved — see Job list below</span>
+              )}
+            </div>
+            <p className="text-[11px] text-slate-400 mt-1">
+              {p.budget_name ? `${p.budget_name} · ` : ''}
+              Duration {p.job_duration || '—'} · {items.length} MPR row{items.length === 1 ? '' : 's'}
+            </p>
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
+// ---- "Add New Job" form — unlike "Add MPR to this Job" (JobEditRow above, always
+// scoped to ONE already-existing Job), this creates a brand-new Job from scratch —
+// Budget, Project, Job Name, Job Duration and one or more MPR Nos, each contributing
+// one or more Item rows. It never applies directly: submitting always queues a single
+// job_edit_requests row (action = 'add_job') for Admin approval, since it's reachable
+// at all only because this user already has can_job_edit — see
+// POST /api/job-edits/new-job. ----
+
+interface NewJobRequestFormProps {
+  token: string;
+  jobs: JobGroup[];
+  mprNumbers: MprNumber[];
+  onSubmitted: () => void;
+}
+
+// One Budget+Project combination this user can add a new Job under — derived from
+// their own already-Final-Submitted Jobs (the `jobs` list JobEditPanel already
+// loaded), since that's exactly the set of Budgets can_job_edit is meant to reach:
+// ones this user has personally Final Submitted. A Budget+Project pair with zero
+// active Jobs left (all deleted) simply won't appear here — a narrow edge case, not
+// worth a separate lookup endpoint just to cover it.
+interface BudgetProjectOption {
+  key: string;
+  budget_id: number;
+  budget_name: string | null;
+  project_id: number;
+  project_name: string;
+  delivery_date_from: string | null;
+  delivery_date_to: string | null;
+}
+
+const NewJobRequestForm: React.FC<NewJobRequestFormProps> = ({ token, jobs, mprNumbers, onSubmitted }) => {
+  const authHeaders = { Authorization: `Bearer ${token}` };
+
+  const budgetProjectOptions: BudgetProjectOption[] = [];
+  {
+    const seen = new Set<string>();
+    for (const j of jobs) {
+      const key = `${j.budget_id}::${j.project_id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      budgetProjectOptions.push({
+        key,
+        budget_id: j.budget_id,
+        budget_name: j.budget_name,
+        project_id: j.project_id,
+        project_name: j.project_name,
+        delivery_date_from: j.delivery_date_from,
+        delivery_date_to: j.delivery_date_to
+      });
+    }
+  }
+
+  const [selectedKey, setSelectedKey] = useState('');
+  const selected = budgetProjectOptions.find((o) => o.key === selectedKey) || null;
+
+  const [jobName, setJobName] = useState('');
+  const [jobDuration, setJobDuration] = useState('');
+  const [budgetItems, setBudgetItems] = useState<BudgetItem[]>([]);
+  const [loadingItems, setLoadingItems] = useState(false);
+  const [rows, setRows] = useState<NewJobItemRow[]>([]);
+  const [mprNoInput, setMprNoInput] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const selectBudgetProject = async (key: string) => {
+    setSelectedKey(key);
+    setRows([]);
+    setMprNoInput('');
+    setError('');
+    setBudgetItems([]);
+    const opt = budgetProjectOptions.find((o) => o.key === key);
+    if (!opt) return;
+    setLoadingItems(true);
+    try {
+      const res = await fetch(apiUrl(`/api/budgets/${opt.budget_id}/items`), { headers: authHeaders });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to load Budget Items');
+      const scoped = (Array.isArray(data) ? data : []).filter(
+        (it: BudgetItem) =>
+          String(it.project_name || '').trim().toLowerCase() === opt.project_name.trim().toLowerCase() &&
+          it.mrf_no &&
+          String(it.mrf_no).trim() !== ''
+      );
+      setBudgetItems(scoped);
+    } catch (err: any) {
+      setError(err.message || "Could not load this Budget's Items");
+    } finally {
+      setLoadingItems(false);
+    }
+  };
+
+  const mprNoOptions = [...new Set(budgetItems.map((it) => String(it.mrf_no).trim()))].sort();
+
+  // Every Item under a given MPR No not already present in `rows` — same rule as
+  // JobEditRow's itemsForAddMpr (an Item this user has already fully requisitioned
+  // is left out; every OTHER imported Excel row under the MPR No gets its own row).
+  const itemsForMpr = (mprNo: string): NewJobItemRow[] => {
+    const present = new Set(rows.map((r) => r.budgetItemId));
+    const out: NewJobItemRow[] = [];
+    for (const bi of budgetItems) {
+      if (String(bi.mrf_no || '').trim().toLowerCase() !== mprNo.trim().toLowerCase()) continue;
+      if (present.has(bi.id)) continue;
+      const desc = String(bi.description || '').trim();
+      if (!desc) continue;
+      const reqQty = parseQtyNumber(bi.req_qty);
+      const consumed = Number(bi.requisitioned_by_me || 0);
+      const remainingQty = reqQty === null ? null : Math.max(0, reqQty - consumed);
+      if (remainingQty !== null && remainingQty <= 0) continue;
+      out.push({
+        uid: makeItemUid(),
+        mprNo: String(bi.mrf_no).trim(),
+        budgetItemId: bi.id,
+        name: desc,
+        reqQty,
+        remainingQty,
+        qty: remainingQty !== null ? String(remainingQty) : '',
+        deliveryDate: ''
+      });
+    }
+    return out;
+  };
+
+  const addMprRows = () => {
+    setError('');
+    if (!mprNoInput.trim()) return;
+    const toAdd = itemsForMpr(mprNoInput);
+    if (toAdd.length === 0) {
+      setError(
+        budgetItems.some((bi) => String(bi.mrf_no || '').trim().toLowerCase() === mprNoInput.trim().toLowerCase())
+          ? 'Every Item under this MPR No is already in the list, or already fully requisitioned by you.'
+          : 'No Description of Materials found in the imported Budget Excel for this MPR No.'
+      );
+      return;
+    }
+    setRows((prev) => [...prev, ...toAdd]);
+    setMprNoInput('');
+  };
+
+  const removeRow = (uid: string) => {
+    setRows((prev) => prev.filter((r) => r.uid !== uid));
+  };
+
+  const updateRowQty = (uid: string, qty: string) => {
+    setRows((prev) => prev.map((r) => (r.uid === uid ? { ...r, qty } : r)));
+  };
+
+  const updateRowDelivery = (uid: string, date: string) => {
+    setRows((prev) => prev.map((r) => (r.uid === uid ? { ...r, deliveryDate: date } : r)));
+  };
+
+  const deliveryFloor = latestDateStr(todayDateOnlyString(), selected?.delivery_date_from);
+  const deliveryTo = selected?.delivery_date_to || undefined;
+
+  const renderDeliveryPicker = (row: NewJobItemRow) => {
+    const className = 'w-full px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs bg-white';
+    if (deliveryFloor && deliveryTo) {
+      return (
+        <select value={row.deliveryDate} onChange={(ev) => updateRowDelivery(row.uid, ev.target.value)} className={className}>
+          <option value="">Select...</option>
+          {dateRangeOptions(deliveryFloor, deliveryTo).map((d) => (
+            <option key={d} value={d}>{formatDateLabel(d)}</option>
+          ))}
+        </select>
+      );
+    }
+    return (
+      <input
+        type="date"
+        value={row.deliveryDate}
+        min={deliveryFloor}
+        max={deliveryTo}
+        onChange={(ev) => updateRowDelivery(row.uid, ev.target.value)}
+        className={className}
+      />
+    );
+  };
+
+  const resetForm = () => {
+    setSelectedKey('');
+    setJobName('');
+    setJobDuration('');
+    setBudgetItems([]);
+    setRows([]);
+    setMprNoInput('');
+    setError('');
+  };
+
+  const submit = async () => {
+    setError('');
+    if (!selected) {
+      setError('Select a Budget / Project.');
+      return;
+    }
+    if (!jobName.trim() || !jobDuration.trim()) {
+      setError('Job Name and Job Duration are required.');
+      return;
+    }
+    if (rows.length === 0) {
+      setError('Add at least one MPR row.');
+      return;
+    }
+    for (const row of rows) {
+      const q = Number(row.qty);
+      if (!row.qty || !Number.isFinite(q) || q <= 0) {
+        setError(`Enter a valid Requisitioned Qty for "${row.name}".`);
+        return;
+      }
+      if (row.remainingQty !== null && q > row.remainingQty) {
+        setError(`Requisitioned Qty for "${row.name}" can't exceed the remaining available Qty (${row.remainingQty}).`);
+        return;
+      }
+      if (!row.deliveryDate) {
+        setError(`Select a Delivery Date for "${row.name}".`);
+        return;
+      }
+    }
+    const itemsPayload: { mpr_id: number; budget_item_id: number; requisitioned_qty: number; delivery_date: string }[] = [];
+    for (const row of rows) {
+      const mprMatch = mprNumbers.find((m) => m.mpr_no.trim().toLowerCase() === row.mprNo.trim().toLowerCase());
+      if (!mprMatch) {
+        setError(`MPR No "${row.mprNo}" isn't in the system MPR list. Ask your Admin to add it first.`);
+        return;
+      }
+      itemsPayload.push({
+        mpr_id: mprMatch.id,
+        budget_item_id: row.budgetItemId,
+        requisitioned_qty: Number(row.qty),
+        delivery_date: row.deliveryDate
+      });
+    }
+    setSaving(true);
+    try {
+      const res = await fetch(apiUrl('/api/job-edits/new-job'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        body: JSON.stringify({
+          budget_id: selected.budget_id,
+          project_id: selected.project_id,
+          job_name: jobName.trim(),
+          job_duration: jobDuration.trim(),
+          items: itemsPayload
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to submit new Job');
+      resetForm();
+      onSubmitted();
+    } catch (err: any) {
+      setError(err.message || 'Something went wrong');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-3">
+      <h3 className="text-sm font-semibold text-slate-800">Add New Job</h3>
+      <p className="text-[11px] text-slate-400 -mt-2">
+        Creates a brand-new Job under a Budget you've already Final Submitted — submitted here for Admin
+        approval, just like Add MPR / Delete MPR.
+      </p>
+      {error && <p className="text-xs text-rose-600">{error}</p>}
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <label className="block text-[11px] font-medium text-slate-500 mb-1">Budget / Project</label>
+          <select
+            value={selectedKey}
+            onChange={(ev) => selectBudgetProject(ev.target.value)}
+            className="w-full px-2.5 py-2 rounded-lg border border-slate-300 text-xs bg-white"
+          >
+            <option value="">Select...</option>
+            {budgetProjectOptions.map((o) => (
+              <option key={o.key} value={o.key}>
+                {o.project_name} {o.budget_name ? `· ${o.budget_name}` : ''}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-[11px] font-medium text-slate-500 mb-1">Job Name</label>
+            <input
+              type="text"
+              value={jobName}
+              onChange={(ev) => setJobName(ev.target.value)}
+              placeholder="Job Name"
+              className="w-full px-2.5 py-2 rounded-lg border border-slate-300 text-xs bg-white"
+            />
+          </div>
+          <div>
+            <label className="block text-[11px] font-medium text-slate-500 mb-1">Job Duration</label>
+            <input
+              type="text"
+              value={jobDuration}
+              onChange={(ev) => setJobDuration(ev.target.value)}
+              placeholder="e.g. 15 days"
+              className="w-full px-2.5 py-2 rounded-lg border border-slate-300 text-xs bg-white"
+            />
+          </div>
+        </div>
+      </div>
+
+      {selected && (
+        loadingItems ? (
+          <div className="flex items-center gap-2 text-xs text-slate-500">
+            <Spinner size={14} /> Loading this Budget's Items…
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <div>
+              <label className="block text-[11px] font-medium text-slate-500 mb-1">MPR No</label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  list="new-job-mpr-no-options"
+                  value={mprNoInput}
+                  onChange={(ev) => setMprNoInput(ev.target.value)}
+                  placeholder="Type or select MPR No"
+                  className="flex-1 min-w-0 px-2.5 py-2 rounded-lg border border-slate-300 text-xs bg-white"
+                />
+                <datalist id="new-job-mpr-no-options">
+                  {mprNoOptions.map((mo) => (
+                    <option key={mo} value={mo} />
+                  ))}
+                </datalist>
+                <button
+                  type="button"
+                  onClick={addMprRows}
+                  className="shrink-0 inline-flex items-center gap-1 text-xs font-semibold px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-900 text-white transition-colors"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Add
+                </button>
+              </div>
+            </div>
+
+            {rows.length > 0 && (
+              <div className="border border-slate-200 rounded-xl overflow-hidden">
+                <table className="w-full text-xs">
+                  <thead className="bg-slate-50 text-slate-500">
+                    <tr>
+                      <th className="px-3 py-2 text-left">MPR No</th>
+                      <th className="px-3 py-2 text-left">Item</th>
+                      <th className="px-3 py-2 text-left">Qty</th>
+                      <th className="px-3 py-2 text-left">Delivery Date</th>
+                      <th className="px-3 py-2 text-right">—</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {rows.map((row) => (
+                      <tr key={row.uid}>
+                        <td className="px-3 py-2 font-medium text-slate-800 whitespace-nowrap">{row.mprNo}</td>
+                        <td className="px-3 py-2 text-slate-600 max-w-[220px] truncate" title={row.name}>{row.name}</td>
+                        <td className="px-3 py-2">
+                          <input
+                            type="number"
+                            inputMode="decimal"
+                            min="0"
+                            step="any"
+                            max={row.remainingQty ?? undefined}
+                            value={row.qty}
+                            onChange={(ev) => updateRowQty(row.uid, ev.target.value)}
+                            className={`w-20 px-2 py-1 rounded-md border text-xs bg-white focus:outline-none ${
+                              row.remainingQty !== null && row.qty !== '' && Number(row.qty) > row.remainingQty
+                                ? 'border-rose-500 ring-1 ring-rose-500'
+                                : 'border-slate-300'
+                            }`}
+                          />
+                          {row.remainingQty !== null && (
+                            <span className="text-[10px] text-slate-400 ml-1">/ {row.remainingQty}</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2">{renderDeliveryPicker(row)}</td>
+                        <td className="px-3 py-2 text-right">
+                          <button type="button" onClick={() => removeRow(row.uid)} className="p-1 rounded-md text-slate-400 hover:text-rose-600 hover:bg-rose-50">
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <button
+              type="button"
+              disabled={saving || rows.length === 0}
+              onClick={submit}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold px-4 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white transition-colors"
+            >
+              <Save className="w-3.5 h-3.5" /> {saving ? 'Submitting…' : 'Submit for Approval'}
+            </button>
+          </div>
+        )
       )}
     </div>
   );

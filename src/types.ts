@@ -695,18 +695,26 @@ export interface EntryEditHistory {
 // User's, for the "editlog" module to review/act on via POST /api/job-edits/:id/act).
 export interface PendingJobEdit {
   id: number;
-  job_id: number;
+  // Null for a still-pending 'add_job' request — there's no real Job yet, only
+  // what's proposed in payload below. Set (and joined via job_no) for add_item /
+  // delete_entry, and backfilled onto add_job once an Admin approves it.
+  job_id: number | null;
   job_no?: string | null;
   job_name?: string | null;
   // Which existing MPR row this request is against — set for 'delete_entry', null
-  // for a still-pending 'add_item' (there's no real entries row yet).
+  // for a still-pending 'add_item'/'add_job' (there's no real entries row yet).
   entry_id: number | null;
-  action: 'add_item' | 'delete_entry';
+  action: 'add_item' | 'delete_entry' | 'add_job';
   status: 'pending' | 'approved' | 'rejected';
   // add_item: { mpr_no, mpr_id, budget_item_id, item_name, requisitioned_qty,
-  // delivery_date } — the proposed new MPR row. delete_entry: {} (the row to
-  // delete is entry_id above; entry/mpr_no/item_name/requisitioned_qty/
-  // delivery_date below carry its current values for display, joined server-side).
+  // delivery_date } — the proposed new MPR row.
+  // add_job: { budget_id, budget_name, project_id, project_name, job_name,
+  // job_duration, items: [{ mpr_no, mpr_id, budget_item_id, item_name,
+  // requisitioned_qty, delivery_date }] } — the proposed brand-new Job, with every
+  // MPR row it would be created with.
+  // delete_entry: {} (the row to delete is entry_id above; entry/mpr_no/item_name/
+  // requisitioned_qty/delivery_date below carry its current values for display,
+  // joined server-side).
   payload: any;
   entry_mpr_no?: string | null;
   entry_item_name?: string | null;
@@ -1241,7 +1249,10 @@ export interface AdminNavRequest {
   // the "My Conveyance Bill Claim" sub-view (an Admin's own Bills/Claims,
   // read-only), shown alongside the 'conveyance' tab to anyone who already
   // has that module, not a separately-grantable permission of its own.
-  target: 'dashboard' | 'reports' | 'mprs' | 'imports' | 'editlog' | 'recycle' | 'projects' | 'branches' | 'users' | 'notices' | 'approvals' | 'attendance' | 'attendance_reports' | 'employees' | 'departments' | 'tracking' | 'holidays' | 'disbursement' | 'my_conveyance' | 'asset_management';
+  // 'servers' is likewise NOT an AdminModuleKey/module_permissions entry —
+  // it's the Superadmin-only "Servers" catalog tab (see ServerProfileRoutes.ts),
+  // never grantable to an Admin/User the way every other Admin Panel module is.
+  target: 'dashboard' | 'reports' | 'mprs' | 'imports' | 'editlog' | 'recycle' | 'projects' | 'branches' | 'users' | 'notices' | 'approvals' | 'attendance' | 'attendance_reports' | 'employees' | 'departments' | 'tracking' | 'holidays' | 'disbursement' | 'my_conveyance' | 'asset_management' | 'servers';
   ts: number;
 }
 
