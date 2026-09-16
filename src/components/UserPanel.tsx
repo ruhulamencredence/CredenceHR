@@ -974,16 +974,34 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // mobileActiveSection + the tile menu exactly as before. Mirrored to
   // localStorage same as mobileActiveSection, so "pull down to reload" lands
   // back on the same desktop section too.
+  // 'dashboard' — a genuine blank-landing state (welcome banner + Check
+  // In/Out + Leave Summary + Pending Approvals, nothing from the Entry/Jobs/
+  // Entry Details/Job Edit grid below) — is its own value here now, separate
+  // from 'budget' (Entry). Previously 'budget' doubled as both "the Dashboard
+  // landing" AND "the Entry page", so Entry/Jobs/Entry Details/Job Edit
+  // always rendered mixed in alongside the Dashboard's own widgets on
+  // desktop; each is now a standalone page the same way a Claims page
+  // already is (see showingMainGroupPage below), and 'dashboard' is the
+  // actual default landing a fresh session (or "Dashboard" in the sidebar)
+  // returns to.
   const userDesktopSectionStorageKey = `mpr_user_desktop_section_${user.id}`;
-  const [desktopActiveSection, setDesktopActiveSection] = useState<'budget' | 'jobs' | 'entries' | 'jobEdit'>(() => {
+  const [desktopActiveSection, setDesktopActiveSection] = useState<'dashboard' | 'budget' | 'jobs' | 'entries' | 'jobEdit'>(() => {
     try {
       const saved = localStorage.getItem(userDesktopSectionStorageKey);
-      if (saved === 'budget' || saved === 'jobs' || saved === 'entries' || saved === 'jobEdit') return saved;
+      if (saved === 'dashboard' || saved === 'budget' || saved === 'jobs' || saved === 'entries' || saved === 'jobEdit') return saved;
     } catch {
-      // ignore — falls through to the 'budget' (Entry) default below
+      // ignore — falls through to the 'dashboard' default below
     }
-    return 'budget';
+    return 'dashboard';
   });
+  // Whether one of Entry/Jobs/Entry Details/Job Edit is the active desktop
+  // section — desktop-only equivalent of showingClaimsPage above (mobile
+  // already treats these as their own tile-menu pages and is unaffected).
+  // 'dashboard' is the one desktopActiveSection value this is false for —
+  // the actual blank Dashboard landing (welcome banner/Check In-Out/Leave
+  // Summary/Pending Approvals), everything else here hides right alongside
+  // showingClaimsPage while any of these four standalone pages is open.
+  const showingMainGroupPage = desktopActiveSection !== 'dashboard';
   useEffect(() => {
     try {
       localStorage.setItem(userDesktopSectionStorageKey, desktopActiveSection);
@@ -997,15 +1015,15 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // before canSeeBudgetModule is known) or a permission the Superadmin
   // revokes mid-session — same idea as the mobile bounce-back effect further
   // up. Falls back to Job Edit if this account still has that separate
-  // grant, since it has no tile menu / "Dashboard" to bounce back to.
+  // grant, otherwise the (now genuinely blank) Dashboard.
   useEffect(() => {
     if (
       (desktopActiveSection === 'budget' || desktopActiveSection === 'jobs' || desktopActiveSection === 'entries') &&
       !canSeeBudgetModule
     ) {
-      setDesktopActiveSection(user.can_job_edit ? 'jobEdit' : 'budget');
+      setDesktopActiveSection(user.can_job_edit ? 'jobEdit' : 'dashboard');
     } else if (desktopActiveSection === 'jobEdit' && !user.can_job_edit) {
-      setDesktopActiveSection('budget');
+      setDesktopActiveSection('dashboard');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canSeeBudgetModule]);
@@ -1034,13 +1052,14 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
 
   // GlobalSidebar's "Dashboard" item — see dashboardNavRequest above. Resets
   // both the mobile tile menu (mobileActiveSection back to null) and the
-  // desktop section (desktopActiveSection back to 'budget', the everyday
-  // Entry landing tab) so the dashboard actually comes back on screen,
+  // desktop section (desktopActiveSection back to 'dashboard', the actual
+  // blank landing now that Entry/Jobs/Entry Details/Job Edit are each their
+  // own standalone page) so the dashboard actually comes back on screen,
   // instead of leaving whichever section was active/restored beforehand.
   useEffect(() => {
     if (!dashboardNavRequest) return;
     setMobileActiveSection(null);
-    setDesktopActiveSection('budget');
+    setDesktopActiveSection('dashboard');
     window.scrollTo({ top: 0, behavior: 'smooth' });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dashboardNavRequest]);
@@ -2605,7 +2624,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
       {/* Desktop-only plain welcome banner (no avatar/bell/drop-notch — those
           are the mobile-specific drop-banner design above). Same gating the
           single banner used before this change. */}
-      <div className={`hidden ${showingClaimsPage ? 'md:hidden' : 'md:block'}`}>
+      <div className={`hidden ${showingClaimsPage || showingMainGroupPage ? 'md:hidden' : 'md:block'}`}>
         <div
           className="rounded-2xl px-6 py-5 sm:px-8 sm:py-6 text-white shadow-sm"
           style={{ background: 'var(--g-gradient)' }}
@@ -2623,7 +2642,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           Remote Attendance), OFF by default — an Admin or Superadmin must
           grant it per account before it shows at all. */}
       {!!user.can_use_attendance && (
-        <div className={`hidden ${showingClaimsPage ? 'md:hidden' : 'md:block'}`}>
+        <div className={`hidden ${showingClaimsPage || showingMainGroupPage ? 'md:hidden' : 'md:block'}`}>
           <AttendanceCard token={token} projects={attendanceProjects} loading={!projectsLoaded} />
         </div>
       )}
@@ -2631,14 +2650,14 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
       {/* Leave Summary (desktop) — same card and same can_view_leave_summary
           gate as the mobile Dashboard above. */}
       {!!user.can_view_leave_summary && (
-        <div className={`hidden ${showingClaimsPage ? 'md:hidden' : 'md:block'}`}>
+        <div className={`hidden ${showingClaimsPage || showingMainGroupPage ? 'md:hidden' : 'md:block'}`}>
           <LeaveSummaryCard token={token} onOpen={() => goToMobileSection('leave')} />
         </div>
       )}
 
       {/* Pending Approvals (desktop) — same card/reasoning as the mobile
           Dashboard above (Part 4 — Role Permissiveness). */}
-      <div className={`hidden ${showingClaimsPage ? 'md:hidden' : 'md:block'}`}>
+      <div className={`hidden ${showingClaimsPage || showingMainGroupPage ? 'md:hidden' : 'md:block'}`}>
         <PendingApprovalsCard token={token} />
       </div>
 
