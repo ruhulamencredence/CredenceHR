@@ -5,6 +5,7 @@ import { Shield, LogOut, Smartphone } from 'lucide-react';
 import credenceLogo from '../assets/credence-logo.png';
 import { AlertsBell } from './AlertsBell';
 import { ChatBell } from './ChatBell';
+import { WeatherBadge } from './WeatherBadge';
 import { useProfilePhoto } from '../lib/useProfilePhoto';
 
 // Mobile header's "open menu" glyph — three filled, rounded-square dots
@@ -231,6 +232,13 @@ export const Navbar: React.FC<NavbarProps> = ({
           >
             <Smartphone className="w-[18px] h-[18px]" />
           </button>
+
+          {/* Live weather — free (no API key, no permission prompt of its
+              own), shown on both the mobile and web header since this
+              component is shared by both. See WeatherBadge.tsx for why it
+              renders nothing at all rather than a placeholder while loading
+              or offline. */}
+          <WeatherBadge transparent={transparentHeader} />
 
           {/* Personal Alerts bell — on by default for every account (no
               module grant needed), shown on both web and the Capacitor
