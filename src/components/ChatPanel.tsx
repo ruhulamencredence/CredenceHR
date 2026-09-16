@@ -161,7 +161,16 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
   const [directory, setDirectory] = useState<ChatDirectoryUser[]>([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
 
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  // Scrolled directly via scrollTop (see scrollMessagesToBottom below), NOT
+  // scrollIntoView() on a descendant — scrollIntoView walks up and scrolls
+  // EVERY scrollable ancestor needed to bring its target into view, which,
+  // if this div's own overflow-y-auto ever isn't enough on its own to
+  // satisfy that (e.g. a height miscalculation on some device), escalates to
+  // scrolling the outer page/body too — that's what was dragging the app's
+  // own header and this panel's conversation header off-screen together.
+  // Targeting this container specifically makes that structurally
+  // impossible: it can never move anything outside itself.
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messageInputRef = useRef<HTMLInputElement>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -374,16 +383,39 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
     };
   }, [lastOwnMessageId, activeRoom, token, seenByRefreshTick]);
 
+  const scrollMessagesToBottom = useCallback((smooth: boolean) => {
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
+  }, []);
+
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages.length]);
+    scrollMessagesToBottom(true);
+  }, [messages.length, scrollMessagesToBottom]);
+
+  // Locks the OUTER page from scrolling at all while a conversation is open
+  // — belt-and-braces alongside .chat-shell's fixed height (index.css): even
+  // if some device's Navbar height/safe-area inset doesn't match that calc()
+  // exactly, the page still can't scroll out from under the chat, which is
+  // what was dragging the app header and this panel's own conversation
+  // header off-screen together in the reported bug.
+  useEffect(() => {
+    const previousBodyOverflow = document.body.style.overflow;
+    const previousHtmlOverflow = document.documentElement.style.overflow;
+    document.body.style.overflow = 'hidden';
+    document.documentElement.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previousBodyOverflow;
+      document.documentElement.style.overflow = previousHtmlOverflow;
+    };
+  }, []);
 
   // Android keyboard covering the message input — the root container above
-  // already uses 100dvh (not 100vh) so the layout reflows on its own on
-  // modern WebViews, but older/OEM WebViews don't always fire that resize
-  // reliably. Belt-and-braces: when the OS keyboard actually finishes
-  // opening, re-scroll to the latest message so the input bar sitting right
-  // below it is pulled back on-screen too.
+  // already uses .chat-shell's dvh-with-vh-fallback height (index.css) so
+  // the layout reflows on its own on modern WebViews, but older/OEM
+  // WebViews don't always fire that resize reliably. Belt-and-braces: when
+  // the OS keyboard actually finishes opening, re-scroll to the latest
+  // message so the input bar sitting right below it is pulled back on-screen too.
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
     let didShowHandle: { remove: () => void } | undefined;
@@ -391,16 +423,16 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
       try {
         const { Keyboard } = await import('@capacitor/keyboard');
         didShowHandle = await Keyboard.addListener('keyboardDidShow', () => {
-          messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+          scrollMessagesToBottom(true);
         });
       } catch {
-        // Plugin unavailable — the 100dvh layout above is still the primary fix.
+        // Plugin unavailable — the .chat-shell layout above is still the primary fix.
       }
     })();
     return () => {
       didShowHandle?.remove();
     };
-  }, []);
+  }, [scrollMessagesToBottom]);
 
   const handleTyping = useCallback(
     (text: string, cursorPos: number) => {
@@ -687,7 +719,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
               </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-4 space-y-2">
+            <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-4 space-y-2">
               {loadingMessages && <div className="text-center text-xs text-slate-400 py-4">Loading...</div>}
               {messages.map((msg) => {
                 const isMe = msg.sender_id === user.id;
@@ -751,7 +783,6 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                   </div>
                 );
               })}
-              <div ref={messagesEndRef} />
             </div>
 
             {replyTo && (
