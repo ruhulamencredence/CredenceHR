@@ -25,7 +25,7 @@ const REAL_SERVER_URL = 'http://203.95.222.58:3000';
 
 // Flip this to true once REAL_SERVER_URL above is filled in and live, then
 // rebuild + re-sync as noted above.
-const USE_REAL_SERVER = true;
+const USE_REAL_SERVER = false;
 
 const ACTIVE_SERVER_URL = USE_REAL_SERVER ? REAL_SERVER_URL : LOCAL_SERVER_URL;
 
