@@ -78,3 +78,16 @@ export function dateRangeOptions(from: string, to: string): string[] {
 }
 
 export const formatDateLabel = (iso: string): string => formatDate(iso) || iso;
+
+// Latest ("max") of any given date strings, ignoring null/undefined/empty ones —
+// used to combine several floors (today, a Budget's delivery_date_from, an entry's
+// own entry_date) into a single min= for a date picker. Plain "YYYY-MM-DD" strings
+// compare correctly with normal string comparison. Shared by JobEditPanel.tsx's
+// "Add MPR"/"Delivery Date edit" pickers and UserPanel.tsx's "Job Entry Details"
+// delivery-date edit, so a past date (before today) never shows as pickable in
+// either place — the server rejects it anyway, so there's nothing useful behind it.
+export function latestDateStr(...dates: (string | null | undefined)[]): string | undefined {
+  const valid = dates.map((d) => (d ? String(d).slice(0, 10) : '')).filter(Boolean);
+  if (valid.length === 0) return undefined;
+  return valid.reduce((a, b) => (b > a ? b : a));
+}

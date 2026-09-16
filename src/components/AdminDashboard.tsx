@@ -90,6 +90,15 @@ function avatarColorFor(seed: number): string {
   return AVATAR_COLORS[Math.abs(seed) % AVATAR_COLORS.length];
 }
 
+// Stat-tile icon circle colors — cycled by index so the tile row reads as
+// colorful glance-able badges (per the reference dashboard screenshot)
+// instead of one repeated blue square. comingSoon tiles override this with
+// a flat slate circle regardless of index (see the tile map below).
+const TILE_ICON_COLORS = ['#3B82F6', '#7C3AED', '#0EA5E9', '#F97316', '#10B981', '#EC4899'];
+function tileIconColorFor(index: number): string {
+  return TILE_ICON_COLORS[index % TILE_ICON_COLORS.length];
+}
+
 // --- Leave Calendar grid helpers (same fixed 6-row/42-cell approach as
 // HolidayCalendarWidget's own buildGrid, so leading/trailing days from the
 // neighbouring months keep the grid height constant while navigating). ---
@@ -441,29 +450,61 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user }) =
 
       {!loading && (
         <>
-          {/* Stat tiles */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-            {statTiles.map((tile) => (
-              <div
-                key={tile.key}
-                className={`bg-white border rounded-2xl p-4 shadow-sm flex flex-col gap-2 ${tile.comingSoon ? 'border-slate-100 opacity-70' : 'border-slate-200'}`}
-              >
-                <div className="flex items-center justify-between">
-                  <span className={`w-9 h-9 rounded-xl flex items-center justify-center ${tile.comingSoon ? 'bg-slate-100' : 'bg-blue-50'}`}>
-                    <tile.icon className={`w-[18px] h-[18px] ${tile.comingSoon ? 'text-slate-400' : 'text-blue-600'}`} />
-                  </span>
-                  {tile.comingSoon && (
-                    <span className="text-[9px] font-semibold uppercase tracking-wide text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-full">
-                      Coming Soon
+          {/* Stat tiles — Liquid Glass style: translucent frosted cards over a
+              soft blurred color wash, so the tiles actually catch light/color
+              through them instead of just looking like flat white boxes. */}
+          <div className="relative">
+            <div className="pointer-events-none absolute -inset-x-4 -inset-y-8 -z-10 overflow-hidden rounded-[32px]">
+              <div className="absolute -top-12 left-4 w-64 h-64 rounded-full blur-3xl opacity-40" style={{ background: '#3B82F6' }} />
+              <div className="absolute -top-8 right-10 w-64 h-64 rounded-full blur-3xl opacity-40" style={{ background: '#A855F7' }} />
+              <div className="absolute bottom-[-3rem] left-1/3 w-64 h-64 rounded-full blur-3xl opacity-30" style={{ background: '#10B981' }} />
+              <div className="absolute bottom-[-2rem] right-1/4 w-56 h-56 rounded-full blur-3xl opacity-30" style={{ background: '#F97316' }} />
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+              {statTiles.map((tile, i) => {
+                const iconColor = tileIconColorFor(i);
+                return (
+                  <div
+                    key={tile.key}
+                    className={`relative overflow-hidden rounded-2xl p-3.5 flex flex-col gap-1.5 backdrop-blur-xl backdrop-saturate-150 transition-all hover:-translate-y-0.5 hover:shadow-lg ${tile.comingSoon ? 'opacity-60' : ''}`}
+                    style={{
+                      background: 'linear-gradient(135deg, rgba(255,255,255,0.55), rgba(255,255,255,0.22))',
+                      border: '1px solid rgba(255,255,255,0.65)',
+                      boxShadow:
+                        'inset 0 1px 1px rgba(255,255,255,0.85), inset 0 -12px 20px -10px rgba(255,255,255,0.35), 0 8px 24px rgba(31,38,135,0.12)',
+                    }}
+                  >
+                    {/* top glass sheen */}
+                    <div
+                      className="pointer-events-none absolute inset-x-0 top-0 h-1/2 rounded-t-2xl"
+                      style={{ background: 'linear-gradient(180deg, rgba(255,255,255,0.55), rgba(255,255,255,0))' }}
+                    />
+
+                    {tile.comingSoon && (
+                      <span className="relative z-10 self-end text-[8px] font-semibold uppercase tracking-wide text-slate-500 bg-white/50 backdrop-blur-sm px-1.5 py-0.5 rounded-full border border-white/60">
+                        Soon
+                      </span>
+                    )}
+                    <span
+                      className="relative z-10 w-9 h-9 rounded-full flex items-center justify-center shrink-0"
+                      style={{
+                        background: tile.comingSoon ? 'rgba(148,163,184,0.55)' : iconColor,
+                        boxShadow: `0 4px 14px ${iconColor}55, inset 0 1px 1px rgba(255,255,255,0.6)`,
+                      }}
+                    >
+                      <tile.icon className="w-4 h-4 text-white" />
                     </span>
-                  )}
-                </div>
-                <p className="text-[11px] font-medium text-slate-500 leading-snug">{tile.label}</p>
-                <p className={`text-lg font-bold ${tile.comingSoon ? 'text-slate-300' : 'text-slate-900'}`}>
-                  {tile.value ?? '—'}
-                </p>
-              </div>
-            ))}
+                    <div className="relative z-10">
+                      <p className="text-[11px] font-medium text-slate-600 leading-snug mb-0.5">{tile.label}</p>
+                      <p className={`text-lg font-extrabold tracking-tight ${tile.comingSoon ? 'text-slate-400' : 'text-slate-900'}`}>
+                        {tile.value ?? '—'}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
 
           {/* Quick View + Claim Amount chart */}
