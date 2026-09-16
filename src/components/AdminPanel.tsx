@@ -5927,7 +5927,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           onClick={() => setManagingModulesFor(null)}
         >
           <div
-            className="bg-white border border-slate-200 rounded-2xl max-w-md w-full max-h-[85vh] flex flex-col shadow-2xl"
+            className="bg-white border border-slate-200 rounded-2xl max-w-md md:max-w-4xl w-full max-h-[90vh] flex flex-col shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="p-5 border-b border-slate-200 flex justify-between items-center">
@@ -5943,7 +5943,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
               </button>
             </div>
 
-            <div className="p-5 overflow-y-auto flex-1 space-y-2">
+            {/* Two columns on desktop (User Module toggles on the left, Admin
+                Module tab checkboxes on the right) instead of one long
+                cramped-looking vertical list stretched across a narrow
+                fixed-width card — the modal itself is wider on md+ too (see
+                max-w-md md:max-w-4xl above). Mobile keeps the original single
+                stacked column, unchanged. */}
+            <div className="p-5 overflow-y-auto flex-1 md:grid md:grid-cols-2 md:gap-x-8 md:items-start">
+            <div className="space-y-2">
               <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">User Module</p>
               {managingModulesFor.role === 'admin' && (
                 <label
@@ -6148,7 +6155,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   />
                 </button>
               </label>
-              <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1 pt-2 border-t border-slate-100">Admin Module</p>
+            </div>
+
+            <div className="space-y-2 mt-4 md:mt-0 pt-4 md:pt-0 border-t md:border-t-0 md:border-l border-slate-100 md:pl-8">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">Admin Module</p>
               <p className="text-xs text-slate-500 mb-2">
                 Choose which Admin Panel tabs this {managingModulesFor.role === 'user' ? 'User' : 'Admin'} can open.
                 {managingModulesFor.role === 'user' && ' They\'ll keep their normal User Panel too, with a switcher to open these tabs.'}
@@ -6300,6 +6310,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   </div>
                 );
               })}
+            </div>
             </div>
 
             <div className="p-5 border-t border-slate-200 flex justify-end gap-2">
