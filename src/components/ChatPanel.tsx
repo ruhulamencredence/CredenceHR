@@ -651,16 +651,6 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
   );
 
   const startRecording = useCallback(async () => {
-    // navigator.mediaDevices is only defined in a "secure context" (https://
-    // or localhost) — on a plain http:// origin (see capacitor.config.ts's
-    // ACTIVE_SERVER_URL comment) it's simply undefined, which reads as a
-    // generic "permission" failure below unless called out specifically
-    // here, and is by far the most likely cause before that origin has an
-    // SSL certificate.
-    if (!navigator.mediaDevices?.getUserMedia) {
-      alert('Voice messages need this app to be served over https:// — recording is not available on a plain http:// server.');
-      return;
-    }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       recordingStreamRef.current = stream;
@@ -675,15 +665,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
       setIsRecording(true);
       setRecordingSeconds(0);
       recordingTimerRef.current = setInterval(() => setRecordingSeconds((s) => s + 1), 1000);
-    } catch (err: any) {
-      // NotAllowedError = the OS/WebView permission prompt was denied (or
-      // was denied once before and Android is no longer asking) — a
-      // distinct, actionable case from every other getUserMedia failure.
-      if (err?.name === 'NotAllowedError') {
-        alert('Microphone permission was denied. Enable it from Android Settings -> Apps -> Credence HR -> Permissions -> Microphone, then try again.');
-      } else {
-        alert(`Could not access the microphone (${err?.name || 'unknown error'}) — check that this app has microphone permission.`);
-      }
+    } catch {
+      alert('Could not access the microphone — check that this app has microphone permission.');
     }
   }, []);
 
