@@ -72,12 +72,15 @@ claims, leave_applications, notices, attendance, ইত্যাদি — ম�
 প্রথমবার `npm run dev` / `npm start` চালালেই এই টেবিলগুলো নিজে থেকে
 তৈরি হয়ে যাবে — আলাদা করে কোনো SQL রান করার দরকার নেই।
 
-**একটাই ব্যতিক্রম — ZKTeco Office Attendance:** `zk_devices` ও
-`zk_attendance_logs` টেবিল দুটো self-heal হয় **না** (`zkSync.ts` ধরে
-নেয় এগুলো আগে থেকেই আছে)। এই মডিউল ব্যবহার করতে চাইলে
-`zk_office_attendance_schema.sql` ফাইলটি phpMyAdmin এ **একবার আলাদাভাবে
-import করতে হবে** (নিচে ৫ নং ধাপ দেখুন)। এটা না করলেও মূল অ্যাপ স্বাভাবিকভাবে
-চলবে — শুধু কনসোলে একটা warning লগ হবে, সার্ভার ক্র্যাশ করবে না।
+**Update:** ZKTeco Office Attendance (`all_employees.zk_device_pin`,
+`zk_devices`, `zk_attendance_logs`) এখন আর ব্যতিক্রম না — এগুলোও
+`ensureSchemaMigrations()` এর ভেতরে self-heal হয় (একটা backfill সহ:
+`zk_device_pin` খালি থাকলে সেটা `employee_id` দিয়ে ভরে দেয়)। আলাদা করে
+`zk_office_attendance_schema.sql` import করার দরকার নেই — **তবে এটা
+কাজ করবে শুধু তখনই যখন `npm start` চালানোর আগে `npm run build` দিয়ে
+`dist/server.cjs` rebuild করা থাকে** (পুরনো `dist/server.cjs` এই fix ছাড়াই
+build হয়েছিল)। `npm run dev` চালালে এটা rebuild ছাড়াই সাথে সাথে কাজ করবে,
+কারণ সেটা সরাসরি `server.ts` থেকে চলে।
 
 ---
 

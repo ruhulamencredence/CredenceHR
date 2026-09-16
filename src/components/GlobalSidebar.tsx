@@ -81,6 +81,8 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   const [reportsOpen, setReportsOpen] = useState(true);
   const [claimsOpen, setClaimsOpen] = useState(true);
   const [attendanceOpen, setAttendanceOpen] = useState(true);
+  const [manageOpen, setManageOpen] = useState(true);
+  const [workforceOpen, setWorkforceOpen] = useState(true);
   const photoUrl = useProfilePhoto(token, photoVersion);
 
   // Server switcher — every account, native app only (the Web build always
@@ -267,29 +269,46 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     { key: 'office_attendance', label: 'Office Attendance', icon: Fingerprint, onClick: () => onGoToAdminModule('office_attendance') },
   ].filter((i) => canSeeModule(i.key as AdminModuleKey));
 
-  const adminFlatItems: NavItem[] = [
+  // "Manage" group (expandable, same pattern as Reports/Claims/Attendance
+  // above) — company/org setup & directory items. Same "Manage" label the old
+  // Navbar header dropdown used for this same cluster (see
+  // AdminPanel.tsx's MODULE_ACCESS_GROUPS comment) — Projects/Branches/Users/
+  // Employees/Notices, plus Departments (which that grouping left out).
+  const manageGroup: NavItem[] = [
     { key: 'projects', label: 'Projects', icon: Building2, onClick: () => onGoToAdminModule('projects') },
     { key: 'branches', label: 'Branches', icon: Building2, onClick: () => onGoToAdminModule('branches') },
+    { key: 'departments', label: 'Departments', icon: Users2, onClick: () => onGoToAdminModule('departments') },
     { key: 'users', label: 'Users', icon: Users, onClick: () => onGoToAdminModule('users') },
     { key: 'employees', label: 'Employees', icon: Contact, onClick: () => onGoToAdminModule('employees') },
-    { key: 'departments', label: 'Departments', icon: Users2, onClick: () => onGoToAdminModule('departments') },
     { key: 'notices', label: 'Notices', icon: Bell, onClick: () => onGoToAdminModule('notices') },
+  ].filter((i) => canSeeModule(i.key as AdminModuleKey));
+
+  // "Workforce" group (expandable, same pattern as above) — day-to-day
+  // people-ops items: approving requests, tracking/leave/assets tied to
+  // individual employees. Same "Workforce" label AdminPanel.tsx's
+  // MODULE_ACCESS_GROUPS already uses for Approvals/Tracking/Holidays;
+  // Monthly Leave Application and Asset Management (which that grouping
+  // left in "Other") fit the same theme, so they're grouped here too.
+  const workforceGroup: NavItem[] = [
     { key: 'approvals', label: 'Approvals', icon: ShieldCheck, onClick: () => onGoToAdminModule('approvals') },
     { key: 'tracking', label: 'Employee Tracking', icon: Navigation, onClick: () => onGoToAdminModule('tracking') },
     { key: 'holidays', label: 'Holidays', icon: Calendar, onClick: () => onGoToAdminModule('holidays') },
-    { key: 'asset_management', label: 'Asset Management', icon: Package, onClick: () => onGoToAdminModule('asset_management') },
     // Read-only "who applied for Leave" report, gated by its own
     // 'leave_applications' module (separate from can_manage_leave's "Leave
-    // Manage" item and from the "Leave Approvals" item above) — see
+    // Manage" item and from the Self Service "Leave Approvals" item) — see
     // ADMIN_MODULES in types.ts.
     { key: 'leave_applications', label: 'Monthly Leave Application', icon: CalendarClock, onClick: () => onGoToAdminModule('leave_applications') },
+    { key: 'asset_management', label: 'Asset Management', icon: Package, onClick: () => onGoToAdminModule('asset_management') },
   ].filter((i) => canSeeModule(i.key as AdminModuleKey));
 
   // "Servers" — Admin Panel tab (full catalog CRUD), Superadmin-only on any
   // platform (this is the WEB-oriented management surface — see
   // ServerProfilesPanel.tsx). Not a grantable module_permissions item like
-  // the rest of adminFlatItems above (canSeeModule wouldn't apply), so
-  // pushed on separately, gated directly on isSuperAdmin.
+  // the two groups above (canSeeModule wouldn't apply), and there's only
+  // ever this one item, so it stays a standalone flat entry rather than its
+  // own single-item collapsible group — same treatment "Admin Dashboard"
+  // gets above.
+  const adminFlatItems: NavItem[] = [];
   if (isSuperAdmin) {
     adminFlatItems.push({
       key: 'servers',
@@ -415,7 +434,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
           <p className="px-2.5 mt-3 mb-1.5 text-[10px] font-semibold tracking-wide text-white/50">SELF SERVICE</p>
           {selfServiceItems.map(renderItem)}
 
-          {(!!adminDashboardItem || reportsGroup.length > 0 || claimsGroup.length > 0 || attendanceGroup.length > 0 || adminFlatItems.length > 0) && (
+          {(!!adminDashboardItem || reportsGroup.length > 0 || claimsGroup.length > 0 || attendanceGroup.length > 0 || manageGroup.length > 0 || workforceGroup.length > 0 || adminFlatItems.length > 0) && (
             <>
               <p className="px-2.5 mt-3 mb-1.5 text-[10px] font-semibold tracking-wide text-white/50">ADMIN PANEL</p>
 
@@ -493,6 +512,64 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
                   {attendanceOpen && (
                     <div className="mt-0.5 ml-[13px] pl-3.5 border-l border-white/15 space-y-0.5">
                       {attendanceGroup.map((item) => (
+                        <button
+                          key={item.key}
+                          type="button"
+                          onClick={() => selectAndClose(item.onClick)}
+                          className="w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-left text-white/70 hover:bg-white/10 hover:text-white transition-colors"
+                        >
+                          <item.icon className="w-3.5 h-3.5 shrink-0" />
+                          <span className="text-[12.5px] truncate">{item.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {manageGroup.length > 0 && (
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => setManageOpen((o) => !o)}
+                    className="w-full flex items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-white/85 hover:bg-white/10 transition-colors"
+                  >
+                    <Building2 className="w-[18px] h-[18px] shrink-0" />
+                    <span className="text-[13px] font-semibold flex-1 text-left">Manage</span>
+                    <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${manageOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  {manageOpen && (
+                    <div className="mt-0.5 ml-[13px] pl-3.5 border-l border-white/15 space-y-0.5">
+                      {manageGroup.map((item) => (
+                        <button
+                          key={item.key}
+                          type="button"
+                          onClick={() => selectAndClose(item.onClick)}
+                          className="w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-left text-white/70 hover:bg-white/10 hover:text-white transition-colors"
+                        >
+                          <item.icon className="w-3.5 h-3.5 shrink-0" />
+                          <span className="text-[12.5px] truncate">{item.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {workforceGroup.length > 0 && (
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => setWorkforceOpen((o) => !o)}
+                    className="w-full flex items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-white/85 hover:bg-white/10 transition-colors"
+                  >
+                    <Users2 className="w-[18px] h-[18px] shrink-0" />
+                    <span className="text-[13px] font-semibold flex-1 text-left">Workforce</span>
+                    <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${workforceOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  {workforceOpen && (
+                    <div className="mt-0.5 ml-[13px] pl-3.5 border-l border-white/15 space-y-0.5">
+                      {workforceGroup.map((item) => (
                         <button
                           key={item.key}
                           type="button"
