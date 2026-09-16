@@ -120,6 +120,29 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
     }
   };
 
+  // Mobile (compact) only — swipe the grid itself left/right to change month,
+  // no button tap needed. Plain touch coordinates (no library): record the
+  // start point, compare to the end point, and only treat it as a swipe once
+  // it clearly reads more horizontal than vertical (so a vertical page-scroll
+  // through the calendar never gets mistaken for a month change).
+  const swipeStart = React.useRef<{ x: number; y: number } | null>(null);
+  const SWIPE_THRESHOLD_PX = 40;
+  const onGridTouchStart = (e: React.TouchEvent) => {
+    const t = e.touches[0];
+    swipeStart.current = { x: t.clientX, y: t.clientY };
+  };
+  const onGridTouchEnd = (e: React.TouchEvent) => {
+    const start = swipeStart.current;
+    swipeStart.current = null;
+    if (!start) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - start.x;
+    const dy = t.clientY - start.y;
+    if (Math.abs(dx) < SWIPE_THRESHOLD_PX || Math.abs(dx) <= Math.abs(dy)) return;
+    if (dx < 0) goNextMonth();
+    else goPrevMonth();
+  };
+
   return (
     <div
       className={
@@ -223,7 +246,7 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
         // the rest of this card. Edge-to-edge (no side padding) so the grid
         // lines actually reach the card's own rounded corners, same as the
         // Admin grid reaching its bordered container's edges.
-        <div>
+        <div onTouchStart={onGridTouchStart} onTouchEnd={onGridTouchEnd}>
           <div className="grid grid-cols-7 bg-white/30 backdrop-blur border-b border-white/40">
             {WEEKDAY_LABELS.map((w, i) => (
               <div key={i} className="py-2 text-center text-[10px] font-bold uppercase tracking-wide text-slate-500">
