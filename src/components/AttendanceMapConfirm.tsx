@@ -11,6 +11,7 @@ import { Capacitor } from '@capacitor/core';
 import { Geolocation } from '@capacitor/geolocation';
 import { X, MapPin, Check, AlertTriangle, CheckCircle2, LocateFixed } from 'lucide-react';
 import { Project } from '../types';
+import { apiUrl } from '../lib/api';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
 import { Spinner } from './Spinner';
 
@@ -27,6 +28,12 @@ interface AttendanceMapConfirmProps {
   // original snapshot taken before the modal opened. Optional so older
   // callers that don't pass it still work (falls back to the initial coords).
   onCoordsChange?: (coords: { latitude: number; longitude: number }) => void;
+  // Lets this same map also plot every OTHER Project's set location circle
+  // (muted/gray, purely for context) alongside the one being checked into —
+  // fetched from GET /api/projects/all, which needs auth but nothing from
+  // the device itself, so this adds no extra permission prompt on top of the
+  // GPS fix already obtained before this modal opened.
+  token: string;
 }
 
 const PROJECT_ZOOM = 17;
@@ -42,6 +49,19 @@ const projectPinIcon = L.divIcon({
   iconSize: [30, 30],
   iconAnchor: [15, 30],
   popupAnchor: [0, -26]
+});
+
+// Every OTHER Project's site — muted gray so it never gets mistaken for the
+// one actually being checked into (that one keeps the violet pin above).
+const otherProjectPinIcon = L.divIcon({
+  className: '',
+  html: `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style="filter: drop-shadow(0 1px 2px rgba(0,0,0,0.3));">
+    <path d="M12 0C7.03 0 3 4.03 3 9c0 6.75 9 15 9 15s9-8.25 9-15c0-4.97-4.03-9-9-9z" fill="#94a3b8"/>
+    <circle cx="12" cy="9" r="3.4" fill="white"/>
+  </svg>`,
+  iconSize: [22, 22],
+  iconAnchor: [11, 22],
+  popupAnchor: [0, -19]
 });
 
 // The user's own live position — a distinct pulsing dot rather than a pin, so
@@ -120,12 +140,18 @@ export default function AttendanceMapConfirm({
   submitting,
   onCancel,
   onConfirm,
-  onCoordsChange
+  onCoordsChange,
+  token
 }: AttendanceMapConfirmProps) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
   const userMarkerRef = useRef<L.Marker | null>(null);
   const circleRef = useRef<L.Circle | null>(null);
+  // Every other Project's site, drawn on this same map once fetched — kept
+  // in its own layer group so it can be cleared/redrawn independently of the
+  // rest of the map (which is set up once on mount, before this data is even
+  // back yet).
+  const otherProjectsLayerRef = useRef<L.LayerGroup | null>(null);
 
   const [ready, setReady] = useState(false);
   const [remarks, setRemarks] = useState('');
@@ -135,6 +161,12 @@ export default function AttendanceMapConfirm({
   const [liveCoords, setLiveCoords] = useState(coords);
   const [locating, setLocating] = useState(false);
   const [locateError, setLocateError] = useState<string | null>(null);
+  // Every OTHER Project with a set site location, for context on this same
+  // map (muted gray — see otherProjectPinIcon). Fetched from GET
+  // /api/projects/all, which is open to any signed-in role and doesn't touch
+  // the device's own location at all, so it adds no extra permission prompt
+  // on top of the GPS fix already obtained before this modal opened.
+  const [otherProjects, setOtherProjects] = useState<Project[]>([]);
 
   useBackButtonClose(true, submitting ? () => {} : onCancel);
 
@@ -195,9 +227,65 @@ export default function AttendanceMapConfirm({
       mapRef.current = null;
       userMarkerRef.current = null;
       circleRef.current = null;
+      otherProjectsLayerRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Fetches every other Project's site once, in parallel with the map/GPS
+  // setup above — GET /api/projects/all (not the narrower GET /api/projects)
+  // so this shows every Project's circle regardless of which one(s) this
+  // account is personally assigned to check in against.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(apiUrl('/api/projects/all'), { headers: { Authorization: `Bearer ${token}` } });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled && Array.isArray(data)) {
+          setOtherProjects(data.filter((p: Project) => p.id !== project.id && p.location_lat != null && p.location_lng != null));
+        }
+      } catch {
+        // Offline/unreachable — this is purely extra context, the actual
+        // check-in/out flow above doesn't depend on it at all.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, project.id]);
+
+  // Draws the fetched otherProjects onto the map created above, once both are
+  // ready — kept as its own effect (rather than folded into the map-setup one
+  // above) since the fetch resolves after that first effect already ran.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || otherProjects.length === 0) return;
+
+    otherProjectsLayerRef.current?.remove();
+    const layer = L.layerGroup();
+    for (const p of otherProjects) {
+      const lat = Number(p.location_lat);
+      const lng = Number(p.location_lng);
+      L.marker([lat, lng], { icon: otherProjectPinIcon })
+        .addTo(layer)
+        .bindPopup(p.project_name);
+      if (p.location_radius) {
+        L.circle([lat, lng], {
+          radius: Number(p.location_radius),
+          color: '#94a3b8',
+          weight: 1.5,
+          dashArray: '4 4',
+          fillColor: '#94a3b8',
+          fillOpacity: 0.06
+        }).addTo(layer);
+      }
+    }
+    layer.addTo(map);
+    otherProjectsLayerRef.current = layer;
+  }, [otherProjects]);
 
   // Re-reads GPS (same permission/flow as the initial fix) and moves the
   // existing marker + recenters the map in place, instead of forcing the user

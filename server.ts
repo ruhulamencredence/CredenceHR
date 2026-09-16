@@ -111,7 +111,22 @@ async function initDB() {
       database: process.env.DB_NAME || "mpr_tracker_db",
       port: Number(process.env.DB_PORT) || 3306,
       waitForConnections: true,
-      connectionLimit: 10,
+      // The Dashboard alone fires off ~10 concurrent API calls on a single
+      // app open (master data, entries, MPR usage, Attendance, Leave
+      // Summary, Pending Approvals, Holiday Calendar, Notices, ...), each
+      // needing its own connection for the length of its query. At the old
+      // limit of 10, one person opening the app could already saturate the
+      // whole pool; with queueLimit unbounded, every request after that
+      // just waits its turn instead of failing outright — which is exactly
+      // the "takes forever to reach the Dashboard" symptom. Raised well
+      // above that single-user burst so concurrent opens don't queue behind
+      // each other; MySQL's own default max_connections (151) has plenty of
+      // headroom above this for the one app process using it. Each PM2
+      // cluster worker (see ecosystem.config.cjs) gets its own pool of this
+      // size, so once running with `instances` > 1 in production, raise
+      // MySQL's max_connections to comfortably cover instances * 30, or
+      // lower this per-worker limit to fit.
+      connectionLimit: 30,
       queueLimit: 0,
       // Without this, mysql2 hands back DATE/DATETIME columns as JS Date objects built
       // from LOCAL midnight. Those then get flattened to a string either by our own
@@ -323,6 +338,19 @@ async function ensureSchemaMigrations() {
       console.warn("⚠️ Could not add entries.deleted_by column: " + err.message);
     }
   }
+
+  // GET /api/entries and /api/entries/mpr-usage both start with `WHERE
+  // e.deleted_at IS NULL`, and a plain 'user' account (the majority of
+  // accounts) additionally filters `AND e.created_by = ?` — created_by has
+  // no FK (an entry's creator can be deleted without taking their entries
+  // with them), so it was never indexed at all. Without this, every one of
+  // those calls was a full table scan of `entries`, which only grows over
+  // the life of the app and is hit on nearly every Dashboard open. Ignore
+  // the error if it already exists (older MySQL has no
+  // "CREATE INDEX IF NOT EXISTS").
+  await dbPool
+    .query(`CREATE INDEX idx_entries_deleted_created ON entries (deleted_at, created_by)`)
+    .catch(() => {});
 
   // entries.item_name must be able to hold the full imported budget_items.description
   // (VARCHAR(255)) it's matched against in GET /api/entries — an older, shorter column
@@ -1299,6 +1327,11 @@ async function ensureSchemaMigrations() {
         MODIFY COLUMN source_type ENUM('attendance','claim','user_claim','attendance_correction','leave_application') NOT NULL,
         MODIFY COLUMN event_type ENUM('check_in','check_out','submit') NOT NULL
     `);
+    // GET /api/my-approvals (PendingApprovalsCard — hit on every Dashboard
+    // open, by every account) starts with `WHERE status = 'pending'`, which
+    // was an unindexed full table scan of every approval request ever
+    // created. Ignore the error if it already exists.
+    await dbPool.query(`CREATE INDEX idx_approval_requests_status ON approval_requests (status)`).catch(() => {});
   } catch (err: any) {
     console.warn("⚠️ Could not ensure approval_chain_steps/approval_requests tables exist: " + err.message);
   }
@@ -1635,6 +1668,14 @@ async function ensureSchemaMigrations() {
   } catch (err: any) {
     // Already exists on a fresh install — ignore silently.
   }
+  // GET /api/my-approvals (PendingApprovalsCard) looks up a Reliever's
+  // still-pending queue with `WHERE reliever_id = ? AND reliever_status =
+  // 'pending' AND status = 'pending'` — without this, that's a full scan of
+  // every Leave Application ever filed, on every Dashboard open. Ignore the
+  // error if it already exists.
+  await dbPool
+    .query(`CREATE INDEX idx_leave_applications_reliever ON leave_applications (reliever_id, reliever_status, status)`)
+    .catch(() => {});
 
   // Links an Employee Directory row (all_employees) to the login account (a
   // users row) created for it at the same time — see POST /api/employees'
@@ -2850,6 +2891,12 @@ async function startServer() {
   await seedAdminFromEnv();
 
   const app = express();
+  // Sitting behind Nginx (see deploy/nginx.conf.example) once deployed that
+  // way — without this, req.ip/req.secure would reflect the proxy's own
+  // connection to this app rather than the real client, for anything that
+  // ever comes to depend on it (rate limiting, audit logging, etc.). A
+  // no-op when there's no reverse proxy in front (e.g. local `npm run dev`).
+  app.set("trust proxy", 1);
   app.use(cors());
   // Gzips every response this server sends — HTML, JSON API responses, and
   // (most importantly for how long the APK/browser takes to first load) the
@@ -5508,6 +5555,45 @@ async function startServer() {
   // member management) come from registerChatRoutes; setupChatSocket wires
   // the live 'send_message'/'typing'/'presence_change' events on top of it.
   const io = new SocketIOServer(httpServer, { cors: { origin: "*" } });
+
+  // Step 1 of making this app safe to run as more than one server process
+  // behind a load balancer (needed once usage grows past what a single
+  // process can handle, e.g. ~1000 concurrent employees): Socket.IO's
+  // default adapter only broadcasts io.to(...)/io.emit(...) to sockets
+  // connected to THIS process. With two+ processes behind a load balancer,
+  // a chat message sent by a user on instance A would never reach a
+  // recipient whose socket landed on instance B. The Redis adapter fixes
+  // that by publishing every broadcast through Redis pub/sub so all
+  // instances see it, regardless of which one a given socket is on.
+  // Opt-in via REDIS_URL — with it unset (today's single-process
+  // deployment), Socket.IO keeps using its default in-memory adapter
+  // exactly as before, so this is a no-op until REDIS_URL is actually
+  // configured on a multi-instance deployment.
+  // Known follow-up once this is enabled: ChatRoutes.ts's setupChatSocket
+  // still tracks "is this user online" in a local, per-process Map
+  // (onlineSockets) — accurate within one instance, but a user connected
+  // to instance A and instance B independently won't be seen as online by
+  // both. Fine for now; move that to Redis too when multi-instance
+  // presence accuracy actually matters.
+  if (process.env.REDIS_URL) {
+    try {
+      const { createAdapter } = await import("@socket.io/redis-adapter");
+      const { createClient } = await import("redis");
+      const pubClient = createClient({ url: process.env.REDIS_URL });
+      const subClient = pubClient.duplicate();
+      pubClient.on("error", (err) => console.error("Socket.IO Redis pub client error:", err));
+      subClient.on("error", (err) => console.error("Socket.IO Redis sub client error:", err));
+      await Promise.all([pubClient.connect(), subClient.connect()]);
+      io.adapter(createAdapter(pubClient, subClient));
+      console.log(" Socket.IO Redis adapter connected — ready for multi-instance deployment.");
+    } catch (err) {
+      console.error(
+        "Failed to attach Socket.IO Redis adapter (falling back to the default in-memory adapter — chat will only broadcast within this one process):",
+        err
+      );
+    }
+  }
+
   registerChatRoutes(app, io, { authenticateToken, queryDB });
   setupChatSocket(io, { queryDB, jwtSecret: JWT_SECRET });
 

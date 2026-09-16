@@ -345,7 +345,15 @@ CREATE TABLE IF NOT EXISTS entries (
   FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE,
   FOREIGN KEY (mpr_id) REFERENCES mpr_numbers(id) ON DELETE CASCADE,
   FOREIGN KEY (deleted_by) REFERENCES users(id) ON DELETE SET NULL,
-  FOREIGN KEY (budget_item_id) REFERENCES budget_items(id) ON DELETE SET NULL
+  FOREIGN KEY (budget_item_id) REFERENCES budget_items(id) ON DELETE SET NULL,
+  -- GET /api/entries and /api/entries/mpr-usage both start with
+  -- `WHERE e.deleted_at IS NULL`, and a plain 'user' account (the vast
+  -- majority of accounts) additionally filters `AND e.created_by = ?` —
+  -- created_by has no FK (an entry's creator can be deleted without taking
+  -- their entries with them), so without this it was never indexed at all.
+  -- This leading-deleted_at composite serves both the Admin's
+  -- deleted_at-only scan and every regular user's deleted_at+created_by one.
+  KEY idx_entries_deleted_created (deleted_at, created_by)
 );
 
 -- Budget Submissions Table (a User marks a Budget as "done" once they've entered
@@ -1109,7 +1117,12 @@ CREATE TABLE IF NOT EXISTS approval_requests (
   actions_json MEDIUMTEXT NOT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  FOREIGN KEY (requested_by) REFERENCES users(id) ON DELETE CASCADE
+  FOREIGN KEY (requested_by) REFERENCES users(id) ON DELETE CASCADE,
+  -- GET /api/my-approvals (PendingApprovalsCard — hit on every Dashboard
+  -- open, by every account) starts with `WHERE status = 'pending'`; without
+  -- this index that's a full table scan of every approval request ever
+  -- created, on every single Dashboard load.
+  KEY idx_approval_requests_status (status)
 );
 
 -- If you already have an existing database, run this once to add the Approval

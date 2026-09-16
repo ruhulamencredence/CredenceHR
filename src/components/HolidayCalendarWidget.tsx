@@ -120,12 +120,42 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
     }
   };
 
+  // Mobile (compact) only — swipe the grid itself left/right to change month,
+  // no button tap needed. Plain touch coordinates (no library): record the
+  // start point, compare to the end point, and only treat it as a swipe once
+  // it clearly reads more horizontal than vertical (so a vertical page-scroll
+  // through the calendar never gets mistaken for a month change).
+  const swipeStart = React.useRef<{ x: number; y: number } | null>(null);
+  const SWIPE_THRESHOLD_PX = 40;
+  const onGridTouchStart = (e: React.TouchEvent) => {
+    const t = e.touches[0];
+    swipeStart.current = { x: t.clientX, y: t.clientY };
+  };
+  const onGridTouchEnd = (e: React.TouchEvent) => {
+    const start = swipeStart.current;
+    swipeStart.current = null;
+    if (!start) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - start.x;
+    const dy = t.clientY - start.y;
+    if (Math.abs(dx) < SWIPE_THRESHOLD_PX || Math.abs(dx) <= Math.abs(dy)) return;
+    if (dx < 0) goNextMonth();
+    else goPrevMonth();
+  };
+
   return (
     <div
       className={
         large
           ? 'bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden max-w-2xl'
-          : 'relative rounded-[28px] overflow-hidden border border-white/70 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-sky-100/70 via-white/50 to-blue-50/40 backdrop-blur-xl max-w-sm mx-auto md:mx-0'
+          // No max-w/mx-auto here (previously max-w-sm mx-auto) — that
+          // centered this card at a fixed 384px width regardless of the
+          // actual viewport, so on any phone wider than that it sat visibly
+          // narrower/more inset than the full-width quick-access tiles right
+          // above it. This is mobile-only (see the `md:hidden` wrapper
+          // around it in UserPanel.tsx) so it should just fill its parent's
+          // width the same way those tiles do.
+          : 'relative rounded-[28px] overflow-hidden border border-white/70 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-sky-100/70 via-white/50 to-blue-50/40 backdrop-blur-xl'
       }
     >
       <div
@@ -216,7 +246,7 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
         // the rest of this card. Edge-to-edge (no side padding) so the grid
         // lines actually reach the card's own rounded corners, same as the
         // Admin grid reaching its bordered container's edges.
-        <div>
+        <div onTouchStart={onGridTouchStart} onTouchEnd={onGridTouchEnd}>
           <div className="grid grid-cols-7 bg-white/30 backdrop-blur border-b border-white/40">
             {WEEKDAY_LABELS.map((w, i) => (
               <div key={i} className="py-2 text-center text-[10px] font-bold uppercase tracking-wide text-slate-500">

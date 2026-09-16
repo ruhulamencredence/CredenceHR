@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
+import { Capacitor } from '@capacitor/core';
 import { Project, MprNumber, Entry, Budget, BudgetItem, User, MprUsage, ClaimsNavRequest, JobsNavRequest, DashboardNavRequest } from '../types';
-import { Calendar, Building2, FileText, Package, Clock, Plus, AlertTriangle, CheckCircle2, ChevronRight, X, Trash2, Edit2, Lock, Wallet, ArrowLeft, FolderOpen, ListChecks, Search, Save, Briefcase, FileDown, Scissors, Route, Info } from 'lucide-react';
+import { Calendar, Building2, FileText, Package, Clock, Plus, AlertTriangle, CheckCircle2, ChevronRight, X, Trash2, Edit2, Lock, Wallet, ArrowLeft, FolderOpen, ListChecks, Search, Save, Briefcase, FileDown, Scissors, Route, Info, Contact, Bell } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { formatDate, todayDateOnlyString, dateRangeOptions, formatDateLabel, latestDateStr } from '../lib/formatDate';
 import { useStableCallback } from '../lib/useStableCallback';
@@ -19,11 +20,13 @@ import { PendingApprovalsCard } from './PendingApprovalsCard';
 import { HolidayCalendarWidget } from './HolidayCalendarWidget';
 import { LeaveReviewPage } from './LeaveReviewPage';
 import { EmployeeDirectory } from './EmployeeDirectory';
+import { NoticeBoard } from './NoticeBoard';
 import { Timesheet } from './Timesheet';
 import { ClaimCard } from './ClaimCard';
 import { MyClaimsCard } from './MyClaimsCard';
 import { ConveyanceClaimCard } from './ConveyanceClaimCard';
 import { BottomNav } from './BottomNav';
+import { ModulePath } from './ModulePath';
 
 interface UserPanelProps {
   token: string;
@@ -846,7 +849,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // initializer) so "pull down to reload" — see App.tsx — lands back on the exact
   // same section instead of resetting to the tile menu.
   const userSectionStorageKey = `mpr_user_section_${user.id}`;
-  const [mobileActiveSection, setMobileActiveSection] = useState<'budget' | 'jobs' | 'entries' | 'jobEdit' | 'claim' | 'claims' | 'conveyanceClaim' | 'leave' | 'timesheet' | 'employeeDirectory' | null>(
+  const [mobileActiveSection, setMobileActiveSection] = useState<'budget' | 'jobs' | 'entries' | 'jobEdit' | 'claim' | 'claims' | 'conveyanceClaim' | 'leave' | 'timesheet' | 'employeeDirectory' | 'noticeBoard' | null>(
     () => {
       try {
         const saved = localStorage.getItem(userSectionStorageKey);
@@ -889,7 +892,8 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
     mobileActiveSection === 'conveyanceClaim' ||
     mobileActiveSection === 'leave' ||
     mobileActiveSection === 'timesheet' ||
-    mobileActiveSection === 'employeeDirectory';
+    mobileActiveSection === 'employeeDirectory' ||
+    mobileActiveSection === 'noticeBoard';
   // Superadmin-gated, same as every other module in this app: an Admin/User only
   // sees Movement Claim / Conveyance Bill Claim once the Superadmin has granted
   // can_view_movement_claims / can_view_conveyance_claims (Admin Panel -> Users
@@ -974,16 +978,39 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // mobileActiveSection + the tile menu exactly as before. Mirrored to
   // localStorage same as mobileActiveSection, so "pull down to reload" lands
   // back on the same desktop section too.
+  // 'dashboard' — a genuine blank-landing state (welcome banner + Check
+  // In/Out + Leave Summary + Pending Approvals, nothing from the Entry/Jobs/
+  // Entry Details/Job Edit grid below) — is its own value here now, separate
+  // from 'budget' (Entry). Previously 'budget' doubled as both "the Dashboard
+  // landing" AND "the Entry page", so Entry/Jobs/Entry Details/Job Edit
+  // always rendered mixed in alongside the Dashboard's own widgets on
+  // desktop; each is now a standalone page the same way a Claims page
+  // already is (see showingMainGroupPage below), and 'dashboard' is the
+  // actual default landing a fresh session (or "Dashboard" in the sidebar)
+  // returns to.
   const userDesktopSectionStorageKey = `mpr_user_desktop_section_${user.id}`;
-  const [desktopActiveSection, setDesktopActiveSection] = useState<'budget' | 'jobs' | 'entries' | 'jobEdit'>(() => {
+  const [desktopActiveSection, setDesktopActiveSection] = useState<'dashboard' | 'budget' | 'jobs' | 'entries' | 'jobEdit'>(() => {
     try {
       const saved = localStorage.getItem(userDesktopSectionStorageKey);
-      if (saved === 'budget' || saved === 'jobs' || saved === 'entries' || saved === 'jobEdit') return saved;
+      if (saved === 'dashboard' || saved === 'budget' || saved === 'jobs' || saved === 'entries' || saved === 'jobEdit') return saved;
     } catch {
-      // ignore — falls through to the 'budget' (Entry) default below
+      // ignore — falls through to the 'dashboard' default below
     }
-    return 'budget';
+    return 'dashboard';
   });
+  // Whether one of Entry/Jobs/Entry Details/Job Edit is the active desktop
+  // section — desktop-only equivalent of showingClaimsPage above (mobile
+  // already treats these as their own tile-menu pages and is unaffected).
+  // 'dashboard' is the one desktopActiveSection value this is false for —
+  // the actual blank Dashboard landing (welcome banner/Check In-Out/Leave
+  // Summary/Pending Approvals), everything else here hides right alongside
+  // showingClaimsPage while any of these four standalone pages is open.
+  const showingMainGroupPage = desktopActiveSection !== 'dashboard';
+  // Same isNativeApp split every other ModulePath breadcrumb uses (Timesheet,
+  // Leave Application, ConveyanceClaimCard, etc.) — the "Main / X" trail below
+  // is a web-only affordance, desktop only (mobile already has its own "Back
+  // to Menu" header for these same sections).
+  const isNativeApp = Capacitor.isNativePlatform();
   useEffect(() => {
     try {
       localStorage.setItem(userDesktopSectionStorageKey, desktopActiveSection);
@@ -997,15 +1024,15 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // before canSeeBudgetModule is known) or a permission the Superadmin
   // revokes mid-session — same idea as the mobile bounce-back effect further
   // up. Falls back to Job Edit if this account still has that separate
-  // grant, since it has no tile menu / "Dashboard" to bounce back to.
+  // grant, otherwise the (now genuinely blank) Dashboard.
   useEffect(() => {
     if (
       (desktopActiveSection === 'budget' || desktopActiveSection === 'jobs' || desktopActiveSection === 'entries') &&
       !canSeeBudgetModule
     ) {
-      setDesktopActiveSection(user.can_job_edit ? 'jobEdit' : 'budget');
+      setDesktopActiveSection(user.can_job_edit ? 'jobEdit' : 'dashboard');
     } else if (desktopActiveSection === 'jobEdit' && !user.can_job_edit) {
-      setDesktopActiveSection('budget');
+      setDesktopActiveSection('dashboard');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canSeeBudgetModule]);
@@ -1034,13 +1061,14 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
 
   // GlobalSidebar's "Dashboard" item — see dashboardNavRequest above. Resets
   // both the mobile tile menu (mobileActiveSection back to null) and the
-  // desktop section (desktopActiveSection back to 'budget', the everyday
-  // Entry landing tab) so the dashboard actually comes back on screen,
+  // desktop section (desktopActiveSection back to 'dashboard', the actual
+  // blank landing now that Entry/Jobs/Entry Details/Job Edit are each their
+  // own standalone page) so the dashboard actually comes back on screen,
   // instead of leaving whichever section was active/restored beforehand.
   useEffect(() => {
     if (!dashboardNavRequest) return;
     setMobileActiveSection(null);
-    setDesktopActiveSection('budget');
+    setDesktopActiveSection('dashboard');
     window.scrollTo({ top: 0, behavior: 'smooth' });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dashboardNavRequest]);
@@ -2575,7 +2603,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
         </div>
 
         {!!user.can_use_attendance && (
-          <div className="relative z-10 px-4 -mt-6 pb-7">
+          <div className="relative z-10 px-2 -mt-6 pb-7">
             <AttendanceCard token={token} projects={attendanceProjects} loading={!projectsLoaded} />
           </div>
         )}
@@ -2584,9 +2612,12 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
             Users -> can_view_leave_summary), OFF by default, same toggle
             pattern as Remote Attendance's can_use_attendance. Sits right
             after Remote Attendance so both quick-action cards stay together
-            at the top of the Dashboard when both are on. */}
+            at the top of the Dashboard when both are on. Same px-2 side
+            padding as the main content container below (tiles/calendar) —
+            was px-4, which sat these cards noticeably further in from the
+            edges than everything below it. */}
         {!!user.can_view_leave_summary && (
-          <div className={`relative z-10 px-4 pb-3 ${user.can_use_attendance ? '-mt-1' : '-mt-6'}`}>
+          <div className={`relative z-10 px-2 pb-3 ${user.can_use_attendance ? '-mt-1' : '-mt-6'}`}>
             <LeaveSummaryCard token={token} onOpen={() => goToMobileSection('leave')} />
           </div>
         )}
@@ -2596,7 +2627,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
             (see Admin Panel -> Approvals -> Templates). Renders nothing at
             all when nothing's waiting on this account, so it stays invisible
             for the vast majority of accounts that are never an approver. */}
-        <div className="relative z-10 px-4">
+        <div className="relative z-10 px-2">
           <PendingApprovalsCard token={token} />
         </div>
       </div>
@@ -2605,7 +2636,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
       {/* Desktop-only plain welcome banner (no avatar/bell/drop-notch — those
           are the mobile-specific drop-banner design above). Same gating the
           single banner used before this change. */}
-      <div className={`hidden ${showingClaimsPage ? 'md:hidden' : 'md:block'}`}>
+      <div className={`hidden ${showingClaimsPage || showingMainGroupPage ? 'md:hidden' : 'md:block'}`}>
         <div
           className="rounded-2xl px-6 py-5 sm:px-8 sm:py-6 text-white shadow-sm"
           style={{ background: 'var(--g-gradient)' }}
@@ -2623,7 +2654,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           Remote Attendance), OFF by default — an Admin or Superadmin must
           grant it per account before it shows at all. */}
       {!!user.can_use_attendance && (
-        <div className={`hidden ${showingClaimsPage ? 'md:hidden' : 'md:block'}`}>
+        <div className={`hidden ${showingClaimsPage || showingMainGroupPage ? 'md:hidden' : 'md:block'}`}>
           <AttendanceCard token={token} projects={attendanceProjects} loading={!projectsLoaded} />
         </div>
       )}
@@ -2631,14 +2662,14 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
       {/* Leave Summary (desktop) — same card and same can_view_leave_summary
           gate as the mobile Dashboard above. */}
       {!!user.can_view_leave_summary && (
-        <div className={`hidden ${showingClaimsPage ? 'md:hidden' : 'md:block'}`}>
+        <div className={`hidden ${showingClaimsPage || showingMainGroupPage ? 'md:hidden' : 'md:block'}`}>
           <LeaveSummaryCard token={token} onOpen={() => goToMobileSection('leave')} />
         </div>
       )}
 
       {/* Pending Approvals (desktop) — same card/reasoning as the mobile
           Dashboard above (Part 4 — Role Permissiveness). */}
-      <div className={`hidden ${showingClaimsPage ? 'md:hidden' : 'md:block'}`}>
+      <div className={`hidden ${showingClaimsPage || showingMainGroupPage ? 'md:hidden' : 'md:block'}`}>
         <PendingApprovalsCard token={token} />
       </div>
 
@@ -2701,6 +2732,13 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           Home. */}
       <div className={mobileActiveSection === 'employeeDirectory' ? 'block max-md:!mt-0' : 'hidden'}>
         <EmployeeDirectory token={token} user={user} onBack={() => goToMobileSection(null)} />
+      </div>
+
+      {/* Notice Board — a persistent, browsable version of the same active
+          notices NoticePopup.tsx shows once as a modal right after login;
+          ungated for every account, same as Employee Directory above. */}
+      <div className={mobileActiveSection === 'noticeBoard' ? 'block max-md:!mt-0' : 'hidden'}>
+        <NoticeBoard token={token} onBack={() => goToMobileSection(null)} />
       </div>
 
       {/* Timesheet — same Self Service page GlobalSidebar's "Timesheet" item
@@ -2878,6 +2916,26 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
               <span className="text-xs font-semibold text-slate-700 text-center leading-tight">Job Edit</span>
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => goToMobileSection('employeeDirectory')}
+            className="relative flex flex-col items-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-indigo-100/70 via-white/50 to-blue-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
+          >
+            <div className="p-2.5 bg-white/50 backdrop-blur border border-white/60 shadow-sm rounded-xl">
+              <Contact className="w-6 h-6 text-indigo-600" />
+            </div>
+            <span className="text-xs font-semibold text-slate-700 text-center leading-tight">Employee Directory</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => goToMobileSection('noticeBoard')}
+            className="relative flex flex-col items-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-yellow-100/70 via-white/50 to-amber-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
+          >
+            <div className="p-2.5 bg-white/50 backdrop-blur border border-white/60 shadow-sm rounded-xl">
+              <Bell className="w-6 h-6 text-amber-600" />
+            </div>
+            <span className="text-xs font-semibold text-slate-700 text-center leading-tight">Notice Board</span>
+          </button>
         </div>
       )}
 
@@ -2921,6 +2979,11 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
             !showingClaimsPage && desktopActiveSection === 'budget' && canSeeBudgetModule ? 'md:block lg:col-span-3' : 'md:hidden lg:col-span-1'
           }`}
         >
+          {!isNativeApp && (
+            <div className="hidden md:block">
+              <ModulePath path={['Main', 'Entry']} />
+            </div>
+          )}
           {!selectedBudget ? (
             /* Budget Picker — a User must choose a Budget the Admin has created &
                imported before a new MPR Entry can be started. Mobile-only "Back to
@@ -3820,6 +3883,11 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
 
         {/* Entries Table / List — grouped by Job, one line per Job (not per MPR) */}
         <div className={`space-y-8 ${!showingClaimsPage && desktopActiveSection !== 'budget' ? 'lg:col-span-3' : 'lg:col-span-2'}`}>
+          {!isNativeApp && !showingClaimsPage && desktopActiveSection === 'jobs' && canSeeBudgetModule && (
+            <div className="hidden md:block">
+              <ModulePath path={['Main', 'Jobs']} />
+            </div>
+          )}
           {/* Jobs summary card — every distinct Job this user has submitted, as a
               scrollable Job No + Job Name list (not just a bare count). */}
           <div
@@ -3943,6 +4011,11 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
             )}
           </div>
 
+          {!isNativeApp && !showingClaimsPage && desktopActiveSection === 'entries' && canSeeBudgetModule && (
+            <div className="hidden md:block">
+              <ModulePath path={['Main', 'Entry Details']} />
+            </div>
+          )}
           <div
             ref={entriesSectionRef}
             className={`bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden ${mobileActiveSection === 'entries' && canSeeBudgetModule ? 'block max-md:!mt-0' : 'hidden'} ${
@@ -4485,6 +4558,11 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           every edge: flush under the header, full width, all the way to the bottom.
           Mobile is untouched (max-md:!mt-0 only ever canceled the mobile gap; the
           extra rules above only take effect at md+). */}
+      {user.can_job_edit && !isNativeApp && !showingClaimsPage && desktopActiveSection === 'jobEdit' && (
+        <div className="hidden md:block">
+          <ModulePath path={['Main', 'Job Edits']} />
+        </div>
+      )}
       {user.can_job_edit && (
         <div className={`${mobileActiveSection === 'jobEdit' ? 'block' : 'hidden'} ${
           !showingClaimsPage && desktopActiveSection === 'jobEdit' ? 'md:block' : 'md:hidden'
@@ -4494,14 +4572,14 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
       )}
 
       {/* Global Calendar (Admin Panel -> Holidays) — same read-only "pocket
-          calendar" widget as mobile's own Dashboard above, sitting under the
-          Conveyance Bill Claim/Job Entry/Job Edit section on desktop too.
-          Hides only while a Claims/Leave page is the active section, same as
-          everything else on this page — desktop has no separate "Dashboard"
-          view to gate this to (unlike mobile's mobileActiveSection), so it
-          stays visible regardless of which of Budget/Jobs/Entries/Job Edit
-          desktopActiveSection currently has expanded. */}
-      {!showingClaimsPage && (
+          calendar" widget as mobile's own Dashboard above, and same
+          Dashboard-only gating: hides whenever a Claims/Leave page OR one of
+          Entry/Jobs/Entry Details/Job Edit (showingMainGroupPage) is the
+          active section, leaving it visible only on the actual blank
+          Dashboard landing — it used to stay visible on every desktop
+          section regardless, back when desktopActiveSection had no real
+          "just the Dashboard" state of its own. */}
+      {!showingClaimsPage && !showingMainGroupPage && (
         <div className="hidden md:block">
           <HolidayCalendarWidget token={token} size="large" />
         </div>
