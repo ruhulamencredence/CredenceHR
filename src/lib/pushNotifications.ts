@@ -21,12 +21,25 @@ import { apiUrl } from './api';
 
 let registeredToken: string | null = null;
 
+// Push notifications need a real Firebase project wired up on the native
+// side (android/app/google-services.json — see android/app/build.gradle's
+// `servicesJSON = file('google-services.json')` check, which only applies
+// the google-services Gradle plugin when that file exists). Without it,
+// FirebaseApp is never initialized, and calling PushNotifications.register()
+// below throws a NATIVE exception the JS try/catch here can't catch —
+// on a build without google-services.json this crashes the whole app the
+// instant the OS permission prompt is answered (either Allow or Don't
+// allow triggers PushNotifications.register() straight after). Flip this
+// to true only once google-services.json has actually been added and the
+// app rebuilt.
+const PUSH_NOTIFICATIONS_ENABLED = false;
+
 // Call once right after login (mirrors connectChatSocket/startBackgroundTracking).
 // onNotificationTap fires when the account taps a Chat push notification
 // while the app was backgrounded/closed — passes the roomId to open straight
 // to that conversation instead of just landing on whatever screen was last open.
 export async function initPushNotifications(token: string, onNotificationTap: (roomId: number) => void): Promise<void> {
-  if (!Capacitor.isNativePlatform()) return;
+  if (!PUSH_NOTIFICATIONS_ENABLED || !Capacitor.isNativePlatform()) return;
   try {
     const { PushNotifications } = await import('@capacitor/push-notifications');
 
