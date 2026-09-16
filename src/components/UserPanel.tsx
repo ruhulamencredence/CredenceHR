@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
+import { Capacitor } from '@capacitor/core';
 import { Project, MprNumber, Entry, Budget, BudgetItem, User, MprUsage, ClaimsNavRequest, JobsNavRequest, DashboardNavRequest } from '../types';
 import { Calendar, Building2, FileText, Package, Clock, Plus, AlertTriangle, CheckCircle2, ChevronRight, X, Trash2, Edit2, Lock, Wallet, ArrowLeft, FolderOpen, ListChecks, Search, Save, Briefcase, FileDown, Scissors, Route, Info } from 'lucide-react';
 import { apiUrl } from '../lib/api';
@@ -24,6 +25,7 @@ import { ClaimCard } from './ClaimCard';
 import { MyClaimsCard } from './MyClaimsCard';
 import { ConveyanceClaimCard } from './ConveyanceClaimCard';
 import { BottomNav } from './BottomNav';
+import { ModulePath } from './ModulePath';
 
 interface UserPanelProps {
   token: string;
@@ -1002,6 +1004,11 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // Summary/Pending Approvals), everything else here hides right alongside
   // showingClaimsPage while any of these four standalone pages is open.
   const showingMainGroupPage = desktopActiveSection !== 'dashboard';
+  // Same isNativeApp split every other ModulePath breadcrumb uses (Timesheet,
+  // Leave Application, ConveyanceClaimCard, etc.) — the "Main / X" trail below
+  // is a web-only affordance, desktop only (mobile already has its own "Back
+  // to Menu" header for these same sections).
+  const isNativeApp = Capacitor.isNativePlatform();
   useEffect(() => {
     try {
       localStorage.setItem(userDesktopSectionStorageKey, desktopActiveSection);
@@ -2940,6 +2947,11 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
             !showingClaimsPage && desktopActiveSection === 'budget' && canSeeBudgetModule ? 'md:block lg:col-span-3' : 'md:hidden lg:col-span-1'
           }`}
         >
+          {!isNativeApp && (
+            <div className="hidden md:block">
+              <ModulePath path={['Main', 'Entry']} />
+            </div>
+          )}
           {!selectedBudget ? (
             /* Budget Picker — a User must choose a Budget the Admin has created &
                imported before a new MPR Entry can be started. Mobile-only "Back to
@@ -3839,6 +3851,11 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
 
         {/* Entries Table / List — grouped by Job, one line per Job (not per MPR) */}
         <div className={`space-y-8 ${!showingClaimsPage && desktopActiveSection !== 'budget' ? 'lg:col-span-3' : 'lg:col-span-2'}`}>
+          {!isNativeApp && !showingClaimsPage && desktopActiveSection === 'jobs' && canSeeBudgetModule && (
+            <div className="hidden md:block">
+              <ModulePath path={['Main', 'Jobs']} />
+            </div>
+          )}
           {/* Jobs summary card — every distinct Job this user has submitted, as a
               scrollable Job No + Job Name list (not just a bare count). */}
           <div
@@ -3962,6 +3979,11 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
             )}
           </div>
 
+          {!isNativeApp && !showingClaimsPage && desktopActiveSection === 'entries' && canSeeBudgetModule && (
+            <div className="hidden md:block">
+              <ModulePath path={['Main', 'Entry Details']} />
+            </div>
+          )}
           <div
             ref={entriesSectionRef}
             className={`bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden ${mobileActiveSection === 'entries' && canSeeBudgetModule ? 'block max-md:!mt-0' : 'hidden'} ${
@@ -4504,6 +4526,11 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           every edge: flush under the header, full width, all the way to the bottom.
           Mobile is untouched (max-md:!mt-0 only ever canceled the mobile gap; the
           extra rules above only take effect at md+). */}
+      {user.can_job_edit && !isNativeApp && !showingClaimsPage && desktopActiveSection === 'jobEdit' && (
+        <div className="hidden md:block">
+          <ModulePath path={['Main', 'Job Edits']} />
+        </div>
+      )}
       {user.can_job_edit && (
         <div className={`${mobileActiveSection === 'jobEdit' ? 'block' : 'hidden'} ${
           !showingClaimsPage && desktopActiveSection === 'jobEdit' ? 'md:block' : 'md:hidden'
