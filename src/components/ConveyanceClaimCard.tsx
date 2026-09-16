@@ -4,6 +4,7 @@
  */
 
 import React, { useEffect, useState } from 'react';
+import { Capacitor } from '@capacitor/core';
 import { Wallet, Plus, ChevronRight, Inbox, Paperclip } from 'lucide-react';
 import { UserClaim, UserClaimStatus } from '../types';
 import { apiUrl } from '../lib/api';
@@ -12,6 +13,7 @@ import { UserClaimStatusBadge } from './UserClaimStatusBadge';
 import { NewConveyanceClaimModal } from './NewConveyanceClaimModal';
 import { ConveyanceClaimDetailModal } from './ConveyanceClaimDetailModal';
 import { Spinner } from './Spinner';
+import { ModulePath } from './ModulePath';
 
 interface ConveyanceClaimCardProps {
   token: string;
@@ -36,6 +38,11 @@ const TABS: { key: ClaimTab; label: string }[] = [
 // submission history with status badges. Top header carries the "+ New Claim"
 // action; the body is the "My Conveyance Claims" history list.
 export const ConveyanceClaimCard: React.FC<ConveyanceClaimCardProps> = ({ token, onBack }) => {
+  // Same isNativeApp split as Timesheet.tsx/LeaveApplication.tsx — the
+  // "Main / Conveyance Bill Claim" module-path breadcrumb is a web-only
+  // affordance (native app users navigate this same page via the mobile
+  // tile menu/bottom nav, so a breadcrumb trail above it is redundant there).
+  const isNativeApp = Capacitor.isNativePlatform();
   const [claims, setClaims] = useState<UserClaim[]>([]);
   const [loading, setLoading] = useState(true);
   const [showNewClaim, setShowNewClaim] = useState(false);
@@ -76,6 +83,12 @@ export const ConveyanceClaimCard: React.FC<ConveyanceClaimCardProps> = ({ token,
     tab === 'pending' ? 'Nothing waiting on review.' : tab === 'approved' ? 'No approved claims yet.' : 'No rejected claims.';
 
   return (
+    <>
+      {!isNativeApp && (
+        <div className="px-2 sm:px-0">
+          <ModulePath path={['Main', 'Conveyance Bill Claim']} />
+        </div>
+      )}
     <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
       {/* Top Header — on mobile the "+ New Claim" action lives in the
           floating pill button at the bottom of the page instead (same
@@ -262,5 +275,6 @@ export const ConveyanceClaimCard: React.FC<ConveyanceClaimCardProps> = ({ token,
       )}
       {viewingClaim && <ConveyanceClaimDetailModal claim={viewingClaim} onClose={() => setViewingClaim(null)} />}
     </div>
+    </>
   );
 };
