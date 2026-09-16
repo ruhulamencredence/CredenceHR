@@ -1316,6 +1316,14 @@ export interface ChatRoomMember {
   joined_at: string;
 }
 
+// GET /api/chat/messages/:id/reads response row — used for the group "Seen
+// by ..." caption under your own most recent message (ChatPanel.tsx).
+export interface ChatReadReceipt {
+  id: number;
+  name: string;
+  read_at: string;
+}
+
 export interface ChatMessage {
   id: number;
   room_id: number;

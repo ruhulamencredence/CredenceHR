@@ -44,6 +44,7 @@ import { usePullToRefresh } from './lib/usePullToRefresh';
 import { apiUrl } from './lib/api';
 import { startBackgroundTracking, stopBackgroundTracking } from './lib/backgroundTracking';
 import { connectChatSocket, disconnectChatSocket } from './lib/chatSocket';
+import { initPushNotifications, clearPushToken } from './lib/pushNotifications';
 
 export default function App() {
   const [token, setToken] = useState<string | null>(localStorage.getItem('mpr_token'));
@@ -126,6 +127,12 @@ export default function App() {
   // isn't persisted across a reload — reopening Chat re-syncs instantly from
   // the server, so there's nothing worth restoring a stale "was open" flag for.
   const [showChat, setShowChat] = useState(false);
+  // Set when a Chat push notification is tapped (see initPushNotifications
+  // below) so ChatPanel opens straight to that conversation instead of just
+  // landing on the room list. Cleared once ChatPanel has consumed it (see
+  // its onInitialRoomHandled prop) so re-showing Chat later doesn't keep
+  // jumping back to that same old room.
+  const [pendingChatRoomId, setPendingChatRoomId] = useState<number | null>(null);
 
   // Bumped right after a Personal Data photo upload succeeds (see
   // ProfilePage's onPhotoUpdated below) — passed to every avatar spot
@@ -261,6 +268,7 @@ export default function App() {
       localStorage.removeItem(`mpr_self_service_view_${user.id}`);
       localStorage.removeItem(`mpr_show_profile_page_${user.id}`);
     }
+    if (token) clearPushToken(token);
     localStorage.removeItem('mpr_token');
     localStorage.removeItem('mpr_user');
     setToken(null);
@@ -292,6 +300,21 @@ export default function App() {
   // rather than opening their own.
   useEffect(() => {
     if (token) connectChatSocket(token);
+  }, [token]);
+
+  // Chat push notifications — registers this device's FCM token (no-op on
+  // web / without Firebase configured, see pushNotifications.ts). Tapping a
+  // push while the app was backgrounded/closed jumps straight into that
+  // conversation via pendingChatRoomId, consumed by ChatPanel below.
+  useEffect(() => {
+    if (token) {
+      initPushNotifications(token, (roomId) => {
+        setSelfServiceView(null);
+        setShowProfilePage(false);
+        setPendingChatRoomId(roomId);
+        setShowChat(true);
+      });
+    }
   }, [token]);
 
   // Which panel the account is currently looking at. Every account now lands
@@ -698,7 +721,13 @@ export default function App() {
       <main className="flex-1">
         <Suspense fallback={<AppLoader />}>
         {showChat ? (
-          <ChatPanel user={user} token={token || ''} onBack={() => setShowChat(false)} />
+          <ChatPanel
+            user={user}
+            token={token || ''}
+            onBack={() => setShowChat(false)}
+            initialRoomId={pendingChatRoomId}
+            onInitialRoomHandled={() => setPendingChatRoomId(null)}
+          />
         ) : showProfilePage ? (
           <ProfilePage
             user={user}

@@ -15,11 +15,12 @@
 // 'receive_message' socket event to every member's open ChatPanel.
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { Capacitor } from '@capacitor/core';
 import {
   ArrowLeft, Search, Plus, X, Send, Paperclip, Check, CheckCheck,
   Users, UserPlus, Shield, LogOut, Trash2, MessageSquare, Link as LinkIcon
 } from 'lucide-react';
-import { User, ChatRoom, ChatMessage, ChatRoomMember, ChatDirectoryUser } from '../types';
+import { User, ChatRoom, ChatMessage, ChatRoomMember, ChatDirectoryUser, ChatReadReceipt } from '../types';
 import { apiUrl } from '../lib/api';
 import { connectChatSocket, getChatSocket } from '../lib/chatSocket';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
@@ -28,6 +29,11 @@ interface ChatPanelProps {
   token: string;
   user: User;
   onBack: () => void;
+  // Set by App.tsx when a Chat push notification was just tapped — opens
+  // straight to that conversation once the room list has loaded. Cleared via
+  // onInitialRoomHandled so re-opening Chat later doesn't keep jumping back.
+  initialRoomId?: number | null;
+  onInitialRoomHandled?: () => void;
 }
 
 function timeOnly(iso: string): string {
@@ -56,6 +62,35 @@ function avatarColor(seed: string): string {
   let hash = 0;
   for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
   return AVATAR_PALETTE[hash % AVATAR_PALETTE.length];
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Highlights "@FullName" occurrences that match a CURRENT room member's name
+// (inserted via the @mention picker — see insertMention in ChatPanel).
+// Longest names first so "@John" doesn't shadow a match for "@John Doe".
+function renderMessageContent(content: string, members: ChatRoomMember[]): React.ReactNode {
+  if (members.length === 0) return content;
+  const names = [...new Set(members.map((m) => m.name))].sort((a, b) => b.length - a.length);
+  if (names.length === 0) return content;
+  const pattern = new RegExp(`@(${names.map(escapeRegExp).join('|')})`, 'g');
+  const parts: React.ReactNode[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  let key = 0;
+  while ((match = pattern.exec(content)) !== null) {
+    if (match.index > lastIndex) parts.push(content.slice(lastIndex, match.index));
+    parts.push(
+      <span key={key++} className="font-semibold text-blue-700">
+        @{match[1]}
+      </span>
+    );
+    lastIndex = match.index + match[0].length;
+  }
+  if (lastIndex < content.length) parts.push(content.slice(lastIndex));
+  return parts;
 }
 
 // Fetches one message's attachment (auth'd — <img src> can't send a Bearer
@@ -96,7 +131,7 @@ const AttachmentImage: React.FC<{ token: string; messageId: number }> = ({ token
   );
 };
 
-export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack }) => {
+export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initialRoomId, onInitialRoomHandled }) => {
   const [rooms, setRooms] = useState<ChatRoom[]>([]);
   const [activeRoomId, setActiveRoomId] = useState<number | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -106,6 +141,17 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack }) => 
   const [typingByRoom, setTypingByRoom] = useState<Record<number, Set<number>>>({});
   const [onlineUserIds, setOnlineUserIds] = useState<Set<number>>(new Set());
   const [otherReadMessageId, setOtherReadMessageId] = useState<number | null>(null);
+  // Group/community "Seen by ..." — who has read at least this far, for
+  // just YOUR most recent message in the room (see fetchSeenBy below).
+  // WhatsApp shows this per-message via long-press; here it's shown inline
+  // under only the latest own message, which covers the common case
+  // ("has everyone seen my last message yet?") without an extra tap.
+  const [seenByLastOwnMessage, setSeenByLastOwnMessage] = useState<ChatReadReceipt[]>([]);
+  const [seenByRefreshTick, setSeenByRefreshTick] = useState(0);
+  // "@" mention autocomplete (group/community only) — the text typed after
+  // the most recent unclosed "@" before the cursor, or null when not
+  // currently mid-mention. See handleTyping/insertMention below.
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
   const [showInfoPanel, setShowInfoPanel] = useState(false);
   const [members, setMembers] = useState<ChatRoomMember[]>([]);
@@ -117,6 +163,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack }) => 
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const messageInputRef = useRef<HTMLInputElement>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Ref mirror of activeRoomId so the socket listeners below (registered
   // once on mount) always see the CURRENT room without needing to
@@ -215,9 +262,14 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack }) => 
       });
     };
     const onRead = ({ roomId, userId, messageId }: { roomId: number; userId: number; messageId: number }) => {
-      if (roomId === activeRoomIdRef.current && userId !== user.id) {
+      if (roomId !== activeRoomIdRef.current) return;
+      if (userId !== user.id) {
         setOtherReadMessageId((prev) => Math.max(prev || 0, messageId));
       }
+      // Someone (including a THIRD member in a group, not just "the other
+      // participant" tracked above) just read further — the "Seen by ..."
+      // caption on our last own message may need to grow.
+      setSeenByRefreshTick((v) => v + 1);
     };
     const onPresence = ({ userId, online }: { userId: number; online: boolean }) => {
       setOnlineUserIds((prev) => {
@@ -253,8 +305,14 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack }) => 
       setShowInfoPanel(false);
       setReplyTo(null);
       setOtherReadMessageId(null);
+      setMentionQuery(null);
       setLoadingMessages(true);
       getChatSocket()?.emit('join_room', roomId);
+      // Members are needed up-front for @mention autocomplete in a group/
+      // community, not just when the info panel is opened — see
+      // handleTyping/mentionCandidates below.
+      const room = rooms.find((r) => r.id === roomId);
+      if (room && room.type !== 'direct') fetchMembers(roomId);
       try {
         const res = await fetch(apiUrl(`/api/chat/rooms/${roomId}/messages?limit=50`), {
           headers: { Authorization: `Bearer ${token}` }
@@ -277,15 +335,75 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack }) => 
       }
       setRooms((prev) => prev.map((r) => (r.id === roomId ? { ...r, unread_count: 0 } : r)));
     },
-    [token]
+    [token, rooms, fetchMembers]
   );
+
+  // Push-notification deep link (see App.tsx's pendingChatRoomId) — opens
+  // straight to that conversation once the room list has actually loaded
+  // and confirms membership, rather than firing blind the instant this
+  // component mounts.
+  useEffect(() => {
+    if (!initialRoomId) return;
+    if (rooms.some((r) => r.id === initialRoomId)) {
+      openRoom(initialRoomId);
+      onInitialRoomHandled?.();
+    }
+  }, [initialRoomId, rooms, openRoom, onInitialRoomHandled]);
+
+  const lastOwnMessageId = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].sender_id === user.id) return messages[i].id;
+    }
+    return null;
+  }, [messages, user.id]);
+
+  useEffect(() => {
+    if (!lastOwnMessageId || !activeRoom || activeRoom.type === 'direct') {
+      setSeenByLastOwnMessage([]);
+      return;
+    }
+    let cancelled = false;
+    fetch(apiUrl(`/api/chat/messages/${lastOwnMessageId}/reads`), { headers: { Authorization: `Bearer ${token}` } })
+      .then((res) => (res.ok ? res.json() : []))
+      .then((rows: ChatReadReceipt[]) => {
+        if (!cancelled) setSeenByLastOwnMessage(rows);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [lastOwnMessageId, activeRoom, token, seenByRefreshTick]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages.length]);
 
+  // Android keyboard covering the message input — the root container above
+  // already uses 100dvh (not 100vh) so the layout reflows on its own on
+  // modern WebViews, but older/OEM WebViews don't always fire that resize
+  // reliably. Belt-and-braces: when the OS keyboard actually finishes
+  // opening, re-scroll to the latest message so the input bar sitting right
+  // below it is pulled back on-screen too.
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    let didShowHandle: { remove: () => void } | undefined;
+    (async () => {
+      try {
+        const { Keyboard } = await import('@capacitor/keyboard');
+        didShowHandle = await Keyboard.addListener('keyboardDidShow', () => {
+          messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        });
+      } catch {
+        // Plugin unavailable — the 100dvh layout above is still the primary fix.
+      }
+    })();
+    return () => {
+      didShowHandle?.remove();
+    };
+  }, []);
+
   const handleTyping = useCallback(
-    (text: string) => {
+    (text: string, cursorPos: number) => {
       setMessageInput(text);
       if (!activeRoomId) return;
       const socket = getChatSocket();
@@ -294,8 +412,44 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack }) => 
       typingTimeoutRef.current = setTimeout(() => {
         socket?.emit('typing', { roomId: activeRoomId, isTyping: false });
       }, 2000);
+
+      // "@" mention trigger — an "@" at the start of the text or right after
+      // whitespace, with only name-shaped characters (and no second "@")
+      // between it and the cursor. Matches multi-word names ("@John Doe")
+      // without needing to close the mention first.
+      if (activeRoom?.type !== 'direct') {
+        const beforeCursor = text.slice(0, cursorPos);
+        const match = beforeCursor.match(/(?:^|\s)@([a-zA-Z0-9 ]{0,40})$/);
+        setMentionQuery(match ? match[1] : null);
+      }
     },
-    [activeRoomId]
+    [activeRoomId, activeRoom?.type]
+  );
+
+  // Candidates shown in the @mention dropdown — every room member (besides
+  // yourself) whose name contains what's typed after "@" so far.
+  const mentionCandidates = useMemo(() => {
+    if (mentionQuery === null) return [];
+    const q = mentionQuery.trim().toLowerCase();
+    return members.filter((m) => m.user_id !== user.id && (!q || m.name.toLowerCase().includes(q)));
+  }, [mentionQuery, members, user.id]);
+
+  const insertMention = useCallback(
+    (name: string) => {
+      const input = messageInputRef.current;
+      const cursorPos = input?.selectionStart ?? messageInput.length;
+      const before = messageInput.slice(0, cursorPos);
+      const after = messageInput.slice(cursorPos);
+      const newBefore = before.replace(/@([a-zA-Z0-9 ]{0,40})$/, `@${name} `);
+      const newText = newBefore + after;
+      setMessageInput(newText);
+      setMentionQuery(null);
+      requestAnimationFrame(() => {
+        input?.focus();
+        input?.setSelectionRange(newBefore.length, newBefore.length);
+      });
+    },
+    [messageInput]
   );
 
   const sendTextMessage = useCallback(() => {
@@ -308,6 +462,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack }) => 
       setSending(false);
       setMessageInput('');
       setReplyTo(null);
+      setMentionQuery(null);
     };
     if (socket?.connected) {
       socket.emit('send_message', payload, (ack: { ok: boolean; message?: ChatMessage; error?: string }) => {
@@ -399,7 +554,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack }) => 
   const isTypingInActiveRoom = typingNamesInActiveRoom.length > 0;
 
   return (
-    <div className="flex h-[calc(100vh-64px)] md:h-[calc(100vh-72px)] bg-white">
+    <div className="flex h-[calc(100dvh-64px)] md:h-[calc(100dvh-72px)] bg-white">
       {/* Sidebar: room list */}
       <div className={`w-full md:w-[360px] border-r border-slate-200 flex flex-col ${activeRoomId ? 'hidden md:flex' : 'flex'}`}>
         <div className="p-4 border-b border-slate-200 flex items-center justify-between gap-2">
@@ -572,7 +727,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack }) => 
                             <Paperclip className="w-4 h-4" /> {msg.attachment_filename || 'Attachment'}
                           </a>
                         )}
-                        {msg.content && <p className="whitespace-pre-wrap break-words">{msg.content}</p>}
+                        {msg.content && <p className="whitespace-pre-wrap break-words">{renderMessageContent(msg.content, members)}</p>}
                         <div className="flex justify-end items-center gap-1 mt-1 text-[10px] text-slate-400">
                           <button
                             type="button"
@@ -586,6 +741,12 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack }) => 
                           {isMe && (isRead ? <CheckCheck size={14} className="text-blue-500" /> : <Check size={14} />)}
                         </div>
                       </div>
+                      {isMe && activeRoom.type !== 'direct' && msg.id === lastOwnMessageId && seenByLastOwnMessage.length > 0 && (
+                        <div className="text-[10px] text-slate-400 text-right mr-1 mt-0.5 truncate">
+                          Seen by {seenByLastOwnMessage.slice(0, 3).map((r) => r.name.split(' ')[0]).join(', ')}
+                          {seenByLastOwnMessage.length > 3 ? ` +${seenByLastOwnMessage.length - 3}` : ''}
+                        </div>
+                      )}
                     </div>
                   </div>
                 );
@@ -604,7 +765,27 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack }) => 
               </div>
             )}
 
-            <div className="p-3 bg-white border-t border-slate-200 flex items-center gap-2">
+            <div className="relative p-3 bg-white border-t border-slate-200 flex items-center gap-2">
+              {mentionQuery !== null && activeRoom.type !== 'direct' && mentionCandidates.length > 0 && (
+                <div className="absolute bottom-full left-3 right-3 mb-1 bg-white border border-slate-200 rounded-xl shadow-lg max-h-48 overflow-y-auto z-10">
+                  {mentionCandidates.map((m) => (
+                    <button
+                      key={m.user_id}
+                      type="button"
+                      onClick={() => insertMention(m.name)}
+                      className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-50 text-left text-sm"
+                    >
+                      <div
+                        className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-semibold shrink-0"
+                        style={{ background: avatarColor(m.name) }}
+                      >
+                        {initialsOf(m.name)}
+                      </div>
+                      {m.name}
+                    </button>
+                  ))}
+                </div>
+              )}
               <input
                 ref={fileInputRef}
                 type="file"
@@ -620,11 +801,12 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack }) => 
                 <Paperclip className="w-5 h-5" />
               </button>
               <input
+                ref={messageInputRef}
                 type="text"
                 value={messageInput}
-                onChange={(e) => handleTyping(e.target.value)}
+                onChange={(e) => handleTyping(e.target.value, e.target.selectionStart ?? e.target.value.length)}
                 onKeyDown={(e) => e.key === 'Enter' && sendTextMessage()}
-                placeholder="Type a message"
+                placeholder={activeRoom.type !== 'direct' ? 'Type a message, @ to mention' : 'Type a message'}
                 className="flex-1 py-2.5 px-4 bg-slate-100 rounded-full border-none focus:outline-none focus:ring-2 focus:ring-blue-600 text-sm"
               />
               <button
