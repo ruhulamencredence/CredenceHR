@@ -393,12 +393,11 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
     scrollMessagesToBottom(true);
   }, [messages.length, scrollMessagesToBottom]);
 
-  // Locks the OUTER page from scrolling at all while a conversation is open
-  // — belt-and-braces alongside .chat-shell's fixed height (index.css): even
-  // if some device's Navbar height/safe-area inset doesn't match that calc()
-  // exactly, the page still can't scroll out from under the chat, which is
-  // what was dragging the app header and this panel's own conversation
-  // header off-screen together in the reported bug.
+  // Locks the OUTER page from scrolling at all while a conversation is open.
+  // .chat-shell (index.css) already takes ChatPanel out of the page's normal
+  // flow entirely (position: fixed), so this is now mostly a nicety — it
+  // freezes whatever page was open behind Chat at its current scroll
+  // position instead of it silently jumping around underneath.
   useEffect(() => {
     const previousBodyOverflow = document.body.style.overflow;
     const previousHtmlOverflow = document.documentElement.style.overflow;
@@ -410,12 +409,12 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
     };
   }, []);
 
-  // Android keyboard covering the message input — the root container above
-  // already uses .chat-shell's dvh-with-vh-fallback height (index.css) so
-  // the layout reflows on its own on modern WebViews, but older/OEM
-  // WebViews don't always fire that resize reliably. Belt-and-braces: when
-  // the OS keyboard actually finishes opening, re-scroll to the latest
-  // message so the input bar sitting right below it is pulled back on-screen too.
+  // Android keyboard covering the message input — .chat-shell's `position:
+  // fixed; inset: 0` (index.css) already tracks the real visible viewport on
+  // its own in most modern WebViews, but older/OEM ones don't always reflow
+  // reliably. Belt-and-braces: when the OS keyboard actually finishes
+  // opening, re-scroll to the latest message so the input bar sitting right
+  // below it is pulled back on-screen too.
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
     let didShowHandle: { remove: () => void } | undefined;

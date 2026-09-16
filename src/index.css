@@ -181,28 +181,26 @@ body {
   color: var(--g-text-muted);
 }
 
-/* ChatPanel.tsx's root container. Two separate `height` declarations (not
-   Tailwind's h-[calc(...)], which can't express this) — the CSS cascade
-   rule that makes this a safe progressive enhancement: a browser that
-   doesn't recognize `dvh` treats that whole declaration as invalid and
-   drops JUST that line, keeping the `vh` one above it. A browser that DOES
-   support `dvh` uses it instead (it wins the cascade, coming second) and
-   gets the real payoff: `dvh` tracks the ACTUAL visible viewport, so it
-   shrinks correctly when the on-screen keyboard opens, whereas `vh` stays
-   pinned to the full screen height and leaves the message input hidden
-   below the keyboard until the page is scrolled.
-   Without the `vh` fallback line, a WebView that doesn't understand `dvh`
-   drops the whole rule and the container collapses to its content's natural
-   (unbounded) height instead of the intended fixed viewport height — which
-   is exactly what broke "open a chat -> have to scroll to see the input
-   box" on such a device. */
+/* ChatPanel.tsx's root container. A previous version of this rule computed
+   its height as `100vh - <Navbar's assumed height>` (64px/72px) — but that
+   assumed height never accounted for the Navbar's own
+   `padding-top: env(safe-area-inset-top)` (see Navbar.tsx), which adds
+   anywhere from 0 to 50-60px depending on the device's notch/status bar.
+   Wherever that padding was nonzero, .chat-shell ended up taller than the
+   space actually left below the Navbar, pushing the input bar off the
+   bottom of the screen with no way to reach it.
+   Fixed positioning sidesteps needing to know the Navbar's real height at
+   all: `inset: 0` always matches the ACTUAL visible viewport exactly (and,
+   in modern engines, still does when the on-screen keyboard opens/closes),
+   with its own safe-area padding below covering the notch/status bar
+   directly instead of stacking underneath the Navbar's. This does mean
+   ChatPanel fully covers the Navbar while open (z-index above its 50) —
+   intentional: a conversation is meant to take over the whole screen, the
+   same as it visually already did before, just anchored correctly now. */
 .chat-shell {
-  height: calc(100vh - 64px);
-  height: calc(100dvh - 64px);
-}
-@media (min-width: 768px) {
-  .chat-shell {
-    height: calc(100vh - 72px);
-    height: calc(100dvh - 72px);
-  }
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
