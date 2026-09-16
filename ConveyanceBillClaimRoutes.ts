@@ -74,6 +74,14 @@ interface ConveyanceBillClaimRouteDeps {
   // Valid Category values for a Conveyance Bill Claim — same
   // USER_CLAIM_CATEGORIES array defined once in server.ts.
   userClaimCategories: readonly string[];
+  // Department-wise scope for the 'conveyance' module (Admin Panel -> Users
+  // -> Module Access -> "Conveyance Claim Departments") — same
+  // getAttendanceReportDeptScope/getLeaveApplicationDeptScope convention
+  // used by AttendanceRoutes.ts/LeaveRoutes.ts. Returns null for
+  // unrestricted (every Department's claims visible); see the
+  // conveyance_claim_department_access table comment in server.ts's
+  // initDB() for the full design.
+  getConveyanceClaimDeptScope: (userId: number) => Promise<string[] | null>;
 }
 
 export function registerConveyanceBillClaimRoutes(app: Express, deps: ConveyanceBillClaimRouteDeps) {
@@ -94,7 +102,8 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
     rejectUserClaimRecord,
     toDateOnlyString,
     todayInDhaka,
-    userClaimCategories: USER_CLAIM_CATEGORIES
+    userClaimCategories: USER_CLAIM_CATEGORIES,
+    getConveyanceClaimDeptScope
   } = deps;
 
   // ---- Conveyance Bill Claim (Superadmin + explicitly-granted Admins only) ----
@@ -693,29 +702,56 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
   });
 
   // System-wide list for the Admin Panel's Conveyance Bill Claim tab (source
-  // "user_claim"), filterable by status/user — pending ones are what need review.
-  app.get("/api/user-claims", authenticateToken, requireAdmin, requireModule("conveyance"), async (req, res) => {
+  // "user_claim"), filterable by status/user — pending ones are what need
+  // review. Visibility is also narrowed by the 'conveyance' module's own
+  // Department scope (Admin Panel -> Users -> Module Access -> "Conveyance
+  // Claim Departments") — same convention GET /api/leave-applications/report
+  // and GET /api/attendance/report/* use: a Superadmin, or an Admin/User
+  // with no scope rows at all, sees every claim; a scoped account only ever
+  // sees claims from accounts whose linked Employee Directory row has a
+  // Department they've been granted. A claimant with no linked Employee row
+  // (so no Department at all) is only ever visible to an unrestricted
+  // viewer.
+  app.get("/api/user-claims", authenticateToken, requireAdmin, requireModule("conveyance"), async (req: any, res) => {
     try {
-      const rows = await queryDB(
-        `SELECT uc.id, uc.user_id, u.name AS user_name, uc.claim_date, uc.from_date, uc.to_date, uc.category, uc.amount,
-                uc.description, uc.file_name, uc.file_mimetype, (uc.file_data IS NOT NULL) AS has_file,
-                uc.status, uc.admin_remarks, uc.reviewed_by, r.name AS reviewed_by_name, uc.reviewed_at,
-                uc.created_at, uc.updated_at, i.id AS bill_item_id, i.bill_id
-           FROM user_claims uc
-           LEFT JOIN users u ON u.id = uc.user_id
-           LEFT JOIN users r ON r.id = uc.reviewed_by
-           LEFT JOIN conveyance_bill_items i ON i.user_claim_id = uc.id
-          ORDER BY uc.id DESC`
-      );
+      const [rows, employees] = await Promise.all([
+        queryDB(
+          `SELECT uc.id, uc.user_id, u.name AS user_name, uc.claim_date, uc.from_date, uc.to_date, uc.category, uc.amount,
+                  uc.description, uc.file_name, uc.file_mimetype, (uc.file_data IS NOT NULL) AS has_file,
+                  uc.status, uc.admin_remarks, uc.reviewed_by, r.name AS reviewed_by_name, uc.reviewed_at,
+                  uc.created_at, uc.updated_at, i.id AS bill_item_id, i.bill_id
+             FROM user_claims uc
+             LEFT JOIN users u ON u.id = uc.user_id
+             LEFT JOIN users r ON r.id = uc.reviewed_by
+             LEFT JOIN conveyance_bill_items i ON i.user_claim_id = uc.id
+            ORDER BY uc.id DESC`
+        ),
+        queryDB("SELECT user_id, department FROM all_employees WHERE user_id IS NOT NULL")
+      ]);
+      const departmentByUserId = new Map<number, string>();
+      for (const e of employees) {
+        if (e.user_id != null && e.department) departmentByUserId.set(Number(e.user_id), e.department);
+      }
+
       const status = req.query.status ? String(req.query.status) : null;
       const user_id = req.query.user_id ? Number(req.query.user_id) : null;
+      const deptScope = req.user.role === "superadmin" ? null : await getConveyanceClaimDeptScope(req.user.id);
       const filtered = rows.filter((r: any) => {
         if (status && r.status !== status) return false;
         if (user_id && Number(r.user_id) !== user_id) return false;
+        if (deptScope) {
+          const dept = departmentByUserId.get(Number(r.user_id)) || null;
+          if (!dept || !deptScope.includes(dept)) return false;
+        }
         return true;
       });
       const withRefs = await attachUserClaimRefs(
-        filtered.map((r: any) => ({ ...r, amount: Number(r.amount), has_file: !!r.has_file }))
+        filtered.map((r: any) => ({
+          ...r,
+          amount: Number(r.amount),
+          has_file: !!r.has_file,
+          department: departmentByUserId.get(Number(r.user_id)) || null
+        }))
       );
       const withApproval = await attachUserClaimApproval(withRefs);
       res.json(withApproval);

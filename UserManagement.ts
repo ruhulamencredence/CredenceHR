@@ -320,6 +320,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
         await queryDB("DELETE FROM admin_module_permissions WHERE user_id = ?", [id]);
         await queryDB("DELETE FROM attendance_report_department_access WHERE user_id = ?", [id]);
         await queryDB("DELETE FROM leave_application_department_access WHERE user_id = ?", [id]);
+        await queryDB("DELETE FROM conveyance_claim_department_access WHERE user_id = ?", [id]);
         await queryDB("UPDATE users SET can_view_login_location = 0, can_access_user_panel = 0 WHERE id = ?", [id]);
       }
       res.json({ success: true });
@@ -465,6 +466,59 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
       await queryDB("DELETE FROM leave_application_department_access WHERE user_id = ?", [id]);
       for (const department of valid) {
         await queryDB("INSERT INTO leave_application_department_access (user_id, department) VALUES (?, ?)", [id, department]);
+      }
+      res.json({ success: true, departments: valid });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Superadmin: department-wise scope for the 'conveyance' module — exact
+  // same shape/rules as the 'attendance_report_departments'/'leave_
+  // application_departments' pairs above, just backed by conveyance_claim_
+  // department_access instead (Admin Panel -> Users -> Module Access ->
+  // "Conveyance Claim Departments", shown once 'conveyance' is ticked). No
+  // rows for a user means unrestricted — every Department's Conveyance Bill
+  // Claims visible, exactly like granting the module alone. Applies equally
+  // to role 'admin' and role 'user' accounts, and to accounts that supervise
+  // no Department at all — the Department picker in the modal only uses
+  // supervisor_user_id client-side to pre-tick a sensible starting
+  // selection, it isn't required here.
+  app.get("/api/users/:id/conveyance-claim-departments", authenticateToken, requireSuperAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const rows: any = await queryDB(
+        "SELECT department FROM conveyance_claim_department_access WHERE user_id = ? ORDER BY department ASC",
+        [id]
+      );
+      res.json({ departments: rows.map((r: any) => r.department) });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/users/:id/conveyance-claim-departments", authenticateToken, requireSuperAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const requested: string[] = Array.isArray(req.body?.departments) ? req.body.departments : [];
+
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "Conveyance Claim Department access only applies to Admin and User accounts." });
+      }
+
+      // Only real Department names (Admin Panel -> Departments) can be scoped
+      // to — same forgiving convention as attendance-report-departments above.
+      const realDepartments: any = await queryDB("SELECT name FROM departments");
+      const realNames = new Set(realDepartments.map((d: any) => d.name));
+      const valid = Array.from(
+        new Set(requested.map((d) => String(d).trim()).filter((d) => d && realNames.has(d)))
+      );
+
+      await queryDB("DELETE FROM conveyance_claim_department_access WHERE user_id = ?", [id]);
+      for (const department of valid) {
+        await queryDB("INSERT INTO conveyance_claim_department_access (user_id, department) VALUES (?, ?)", [id, department]);
       }
       res.json({ success: true, departments: valid });
     } catch (err: any) {
@@ -781,6 +835,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
       await queryDB("DELETE FROM admin_module_permissions WHERE user_id = ?", [id]);
       await queryDB("DELETE FROM attendance_report_department_access WHERE user_id = ?", [id]);
       await queryDB("DELETE FROM leave_application_department_access WHERE user_id = ?", [id]);
+      await queryDB("DELETE FROM conveyance_claim_department_access WHERE user_id = ?", [id]);
       // A deleted user might still be linked from an Employees directory row
       // (all_employees.user_id — no FK/cascade on that column) — clear it so
       // the Employee doesn't keep showing a stale "Has Login" badge for an
