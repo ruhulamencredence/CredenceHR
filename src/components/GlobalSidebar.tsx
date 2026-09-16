@@ -4,6 +4,7 @@ import {
   CalendarClock, ListChecks, CheckSquare, ChevronDown, Building2, Users, Users2,
   BarChart3, Upload, History, Recycle, Navigation, Bell, ShieldCheck,
   Contact, Calendar, Clock, Fingerprint, Banknote, Package, LayoutDashboard, Server, MessageSquare,
+  ChevronsLeft, ChevronsRight,
 } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { User, AdminModuleKey } from '../types';
@@ -84,7 +85,36 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   const [reportsOpen, setReportsOpen] = useState(true);
   const [claimsOpen, setClaimsOpen] = useState(true);
   const [attendanceOpen, setAttendanceOpen] = useState(true);
+  const [orgOpen, setOrgOpen] = useState(true);
+  const [workforceOpen, setWorkforceOpen] = useState(true);
+  const [hrOpen, setHrOpen] = useState(true);
   const photoUrl = useProfilePhoto(token, photoVersion);
+
+  // Minimized/collapsed mode — desktop persistent column only (the mobile
+  // overlay drawer is already a full-width sheet the user opens on demand,
+  // so "minimizing" it wouldn't make sense). Remembers the user's choice
+  // across reloads via localStorage; the overlay-variant instance of this
+  // component never reads/writes it since `isPersistent` gates it below.
+  const [collapsed, setCollapsed] = useState<boolean>(() => {
+    if (!isPersistent) return false;
+    try {
+      return localStorage.getItem('gsidebar_collapsed') === '1';
+    } catch {
+      return false;
+    }
+  });
+  const toggleCollapsed = () => {
+    setCollapsed((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('gsidebar_collapsed', next ? '1' : '0');
+      } catch {
+        // localStorage unavailable (private mode, etc.) — collapsed state
+        // just won't persist across reloads, nothing else breaks.
+      }
+      return next;
+    });
+  };
 
   // Server switcher — every account, native app only (the Web build always
   // just uses the relative "/api/..." origin it's served from, so switching
@@ -273,17 +303,31 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     { key: 'office_attendance', label: 'Office Attendance', icon: Fingerprint, onClick: () => onGoToAdminModule('office_attendance') },
   ].filter((i) => canSeeModule(i.key as AdminModuleKey));
 
-  const adminFlatItems: NavItem[] = [
+  // The rest of the Admin Panel's modules, grouped into categories (same
+  // collapsible-group pattern as PEPM Manage/Claims/Attendance above)
+  // instead of one long flat list — easier to scan once "Employees",
+  // "Departments", "Notices" etc. all sit loose together.
+
+  // "Organization" — company structure/setup.
+  const orgGroup: NavItem[] = [
     { key: 'projects', label: 'Projects', icon: Building2, onClick: () => onGoToAdminModule('projects') },
     { key: 'branches', label: 'Branches', icon: Building2, onClick: () => onGoToAdminModule('branches') },
+    { key: 'departments', label: 'Departments', icon: Users2, onClick: () => onGoToAdminModule('departments') },
+  ].filter((i) => canSeeModule(i.key as AdminModuleKey));
+
+  // "Workforce" — people + what's assigned/tracked against them.
+  const workforceGroup: NavItem[] = [
     { key: 'users', label: 'Users', icon: Users, onClick: () => onGoToAdminModule('users') },
     { key: 'employees', label: 'Employees', icon: Contact, onClick: () => onGoToAdminModule('employees') },
-    { key: 'departments', label: 'Departments', icon: Users2, onClick: () => onGoToAdminModule('departments') },
-    { key: 'notices', label: 'Notices', icon: Bell, onClick: () => onGoToAdminModule('notices') },
-    { key: 'approvals', label: 'Approvals', icon: ShieldCheck, onClick: () => onGoToAdminModule('approvals') },
     { key: 'tracking', label: 'Employee Tracking', icon: Navigation, onClick: () => onGoToAdminModule('tracking') },
-    { key: 'holidays', label: 'Holidays', icon: Calendar, onClick: () => onGoToAdminModule('holidays') },
     { key: 'asset_management', label: 'Asset Management', icon: Package, onClick: () => onGoToAdminModule('asset_management') },
+  ].filter((i) => canSeeModule(i.key as AdminModuleKey));
+
+  // "HR" — approvals, notices, holidays, leave reporting.
+  const hrGroup: NavItem[] = [
+    { key: 'approvals', label: 'Approvals', icon: ShieldCheck, onClick: () => onGoToAdminModule('approvals') },
+    { key: 'notices', label: 'Notices', icon: Bell, onClick: () => onGoToAdminModule('notices') },
+    { key: 'holidays', label: 'Holidays', icon: Calendar, onClick: () => onGoToAdminModule('holidays') },
     // Read-only "who applied for Leave" report, gated by its own
     // 'leave_applications' module (separate from can_manage_leave's "Leave
     // Manage" item and from the "Leave Approvals" item above) — see
@@ -294,8 +338,9 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // "Servers" — Admin Panel tab (full catalog CRUD), Superadmin-only on any
   // platform (this is the WEB-oriented management surface — see
   // ServerProfilesPanel.tsx). Not a grantable module_permissions item like
-  // the rest of adminFlatItems above (canSeeModule wouldn't apply), so
-  // pushed on separately, gated directly on isSuperAdmin.
+  // the groups above (canSeeModule wouldn't apply), so kept as its own flat
+  // item, gated directly on isSuperAdmin.
+  const adminFlatItems: NavItem[] = [];
   if (isSuperAdmin) {
     adminFlatItems.push({
       key: 'servers',
@@ -309,13 +354,63 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     <button
       key={item.key}
       type="button"
+      title={collapsed ? item.label : undefined}
       onClick={() => selectAndClose(item.onClick)}
-      className="w-full flex items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-white/85 hover:bg-white/10 transition-colors"
+      className={`w-full flex items-center rounded-xl text-white/85 hover:bg-white/10 transition-colors ${
+        collapsed ? 'justify-center px-0 py-2.5' : 'gap-2.5 px-2.5 py-2.5'
+      }`}
     >
       <item.icon className="w-[18px] h-[18px] shrink-0" />
-      <span className="text-[13px] font-medium truncate">{item.label}</span>
+      {!collapsed && <span className="text-[13px] font-medium truncate">{item.label}</span>}
     </button>
   );
+
+  // Shared renderer for the collapsible category groups (PEPM Manage,
+  // Claims, Attendance, Organization, Workforce, HR): a toggle header +
+  // indented items when expanded. While the sidebar itself is minimized,
+  // grouping into a flyout isn't worth the complexity, so it just falls
+  // back to the same flat icon list every other item uses.
+  const renderGroup = (
+    items: NavItem[],
+    label: string,
+    icon: React.ComponentType<{ className?: string }>,
+    isOpen: boolean,
+    setOpen: (fn: (o: boolean) => boolean) => void,
+  ) => {
+    if (items.length === 0) return null;
+    if (collapsed) {
+      return <div key={label} className="space-y-0.5">{items.map(renderItem)}</div>;
+    }
+    const GroupIcon = icon;
+    return (
+      <div key={label}>
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          className="w-full flex items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-white/85 hover:bg-white/10 transition-colors"
+        >
+          <GroupIcon className="w-[18px] h-[18px] shrink-0" />
+          <span className="text-[13px] font-semibold flex-1 text-left">{label}</span>
+          <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
+        </button>
+        {isOpen && (
+          <div className="mt-0.5 ml-[13px] pl-3.5 border-l border-white/15 space-y-0.5">
+            {items.map((item) => (
+              <button
+                key={item.key}
+                type="button"
+                onClick={() => selectAndClose(item.onClick)}
+                className="w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-left text-white/70 hover:bg-white/10 hover:text-white transition-colors"
+              >
+                <item.icon className="w-3.5 h-3.5 shrink-0" />
+                <span className="text-[12.5px] truncate">{item.label}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div>
@@ -341,7 +436,9 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
       <aside
         className={
           isPersistent
-            ? 'hidden md:flex sticky top-16 z-10 flex-col w-[264px] shrink-0 self-start h-[calc(100vh-4rem)]'
+            ? `hidden md:flex sticky top-16 z-10 flex-col shrink-0 self-start h-[calc(100vh-4rem)] transition-[width] duration-200 ${
+                collapsed ? 'w-[64px]' : 'w-[264px]'
+              }`
             : `fixed left-0 top-0 bottom-0 z-[1200] flex flex-col w-[264px] max-w-[85vw] transition-transform duration-300 ease-out ${
                 open ? 'translate-x-0' : '-translate-x-[110%]'
               }`
@@ -399,120 +496,64 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
           </>
         )}
 
+        {/* Minimize/expand toggle — persistent (desktop) variant only. Shrinks
+            the column down to a slim icon rail (labels/section headers
+            hidden, collapsible groups fall back to a flat icon list — see
+            renderGroup) so the main content gets more width without losing
+            one-click access to every item. Choice is remembered across
+            reloads via localStorage above. */}
+        {isPersistent && (
+          <div className={`flex px-2.5 pt-3 ${collapsed ? 'justify-center' : 'justify-end'}`}>
+            <button
+              type="button"
+              onClick={toggleCollapsed}
+              title={collapsed ? 'Expand sidebar' : 'Minimize sidebar'}
+              aria-label={collapsed ? 'Expand sidebar' : 'Minimize sidebar'}
+              className="w-7 h-7 rounded-full flex items-center justify-center text-white/70 hover:text-white hover:bg-white/10 transition-colors"
+            >
+              {collapsed ? <ChevronsRight className="w-4 h-4" /> : <ChevronsLeft className="w-4 h-4" />}
+            </button>
+          </div>
+        )}
+
         <nav className={`flex-1 overflow-y-auto py-4 px-2.5 space-y-0.5 ${isPersistent ? 'gsidebar-no-scrollbar' : ''}`}>
           {/* Dashboard — always available, lands back on the User Panel's own
               dashboard regardless of which panel is currently showing. */}
           <button
             type="button"
             onClick={() => selectAndClose(onGoToDashboard)}
-            className="w-full flex items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-white/85 hover:bg-white/10 transition-colors"
+            title={collapsed ? 'Dashboard' : undefined}
+            className={`w-full flex items-center rounded-xl text-white/85 hover:bg-white/10 transition-colors ${
+              collapsed ? 'justify-center px-0 py-2.5' : 'gap-2.5 px-2.5 py-2.5'
+            }`}
           >
             <Home className="w-[18px] h-[18px] shrink-0" />
-            <span className="text-[13px] font-medium truncate">Dashboard</span>
+            {!collapsed && <span className="text-[13px] font-medium truncate">Dashboard</span>}
           </button>
 
           {mainItems.length > 0 && (
             <>
-              <p className="px-2.5 mt-3 mb-1.5 text-[10px] font-semibold tracking-wide text-white/50">MAIN</p>
+              {!collapsed && <p className="px-2.5 mt-3 mb-1.5 text-[10px] font-semibold tracking-wide text-white/50">MAIN</p>}
               {mainItems.map(renderItem)}
             </>
           )}
 
-          <p className="px-2.5 mt-3 mb-1.5 text-[10px] font-semibold tracking-wide text-white/50">SELF SERVICE</p>
+          {!collapsed && <p className="px-2.5 mt-3 mb-1.5 text-[10px] font-semibold tracking-wide text-white/50">SELF SERVICE</p>}
           {selfServiceItems.map(renderItem)}
 
-          {(!!adminDashboardItem || reportsGroup.length > 0 || claimsGroup.length > 0 || attendanceGroup.length > 0 || adminFlatItems.length > 0) && (
+          {(!!adminDashboardItem || reportsGroup.length > 0 || claimsGroup.length > 0 || attendanceGroup.length > 0 ||
+            orgGroup.length > 0 || workforceGroup.length > 0 || hrGroup.length > 0 || adminFlatItems.length > 0) && (
             <>
-              <p className="px-2.5 mt-3 mb-1.5 text-[10px] font-semibold tracking-wide text-white/50">ADMIN PANEL</p>
+              {!collapsed && <p className="px-2.5 mt-3 mb-1.5 text-[10px] font-semibold tracking-wide text-white/50">ADMIN PANEL</p>}
 
               {adminDashboardItem && renderItem(adminDashboardItem)}
 
-              {reportsGroup.length > 0 && (
-                <div>
-                  <button
-                    type="button"
-                    onClick={() => setReportsOpen((o) => !o)}
-                    className="w-full flex items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-white/85 hover:bg-white/10 transition-colors"
-                  >
-                    <BarChart3 className="w-[18px] h-[18px] shrink-0" />
-                    <span className="text-[13px] font-semibold flex-1 text-left">PEPM Manage</span>
-                    <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${reportsOpen ? 'rotate-180' : ''}`} />
-                  </button>
-                  {reportsOpen && (
-                    <div className="mt-0.5 ml-[13px] pl-3.5 border-l border-white/15 space-y-0.5">
-                      {reportsGroup.map((item) => (
-                        <button
-                          key={item.key}
-                          type="button"
-                          onClick={() => selectAndClose(item.onClick)}
-                          className="w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-left text-white/70 hover:bg-white/10 hover:text-white transition-colors"
-                        >
-                          <item.icon className="w-3.5 h-3.5 shrink-0" />
-                          <span className="text-[12.5px] truncate">{item.label}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {claimsGroup.length > 0 && (
-                <div>
-                  <button
-                    type="button"
-                    onClick={() => setClaimsOpen((o) => !o)}
-                    className="w-full flex items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-white/85 hover:bg-white/10 transition-colors"
-                  >
-                    <CreditCard className="w-[18px] h-[18px] shrink-0" />
-                    <span className="text-[13px] font-semibold flex-1 text-left">Claims</span>
-                    <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${claimsOpen ? 'rotate-180' : ''}`} />
-                  </button>
-                  {claimsOpen && (
-                    <div className="mt-0.5 ml-[13px] pl-3.5 border-l border-white/15 space-y-0.5">
-                      {claimsGroup.map((item) => (
-                        <button
-                          key={item.key}
-                          type="button"
-                          onClick={() => selectAndClose(item.onClick)}
-                          className="w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-left text-white/70 hover:bg-white/10 hover:text-white transition-colors"
-                        >
-                          <item.icon className="w-3.5 h-3.5 shrink-0" />
-                          <span className="text-[12.5px] truncate">{item.label}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {attendanceGroup.length > 0 && (
-                <div>
-                  <button
-                    type="button"
-                    onClick={() => setAttendanceOpen((o) => !o)}
-                    className="w-full flex items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-white/85 hover:bg-white/10 transition-colors"
-                  >
-                    <Fingerprint className="w-[18px] h-[18px] shrink-0" />
-                    <span className="text-[13px] font-semibold flex-1 text-left">Attendance</span>
-                    <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${attendanceOpen ? 'rotate-180' : ''}`} />
-                  </button>
-                  {attendanceOpen && (
-                    <div className="mt-0.5 ml-[13px] pl-3.5 border-l border-white/15 space-y-0.5">
-                      {attendanceGroup.map((item) => (
-                        <button
-                          key={item.key}
-                          type="button"
-                          onClick={() => selectAndClose(item.onClick)}
-                          className="w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-left text-white/70 hover:bg-white/10 hover:text-white transition-colors"
-                        >
-                          <item.icon className="w-3.5 h-3.5 shrink-0" />
-                          <span className="text-[12.5px] truncate">{item.label}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
+              {renderGroup(reportsGroup, 'PEPM Manage', BarChart3, reportsOpen, setReportsOpen)}
+              {renderGroup(claimsGroup, 'Claims', CreditCard, claimsOpen, setClaimsOpen)}
+              {renderGroup(attendanceGroup, 'Attendance', Fingerprint, attendanceOpen, setAttendanceOpen)}
+              {renderGroup(orgGroup, 'Organization', Building2, orgOpen, setOrgOpen)}
+              {renderGroup(workforceGroup, 'Workforce', Users, workforceOpen, setWorkforceOpen)}
+              {renderGroup(hrGroup, 'HR', ShieldCheck, hrOpen, setHrOpen)}
 
               {adminFlatItems.map(renderItem)}
             </>
@@ -532,19 +573,21 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
             <button
               type="button"
               onClick={() => selectAndClose(() => setShowServerModal(true))}
+              title={collapsed ? (currentServerHost ? `Server: ${currentServerHost}` : 'Set Server') : undefined}
               className="w-full flex items-center justify-center gap-2 rounded-full py-2.5 text-[13px] font-semibold text-white bg-white/10 hover:bg-white/15 active:scale-[0.98] transition-transform"
             >
-              <Navigation className="w-4 h-4" />
-              {currentServerHost ? `Server: ${currentServerHost}` : 'Set Server'}
+              <Navigation className="w-4 h-4 shrink-0" />
+              {!collapsed && (currentServerHost ? `Server: ${currentServerHost}` : 'Set Server')}
             </button>
           )}
           <button
             type="button"
             onClick={() => selectAndClose(onLogout)}
+            title={collapsed ? 'Logout' : undefined}
             className="w-full flex items-center justify-center gap-2 rounded-full py-2.5 text-[13px] font-semibold text-[color:var(--g-accent-900)] bg-white active:scale-[0.98] transition-transform"
           >
-            <LogOut className="w-4 h-4" />
-            Logout
+            <LogOut className="w-4 h-4 shrink-0" />
+            {!collapsed && 'Logout'}
           </button>
         </div>
       </aside>
