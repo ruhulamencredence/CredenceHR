@@ -6,10 +6,11 @@
 import React, { useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { Geolocation } from '@capacitor/geolocation';
-import { UserCheck, Play, CheckCircle2, AlertTriangle, MapPin } from 'lucide-react';
+import { UserCheck, Play, CheckCircle2, AlertTriangle, MapPin, MapPinned } from 'lucide-react';
 import { Project, AttendanceRecord } from '../types';
 import { apiUrl } from '../lib/api';
 import AttendanceMapConfirm from './AttendanceMapConfirm';
+import ProjectLocationsMap from './ProjectLocationsMap';
 import { ApprovalBadge } from './ApprovalBadge';
 import { Spinner } from './Spinner';
 
@@ -89,6 +90,11 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
   // cancels there instead of confirming.
   const [pending, setPending] = useState<{ kind: 'in' | 'out'; coords: { latitude: number; longitude: number } } | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // "View Project Locations" — opens ProjectLocationsMap.tsx, a read-only map
+  // of every Project's set attendance circle (not just the one(s) this
+  // account can check in against). Doesn't touch geolocation at all, so no
+  // permission prompt of any kind — see that component's own comment.
+  const [showProjectLocations, setShowProjectLocations] = useState(false);
 
   // Default to the only project when there's just one, so most users never
   // have to touch the dropdown at all.
@@ -218,6 +224,19 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
         {selectedProject && (
           <span className="text-xs font-medium text-slate-500 truncate">— {selectedProject.project_name}</span>
         )}
+        {/* Read-only map of every Project's set attendance circle — no
+            location permission needed, since it never touches the device's
+            own GPS (see ProjectLocationsMap.tsx). Open to every account,
+            regardless of which Project(s) they're personally assigned to
+            check in against. */}
+        <button
+          type="button"
+          onClick={() => setShowProjectLocations(true)}
+          title="View every Project's location circle"
+          className="ml-auto shrink-0 p-1 text-slate-400 hover:text-blue-600 transition-colors"
+        >
+          <MapPinned className="w-3.5 h-3.5" />
+        </button>
       </h3>
 
       {projects.length > 1 && (
@@ -340,6 +359,10 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
           onConfirm={handleConfirmPending}
           onCoordsChange={(coords) => setPending((p) => (p ? { ...p, coords } : p))}
         />
+      )}
+
+      {showProjectLocations && (
+        <ProjectLocationsMap token={token} onClose={() => setShowProjectLocations(false)} />
       )}
     </div>
   );
