@@ -180,3 +180,29 @@ body {
 .profile-field-readonly {
   color: var(--g-text-muted);
 }
+
+/* ChatPanel.tsx's root container. Two separate `height` declarations (not
+   Tailwind's h-[calc(...)], which can't express this) — the CSS cascade
+   rule that makes this a safe progressive enhancement: a browser that
+   doesn't recognize `dvh` treats that whole declaration as invalid and
+   drops JUST that line, keeping the `vh` one above it. A browser that DOES
+   support `dvh` uses it instead (it wins the cascade, coming second) and
+   gets the real payoff: `dvh` tracks the ACTUAL visible viewport, so it
+   shrinks correctly when the on-screen keyboard opens, whereas `vh` stays
+   pinned to the full screen height and leaves the message input hidden
+   below the keyboard until the page is scrolled.
+   Without the `vh` fallback line, a WebView that doesn't understand `dvh`
+   drops the whole rule and the container collapses to its content's natural
+   (unbounded) height instead of the intended fixed viewport height — which
+   is exactly what broke "open a chat -> have to scroll to see the input
+   box" on such a device. */
+.chat-shell {
+  height: calc(100vh - 64px);
+  height: calc(100dvh - 64px);
+}
+@media (min-width: 768px) {
+  .chat-shell {
+    height: calc(100vh - 72px);
+    height: calc(100dvh - 72px);
+  }
+}

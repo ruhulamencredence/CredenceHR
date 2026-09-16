@@ -554,7 +554,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
   const isTypingInActiveRoom = typingNamesInActiveRoom.length > 0;
 
   return (
-    <div className="flex h-[calc(100dvh-64px)] md:h-[calc(100dvh-72px)] bg-white">
+    <div className="chat-shell flex bg-white">
       {/* Sidebar: room list */}
       <div className={`w-full md:w-[360px] border-r border-slate-200 flex flex-col ${activeRoomId ? 'hidden md:flex' : 'flex'}`}>
         <div className="p-4 border-b border-slate-200 flex items-center justify-between gap-2">
