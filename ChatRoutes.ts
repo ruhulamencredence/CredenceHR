@@ -48,10 +48,108 @@
 import type { Express } from "express";
 import type { Server as SocketIOServer } from "socket.io";
 import jwt from "jsonwebtoken";
+import admin from "firebase-admin";
 
 interface ChatRouteDeps {
   authenticateToken: any;
   queryDB: (sql: string, params?: any[]) => Promise<any>;
+}
+
+// Push notifications (Android, via Firebase Cloud Messaging) — entirely
+// optional. Set FIREBASE_SERVICE_ACCOUNT_JSON (the full JSON contents of a
+// Firebase service account key, e.g. from a secrets manager or one-line env
+// var) to enable; every push call below silently no-ops otherwise, so Chat
+// itself (Socket.IO delivery, REST) works identically with or without it.
+// Manual setup this needs, none of which this code can do for you:
+//   1. Create a Firebase project (console.firebase.google.com), add an
+//      Android app to it with this app's applicationId (see
+//      android/app/build.gradle), download google-services.json into
+//      android/app/.
+//   2. Project Settings -> Service Accounts -> Generate new private key —
+//      that JSON file's contents go into FIREBASE_SERVICE_ACCOUNT_JSON.
+//   3. Add @capacitor/push-notifications and rebuild the APK (see
+//      src/lib/pushNotifications.ts for the client-side half).
+let firebaseApp: admin.app.App | null | undefined;
+function getFirebaseApp(): admin.app.App | null {
+  if (firebaseApp !== undefined) return firebaseApp;
+  const json = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+  if (!json) {
+    console.warn("ℹ️ FIREBASE_SERVICE_ACCOUNT_JSON not set — Chat push notifications disabled (everything else works normally).");
+    firebaseApp = null;
+    return null;
+  }
+  try {
+    firebaseApp = admin.initializeApp({ credential: admin.credential.cert(JSON.parse(json)) });
+  } catch (err: any) {
+    console.warn("⚠️ Could not initialize Firebase (check FIREBASE_SERVICE_ACCOUNT_JSON) — Chat push notifications disabled: " + err.message);
+    firebaseApp = null;
+  }
+  return firebaseApp;
+}
+
+async function sendPushToRoomMembers(
+  queryDB: ChatRouteDeps["queryDB"],
+  roomId: number,
+  excludeUserId: number,
+  title: string,
+  body: string,
+  data: Record<string, string>
+): Promise<void> {
+  const app = getFirebaseApp();
+  if (!app) return;
+  try {
+    const rows = await queryDB(
+      `SELECT t.token FROM chat_push_tokens t
+       JOIN chat_room_members m ON m.user_id = t.user_id AND m.room_id = ?
+       WHERE t.user_id != ?`,
+      [roomId, excludeUserId]
+    );
+    if (rows.length === 0) return;
+    const result = await admin.messaging(app).sendEachForMulticast({
+      tokens: rows.map((r: any) => r.token),
+      notification: { title, body },
+      data,
+      android: { priority: "high" }
+    });
+    // Firebase returns per-token success/failure rather than throwing — a
+    // token failing with "not registered" means the app was uninstalled or
+    // reinstalled without re-registering, so it's just dead weight now.
+    const deadTokens: string[] = [];
+    result.responses.forEach((r, i) => {
+      if (!r.success && r.error?.code === "messaging/registration-token-not-registered") {
+        deadTokens.push(rows[i].token);
+      }
+    });
+    if (deadTokens.length > 0) {
+      await queryDB(`DELETE FROM chat_push_tokens WHERE token IN (${deadTokens.map(() => "?").join(",")})`, deadTokens);
+    }
+  } catch (err: any) {
+    console.warn("⚠️ Chat push send failed: " + err.message);
+  }
+}
+
+// Fire-and-forget from both the REST POST /messages route and the socket
+// 'send_message' handler right after a message is persisted+broadcast —
+// never awaited there, so a slow/failed push never delays message delivery
+// to the people actually online.
+async function notifyNewMessage(queryDB: ChatRouteDeps["queryDB"], message: any): Promise<void> {
+  try {
+    const roomRows = await queryDB("SELECT type, title FROM chat_rooms WHERE id = ?", [message.room_id]);
+    const room = roomRows[0];
+    if (!room) return;
+    const isGroup = room.type !== "direct";
+    const bodyText =
+      message.message_type === "image" ? "📷 Photo" : message.message_type === "file" ? `📎 ${message.attachment_filename || "File"}` : message.content || "";
+    const title = isGroup ? room.title || "Group" : message.sender_name;
+    const body = isGroup ? `${message.sender_name}: ${bodyText}` : bodyText;
+    await sendPushToRoomMembers(queryDB, message.room_id, message.sender_id, title, body, {
+      roomId: String(message.room_id),
+      messageId: String(message.id)
+    });
+  } catch {
+    // Best-effort — see sendPushToRoomMembers; a push failure never affects
+    // the message itself, which is already delivered via Socket.IO/REST.
+  }
 }
 
 interface ChatSocketDeps {
@@ -121,6 +219,22 @@ export async function ensureChatSchema(dbPool: any): Promise<void> {
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         PRIMARY KEY (room_id, user_id),
         FOREIGN KEY (room_id) REFERENCES chat_rooms(id) ON DELETE CASCADE,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      )
+    `);
+    // One row per (account, device) — a phone reinstalling the app or an
+    // account signed in on two devices both get their own row. Push
+    // delivery (notifyNewMessage below) is entirely best-effort: this table
+    // existing doesn't mean push actually works, only that Firebase is wired
+    // up — see FIREBASE_SERVICE_ACCOUNT_JSON in the module comment near
+    // sendPushToRoomMembers.
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS chat_push_tokens (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        token VARCHAR(255) NOT NULL UNIQUE,
+        platform VARCHAR(20) NOT NULL DEFAULT 'android',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
       )
     `);
@@ -533,6 +647,7 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
         replyToId: replyToId ? Number(replyToId) : null
       });
       io.to(`room:${roomId}`).emit("receive_message", message);
+      void notifyNewMessage(queryDB, message);
       res.json(message);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -576,6 +691,66 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
       }
       await upsertRead(queryDB, roomId, req.user.id, messageId);
       io.to(`room:${roomId}`).emit("message_read", { roomId, userId: req.user.id, messageId });
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/chat/messages/:id/reads — who has read at least up through this
+  // message (chat_room_reads.last_read_message_id >= this id), excluding the
+  // sender. Used for the group "Seen by ..." line under your own latest
+  // message — WhatsApp shows this per-message via long-press; this app shows
+  // it inline for just the sender's own most recent message, which is what
+  // the ChatPanel UI actually renders (see the module comment there).
+  app.get("/api/chat/messages/:id/reads", authenticateToken, async (req: any, res) => {
+    try {
+      const messageId = Number(req.params.id);
+      const msgRows = await queryDB("SELECT room_id, sender_id FROM chat_messages WHERE id = ?", [messageId]);
+      const msg = msgRows[0];
+      if (!msg) return res.status(404).json({ error: "Message not found." });
+      if (!(await isMember(queryDB, msg.room_id, req.user.id))) {
+        return res.status(403).json({ error: "Not a member of this room." });
+      }
+      const rows = await queryDB(
+        `SELECT u.id, u.name, rr.updated_at AS read_at
+         FROM chat_room_reads rr JOIN users u ON u.id = rr.user_id
+         WHERE rr.room_id = ? AND rr.user_id != ? AND rr.last_read_message_id >= ?
+         ORDER BY rr.updated_at ASC`,
+        [msg.room_id, msg.sender_id, messageId]
+      );
+      res.json(rows);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/chat/push-token — register/refresh this device's FCM token
+  // (see src/lib/pushNotifications.ts). No-ops usefully even without
+  // Firebase configured — the token just sits unused in chat_push_tokens
+  // until FIREBASE_SERVICE_ACCOUNT_JSON is set, see notifyNewMessage above.
+  app.post("/api/chat/push-token", authenticateToken, async (req: any, res) => {
+    try {
+      const { token, platform } = req.body || {};
+      if (!token || typeof token !== "string") return res.status(400).json({ error: "token is required." });
+      await queryDB(
+        `INSERT INTO chat_push_tokens (user_id, token, platform) VALUES (?, ?, ?)
+         ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), platform = VALUES(platform)`,
+        [req.user.id, token, platform || "android"]
+      );
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // DELETE /api/chat/push-token — called on logout so a shared/reused device
+  // stops receiving this account's pushes once signed out.
+  app.delete("/api/chat/push-token", authenticateToken, async (req: any, res) => {
+    try {
+      const { token } = req.body || {};
+      if (!token) return res.status(400).json({ error: "token is required." });
+      await queryDB("DELETE FROM chat_push_tokens WHERE token = ? AND user_id = ?", [token, req.user.id]);
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -662,6 +837,7 @@ export function setupChatSocket(io: SocketIOServer, deps: ChatSocketDeps) {
             replyToId: data.replyToId ? Number(data.replyToId) : null
           });
           io.to(`room:${roomId}`).emit("receive_message", message);
+          void notifyNewMessage(queryDB, message);
           if (ack) ack({ ok: true, message });
         } catch (err: any) {
           if (ack) ack({ ok: false, error: err.message });
