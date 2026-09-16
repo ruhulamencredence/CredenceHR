@@ -1668,6 +1668,14 @@ async function ensureSchemaMigrations() {
   } catch (err: any) {
     // Already exists on a fresh install — ignore silently.
   }
+  // GET /api/my-approvals (PendingApprovalsCard) looks up a Reliever's
+  // still-pending queue with `WHERE reliever_id = ? AND reliever_status =
+  // 'pending' AND status = 'pending'` — without this, that's a full scan of
+  // every Leave Application ever filed, on every Dashboard open. Ignore the
+  // error if it already exists.
+  await dbPool
+    .query(`CREATE INDEX idx_leave_applications_reliever ON leave_applications (reliever_id, reliever_status, status)`)
+    .catch(() => {});
 
   // Links an Employee Directory row (all_employees) to the login account (a
   // users row) created for it at the same time — see POST /api/employees'
