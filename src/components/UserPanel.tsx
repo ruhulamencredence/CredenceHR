@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Capacitor } from '@capacitor/core';
 import { Project, MprNumber, Entry, Budget, BudgetItem, User, MprUsage, ClaimsNavRequest, JobsNavRequest, DashboardNavRequest } from '../types';
-import { Calendar, Building2, FileText, Package, Clock, Plus, AlertTriangle, CheckCircle2, ChevronRight, X, Trash2, Edit2, Lock, Wallet, ArrowLeft, FolderOpen, ListChecks, Search, Save, Briefcase, FileDown, Scissors, Route, Info } from 'lucide-react';
+import { Calendar, Building2, FileText, Package, Clock, Plus, AlertTriangle, CheckCircle2, ChevronRight, X, Trash2, Edit2, Lock, Wallet, ArrowLeft, FolderOpen, ListChecks, Search, Save, Briefcase, FileDown, Scissors, Route, Info, Contact, Bell } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { formatDate, todayDateOnlyString, dateRangeOptions, formatDateLabel, latestDateStr } from '../lib/formatDate';
 import { useStableCallback } from '../lib/useStableCallback';
@@ -20,6 +20,7 @@ import { PendingApprovalsCard } from './PendingApprovalsCard';
 import { HolidayCalendarWidget } from './HolidayCalendarWidget';
 import { LeaveReviewPage } from './LeaveReviewPage';
 import { EmployeeDirectory } from './EmployeeDirectory';
+import { NoticeBoard } from './NoticeBoard';
 import { Timesheet } from './Timesheet';
 import { ClaimCard } from './ClaimCard';
 import { MyClaimsCard } from './MyClaimsCard';
@@ -848,7 +849,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // initializer) so "pull down to reload" — see App.tsx — lands back on the exact
   // same section instead of resetting to the tile menu.
   const userSectionStorageKey = `mpr_user_section_${user.id}`;
-  const [mobileActiveSection, setMobileActiveSection] = useState<'budget' | 'jobs' | 'entries' | 'jobEdit' | 'claim' | 'claims' | 'conveyanceClaim' | 'leave' | 'timesheet' | 'employeeDirectory' | null>(
+  const [mobileActiveSection, setMobileActiveSection] = useState<'budget' | 'jobs' | 'entries' | 'jobEdit' | 'claim' | 'claims' | 'conveyanceClaim' | 'leave' | 'timesheet' | 'employeeDirectory' | 'noticeBoard' | null>(
     () => {
       try {
         const saved = localStorage.getItem(userSectionStorageKey);
@@ -891,7 +892,8 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
     mobileActiveSection === 'conveyanceClaim' ||
     mobileActiveSection === 'leave' ||
     mobileActiveSection === 'timesheet' ||
-    mobileActiveSection === 'employeeDirectory';
+    mobileActiveSection === 'employeeDirectory' ||
+    mobileActiveSection === 'noticeBoard';
   // Superadmin-gated, same as every other module in this app: an Admin/User only
   // sees Movement Claim / Conveyance Bill Claim once the Superadmin has granted
   // can_view_movement_claims / can_view_conveyance_claims (Admin Panel -> Users
@@ -2732,6 +2734,13 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
         <EmployeeDirectory token={token} user={user} onBack={() => goToMobileSection(null)} />
       </div>
 
+      {/* Notice Board — a persistent, browsable version of the same active
+          notices NoticePopup.tsx shows once as a modal right after login;
+          ungated for every account, same as Employee Directory above. */}
+      <div className={mobileActiveSection === 'noticeBoard' ? 'block max-md:!mt-0' : 'hidden'}>
+        <NoticeBoard token={token} onBack={() => goToMobileSection(null)} />
+      </div>
+
       {/* Timesheet — same Self Service page GlobalSidebar's "Timesheet" item
           opens, reachable here too via the BottomNav "Timesheet" tab below. */}
       <div className={mobileActiveSection === 'timesheet' ? 'block max-md:!mt-0' : 'hidden'}>
@@ -2907,6 +2916,26 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
               <span className="text-xs font-semibold text-slate-700 text-center leading-tight">Job Edit</span>
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => goToMobileSection('employeeDirectory')}
+            className="relative flex flex-col items-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-indigo-100/70 via-white/50 to-blue-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
+          >
+            <div className="p-2.5 bg-white/50 backdrop-blur border border-white/60 shadow-sm rounded-xl">
+              <Contact className="w-6 h-6 text-indigo-600" />
+            </div>
+            <span className="text-xs font-semibold text-slate-700 text-center leading-tight">Employee Directory</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => goToMobileSection('noticeBoard')}
+            className="relative flex flex-col items-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-yellow-100/70 via-white/50 to-amber-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
+          >
+            <div className="p-2.5 bg-white/50 backdrop-blur border border-white/60 shadow-sm rounded-xl">
+              <Bell className="w-6 h-6 text-amber-600" />
+            </div>
+            <span className="text-xs font-semibold text-slate-700 text-center leading-tight">Notice Board</span>
+          </button>
         </div>
       )}
 
