@@ -121,7 +121,11 @@ async function initDB() {
       // the "takes forever to reach the Dashboard" symptom. Raised well
       // above that single-user burst so concurrent opens don't queue behind
       // each other; MySQL's own default max_connections (151) has plenty of
-      // headroom above this for the one app process using it.
+      // headroom above this for the one app process using it. Each PM2
+      // cluster worker (see ecosystem.config.cjs) gets its own pool of this
+      // size, so once running with `instances` > 1 in production, raise
+      // MySQL's max_connections to comfortably cover instances * 30, or
+      // lower this per-worker limit to fit.
       connectionLimit: 30,
       queueLimit: 0,
       // Without this, mysql2 hands back DATE/DATETIME columns as JS Date objects built
@@ -2861,6 +2865,12 @@ async function startServer() {
   await seedAdminFromEnv();
 
   const app = express();
+  // Sitting behind Nginx (see deploy/nginx.conf.example) once deployed that
+  // way — without this, req.ip/req.secure would reflect the proxy's own
+  // connection to this app rather than the real client, for anything that
+  // ever comes to depend on it (rate limiting, audit logging, etc.). A
+  // no-op when there's no reverse proxy in front (e.g. local `npm run dev`).
+  app.set("trust proxy", 1);
   app.use(cors());
   // Gzips every response this server sends — HTML, JSON API responses, and
   // (most importantly for how long the APK/browser takes to first load) the

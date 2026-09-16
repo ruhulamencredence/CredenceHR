@@ -9,7 +9,11 @@
     "start": "node dist/server.cjs",
     "preview": "vite preview",
     "clean": "rm -rf dist server.cjs",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "pm2:start": "npm run build && pm2 start ecosystem.config.cjs",
+    "pm2:reload": "npm run build && pm2 reload ecosystem.config.cjs",
+    "pm2:stop": "pm2 stop ecosystem.config.cjs",
+    "pm2:logs": "pm2 logs credencehr"
   },
   "dependencies": {
     "@capacitor-community/background-geolocation": "^1.2.26",
@@ -67,6 +71,7 @@
     "@types/react-dom": "^19.0.4",
     "autoprefixer": "^10.4.21",
     "esbuild": "^0.25.0",
+    "pm2": "^5.4.3",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
