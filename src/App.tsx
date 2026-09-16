@@ -508,6 +508,23 @@ export default function App() {
     );
   }
 
+  // "Chat" — on the web (desktop/mobile browser), opens in its own new
+  // browser tab (/chat, see ChatStandalone.tsx + main.tsx) instead of taking
+  // over this tab's main area, so a conversation stays open and reachable
+  // (its own tab, its own back/forward history) while the rest of the app
+  // keeps working here. Inside the Android APK there's no such thing as "a
+  // new tab" — it's one WebView — so native keeps the original in-app panel
+  // behavior.
+  const openChat = () => {
+    if (Capacitor.isNativePlatform()) {
+      setSelfServiceView(null);
+      setShowProfilePage(false);
+      setShowChat(true);
+    } else {
+      window.open('/chat', '_blank', 'noopener');
+    }
+  };
+
   // Shared nav handlers for GlobalSidebar — identical for the mobile overlay
   // drawer (hamburger-triggered, unchanged) and the persistent desktop
   // column that now sits beside <main> (see the layout below), so both stay
@@ -569,11 +586,7 @@ export default function App() {
       setShowChat(false);
       setShowProfilePage(true);
     },
-    onOpenChat: () => {
-      setSelfServiceView(null);
-      setShowProfilePage(false);
-      setShowChat(true);
-    },
+    onOpenChat: openChat,
   };
 
   return (
@@ -687,11 +700,7 @@ export default function App() {
           setShowChat(false);
           setShowProfilePage(true);
         }}
-        onOpenChat={() => {
-          setSelfServiceView(null);
-          setShowProfilePage(false);
-          setShowChat(true);
-        }}
+        onOpenChat={openChat}
         isChatOpen={showChat}
       />
 
