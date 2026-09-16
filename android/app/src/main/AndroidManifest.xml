@@ -54,4 +54,10 @@
     <!-- Android 13+ requires this to show that foreground-service
          notification at all. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Chat -> voice messages (ChatPanel.tsx's mic button, MediaRecorder
+         over getUserMedia({audio:true})). Capacitor's default
+         BridgeWebChromeClient handles the WebView's own onPermissionRequest
+         for RESOURCE_AUDIO_CAPTURE automatically once this manifest
+         permission is granted at runtime -- no custom native code needed. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
 </manifest>
