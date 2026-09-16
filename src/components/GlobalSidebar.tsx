@@ -3,7 +3,7 @@ import {
   X, LogOut, Home, Wallet, Briefcase, FileText, Edit2, Route, CreditCard,
   CalendarClock, ListChecks, CheckSquare, ChevronDown, Building2, Users, Users2,
   BarChart3, Upload, History, Recycle, Navigation, Bell, ShieldCheck,
-  Contact, Calendar, Clock, Fingerprint, Banknote, Package, LayoutDashboard, Server,
+  Contact, Calendar, Clock, Fingerprint, Banknote, Package, LayoutDashboard, Server, MessageSquare,
 } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { User, AdminModuleKey } from '../types';
@@ -63,6 +63,9 @@ interface GlobalSidebarProps {
   // Tapping the profile header (avatar + name, below) opens ProfilePage.tsx —
   // same destination Navbar's own avatar button opens on desktop.
   onOpenProfile: () => void;
+  // "Chat" item (self-service list below) opens ChatPanel.tsx — same
+  // destination the Navbar chat bell opens on desktop.
+  onOpenChat: () => void;
 }
 
 // One global navigation drawer for the whole app, reachable from the header's
@@ -75,7 +78,7 @@ interface GlobalSidebarProps {
 // drawer) carried over from the old AdminSidebar.
 export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   open, onClose, variant = 'overlay', user, token, photoVersion, onLogout, onGoToDashboard, onGoToJobsTab, onGoToUserClaims,
-  onGoToSelfServiceTab, onGoToAdminClaims, onGoToAdminModule, onOpenProfile,
+  onGoToSelfServiceTab, onGoToAdminClaims, onGoToAdminModule, onOpenProfile, onOpenChat,
 }) => {
   const isPersistent = variant === 'persistent';
   const [reportsOpen, setReportsOpen] = useState(true);
@@ -179,6 +182,9 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   if (canSeeMyLeave) {
     selfServiceItems.push({ key: 'myLeave', label: 'My Leave', icon: ListChecks, onClick: () => onGoToSelfServiceTab('myLeave') });
   }
+  // Chat (Direct/Group/Community messaging, ChatPanel.tsx) — NOT gated,
+  // every signed-in account gets it, same as Employee Directory just below.
+  selfServiceItems.push({ key: 'chat', label: 'Chat', icon: MessageSquare, onClick: onOpenChat });
   // Company-wide roster, browsable by every account regardless of role or
   // Admin Panel module access (unlike Admin Panel -> Employees, which is
   // the HR-editing view gated behind the 'employees' module) — see

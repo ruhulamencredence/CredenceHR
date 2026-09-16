@@ -24,6 +24,8 @@ import { registerAssetManagementRoutes, ensureAssetManagementSchema } from "./As
 import { registerEntriesRoutes } from "./EntriesRoutes";
 import { registerEmployeeTransferRoutes, ensureEmployeeTransferSchema } from "./EmployeeTransferRoutes";
 import { registerEmployeeDirectoryRoutes } from "./EmployeeDirectoryRoutes";
+import { Server as SocketIOServer } from "socket.io";
+import { ensureChatSchema, registerChatRoutes, setupChatSocket } from "./ChatRoutes";
 import { memoryDb, queryMemoryDb, EMPLOYEE_BOOL_FIELDS } from "./memoryDbFallback";
 
 dotenv.config();
@@ -188,6 +190,11 @@ async function ensureSchemaMigrations() {
   // schema owned by ServerProfileRoutes.ts, only the call site lives here,
   // same as every other self-healing migration in this function.
   await ensureServerProfilesSchema(dbPool);
+
+  // Chat (Direct/Group/Community messaging) — table + schema owned by
+  // ChatRoutes.ts, only the call site lives here, same as every other
+  // self-healing migration in this function.
+  await ensureChatSchema(dbPool);
 
   // Personal Data (ProfilePage.tsx -> PersonalDataForm.tsx) — one row per user,
   // created on first save. Position/Department are deliberately NOT columns
@@ -5451,6 +5458,16 @@ async function startServer() {
   // rides over the same host:port the app is already being loaded from,
   // whatever port that ends up being (see the port-fallback logic below).
   const httpServer = http.createServer(app);
+
+  // Real-time messaging (Chat -> Direct/Group/Community) — Socket.IO shares
+  // this same httpServer (same reasoning as Vite's HMR WebSocket just above:
+  // one process, one port, works identically through the APK's WebView and
+  // over a LAN IP). REST endpoints (room/message history, attachments,
+  // member management) come from registerChatRoutes; setupChatSocket wires
+  // the live 'send_message'/'typing'/'presence_change' events on top of it.
+  const io = new SocketIOServer(httpServer, { cors: { origin: "*" } });
+  registerChatRoutes(app, io, { authenticateToken, queryDB });
+  setupChatSocket(io, { queryDB, jwtSecret: JWT_SECRET });
 
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
