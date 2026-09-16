@@ -58,6 +58,6 @@
          over getUserMedia({audio:true})). Capacitor's default
          BridgeWebChromeClient handles the WebView's own onPermissionRequest
          for RESOURCE_AUDIO_CAPTURE automatically once this manifest
-         permission is granted at runtime -- no custom native code needed. -->
+         permission is granted at runtime, no custom native code needed. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 </manifest>
