@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -543,6 +543,24 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [mprNumbers, setMprNumbers] = useState<MprNumber[]>([]);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [users, setUsers] = useState<User[]>([]);
+  // User Management table search + role filter — narrows the (often long)
+  // users list by name/Login ID and/or role without touching the underlying
+  // `users` state, so every other tab (Add User, Departments' Supervisor
+  // dropdown, etc.) still sees the full list.
+  const [userSearchText, setUserSearchText] = useState('');
+  const [userRoleFilter, setUserRoleFilter] = useState<'all' | 'superadmin' | 'admin' | 'user'>('all');
+  const filteredUsers = useMemo(() => {
+    const q = userSearchText.trim().toLowerCase();
+    return users.filter((u) => {
+      if (userRoleFilter !== 'all' && u.role !== userRoleFilter) return false;
+      if (!q) return true;
+      return (
+        u.name.toLowerCase().includes(q) ||
+        (u.email || '').toLowerCase().includes(q) ||
+        (u.username || '').toLowerCase().includes(q)
+      );
+    });
+  }, [users, userSearchText, userRoleFilter]);
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [permissions, setPermissions] = useState<UserProjectPermission[]>([]);
 
@@ -4769,37 +4787,83 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           </div>
 
           <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-          <div className="p-6 border-b border-slate-200">
-            <h3 className="text-lg font-bold text-slate-900">User Management</h3>
-            <p className="text-xs text-slate-500">
-              {isSuperAdmin
-                ? 'Manage system users, promote/demote Admins, and set which Admin Panel modules each Admin can access.'
-                : 'Manage system users. Only the Superadmin can change roles or an Admin\u2019s module access.'}
-            </p>
+          <div className="p-6 border-b border-slate-200 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+            <div>
+              <h3 className="text-lg font-bold text-slate-900">User Management</h3>
+              <p className="text-xs text-slate-500">
+                {isSuperAdmin
+                  ? 'Manage system users, promote/demote Admins, and set which Admin Panel modules each Admin can access.'
+                  : 'Manage system users. Only the Superadmin can change roles or an Admin\u2019s module access.'}
+              </p>
+            </div>
+            {/* Search (name / Login ID) + role filter \u2014 narrows filteredUsers below
+                without touching the `users` state other tabs on this page depend on. */}
+            <div className="flex items-center gap-2 shrink-0">
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={userSearchText}
+                  onChange={(e) => setUserSearchText(e.target.value)}
+                  placeholder="Search name or Login ID..."
+                  className="w-full sm:w-56 pl-8 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-xs focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400"
+                />
+              </div>
+              <div className="relative">
+                <Filter className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <select
+                  value={userRoleFilter}
+                  onChange={(e) => setUserRoleFilter(e.target.value as typeof userRoleFilter)}
+                  className="pl-8 pr-7 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-xs focus:ring-2 focus:ring-blue-600 focus:outline-none cursor-pointer appearance-none"
+                >
+                  <option value="all">All Roles</option>
+                  <option value="superadmin">Superadmin</option>
+                  <option value="admin">Admin</option>
+                  <option value="user">User</option>
+                </select>
+              </div>
+            </div>
           </div>
+          {(userSearchText || userRoleFilter !== 'all') && (
+            <div className="px-6 py-2 border-b border-slate-100 text-[11px] text-slate-500">
+              Showing {filteredUsers.length} of {users.length} users
+            </div>
+          )}
           <div className="overflow-x-auto">
-            <table className="w-full table-fixed divide-y divide-slate-200">
+            <table className="w-full divide-y divide-slate-200">
               <thead className="bg-slate-50 text-slate-500 text-[11px] uppercase tracking-wider">
                 <tr>
-                  <th className="w-28 px-3 py-2.5 text-left">Name</th>
-                  <th className="w-32 px-3 py-2.5 text-left">Login ID</th>
-                  <th className="w-24 px-3 py-2.5 text-left">Role</th>
-                  {isSuperAdmin && <th className="w-32 px-3 py-2.5 text-left">Modules</th>}
-                  <th className="w-32 px-3 py-2.5 text-left">Projects</th>
-                  <th className="w-20 px-3 py-2.5 text-left">Joined</th>
-                  {canSeeLoginLocation && <th className="w-36 px-3 py-2.5 text-left">Last Login</th>}
-                  {isSuperAdmin && <th className="w-16 px-3 py-2.5 text-left">Location</th>}
-                  <th className="w-16 px-3 py-2.5 text-left">Delivery</th>
-                  <th className="w-16 px-3 py-2.5 text-left">Job Edit</th>
-                  <th className="w-16 px-3 py-2.5 text-left">Attend.</th>
-                  <th className="w-32 px-3 py-2.5 text-left">Attend. Project</th>
-                  <th className="w-16 px-3 py-2.5 text-left">Tracking</th>
-                  <th className="w-16 px-3 py-2.5 text-left">Leave</th>
-                  <th className="w-16 px-3 py-2.5 text-right">Actions</th>
+                  <th className="w-24 px-2.5 py-2 text-left">Name</th>
+                  <th className="w-28 px-2.5 py-2 text-left">Login ID</th>
+                  <th className="w-20 px-2.5 py-2 text-left">Role</th>
+                  {isSuperAdmin && <th className="w-24 px-2.5 py-2 text-left">Modules</th>}
+                  <th className="w-24 px-2.5 py-2 text-left">Projects</th>
+                  <th className="px-2.5 py-2 text-left">Joined</th>
+                  {canSeeLoginLocation && <th className="w-32 px-2.5 py-2 text-left">Last Login</th>}
+                  {isSuperAdmin && <th className="px-2.5 py-2 text-left">Location</th>}
+                  <th className="px-2.5 py-2 text-left">Delivery</th>
+                  <th className="px-2.5 py-2 text-left">Job Edit</th>
+                  <th className="px-2.5 py-2 text-left">Attend.</th>
+                  <th className="w-28 px-2.5 py-2 text-left">Attend. Project</th>
+                  <th className="px-2.5 py-2 text-left">Tracking</th>
+                  <th className="px-2.5 py-2 text-left">Leave</th>
+                  <th className="px-2.5 py-2 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200 text-sm">
-                {users.map((u) => {
+                {filteredUsers.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={
+                        3 + (isSuperAdmin ? 1 : 0) + 1 + 1 + (canSeeLoginLocation ? 1 : 0) +
+                        (isSuperAdmin ? 1 : 0) + 1 + 1 + 1 + 1 + 1 + 1 + 1
+                      }
+                      className="px-4 py-8 text-center text-sm text-slate-400"
+                    >
+                      No users match your search.
+                    </td>
+                  </tr>
+                ) : filteredUsers.map((u) => {
                   const grantedCount = projectIdsForUser(u.id).size;
                   const grantedModuleCount = (u.module_permissions || []).length;
                   return (
