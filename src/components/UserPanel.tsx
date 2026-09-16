@@ -2601,7 +2601,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
         </div>
 
         {!!user.can_use_attendance && (
-          <div className="relative z-10 px-4 -mt-6 pb-7">
+          <div className="relative z-10 px-2 -mt-6 pb-7">
             <AttendanceCard token={token} projects={attendanceProjects} loading={!projectsLoaded} />
           </div>
         )}
@@ -2610,9 +2610,12 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
             Users -> can_view_leave_summary), OFF by default, same toggle
             pattern as Remote Attendance's can_use_attendance. Sits right
             after Remote Attendance so both quick-action cards stay together
-            at the top of the Dashboard when both are on. */}
+            at the top of the Dashboard when both are on. Same px-2 side
+            padding as the main content container below (tiles/calendar) —
+            was px-4, which sat these cards noticeably further in from the
+            edges than everything below it. */}
         {!!user.can_view_leave_summary && (
-          <div className={`relative z-10 px-4 pb-3 ${user.can_use_attendance ? '-mt-1' : '-mt-6'}`}>
+          <div className={`relative z-10 px-2 pb-3 ${user.can_use_attendance ? '-mt-1' : '-mt-6'}`}>
             <LeaveSummaryCard token={token} onOpen={() => goToMobileSection('leave')} />
           </div>
         )}
@@ -2622,7 +2625,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
             (see Admin Panel -> Approvals -> Templates). Renders nothing at
             all when nothing's waiting on this account, so it stays invisible
             for the vast majority of accounts that are never an approver. */}
-        <div className="relative z-10 px-4">
+        <div className="relative z-10 px-2">
           <PendingApprovalsCard token={token} />
         </div>
       </div>
