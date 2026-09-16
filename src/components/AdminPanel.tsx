@@ -285,6 +285,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // application-departments instead. Empty set = unrestricted.
   const [leaveApplicationDepts, setLeaveApplicationDepts] = useState<Set<string>>(new Set());
   const [loadingLeaveApplicationDepts, setLoadingLeaveApplicationDepts] = useState(false);
+  // Department-wise scope for the 'conveyance' module — same idea as
+  // attendanceReportDepts/leaveApplicationDepts above, backed by PUT
+  // /api/users/:id/conveyance-claim-departments instead. Empty set =
+  // unrestricted.
+  const [conveyanceClaimDepts, setConveyanceClaimDepts] = useState<Set<string>>(new Set());
+  const [loadingConveyanceClaimDepts, setLoadingConveyanceClaimDepts] = useState(false);
   const [userPanelAccessEnabled, setUserPanelAccessEnabled] = useState(false);
   const [leaveManagementAccessEnabled, setLeaveManagementAccessEnabled] = useState(false);
   const [movementClaimAccessEnabled, setMovementClaimAccessEnabled] = useState(false);
@@ -359,6 +365,27 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       })
       .catch(() => {})
       .finally(() => setLoadingLeaveApplicationDepts(false));
+
+    // Conveyance Claim Department scope — same fetch-fresh-on-open and
+    // Supervisor-pre-tick-only-if-nothing-saved-yet rules as above, just
+    // against the 'conveyance' module's own endpoint.
+    setConveyanceClaimDepts(new Set());
+    setLoadingConveyanceClaimDepts(true);
+    fetch(apiUrl(`/api/users/${u.id}/conveyance-claim-departments`), {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+      .then((res) => (res.ok ? res.json() : { departments: [] }))
+      .then((data) => {
+        const saved: string[] = Array.isArray(data?.departments) ? data.departments : [];
+        if (saved.length > 0) {
+          setConveyanceClaimDepts(new Set(saved));
+        } else {
+          const supervised = departments.filter((d) => d.supervisor_user_id === u.id).map((d) => d.name);
+          setConveyanceClaimDepts(new Set(supervised));
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoadingConveyanceClaimDepts(false));
   };
 
   const toggleAttendanceReportDept = (name: string) => {
@@ -372,6 +399,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
 
   const toggleLeaveApplicationDept = (name: string) => {
     setLeaveApplicationDepts((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  };
+
+  const toggleConveyanceClaimDept = (name: string) => {
+    setConveyanceClaimDepts((prev) => {
       const next = new Set(prev);
       if (next.has(name)) next.delete(name);
       else next.add(name);
@@ -426,6 +462,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         });
         const leaveDeptData = await leaveDeptRes.json();
         if (!leaveDeptRes.ok) throw new Error(leaveDeptData.error || 'Failed to update Leave Application Department access');
+      }
+
+      // Department-wise scope for the 'conveyance' module — same
+      // "only save while the module checkbox is actually ticked" rule as
+      // attendance_reports/leave_applications above.
+      if (selectedModules.has('conveyance')) {
+        const conveyanceDeptRes = await fetch(apiUrl(`/api/users/${managingModulesFor.id}/conveyance-claim-departments`), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ departments: Array.from(conveyanceClaimDepts) })
+        });
+        const conveyanceDeptData = await conveyanceDeptRes.json();
+        if (!conveyanceDeptRes.ok) throw new Error(conveyanceDeptData.error || 'Failed to update Conveyance Claim Department access');
       }
 
       // Also save the "User Panel Access" toggle, only if it actually changed —
@@ -6193,6 +6242,46 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                                         type="checkbox"
                                         checked={leaveApplicationDepts.has(d.name)}
                                         onChange={() => toggleLeaveApplicationDept(d.name)}
+                                        className="w-3.5 h-3.5 rounded border-slate-300 text-amber-600 focus:ring-amber-600 cursor-pointer"
+                                      />
+                                      <span className="text-xs text-slate-800">{d.name}</span>
+                                      {d.supervisor_user_id === managingModulesFor?.id && (
+                                        <span className="text-[10px] text-amber-700 font-semibold">Supervisor</span>
+                                      )}
+                                    </label>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                          {m.key === 'conveyance' && selectedModules.has('conveyance') && (
+                            <div className="ml-2 mt-1 mb-1 p-3 bg-amber-50 border border-amber-200 rounded-xl">
+                              <p className="text-[11px] font-semibold text-slate-700 flex items-center gap-1.5 mb-1">
+                                <Building2 className="w-3.5 h-3.5 text-amber-600" />
+                                Department Access for this Report
+                              </p>
+                              <p className="text-[11px] text-slate-500 mb-2">
+                                Leave every Department unchecked to keep seeing all of them (default). Tick one or
+                                more to restrict {managingModulesFor?.role === 'user' ? 'this User' : 'this Admin'} to
+                                only those Department(s) on the Conveyance Bill Claim tab — a Department they
+                                supervise is pre-ticked here the first time this is set up, but that can be
+                                unticked, and this can be set for any account either way.
+                              </p>
+                              {loadingConveyanceClaimDepts ? (
+                                <p className="text-[11px] text-slate-400">Loading…</p>
+                              ) : departments.length === 0 ? (
+                                <p className="text-[11px] text-slate-400">No Departments set up yet (Admin Panel -&gt; Departments).</p>
+                              ) : (
+                                <div className="space-y-1 max-h-40 overflow-y-auto pr-1">
+                                  {departments.map((d) => (
+                                    <label
+                                      key={d.id}
+                                      className="flex items-center gap-2 px-2 py-1.5 bg-white border border-amber-100 rounded-lg cursor-pointer hover:bg-amber-100/40"
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={conveyanceClaimDepts.has(d.name)}
+                                        onChange={() => toggleConveyanceClaimDept(d.name)}
                                         className="w-3.5 h-3.5 rounded border-slate-300 text-amber-600 focus:ring-amber-600 cursor-pointer"
                                       />
                                       <span className="text-xs text-slate-800">{d.name}</span>

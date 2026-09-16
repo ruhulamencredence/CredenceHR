@@ -818,6 +818,32 @@ async function ensureSchemaMigrations() {
   } catch (err: any) {
     console.warn("⚠️ Could not ensure leave_application_department_access table exists: " + err.message);
   }
+  // Department-wise scoping for the 'conveyance' module only — identical
+  // design to attendance_report_department_access/leave_application_
+  // department_access above, just for the Admin Panel's "Conveyance Bill
+  // Claim" tab (Admin Panel -> Users -> Module Access -> "Conveyance Claim
+  // Departments", shown once 'conveyance' itself is checked). A row here
+  // means the account may ONLY see Conveyance Bill Claims submitted by users
+  // whose linked Employee Directory row has that one Department —
+  // GET /api/user-claims in ConveyanceBillClaimRoutes.ts filters on it via
+  // getConveyanceClaimDeptScope() below. No rows at all for a user means
+  // unrestricted (every Department's claims visible), exactly like granting
+  // the module alone. Same rename-sync convention as the other two tables —
+  // see PUT /api/departments/:id in DepartmentsAndBranches.ts.
+  try {
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS conveyance_claim_department_access (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        department VARCHAR(150) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY unique_user_department (user_id, department),
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      )
+    `);
+  } catch (err: any) {
+    console.warn("⚠️ Could not ensure conveyance_claim_department_access table exists: " + err.message);
+  }
   // "Remote Attendance" — one row per (user, project, calendar day). check_in_* is
   // filled when the User taps Check In (server-validated to be inside the Project's
   // location_radius circle around location_lat/location_lng); check_out_* likewise
@@ -1807,6 +1833,21 @@ async function getAttendanceReportDeptScope(userId: number): Promise<string[] | 
 async function getLeaveApplicationDeptScope(userId: number): Promise<string[] | null> {
   try {
     const rows: any = await queryDB("SELECT department FROM leave_application_department_access WHERE user_id = ?", [userId]);
+    if (rows.length === 0) return null;
+    return rows.map((r: any) => r.department);
+  } catch {
+    return null;
+  }
+}
+
+// Department-wise scope for the 'conveyance' module — same shape and same
+// "no rows = unrestricted" convention as getAttendanceReportDeptScope/
+// getLeaveApplicationDeptScope above, backed by
+// conveyance_claim_department_access instead. See that table's comment in
+// initDB() for the full design.
+async function getConveyanceClaimDeptScope(userId: number): Promise<string[] | null> {
+  try {
+    const rows: any = await queryDB("SELECT department FROM conveyance_claim_department_access WHERE user_id = ?", [userId]);
     if (rows.length === 0) return null;
     return rows.map((r: any) => r.department);
   } catch {
@@ -3839,7 +3880,8 @@ async function startServer() {
     rejectUserClaimRecord,
     toDateOnlyString,
     todayInDhaka,
-    userClaimCategories: USER_CLAIM_CATEGORIES
+    userClaimCategories: USER_CLAIM_CATEGORIES,
+    getConveyanceClaimDeptScope
   });
 
   // Approve Applications / generic Approval workflow (chain config, Admin
