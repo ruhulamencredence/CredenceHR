@@ -4929,7 +4929,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           )}
           <div className="overflow-x-auto">
             <table className="w-full divide-y divide-slate-200">
-              <thead className="bg-slate-50 text-slate-500 text-[11px] uppercase tracking-wider">
+              {/* Sticky under the app header (Navbar is sticky top-0 h-16 —
+                  see Navbar.tsx) so scrolling a long User list never scrolls
+                  the column headers out of view underneath it. */}
+              <thead className="sticky top-16 z-10 bg-slate-50 text-slate-500 text-[11px] uppercase tracking-wider">
                 <tr>
                   <th className="w-24 px-2.5 py-2 text-left">Name</th>
                   <th className="w-28 px-2.5 py-2 text-left">Login ID</th>
