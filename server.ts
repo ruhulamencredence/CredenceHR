@@ -339,6 +339,19 @@ async function ensureSchemaMigrations() {
     }
   }
 
+  // GET /api/entries and /api/entries/mpr-usage both start with `WHERE
+  // e.deleted_at IS NULL`, and a plain 'user' account (the majority of
+  // accounts) additionally filters `AND e.created_by = ?` — created_by has
+  // no FK (an entry's creator can be deleted without taking their entries
+  // with them), so it was never indexed at all. Without this, every one of
+  // those calls was a full table scan of `entries`, which only grows over
+  // the life of the app and is hit on nearly every Dashboard open. Ignore
+  // the error if it already exists (older MySQL has no
+  // "CREATE INDEX IF NOT EXISTS").
+  await dbPool
+    .query(`CREATE INDEX idx_entries_deleted_created ON entries (deleted_at, created_by)`)
+    .catch(() => {});
+
   // entries.item_name must be able to hold the full imported budget_items.description
   // (VARCHAR(255)) it's matched against in GET /api/entries — an older, shorter column
   // here silently truncates long item names on insert, which then never matches the
@@ -1314,6 +1327,11 @@ async function ensureSchemaMigrations() {
         MODIFY COLUMN source_type ENUM('attendance','claim','user_claim','attendance_correction','leave_application') NOT NULL,
         MODIFY COLUMN event_type ENUM('check_in','check_out','submit') NOT NULL
     `);
+    // GET /api/my-approvals (PendingApprovalsCard — hit on every Dashboard
+    // open, by every account) starts with `WHERE status = 'pending'`, which
+    // was an unindexed full table scan of every approval request ever
+    // created. Ignore the error if it already exists.
+    await dbPool.query(`CREATE INDEX idx_approval_requests_status ON approval_requests (status)`).catch(() => {});
   } catch (err: any) {
     console.warn("⚠️ Could not ensure approval_chain_steps/approval_requests tables exist: " + err.message);
   }
