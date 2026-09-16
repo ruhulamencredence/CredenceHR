@@ -160,6 +160,17 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
   const [showLinkGroup, setShowLinkGroup] = useState(false);
   const [directory, setDirectory] = useState<ChatDirectoryUser[]>([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
+  // Live-measured viewport size/offset (window.visualViewport), NOT a CSS
+  // vh/dvh guess or a hardcoded Navbar-height subtraction — both of those
+  // turned out unreliable on the actual device this was tested on (a
+  // notch/status-bar inset the CSS math didn't account for, and `position:
+  // fixed` not reliably tracking the real viewport once the on-screen
+  // keyboard opened). visualViewport reports the ACTUAL visible area
+  // directly, keyboard included, so .chat-shell's size/position below is
+  // driven by real numbers instead of assumptions. null until the first
+  // measurement lands, during which .chat-shell's CSS `inset: 0` fallback
+  // (index.css) covers the gap.
+  const [viewportSize, setViewportSize] = useState<{ height: number; top: number } | null>(null);
 
   // Scrolled directly via scrollTop (see scrollMessagesToBottom below), NOT
   // scrollIntoView() on a descendant — scrollIntoView walks up and scrolls
@@ -393,6 +404,27 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
     scrollMessagesToBottom(true);
   }, [messages.length, scrollMessagesToBottom]);
 
+  // window.visualViewport is the standards-based, actually-reliable way to
+  // know the real visible area in a WebView, keyboard included — unlike
+  // CSS `dvh`/`position:fixed`, it doesn't depend on the WebView correctly
+  // propagating a native resize event to layout; it just reports the true
+  // numbers whenever they change (keyboard open/close, rotation). Every
+  // modern Android WebView supports it, so no feature-detection fallback
+  // math is needed beyond the `if (!vv) return` guard below (an
+  // unsupported browser just keeps .chat-shell's CSS `inset: 0` instead).
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const update = () => setViewportSize({ height: vv.height, top: vv.offsetTop });
+    update();
+    vv.addEventListener('resize', update);
+    vv.addEventListener('scroll', update);
+    return () => {
+      vv.removeEventListener('resize', update);
+      vv.removeEventListener('scroll', update);
+    };
+  }, []);
+
   // Locks the OUTER page from scrolling at all while a conversation is open.
   // .chat-shell (index.css) already takes ChatPanel out of the page's normal
   // flow entirely (position: fixed), so this is now mostly a nicety — it
@@ -585,7 +617,10 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
   const isTypingInActiveRoom = typingNamesInActiveRoom.length > 0;
 
   return (
-    <div className="chat-shell flex bg-white">
+    <div
+      className="chat-shell flex bg-white"
+      style={viewportSize ? { top: viewportSize.top, height: viewportSize.height } : undefined}
+    >
       {/* Sidebar: room list */}
       <div className={`w-full md:w-[360px] border-r border-slate-200 flex flex-col ${activeRoomId ? 'hidden md:flex' : 'flex'}`}>
         <div className="p-4 border-b border-slate-200 flex items-center justify-between gap-2">
