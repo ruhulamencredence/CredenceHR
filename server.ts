@@ -5519,6 +5519,45 @@ async function startServer() {
   // member management) come from registerChatRoutes; setupChatSocket wires
   // the live 'send_message'/'typing'/'presence_change' events on top of it.
   const io = new SocketIOServer(httpServer, { cors: { origin: "*" } });
+
+  // Step 1 of making this app safe to run as more than one server process
+  // behind a load balancer (needed once usage grows past what a single
+  // process can handle, e.g. ~1000 concurrent employees): Socket.IO's
+  // default adapter only broadcasts io.to(...)/io.emit(...) to sockets
+  // connected to THIS process. With two+ processes behind a load balancer,
+  // a chat message sent by a user on instance A would never reach a
+  // recipient whose socket landed on instance B. The Redis adapter fixes
+  // that by publishing every broadcast through Redis pub/sub so all
+  // instances see it, regardless of which one a given socket is on.
+  // Opt-in via REDIS_URL — with it unset (today's single-process
+  // deployment), Socket.IO keeps using its default in-memory adapter
+  // exactly as before, so this is a no-op until REDIS_URL is actually
+  // configured on a multi-instance deployment.
+  // Known follow-up once this is enabled: ChatRoutes.ts's setupChatSocket
+  // still tracks "is this user online" in a local, per-process Map
+  // (onlineSockets) — accurate within one instance, but a user connected
+  // to instance A and instance B independently won't be seen as online by
+  // both. Fine for now; move that to Redis too when multi-instance
+  // presence accuracy actually matters.
+  if (process.env.REDIS_URL) {
+    try {
+      const { createAdapter } = await import("@socket.io/redis-adapter");
+      const { createClient } = await import("redis");
+      const pubClient = createClient({ url: process.env.REDIS_URL });
+      const subClient = pubClient.duplicate();
+      pubClient.on("error", (err) => console.error("Socket.IO Redis pub client error:", err));
+      subClient.on("error", (err) => console.error("Socket.IO Redis sub client error:", err));
+      await Promise.all([pubClient.connect(), subClient.connect()]);
+      io.adapter(createAdapter(pubClient, subClient));
+      console.log(" Socket.IO Redis adapter connected — ready for multi-instance deployment.");
+    } catch (err) {
+      console.error(
+        "Failed to attach Socket.IO Redis adapter (falling back to the default in-memory adapter — chat will only broadcast within this one process):",
+        err
+      );
+    }
+  }
+
   registerChatRoutes(app, io, { authenticateToken, queryDB });
   setupChatSocket(io, { queryDB, jwtSecret: JWT_SECRET });
 
