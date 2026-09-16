@@ -125,7 +125,14 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
       className={
         large
           ? 'bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden max-w-2xl'
-          : 'relative rounded-[28px] overflow-hidden border border-white/70 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-sky-100/70 via-white/50 to-blue-50/40 backdrop-blur-xl max-w-sm mx-auto md:mx-0'
+          // No max-w/mx-auto here (previously max-w-sm mx-auto) — that
+          // centered this card at a fixed 384px width regardless of the
+          // actual viewport, so on any phone wider than that it sat visibly
+          // narrower/more inset than the full-width quick-access tiles right
+          // above it. This is mobile-only (see the `md:hidden` wrapper
+          // around it in UserPanel.tsx) so it should just fill its parent's
+          // width the same way those tiles do.
+          : 'relative rounded-[28px] overflow-hidden border border-white/70 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-sky-100/70 via-white/50 to-blue-50/40 backdrop-blur-xl'
       }
     >
       <div
