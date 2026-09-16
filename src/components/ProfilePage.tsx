@@ -138,7 +138,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
             </button>
             <div className="flex flex-col items-center mt-4">
               <div
-                className="w-[74px] h-[74px] rounded-full bg-white flex items-center justify-center text-2xl font-semibold overflow-hidden"
+                className="w-[104px] h-[104px] rounded-full bg-white flex items-center justify-center text-3xl font-semibold overflow-hidden"
                 style={{ color: 'var(--g-accent)', border: '3px solid rgba(255,255,255,0.55)' }}
               >
                 {photoUrl ? <img src={photoUrl} alt={user.name} className="w-full h-full object-cover" /> : initial}

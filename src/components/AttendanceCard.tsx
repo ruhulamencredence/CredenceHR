@@ -333,6 +333,7 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
           project={selectedProject}
           coords={pending.coords}
           submitting={submitting}
+          token={token}
           onCancel={() => {
             if (submitting) return;
             setPending(null);

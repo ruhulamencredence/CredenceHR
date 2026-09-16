@@ -330,7 +330,19 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
   // same widget reused inside the Admin Panel queue for consistency.
   app.get("/api/my-approvals", authenticateToken, async (req: any, res) => {
     try {
-      const [pendingRequests, templateStepApproverRows, chain, userClaimRows, attendanceCorrectionRows, leaveApplicationRows, projects, requesterRows] = await Promise.all([
+      const myId = Number(req.user.id);
+
+      // Phase 1 — everything needed to work out WHICH pending requests are
+      // actually this account's to act on. approval_requests is already
+      // scoped to status='pending' (small and indexed — see
+      // idx_approval_requests_status in server.ts's initDB), and
+      // templateStepApproverRows/chain are both small, fixed-size config
+      // tables (their size tracks the number of configured approval
+      // steps/chain layers, never the number of employees or requests).
+      // The reliever query is similarly scoped directly in SQL instead of
+      // pulling every Leave Application ever filed — see the old version's
+      // comment (now below) on why this exists.
+      const [pendingRequests, templateStepApproverRows, chain, relieverRows] = await Promise.all([
         queryDB("SELECT * FROM approval_requests WHERE status = 'pending' ORDER BY id ASC"),
         queryDB(
           `SELECT s.template_id, s.step_order, sa.user_id
@@ -338,11 +350,10 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
            JOIN approval_template_steps s ON s.id = sa.step_id`
         ),
         getApprovalChain(),
-        queryDB("SELECT * FROM user_claims"),
-        queryDB("SELECT * FROM attendance_corrections"),
-        queryDB("SELECT * FROM leave_applications"),
-        queryDB("SELECT * FROM projects"),
-        queryDB("SELECT id, name FROM users")
+        queryDB(
+          "SELECT * FROM leave_applications WHERE reliever_id = ? AND reliever_status = 'pending' AND status = 'pending'",
+          [myId]
+        )
       ]);
       const templateStepApproverIds = new Map<string, number[]>();
       for (const r of templateStepApproverRows) {
@@ -351,12 +362,6 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
         templateStepApproverIds.get(key)!.push(Number(r.user_id));
       }
       const chainByStep = new Map<number, any>(chain.map((s: any) => [Number(s.step_order), s]));
-      const userClaimMap = new Map<number, any>(userClaimRows.map((c: any) => [Number(c.id), c]));
-      const attendanceCorrectionMap = new Map<number, any>(attendanceCorrectionRows.map((c: any) => [Number(c.id), c]));
-      const leaveApplicationMap = new Map<number, any>(leaveApplicationRows.map((l: any) => [Number(l.id), l]));
-      const projectMap = new Map<number, any>(projects.map((p: any) => [Number(p.id), p]));
-      const requesterMap = new Map<number, any>(requesterRows.map((u: any) => [Number(u.id), u]));
-      const myId = Number(req.user.id);
 
       const mine = pendingRequests.filter((r: any) => {
         // Department Supervisor auto-layer (Part 6) — step_order 1 is the
@@ -382,10 +387,50 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       // ('leave_reliever') so this one personal queue still covers both
       // roles an account can be asked to act in. See POST
       // /api/leave-applications/:id/reliever-decision for how these are
-      // actually decided.
-      const relieverItems = leaveApplicationRows.filter(
-        (la: any) => Number(la.reliever_id) === myId && la.reliever_status === "pending" && la.status === "pending"
+      // actually decided. (Fetched directly by this exact filter as
+      // relieverRows in Phase 1 above, rather than pulling every Leave
+      // Application ever filed and filtering in JS.)
+      const relieverItems = relieverRows;
+
+      // Phase 2 — only the specific user_claims/attendance_corrections/
+      // leave_applications/projects/users rows `mine` and relieverItems
+      // actually reference, instead of every row in each of those tables
+      // system-wide (the previous version's SELECT * FROM ... with no
+      // WHERE at all). `mine` is bounded by how many requests are
+      // currently pending — not by how many claims/corrections/leave
+      // applications have ever existed — so this scales with pending
+      // workload rather than with total history.
+      const userClaimIds = mine.filter((r: any) => r.source_type === "user_claim").map((r: any) => Number(r.source_id));
+      const attendanceCorrectionIds = mine
+        .filter((r: any) => r.source_type === "attendance_correction")
+        .map((r: any) => Number(r.source_id));
+      const leaveApplicationIds = mine.filter((r: any) => r.source_type === "leave_application").map((r: any) => Number(r.source_id));
+      const requestedByIds = Array.from(
+        new Set([...mine.map((r: any) => Number(r.requested_by)), ...relieverItems.map((la: any) => Number(la.user_id))])
       );
+
+      const fetchByIds = (table: string, ids: number[], columns = "*") =>
+        ids.length === 0 ? Promise.resolve([]) : queryDB(`SELECT ${columns} FROM ${table} WHERE id IN (${ids.map(() => "?").join(",")})`, ids);
+
+      const [userClaimRows, attendanceCorrectionRows, leaveApplicationRows, requesterRows] = await Promise.all([
+        fetchByIds("user_claims", userClaimIds),
+        fetchByIds("attendance_corrections", attendanceCorrectionIds),
+        fetchByIds("leave_applications", leaveApplicationIds),
+        fetchByIds("users", requestedByIds, "id, name")
+      ]);
+      // attendance_corrections' project_name comes from a second lookup —
+      // only for the specific projects these narrowed rows actually
+      // reference, same reasoning as above.
+      const projectIds: number[] = Array.from(
+        new Set<number>(attendanceCorrectionRows.map((ac: any) => Number(ac.project_id)).filter((id: number) => Number.isFinite(id)))
+      );
+      const projects = await fetchByIds("projects", projectIds);
+
+      const userClaimMap = new Map<number, any>(userClaimRows.map((c: any) => [Number(c.id), c]));
+      const attendanceCorrectionMap = new Map<number, any>(attendanceCorrectionRows.map((c: any) => [Number(c.id), c]));
+      const leaveApplicationMap = new Map<number, any>(leaveApplicationRows.map((l: any) => [Number(l.id), l]));
+      const projectMap = new Map<number, any>(projects.map((p: any) => [Number(p.id), p]));
+      const requesterMap = new Map<number, any>(requesterRows.map((u: any) => [Number(u.id), u]));
 
       const combined = [
         ...mine.map((r: any) => {

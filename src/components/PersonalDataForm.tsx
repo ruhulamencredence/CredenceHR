@@ -168,8 +168,8 @@ export const PersonalDataForm: React.FC<PersonalDataFormProps> = ({ token, onBac
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!data.first_name.trim() || !data.last_name.trim()) {
-      setError('First Name and Last Name are required.');
+    if (!data.first_name.trim()) {
+      setError('First Name is required.');
       return;
     }
     setSaving(true);
@@ -288,7 +288,6 @@ export const PersonalDataForm: React.FC<PersonalDataFormProps> = ({ token, onBac
                     type="text"
                     value={data.last_name}
                     onChange={update('last_name')}
-                    required
                     className="profile-field-input"
                     placeholder="Last Name"
                   />
