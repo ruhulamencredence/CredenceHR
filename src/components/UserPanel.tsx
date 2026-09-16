@@ -4513,14 +4513,14 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
       )}
 
       {/* Global Calendar (Admin Panel -> Holidays) — same read-only "pocket
-          calendar" widget as mobile's own Dashboard above, sitting under the
-          Conveyance Bill Claim/Job Entry/Job Edit section on desktop too.
-          Hides only while a Claims/Leave page is the active section, same as
-          everything else on this page — desktop has no separate "Dashboard"
-          view to gate this to (unlike mobile's mobileActiveSection), so it
-          stays visible regardless of which of Budget/Jobs/Entries/Job Edit
-          desktopActiveSection currently has expanded. */}
-      {!showingClaimsPage && (
+          calendar" widget as mobile's own Dashboard above, and same
+          Dashboard-only gating: hides whenever a Claims/Leave page OR one of
+          Entry/Jobs/Entry Details/Job Edit (showingMainGroupPage) is the
+          active section, leaving it visible only on the actual blank
+          Dashboard landing — it used to stay visible on every desktop
+          section regardless, back when desktopActiveSection had no real
+          "just the Dashboard" state of its own. */}
+      {!showingClaimsPage && !showingMainGroupPage && (
         <div className="hidden md:block">
           <HolidayCalendarWidget token={token} size="large" />
         </div>
