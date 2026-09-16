@@ -98,7 +98,6 @@ export function registerProfileRoutes(app: Express, deps: ProfileRouteDeps) {
       const firstName = String(first_name || "").trim();
       const lastName = String(last_name || "").trim();
       if (!firstName) return res.status(400).json({ error: "First Name is required." });
-      if (!lastName) return res.status(400).json({ error: "Last Name is required." });
 
       const existing = await queryDB("SELECT user_id FROM user_profile_details WHERE user_id = ?", [userId]);
       if (existing.length > 0) {
