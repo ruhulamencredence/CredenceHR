@@ -20,6 +20,10 @@ import { ProfilePage } from './components/ProfilePage';
 // during the brief gap while a panel's own chunk downloads after login.
 const UserPanel = lazy(() => import('./components/UserPanel').then(m => ({ default: m.UserPanel })));
 const AdminPanel = lazy(() => import('./components/AdminPanel').then(m => ({ default: m.AdminPanel })));
+// Chat pulls in its own Socket.IO client — lazy-loaded for the same reason
+// as UserPanel/AdminPanel above, so an account that never opens Chat never
+// pays for it.
+const ChatPanel = lazy(() => import('./components/ChatPanel').then(m => ({ default: m.ChatPanel })));
 
 import { AppLoader } from './components/AppLoader';
 import { Spinner } from './components/Spinner';
@@ -39,6 +43,8 @@ import { installKeyboardScrollFix } from './lib/keyboardScrollFix';
 import { usePullToRefresh } from './lib/usePullToRefresh';
 import { apiUrl } from './lib/api';
 import { startBackgroundTracking, stopBackgroundTracking } from './lib/backgroundTracking';
+import { connectChatSocket, disconnectChatSocket } from './lib/chatSocket';
+import { initPushNotifications, clearPushToken } from './lib/pushNotifications';
 
 export default function App() {
   const [token, setToken] = useState<string | null>(localStorage.getItem('mpr_token'));
@@ -115,6 +121,18 @@ export default function App() {
       // ignore, it just means a reload won't be able to restore this page.
     }
   }, [showProfilePage, showProfilePageStorageKey]);
+
+  // ChatPanel.tsx — opened from the Navbar chat bell, takes over the main
+  // area the same way ProfilePage does. Unlike showProfilePage above, this
+  // isn't persisted across a reload — reopening Chat re-syncs instantly from
+  // the server, so there's nothing worth restoring a stale "was open" flag for.
+  const [showChat, setShowChat] = useState(false);
+  // Set when a Chat push notification is tapped (see initPushNotifications
+  // below) so ChatPanel opens straight to that conversation instead of just
+  // landing on the room list. Cleared once ChatPanel has consumed it (see
+  // its onInitialRoomHandled prop) so re-showing Chat later doesn't keep
+  // jumping back to that same old room.
+  const [pendingChatRoomId, setPendingChatRoomId] = useState<number | null>(null);
 
   // Bumped right after a Personal Data photo upload succeeds (see
   // ProfilePage's onPhotoUpdated below) — passed to every avatar spot
@@ -235,6 +253,7 @@ export default function App() {
     setViewMode('user');
     setSelfServiceView(null);
     setShowProfilePage(false);
+          setShowChat(false);
   };
 
   const handleLogout = () => {
@@ -249,11 +268,13 @@ export default function App() {
       localStorage.removeItem(`mpr_self_service_view_${user.id}`);
       localStorage.removeItem(`mpr_show_profile_page_${user.id}`);
     }
+    if (token) clearPushToken(token);
     localStorage.removeItem('mpr_token');
     localStorage.removeItem('mpr_user');
     setToken(null);
     setUser(null);
     stopBackgroundTracking();
+    disconnectChatSocket();
   };
 
   // Employee Tracking (Admin Panel -> Employee Tracking): starts/stops the
@@ -270,6 +291,31 @@ export default function App() {
       stopBackgroundTracking();
     }
   }, [token, user?.can_use_tracking]);
+
+  // Chat (Direct/Group/Community messaging) — connects the one shared
+  // Socket.IO connection for the whole session (see chatSocket.ts) as soon
+  // as an account is signed in, every account, no permission gate (this is
+  // internal org-wide messaging, same visibility as Employee Directory).
+  // ChatPanel.tsx and the Navbar chat bell both reuse this same connection
+  // rather than opening their own.
+  useEffect(() => {
+    if (token) connectChatSocket(token);
+  }, [token]);
+
+  // Chat push notifications — registers this device's FCM token (no-op on
+  // web / without Firebase configured, see pushNotifications.ts). Tapping a
+  // push while the app was backgrounded/closed jumps straight into that
+  // conversation via pendingChatRoomId, consumed by ChatPanel below.
+  useEffect(() => {
+    if (token) {
+      initPushNotifications(token, (roomId) => {
+        setSelfServiceView(null);
+        setShowProfilePage(false);
+        setPendingChatRoomId(roomId);
+        setShowChat(true);
+      });
+    }
+  }, [token]);
 
   // Which panel the account is currently looking at. Every account now lands
   // on the User Panel dashboard by default after logging in (see
@@ -462,6 +508,23 @@ export default function App() {
     );
   }
 
+  // "Chat" — on the web (desktop/mobile browser), opens in its own new
+  // browser tab (/chat, see ChatStandalone.tsx + main.tsx) instead of taking
+  // over this tab's main area, so a conversation stays open and reachable
+  // (its own tab, its own back/forward history) while the rest of the app
+  // keeps working here. Inside the Android APK there's no such thing as "a
+  // new tab" — it's one WebView — so native keeps the original in-app panel
+  // behavior.
+  const openChat = () => {
+    if (Capacitor.isNativePlatform()) {
+      setSelfServiceView(null);
+      setShowProfilePage(false);
+      setShowChat(true);
+    } else {
+      window.open('/chat', '_blank', 'noopener');
+    }
+  };
+
   // Shared nav handlers for GlobalSidebar — identical for the mobile overlay
   // drawer (hamburger-triggered, unchanged) and the persistent desktop
   // column that now sits beside <main> (see the layout below), so both stay
@@ -475,6 +538,7 @@ export default function App() {
     onGoToDashboard: () => {
       setSelfServiceView(null);
       setShowProfilePage(false);
+          setShowChat(false);
       setViewMode('user');
       // Also reset UserPanel's own persisted section (mobile tile menu /
       // desktop tab) back to the dashboard default — see dashboardNavRequest
@@ -487,35 +551,42 @@ export default function App() {
     onGoToJobsTab: (target: 'entry' | 'jobs' | 'entryDetails' | 'jobEdit') => {
       setSelfServiceView(null);
       setShowProfilePage(false);
+          setShowChat(false);
       setViewMode('user');
       setJobsNavRequest({ target, ts: Date.now() });
     },
     onGoToUserClaims: (target: 'movementClaims' | 'conveyanceBill') => {
       setSelfServiceView(null);
       setShowProfilePage(false);
+          setShowChat(false);
       setViewMode('user');
       setClaimsNavRequest({ target, ts: Date.now() });
     },
     onGoToAdminClaims: (target: 'claims' | 'conveyance') => {
       setSelfServiceView(null);
       setShowProfilePage(false);
+          setShowChat(false);
       setViewMode('admin');
       setClaimsNavRequest({ target: target === 'claims' ? 'movementClaims' : 'conveyanceBill', ts: Date.now() });
     },
     onGoToAdminModule: (target: Exclude<AdminModuleKey, 'claims' | 'conveyance'> | 'my_conveyance' | 'dashboard' | 'servers') => {
       setSelfServiceView(null);
       setShowProfilePage(false);
+          setShowChat(false);
       setViewMode('admin');
       setAdminNavRequest({ target, ts: Date.now() });
     },
     onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'myLeave' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory') => {
       setShowProfilePage(false);
+          setShowChat(false);
       setSelfServiceView(target);
     },
     onOpenProfile: () => {
       setSelfServiceView(null);
+      setShowChat(false);
       setShowProfilePage(true);
     },
+    onOpenChat: openChat,
   };
 
   return (
@@ -542,6 +613,7 @@ export default function App() {
                 // Service too, or it stays stuck showing the Self Service page.
                 setSelfServiceView(null);
                 setShowProfilePage(false);
+          setShowChat(false);
                 setViewMode(mode);
               }
             : undefined
@@ -555,6 +627,7 @@ export default function App() {
           // staying stuck on whichever section was previously active.
           setSelfServiceView(null);
           setShowProfilePage(false);
+          setShowChat(false);
           setViewMode('user');
           setDashboardNavRequest({ ts: Date.now() });
         }}
@@ -570,11 +643,13 @@ export default function App() {
           // underneath it. Every other nav handler below needs the same reset.
           setSelfServiceView(null);
           setShowProfilePage(false);
+          setShowChat(false);
           setClaimsNavRequest({ target: 'movementClaims', ts: Date.now() });
         }}
         onGoToConveyanceBillClaim={() => {
           setSelfServiceView(null);
           setShowProfilePage(false);
+          setShowChat(false);
           setClaimsNavRequest({ target: 'conveyanceBill', ts: Date.now() });
         }}
         onGoToJobsTab={(target) => {
@@ -585,6 +660,7 @@ export default function App() {
           // that section.
           setSelfServiceView(null);
           setShowProfilePage(false);
+          setShowChat(false);
           if (canSwitchPanels) setViewMode('user');
           setJobsNavRequest({ target, ts: Date.now() });
         }}
@@ -595,30 +671,37 @@ export default function App() {
           // AdminPanel's own effect (below) tries to jump to that tab.
           setSelfServiceView(null);
           setShowProfilePage(false);
+          setShowChat(false);
           if (canSwitchPanels) setViewMode('admin');
           setAdminNavRequest({ target, ts: Date.now() });
         }}
         onGoToManageTab={(target) => {
           setSelfServiceView(null);
           setShowProfilePage(false);
+          setShowChat(false);
           if (canSwitchPanels) setViewMode('admin');
           setAdminNavRequest({ target, ts: Date.now() });
         }}
         onGoToWorkforceTab={(target) => {
           setSelfServiceView(null);
           setShowProfilePage(false);
+          setShowChat(false);
           if (canSwitchPanels) setViewMode('admin');
           setAdminNavRequest({ target, ts: Date.now() });
         }}
         onGoToSelfServiceTab={(target) => {
           setShowProfilePage(false);
+          setShowChat(false);
           setSelfServiceView(target);
         }}
         onOpenMobileMenu={() => setGlobalSidebarOpen(true)}
         onOpenProfile={() => {
           setSelfServiceView(null);
+          setShowChat(false);
           setShowProfilePage(true);
         }}
+        onOpenChat={openChat}
+        isChatOpen={showChat}
       />
 
       {/* Mobile-only overlay drawer (see Navbar.tsx's md:hidden hamburger) —
@@ -646,7 +729,15 @@ export default function App() {
         <div className="flex-1 min-w-0 flex flex-col">
       <main className="flex-1">
         <Suspense fallback={<AppLoader />}>
-        {showProfilePage ? (
+        {showChat ? (
+          <ChatPanel
+            user={user}
+            token={token || ''}
+            onBack={() => setShowChat(false)}
+            initialRoomId={pendingChatRoomId}
+            onInitialRoomHandled={() => setPendingChatRoomId(null)}
+          />
+        ) : showProfilePage ? (
           <ProfilePage
             user={user}
             token={token || ''}

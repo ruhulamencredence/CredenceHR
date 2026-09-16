@@ -4,6 +4,7 @@ import { User } from '../types';
 import { Shield, LogOut, Smartphone } from 'lucide-react';
 import credenceLogo from '../assets/credence-logo.png';
 import { AlertsBell } from './AlertsBell';
+import { ChatBell } from './ChatBell';
 import { useProfilePhoto } from '../lib/useProfilePhoto';
 
 // Mobile header's "open menu" glyph — three filled, rounded-square dots
@@ -91,6 +92,12 @@ interface NavbarProps {
   // Clicking the avatar (desktop header, top-right) opens ProfilePage.tsx —
   // same destination GlobalSidebar's own profile header opens on mobile.
   onOpenProfile: () => void;
+  // Chat bell (ChatBell.tsx) — opens ChatPanel.tsx, same destination
+  // GlobalSidebar's own "Chat" item opens on mobile.
+  onOpenChat: () => void;
+  // Hides this bell while ChatPanel.tsx is the page currently showing, same
+  // reasoning as isProfilePageOpen hiding the avatar button above.
+  isChatOpen?: boolean;
 }
 
 // Styled after the Gemini app's top bar: a plain white surface, the Credence
@@ -113,7 +120,9 @@ export const Navbar: React.FC<NavbarProps> = ({
   onGoToWorkforceTab,
   onGoToSelfServiceTab,
   onOpenMobileMenu,
-  onOpenProfile
+  onOpenProfile,
+  onOpenChat,
+  isChatOpen
 }) => {
   // Both the User Panel and the Admin Panel now get the fully transparent
   // header on the native Android APK (per request) — the web build keeps the
@@ -230,6 +239,10 @@ export const Navbar: React.FC<NavbarProps> = ({
               Application, same destination the "Self Service" menu above
               points at. */}
           <AlertsBell token={token} onOpenLeaveApplication={() => onGoToSelfServiceTab('leaveApplication')} />
+
+          {/* Chat bell — hidden while ChatPanel.tsx is already the page
+              showing, same isProfilePageOpen/avatar pattern below. */}
+          {!isChatOpen && <ChatBell token={token} onOpenChat={onOpenChat} />}
 
           <div className="hidden lg:block text-right mr-1">
             <div className="text-sm font-medium leading-tight" style={{ color: 'var(--g-text)' }}>{user.name}</div>

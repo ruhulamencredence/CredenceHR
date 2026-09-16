@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -285,6 +285,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // application-departments instead. Empty set = unrestricted.
   const [leaveApplicationDepts, setLeaveApplicationDepts] = useState<Set<string>>(new Set());
   const [loadingLeaveApplicationDepts, setLoadingLeaveApplicationDepts] = useState(false);
+  // Department-wise scope for the 'conveyance' module — same idea as
+  // attendanceReportDepts/leaveApplicationDepts above, backed by PUT
+  // /api/users/:id/conveyance-claim-departments instead. Empty set =
+  // unrestricted.
+  const [conveyanceClaimDepts, setConveyanceClaimDepts] = useState<Set<string>>(new Set());
+  const [loadingConveyanceClaimDepts, setLoadingConveyanceClaimDepts] = useState(false);
   const [userPanelAccessEnabled, setUserPanelAccessEnabled] = useState(false);
   const [leaveManagementAccessEnabled, setLeaveManagementAccessEnabled] = useState(false);
   const [movementClaimAccessEnabled, setMovementClaimAccessEnabled] = useState(false);
@@ -359,6 +365,27 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       })
       .catch(() => {})
       .finally(() => setLoadingLeaveApplicationDepts(false));
+
+    // Conveyance Claim Department scope — same fetch-fresh-on-open and
+    // Supervisor-pre-tick-only-if-nothing-saved-yet rules as above, just
+    // against the 'conveyance' module's own endpoint.
+    setConveyanceClaimDepts(new Set());
+    setLoadingConveyanceClaimDepts(true);
+    fetch(apiUrl(`/api/users/${u.id}/conveyance-claim-departments`), {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+      .then((res) => (res.ok ? res.json() : { departments: [] }))
+      .then((data) => {
+        const saved: string[] = Array.isArray(data?.departments) ? data.departments : [];
+        if (saved.length > 0) {
+          setConveyanceClaimDepts(new Set(saved));
+        } else {
+          const supervised = departments.filter((d) => d.supervisor_user_id === u.id).map((d) => d.name);
+          setConveyanceClaimDepts(new Set(supervised));
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoadingConveyanceClaimDepts(false));
   };
 
   const toggleAttendanceReportDept = (name: string) => {
@@ -372,6 +399,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
 
   const toggleLeaveApplicationDept = (name: string) => {
     setLeaveApplicationDepts((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  };
+
+  const toggleConveyanceClaimDept = (name: string) => {
+    setConveyanceClaimDepts((prev) => {
       const next = new Set(prev);
       if (next.has(name)) next.delete(name);
       else next.add(name);
@@ -426,6 +462,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         });
         const leaveDeptData = await leaveDeptRes.json();
         if (!leaveDeptRes.ok) throw new Error(leaveDeptData.error || 'Failed to update Leave Application Department access');
+      }
+
+      // Department-wise scope for the 'conveyance' module — same
+      // "only save while the module checkbox is actually ticked" rule as
+      // attendance_reports/leave_applications above.
+      if (selectedModules.has('conveyance')) {
+        const conveyanceDeptRes = await fetch(apiUrl(`/api/users/${managingModulesFor.id}/conveyance-claim-departments`), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ departments: Array.from(conveyanceClaimDepts) })
+        });
+        const conveyanceDeptData = await conveyanceDeptRes.json();
+        if (!conveyanceDeptRes.ok) throw new Error(conveyanceDeptData.error || 'Failed to update Conveyance Claim Department access');
       }
 
       // Also save the "User Panel Access" toggle, only if it actually changed —
@@ -543,6 +592,24 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [mprNumbers, setMprNumbers] = useState<MprNumber[]>([]);
   const [entries, setEntries] = useState<Entry[]>([]);
   const [users, setUsers] = useState<User[]>([]);
+  // User Management table search + role filter — narrows the (often long)
+  // users list by name/Login ID and/or role without touching the underlying
+  // `users` state, so every other tab (Add User, Departments' Supervisor
+  // dropdown, etc.) still sees the full list.
+  const [userSearchText, setUserSearchText] = useState('');
+  const [userRoleFilter, setUserRoleFilter] = useState<'all' | 'superadmin' | 'admin' | 'user'>('all');
+  const filteredUsers = useMemo(() => {
+    const q = userSearchText.trim().toLowerCase();
+    return users.filter((u) => {
+      if (userRoleFilter !== 'all' && u.role !== userRoleFilter) return false;
+      if (!q) return true;
+      return (
+        u.name.toLowerCase().includes(q) ||
+        (u.email || '').toLowerCase().includes(q) ||
+        (u.username || '').toLowerCase().includes(q)
+      );
+    });
+  }, [users, userSearchText, userRoleFilter]);
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [permissions, setPermissions] = useState<UserProjectPermission[]>([]);
 
@@ -3319,50 +3386,92 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           ) : leaveApplicationsReportError ? (
             <p className="p-6 text-sm text-rose-600">{leaveApplicationsReportError}</p>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-slate-50 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                  <tr>
-                    <th className="px-4 py-3">Employee</th>
-                    <th className="px-4 py-3">Department</th>
-                    <th className="px-4 py-3">Leave Type</th>
-                    <th className="px-4 py-3">Start Date</th>
-                    <th className="px-4 py-3">End Date</th>
-                    <th className="px-4 py-3">Days</th>
-                    <th className="px-4 py-3">Status</th>
-                    <th className="px-4 py-3">Approver</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {leaveApplicationsReport
-                    .filter((a) => (a.user_name || '').toLowerCase().includes(leaveApplicationsReportSearch.trim().toLowerCase()))
-                    .map((a) => (
-                      <tr key={a.id} className="hover:bg-slate-50">
-                        <td className="px-4 py-3 font-medium text-slate-900">{a.user_name || '(account removed)'}</td>
-                        <td className="px-4 py-3 text-slate-600">{a.department || '—'}</td>
-                        <td className="px-4 py-3 text-slate-600 capitalize">{a.leave_type.replace('_', ' ')}</td>
-                        <td className="px-4 py-3 text-slate-600">{formatDate(a.start_date)}</td>
-                        <td className="px-4 py-3 text-slate-600">{formatDate(a.end_date)}</td>
-                        <td className="px-4 py-3 text-slate-600">{a.day_count}</td>
-                        <td className="px-4 py-3">
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold ${
-                            a.status === 'approved' ? 'bg-emerald-50 text-emerald-700' :
-                            a.status === 'rejected' ? 'bg-rose-50 text-rose-700' : 'bg-amber-50 text-amber-700'
-                          }`}>
-                            {a.status}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-slate-600">{a.approver_name || '—'}</td>
-                      </tr>
-                    ))}
-                  {leaveApplicationsReport.length === 0 && (
+            <>
+              {/* Desktop — unchanged full table. */}
+              <div className="hidden md:block overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
                     <tr>
-                      <td colSpan={8} className="px-4 py-10 text-center text-slate-400">No Leave Applications found.</td>
+                      <th className="px-4 py-3">Employee</th>
+                      <th className="px-4 py-3">Department</th>
+                      <th className="px-4 py-3">Leave Type</th>
+                      <th className="px-4 py-3">Start Date</th>
+                      <th className="px-4 py-3">End Date</th>
+                      <th className="px-4 py-3">Days</th>
+                      <th className="px-4 py-3">Status</th>
+                      <th className="px-4 py-3">Approver</th>
                     </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {leaveApplicationsReport
+                      .filter((a) => (a.user_name || '').toLowerCase().includes(leaveApplicationsReportSearch.trim().toLowerCase()))
+                      .map((a) => (
+                        <tr key={a.id} className="hover:bg-slate-50">
+                          <td className="px-4 py-3 font-medium text-slate-900">{a.user_name || '(account removed)'}</td>
+                          <td className="px-4 py-3 text-slate-600">{a.department || '—'}</td>
+                          <td className="px-4 py-3 text-slate-600 capitalize">{a.leave_type.replace('_', ' ')}</td>
+                          <td className="px-4 py-3 text-slate-600">{formatDate(a.start_date)}</td>
+                          <td className="px-4 py-3 text-slate-600">{formatDate(a.end_date)}</td>
+                          <td className="px-4 py-3 text-slate-600">{a.day_count}</td>
+                          <td className="px-4 py-3">
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold ${
+                              a.status === 'approved' ? 'bg-emerald-50 text-emerald-700' :
+                              a.status === 'rejected' ? 'bg-rose-50 text-rose-700' : 'bg-amber-50 text-amber-700'
+                            }`}>
+                              {a.status}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">{a.approver_name || '—'}</td>
+                        </tr>
+                      ))}
+                    {leaveApplicationsReport.length === 0 && (
+                      <tr>
+                        <td colSpan={8} className="px-4 py-10 text-center text-slate-400">No Leave Applications found.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Mobile — stacked cards instead of the same table squeezed
+                  into a horizontal scroll (same pattern as ClaimsPanel.tsx /
+                  ConveyanceClaimCard.tsx's own mobile treatment). */}
+              <div className="md:hidden divide-y divide-slate-100">
+                {leaveApplicationsReport
+                  .filter((a) => (a.user_name || '').toLowerCase().includes(leaveApplicationsReportSearch.trim().toLowerCase()))
+                  .map((a) => (
+                    <div key={a.id} className="p-4 flex flex-col gap-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="font-semibold text-slate-900 text-sm truncate">{a.user_name || '(account removed)'}</p>
+                          <p className="text-xs text-slate-500 mt-0.5">{a.department || '—'}</p>
+                        </div>
+                        <span className={`shrink-0 inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold ${
+                          a.status === 'approved' ? 'bg-emerald-50 text-emerald-700' :
+                          a.status === 'rejected' ? 'bg-rose-50 text-rose-700' : 'bg-amber-50 text-amber-700'
+                        }`}>
+                          {a.status}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-1.5 text-xs text-slate-600 capitalize">
+                        <CalendarClock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                        {a.leave_type.replace('_', ' ')} &middot; {a.day_count} day{Number(a.day_count) === 1 ? '' : 's'}
+                      </div>
+
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-slate-500">
+                          {formatDate(a.start_date)} &rarr; {formatDate(a.end_date)}
+                        </span>
+                        <span className="text-slate-400">{a.approver_name || '—'}</span>
+                      </div>
+                    </div>
+                  ))}
+                {leaveApplicationsReport.length === 0 && (
+                  <p className="px-4 py-10 text-center text-slate-400 text-sm">No Leave Applications found.</p>
+                )}
+              </div>
+            </>
           )}
         </div>
       )}
@@ -4769,37 +4878,83 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           </div>
 
           <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-          <div className="p-6 border-b border-slate-200">
-            <h3 className="text-lg font-bold text-slate-900">User Management</h3>
-            <p className="text-xs text-slate-500">
-              {isSuperAdmin
-                ? 'Manage system users, promote/demote Admins, and set which Admin Panel modules each Admin can access.'
-                : 'Manage system users. Only the Superadmin can change roles or an Admin\u2019s module access.'}
-            </p>
+          <div className="p-6 border-b border-slate-200 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+            <div>
+              <h3 className="text-lg font-bold text-slate-900">User Management</h3>
+              <p className="text-xs text-slate-500">
+                {isSuperAdmin
+                  ? 'Manage system users, promote/demote Admins, and set which Admin Panel modules each Admin can access.'
+                  : 'Manage system users. Only the Superadmin can change roles or an Admin\u2019s module access.'}
+              </p>
+            </div>
+            {/* Search (name / Login ID) + role filter \u2014 narrows filteredUsers below
+                without touching the `users` state other tabs on this page depend on. */}
+            <div className="flex items-center gap-2 shrink-0">
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={userSearchText}
+                  onChange={(e) => setUserSearchText(e.target.value)}
+                  placeholder="Search name or Login ID..."
+                  className="w-full sm:w-56 pl-8 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-xs focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400"
+                />
+              </div>
+              <div className="relative">
+                <Filter className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <select
+                  value={userRoleFilter}
+                  onChange={(e) => setUserRoleFilter(e.target.value as typeof userRoleFilter)}
+                  className="pl-8 pr-7 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-xs focus:ring-2 focus:ring-blue-600 focus:outline-none cursor-pointer appearance-none"
+                >
+                  <option value="all">All Roles</option>
+                  <option value="superadmin">Superadmin</option>
+                  <option value="admin">Admin</option>
+                  <option value="user">User</option>
+                </select>
+              </div>
+            </div>
           </div>
+          {(userSearchText || userRoleFilter !== 'all') && (
+            <div className="px-6 py-2 border-b border-slate-100 text-[11px] text-slate-500">
+              Showing {filteredUsers.length} of {users.length} users
+            </div>
+          )}
           <div className="overflow-x-auto">
-            <table className="w-full table-fixed divide-y divide-slate-200">
+            <table className="w-full divide-y divide-slate-200">
               <thead className="bg-slate-50 text-slate-500 text-[11px] uppercase tracking-wider">
                 <tr>
-                  <th className="w-28 px-3 py-2.5 text-left">Name</th>
-                  <th className="w-32 px-3 py-2.5 text-left">Login ID</th>
-                  <th className="w-24 px-3 py-2.5 text-left">Role</th>
-                  {isSuperAdmin && <th className="w-32 px-3 py-2.5 text-left">Modules</th>}
-                  <th className="w-32 px-3 py-2.5 text-left">Projects</th>
-                  <th className="w-20 px-3 py-2.5 text-left">Joined</th>
-                  {canSeeLoginLocation && <th className="w-36 px-3 py-2.5 text-left">Last Login</th>}
-                  {isSuperAdmin && <th className="w-16 px-3 py-2.5 text-left">Location</th>}
-                  <th className="w-16 px-3 py-2.5 text-left">Delivery</th>
-                  <th className="w-16 px-3 py-2.5 text-left">Job Edit</th>
-                  <th className="w-16 px-3 py-2.5 text-left">Attend.</th>
-                  <th className="w-32 px-3 py-2.5 text-left">Attend. Project</th>
-                  <th className="w-16 px-3 py-2.5 text-left">Tracking</th>
-                  <th className="w-16 px-3 py-2.5 text-left">Leave</th>
-                  <th className="w-16 px-3 py-2.5 text-right">Actions</th>
+                  <th className="w-24 px-2.5 py-2 text-left">Name</th>
+                  <th className="w-28 px-2.5 py-2 text-left">Login ID</th>
+                  <th className="w-20 px-2.5 py-2 text-left">Role</th>
+                  {isSuperAdmin && <th className="w-24 px-2.5 py-2 text-left">Modules</th>}
+                  <th className="w-24 px-2.5 py-2 text-left">Projects</th>
+                  <th className="px-2.5 py-2 text-left">Joined</th>
+                  {canSeeLoginLocation && <th className="w-32 px-2.5 py-2 text-left">Last Login</th>}
+                  {isSuperAdmin && <th className="px-2.5 py-2 text-left">Location</th>}
+                  <th className="px-2.5 py-2 text-left">Delivery</th>
+                  <th className="px-2.5 py-2 text-left">Job Edit</th>
+                  <th className="px-2.5 py-2 text-left">Attend.</th>
+                  <th className="w-28 px-2.5 py-2 text-left">Attend. Project</th>
+                  <th className="px-2.5 py-2 text-left">Tracking</th>
+                  <th className="px-2.5 py-2 text-left">Leave</th>
+                  <th className="px-2.5 py-2 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200 text-sm">
-                {users.map((u) => {
+                {filteredUsers.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={
+                        3 + (isSuperAdmin ? 1 : 0) + 1 + 1 + (canSeeLoginLocation ? 1 : 0) +
+                        (isSuperAdmin ? 1 : 0) + 1 + 1 + 1 + 1 + 1 + 1 + 1
+                      }
+                      className="px-4 py-8 text-center text-sm text-slate-400"
+                    >
+                      No users match your search.
+                    </td>
+                  </tr>
+                ) : filteredUsers.map((u) => {
                   const grantedCount = projectIdsForUser(u.id).size;
                   const grantedModuleCount = (u.module_permissions || []).length;
                   return (
@@ -5814,7 +5969,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           onClick={() => setManagingModulesFor(null)}
         >
           <div
-            className="bg-white border border-slate-200 rounded-2xl max-w-md w-full max-h-[85vh] flex flex-col shadow-2xl"
+            className="bg-white border border-slate-200 rounded-2xl max-w-md md:max-w-4xl w-full max-h-[90vh] flex flex-col shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="p-5 border-b border-slate-200 flex justify-between items-center">
@@ -5830,7 +5985,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
               </button>
             </div>
 
-            <div className="p-5 overflow-y-auto flex-1 space-y-2">
+            {/* Two columns on desktop (User Module toggles on the left, Admin
+                Module tab checkboxes on the right) instead of one long
+                cramped-looking vertical list stretched across a narrow
+                fixed-width card — the modal itself is wider on md+ too (see
+                max-w-md md:max-w-4xl above). Mobile keeps the original single
+                stacked column, unchanged. */}
+            <div className="p-5 overflow-y-auto flex-1 md:grid md:grid-cols-2 md:gap-x-8 md:items-start">
+            <div className="space-y-2">
               <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">User Module</p>
               {managingModulesFor.role === 'admin' && (
                 <label
@@ -6035,7 +6197,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   />
                 </button>
               </label>
-              <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1 pt-2 border-t border-slate-100">Admin Module</p>
+            </div>
+
+            <div className="space-y-2 mt-4 md:mt-0 pt-4 md:pt-0 border-t md:border-t-0 md:border-l border-slate-100 md:pl-8">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">Admin Module</p>
               <p className="text-xs text-slate-500 mb-2">
                 Choose which Admin Panel tabs this {managingModulesFor.role === 'user' ? 'User' : 'Admin'} can open.
                 {managingModulesFor.role === 'user' && ' They\'ll keep their normal User Panel too, with a switcher to open these tabs.'}
@@ -6141,12 +6306,53 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                               )}
                             </div>
                           )}
+                          {m.key === 'conveyance' && selectedModules.has('conveyance') && (
+                            <div className="ml-2 mt-1 mb-1 p-3 bg-amber-50 border border-amber-200 rounded-xl">
+                              <p className="text-[11px] font-semibold text-slate-700 flex items-center gap-1.5 mb-1">
+                                <Building2 className="w-3.5 h-3.5 text-amber-600" />
+                                Department Access for this Report
+                              </p>
+                              <p className="text-[11px] text-slate-500 mb-2">
+                                Leave every Department unchecked to keep seeing all of them (default). Tick one or
+                                more to restrict {managingModulesFor?.role === 'user' ? 'this User' : 'this Admin'} to
+                                only those Department(s) on the Conveyance Bill Claim tab — a Department they
+                                supervise is pre-ticked here the first time this is set up, but that can be
+                                unticked, and this can be set for any account either way.
+                              </p>
+                              {loadingConveyanceClaimDepts ? (
+                                <p className="text-[11px] text-slate-400">Loading…</p>
+                              ) : departments.length === 0 ? (
+                                <p className="text-[11px] text-slate-400">No Departments set up yet (Admin Panel -&gt; Departments).</p>
+                              ) : (
+                                <div className="space-y-1 max-h-40 overflow-y-auto pr-1">
+                                  {departments.map((d) => (
+                                    <label
+                                      key={d.id}
+                                      className="flex items-center gap-2 px-2 py-1.5 bg-white border border-amber-100 rounded-lg cursor-pointer hover:bg-amber-100/40"
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={conveyanceClaimDepts.has(d.name)}
+                                        onChange={() => toggleConveyanceClaimDept(d.name)}
+                                        className="w-3.5 h-3.5 rounded border-slate-300 text-amber-600 focus:ring-amber-600 cursor-pointer"
+                                      />
+                                      <span className="text-xs text-slate-800">{d.name}</span>
+                                      {d.supervisor_user_id === managingModulesFor?.id && (
+                                        <span className="text-[10px] text-amber-700 font-semibold">Supervisor</span>
+                                      )}
+                                    </label>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </React.Fragment>
                       ))}
                     </div>
                   </div>
                 );
               })}
+            </div>
             </div>
 
             <div className="p-5 border-t border-slate-200 flex justify-end gap-2">

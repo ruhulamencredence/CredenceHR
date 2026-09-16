@@ -17,12 +17,23 @@
 //
 // Design: the watcher's callback can still fire more often than we want to
 // hit the network, so we DON'T send a request from inside it. Instead we just
-// remember the latest fix in memory, and a separate timer (PING_INTERVAL_MS)
+// remember the latest fix in memory, and a separate timer (the ping interval)
 // POSTs whatever the latest fix is every few minutes. This decouples "how
 // often the OS reports a GPS fix" from "how often we hit the server" — but
-// the OS-reporting frequency itself is controlled separately by
-// DISTANCE_FILTER_M below, which is the actual battery lever; PING_INTERVAL_MS
+// the OS-reporting frequency itself is controlled separately by the
+// distanceFilter below, which is the actual battery lever; the ping interval
 // only controls network/data usage, not GPS power draw.
+//
+// Adaptive active/idle mode: there's no direct Capacitor API for a
+// Significant-Motion/accelerometer trigger (that needs a custom native
+// plugin), so this settles for a cheaper approximation — if no new fix has
+// arrived for IDLE_AFTER_MS, the device is almost certainly stationary
+// (desk/home, not just walking slowly), so we re-arm the watcher with a much
+// coarser distanceFilter and back off the ping interval. That means the OS
+// is asked for far fewer/lower-power location updates while idle, without
+// giving up on detecting movement — the moment a fix does arrive (i.e. the
+// device moved past the coarse threshold), we snap straight back to the
+// tight "active" settings.
 
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { apiUrl } from './api';
@@ -51,29 +62,37 @@ interface BackgroundGeolocationPlugin {
 
 const BackgroundGeolocation = registerPlugin<BackgroundGeolocationPlugin>('BackgroundGeolocation');
 
-// Ping every 3 minutes instead of 7. Network pings themselves are cheap
-// (a tiny POST, not a GPS read), so tightening this doesn't meaningfully
-// touch battery — but it keeps the admin-side "last seen" fresh even when
-// the employee is standing still, so the panel doesn't look stale between
-// fixes. The real battery lever is DISTANCE_FILTER_M below.
-const PING_INTERVAL_MS = 3 * 60 * 1000;
+// "Active" settings — used right after a fix arrives, i.e. while the device
+// is known (or assumed) to still be moving.
+// 25m is tight enough that normal walking-speed movement shows up within a
+// fix or two instead of minutes, but still lets the native side use a
+// coarser/lower-power location request than distanceFilter: 0 (continuous
+// max-frequency, max-power updates — that's what caused the original battery
+// drain).
+const ACTIVE_DISTANCE_FILTER_M = 25;
+// Network pings themselves are cheap (a tiny POST, not a GPS read), so this
+// is tight mostly to keep the admin-side "last seen" fresh while movement is
+// actually happening.
+const ACTIVE_PING_INTERVAL_MS = 3 * 60 * 1000;
 
-// How far (in meters) the device must move before the plugin delivers a new
-// fix. This is the actual battery lever, NOT PING_INTERVAL_MS above: every
-// fix costs GPS radio power to produce, whether or not we end up pinging it.
-// 70m was too coarse — someone walking around a building or a small campus
-// could go several minutes without a single new fix, so pings kept re-sending
-// a stale position and looked like the person wasn't "live". 25m still lets
-// the native side use a coarser/lower-power location request (vs. 0, which
-// is continuous max-frequency, max-power updates — that's what caused the
-// original battery drain), but is tight enough that normal walking-speed
-// movement shows up within a fix or two instead of minutes.
-const DISTANCE_FILTER_M = 25;
+// "Idle" settings — switched to once IDLE_AFTER_MS has passed with no new
+// fix (device hasn't moved ACTIVE_DISTANCE_FILTER_M in that whole window).
+// A much coarser distanceFilter means the OS requests location far less
+// often/precisely while the person is sitting at a desk or asleep, which is
+// where the real battery saving comes from — this is the one lever that
+// actually reduces GPS radio wake-ups, not just network traffic.
+const IDLE_DISTANCE_FILTER_M = 120;
+const IDLE_PING_INTERVAL_MS = 10 * 60 * 1000;
+const IDLE_AFTER_MS = 15 * 60 * 1000;
 
 let watcherId: string | null = null;
 let pingTimer: ReturnType<typeof setInterval> | null = null;
+let idleCheckTimer: ReturnType<typeof setInterval> | null = null;
 let latestFix: BGLocation | null = null;
 let currentToken: string | null = null;
+let mode: 'active' | 'idle' = 'active';
+let lastFixAt = 0;
+let switchingMode = false;
 
 // Best-effort battery percentage — the Web Battery API isn't in every
 // WebView, so this silently returns null rather than ever blocking a ping.
@@ -110,6 +129,60 @@ async function sendPing() {
   }
 }
 
+function restartPingTimer(intervalMs: number) {
+  if (pingTimer) clearInterval(pingTimer);
+  pingTimer = setInterval(sendPing, intervalMs);
+}
+
+// Tears down and re-arms the watcher with the given distanceFilter. Used
+// both for the initial start and for switching between active/idle mode —
+// the plugin has no way to change distanceFilter on a live watcher, so a
+// remove+add is the only option.
+async function armWatcher(distanceFilterM: number): Promise<void> {
+  if (watcherId) {
+    try {
+      await BackgroundGeolocation.removeWatcher({ id: watcherId });
+    } catch {
+      // Already gone — fine, we're about to replace it anyway.
+    }
+    watcherId = null;
+  }
+  watcherId = await BackgroundGeolocation.addWatcher(
+    {
+      backgroundTitle: 'Employee Tracking active',
+      backgroundMessage: 'Reporting your location for Employee Tracking. Tap to open the app.',
+      requestPermissions: true,
+      stale: false,
+      distanceFilter: distanceFilterM
+    },
+    (location) => {
+      if (!location) return;
+      latestFix = location;
+      lastFixAt = Date.now();
+      // A fix arrived while idle => the device moved past the coarse
+      // threshold, i.e. it's moving again. Snap back to active mode so we
+      // don't miss the rest of the movement.
+      if (mode === 'idle') void switchMode('active');
+    }
+  );
+}
+
+async function switchMode(next: 'active' | 'idle') {
+  if (mode === next || switchingMode || !currentToken) return;
+  switchingMode = true;
+  try {
+    mode = next;
+    await armWatcher(next === 'active' ? ACTIVE_DISTANCE_FILTER_M : IDLE_DISTANCE_FILTER_M);
+    restartPingTimer(next === 'active' ? ACTIVE_PING_INTERVAL_MS : IDLE_PING_INTERVAL_MS);
+  } catch {
+    // Re-arming failed (permission revoked mid-session, plugin hiccup) —
+    // leave whatever watcher/timer state we had; the next idle-check tick
+    // or app restart will retry.
+  } finally {
+    switchingMode = false;
+  }
+}
+
 // Call once right after login (and again if can_use_tracking is granted
 // mid-session — see UserPanel.tsx) with the account's JWT. No-ops on the web
 // build or if tracking is already running for this token.
@@ -119,20 +192,19 @@ export async function startBackgroundTracking(token: string): Promise<void> {
   if (watcherId) await stopBackgroundTracking();
 
   currentToken = token;
+  mode = 'active';
+  lastFixAt = Date.now();
   try {
-    watcherId = await BackgroundGeolocation.addWatcher(
-      {
-        backgroundTitle: 'Employee Tracking active',
-        backgroundMessage: 'Reporting your location for Employee Tracking. Tap to open the app.',
-        requestPermissions: true,
-        stale: false,
-        distanceFilter: DISTANCE_FILTER_M
-      },
-      (location) => {
-        if (location) latestFix = location;
+    await armWatcher(ACTIVE_DISTANCE_FILTER_M);
+    restartPingTimer(ACTIVE_PING_INTERVAL_MS);
+    // Checks every minute whether we've gone quiet long enough to drop into
+    // idle mode. Cheap (just a Date.now() comparison), so this itself costs
+    // no meaningful battery.
+    idleCheckTimer = setInterval(() => {
+      if (mode === 'active' && Date.now() - lastFixAt >= IDLE_AFTER_MS) {
+        void switchMode('idle');
       }
-    );
-    pingTimer = setInterval(sendPing, PING_INTERVAL_MS);
+    }, 60 * 1000);
   } catch {
     // Permission denied or plugin unavailable — Employee Tracking simply
     // won't report for this session; every other feature keeps working.
@@ -142,6 +214,10 @@ export async function startBackgroundTracking(token: string): Promise<void> {
 
 // Call on logout, or if an Admin revokes can_use_tracking mid-session.
 export async function stopBackgroundTracking(): Promise<void> {
+  if (idleCheckTimer) {
+    clearInterval(idleCheckTimer);
+    idleCheckTimer = null;
+  }
   if (pingTimer) {
     clearInterval(pingTimer);
     pingTimer = null;
@@ -156,6 +232,7 @@ export async function stopBackgroundTracking(): Promise<void> {
   }
   latestFix = null;
   currentToken = null;
+  mode = 'active';
 }
 
 export function isBackgroundTrackingActive(): boolean {

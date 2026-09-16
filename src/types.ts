@@ -1277,3 +1277,65 @@ export interface JobsNavRequest {
 export interface DashboardNavRequest {
   ts: number;
 }
+
+// Chat (Direct/Group/Community messaging) — see ChatRoutes.ts for the
+// server-side data model these mirror.
+export interface ChatDirectoryUser {
+  id: number;
+  name: string;
+  email: string | null;
+  username?: string | null;
+  role: UserRole;
+}
+
+export interface ChatRoom {
+  id: number;
+  type: 'direct' | 'group' | 'community';
+  title: string | null;
+  parent_room_id: number | null;
+  created_by: number | null;
+  has_avatar: boolean;
+  my_role: 'admin' | 'member';
+  last_message_id: number | null;
+  last_message_content: string | null;
+  last_message_type: 'text' | 'image' | 'file' | 'audio' | null;
+  last_message_sender_id: number | null;
+  last_message_at: string | null;
+  unread_count: number;
+  // Only set for type === 'direct' — the other participant, so the room list
+  // can show their name/avatar instead of a room title (direct chats have none).
+  other_participant: ChatDirectoryUser | null;
+}
+
+export interface ChatRoomMember {
+  user_id: number;
+  name: string;
+  email: string | null;
+  username?: string | null;
+  role: 'admin' | 'member';
+  joined_at: string;
+}
+
+// GET /api/chat/messages/:id/reads response row — used for the group "Seen
+// by ..." caption under your own most recent message (ChatPanel.tsx).
+export interface ChatReadReceipt {
+  id: number;
+  name: string;
+  read_at: string;
+}
+
+export interface ChatMessage {
+  id: number;
+  room_id: number;
+  sender_id: number;
+  sender_name: string;
+  message_type: 'text' | 'image' | 'file' | 'audio';
+  content: string | null;
+  attachment_filename: string | null;
+  attachment_mimetype: string | null;
+  has_attachment: boolean;
+  reply_to_id: number | null;
+  reply_to_content: string | null;
+  reply_to_sender_name: string | null;
+  created_at: string;
+}
