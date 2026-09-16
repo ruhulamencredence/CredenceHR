@@ -3386,50 +3386,92 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           ) : leaveApplicationsReportError ? (
             <p className="p-6 text-sm text-rose-600">{leaveApplicationsReportError}</p>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-slate-50 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                  <tr>
-                    <th className="px-4 py-3">Employee</th>
-                    <th className="px-4 py-3">Department</th>
-                    <th className="px-4 py-3">Leave Type</th>
-                    <th className="px-4 py-3">Start Date</th>
-                    <th className="px-4 py-3">End Date</th>
-                    <th className="px-4 py-3">Days</th>
-                    <th className="px-4 py-3">Status</th>
-                    <th className="px-4 py-3">Approver</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {leaveApplicationsReport
-                    .filter((a) => (a.user_name || '').toLowerCase().includes(leaveApplicationsReportSearch.trim().toLowerCase()))
-                    .map((a) => (
-                      <tr key={a.id} className="hover:bg-slate-50">
-                        <td className="px-4 py-3 font-medium text-slate-900">{a.user_name || '(account removed)'}</td>
-                        <td className="px-4 py-3 text-slate-600">{a.department || '—'}</td>
-                        <td className="px-4 py-3 text-slate-600 capitalize">{a.leave_type.replace('_', ' ')}</td>
-                        <td className="px-4 py-3 text-slate-600">{formatDate(a.start_date)}</td>
-                        <td className="px-4 py-3 text-slate-600">{formatDate(a.end_date)}</td>
-                        <td className="px-4 py-3 text-slate-600">{a.day_count}</td>
-                        <td className="px-4 py-3">
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold ${
-                            a.status === 'approved' ? 'bg-emerald-50 text-emerald-700' :
-                            a.status === 'rejected' ? 'bg-rose-50 text-rose-700' : 'bg-amber-50 text-amber-700'
-                          }`}>
-                            {a.status}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-slate-600">{a.approver_name || '—'}</td>
-                      </tr>
-                    ))}
-                  {leaveApplicationsReport.length === 0 && (
+            <>
+              {/* Desktop — unchanged full table. */}
+              <div className="hidden md:block overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
                     <tr>
-                      <td colSpan={8} className="px-4 py-10 text-center text-slate-400">No Leave Applications found.</td>
+                      <th className="px-4 py-3">Employee</th>
+                      <th className="px-4 py-3">Department</th>
+                      <th className="px-4 py-3">Leave Type</th>
+                      <th className="px-4 py-3">Start Date</th>
+                      <th className="px-4 py-3">End Date</th>
+                      <th className="px-4 py-3">Days</th>
+                      <th className="px-4 py-3">Status</th>
+                      <th className="px-4 py-3">Approver</th>
                     </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {leaveApplicationsReport
+                      .filter((a) => (a.user_name || '').toLowerCase().includes(leaveApplicationsReportSearch.trim().toLowerCase()))
+                      .map((a) => (
+                        <tr key={a.id} className="hover:bg-slate-50">
+                          <td className="px-4 py-3 font-medium text-slate-900">{a.user_name || '(account removed)'}</td>
+                          <td className="px-4 py-3 text-slate-600">{a.department || '—'}</td>
+                          <td className="px-4 py-3 text-slate-600 capitalize">{a.leave_type.replace('_', ' ')}</td>
+                          <td className="px-4 py-3 text-slate-600">{formatDate(a.start_date)}</td>
+                          <td className="px-4 py-3 text-slate-600">{formatDate(a.end_date)}</td>
+                          <td className="px-4 py-3 text-slate-600">{a.day_count}</td>
+                          <td className="px-4 py-3">
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold ${
+                              a.status === 'approved' ? 'bg-emerald-50 text-emerald-700' :
+                              a.status === 'rejected' ? 'bg-rose-50 text-rose-700' : 'bg-amber-50 text-amber-700'
+                            }`}>
+                              {a.status}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">{a.approver_name || '—'}</td>
+                        </tr>
+                      ))}
+                    {leaveApplicationsReport.length === 0 && (
+                      <tr>
+                        <td colSpan={8} className="px-4 py-10 text-center text-slate-400">No Leave Applications found.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Mobile — stacked cards instead of the same table squeezed
+                  into a horizontal scroll (same pattern as ClaimsPanel.tsx /
+                  ConveyanceClaimCard.tsx's own mobile treatment). */}
+              <div className="md:hidden divide-y divide-slate-100">
+                {leaveApplicationsReport
+                  .filter((a) => (a.user_name || '').toLowerCase().includes(leaveApplicationsReportSearch.trim().toLowerCase()))
+                  .map((a) => (
+                    <div key={a.id} className="p-4 flex flex-col gap-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="font-semibold text-slate-900 text-sm truncate">{a.user_name || '(account removed)'}</p>
+                          <p className="text-xs text-slate-500 mt-0.5">{a.department || '—'}</p>
+                        </div>
+                        <span className={`shrink-0 inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold ${
+                          a.status === 'approved' ? 'bg-emerald-50 text-emerald-700' :
+                          a.status === 'rejected' ? 'bg-rose-50 text-rose-700' : 'bg-amber-50 text-amber-700'
+                        }`}>
+                          {a.status}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-1.5 text-xs text-slate-600 capitalize">
+                        <CalendarClock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                        {a.leave_type.replace('_', ' ')} &middot; {a.day_count} day{Number(a.day_count) === 1 ? '' : 's'}
+                      </div>
+
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-slate-500">
+                          {formatDate(a.start_date)} &rarr; {formatDate(a.end_date)}
+                        </span>
+                        <span className="text-slate-400">{a.approver_name || '—'}</span>
+                      </div>
+                    </div>
+                  ))}
+                {leaveApplicationsReport.length === 0 && (
+                  <p className="px-4 py-10 text-center text-slate-400 text-sm">No Leave Applications found.</p>
+                )}
+              </div>
+            </>
           )}
         </div>
       )}
