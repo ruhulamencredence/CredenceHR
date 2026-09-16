@@ -139,7 +139,13 @@ async function notifyNewMessage(queryDB: ChatRouteDeps["queryDB"], message: any)
     if (!room) return;
     const isGroup = room.type !== "direct";
     const bodyText =
-      message.message_type === "image" ? "📷 Photo" : message.message_type === "file" ? `📎 ${message.attachment_filename || "File"}` : message.content || "";
+      message.message_type === "image"
+        ? "📷 Photo"
+        : message.message_type === "audio"
+        ? "🎤 Voice message"
+        : message.message_type === "file"
+        ? `📎 ${message.attachment_filename || "File"}`
+        : message.content || "";
     const title = isGroup ? room.title || "Group" : message.sender_name;
     const body = isGroup ? `${message.sender_name}: ${bodyText}` : bodyText;
     await sendPushToRoomMembers(queryDB, message.room_id, message.sender_id, title, body, {
@@ -198,7 +204,7 @@ export async function ensureChatSchema(dbPool: any): Promise<void> {
         id INT AUTO_INCREMENT PRIMARY KEY,
         room_id INT NOT NULL,
         sender_id INT NOT NULL,
-        message_type ENUM('text','image','file') NOT NULL DEFAULT 'text',
+        message_type ENUM('text','image','file','audio') NOT NULL DEFAULT 'text',
         content TEXT NULL,
         attachment_filename VARCHAR(255) NULL,
         attachment_mimetype VARCHAR(150) NULL,
@@ -211,6 +217,15 @@ export async function ensureChatSchema(dbPool: any): Promise<void> {
         FOREIGN KEY (reply_to_id) REFERENCES chat_messages(id) ON DELETE SET NULL
       )
     `);
+    // Adds 'audio' (voice messages) to an already-existing install's enum —
+    // the CREATE TABLE above only takes effect on a fresh database.
+    // Idempotent (MODIFY to the same definition is a no-op), same pattern
+    // as every other enum widening in server.ts's ensureSchemaMigrations.
+    try {
+      await dbPool.query(`ALTER TABLE chat_messages MODIFY COLUMN message_type ENUM('text','image','file','audio') NOT NULL DEFAULT 'text'`);
+    } catch (err: any) {
+      console.warn("⚠️ Could not add 'audio' to chat_messages.message_type: " + err.message);
+    }
     await dbPool.query(`
       CREATE TABLE IF NOT EXISTS chat_room_reads (
         room_id INT NOT NULL,
@@ -291,7 +306,7 @@ async function insertChatMessage(
   params: {
     roomId: number;
     senderId: number;
-    messageType: "text" | "image" | "file";
+    messageType: "text" | "image" | "file" | "audio";
     content: string | null;
     attachmentBuffer?: Buffer | null;
     attachmentMimetype?: string | null;
@@ -626,7 +641,7 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
         return res.status(403).json({ error: "Not a member of this room." });
       }
       const { content, messageType, attachment_base64, attachment_mimetype, attachment_filename, replyToId } = req.body || {};
-      const type = ["text", "image", "file"].includes(messageType) ? messageType : "text";
+      const type = ["text", "image", "file", "audio"].includes(messageType) ? messageType : "text";
       let attachmentBuffer: Buffer | null = null;
       if (attachment_base64) {
         attachmentBuffer = Buffer.from(attachment_base64, "base64");

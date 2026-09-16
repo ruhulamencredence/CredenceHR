@@ -1298,7 +1298,7 @@ export interface ChatRoom {
   my_role: 'admin' | 'member';
   last_message_id: number | null;
   last_message_content: string | null;
-  last_message_type: 'text' | 'image' | 'file' | null;
+  last_message_type: 'text' | 'image' | 'file' | 'audio' | null;
   last_message_sender_id: number | null;
   last_message_at: string | null;
   unread_count: number;
@@ -1329,7 +1329,7 @@ export interface ChatMessage {
   room_id: number;
   sender_id: number;
   sender_name: string;
-  message_type: 'text' | 'image' | 'file';
+  message_type: 'text' | 'image' | 'file' | 'audio';
   content: string | null;
   attachment_filename: string | null;
   attachment_mimetype: string | null;

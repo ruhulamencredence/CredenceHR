@@ -18,7 +18,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { Capacitor } from '@capacitor/core';
 import {
   ArrowLeft, Search, Plus, X, Send, Paperclip, Check, CheckCheck,
-  Users, UserPlus, Shield, LogOut, Trash2, MessageSquare, Link as LinkIcon
+  Users, UserPlus, Shield, LogOut, Trash2, MessageSquare, Link as LinkIcon, Mic
 } from 'lucide-react';
 import { User, ChatRoom, ChatMessage, ChatRoomMember, ChatDirectoryUser, ChatReadReceipt } from '../types';
 import { apiUrl } from '../lib/api';
@@ -44,6 +44,12 @@ function timeOnly(iso: string): string {
   const ampm = hours >= 12 ? 'PM' : 'AM';
   hours = hours % 12 || 12;
   return `${hours}:${minutes} ${ampm}`;
+}
+
+function formatRecordingTime(totalSeconds: number): string {
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
 }
 
 function roomDisplayName(room: ChatRoom, meId: number): string {
@@ -96,7 +102,10 @@ function renderMessageContent(content: string, members: ChatRoomMember[]): React
 // Fetches one message's attachment (auth'd — <img src> can't send a Bearer
 // header, so this can't just be a plain <img src={apiUrl(...)}>) as an
 // object URL. Same fetch/blob/revoke pattern as useProfilePhoto.ts.
-const AttachmentImage: React.FC<{ token: string; messageId: number }> = ({ token, messageId }) => {
+// Shared by AttachmentImage and AudioAttachment below — auth'd fetch (an
+// <img>/<audio> src can't send a Bearer header on its own) turned into an
+// object URL. Same fetch/blob/revoke pattern as useProfilePhoto.ts.
+function useAttachmentUrl(token: string, messageId: number): string | null {
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
@@ -119,7 +128,11 @@ const AttachmentImage: React.FC<{ token: string; messageId: number }> = ({ token
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [token, messageId]);
+  return url;
+}
 
+const AttachmentImage: React.FC<{ token: string; messageId: number }> = ({ token, messageId }) => {
+  const url = useAttachmentUrl(token, messageId);
   if (!url) return <div className="w-48 h-32 bg-slate-200 rounded-lg animate-pulse" />;
   return (
     <img
@@ -129,6 +142,22 @@ const AttachmentImage: React.FC<{ token: string; messageId: number }> = ({ token
       onClick={() => window.open(url, '_blank')}
     />
   );
+};
+
+// Voice message bubble — the browser's own <audio controls> UI (play/pause,
+// scrubber, duration) rather than a hand-built player, same reasoning as
+// reusing native <input type="file"> elsewhere in this app instead of a
+// custom picker.
+const AudioAttachment: React.FC<{ token: string; messageId: number }> = ({ token, messageId }) => {
+  const url = useAttachmentUrl(token, messageId);
+  if (!url) {
+    return (
+      <div className="flex items-center gap-2 w-56 h-9 bg-slate-200 rounded-full animate-pulse px-3">
+        <Mic className="w-3.5 h-3.5 text-slate-400" />
+      </div>
+    );
+  }
+  return <audio controls src={url} className="w-56 max-w-full h-9" />;
 };
 
 export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initialRoomId, onInitialRoomHandled }) => {
@@ -152,6 +181,17 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
   // the most recent unclosed "@" before the cursor, or null when not
   // currently mid-mention. See handleTyping/insertMention below.
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  // Voice message recording — MediaRecorder over getUserMedia({audio:true}).
+  // Requires RECORD_AUDIO in AndroidManifest.xml (Capacitor's default
+  // WebChromeClient then handles the runtime permission prompt itself, no
+  // custom native code needed). Falls back to a plain alert() if denied/
+  // unavailable — text/image/file messages are unaffected either way.
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = useRef<Blob[]>([]);
+  const recordingStreamRef = useRef<MediaStream | null>(null);
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
   const [showInfoPanel, setShowInfoPanel] = useState(false);
   const [members, setMembers] = useState<ChatRoomMember[]>([]);
@@ -549,29 +589,32 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
     }
   }, [messageInput, activeRoomId, sending, replyTo, token]);
 
-  const sendAttachment = useCallback(
-    async (file: File) => {
+  // Shared by sendAttachment (image/file picker) and sendAudioMessage
+  // (voice recording) below — both end up as a base64 body POSTed to the
+  // same REST endpoint (see the module comment's text-over-socket /
+  // attachment-over-REST split).
+  const uploadAttachmentMessage = useCallback(
+    async (params: { blob: Blob; messageType: 'image' | 'file' | 'audio'; filename: string; mimetype: string }) => {
       if (!activeRoomId) return;
-      if (file.size > 5 * 1024 * 1024) {
+      if (params.blob.size > 5 * 1024 * 1024) {
         alert('Attachment must be less than 5MB.');
         return;
       }
-      const isImage = file.type.startsWith('image/');
       const base64 = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => resolve(String(reader.result).split(',')[1] || '');
         reader.onerror = reject;
-        reader.readAsDataURL(file);
+        reader.readAsDataURL(params.blob);
       });
       try {
         const res = await fetch(apiUrl(`/api/chat/rooms/${activeRoomId}/messages`), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
           body: JSON.stringify({
-            messageType: isImage ? 'image' : 'file',
+            messageType: params.messageType,
             attachment_base64: base64,
-            attachment_mimetype: file.type,
-            attachment_filename: file.name
+            attachment_mimetype: params.mimetype,
+            attachment_filename: params.filename
           })
         });
         if (res.ok) {
@@ -579,11 +622,87 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
           setMessages((prev) => [...prev, message]);
         }
       } catch {
-        alert('Could not send attachment — check your connection and try again.');
+        alert('Could not send — check your connection and try again.');
       }
     },
     [activeRoomId, token]
   );
+
+  const sendAttachment = useCallback(
+    (file: File) =>
+      uploadAttachmentMessage({
+        blob: file,
+        messageType: file.type.startsWith('image/') ? 'image' : 'file',
+        filename: file.name,
+        mimetype: file.type
+      }),
+    [uploadAttachmentMessage]
+  );
+
+  const sendAudioMessage = useCallback(
+    (blob: Blob) =>
+      uploadAttachmentMessage({
+        blob,
+        messageType: 'audio',
+        filename: 'voice-message.webm',
+        mimetype: blob.type || 'audio/webm'
+      }),
+    [uploadAttachmentMessage]
+  );
+
+  const startRecording = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      recordingStreamRef.current = stream;
+      recordedChunksRef.current = [];
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
+      const recorder = new MediaRecorder(stream, { mimeType });
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) recordedChunksRef.current.push(e.data);
+      };
+      recorder.start();
+      mediaRecorderRef.current = recorder;
+      setIsRecording(true);
+      setRecordingSeconds(0);
+      recordingTimerRef.current = setInterval(() => setRecordingSeconds((s) => s + 1), 1000);
+    } catch {
+      alert('Could not access the microphone — check that this app has microphone permission.');
+    }
+  }, []);
+
+  // send=false discards the recording (mic X button); send=true uploads it.
+  const stopRecording = useCallback(
+    (send: boolean) => {
+      const recorder = mediaRecorderRef.current;
+      if (!recorder) return;
+      recorder.onstop = () => {
+        recordingStreamRef.current?.getTracks().forEach((t) => t.stop());
+        recordingStreamRef.current = null;
+        if (recordingTimerRef.current) {
+          clearInterval(recordingTimerRef.current);
+          recordingTimerRef.current = null;
+        }
+        setIsRecording(false);
+        if (send && recordedChunksRef.current.length > 0) {
+          const blob = new Blob(recordedChunksRef.current, { type: recorder.mimeType || 'audio/webm' });
+          void sendAudioMessage(blob);
+        }
+        recordedChunksRef.current = [];
+      };
+      recorder.stop();
+      mediaRecorderRef.current = null;
+    },
+    [sendAudioMessage]
+  );
+
+  // Never leave the microphone open if this page unmounts mid-recording
+  // (e.g. the account taps Back while recording).
+  useEffect(() => {
+    return () => {
+      recordingStreamRef.current?.getTracks().forEach((t) => t.stop());
+      if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+    };
+  }, []);
 
   const createRoom = useCallback(
     async (type: 'direct' | 'group' | 'community', title: string, memberIds: number[]) => {
@@ -668,6 +787,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
             const previewText =
               room.last_message_type === 'image'
                 ? '📷 Photo'
+                : room.last_message_type === 'audio'
+                ? '🎤 Voice message'
                 : room.last_message_type === 'file'
                 ? '📎 File'
                 : room.last_message_content || 'No messages yet';
@@ -776,6 +897,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                           </div>
                         )}
                         {msg.message_type === 'image' && msg.has_attachment && <AttachmentImage token={token} messageId={msg.id} />}
+                        {msg.message_type === 'audio' && msg.has_attachment && <AudioAttachment token={token} messageId={msg.id} />}
                         {msg.message_type === 'file' && msg.has_attachment && (
                           <a
                             href="#"
@@ -851,37 +973,75 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                   ))}
                 </div>
               )}
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*,.pdf,.doc,.docx,.xlsx"
-                className="hidden"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) sendAttachment(file);
-                  e.target.value = '';
-                }}
-              />
-              <button type="button" onClick={() => fileInputRef.current?.click()} className="p-2 text-slate-500 hover:bg-slate-100 rounded-full shrink-0">
-                <Paperclip className="w-5 h-5" />
-              </button>
-              <input
-                ref={messageInputRef}
-                type="text"
-                value={messageInput}
-                onChange={(e) => handleTyping(e.target.value, e.target.selectionStart ?? e.target.value.length)}
-                onKeyDown={(e) => e.key === 'Enter' && sendTextMessage()}
-                placeholder={activeRoom.type !== 'direct' ? 'Type a message, @ to mention' : 'Type a message'}
-                className="flex-1 py-2.5 px-4 bg-slate-100 rounded-full border-none focus:outline-none focus:ring-2 focus:ring-blue-600 text-sm"
-              />
-              <button
-                type="button"
-                onClick={sendTextMessage}
-                disabled={!messageInput.trim() || sending}
-                className="p-2.5 bg-emerald-600 text-white rounded-full hover:bg-emerald-700 disabled:opacity-40 shrink-0"
-              >
-                <Send className="w-4 h-4" />
-              </button>
+              {isRecording ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => stopRecording(false)}
+                    className="p-2 text-rose-500 hover:bg-rose-50 rounded-full shrink-0"
+                    title="Discard recording"
+                  >
+                    <Trash2 className="w-5 h-5" />
+                  </button>
+                  <div className="flex-1 flex items-center gap-2 py-2.5 px-4 bg-slate-100 rounded-full text-sm text-slate-600">
+                    <span className="w-2.5 h-2.5 bg-rose-500 rounded-full animate-pulse shrink-0" />
+                    Recording... {formatRecordingTime(recordingSeconds)}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => stopRecording(true)}
+                    className="p-2.5 bg-emerald-600 text-white rounded-full hover:bg-emerald-700 shrink-0"
+                    title="Send voice message"
+                  >
+                    <Send className="w-4 h-4" />
+                  </button>
+                </>
+              ) : (
+                <>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*,.pdf,.doc,.docx,.xlsx"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) sendAttachment(file);
+                      e.target.value = '';
+                    }}
+                  />
+                  <button type="button" onClick={() => fileInputRef.current?.click()} className="p-2 text-slate-500 hover:bg-slate-100 rounded-full shrink-0">
+                    <Paperclip className="w-5 h-5" />
+                  </button>
+                  <input
+                    ref={messageInputRef}
+                    type="text"
+                    value={messageInput}
+                    onChange={(e) => handleTyping(e.target.value, e.target.selectionStart ?? e.target.value.length)}
+                    onKeyDown={(e) => e.key === 'Enter' && sendTextMessage()}
+                    placeholder={activeRoom.type !== 'direct' ? 'Type a message, @ to mention' : 'Type a message'}
+                    className="flex-1 py-2.5 px-4 bg-slate-100 rounded-full border-none focus:outline-none focus:ring-2 focus:ring-blue-600 text-sm"
+                  />
+                  {messageInput.trim() ? (
+                    <button
+                      type="button"
+                      onClick={sendTextMessage}
+                      disabled={sending}
+                      className="p-2.5 bg-emerald-600 text-white rounded-full hover:bg-emerald-700 disabled:opacity-40 shrink-0"
+                    >
+                      <Send className="w-4 h-4" />
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={startRecording}
+                      className="p-2.5 bg-emerald-600 text-white rounded-full hover:bg-emerald-700 shrink-0"
+                      title="Record a voice message"
+                    >
+                      <Mic className="w-4 h-4" />
+                    </button>
+                  )}
+                </>
+              )}
             </div>
           </>
         )}
