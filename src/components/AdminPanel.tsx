@@ -2543,9 +2543,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     <div className="w-full px-4 sm:px-6 lg:px-8 pt-3 pb-8 space-y-4 min-h-[calc(100vh-4rem)] text-slate-900" style={{ background: 'var(--g-bg-gradient)' }}>
       {/* Violet gradient welcome banner — same brand gradient as the logo/hero
           text elsewhere (see --g-gradient in index.css), sitting right below the
-          title the way the reference dashboard's "Welcome Back" card does. */}
+          title the way the reference dashboard's "Welcome Back" card does.
+          Hidden on mobile for Monthly Leave Application specifically — that
+          report's own header (title + search/filter row) already needs the
+          space on a small screen, and this repeated greeting doesn't add
+          anything there; desktop keeps it, and every other tab keeps it on
+          both mobile and desktop, unchanged. */}
       <div
-        className="rounded-2xl px-6 py-5 sm:px-8 sm:py-6 text-white shadow-sm"
+        className={`rounded-2xl px-6 py-5 sm:px-8 sm:py-6 text-white shadow-sm ${
+          activeTab === 'leave_applications' ? 'hidden md:block' : ''
+        }`}
         style={{ background: 'var(--g-gradient)' }}
       >
         <h3 className="text-xl sm:text-2xl font-bold">Welcome back, {user.name.split(' ')[0]}!</h3>
