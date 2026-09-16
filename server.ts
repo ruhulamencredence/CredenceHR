@@ -111,7 +111,18 @@ async function initDB() {
       database: process.env.DB_NAME || "mpr_tracker_db",
       port: Number(process.env.DB_PORT) || 3306,
       waitForConnections: true,
-      connectionLimit: 10,
+      // The Dashboard alone fires off ~10 concurrent API calls on a single
+      // app open (master data, entries, MPR usage, Attendance, Leave
+      // Summary, Pending Approvals, Holiday Calendar, Notices, ...), each
+      // needing its own connection for the length of its query. At the old
+      // limit of 10, one person opening the app could already saturate the
+      // whole pool; with queueLimit unbounded, every request after that
+      // just waits its turn instead of failing outright — which is exactly
+      // the "takes forever to reach the Dashboard" symptom. Raised well
+      // above that single-user burst so concurrent opens don't queue behind
+      // each other; MySQL's own default max_connections (151) has plenty of
+      // headroom above this for the one app process using it.
+      connectionLimit: 30,
       queueLimit: 0,
       // Without this, mysql2 hands back DATE/DATETIME columns as JS Date objects built
       // from LOCAL midnight. Those then get flattened to a string either by our own
