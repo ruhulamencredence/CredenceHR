@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Project, MprNumber, Entry, Budget, BudgetItem, User, MprUsage, ClaimsNavRequest, JobsNavRequest, DashboardNavRequest } from '../types';
 import { Calendar, Building2, FileText, Package, Clock, Plus, AlertTriangle, CheckCircle2, ChevronRight, X, Trash2, Edit2, Lock, Wallet, ArrowLeft, FolderOpen, ListChecks, Search, Save, Briefcase, FileDown, Scissors, Route, Info } from 'lucide-react';
 import { apiUrl } from '../lib/api';
-import { formatDate, todayDateOnlyString, dateRangeOptions, formatDateLabel } from '../lib/formatDate';
+import { formatDate, todayDateOnlyString, dateRangeOptions, formatDateLabel, latestDateStr } from '../lib/formatDate';
 import { useStableCallback } from '../lib/useStableCallback';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -2215,8 +2215,13 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
     setEditItemOptions([]);
     setEditBudgetItems([]);
     const owningBudget = entry.budget_id ? budgets.find((b) => b.id === entry.budget_id) : null;
+    // Floor is whichever is LATER of today and the Budget's delivery_date_from —
+    // a date before today can never actually be saved (the server always rejects
+    // it), so it's excluded here rather than shown as a pickable option that would
+    // just bounce back with a validation error. Same rule JobEditPanel.tsx's own
+    // delivery-date edit already applies.
     setEditDeliveryRange({
-      from: owningBudget?.delivery_date_from || null,
+      from: latestDateStr(todayDateOnlyString(), owningBudget?.delivery_date_from, entry.entry_date) || null,
       to: owningBudget?.delivery_date_to || null
     });
     // Delivery-Date-only edit (see isDateOnlyEditableEntry) never touches Item

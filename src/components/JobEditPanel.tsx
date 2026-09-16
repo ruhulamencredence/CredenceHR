@@ -6,7 +6,7 @@
 import React, { useEffect, useState } from 'react';
 import { Plus, Trash2, Save, X, Briefcase, Lock, ChevronDown, ChevronRight, Pencil, Calendar, Hash, Scissors } from 'lucide-react';
 import { apiUrl } from '../lib/api';
-import { formatDate, todayDateOnlyString, dateRangeOptions, formatDateLabel } from '../lib/formatDate';
+import { formatDate, todayDateOnlyString, dateRangeOptions, formatDateLabel, latestDateStr } from '../lib/formatDate';
 import { Entry, BudgetItem, MprNumber, PendingJobEdit } from '../types';
 import { Spinner } from './Spinner';
 
@@ -53,16 +53,6 @@ const getAddItemDeliveryDate = (opt: AddItemOption, sharedDate: string): string 
 // different MPR Nos at once, each contributing its own Item rows.
 interface NewJobItemRow extends AddItemOption {
   mprNo: string;
-}
-
-// Latest ("max") of any given date strings, ignoring null/undefined/empty ones —
-// used to combine several floors (today, the Budget's delivery_date_from, an
-// entry's own entry_date) into a single min= for a date picker. Plain
-// "YYYY-MM-DD" strings compare correctly with normal string comparison.
-function latestDateStr(...dates: (string | null | undefined)[]): string | undefined {
-  const valid = dates.map((d) => (d ? String(d).slice(0, 10) : '')).filter(Boolean);
-  if (valid.length === 0) return undefined;
-  return valid.reduce((a, b) => (b > a ? b : a));
 }
 
 interface JobEditPanelProps {

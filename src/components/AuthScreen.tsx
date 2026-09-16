@@ -1,5 +1,5 @@
 import React, { useState, lazy, Suspense } from 'react';
-import { Lock, ArrowUp, MapPin } from 'lucide-react';
+import { Lock, ArrowUp, MapPin, Download } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import credenceLogo from '../assets/credence-logo.png';
 import { apiUrl } from '../lib/api';
@@ -237,6 +237,26 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
           <p className="mt-2 text-center text-xs" style={{ color: 'var(--g-text-muted)' }}>
             Don't have an account? Contact your Admin to get one created.
           </p>
+
+          {/* APK download — WEB build only. Someone already inside the native
+              Android app has no use for this, so it's hidden there the same
+              way the location notice above is shown only for isNativeApp. */}
+          {!isNativeApp && (
+            <a
+              href="/downloads/CredenceHR.apk"
+              download
+              className="mt-5 flex items-center justify-center gap-2.5 py-3 px-5 rounded-2xl text-white transition-opacity hover:opacity-90"
+              style={{ background: '#111318' }}
+            >
+              <Download className="w-4 h-4 shrink-0" />
+              <span className="flex flex-col items-start leading-tight">
+                <span className="text-[10px] tracking-wide" style={{ color: 'rgba(255,255,255,0.65)' }}>
+                  GET IT ON
+                </span>
+                <span className="text-[15px] font-medium">Android (APK)</span>
+              </span>
+            </a>
+          )}
         </div>
         </div>
       </div>
