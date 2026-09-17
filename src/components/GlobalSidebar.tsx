@@ -4,7 +4,7 @@ import {
   CalendarClock, ListChecks, CheckSquare, ChevronDown, Building2, Users, Users2,
   BarChart3, Upload, History, Recycle, Navigation, Bell, ShieldCheck,
   Contact, Calendar, Clock, Fingerprint, Banknote, Package, LayoutDashboard, Server, MessageSquare,
-  ChevronsLeft, ChevronsRight, ShieldAlert,
+  ChevronsLeft, ChevronsRight, ShieldAlert, Search,
 } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { User, AdminModuleKey } from '../types';
@@ -359,6 +359,34 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     });
   }
 
+  // Sidebar-wide menu search — flattens every item this account can actually
+  // see (Dashboard + Main + Self Service + every Admin Panel group/flat item)
+  // into one searchable list, so a menu buried a few groups deep is still one
+  // search away instead of needing to expand each group to find it. Hidden
+  // while the desktop column is minimized (collapsed) — no room for typed
+  // input there, same as every other label in that mode.
+  const [sidebarSearch, setSidebarSearch] = useState('');
+  const dashboardSearchItem: NavItem = { key: 'dashboard', label: 'Dashboard', icon: Home, onClick: onGoToDashboard };
+  const allSearchableItems: NavItem[] = [
+    dashboardSearchItem,
+    ...mainItems,
+    ...selfServiceItems,
+    ...(adminDashboardItem ? [adminDashboardItem] : []),
+    ...reportsGroup,
+    ...claimsGroup,
+    ...attendanceGroup,
+    ...orgGroup,
+    ...workforceGroup,
+    ...hrGroup,
+    ...adminFlatItems,
+  ];
+  const searchQuery = sidebarSearch.trim().toLowerCase();
+  const searchResults = searchQuery ? allSearchableItems.filter((i) => i.label.toLowerCase().includes(searchQuery)) : [];
+  const selectSearchResult = (fn: () => void) => {
+    setSidebarSearch('');
+    selectAndClose(fn);
+  };
+
   const renderItem = (item: NavItem) => (
     <button
       key={item.key}
@@ -526,6 +554,55 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
         )}
 
         <nav className={`flex-1 overflow-y-auto py-4 px-2.5 space-y-0.5 ${isPersistent ? 'gsidebar-no-scrollbar' : ''}`}>
+          {/* Menu search — searches every visible item (Dashboard, Main, Self
+              Service, and every Admin Panel group), regardless of whether its
+              group is currently expanded. Selecting a result navigates
+              straight there, same as clicking that item directly. */}
+          {!collapsed && (
+            <div className="relative mb-2">
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 text-white/40 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={sidebarSearch}
+                  onChange={(e) => setSidebarSearch(e.target.value)}
+                  placeholder="Search menu…"
+                  className="w-full pl-8 pr-7 py-2 rounded-xl bg-white/10 text-white text-[13px] placeholder-white/40 focus:outline-none focus:bg-white/15 transition-colors"
+                />
+                {sidebarSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setSidebarSearch('')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-white/50 hover:text-white"
+                    aria-label="Clear search"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+
+              {searchQuery && (
+                <div className="absolute left-0 right-0 mt-1 max-h-72 overflow-y-auto rounded-xl bg-[#3a0d70] border border-white/15 shadow-xl z-20 py-1">
+                  {searchResults.length > 0 ? (
+                    searchResults.map((item) => (
+                      <button
+                        key={item.key}
+                        type="button"
+                        onClick={() => selectSearchResult(item.onClick)}
+                        className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-white/85 hover:bg-white/10 transition-colors"
+                      >
+                        <item.icon className="w-4 h-4 shrink-0" />
+                        <span className="text-[13px] truncate">{item.label}</span>
+                      </button>
+                    ))
+                  ) : (
+                    <p className="px-3 py-2.5 text-xs text-white/50">No matching menu.</p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Dashboard — always available, lands back on the User Panel's own
               dashboard regardless of which panel is currently showing. */}
           <button
