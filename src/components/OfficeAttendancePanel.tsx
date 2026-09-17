@@ -459,7 +459,19 @@ export const OfficeAttendancePanel: React.FC<OfficeAttendancePanelProps> = ({ to
         </div>
       )}
 
-      <div className="border border-slate-200 rounded-xl overflow-x-auto">
+      {/* No overflow-x-auto on this wrapper (deliberately) — a div with
+          overflow-x set to anything but visible forces its overflow-y to
+          become `auto` too (CSS: an ancestor can't have one axis "visible"
+          and the other not), which then makes THIS div — not the page/
+          window — the positioning container for any sticky descendant.
+          That's exactly why the thead below wasn't actually tracking the
+          page's scroll: it was sticking to a fixed offset from this card's
+          own top instead of the viewport, so as the page scrolled it just
+          moved with everything else and vanished under the Navbar. Dropping
+          overflow-x-auto here restores the window as the sticky reference,
+          at the cost of a horizontal scrollbar on very narrow viewports
+          (this table's 6 columns fit comfortably on web/tablet widths). */}
+      <div className="border border-slate-200 rounded-xl">
         <table className="w-full text-sm">
           {/* Sticky under the app header (Navbar.tsx is sticky top-0, h-16 =
               4rem tall). A plain `top-16` (a fixed 64px) matches that on
