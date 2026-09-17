@@ -186,7 +186,12 @@ export const Navbar: React.FC<NavbarProps> = ({
         {/* Logo, left-aligned. The desktop dropdown menus that used to sit
             next to it (Claims / Jobs / Budget / Manage / Workforce / Self
             Service) have been removed — see the note below. */}
-        <div className="flex items-center gap-8 lg:gap-10 min-w-0">
+        {/* gap shrinks to gap-2 on mobile while the search icon is showing —
+            the collapsed logo between hamburger and search (see below) still
+            takes up its own gap on both sides even at 0 width, so the normal
+            gap-8 doubled up into a much wider gap than intended. Desktop
+            (md+) always keeps the full logo, so its spacing stays gap-8/10. */}
+        <div className={`flex items-center min-w-0 md:gap-8 lg:gap-10 ${showMobileSearchIcon ? 'gap-2' : 'gap-8'}`}>
           {/* Mobile-only hamburger — opens the single GlobalSidebar drawer
               (see GlobalSidebar.tsx), regardless of which panel is currently
               showing. Desktop (md and up) still hides this button — the
