@@ -687,6 +687,29 @@ export interface EntryEditHistory {
   entry_owner_name?: string | null;
 }
 
+// GET /api/entries/permanent-delete-log — Superadmin-only (see AdminPanel.tsx's
+// "servers"-style gating). One row per entry ever erased via DELETE
+// /api/entries/:id/permanent; every field here is a snapshot taken right before
+// that entry row was hard-deleted, not a live join, since the entry itself is
+// gone by the time this log is read.
+export interface EntryPermanentDeleteLog {
+  id: number;
+  entry_id: number;
+  entry_date: string | null;
+  job_name: string | null;
+  job_no: string | null;
+  project_name: string | null;
+  mpr_no: string | null;
+  item_name: string | null;
+  requisitioned_qty: number | null;
+  entry_created_by_name: string | null;
+  entry_deleted_by_name: string | null;
+  entry_deleted_at: string | null;
+  permanently_deleted_by: number | null;
+  permanently_deleted_by_name: string;
+  permanently_deleted_at: string;
+}
+
 // One row of the Job Edit Approval queue — a "Job Edit" (Add MPR to a Final-
 // Submitted Job / Delete an MPR from one) made by a User who only has the
 // can_job_edit permission, sitting pending Admin review instead of being applied
@@ -1253,7 +1276,9 @@ export interface AdminNavRequest {
   // 'servers' is likewise NOT an AdminModuleKey/module_permissions entry —
   // it's the Superadmin-only "Servers" catalog tab (see ServerProfileRoutes.ts),
   // never grantable to an Admin/User the way every other Admin Panel module is.
-  target: 'dashboard' | 'reports' | 'mprs' | 'imports' | 'editlog' | 'recycle' | 'projects' | 'branches' | 'users' | 'notices' | 'approvals' | 'attendance' | 'attendance_reports' | 'employees' | 'departments' | 'tracking' | 'holidays' | 'disbursement' | 'my_conveyance' | 'asset_management' | 'servers';
+  // 'permanent_delete_log' is the same — Superadmin-only, see
+  // GET /api/entries/permanent-delete-log in EntriesRoutes.ts.
+  target: 'dashboard' | 'reports' | 'mprs' | 'imports' | 'editlog' | 'recycle' | 'projects' | 'branches' | 'users' | 'notices' | 'approvals' | 'attendance' | 'attendance_reports' | 'employees' | 'departments' | 'tracking' | 'holidays' | 'disbursement' | 'my_conveyance' | 'asset_management' | 'servers' | 'permanent_delete_log';
   ts: number;
 }
 

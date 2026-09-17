@@ -502,6 +502,35 @@ CREATE TABLE IF NOT EXISTS entry_edit_history (
   FOREIGN KEY (edited_by) REFERENCES users(id) ON DELETE SET NULL
 );
 
+-- Permanent Delete Log (Superadmin-only — see GET /api/entries/permanent-delete-log,
+-- gated by requireSuperAdmin directly rather than a grantable module, since this
+-- exists specifically so a Superadmin can see an Admin's permanent erases too, not
+-- just ones an Admin was given visibility into). One row per entry ever erased from
+-- the Job Recycle bin via DELETE /api/entries/:id/permanent — that endpoint hard-
+-- deletes the entries row itself (no FK to entries here on purpose: the row this
+-- refers to is gone by the time this log is read), so every identifying field is a
+-- plain snapshot taken right before the DELETE, not a live join. permanently_deleted_by
+-- has no ON DELETE CASCADE either, and *_name columns are captured as plain text so
+-- the log still reads correctly even if that user's own account is later removed.
+CREATE TABLE IF NOT EXISTS entry_permanent_delete_log (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  entry_id INT NOT NULL,
+  entry_date DATE,
+  job_name VARCHAR(30),
+  job_no VARCHAR(100),
+  project_name VARCHAR(150),
+  mpr_no VARCHAR(100),
+  item_name VARCHAR(255),
+  requisitioned_qty DECIMAL(14,2),
+  entry_created_by_name VARCHAR(100),
+  entry_deleted_by_name VARCHAR(100),
+  entry_deleted_at TIMESTAMP NULL,
+  permanently_deleted_by INT NULL,
+  permanently_deleted_by_name VARCHAR(100) NOT NULL,
+  permanently_deleted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (permanently_deleted_by) REFERENCES users(id) ON DELETE SET NULL
+);
+
 -- Job Edit Approval queue (Job Edit -> Add MPR to a Final-Submitted Job / Delete an
 -- MPR from one, when the acting User only has the can_job_edit permission, not
 -- Admin/Superadmin). Instead of applying immediately, the action is queued here and

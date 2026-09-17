@@ -20,6 +20,7 @@ import type { Express } from "express";
 interface EntriesRouteDeps {
   authenticateToken: any;
   requireAdmin: any;
+  requireSuperAdmin: any;
   requireModule: (moduleKey: string) => any;
   requireBudgetModuleAccess: any;
   queryDB: (sql: string, params?: any[]) => Promise<any>;
@@ -32,6 +33,7 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
   const {
     authenticateToken,
     requireAdmin,
+    requireSuperAdmin,
     requireModule,
     requireBudgetModuleAccess,
     queryDB,
@@ -1592,22 +1594,78 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
     }
   });
 
-  // Permanently erase an entry from the Job Recycle bin (Admin-only). Only allowed on
+  // Permanently erase an entry from the Job Recycle bin (Admin-only — a Superadmin
+  // can do this too, since it's granted every module by default). Only allowed on
   // an entry that's already soft-deleted — this can't be used to bypass the soft
-  // delete on an active entry.
-  app.delete("/api/entries/:id/permanent", authenticateToken, requireAdmin, requireModule("recycle"), async (req, res) => {
+  // delete on an active entry. Before the DELETE actually erases the row, a full
+  // snapshot is written to entry_permanent_delete_log — visible ONLY to a
+  // Superadmin (see GET /api/entries/permanent-delete-log below), specifically so
+  // an Admin's permanent erases are still visible to a Superadmin even though the
+  // Admin who did it doesn't get to see (or clear) that log themselves. Whoever
+  // does this — Admin or Superadmin, including a Superadmin erasing their own
+  // entry — is recorded the same way; there's no exemption for either role.
+  app.delete("/api/entries/:id/permanent", authenticateToken, requireAdmin, requireModule("recycle"), async (req: any, res) => {
     try {
       const { id } = req.params;
-      const rows = await queryDB("SELECT id, deleted_at FROM entries WHERE id = ?", [id]);
+      const rows = await queryDB(
+        `SELECT e.id, e.deleted_at, e.entry_date, e.job_name, e.item_name, e.requisitioned_qty,
+                j.job_no, p.project_name, m.mpr_no,
+                creator.name AS entry_created_by_name, deleter.name AS entry_deleted_by_name
+           FROM entries e
+           LEFT JOIN jobs j ON e.job_id = j.id
+           LEFT JOIN projects p ON e.project_id = p.id
+           LEFT JOIN mpr_numbers m ON e.mpr_id = m.id
+           LEFT JOIN users creator ON e.created_by = creator.id
+           LEFT JOIN users deleter ON e.deleted_by = deleter.id
+          WHERE e.id = ?`,
+        [id]
+      );
       if (rows.length === 0) return res.status(404).json({ error: "Entry not found" });
-      if (!rows[0].deleted_at) {
+      const entry = rows[0];
+      if (!entry.deleted_at) {
         return res.status(400).json({ error: "This entry must be deleted first before it can be permanently erased." });
       }
+
+      await queryDB(
+        `INSERT INTO entry_permanent_delete_log
+           (entry_id, entry_date, job_name, job_no, project_name, mpr_no, item_name, requisitioned_qty,
+            entry_created_by_name, entry_deleted_by_name, entry_deleted_at,
+            permanently_deleted_by, permanently_deleted_by_name)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          entry.id,
+          entry.entry_date,
+          entry.job_name,
+          entry.job_no,
+          entry.project_name,
+          entry.mpr_no,
+          entry.item_name,
+          entry.requisitioned_qty,
+          entry.entry_created_by_name,
+          entry.entry_deleted_by_name,
+          entry.deleted_at,
+          req.user.id,
+          req.user.name
+        ]
+      );
 
       await queryDB("DELETE FROM entries WHERE id = ?", [id]);
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Failed to permanently delete entry" });
+    }
+  });
+
+  // Permanent Delete Log — Superadmin-only (requireSuperAdmin, not a grantable
+  // module: see the comment on DELETE /api/entries/:id/permanent above and on
+  // entry_permanent_delete_log in schema.sql). Every entry ever erased from the
+  // Job Recycle bin, newest first — including ones a Superadmin erased themselves.
+  app.get("/api/entries/permanent-delete-log", authenticateToken, requireSuperAdmin, async (req, res) => {
+    try {
+      const rows = await queryDB("SELECT * FROM entry_permanent_delete_log ORDER BY id DESC");
+      res.json(rows);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to load the Permanent Delete Log" });
     }
   });
 
