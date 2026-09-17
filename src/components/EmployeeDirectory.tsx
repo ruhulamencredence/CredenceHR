@@ -13,6 +13,7 @@ import { User, Department, EmployeeDirectoryEntry } from '../types';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
 import { ModulePath } from './ModulePath';
+import { registerHeaderSearch, unregisterHeaderSearch, setHeaderSearchBarHidden } from '../lib/headerSearch';
 
 interface EmployeeDirectoryProps {
   token: string;
@@ -204,6 +205,31 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
   const [mobileVisibleCount, setMobileVisibleCount] = useState<number>(pageSize);
   const loadMoreSentinelRef = useRef<HTMLDivElement>(null);
 
+  // Dock this page's own search box into Navbar's mobile header: register it
+  // on mount, and watch (via IntersectionObserver) whether the on-page
+  // search bar has scrolled out from under the sticky header. Navbar reads
+  // both through the useHeaderSearchState() subscription in headerSearch.ts.
+  const searchBarRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    registerHeaderSearch({
+      value: search,
+      onChange: setSearch,
+      placeholder: 'Search by name or Employee ID…'
+    });
+    return () => unregisterHeaderSearch();
+  }, [search]);
+
+  useEffect(() => {
+    const el = searchBarRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => setHeaderSearchBarHidden(!entry.isIntersecting),
+      { rootMargin: '-64px 0px 0px 0px', threshold: 0 }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
   useEffect(() => {
     (async () => {
       setLoading(true);
@@ -352,7 +378,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
 
           {/* Search & Control Bar */}
           <div className="p-4 sm:p-6 border-b border-slate-200 flex flex-col lg:flex-row lg:items-center gap-3">
-            <div className="relative flex-1">
+            <div className="relative flex-1" ref={searchBarRef}>
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
