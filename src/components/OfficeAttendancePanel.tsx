@@ -459,9 +459,13 @@ export const OfficeAttendancePanel: React.FC<OfficeAttendancePanelProps> = ({ to
         </div>
       )}
 
-      <div className="border border-slate-200 rounded-xl overflow-hidden">
+      <div className="border border-slate-200 rounded-xl overflow-x-auto">
         <table className="w-full text-sm">
-          <thead className="bg-slate-50 border-b border-slate-200 text-xs text-slate-500">
+          {/* Sticky under the app header (Navbar is sticky top-0 h-16 — see
+              Navbar.tsx), same pattern as the User Management list (Admin
+              Panel -> Users) — both rows of this thead stay pinned below the
+              nav while the table body scrolls underneath. */}
+          <thead className="sticky top-16 z-10 bg-slate-50 border-b border-slate-200 text-xs text-slate-500">
             <tr>
               <th className="text-left px-3 py-2 font-medium">Employee</th>
               <th className="text-left px-3 py-2 font-medium">Department</th>
