@@ -3,11 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import {
   Contact, Search, X, Users2, Building2, LayoutGrid, List,
-  Mail, Phone, PhoneCall, Briefcase, MapPin, ChevronLeft, ChevronRight
+  Mail, Phone, PhoneCall, Briefcase, MapPin, ChevronLeft, ChevronRight, ChevronDown
 } from 'lucide-react';
 import { User, Department, EmployeeDirectoryEntry } from '../types';
 import { apiUrl } from '../lib/api';
@@ -169,6 +169,41 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
 
   const [selectedEmployee, setSelectedEmployee] = useState<EmployeeDirectoryEntry | null>(null);
 
+  // Department filter as a searchable dropdown — plain <select> forces a
+  // long alphabetical scroll on a phone; this lets someone type a few
+  // letters to jump straight to their team.
+  const [deptDropdownOpen, setDeptDropdownOpen] = useState(false);
+  const [deptSearchQuery, setDeptSearchQuery] = useState('');
+  const deptDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!deptDropdownOpen) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (deptDropdownRef.current && !deptDropdownRef.current.contains(e.target as Node)) {
+        setDeptDropdownOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [deptDropdownOpen]);
+
+  // Mobile (native app, or a narrow web browser) swaps numbered pagination
+  // for scroll-to-load-more, rendering only a growing slice of the already
+  // fetched list so a long roster doesn't paint hundreds of cards at once.
+  const [isMobileViewport, setIsMobileViewport] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(max-width: 639px)').matches
+  );
+  useEffect(() => {
+    const mql = window.matchMedia('(max-width: 639px)');
+    const handler = () => setIsMobileViewport(mql.matches);
+    mql.addEventListener('change', handler);
+    return () => mql.removeEventListener('change', handler);
+  }, []);
+  const isMobile = isNativeApp || isMobileViewport;
+
+  const [mobileVisibleCount, setMobileVisibleCount] = useState<number>(pageSize);
+  const loadMoreSentinelRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     (async () => {
       setLoading(true);
@@ -211,16 +246,47 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
     });
   }, [employees, search, departmentFilter, designationFilter]);
 
-  // Any filter/search/page-size change should land back on page 1 — staying
-  // on, say, page 4 of a now much shorter result list would just show an
-  // empty page.
+  const filteredDepartments = useMemo(() => {
+    const q = deptSearchQuery.trim().toLowerCase();
+    if (!q) return departments;
+    return departments.filter((d) => d.name.toLowerCase().includes(q));
+  }, [departments, deptSearchQuery]);
+
+  const selectedDepartmentName = departmentFilter
+    ? departments.find((d) => String(d.id) === departmentFilter)?.name || 'All Departments'
+    : 'All Departments';
+
+  // Any filter/search/page-size change should land back on page 1 (desktop)
+  // or the first batch (mobile) — staying on, say, page 4 of a now much
+  // shorter result list would just show an empty page.
   useEffect(() => {
     setCurrentPage(1);
+    setMobileVisibleCount(pageSize);
   }, [search, departmentFilter, designationFilter, pageSize]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const pageSafe = Math.min(currentPage, totalPages);
   const paginated = filtered.slice((pageSafe - 1) * pageSize, pageSafe * pageSize);
+  const displayed = isMobile ? filtered.slice(0, mobileVisibleCount) : paginated;
+
+  // Scroll-to-load-more, mobile only: grow the visible slice as the sentinel
+  // at the bottom of the list comes into view, instead of rendering every
+  // matching employee up front.
+  useEffect(() => {
+    if (!isMobile) return;
+    const el = loadMoreSentinelRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          setMobileVisibleCount((c) => Math.min(filtered.length, c + pageSize));
+        }
+      },
+      { rootMargin: '300px' }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [isMobile, filtered.length, pageSize, mobileVisibleCount]);
 
   const activeCount = employees.filter((e) => e.is_active).length;
 
@@ -232,7 +298,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
 
   return (
     <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900" style={{ background: 'var(--g-bg-gradient)' }}>
-      <div className="w-full px-4 sm:px-6 lg:px-8 pt-3 pb-8">
+      <div className="w-full px-2 sm:px-6 lg:px-8 pt-3 pb-8">
         {!isNativeApp && (
           <>
             <ModulePath path={['Self Service', 'Employee Directory']} />
@@ -310,17 +376,63 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
                 narrow web browser), unlike Designation/Clear Filters/View Switcher
                 just below, which stay desktop-only. Department is the one filter
                 most worth having on a phone: Employee Directory has no other way
-                to narrow a long roster down to one team while on mobile. */}
-            <select
-              value={departmentFilter}
-              onChange={(e) => setDepartmentFilter(e.target.value)}
-              className="w-full lg:w-auto px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-700 focus:ring-2 focus:ring-blue-600 focus:outline-none"
-            >
-              <option value="">All Departments</option>
-              {departments.map((d) => (
-                <option key={d.id} value={d.id}>{d.name}</option>
-              ))}
-            </select>
+                to narrow a long roster down to one team while on mobile. A
+                searchable dropdown (instead of a plain <select>) so a long
+                department list doesn't force a blind scroll. */}
+            <div className="relative w-full lg:w-56" ref={deptDropdownRef}>
+              <button
+                type="button"
+                onClick={() => setDeptDropdownOpen((o) => !o)}
+                className="w-full flex items-center justify-between gap-2 px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-700 focus:ring-2 focus:ring-blue-600 focus:outline-none"
+              >
+                <span className="truncate">{selectedDepartmentName}</span>
+                <ChevronDown className="w-4 h-4 text-slate-400 shrink-0" />
+              </button>
+              {deptDropdownOpen && (
+                <div className="absolute z-20 mt-1 w-full bg-white border border-slate-200 rounded-xl shadow-lg max-h-64 flex flex-col overflow-hidden">
+                  <div className="p-2 border-b border-slate-100 shrink-0">
+                    <input
+                      autoFocus
+                      type="text"
+                      value={deptSearchQuery}
+                      onChange={(e) => setDeptSearchQuery(e.target.value)}
+                      placeholder="Search department…"
+                      className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-900 focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                    />
+                  </div>
+                  <div className="overflow-y-auto">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDepartmentFilter('');
+                        setDeptDropdownOpen(false);
+                        setDeptSearchQuery('');
+                      }}
+                      className={`w-full text-left px-3 py-2 text-sm hover:bg-slate-50 ${!departmentFilter ? 'text-blue-600 font-semibold' : 'text-slate-700'}`}
+                    >
+                      All Departments
+                    </button>
+                    {filteredDepartments.map((d) => (
+                      <button
+                        key={d.id}
+                        type="button"
+                        onClick={() => {
+                          setDepartmentFilter(String(d.id));
+                          setDeptDropdownOpen(false);
+                          setDeptSearchQuery('');
+                        }}
+                        className={`w-full text-left px-3 py-2 text-sm hover:bg-slate-50 truncate ${departmentFilter === String(d.id) ? 'text-blue-600 font-semibold' : 'text-slate-700'}`}
+                      >
+                        {d.name}
+                      </button>
+                    ))}
+                    {filteredDepartments.length === 0 && (
+                      <p className="px-3 py-2.5 text-xs text-slate-400">No matching department.</p>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
 
             {!isNativeApp && (
               <div className="hidden sm:contents">
@@ -369,7 +481,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
           </div>
 
           {/* Body */}
-          <div className="p-4 sm:p-6">
+          <div className="p-2 sm:p-6">
             {loading ? (
               viewMode === 'grid' ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -402,7 +514,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
               </div>
             ) : viewMode === 'grid' ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
-                {paginated.map((emp) => (
+                {displayed.map((emp) => (
                   <button
                     key={emp.id}
                     type="button"
@@ -513,7 +625,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {paginated.map((emp) => (
+                    {displayed.map((emp) => (
                       <tr key={emp.id} className="hover:bg-slate-50/80 transition-colors">
                         <td className="px-3 py-2.5 whitespace-nowrap">
                           <div className="flex items-center gap-2">
@@ -549,8 +661,10 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
               </div>
             )}
 
-            {/* Pagination */}
-            {!loading && filtered.length > 0 && (
+            {/* Pagination — desktop only. Mobile swaps this for scroll-to-load-more
+                just below, so a long roster never shows a "1–12 of 300" style
+                counter the user has to click through. */}
+            {!loading && !isMobile && filtered.length > 0 && (
               <div className="flex flex-col sm:flex-row items-center justify-between gap-3 mt-6 pt-4 border-t border-slate-100">
                 <div className="flex items-center gap-2 text-xs text-slate-500">
                   <span>
@@ -585,6 +699,16 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
                     <ChevronRight className="w-4 h-4" />
                   </button>
                 </div>
+              </div>
+            )}
+
+            {/* Scroll-to-load-more — mobile only. The sentinel sits below the
+                last rendered card; scrolling it into view grows the visible
+                slice by one more page instead of the whole list mounting at
+                once. */}
+            {!loading && isMobile && filtered.length > 0 && (
+              <div ref={loadMoreSentinelRef} className="flex items-center justify-center py-4 mt-2">
+                {mobileVisibleCount < filtered.length && <Spinner />}
               </div>
             )}
           </div>
