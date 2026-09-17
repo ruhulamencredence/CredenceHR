@@ -4,7 +4,7 @@ import {
   CalendarClock, ListChecks, CheckSquare, ChevronDown, Building2, Users, Users2,
   BarChart3, Upload, History, Recycle, Navigation, Bell, ShieldCheck,
   Contact, Calendar, Clock, Fingerprint, Banknote, Package, LayoutDashboard, Server, MessageSquare,
-  ChevronsLeft, ChevronsRight,
+  ChevronsLeft, ChevronsRight, ShieldAlert, Search,
 } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { User, AdminModuleKey } from '../types';
@@ -57,7 +57,7 @@ interface GlobalSidebarProps {
   // 'my_conveyance' is the one exception below: not its own module_permissions
   // entry, just the "My Conveyance Bill Claim" sub-view shown alongside
   // 'conveyance' in claimsGroup, gated on the same 'conveyance' grant.
-  onGoToAdminModule: (target: Exclude<AdminModuleKey, 'claims' | 'conveyance'> | 'my_conveyance' | 'dashboard' | 'servers') => void;
+  onGoToAdminModule: (target: Exclude<AdminModuleKey, 'claims' | 'conveyance'> | 'my_conveyance' | 'dashboard' | 'servers' | 'permanent_delete_log') => void;
   // Android APK build info modal — previously a header icon, moved in here so
   // the header itself can stay down to just hamburger + profile + logout.
   onOpenApkInfo: () => void;
@@ -348,7 +348,44 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
       icon: Server,
       onClick: () => onGoToAdminModule('servers'),
     });
+    // Same "not a grantable module" reasoning as Servers above — this exists
+    // specifically so a Superadmin can see an Admin's permanent Job Recycle
+    // erases too, so it can never be delegated away via module_permissions.
+    adminFlatItems.push({
+      key: 'permanent_delete_log',
+      label: 'Permanent Delete Log',
+      icon: ShieldAlert,
+      onClick: () => onGoToAdminModule('permanent_delete_log'),
+    });
   }
+
+  // Sidebar-wide menu search — flattens every item this account can actually
+  // see (Dashboard + Main + Self Service + every Admin Panel group/flat item)
+  // into one searchable list, so a menu buried a few groups deep is still one
+  // search away instead of needing to expand each group to find it. Hidden
+  // while the desktop column is minimized (collapsed) — no room for typed
+  // input there, same as every other label in that mode.
+  const [sidebarSearch, setSidebarSearch] = useState('');
+  const dashboardSearchItem: NavItem = { key: 'dashboard', label: 'Dashboard', icon: Home, onClick: onGoToDashboard };
+  const allSearchableItems: NavItem[] = [
+    dashboardSearchItem,
+    ...mainItems,
+    ...selfServiceItems,
+    ...(adminDashboardItem ? [adminDashboardItem] : []),
+    ...reportsGroup,
+    ...claimsGroup,
+    ...attendanceGroup,
+    ...orgGroup,
+    ...workforceGroup,
+    ...hrGroup,
+    ...adminFlatItems,
+  ];
+  const searchQuery = sidebarSearch.trim().toLowerCase();
+  const searchResults = searchQuery ? allSearchableItems.filter((i) => i.label.toLowerCase().includes(searchQuery)) : [];
+  const selectSearchResult = (fn: () => void) => {
+    setSidebarSearch('');
+    selectAndClose(fn);
+  };
 
   const renderItem = (item: NavItem) => (
     <button
@@ -496,25 +533,76 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
           </>
         )}
 
-        {/* Minimize/expand toggle — persistent (desktop) variant only. Shrinks
-            the column down to a slim icon rail (labels/section headers
-            hidden, collapsible groups fall back to a flat icon list — see
-            renderGroup) so the main content gets more width without losing
-            one-click access to every item. Choice is remembered across
-            reloads via localStorage above. */}
-        {isPersistent && (
-          <div className={`flex px-2.5 pt-3 ${collapsed ? 'justify-center' : 'justify-end'}`}>
-            <button
-              type="button"
-              onClick={toggleCollapsed}
-              title={collapsed ? 'Expand sidebar' : 'Minimize sidebar'}
-              aria-label={collapsed ? 'Expand sidebar' : 'Minimize sidebar'}
-              className="w-7 h-7 rounded-full flex items-center justify-center text-white/70 hover:text-white hover:bg-white/10 transition-colors"
-            >
-              {collapsed ? <ChevronsRight className="w-4 h-4" /> : <ChevronsLeft className="w-4 h-4" />}
-            </button>
-          </div>
-        )}
+        {/* Menu search + Minimize/expand toggle, same row — both sit ABOVE
+            <nav> (which is the only scrolling element in this drawer), so
+            neither one ever scrolls out of view: they're not inside the
+            scrollable area at all, rather than being "sticky" within it.
+            The toggle is persistent (desktop) variant only — it shrinks the
+            column down to a slim icon rail (labels/section headers hidden,
+            collapsible groups fall back to a flat icon list — see
+            renderGroup), remembered across reloads via localStorage above.
+            Search itself searches every visible item (Dashboard, Main, Self
+            Service, and every Admin Panel group), regardless of whether its
+            group is currently expanded — selecting a result navigates
+            straight there, same as clicking that item directly. */}
+        <div className={`flex items-center gap-2 px-2.5 pt-3 ${isPersistent && collapsed ? 'justify-center' : ''}`}>
+            {!(isPersistent && collapsed) && (
+              <div className="relative flex-1 min-w-0">
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 text-white/40 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={sidebarSearch}
+                    onChange={(e) => setSidebarSearch(e.target.value)}
+                    placeholder="Search menu…"
+                    className="w-full pl-8 pr-7 py-2 rounded-xl bg-white/10 text-white text-[13px] placeholder-white/40 focus:outline-none focus:bg-white/15 transition-colors"
+                  />
+                  {sidebarSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setSidebarSearch('')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-white/50 hover:text-white"
+                      aria-label="Clear search"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                {searchQuery && (
+                  <div className="absolute left-0 right-0 mt-1 max-h-72 overflow-y-auto rounded-xl bg-[#3a0d70] border border-white/15 shadow-xl z-20 py-1">
+                    {searchResults.length > 0 ? (
+                      searchResults.map((item) => (
+                        <button
+                          key={item.key}
+                          type="button"
+                          onClick={() => selectSearchResult(item.onClick)}
+                          className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-white/85 hover:bg-white/10 transition-colors"
+                        >
+                          <item.icon className="w-4 h-4 shrink-0" />
+                          <span className="text-[13px] truncate">{item.label}</span>
+                        </button>
+                      ))
+                    ) : (
+                      <p className="px-3 py-2.5 text-xs text-white/50">No matching menu.</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {isPersistent && (
+              <button
+                type="button"
+                onClick={toggleCollapsed}
+                title={collapsed ? 'Expand sidebar' : 'Minimize sidebar'}
+                aria-label={collapsed ? 'Expand sidebar' : 'Minimize sidebar'}
+                className="w-7 h-7 rounded-full flex items-center justify-center text-white/70 hover:text-white hover:bg-white/10 transition-colors shrink-0"
+              >
+                {collapsed ? <ChevronsRight className="w-4 h-4" /> : <ChevronsLeft className="w-4 h-4" />}
+              </button>
+            )}
+        </div>
 
         <nav className={`flex-1 overflow-y-auto py-4 px-2.5 space-y-0.5 ${isPersistent ? 'gsidebar-no-scrollbar' : ''}`}>
           {/* Dashboard — always available, lands back on the User Panel's own
