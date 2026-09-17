@@ -1,12 +1,13 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { User } from '../types';
-import { Shield, LogOut, Smartphone } from 'lucide-react';
+import { Shield, LogOut, Smartphone, Search, X } from 'lucide-react';
 import credenceLogo from '../assets/credence-logo.png';
 import { AlertsBell } from './AlertsBell';
 import { ChatBell } from './ChatBell';
 import { WeatherBadge } from './WeatherBadge';
 import { useProfilePhoto } from '../lib/useProfilePhoto';
+import { useHeaderSearchState } from '../lib/headerSearch';
 
 // Mobile header's "open menu" glyph — three filled, rounded-square dots
 // stacked vertically, matching the app's own rounded-corner language (the
@@ -131,6 +132,17 @@ export const Navbar: React.FC<NavbarProps> = ({
   const isNativeApp = Capacitor.isNativePlatform();
   const transparentHeader = isNativeApp;
 
+  // Whichever page is showing may have docked its own search box into this
+  // header (see headerSearch.ts) — while that page's own search bar has
+  // scrolled out of view, this swaps the mobile logo for a search icon so
+  // the user can keep searching without scrolling back up.
+  const { registration: headerSearchReg, barHidden: headerSearchBarHidden } = useHeaderSearchState();
+  const showMobileSearchIcon = !!headerSearchReg && headerSearchBarHidden;
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
+  useEffect(() => {
+    if (!showMobileSearchIcon) setMobileSearchOpen(false);
+  }, [showMobileSearchIcon]);
+
   // Circular avatar shown at the top right (initial + role-tinted background) —
   // falls back to this when the account has no Personal Data photo uploaded
   // yet (or it hasn't loaded); shows the actual photo (PersonalDataForm.tsx)
@@ -174,7 +186,12 @@ export const Navbar: React.FC<NavbarProps> = ({
         {/* Logo, left-aligned. The desktop dropdown menus that used to sit
             next to it (Claims / Jobs / Budget / Manage / Workforce / Self
             Service) have been removed — see the note below. */}
-        <div className="flex items-center gap-8 lg:gap-10 min-w-0">
+        {/* gap shrinks to gap-2 on mobile while the search icon is showing —
+            the collapsed logo between hamburger and search (see below) still
+            takes up its own gap on both sides even at 0 width, so the normal
+            gap-8 doubled up into a much wider gap than intended. Desktop
+            (md+) always keeps the full logo, so its spacing stays gap-8/10. */}
+        <div className={`flex items-center min-w-0 md:gap-8 lg:gap-10 ${showMobileSearchIcon ? 'gap-2' : 'gap-8'}`}>
           {/* Mobile-only hamburger — opens the single GlobalSidebar drawer
               (see GlobalSidebar.tsx), regardless of which panel is currently
               showing. Desktop (md and up) still hides this button — the
@@ -198,14 +215,79 @@ export const Navbar: React.FC<NavbarProps> = ({
           >
             <ThreeDotsMenuIcon className="w-[18px] h-[18px]" />
           </button>
+          {/* On mobile, once the current page's own search bar has scrolled
+              out of view, this logo swaps for a search icon (see
+              showMobileSearchIcon above) so search stays reachable without
+              scrolling back up. Desktop always keeps the plain logo. Animated
+              (collapsing width + fade) rather than an instant hidden/shown
+              jump — both this button and the search area below stay mounted
+              and transition together. */}
           <button
             type="button"
             onClick={onGoToDashboard}
-            className="flex-shrink-0 hover:opacity-80 transition-opacity"
+            className={`flex-shrink-0 overflow-hidden transition-all duration-300 ease-in-out hover:opacity-80 ${
+              showMobileSearchIcon
+                ? 'max-w-0 opacity-0 -translate-x-3 pointer-events-none md:max-w-[220px] md:opacity-100 md:translate-x-0 md:pointer-events-auto'
+                : 'max-w-[220px] opacity-100 translate-x-0'
+            }`}
             aria-label="Go to dashboard"
           >
             <img src={credenceLogo} alt="Credence" className="h-8 sm:h-9 w-auto" />
           </button>
+
+          <div
+            className={`md:hidden min-w-0 flex items-center overflow-hidden transition-all duration-300 ease-in-out ${
+              showMobileSearchIcon
+                ? mobileSearchOpen
+                  ? 'flex-1 max-w-none opacity-100'
+                  : 'max-w-[40px] opacity-100'
+                : 'max-w-0 opacity-0 pointer-events-none'
+            }`}
+          >
+              {mobileSearchOpen ? (
+                <div className="relative flex-1">
+                  <Search
+                    className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2"
+                    style={{ color: transparentHeader ? 'rgba(255,255,255,0.75)' : 'var(--g-text-muted)' }}
+                  />
+                  <input
+                    autoFocus
+                    type="text"
+                    value={headerSearchReg?.value || ''}
+                    onChange={(e) => headerSearchReg?.onChange(e.target.value)}
+                    placeholder={headerSearchReg?.placeholder || 'Search…'}
+                    className={`w-full pl-9 pr-8 py-2 rounded-xl text-sm focus:outline-none ${
+                      transparentHeader
+                        ? 'bg-white/15 text-white placeholder-white/70'
+                        : 'bg-slate-50 text-slate-900 border border-slate-200'
+                    }`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setMobileSearchOpen(false)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1"
+                    style={{ color: transparentHeader ? 'white' : 'var(--g-text-muted)' }}
+                    aria-label="Close search"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setMobileSearchOpen(true)}
+                  className={`w-9 h-9 rounded-xl flex items-center justify-center transition-colors ${
+                    transparentHeader
+                      ? 'text-white bg-white/15 hover:bg-white/25 active:bg-white/30'
+                      : 'hover:opacity-70'
+                  }`}
+                  style={transparentHeader ? undefined : { color: 'var(--g-text-muted)' }}
+                  aria-label="Search"
+                >
+                  <Search className="w-[18px] h-[18px]" />
+                </button>
+              )}
+          </div>
 
           {/* Desktop dropdown menus (Claims / Jobs / Budget / Manage /
               Workforce / Self Service) removed from the web header per

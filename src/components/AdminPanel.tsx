@@ -5,8 +5,8 @@ import autoTable from 'jspdf-autotable';
 import credenceLogo from '../assets/credence-logo.png';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
 import { savePdfCrossPlatform } from '../lib/saveFile';
-import { Project, Branch, MprNumber, Entry, User, Budget, BudgetItem, UserProjectPermission, EntryEditHistory, BulkUserRow, BulkUserResultItem, AdminModuleKey, ADMIN_MODULES, AttendanceRecord, ClaimsNavRequest, AdminNavRequest, Department, LeaveApplication, PendingJobEdit } from '../types';
-import { Building2, FileText, Users, Users2, BarChart3, Plus, Trash2, Edit2, Search, Filter, UserCheck, Calendar, CalendarClock, Download, Upload, FolderPlus, X, Eye, FileSpreadsheet, KeyRound, History, RotateCcw, Recycle, ListChecks, FileDown, MapPin, LayoutGrid, Navigation, LogIn, LogOut, Bell, Route, ShieldCheck, Wallet, Contact, Lock, Mail, CheckCircle2, XCircle, Clock3 } from 'lucide-react';
+import { Project, Branch, MprNumber, Entry, User, Budget, BudgetItem, UserProjectPermission, EntryEditHistory, EntryPermanentDeleteLog, BulkUserRow, BulkUserResultItem, AdminModuleKey, ADMIN_MODULES, AttendanceRecord, ClaimsNavRequest, AdminNavRequest, Department, LeaveApplication, PendingJobEdit } from '../types';
+import { Building2, FileText, Users, Users2, BarChart3, Plus, Trash2, Edit2, Search, Filter, UserCheck, Calendar, CalendarClock, Download, Upload, FolderPlus, X, Eye, FileSpreadsheet, KeyRound, History, RotateCcw, Recycle, ListChecks, FileDown, MapPin, LayoutGrid, Navigation, LogIn, LogOut, Bell, Route, ShieldCheck, Wallet, Contact, Lock, Mail, CheckCircle2, XCircle, Clock3, ShieldAlert } from 'lucide-react';
 import LocationMapPicker from './LocationMapPicker';
 import { NoticeManager } from './NoticeManager';
 import { EmployeesPanel } from './EmployeesPanel';
@@ -19,6 +19,7 @@ import { ApprovalTemplateManager } from './ApprovalTemplateManager';
 import { ApprovalBadge } from './ApprovalBadge';
 import { EmployeeTrackingPanel } from './EmployeeTrackingPanel';
 import { OfficeAttendancePanel } from './OfficeAttendancePanel';
+import { DeliveryDateConditionsPanel } from './DeliveryDateConditionsPanel';
 import { HolidayCalendarPanel } from './HolidayCalendarPanel';
 import { AssetManagementAdmin } from './AssetManagementAdmin';
 import { ServerProfilesPanel } from './ServerProfilesPanel';
@@ -177,7 +178,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // have explicitly granted user.can_view_login_location.
   const canSeeLoginLocation = isSuperAdmin || !!user.can_view_login_location;
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'my_conveyance' | 'disbursement' | 'holidays' | 'asset_management' | 'servers'>(
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'my_conveyance' | 'disbursement' | 'holidays' | 'asset_management' | 'servers' | 'permanent_delete_log'>(
     () => {
       // Restores whichever tab this Admin was last looking at — see the
       // "pull down to reload" note in App.tsx: since a reload now has to be
@@ -187,12 +188,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         const saved = localStorage.getItem(`mpr_admin_tab_${user.id}`);
         // 'my_conveyance' isn't its own module_permissions entry — it rides
         // along with 'conveyance' (see the tab-visibility effect below).
-        // 'servers' isn't one either — it's Superadmin-only, never granted
-        // via module_permissions (see ServerProfileRoutes.ts).
+        // 'servers'/'permanent_delete_log' aren't either — both Superadmin-only,
+        // never granted via module_permissions (see ServerProfileRoutes.ts and
+        // GET /api/entries/permanent-delete-log respectively).
         const savedVisible =
           saved === 'dashboard' ? isAdminRole :
           saved === 'my_conveyance' ? isSuperAdmin || visibleModules.includes('conveyance') :
-          saved === 'servers' ? isSuperAdmin : isSuperAdmin || visibleModules.includes(saved as AdminModuleKey);
+          saved === 'servers' || saved === 'permanent_delete_log' ? isSuperAdmin :
+          isSuperAdmin || visibleModules.includes(saved as AdminModuleKey);
         if (saved && savedVisible) return saved as any;
       } catch {
         // ignore — falls through to the normal default below
@@ -229,11 +232,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       if (isAdminRole) setActiveTab('dashboard');
       return;
     }
-    // 'servers' isn't an AdminModuleKey/module_permissions entry either —
-    // Superadmin-only (see ServerProfileRoutes.ts), same reasoning as
-    // 'my_conveyance' below.
-    if (adminNavRequest.target === 'servers') {
-      if (isSuperAdmin) setActiveTab('servers');
+    // 'servers'/'permanent_delete_log' aren't AdminModuleKey/module_permissions
+    // entries either — both Superadmin-only, same reasoning as 'my_conveyance'
+    // below.
+    if (adminNavRequest.target === 'servers' || adminNavRequest.target === 'permanent_delete_log') {
+      if (isSuperAdmin) setActiveTab(adminNavRequest.target);
       return;
     }
     // 'my_conveyance' isn't its own module_permissions entry — it rides along
@@ -249,7 +252,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   useEffect(() => {
     const activeTabStillVisible =
       activeTab === 'dashboard' ? isAdminRole :
-      activeTab === 'servers' ? isSuperAdmin :
+      activeTab === 'servers' || activeTab === 'permanent_delete_log' ? isSuperAdmin :
       activeTab === 'my_conveyance' ? canSee('conveyance') : canSee(activeTab);
     if (!activeTabStillVisible && visibleModules.length > 0) {
       setActiveTab(visibleModules[0] as any);
@@ -620,6 +623,28 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [restoringEntryId, setRestoringEntryId] = useState<number | null>(null);
   const [erasingEntryId, setErasingEntryId] = useState<number | null>(null);
   const [deletingEntryId, setDeletingEntryId] = useState<number | null>(null);
+
+  // Permanent Delete Log (Superadmin-only tab) — every entry ever erased from
+  // the Job Recycle bin above, including ones a Superadmin erased themselves.
+  // See GET /api/entries/permanent-delete-log.
+  const [permanentDeleteLog, setPermanentDeleteLog] = useState<EntryPermanentDeleteLog[]>([]);
+  const [loadingPermanentDeleteLog, setLoadingPermanentDeleteLog] = useState(false);
+
+  const fetchPermanentDeleteLog = async () => {
+    setLoadingPermanentDeleteLog(true);
+    try {
+      const res = await fetch(apiUrl('/api/entries/permanent-delete-log'), { headers: { Authorization: `Bearer ${token}` } });
+      if (res.ok) setPermanentDeleteLog(await res.json());
+    } catch (err) {
+      console.error('Failed to load the Permanent Delete Log', err);
+    } finally {
+      setLoadingPermanentDeleteLog(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'permanent_delete_log') fetchPermanentDeleteLog();
+  }, [activeTab]);
 
   // Entry edit history modal (Reports tab -> History icon per row)
   const [historyEntryId, setHistoryEntryId] = useState<number | null>(null);
@@ -3532,6 +3557,83 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         </div>
       )}
 
+      {/* TAB: PERMANENT DELETE LOG — Superadmin-only (see GET
+          /api/entries/permanent-delete-log and the comment on DELETE
+          /api/entries/:id/permanent) audit trail of every entry ever erased
+          from the Job Recycle bin below, including an Admin's erases and a
+          Superadmin's own. Not a grantable AdminModuleKey — gated purely by
+          isSuperAdmin in the effects above, same as the "Servers" tab. */}
+      {activeTab === 'permanent_delete_log' && (
+        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+          <div className="p-6 border-b border-slate-200">
+            <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+              <ShieldAlert className="w-4 h-4 text-rose-600" /> Permanent Delete Log
+            </h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Every entry ever permanently erased from the Job Recycle bin — by an Admin or a Superadmin, including a
+              Superadmin's own erases. This log itself can never be cleared or hidden from here.
+            </p>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-slate-200">
+              <thead className="bg-slate-50 text-slate-500 text-[11px] uppercase tracking-wider">
+                <tr>
+                  <th className="px-4 py-3 text-left">Entry Date</th>
+                  <th className="px-4 py-3 text-left">Job Name</th>
+                  <th className="px-4 py-3 text-left">Project</th>
+                  <th className="px-4 py-3 text-left">Job No</th>
+                  <th className="px-4 py-3 text-left">MPR No</th>
+                  <th className="px-4 py-3 text-left">Item Name</th>
+                  <th className="px-4 py-3 text-left">Originally Logged By</th>
+                  <th className="px-4 py-3 text-left">Soft-Deleted By</th>
+                  <th className="px-4 py-3 text-left">Permanently Deleted By</th>
+                  <th className="px-4 py-3 text-left">Permanently Deleted At</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-200 text-sm">
+                {loadingPermanentDeleteLog ? (
+                  <tr>
+                    <td colSpan={10} className="px-6 py-12 text-center text-slate-400">
+                      Loading Permanent Delete Log...
+                    </td>
+                  </tr>
+                ) : permanentDeleteLog.length === 0 ? (
+                  <tr>
+                    <td colSpan={10} className="px-6 py-12 text-center text-slate-400">
+                      No entry has ever been permanently deleted.
+                    </td>
+                  </tr>
+                ) : (
+                  permanentDeleteLog.map((log) => (
+                    <tr key={log.id} className="hover:bg-slate-50/80 transition-colors">
+                      <td className="px-4 py-3.5 whitespace-nowrap text-slate-600 text-xs">
+                        {log.entry_date ? formatDate(log.entry_date) : '—'}
+                      </td>
+                      <td className="px-4 py-3.5 whitespace-nowrap font-semibold text-slate-900 text-xs">{log.job_name || '—'}</td>
+                      <td className="px-4 py-3.5 whitespace-nowrap font-medium text-slate-900 text-xs">{log.project_name || '—'}</td>
+                      <td className="px-4 py-3.5 whitespace-nowrap text-xs font-semibold text-blue-600">{log.job_no || '—'}</td>
+                      <td className="px-4 py-3.5 whitespace-nowrap text-xs">
+                        <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 border border-slate-200 font-mono">
+                          {log.mpr_no || '—'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3.5 text-slate-800 text-xs">{log.item_name || '—'}</td>
+                      <td className="px-4 py-3.5 whitespace-nowrap text-slate-500 text-xs">{log.entry_created_by_name || '—'}</td>
+                      <td className="px-4 py-3.5 whitespace-nowrap text-amber-600 text-xs">{log.entry_deleted_by_name || '—'}</td>
+                      <td className="px-4 py-3.5 whitespace-nowrap text-rose-600 font-semibold text-xs">
+                        {log.permanently_deleted_by_name}
+                      </td>
+                      <td className="px-4 py-3.5 whitespace-nowrap text-slate-500 text-xs">{formatDate(log.permanently_deleted_at)}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {/* TAB: JOB RECYCLE — every soft-deleted entry, with Restore + permanently erase */}
       {activeTab === 'recycle' && (
         <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
@@ -4518,6 +4620,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
               )
             )}
           </div>
+
+          {/* Delivery Date "minimum lead time" — see DeliveryDateConditionsPanel.tsx */}
+          <DeliveryDateConditionsPanel token={token} />
         </div>
       )}
 

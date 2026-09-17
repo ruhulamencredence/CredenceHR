@@ -91,3 +91,15 @@ export function latestDateStr(...dates: (string | null | undefined)[]): string |
   if (valid.length === 0) return undefined;
   return valid.reduce((a, b) => (b > a ? b : a));
 }
+
+// Whether `date` (a "YYYY-MM-DD" from dateRangeOptions above) falls inside the
+// admin's configured Delivery Date "minimum lead time" window (Admin Panel ->
+// PEPM Manage -> Data Import -> Condition Set) and so should show in the
+// picker but not be selectable. `earliestAllowedDate` is the `earliest_date`
+// GET /api/delivery-date-conditions/effective already computed server-side
+// (or null when no condition is enabled for this account/Project/Budget) —
+// this is deliberately just a string comparison, no date math client-side, so
+// it can never disagree with what the server will actually accept.
+export function isDateBlockedByLeadTime(date: string, earliestAllowedDate: string | null): boolean {
+  return !!earliestAllowedDate && date < earliestAllowedDate;
+}
