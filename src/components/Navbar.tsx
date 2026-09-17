@@ -213,18 +213,32 @@ export const Navbar: React.FC<NavbarProps> = ({
           {/* On mobile, once the current page's own search bar has scrolled
               out of view, this logo swaps for a search icon (see
               showMobileSearchIcon above) so search stays reachable without
-              scrolling back up. Desktop always keeps the plain logo. */}
+              scrolling back up. Desktop always keeps the plain logo. Animated
+              (collapsing width + fade) rather than an instant hidden/shown
+              jump — both this button and the search area below stay mounted
+              and transition together. */}
           <button
             type="button"
             onClick={onGoToDashboard}
-            className={`flex-shrink-0 hover:opacity-80 transition-opacity ${showMobileSearchIcon ? 'hidden md:block' : ''}`}
+            className={`flex-shrink-0 overflow-hidden transition-all duration-300 ease-in-out hover:opacity-80 ${
+              showMobileSearchIcon
+                ? 'max-w-0 opacity-0 -translate-x-3 pointer-events-none md:max-w-[220px] md:opacity-100 md:translate-x-0 md:pointer-events-auto'
+                : 'max-w-[220px] opacity-100 translate-x-0'
+            }`}
             aria-label="Go to dashboard"
           >
             <img src={credenceLogo} alt="Credence" className="h-8 sm:h-9 w-auto" />
           </button>
 
-          {showMobileSearchIcon && (
-            <div className="md:hidden flex-1 min-w-0 flex items-center">
+          <div
+            className={`md:hidden min-w-0 flex items-center overflow-hidden transition-all duration-300 ease-in-out ${
+              showMobileSearchIcon
+                ? mobileSearchOpen
+                  ? 'flex-1 max-w-none opacity-100'
+                  : 'max-w-[40px] opacity-100'
+                : 'max-w-0 opacity-0 pointer-events-none'
+            }`}
+          >
               {mobileSearchOpen ? (
                 <div className="relative flex-1">
                   <Search
@@ -268,8 +282,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <Search className="w-[18px] h-[18px]" />
                 </button>
               )}
-            </div>
-          )}
+          </div>
 
           {/* Desktop dropdown menus (Claims / Jobs / Budget / Manage /
               Workforce / Self Service) removed from the web header per
