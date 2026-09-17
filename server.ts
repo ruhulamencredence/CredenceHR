@@ -9,6 +9,7 @@ import jwt from "jsonwebtoken";
 import mysql from "mysql2/promise";
 import { createServer as createViteServer } from "vite";
 import { syncAllZkDevices, syncZkDevice, startZkSyncSchedule } from "./zkSync";
+import { resolveMinLeadDays, addDaysToDateStr, DeliveryConditionType } from "./deliveryDateConditions";
 import { registerProfileRoutes } from "./profileRoutes";
 import { registerHolidayRoutes, ensureHolidayCalendarSchema, getHolidayMap } from "./holidayRoutes";
 import { registerAlertRoutes, ensureAlertsSchema, createAlert } from "./Alerts";
@@ -287,6 +288,45 @@ async function ensureSchemaMigrations() {
     `);
   } catch (err: any) {
     console.warn("⚠️ Could not ensure entry_permanent_delete_log table exists: " + err.message);
+  }
+
+  // Delivery Date "minimum lead time" conditions — Admin Panel -> PEPM Manage
+  // -> Data Import -> Condition Set (see deliveryDateConditions.ts's resolver
+  // and EntriesRoutes.ts's enforcement). Two independent condition_types
+  // ("entry" — New Job Entry/Add MPR, "job_edit" — changing an existing
+  // entry's Delivery Date), each with one Global row (scope='global',
+  // scope_id=0) plus any number of Project/Budget override rows. scope_id
+  // is 0 (not NULL) for the Global row specifically so the unique key below
+  // can actually enforce "only one Global row per condition_type" — MySQL
+  // treats every NULL in a unique index as distinct from every other NULL,
+  // which would silently allow duplicate Global rows otherwise.
+  try {
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS delivery_date_conditions (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        condition_type ENUM('entry','job_edit') NOT NULL,
+        scope ENUM('global','project','budget') NOT NULL DEFAULT 'global',
+        scope_id INT NOT NULL DEFAULT 0,
+        min_lead_days INT NOT NULL DEFAULT 0,
+        apply_to_admins TINYINT(1) NOT NULL DEFAULT 0,
+        enabled TINYINT(1) NOT NULL DEFAULT 0,
+        updated_by INT NULL,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_delivery_condition (condition_type, scope, scope_id),
+        FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
+      )
+    `);
+    // Seed the two Global rows (disabled by default) so the resolver and the
+    // Condition Set UI always have a row to read/upsert against instead of
+    // needing separate "does a Global row exist yet" branches everywhere.
+    await dbPool.query(
+      `INSERT IGNORE INTO delivery_date_conditions (condition_type, scope, scope_id, min_lead_days, apply_to_admins, enabled) VALUES
+       ('entry', 'global', 0, 0, 0, 0),
+       ('job_edit', 'global', 0, 0, 0, 0)`
+    );
+  } catch (err: any) {
+    console.warn("⚠️ Could not ensure delivery_date_conditions table exists: " + err.message);
   }
 
   // Job Edit Approval queue — same self-healing pattern as entry_edit_history above.
@@ -5520,6 +5560,131 @@ async function startServer() {
       res.json({ success: true, delivery_date_from, delivery_date_to });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Failed to set Delivery Date range" });
+    }
+  });
+
+  // --- Delivery Date Conditions ("minimum lead time" rule) ---
+  // Admin Panel -> PEPM Manage -> Data Import -> Condition Set. See
+  // deliveryDateConditions.ts for the resolver used by EntriesRoutes.ts's
+  // actual enforcement; these are just the CRUD/read endpoints behind the
+  // admin UI, plus one unrestricted read (below the admin-only block) that
+  // any authenticated account uses to grey out blocked dates on its own
+  // Delivery Date pickers.
+  app.get("/api/delivery-date-conditions", authenticateToken, requireAdmin, requireModule("imports"), async (req, res) => {
+    try {
+      const rows = await queryDB(
+        `SELECT c.*,
+                CASE WHEN c.scope = 'project' THEN p.project_name
+                     WHEN c.scope = 'budget' THEN b.budget_name
+                     ELSE NULL END AS scope_name
+         FROM delivery_date_conditions c
+         LEFT JOIN projects p ON c.scope = 'project' AND p.id = c.scope_id
+         LEFT JOIN budgets b ON c.scope = 'budget' AND b.id = c.scope_id
+         ORDER BY c.condition_type, c.scope = 'global' DESC, c.scope, c.scope_id`
+      );
+      res.json(rows);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Upserts the ONE Global row for a condition_type — always exists already
+  // (seeded in initDB()), so this is always an UPDATE in practice; INSERT ...
+  // ON DUPLICATE KEY covers a fresh/self-healed table too.
+  app.put("/api/delivery-date-conditions/global", authenticateToken, requireAdmin, requireModule("imports"), async (req: any, res) => {
+    try {
+      const { condition_type, enabled, min_lead_days, apply_to_admins } = req.body;
+      if (condition_type !== "entry" && condition_type !== "job_edit") {
+        return res.status(400).json({ error: "condition_type must be 'entry' or 'job_edit'" });
+      }
+      const days = Number(min_lead_days);
+      if (!Number.isInteger(days) || days < 0) {
+        return res.status(400).json({ error: "min_lead_days must be a non-negative whole number" });
+      }
+      await queryDB(
+        `INSERT INTO delivery_date_conditions (condition_type, scope, scope_id, min_lead_days, apply_to_admins, enabled, updated_by)
+         VALUES (?, 'global', 0, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE min_lead_days = VALUES(min_lead_days), apply_to_admins = VALUES(apply_to_admins),
+           enabled = VALUES(enabled), updated_by = VALUES(updated_by)`,
+        [condition_type, days, apply_to_admins ? 1 : 0, enabled ? 1 : 0, req.user.id]
+      );
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Creates/updates a Project or Budget override row (upsert on the same
+  // unique key the Global row above uses).
+  app.post("/api/delivery-date-conditions/override", authenticateToken, requireAdmin, requireModule("imports"), async (req: any, res) => {
+    try {
+      const { condition_type, scope, scope_id, min_lead_days, apply_to_admins, enabled } = req.body;
+      if (condition_type !== "entry" && condition_type !== "job_edit") {
+        return res.status(400).json({ error: "condition_type must be 'entry' or 'job_edit'" });
+      }
+      if (scope !== "project" && scope !== "budget") {
+        return res.status(400).json({ error: "scope must be 'project' or 'budget'" });
+      }
+      const id = Number(scope_id);
+      if (!id) return res.status(400).json({ error: "A Project/Budget must be selected" });
+      const days = Number(min_lead_days);
+      if (!Number.isInteger(days) || days < 0) {
+        return res.status(400).json({ error: "min_lead_days must be a non-negative whole number" });
+      }
+      const table = scope === "project" ? "projects" : "budgets";
+      const existsRows = await queryDB(`SELECT id FROM ${table} WHERE id = ?`, [id]);
+      if (existsRows.length === 0) {
+        return res.status(400).json({ error: `Selected ${scope === "project" ? "Project" : "Budget"} not found` });
+      }
+      await queryDB(
+        `INSERT INTO delivery_date_conditions (condition_type, scope, scope_id, min_lead_days, apply_to_admins, enabled, updated_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE min_lead_days = VALUES(min_lead_days), apply_to_admins = VALUES(apply_to_admins),
+           enabled = VALUES(enabled), updated_by = VALUES(updated_by)`,
+        [condition_type, scope, id, days, apply_to_admins ? 1 : 0, enabled === false ? 0 : 1, req.user.id]
+      );
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Removes a Project/Budget override entirely (a Global row can only ever be
+  // disabled/re-enabled above — deleting it isn't offered, since the resolver
+  // and this admin UI both assume exactly one Global row per condition_type
+  // always exists).
+  app.delete("/api/delivery-date-conditions/:id", authenticateToken, requireAdmin, requireModule("imports"), async (req, res) => {
+    try {
+      await queryDB("DELETE FROM delivery_date_conditions WHERE id = ? AND scope <> 'global'", [req.params.id]);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Unrestricted (any authenticated account, no admin/module gate) — lets a
+  // Delivery Date picker on the New Job Entry / Add MPR / Job Edit forms
+  // grey out blocked dates for THIS account before it even attempts a
+  // submit, using the exact same resolver the server enforces with.
+  app.get("/api/delivery-date-conditions/effective", authenticateToken, async (req: any, res) => {
+    try {
+      const conditionType = req.query.type as DeliveryConditionType;
+      if (conditionType !== "entry" && conditionType !== "job_edit") {
+        return res.status(400).json({ error: "type must be 'entry' or 'job_edit'" });
+      }
+      const projectId = req.query.project_id ? Number(req.query.project_id) : null;
+      const budgetId = req.query.budget_id ? Number(req.query.budget_id) : null;
+      const minLeadDays = await resolveMinLeadDays(queryDB, conditionType, {
+        projectId,
+        budgetId,
+        userRole: req.user.role
+      });
+      res.json({
+        min_lead_days: minLeadDays,
+        earliest_date: minLeadDays !== null ? addDaysToDateStr(todayInDhaka(), minLeadDays) : null
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
     }
   });
 

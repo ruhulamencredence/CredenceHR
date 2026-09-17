@@ -4,7 +4,8 @@ import { Capacitor } from '@capacitor/core';
 import { Project, MprNumber, Entry, Budget, BudgetItem, User, MprUsage, ClaimsNavRequest, JobsNavRequest, DashboardNavRequest } from '../types';
 import { Calendar, Building2, FileText, Package, Clock, Plus, AlertTriangle, CheckCircle2, ChevronRight, X, Trash2, Edit2, Lock, Wallet, ArrowLeft, FolderOpen, ListChecks, Search, Save, Briefcase, FileDown, Scissors, Route, Info, Contact, Bell } from 'lucide-react';
 import { apiUrl } from '../lib/api';
-import { formatDate, todayDateOnlyString, dateRangeOptions, formatDateLabel, latestDateStr } from '../lib/formatDate';
+import { formatDate, todayDateOnlyString, dateRangeOptions, formatDateLabel, latestDateStr, isDateBlockedByLeadTime } from '../lib/formatDate';
+import { useDeliveryLeadTime } from '../lib/useDeliveryLeadTime';
 import { useStableCallback } from '../lib/useStableCallback';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -126,6 +127,10 @@ const makeEmptyRow = (): MprRow => ({
 
 interface EntryRowProps {
   it: Entry;
+  // Needed only for this row's own GET /api/delivery-date-conditions/effective
+  // lookup (see the useDeliveryLeadTime call below) — fired only while this
+  // row isEditing, not for every row in a long list.
+  token: string;
   idx: number;
   isEditing: boolean;
   canEdit: boolean;
@@ -190,7 +195,7 @@ interface EntryRowProps {
 // filters, etc.) does not force React to re-diff every row of a potentially long
 // entries table — only the row(s) whose props actually changed re-render.
 const EntryRow = React.memo(function EntryRow({
-  it, idx, isEditing, canEdit, dateOnlyEdit, deletingEntryId,
+  it, token, idx, isEditing, canEdit, dateOnlyEdit, deletingEntryId,
   onStartEdit, onCancelEdit, onSaveEdit, onDelete, onSelectEditMpr,
   editJobName, setEditJobName,
   editMprSearchText, setEditMprSearchText,
@@ -203,6 +208,16 @@ const EntryRow = React.memo(function EntryRow({
   editSaving,
   editSplitRemaining, onSplitRemaining, splitSaving, splitError
 }: EntryRowProps) {
+  // Admin-set Delivery Date "minimum lead time" for changing THIS entry's
+  // Delivery Date (Condition Set's "job_edit" type — see
+  // deliveryDateConditions.ts). Only looked up while this row is actually
+  // being edited, so a long entries list doesn't fire one request per row.
+  const { earliestAllowedDate: editEarliestDate } = useDeliveryLeadTime(
+    token,
+    'job_edit',
+    isEditing ? it.project_id : null,
+    isEditing ? it.budget_id : null
+  );
   return (
     <tr className="hover:bg-slate-50/80">
       <td className="px-3 py-2.5 whitespace-nowrap text-slate-500">{idx + 1}</td>
@@ -352,16 +367,25 @@ const EntryRow = React.memo(function EntryRow({
                 className="px-2 py-1 bg-white border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-600 focus:outline-none appearance-none"
               >
                 <option value="">Select...</option>
-                {dateRangeOptions(editDeliveryRange.from, editDeliveryRange.to).map((d) => (
-                  <option key={d} value={d}>{formatDateLabel(d)}</option>
-                ))}
+                {dateRangeOptions(editDeliveryRange.from, editDeliveryRange.to).map((d) => {
+                  const blocked = isDateBlockedByLeadTime(d, editEarliestDate);
+                  return (
+                    <option key={d} value={d} disabled={blocked}>
+                      {formatDateLabel(d)}{blocked ? ' — needs more notice' : ''}
+                    </option>
+                  );
+                })}
               </select>
             ) : (
               <input
                 type="date"
                 value={editDeliveryDate}
                 onChange={(e) => setEditDeliveryDate(e.target.value)}
-                min={editDeliveryRange.from || undefined}
+                min={
+                  editEarliestDate && (!editDeliveryRange.from || editEarliestDate > editDeliveryRange.from)
+                    ? editEarliestDate
+                    : editDeliveryRange.from || undefined
+                }
                 max={editDeliveryRange.to || undefined}
                 className="px-2 py-1 bg-white border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-600 focus:outline-none"
               />
@@ -441,7 +465,7 @@ const EntryRow = React.memo(function EntryRow({
 // used on narrow screens so the "Job Entry Details" list never needs horizontal
 // scrolling on mobile (see the `md:hidden` / `hidden md:block` split further down).
 const EntryCard = React.memo(function EntryCard({
-  it, idx, isEditing, canEdit, dateOnlyEdit, deletingEntryId,
+  it, token, idx, isEditing, canEdit, dateOnlyEdit, deletingEntryId,
   onStartEdit, onCancelEdit, onSaveEdit, onDelete, onSelectEditMpr,
   editJobName, setEditJobName,
   editMprSearchText, setEditMprSearchText,
@@ -454,6 +478,14 @@ const EntryCard = React.memo(function EntryCard({
   editSaving,
   editSplitRemaining, onSplitRemaining, splitSaving, splitError
 }: EntryRowProps) {
+  // Same Condition Set lookup as EntryRow above (desktop table vs this mobile
+  // card are two separate components rendering the same data).
+  const { earliestAllowedDate: editEarliestDate } = useDeliveryLeadTime(
+    token,
+    'job_edit',
+    isEditing ? it.project_id : null,
+    isEditing ? it.budget_id : null
+  );
   const fieldLabel = "text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1";
   const inputCls = "w-full px-2.5 py-2 bg-slate-50 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none";
   // Compact "label ⋯ value" line used by the read-only (non-editing) layout — packs
@@ -593,16 +625,25 @@ const EntryCard = React.memo(function EntryCard({
                   className={`${inputCls} appearance-none`}
                 >
                   <option value="">Select...</option>
-                  {dateRangeOptions(editDeliveryRange.from, editDeliveryRange.to).map((d) => (
-                    <option key={d} value={d}>{formatDateLabel(d)}</option>
-                  ))}
+                  {dateRangeOptions(editDeliveryRange.from, editDeliveryRange.to).map((d) => {
+                    const blocked = isDateBlockedByLeadTime(d, editEarliestDate);
+                    return (
+                      <option key={d} value={d} disabled={blocked}>
+                        {formatDateLabel(d)}{blocked ? ' — needs more notice' : ''}
+                      </option>
+                    );
+                  })}
                 </select>
               ) : (
                 <input
                   type="date"
                   value={editDeliveryDate}
                   onChange={(e) => setEditDeliveryDate(e.target.value)}
-                  min={editDeliveryRange.from || undefined}
+                  min={
+                    editEarliestDate && (!editDeliveryRange.from || editEarliestDate > editDeliveryRange.from)
+                      ? editEarliestDate
+                      : editDeliveryRange.from || undefined
+                  }
                   max={editDeliveryRange.to || undefined}
                   className={inputCls}
                 />
@@ -746,16 +787,25 @@ const EntryCard = React.memo(function EntryCard({
                   className={`${inputCls} appearance-none`}
                 >
                   <option value="">Select...</option>
-                  {dateRangeOptions(editDeliveryRange.from, editDeliveryRange.to).map((d) => (
-                    <option key={d} value={d}>{formatDateLabel(d)}</option>
-                  ))}
+                  {dateRangeOptions(editDeliveryRange.from, editDeliveryRange.to).map((d) => {
+                    const blocked = isDateBlockedByLeadTime(d, editEarliestDate);
+                    return (
+                      <option key={d} value={d} disabled={blocked}>
+                        {formatDateLabel(d)}{blocked ? ' — needs more notice' : ''}
+                      </option>
+                    );
+                  })}
                 </select>
               ) : (
                 <input
                   type="date"
                   value={editDeliveryDate}
                   onChange={(e) => setEditDeliveryDate(e.target.value)}
-                  min={editDeliveryRange.from || undefined}
+                  min={
+                    editEarliestDate && (!editDeliveryRange.from || editEarliestDate > editDeliveryRange.from)
+                      ? editEarliestDate
+                      : editDeliveryRange.from || undefined
+                  }
                   max={editDeliveryRange.to || undefined}
                   className={inputCls}
                 />
@@ -1076,6 +1126,16 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // Form state
   const [entryDate, setEntryDate] = useState<string>(todayDateOnlyString());
   const [projectId, setProjectId] = useState<string>('');
+  // Admin-set Delivery Date "minimum lead time" for the New Job Entry form's
+  // own rows below (Condition Set's "entry" type — see
+  // deliveryDateConditions.ts). Re-resolves whenever the Project/Budget
+  // picked above changes; null (unrestricted) until both are chosen.
+  const { earliestAllowedDate: newEntryEarliestDate } = useDeliveryLeadTime(
+    token,
+    'entry',
+    projectId ? Number(projectId) : null,
+    selectedBudget?.id
+  );
   // Project Name is now a type-to-search dropdown (same pattern as MPR No) instead of
   // a plain <select> — projectSearchText holds what's typed/shown, showProjectDropdown
   // toggles the suggestion list.
@@ -3306,6 +3366,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                           <EntryCard
                             key={it.id}
                             it={it}
+                            token={token}
                             idx={idx}
                             isEditing={isEditingThis}
                             canEdit={canEditThis}
@@ -3792,9 +3853,14 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                               className="block w-full px-4 py-3.5 sm:py-3 bg-white border border-slate-300 rounded-xl text-slate-900 text-base sm:text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
                             >
                               <option value="">Select a Delivery Date...</option>
-                              {dateRangeOptions(selectedBudget.delivery_date_from, selectedBudget.delivery_date_to).map((d) => (
-                                <option key={d} value={d}>{formatDateLabel(d)}</option>
-                              ))}
+                              {dateRangeOptions(selectedBudget.delivery_date_from, selectedBudget.delivery_date_to).map((d) => {
+                                const blocked = isDateBlockedByLeadTime(d, newEntryEarliestDate);
+                                return (
+                                  <option key={d} value={d} disabled={blocked}>
+                                    {formatDateLabel(d)}{blocked ? ' — needs more notice' : ''}
+                                  </option>
+                                );
+                              })}
                             </select>
                           ) : (
                             <input
@@ -3802,7 +3868,12 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                               required={rowDeliveryFieldRequired}
                               value={row.deliveryDate}
                               onChange={(e) => updateRow(row.rowId, { deliveryDate: e.target.value })}
-                              min={selectedBudget?.delivery_date_from || undefined}
+                              min={
+                                newEntryEarliestDate &&
+                                (!selectedBudget?.delivery_date_from || newEntryEarliestDate > selectedBudget.delivery_date_from)
+                                  ? newEntryEarliestDate
+                                  : selectedBudget?.delivery_date_from || undefined
+                              }
                               max={selectedBudget?.delivery_date_to || undefined}
                               className="block w-full px-4 py-3.5 sm:py-3 bg-white border border-slate-300 rounded-xl text-slate-900 text-base sm:text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
                             />
@@ -4267,6 +4338,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                       <EntryCard
                         key={it.id}
                         it={it}
+                        token={token}
                         idx={idx}
                         isEditing={isEditing}
                         canEdit={canEdit}
@@ -4481,6 +4553,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                         <EntryRow
                           key={it.id}
                           it={it}
+                          token={token}
                           idx={idx}
                           isEditing={isEditing}
                           canEdit={canEdit}
@@ -4736,16 +4809,26 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                   className="block w-full px-4 py-3.5 sm:py-3 bg-white border border-slate-300 rounded-xl text-slate-900 text-base sm:text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
                 >
                   <option value="">Select a Delivery Date...</option>
-                  {dateRangeOptions(selectedBudget.delivery_date_from, selectedBudget.delivery_date_to).map((d) => (
-                    <option key={d} value={d}>{formatDateLabel(d)}</option>
-                  ))}
+                  {dateRangeOptions(selectedBudget.delivery_date_from, selectedBudget.delivery_date_to).map((d) => {
+                    const blocked = isDateBlockedByLeadTime(d, newEntryEarliestDate);
+                    return (
+                      <option key={d} value={d} disabled={blocked}>
+                        {formatDateLabel(d)}{blocked ? ' — needs more notice' : ''}
+                      </option>
+                    );
+                  })}
                 </select>
               ) : (
                 <input
                   type="date"
                   value={itemDeliveryDraft}
                   onChange={(e) => setItemDeliveryDraft(e.target.value)}
-                  min={selectedBudget?.delivery_date_from || undefined}
+                  min={
+                    newEntryEarliestDate &&
+                    (!selectedBudget?.delivery_date_from || newEntryEarliestDate > selectedBudget.delivery_date_from)
+                      ? newEntryEarliestDate
+                      : selectedBudget?.delivery_date_from || undefined
+                  }
                   max={selectedBudget?.delivery_date_to || undefined}
                   className="block w-full px-4 py-3.5 sm:py-3 bg-white border border-slate-300 rounded-xl text-slate-900 text-base sm:text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
                 />
@@ -4820,6 +4903,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           return (
             <EntryCard
               it={entry}
+              token={token}
               idx={entries.findIndex((e) => e.id === entry.id)}
               isEditing
               canEdit={isEntryEditable(entry)}

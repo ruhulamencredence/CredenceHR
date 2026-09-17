@@ -16,6 +16,7 @@
 // threaded through as deps rather than duplicated or re-imported directly.
 
 import type { Express } from "express";
+import { resolveMinLeadDays, addDaysToDateStr } from "./deliveryDateConditions";
 
 interface EntriesRouteDeps {
   authenticateToken: any;
@@ -348,6 +349,27 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
         }
       }
 
+      // Admin-set "minimum lead time" (Condition Set — see deliveryDateConditions.ts)
+      // for the "entry" condition_type, resolved for this Project/Budget. Enforced
+      // here too, not just as a floor on the client's date picker, so it can't be
+      // bypassed via a direct API call.
+      const entryMinLeadDays = await resolveMinLeadDays(queryDB, "entry", {
+        projectId: project_id,
+        budgetId: budget_id,
+        userRole: req.user.role
+      });
+      if (entryMinLeadDays !== null) {
+        const earliestAllowed = addDaysToDateStr(todayInDhaka(), entryMinLeadDays);
+        for (const it of items) {
+          const d = String(it.delivery_date).slice(0, 10);
+          if (d < earliestAllowed) {
+            return res.status(400).json({
+              error: `Delivery Date needs at least ${entryMinLeadDays} day(s) notice — the earliest allowed date is ${earliestAllowed}.`
+            });
+          }
+        }
+      }
+
       // An MPR No that carries several imported Excel rows (even ones that share the
       // exact same Description of Materials text) is now submitted as several items
       // sharing that same mpr_id, one per Excel row (budget_item_id) — that's expected,
@@ -668,6 +690,27 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
           const d = String(it.delivery_date).slice(0, 10);
           if (d < today) {
             return res.status(400).json({ error: `Delivery Date can't be earlier than today (${today}).` });
+          }
+        }
+      }
+
+      // Admin-set "minimum lead time" for the "entry" condition_type — Add MPR to Job
+      // is still a new-row entry, same as creating a Job (see POST /api/entries above).
+      {
+        const entryMinLeadDays = await resolveMinLeadDays(queryDB, "entry", {
+          projectId: project_id,
+          budgetId: budget_id,
+          userRole: req.user.role
+        });
+        if (entryMinLeadDays !== null) {
+          const earliestAllowed = addDaysToDateStr(todayInDhaka(), entryMinLeadDays);
+          for (const it of items) {
+            const d = String(it.delivery_date).slice(0, 10);
+            if (d < earliestAllowed) {
+              return res.status(400).json({
+                error: `Delivery Date needs at least ${entryMinLeadDays} day(s) notice — the earliest allowed date is ${earliestAllowed}.`
+              });
+            }
           }
         }
       }
@@ -1179,6 +1222,25 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
           return res.status(400).json({
             error: `Delivery Date can't be earlier than ${floor} (the entry date / today).`
           });
+        }
+
+        // Admin-set "minimum lead time" (Condition Set) for the "job_edit"
+        // condition_type — this IS an edit of an already-existing entry (as
+        // opposed to POST /api/entries / Add MPR above, which are new rows),
+        // only checked here alongside the entry-date/today floor, i.e. only
+        // when the Delivery Date is actually being changed.
+        const jobEditMinLeadDays = await resolveMinLeadDays(queryDB, "job_edit", {
+          projectId: entry.project_id,
+          budgetId: entry.budget_id,
+          userRole: req.user.role
+        });
+        if (jobEditMinLeadDays !== null) {
+          const earliestAllowed = addDaysToDateStr(todayInDhaka(), jobEditMinLeadDays);
+          if (newDeliveryDate < earliestAllowed) {
+            return res.status(400).json({
+              error: `Delivery Date needs at least ${jobEditMinLeadDays} day(s) notice — the earliest allowed date is ${earliestAllowed}.`
+            });
+          }
         }
       }
 

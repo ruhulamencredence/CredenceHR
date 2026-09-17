@@ -710,6 +710,26 @@ export interface EntryPermanentDeleteLog {
   permanently_deleted_at: string;
 }
 
+// Delivery Date "minimum lead time" condition — Admin Panel -> PEPM Manage ->
+// Data Import -> Condition Set (GET/PUT/POST/DELETE /api/delivery-date-conditions...,
+// resolver in deliveryDateConditions.ts). One row per (condition_type, scope,
+// scope_id): the single Global row (scope 'global', scope_id 0) plus any
+// number of Project/Budget override rows. scope_name is only populated for
+// override rows (joined project_name/budget_name), so the admin UI can show
+// "Project: X" / "Budget: Y" without a second lookup.
+export type DeliveryConditionType = 'entry' | 'job_edit';
+export type DeliveryConditionScope = 'global' | 'project' | 'budget';
+export interface DeliveryDateCondition {
+  id: number;
+  condition_type: DeliveryConditionType;
+  scope: DeliveryConditionScope;
+  scope_id: number;
+  min_lead_days: number;
+  apply_to_admins: number;
+  enabled: number;
+  scope_name?: string | null;
+}
+
 // One row of the Job Edit Approval queue — a "Job Edit" (Add MPR to a Final-
 // Submitted Job / Delete an MPR from one) made by a User who only has the
 // can_job_edit permission, sitting pending Admin review instead of being applied

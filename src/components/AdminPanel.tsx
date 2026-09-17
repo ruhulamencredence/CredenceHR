@@ -19,6 +19,7 @@ import { ApprovalTemplateManager } from './ApprovalTemplateManager';
 import { ApprovalBadge } from './ApprovalBadge';
 import { EmployeeTrackingPanel } from './EmployeeTrackingPanel';
 import { OfficeAttendancePanel } from './OfficeAttendancePanel';
+import { DeliveryDateConditionsPanel } from './DeliveryDateConditionsPanel';
 import { HolidayCalendarPanel } from './HolidayCalendarPanel';
 import { AssetManagementAdmin } from './AssetManagementAdmin';
 import { ServerProfilesPanel } from './ServerProfilesPanel';
@@ -4619,6 +4620,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
               )
             )}
           </div>
+
+          {/* Delivery Date "minimum lead time" — see DeliveryDateConditionsPanel.tsx */}
+          <DeliveryDateConditionsPanel token={token} />
         </div>
       )}
 
