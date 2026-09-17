@@ -461,11 +461,19 @@ export const OfficeAttendancePanel: React.FC<OfficeAttendancePanelProps> = ({ to
 
       <div className="border border-slate-200 rounded-xl overflow-x-auto">
         <table className="w-full text-sm">
-          {/* Sticky under the app header (Navbar is sticky top-0 h-16 — see
-              Navbar.tsx), same pattern as the User Management list (Admin
-              Panel -> Users) — both rows of this thead stay pinned below the
-              nav while the table body scrolls underneath. */}
-          <thead className="sticky top-16 z-10 bg-slate-50 border-b border-slate-200 text-xs text-slate-500">
+          {/* Sticky under the app header (Navbar.tsx is sticky top-0, h-16 =
+              4rem tall). A plain `top-16` (a fixed 64px) matches that on
+              desktop web, but on the native app Navbar is also pushed down
+              by `padding-top: env(safe-area-inset-top)` for the
+              notch/status bar — up to 50-60px more, device-dependent — so a
+              fixed 64px left this thead scrolling up UNDER the Navbar
+              (disappearing into it) instead of stopping right below it.
+              Computing the same safe-area offset here keeps it pinned at
+              the Navbar's actual rendered bottom edge on every device. */}
+          <thead
+            className="sticky z-10 bg-slate-50 border-b border-slate-200 text-xs text-slate-500"
+            style={{ top: 'calc(4rem + env(safe-area-inset-top, 0px))' }}
+          >
             <tr>
               <th className="text-left px-3 py-2 font-medium">Employee</th>
               <th className="text-left px-3 py-2 font-medium">Department</th>
