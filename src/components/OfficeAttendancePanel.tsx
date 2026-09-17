@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { Fingerprint, RefreshCw, LogIn, LogOut, AlertTriangle, Search, X, CheckCircle2 } from 'lucide-react';
+import { Fingerprint, RefreshCw, LogIn, LogOut, AlertTriangle, Search, X, CheckCircle2, Settings, Plus, Pencil, Trash2 } from 'lucide-react';
 import { OfficeAttendanceRow } from '../types';
 import { apiUrl } from '../lib/api';
 import { formatDate, todayDateOnlyString } from '../lib/formatDate';
@@ -21,10 +21,13 @@ interface ZkDeviceStatus {
   name: string;
   ip_address: string;
   port: number;
+  serial_number: string | null;
   is_active: number;
   last_synced_at: string | null;
   last_sync_status: string | null;
 }
+
+const emptyDeviceForm = { name: '', ip_address: '', port: '4370', serial_number: '', is_active: true };
 
 function timeOnly(value: string | null): string {
   if (!value) return '—';
@@ -71,6 +74,20 @@ export const OfficeAttendancePanel: React.FC<OfficeAttendancePanelProps> = ({ to
   const [singleSyncDeviceId, setSingleSyncDeviceId] = useState<number | null>(null);
   const singleSyncStartRef = useRef<number>(0);
   const anySyncing = syncing || singleSyncDeviceId !== null;
+
+  // Device registry management (Add / Edit / Delete) — this is what the
+  // "add one from ... -> Devices" hint below points at. Same GET
+  // /api/zk-devices this panel already polled for sync-status badges is
+  // reused as the list here; POST/PUT/DELETE drive the actual CRUD, so a
+  // new terminal's IP no longer needs a manual SQL INSERT against
+  // zk_devices.
+  const [showDeviceModal, setShowDeviceModal] = useState(false);
+  const [deviceForm, setDeviceForm] = useState(emptyDeviceForm);
+  const [editingDeviceId, setEditingDeviceId] = useState<number | null>(null);
+  const [deviceFormOpen, setDeviceFormOpen] = useState(false);
+  const [deviceSaving, setDeviceSaving] = useState(false);
+  const [deviceFormError, setDeviceFormError] = useState<string | null>(null);
+  const [deletingDeviceId, setDeletingDeviceId] = useState<number | null>(null);
 
   const fetchDevices = useCallback(async () => {
     try {
@@ -226,6 +243,83 @@ export const OfficeAttendancePanel: React.FC<OfficeAttendancePanelProps> = ({ to
     }
   };
 
+  const openAddDeviceForm = () => {
+    setEditingDeviceId(null);
+    setDeviceForm(emptyDeviceForm);
+    setDeviceFormError(null);
+    setDeviceFormOpen(true);
+  };
+
+  const openEditDeviceForm = (device: ZkDeviceStatus) => {
+    setEditingDeviceId(device.id);
+    setDeviceForm({
+      name: device.name,
+      ip_address: device.ip_address,
+      port: String(device.port),
+      serial_number: device.serial_number || '',
+      is_active: !!device.is_active
+    });
+    setDeviceFormError(null);
+    setDeviceFormOpen(true);
+  };
+
+  const closeDeviceForm = () => {
+    setDeviceFormOpen(false);
+    setDeviceFormError(null);
+  };
+
+  const handleSaveDevice = async () => {
+    if (!deviceForm.name.trim() || !deviceForm.ip_address.trim()) {
+      setDeviceFormError('Name and IP address are required.');
+      return;
+    }
+    setDeviceSaving(true);
+    setDeviceFormError(null);
+    try {
+      const body = {
+        name: deviceForm.name.trim(),
+        ip_address: deviceForm.ip_address.trim(),
+        port: Number(deviceForm.port) || 4370,
+        serial_number: deviceForm.serial_number.trim() || null,
+        is_active: deviceForm.is_active
+      };
+      const res = await fetch(
+        apiUrl(editingDeviceId ? `/api/zk-devices/${editingDeviceId}` : '/api/zk-devices'),
+        {
+          method: editingDeviceId ? 'PUT' : 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify(body)
+        }
+      );
+      const result = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(result.error || 'Failed to save device');
+      await fetchDevices();
+      closeDeviceForm();
+    } catch (err: any) {
+      setDeviceFormError(err.message || 'Failed to save device');
+    } finally {
+      setDeviceSaving(false);
+    }
+  };
+
+  const handleDeleteDevice = async (device: ZkDeviceStatus) => {
+    if (!window.confirm(`Delete "${device.name}" (${device.ip_address})? Its already-synced punch history is deleted too. This cannot be undone.`)) return;
+    setDeletingDeviceId(device.id);
+    try {
+      const res = await fetch(apiUrl(`/api/zk-devices/${device.id}`), {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const result = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(result.error || 'Failed to delete device');
+      await fetchDevices();
+    } catch (err: any) {
+      setError(err.message || `Failed to delete ${device.name}`);
+    } finally {
+      setDeletingDeviceId(null);
+    }
+  };
+
   // Overall % across devices for the progress bar below — a device counts as
   // "done" once its last_synced_at moves past the moment this run started
   // (same signal already used per-badge above), so this stays in lockstep
@@ -250,6 +344,12 @@ export const OfficeAttendancePanel: React.FC<OfficeAttendancePanelProps> = ({ to
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowDeviceModal(true)}
+            className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
+          >
+            <Settings className="w-3.5 h-3.5" /> Manage Devices
+          </button>
           <button
             onClick={handleSyncNow}
             disabled={anySyncing}
@@ -307,7 +407,12 @@ export const OfficeAttendancePanel: React.FC<OfficeAttendancePanelProps> = ({ to
           );
         })}
         {!devicesLoading && devices.length === 0 && (
-          <span className="text-xs text-slate-400">No devices registered yet — add one from Admin Panel -&gt; Office Attendance -&gt; Devices.</span>
+          <span className="text-xs text-slate-400">
+            No devices registered yet —{' '}
+            <button onClick={() => setShowDeviceModal(true)} className="text-emerald-600 hover:underline">
+              add one from Manage Devices
+            </button>.
+          </span>
         )}
       </div>
 
@@ -452,6 +557,155 @@ export const OfficeAttendancePanel: React.FC<OfficeAttendancePanelProps> = ({ to
           </tbody>
         </table>
       </div>
+
+      {/* Manage Devices modal — the ZKTeco device registry (zk_devices),
+          full CRUD from the interface instead of a manual SQL INSERT
+          whenever a new terminal's IP needs registering. */}
+      {showDeviceModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200 shrink-0">
+              <h3 className="text-base font-semibold text-slate-900 flex items-center gap-2">
+                <Fingerprint className="w-4 h-4 text-emerald-600" /> Manage ZKTeco Devices
+              </h3>
+              <button
+                onClick={() => { setShowDeviceModal(false); closeDeviceForm(); }}
+                className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="overflow-y-auto px-5 py-4 space-y-3">
+              {!deviceFormOpen && (
+                <button
+                  onClick={openAddDeviceForm}
+                  className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-sm rounded-lg border border-dashed border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Add Device
+                </button>
+              )}
+
+              {deviceFormOpen && (
+                <div className="border border-emerald-200 bg-emerald-50/50 rounded-xl p-3.5 space-y-2.5">
+                  <p className="text-xs font-semibold text-emerald-700">
+                    {editingDeviceId ? 'Edit Device' : 'Add Device'}
+                  </p>
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <div className="col-span-2">
+                      <label className="text-[11px] text-slate-500">Device Name</label>
+                      <input
+                        type="text"
+                        value={deviceForm.name}
+                        onChange={(e) => setDeviceForm((f) => ({ ...f, name: e.target.value }))}
+                        placeholder="e.g. Device 2 — Main Gate"
+                        className="w-full text-sm border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-emerald-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] text-slate-500">IP Address</label>
+                      <input
+                        type="text"
+                        value={deviceForm.ip_address}
+                        onChange={(e) => setDeviceForm((f) => ({ ...f, ip_address: e.target.value }))}
+                        placeholder="192.168.1.201"
+                        className="w-full text-sm border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-emerald-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] text-slate-500">Port</label>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={deviceForm.port}
+                        onChange={(e) => setDeviceForm((f) => ({ ...f, port: e.target.value.replace(/\D/g, '') }))}
+                        placeholder="4370"
+                        className="w-full text-sm border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-emerald-400"
+                      />
+                    </div>
+                    <div className="col-span-2">
+                      <label className="text-[11px] text-slate-500">Serial Number (optional)</label>
+                      <input
+                        type="text"
+                        value={deviceForm.serial_number}
+                        onChange={(e) => setDeviceForm((f) => ({ ...f, serial_number: e.target.value }))}
+                        className="w-full text-sm border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-emerald-400"
+                      />
+                    </div>
+                    <label className="col-span-2 flex items-center gap-2 text-xs text-slate-600">
+                      <input
+                        type="checkbox"
+                        checked={deviceForm.is_active}
+                        onChange={(e) => setDeviceForm((f) => ({ ...f, is_active: e.target.checked }))}
+                        className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-400"
+                      />
+                      Active (included in Sync Now / the scheduled pulls)
+                    </label>
+                  </div>
+
+                  {deviceFormError && (
+                    <p className="text-xs text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-2.5 py-1.5">{deviceFormError}</p>
+                  )}
+
+                  <div className="flex items-center gap-2 pt-1">
+                    <button
+                      onClick={handleSaveDevice}
+                      disabled={deviceSaving}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-60"
+                    >
+                      {deviceSaving && <Spinner size={12} />} {editingDeviceId ? 'Save Changes' : 'Add Device'}
+                    </button>
+                    <button
+                      onClick={closeDeviceForm}
+                      disabled={deviceSaving}
+                      className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <div className="space-y-2">
+                {devicesLoading && <p className="text-xs text-slate-400">Loading devices…</p>}
+                {!devicesLoading && devices.length === 0 && (
+                  <p className="text-xs text-slate-400">No devices registered yet — add one above.</p>
+                )}
+                {devices.map((d) => (
+                  <div key={d.id} className="flex items-center justify-between gap-2 border border-slate-200 rounded-xl px-3 py-2.5">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-slate-800 truncate flex items-center gap-1.5">
+                        {d.name}
+                        {!d.is_active && (
+                          <span className="text-[10px] font-normal px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200">Paused</span>
+                        )}
+                      </p>
+                      <p className="text-xs text-slate-500 truncate">{d.ip_address}:{d.port}{d.serial_number ? ` · SN: ${d.serial_number}` : ''}</p>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        onClick={() => openEditDeviceForm(d)}
+                        title="Edit"
+                        className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:bg-slate-100 hover:text-emerald-700"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteDevice(d)}
+                        disabled={deletingDeviceId === d.id}
+                        title="Delete"
+                        className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:bg-rose-50 hover:text-rose-600 disabled:opacity-40"
+                      >
+                        {deletingDeviceId === d.id ? <Spinner size={14} /> : <Trash2 className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

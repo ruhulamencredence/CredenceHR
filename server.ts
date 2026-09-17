@@ -3590,13 +3590,30 @@ async function startServer() {
 
   app.post("/api/zk-devices", authenticateToken, requireAdmin, requireModule("office_attendance"), async (req: any, res) => {
     try {
-      const { name, ip_address, port } = req.body;
+      const { name, ip_address, port, serial_number } = req.body;
       if (!name || !ip_address) return res.status(400).json({ error: "name and ip_address are required" });
       const result: any = await queryDB(
-        "INSERT INTO zk_devices (name, ip_address, port) VALUES (?, ?, ?)",
-        [name, ip_address, port || 4370]
+        "INSERT INTO zk_devices (name, ip_address, port, serial_number) VALUES (?, ?, ?, ?)",
+        [name, ip_address, port || 4370, serial_number || null]
       );
       res.json({ id: result.insertId });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Edit a device's registry row (name/IP/port/serial, and is_active — a
+  // device can be paused without deleting its punch history, since deleting
+  // it would CASCADE-delete every zk_attendance_logs row tied to it).
+  app.put("/api/zk-devices/:id", authenticateToken, requireAdmin, requireModule("office_attendance"), async (req: any, res) => {
+    try {
+      const { name, ip_address, port, serial_number, is_active } = req.body;
+      if (!name || !ip_address) return res.status(400).json({ error: "name and ip_address are required" });
+      await queryDB(
+        "UPDATE zk_devices SET name = ?, ip_address = ?, port = ?, serial_number = ?, is_active = ? WHERE id = ?",
+        [name, ip_address, port || 4370, serial_number || null, is_active ? 1 : 0, req.params.id]
+      );
+      res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
