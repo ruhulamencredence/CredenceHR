@@ -533,76 +533,78 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
           </>
         )}
 
-        {/* Minimize/expand toggle — persistent (desktop) variant only. Shrinks
-            the column down to a slim icon rail (labels/section headers
-            hidden, collapsible groups fall back to a flat icon list — see
-            renderGroup) so the main content gets more width without losing
-            one-click access to every item. Choice is remembered across
-            reloads via localStorage above. */}
-        {isPersistent && (
-          <div className={`flex px-2.5 pt-3 ${collapsed ? 'justify-center' : 'justify-end'}`}>
-            <button
-              type="button"
-              onClick={toggleCollapsed}
-              title={collapsed ? 'Expand sidebar' : 'Minimize sidebar'}
-              aria-label={collapsed ? 'Expand sidebar' : 'Minimize sidebar'}
-              className="w-7 h-7 rounded-full flex items-center justify-center text-white/70 hover:text-white hover:bg-white/10 transition-colors"
-            >
-              {collapsed ? <ChevronsRight className="w-4 h-4" /> : <ChevronsLeft className="w-4 h-4" />}
-            </button>
-          </div>
-        )}
-
-        <nav className={`flex-1 overflow-y-auto py-4 px-2.5 space-y-0.5 ${isPersistent ? 'gsidebar-no-scrollbar' : ''}`}>
-          {/* Menu search — searches every visible item (Dashboard, Main, Self
-              Service, and every Admin Panel group), regardless of whether its
-              group is currently expanded. Selecting a result navigates
-              straight there, same as clicking that item directly. */}
-          {!collapsed && (
-            <div className="relative mb-2">
-              <div className="relative">
-                <Search className="w-3.5 h-3.5 text-white/40 absolute left-2.5 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  value={sidebarSearch}
-                  onChange={(e) => setSidebarSearch(e.target.value)}
-                  placeholder="Search menu…"
-                  className="w-full pl-8 pr-7 py-2 rounded-xl bg-white/10 text-white text-[13px] placeholder-white/40 focus:outline-none focus:bg-white/15 transition-colors"
-                />
-                {sidebarSearch && (
-                  <button
-                    type="button"
-                    onClick={() => setSidebarSearch('')}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-white/50 hover:text-white"
-                    aria-label="Clear search"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                )}
-              </div>
-
-              {searchQuery && (
-                <div className="absolute left-0 right-0 mt-1 max-h-72 overflow-y-auto rounded-xl bg-[#3a0d70] border border-white/15 shadow-xl z-20 py-1">
-                  {searchResults.length > 0 ? (
-                    searchResults.map((item) => (
-                      <button
-                        key={item.key}
-                        type="button"
-                        onClick={() => selectSearchResult(item.onClick)}
-                        className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-white/85 hover:bg-white/10 transition-colors"
-                      >
-                        <item.icon className="w-4 h-4 shrink-0" />
-                        <span className="text-[13px] truncate">{item.label}</span>
-                      </button>
-                    ))
-                  ) : (
-                    <p className="px-3 py-2.5 text-xs text-white/50">No matching menu.</p>
+        {/* Menu search + Minimize/expand toggle, same row — both sit ABOVE
+            <nav> (which is the only scrolling element in this drawer), so
+            neither one ever scrolls out of view: they're not inside the
+            scrollable area at all, rather than being "sticky" within it.
+            The toggle is persistent (desktop) variant only — it shrinks the
+            column down to a slim icon rail (labels/section headers hidden,
+            collapsible groups fall back to a flat icon list — see
+            renderGroup), remembered across reloads via localStorage above.
+            Search itself searches every visible item (Dashboard, Main, Self
+            Service, and every Admin Panel group), regardless of whether its
+            group is currently expanded — selecting a result navigates
+            straight there, same as clicking that item directly. */}
+        <div className={`flex items-center gap-2 px-2.5 pt-3 ${isPersistent && collapsed ? 'justify-center' : ''}`}>
+            {!(isPersistent && collapsed) && (
+              <div className="relative flex-1 min-w-0">
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 text-white/40 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={sidebarSearch}
+                    onChange={(e) => setSidebarSearch(e.target.value)}
+                    placeholder="Search menu…"
+                    className="w-full pl-8 pr-7 py-2 rounded-xl bg-white/10 text-white text-[13px] placeholder-white/40 focus:outline-none focus:bg-white/15 transition-colors"
+                  />
+                  {sidebarSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setSidebarSearch('')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-white/50 hover:text-white"
+                      aria-label="Clear search"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
                   )}
                 </div>
-              )}
-            </div>
-          )}
 
+                {searchQuery && (
+                  <div className="absolute left-0 right-0 mt-1 max-h-72 overflow-y-auto rounded-xl bg-[#3a0d70] border border-white/15 shadow-xl z-20 py-1">
+                    {searchResults.length > 0 ? (
+                      searchResults.map((item) => (
+                        <button
+                          key={item.key}
+                          type="button"
+                          onClick={() => selectSearchResult(item.onClick)}
+                          className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-white/85 hover:bg-white/10 transition-colors"
+                        >
+                          <item.icon className="w-4 h-4 shrink-0" />
+                          <span className="text-[13px] truncate">{item.label}</span>
+                        </button>
+                      ))
+                    ) : (
+                      <p className="px-3 py-2.5 text-xs text-white/50">No matching menu.</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {isPersistent && (
+              <button
+                type="button"
+                onClick={toggleCollapsed}
+                title={collapsed ? 'Expand sidebar' : 'Minimize sidebar'}
+                aria-label={collapsed ? 'Expand sidebar' : 'Minimize sidebar'}
+                className="w-7 h-7 rounded-full flex items-center justify-center text-white/70 hover:text-white hover:bg-white/10 transition-colors shrink-0"
+              >
+                {collapsed ? <ChevronsRight className="w-4 h-4" /> : <ChevronsLeft className="w-4 h-4" />}
+              </button>
+            )}
+        </div>
+
+        <nav className={`flex-1 overflow-y-auto py-4 px-2.5 space-y-0.5 ${isPersistent ? 'gsidebar-no-scrollbar' : ''}`}>
           {/* Dashboard — always available, lands back on the User Panel's own
               dashboard regardless of which panel is currently showing. */}
           <button
