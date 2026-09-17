@@ -306,19 +306,24 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
               )}
             </div>
 
+            {/* Department filter — kept visible on mobile (both native app and a
+                narrow web browser), unlike Designation/Clear Filters/View Switcher
+                just below, which stay desktop-only. Department is the one filter
+                most worth having on a phone: Employee Directory has no other way
+                to narrow a long roster down to one team while on mobile. */}
+            <select
+              value={departmentFilter}
+              onChange={(e) => setDepartmentFilter(e.target.value)}
+              className="w-full lg:w-auto px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-700 focus:ring-2 focus:ring-blue-600 focus:outline-none"
+            >
+              <option value="">All Departments</option>
+              {departments.map((d) => (
+                <option key={d.id} value={d.id}>{d.name}</option>
+              ))}
+            </select>
+
             {!isNativeApp && (
               <div className="hidden sm:contents">
-                <select
-                  value={departmentFilter}
-                  onChange={(e) => setDepartmentFilter(e.target.value)}
-                  className="px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-700 focus:ring-2 focus:ring-blue-600 focus:outline-none"
-                >
-                  <option value="">All Departments</option>
-                  {departments.map((d) => (
-                    <option key={d.id} value={d.id}>{d.name}</option>
-                  ))}
-                </select>
-
                 <select
                   value={designationFilter}
                   onChange={(e) => setDesignationFilter(e.target.value)}
