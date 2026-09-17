@@ -4,7 +4,7 @@ import {
   CalendarClock, ListChecks, CheckSquare, ChevronDown, Building2, Users, Users2,
   BarChart3, Upload, History, Recycle, Navigation, Bell, ShieldCheck,
   Contact, Calendar, Clock, Fingerprint, Banknote, Package, LayoutDashboard, Server, MessageSquare,
-  ChevronsLeft, ChevronsRight,
+  ChevronsLeft, ChevronsRight, ShieldAlert,
 } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { User, AdminModuleKey } from '../types';
@@ -57,7 +57,7 @@ interface GlobalSidebarProps {
   // 'my_conveyance' is the one exception below: not its own module_permissions
   // entry, just the "My Conveyance Bill Claim" sub-view shown alongside
   // 'conveyance' in claimsGroup, gated on the same 'conveyance' grant.
-  onGoToAdminModule: (target: Exclude<AdminModuleKey, 'claims' | 'conveyance'> | 'my_conveyance' | 'dashboard' | 'servers') => void;
+  onGoToAdminModule: (target: Exclude<AdminModuleKey, 'claims' | 'conveyance'> | 'my_conveyance' | 'dashboard' | 'servers' | 'permanent_delete_log') => void;
   // Android APK build info modal — previously a header icon, moved in here so
   // the header itself can stay down to just hamburger + profile + logout.
   onOpenApkInfo: () => void;
@@ -347,6 +347,15 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
       label: 'Servers',
       icon: Server,
       onClick: () => onGoToAdminModule('servers'),
+    });
+    // Same "not a grantable module" reasoning as Servers above — this exists
+    // specifically so a Superadmin can see an Admin's permanent Job Recycle
+    // erases too, so it can never be delegated away via module_permissions.
+    adminFlatItems.push({
+      key: 'permanent_delete_log',
+      label: 'Permanent Delete Log',
+      icon: ShieldAlert,
+      onClick: () => onGoToAdminModule('permanent_delete_log'),
     });
   }
 

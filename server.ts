@@ -258,6 +258,37 @@ async function ensureSchemaMigrations() {
     console.warn("⚠️ Could not ensure entry_edit_history table exists: " + err.message);
   }
 
+  // Permanent Delete Log — Superadmin-only audit trail of every entry ever
+  // erased from the Job Recycle bin (DELETE /api/entries/:id/permanent, which
+  // hard-deletes the entries row). No FK to entries on purpose: the row this
+  // refers to is already gone by the time the log is read, so every
+  // identifying field here is a plain snapshot taken right before that
+  // DELETE, not a live join — see schema.sql's comment on this table.
+  try {
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS entry_permanent_delete_log (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        entry_id INT NOT NULL,
+        entry_date DATE,
+        job_name VARCHAR(30),
+        job_no VARCHAR(100),
+        project_name VARCHAR(150),
+        mpr_no VARCHAR(100),
+        item_name VARCHAR(255),
+        requisitioned_qty DECIMAL(14,2),
+        entry_created_by_name VARCHAR(100),
+        entry_deleted_by_name VARCHAR(100),
+        entry_deleted_at TIMESTAMP NULL,
+        permanently_deleted_by INT NULL,
+        permanently_deleted_by_name VARCHAR(100) NOT NULL,
+        permanently_deleted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (permanently_deleted_by) REFERENCES users(id) ON DELETE SET NULL
+      )
+    `);
+  } catch (err: any) {
+    console.warn("⚠️ Could not ensure entry_permanent_delete_log table exists: " + err.message);
+  }
+
   // Job Edit Approval queue — same self-healing pattern as entry_edit_history above.
   // See schema.sql's job_edit_requests comment for the full explanation.
   try {
@@ -5505,6 +5536,7 @@ async function startServer() {
   registerEntriesRoutes(app, {
     authenticateToken,
     requireAdmin,
+    requireSuperAdmin,
     requireModule,
     requireBudgetModuleAccess,
     queryDB,
