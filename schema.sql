@@ -531,6 +531,38 @@ CREATE TABLE IF NOT EXISTS entry_permanent_delete_log (
   FOREIGN KEY (permanently_deleted_by) REFERENCES users(id) ON DELETE SET NULL
 );
 
+-- Delivery Date "minimum lead time" conditions (Admin Panel -> PEPM Manage ->
+-- Data Import -> Condition Set). Two independent condition_types: "entry"
+-- (New Job Entry / Add MPR to Job) and "job_edit" (changing an EXISTING
+-- entry's Delivery Date). Each has one Global row (scope='global',
+-- scope_id=0) plus optional Project/Budget override rows; scope_id is 0
+-- (not NULL) for the Global row so the unique key can actually enforce
+-- "one Global row per condition_type" — MySQL treats every NULL in a
+-- unique index as distinct, which would silently allow duplicate Global
+-- rows otherwise. Resolution order (see deliveryDateConditions.ts):
+-- Budget override > Project override > Global > nothing configured/enabled
+-- = unrestricted. apply_to_admins opts an Admin/Superadmin INTO the same
+-- limit too (off by default, since every other lock in this app already
+-- exempts them).
+CREATE TABLE IF NOT EXISTS delivery_date_conditions (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  condition_type ENUM('entry','job_edit') NOT NULL,
+  scope ENUM('global','project','budget') NOT NULL DEFAULT 'global',
+  scope_id INT NOT NULL DEFAULT 0,
+  min_lead_days INT NOT NULL DEFAULT 0,
+  apply_to_admins TINYINT(1) NOT NULL DEFAULT 0,
+  enabled TINYINT(1) NOT NULL DEFAULT 0,
+  updated_by INT NULL,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_delivery_condition (condition_type, scope, scope_id),
+  FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
+);
+
+INSERT IGNORE INTO delivery_date_conditions (condition_type, scope, scope_id, min_lead_days, apply_to_admins, enabled) VALUES
+  ('entry', 'global', 0, 0, 0, 0),
+  ('job_edit', 'global', 0, 0, 0, 0);
+
 -- Job Edit Approval queue (Job Edit -> Add MPR to a Final-Submitted Job / Delete an
 -- MPR from one, when the acting User only has the can_job_edit permission, not
 -- Admin/Superadmin). Instead of applying immediately, the action is queued here and
