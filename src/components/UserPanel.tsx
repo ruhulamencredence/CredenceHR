@@ -2693,7 +2693,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           Claim/Entries/History) is replaced by the Remote Attendance card
           overlapping the bottom edge, same can_use_attendance gating as
           before. Shown only on the Dashboard (mobileActiveSection === null). */}
-      <div className={`${mobileActiveSection === null ? 'block' : 'hidden'} md:hidden relative`}>
+      <div className={`${mobileActiveSection === null ? 'block mobile-page-in' : 'hidden'} md:hidden relative`}>
         <div className="relative rounded-b-[28px] shadow-sm" style={{ background: 'var(--g-gradient)' }}>
           <div className="px-6 pt-6 pb-10 sm:px-8 sm:pb-10 text-center">
             <p className="text-xs font-medium tracking-wide text-white/70">Welcome back</p>
@@ -2779,7 +2779,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           the complete Check In/Check Out history on mobile (with a floating "Add
           Check In/Out" button opening the form in a sheet) and the plain Check
           In/Out form directly on desktop, where there's room for it inline. */}
-      <div className={mobileActiveSection === 'claim' && canSeeMovementClaim ? 'block max-md:!mt-0' : 'hidden'}>
+      <div className={mobileActiveSection === 'claim' && canSeeMovementClaim ? 'block max-md:!mt-0 mobile-page-in' : 'hidden'}>
         <div className="hidden md:block">
           <ClaimCard token={token} />
         </div>
@@ -2798,7 +2798,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           mobile-only. onCheckOut/refreshKey wired the same as the 'claim'
           section's copy above, so a still-open claim can be completed straight
           from this list too, without bouncing back to the Movement Claim page. */}
-      <div className={mobileActiveSection === 'claims' && canSeeMovementClaim ? 'block md:hidden max-md:!mt-0' : 'hidden'}>
+      <div className={mobileActiveSection === 'claims' && canSeeMovementClaim ? 'block md:hidden max-md:!mt-0 mobile-page-in' : 'hidden'}>
         <MyClaimsCard
           token={token}
           onBack={() => goToMobileSection(null)}
@@ -2811,7 +2811,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           from the GPS-based Movement Claims above). Reachable via its own mobile
           tile / bottom-nav item and the Navbar's "Claims" header menu on desktop
           (see claimsNavRequest above) — either way now its own dedicated page. */}
-      <div className={mobileActiveSection === 'conveyanceClaim' && canSeeConveyanceClaim ? 'block max-md:!mt-0' : 'hidden'}>
+      <div className={mobileActiveSection === 'conveyanceClaim' && canSeeConveyanceClaim ? 'block max-md:!mt-0 mobile-page-in' : 'hidden'}>
         <ConveyanceClaimCard token={token} onBack={() => goToMobileSection(null)} />
       </div>
 
@@ -2820,7 +2820,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           dedicated-page pattern as Conveyance Bill Claim). Gated by
           can_view_leave_summary — see canSeeLeave above — same as the Leave
           Summary card itself and the BottomNav "Leave" tab that opens this. */}
-      <div className={mobileActiveSection === 'leave' && canSeeLeave ? 'block max-md:!mt-0' : 'hidden'}>
+      <div className={mobileActiveSection === 'leave' && canSeeLeave ? 'block max-md:!mt-0 mobile-page-in' : 'hidden'}>
         <LeaveReviewPage token={token} onBack={() => goToMobileSection(null)} />
       </div>
 
@@ -2829,7 +2829,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           the BottomNav's fallback last tab for any account without Leave
           access (canSeeLeave above), so the bar never collapses to just
           Home. */}
-      <div className={mobileActiveSection === 'employeeDirectory' ? 'block max-md:!mt-0' : 'hidden'}>
+      <div className={mobileActiveSection === 'employeeDirectory' ? 'block max-md:!mt-0 mobile-page-in' : 'hidden'}>
         <EmployeeDirectory
           token={token}
           user={user}
@@ -2841,13 +2841,13 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
       {/* Notice Board — a persistent, browsable version of the same active
           notices NoticePopup.tsx shows once as a modal right after login;
           ungated for every account, same as Employee Directory above. */}
-      <div className={mobileActiveSection === 'noticeBoard' ? 'block max-md:!mt-0' : 'hidden'}>
+      <div className={mobileActiveSection === 'noticeBoard' ? 'block max-md:!mt-0 mobile-page-in' : 'hidden'}>
         <NoticeBoard token={token} onBack={() => goToMobileSection(null)} />
       </div>
 
       {/* Timesheet — same Self Service page GlobalSidebar's "Timesheet" item
           opens, reachable here too via the BottomNav "Timesheet" tab below. */}
-      <div className={mobileActiveSection === 'timesheet' ? 'block max-md:!mt-0' : 'hidden'}>
+      <div className={mobileActiveSection === 'timesheet' ? 'block max-md:!mt-0 mobile-page-in' : 'hidden'}>
         <Timesheet token={token} onBack={() => goToMobileSection(null)} attendanceProjectId={user.attendance_project_id} />
       </div>
 
@@ -2937,7 +2937,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           gradient square with a soft colored glow (white icon on top), rather than a
           flat white icon box, so it reads at a glance like a home-screen app icon. */}
       {mobileActiveSection === null && (
-        <div className="md:hidden grid grid-cols-3 gap-2.5">
+        <div className="md:hidden grid grid-cols-3 gap-2.5 mobile-page-in">
           {canSeeBudgetModule && (
           <button
             type="button"
@@ -3081,7 +3081,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
         }`}
       >
         <div
-          className={`${mobileActiveSection === 'budget' && canSeeBudgetModule ? 'block' : 'hidden'} ${
+          className={`${mobileActiveSection === 'budget' && canSeeBudgetModule ? 'block mobile-page-in' : 'hidden'} ${
             !showingClaimsPage && desktopActiveSection === 'budget' && canSeeBudgetModule ? 'md:block lg:col-span-3' : 'md:hidden lg:col-span-1'
           }`}
         >
@@ -4022,7 +4022,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           {/* Jobs summary card — every distinct Job this user has submitted, as a
               scrollable Job No + Job Name list (not just a bare count). */}
           <div
-            className={`bg-gradient-to-br from-violet-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl border border-white/70 rounded-[28px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] overflow-hidden md:bg-white md:from-transparent md:via-transparent md:to-transparent md:backdrop-blur-none md:border-slate-200 md:rounded-lg md:shadow-none ${mobileActiveSection === 'jobs' && canSeeBudgetModule ? 'block' : 'hidden'} ${
+            className={`bg-gradient-to-br from-violet-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl border border-white/70 rounded-[28px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] overflow-hidden md:bg-white md:from-transparent md:via-transparent md:to-transparent md:backdrop-blur-none md:border-slate-200 md:rounded-lg md:shadow-none ${mobileActiveSection === 'jobs' && canSeeBudgetModule ? 'block mobile-page-in' : 'hidden'} ${
               !showingClaimsPage && desktopActiveSection === 'jobs' && canSeeBudgetModule ? 'md:block' : 'md:hidden'
             }`}
           >
@@ -4155,7 +4155,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           )}
           <div
             ref={entriesSectionRef}
-            className={`bg-gradient-to-br from-violet-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl border border-white/70 rounded-[28px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] overflow-hidden md:bg-white md:from-transparent md:via-transparent md:to-transparent md:backdrop-blur-none md:border-slate-200 md:rounded-2xl md:shadow-sm ${mobileActiveSection === 'entries' && canSeeBudgetModule ? 'block max-md:!mt-0' : 'hidden'} ${
+            className={`bg-gradient-to-br from-violet-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl border border-white/70 rounded-[28px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] overflow-hidden md:bg-white md:from-transparent md:via-transparent md:to-transparent md:backdrop-blur-none md:border-slate-200 md:rounded-2xl md:shadow-sm ${mobileActiveSection === 'entries' && canSeeBudgetModule ? 'block max-md:!mt-0 mobile-page-in' : 'hidden'} ${
               !showingClaimsPage && desktopActiveSection === 'entries' && canSeeBudgetModule ? 'md:block' : 'md:hidden'
             }`}
           >
@@ -4716,7 +4716,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
         </div>
       )}
       {user.can_job_edit && (
-        <div className={`${mobileActiveSection === 'jobEdit' ? 'block' : 'hidden'} ${
+        <div className={`${mobileActiveSection === 'jobEdit' ? 'block mobile-page-in' : 'hidden'} ${
           !showingClaimsPage && desktopActiveSection === 'jobEdit' ? 'md:block' : 'md:hidden'
         } !mt-0 -mx-2 sm:-mx-6 lg:-mx-8 md:-mt-8 md:-mb-8`}>
           <JobEditPanel token={token} />
