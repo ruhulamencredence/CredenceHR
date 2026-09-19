@@ -100,26 +100,25 @@ export const LeaveSummaryCard: React.FC<LeaveSummaryCardProps> = ({ token, onOpe
 
       {/* Total Leave strip — overlaps the header the same way AttendanceCard
           overlaps the Dashboard banner, so this reads as one connected card.
-          Same liquid-glass treatment as the outer card (translucent white +
-          backdrop-blur instead of a flat white box), so the violet header
-          shows softly through it. */}
+          Available/Used are now their own separate tiles (same grid-cols-2
+          gap-2 + px-4 py-3 backdrop-blur-lg tile treatment as My Attendance's
+          In Time/Out Time tiles) instead of one shared box, so this card
+          matches that one's design exactly. */}
       <div className="px-5 sm:px-6 -mt-4 pb-5">
-        <div className="bg-white/50 backdrop-blur-xl border border-white/60 rounded-2xl px-4 py-3 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)]">
-          <p className="text-xs font-bold text-slate-900">Total Leave</p>
-          <p className="text-[11px] text-slate-500 mt-0.5">Period 1 Jan {year} – 31 Dec {year}</p>
-          <div className="mt-2.5 flex items-center gap-6">
-            <div>
-              <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
-                <span className="w-2 h-2 rounded-full bg-emerald-500" /> Available
-              </div>
-              <p className="text-lg font-bold text-slate-900 mt-0.5">{available}</p>
+        <p className="text-xs font-bold text-slate-900">Total Leave</p>
+        <p className="text-[11px] text-slate-500 mt-0.5 mb-2">Period 1 Jan {year} – 31 Dec {year}</p>
+        <div className="grid grid-cols-2 gap-2">
+          <div className="rounded-xl px-4 py-3 backdrop-blur-lg border bg-emerald-100/50 border-white/60">
+            <div className="flex items-center gap-1.5 text-xs font-medium text-slate-500">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" /> Available
             </div>
-            <div>
-              <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
-                <span className="w-2 h-2 rounded-full" style={{ backgroundColor: 'var(--g-accent)' }} /> Leave Used
-              </div>
-              <p className="text-lg font-bold text-slate-900 mt-0.5">{used}</p>
+            <p className="mt-0.5 text-lg font-bold text-emerald-700">{available}</p>
+          </div>
+          <div className="rounded-xl px-4 py-3 backdrop-blur-lg border bg-violet-100/50 border-white/60">
+            <div className="flex items-center gap-1.5 text-xs font-medium text-slate-500">
+              <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: 'var(--g-accent)' }} /> Leave Used
             </div>
+            <p className="mt-0.5 text-lg font-bold" style={{ color: 'var(--g-accent)' }}>{used}</p>
           </div>
         </div>
       </div>
