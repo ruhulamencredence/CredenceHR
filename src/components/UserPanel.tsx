@@ -2824,7 +2824,12 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           access (canSeeLeave above), so the bar never collapses to just
           Home. */}
       <div className={mobileActiveSection === 'employeeDirectory' ? 'block max-md:!mt-0' : 'hidden'}>
-        <EmployeeDirectory token={token} user={user} onBack={() => goToMobileSection(null)} />
+        <EmployeeDirectory
+          token={token}
+          user={user}
+          onBack={() => goToMobileSection(null)}
+          isActive={mobileActiveSection === 'employeeDirectory'}
+        />
       </div>
 
       {/* Notice Board — a persistent, browsable version of the same active
