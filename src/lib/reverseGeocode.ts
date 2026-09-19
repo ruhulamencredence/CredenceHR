@@ -35,6 +35,14 @@ function shorten(displayName: string, parts = 3): string {
 }
 
 export function reverseGeocode(lat: number, lng: number): Promise<string | null> {
+  // Defensive: callers occasionally pass through a DB-sourced DECIMAL field that
+  // arrived over JSON as a numeric string (see MyClaimsCard.tsx) — coerce here too
+  // so a slip at a call site degrades to "no address found" instead of crashing
+  // the caller's render (a bare NaN.toFixed()/fetch with lat=NaN would throw/404).
+  lat = Number(lat);
+  lng = Number(lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return Promise.resolve(null);
+
   const key = coordKey(lat, lng);
   const cached = cache.get(key);
   if (cached) return cached;
