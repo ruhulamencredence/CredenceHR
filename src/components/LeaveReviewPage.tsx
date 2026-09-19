@@ -73,7 +73,11 @@ export const LeaveReviewPage: React.FC<LeaveReviewPageProps> = ({ token, onBack 
 
   return (
     <>
-    <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+    {/* Liquid glass on mobile (soft violet-tint gradient + backdrop-blur +
+        big rounded corners) — same Dashboard mobile look as Select a
+        Budget/Jobs/My Claims/Conveyance Bill Claim. Desktop's md: overrides
+        keep the original plain white panel untouched. */}
+    <div className="bg-gradient-to-br from-violet-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl border border-white/70 rounded-[28px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] overflow-hidden md:bg-white md:from-transparent md:via-transparent md:to-transparent md:backdrop-blur-none md:border-slate-200 md:rounded-2xl md:shadow-sm">
       {/* Back to Menu / Submit Leave — desktop only now. Mobile drops the
           on-screen Back button (the header shows this page's own "Leave
           Applications" title in the logo's place, see headerPageTitle.ts in
@@ -117,7 +121,7 @@ export const LeaveReviewPage: React.FC<LeaveReviewPageProps> = ({ token, onBack 
           color + white text + soft shadow, and a small round count badge on
           every pill (white/20-on-accent when active, slate-200-on-slate-500
           when not). */}
-      <div className="px-5 sm:px-6 mt-4 md:mt-4 pt-4 md:pt-0 flex items-center gap-1.5 rounded-full bg-slate-100 p-1.5 text-xs font-semibold">
+      <div className="px-5 sm:px-6 mt-4 md:mt-4 pt-4 md:pt-0 flex items-center gap-1.5 rounded-full bg-white/50 md:bg-slate-100 backdrop-blur md:backdrop-blur-none p-1.5 text-xs font-semibold">
         {TABS.map((t) => {
           const active = tab === t.key;
           const count = countFor(t.key);
@@ -162,7 +166,12 @@ export const LeaveReviewPage: React.FC<LeaveReviewPageProps> = ({ token, onBack 
         ) : (
           <div className="space-y-3">
             {filtered.map((a) => (
-              <div key={a.id} className="border border-slate-200 rounded-xl p-3.5">
+              // No backdrop-blur on these cards on purpose — a per-item blur
+              // layer for every application in the list is what made other
+              // pages (Employee Directory, Job Entry Details) stutter on
+              // Android. A plain, more opaque white keeps the same glass
+              // look without that per-item cost.
+              <div key={a.id} className="border border-white/60 md:border-slate-200 rounded-2xl md:rounded-xl bg-white/80 md:bg-white p-3.5">
                 <div className="flex items-center gap-1.5 text-xs font-bold text-slate-900">
                   <CalendarDays className="w-3.5 h-3.5" style={{ color: 'var(--g-accent)' }} />
                   {formatDate(a.apply_date)}
@@ -212,14 +221,14 @@ export const LeaveReviewPage: React.FC<LeaveReviewPageProps> = ({ token, onBack 
 
     </div>
 
-      {/* Floating "Submit Leave" — mobile only, same design/position as
+      {/* Floating "Submit Leave" — mobile only, same design/position/color as
           Movement Claim's "Add Check In/Out" and Conveyance's "New Claim"
           floating buttons (bottom-right, above BottomNav's fixed bar). */}
       <button
         type="button"
         onClick={() => setShowNewModal(true)}
-        className="md:hidden fixed right-4 z-50 flex items-center gap-2 pl-4 pr-5 py-3 text-white text-sm font-semibold rounded-full shadow-lg active:scale-95 transition-transform"
-        style={{ bottom: 'calc(6.5rem + env(safe-area-inset-bottom, 0px))', background: 'var(--g-accent)' }}
+        className="md:hidden fixed right-4 z-50 flex items-center gap-2 pl-4 pr-5 py-3 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-full shadow-lg shadow-blue-600/30 active:scale-95 transition-transform"
+        style={{ bottom: 'calc(6.5rem + env(safe-area-inset-bottom, 0px))' }}
       >
         <Plus className="w-4 h-4" /> Submit Leave
       </button>
