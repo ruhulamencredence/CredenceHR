@@ -59,15 +59,12 @@ export const NoticeBoard: React.FC<NoticeBoardProps> = ({ token, onBack }) => {
             </button>
           </>
         )}
-        {isNativeApp && (
-          <button
-            type="button"
-            onClick={onBack}
-            className="flex items-center gap-1.5 text-sm text-slate-500 mb-3"
-          >
-            <ChevronLeft className="w-4 h-4" /> Back
-          </button>
-        )}
+        {/* On the native Android app there's no on-screen Back button here —
+            the hardware/gesture back navigates back to the tile menu on its
+            own (UserPanel.tsx's useBackButtonClose(mobileActiveSection !==
+            null, () => goToMobileSection(null))), so a duplicate on-screen
+            button would be redundant. The web build above keeps its own
+            (there's no OS-level back gesture to fall back on there). */}
 
         {/* Hidden on mobile — the mobile header now shows this page's own
             "Notice Board" title in the logo's place (see headerPageTitle.ts
