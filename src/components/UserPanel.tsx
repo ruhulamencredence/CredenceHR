@@ -927,7 +927,13 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // switch) by the separate effect below, not here, so switching between
   // this section and another doesn't flash the logo back on for a tick.
   useEffect(() => {
-    setHeaderPageTitle(mobileActiveSection === 'budget' ? (selectedBudget ? 'MPR Entry' : 'Select a Budget') : null);
+    setHeaderPageTitle(
+      mobileActiveSection === 'budget'
+        ? (selectedBudget ? 'MPR Entry' : 'Select a Budget')
+        : mobileActiveSection === 'jobs'
+        ? 'Jobs'
+        : null
+    );
   }, [mobileActiveSection, selectedBudget]);
   useEffect(() => {
     return () => setHeaderPageTitle(null);
@@ -3986,7 +3992,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           {/* Jobs summary card — every distinct Job this user has submitted, as a
               scrollable Job No + Job Name list (not just a bare count). */}
           <div
-            className={`bg-white border border-slate-200 rounded-lg overflow-hidden ${mobileActiveSection === 'jobs' && canSeeBudgetModule ? 'block' : 'hidden'} ${
+            className={`bg-gradient-to-br from-violet-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl border border-white/70 rounded-[28px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] overflow-hidden md:bg-white md:from-transparent md:via-transparent md:to-transparent md:backdrop-blur-none md:border-slate-200 md:rounded-lg md:shadow-none ${mobileActiveSection === 'jobs' && canSeeBudgetModule ? 'block' : 'hidden'} ${
               !showingClaimsPage && desktopActiveSection === 'jobs' && canSeeBudgetModule ? 'md:block' : 'md:hidden'
             }`}
           >
@@ -4010,8 +4016,14 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                 <ArrowLeft className="w-3.5 h-3.5" /> Return to Entry
               </button>
             )}
-            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
-              <div className="flex items-center gap-2.5">
+            {/* The icon/title/description here is hidden on mobile — the mobile
+                header now shows this page's own "Jobs" title in the logo's
+                place (see headerPageTitle.ts), so repeating it would be a
+                redundant duplicate. The count badge stays (it's live data,
+                not a duplicate label). Desktop has no such header takeover,
+                so it keeps the full row. */}
+            <div className="flex items-center justify-end md:justify-between px-5 py-4 border-b border-white/40 md:border-slate-100">
+              <div className="hidden md:flex items-center gap-2.5">
                 <div className="p-2 bg-blue-50 rounded-lg">
                   <Briefcase className="w-4 h-4 text-blue-600" />
                 </div>
@@ -4020,25 +4032,25 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                   <div className="text-xs text-slate-400">Total Job entries submitted</div>
                 </div>
               </div>
-              <span className="text-sm font-semibold text-slate-900 bg-slate-100 px-2.5 py-1 rounded-full">
+              <span className="text-sm font-semibold text-slate-900 bg-white/50 md:bg-slate-100 backdrop-blur md:backdrop-blur-none px-2.5 py-1 rounded-full">
                 {totalJobsCount}
               </span>
             </div>
             {uniqueJobsList.length === 0 ? (
               <p className="text-sm text-slate-400 px-5 py-4">No Job entries submitted yet.</p>
             ) : (
-              <div className="max-h-64 overflow-y-auto divide-y divide-slate-100">
+              <div className="max-h-64 overflow-y-auto divide-y divide-white/40 md:divide-slate-100">
                 {jobsByBudget.map((group) => (
                   <div key={group.budget_id !== null ? `id:${group.budget_id}` : `none:${group.budget_name || ''}`}>
                     {/* Budget-wise grouping — a sticky header per Budget so it's clear
                         which Jobs belong to which, even while scrolling a long list. */}
-                    <div className="sticky top-0 z-10 px-5 py-1.5 bg-slate-100 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                    <div className="sticky top-0 z-10 px-5 py-1.5 bg-white/60 md:bg-slate-100 backdrop-blur md:backdrop-blur-none text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                       {group.budget_name || 'No Budget'}
                       <span className="ml-1.5 font-normal normal-case text-slate-400">({group.jobs.length})</span>
                     </div>
-                    <div className="divide-y divide-slate-100">
+                    <div className="divide-y divide-white/40 md:divide-slate-100">
                       {group.jobs.map((j) => (
-                        <div key={j.job_no} className="flex items-center gap-1 hover:bg-slate-50 transition-colors">
+                        <div key={j.job_no} className="flex items-center gap-1 hover:bg-white/50 md:hover:bg-slate-50 transition-colors">
                           <button
                             type="button"
                             // Filters "Job Entry Details" down to just this Job (same table,
