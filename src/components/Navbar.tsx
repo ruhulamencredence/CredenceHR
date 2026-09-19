@@ -8,6 +8,7 @@ import { ChatBell } from './ChatBell';
 import { WeatherBadge } from './WeatherBadge';
 import { useProfilePhoto } from '../lib/useProfilePhoto';
 import { useHeaderSearchState } from '../lib/headerSearch';
+import { useHeaderPageTitle } from '../lib/headerPageTitle';
 
 // Mobile header's "open menu" glyph — three filled, rounded-square dots
 // stacked vertically, matching the app's own rounded-corner language (the
@@ -139,9 +140,23 @@ export const Navbar: React.FC<NavbarProps> = ({
   const { registration: headerSearchReg, barHidden: headerSearchBarHidden } = useHeaderSearchState();
   const showMobileSearchIcon = !!headerSearchReg && headerSearchBarHidden;
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
+
+  // A mobile sub-page (e.g. "Select a Budget") can instead ask for its own
+  // plain title in place of the logo (see headerPageTitle.ts) — same logo
+  // swap as the search icon above, just with static text instead of a
+  // search box. The two never happen at once in practice (different pages
+  // own each), but the title wins if they somehow did.
+  const headerPageTitle = useHeaderPageTitle();
+  const showMobilePageTitle = !!headerPageTitle;
+  const showMobileLogoSwap = showMobileSearchIcon || showMobilePageTitle;
+  // A page-title takeover (e.g. "Select a Budget") means this page owns the
+  // whole mobile header row — its own search icon (if some other, unrelated
+  // page had left one docked) and the Weather badge both get out of the way
+  // on mobile, matching the reference screenshot. Desktop is unaffected.
+  const showMobileSearchIconResolved = showMobileSearchIcon && !showMobilePageTitle;
   useEffect(() => {
-    if (!showMobileSearchIcon) setMobileSearchOpen(false);
-  }, [showMobileSearchIcon]);
+    if (!showMobileSearchIconResolved) setMobileSearchOpen(false);
+  }, [showMobileSearchIconResolved]);
 
   // Circular avatar shown at the top right (initial + role-tinted background) —
   // falls back to this when the account has no Personal Data photo uploaded
@@ -191,7 +206,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             takes up its own gap on both sides even at 0 width, so the normal
             gap-8 doubled up into a much wider gap than intended. Desktop
             (md+) always keeps the full logo, so its spacing stays gap-8/10. */}
-        <div className={`flex items-center min-w-0 md:gap-8 lg:gap-10 ${showMobileSearchIcon ? 'gap-2' : 'gap-8'}`}>
+        <div className={`flex items-center min-w-0 md:gap-8 lg:gap-10 ${showMobileLogoSwap ? 'gap-2' : 'gap-8'}`}>
           {/* Mobile-only hamburger — opens the single GlobalSidebar drawer
               (see GlobalSidebar.tsx), regardless of which panel is currently
               showing. Desktop (md and up) still hides this button — the
@@ -226,7 +241,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             type="button"
             onClick={onGoToDashboard}
             className={`flex-shrink-0 overflow-hidden transition-all duration-300 ease-in-out hover:opacity-80 ${
-              showMobileSearchIcon
+              showMobileLogoSwap
                 ? 'max-w-0 opacity-0 -translate-x-3 pointer-events-none md:max-w-[220px] md:opacity-100 md:translate-x-0 md:pointer-events-auto'
                 : 'max-w-[220px] opacity-100 translate-x-0'
             }`}
@@ -235,9 +250,25 @@ export const Navbar: React.FC<NavbarProps> = ({
             <img src={credenceLogo} alt="Credence" className="h-8 sm:h-9 w-auto" />
           </button>
 
+          {/* A mobile sub-page's own title (see headerPageTitle.ts), shown in
+              the logo's place — same animated collapse/expand as the search
+              icon below, just static text instead of an input. */}
+          <div
+            className={`md:hidden min-w-0 flex-1 flex items-center overflow-hidden transition-all duration-300 ease-in-out ${
+              showMobilePageTitle ? 'max-w-none opacity-100 translate-x-0' : 'max-w-0 opacity-0 -translate-x-3 pointer-events-none'
+            }`}
+          >
+            <span
+              className="text-base font-semibold truncate"
+              style={{ color: transparentHeader ? 'white' : 'var(--g-text)' }}
+            >
+              {headerPageTitle}
+            </span>
+          </div>
+
           <div
             className={`md:hidden min-w-0 flex items-center overflow-hidden transition-all duration-300 ease-in-out ${
-              showMobileSearchIcon
+              showMobileSearchIconResolved
                 ? mobileSearchOpen
                   ? 'flex-1 max-w-none opacity-100'
                   : 'max-w-[40px] opacity-100'
@@ -319,8 +350,11 @@ export const Navbar: React.FC<NavbarProps> = ({
               own), shown on both the mobile and web header since this
               component is shared by both. See WeatherBadge.tsx for why it
               renders nothing at all rather than a placeholder while loading
-              or offline. */}
-          <WeatherBadge transparent={transparentHeader} />
+              or offline. Hidden on mobile while a page-title takeover (e.g.
+              "Select a Budget") owns the header row — desktop keeps it. */}
+          <div className={showMobilePageTitle ? 'hidden md:block' : ''}>
+            <WeatherBadge transparent={transparentHeader} />
+          </div>
 
           {/* Personal Alerts bell — on by default for every account (no
               module grant needed), shown on both web and the Capacitor

@@ -13,6 +13,7 @@ import credenceLogo from '../assets/credence-logo.png';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
 import { savePdfCrossPlatform } from '../lib/saveFile';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
+import { setHeaderPageTitle } from '../lib/headerPageTitle';
 import { PdfPreviewModal } from './PdfPreviewModal';
 import { JobEditPanel } from './JobEditPanel';
 import { AttendanceCard } from './AttendanceCard';
@@ -498,7 +499,10 @@ const EntryCard = React.memo(function EntryCard({
   );
 
   return (
-    <div className="p-3.5 border border-slate-200 rounded-xl bg-white">
+    // Mobile-only (see its md:hidden wrapper above) — liquid glass to match
+    // the rest of the Dashboard's mobile cards (Select a Budget/Jobs), since
+    // there's no desktop rendering of this component to keep unchanged.
+    <div className="p-3.5 border border-white/60 rounded-2xl bg-white/50 backdrop-blur-xl shadow-[0_4px_14px_-4px_rgba(15,23,42,0.12)]">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="flex items-center gap-1.5">
@@ -918,6 +922,35 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
       // ignore, it just means a reload won't be able to restore this section.
     }
   }, [mobileActiveSection]);
+  // While the "Select a Budget" tile is the active mobile section, dock this
+  // page's own title into the mobile header (Navbar.tsx) in place of the
+  // company logo — see headerPageTitle.ts, same swap EmployeeDirectory does
+  // for its search icon. Matches the tile's own label (line ~2907) so the
+  // text doesn't change mid-navigation. Cleared on unmount (logout/panel
+  // switch) by the separate effect below, not here, so switching between
+  // this section and another doesn't flash the logo back on for a tick.
+  useEffect(() => {
+    setHeaderPageTitle(
+      mobileActiveSection === 'budget'
+        ? (selectedBudget ? 'MPR Entry' : 'Select a Budget')
+        : mobileActiveSection === 'jobs'
+        ? 'Jobs'
+        : mobileActiveSection === 'entries'
+        ? 'Job Entry Details'
+        : mobileActiveSection === 'jobEdit'
+        ? 'Job Edit'
+        : mobileActiveSection === 'claim' || mobileActiveSection === 'claims'
+        ? 'My Claims'
+        : mobileActiveSection === 'conveyanceClaim'
+        ? 'Conveyance Bill Claim'
+        : mobileActiveSection === 'noticeBoard'
+        ? 'Notice Board'
+        : null
+    );
+  }, [mobileActiveSection, selectedBudget]);
+  useEffect(() => {
+    return () => setHeaderPageTitle(null);
+  }, []);
   // Switching mobile "pages" (tile taps, the bottom nav bar, etc.) only ever
   // toggles which section is display:block vs hidden — it never remounts or
   // scrolls anything on its own. Without this, jumping to a shorter page (e.g.
@@ -2889,19 +2922,21 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           rounded corners) to match Employee Directory's mobile card look
           (EmployeeDirectory.tsx's cardTintClass grid cards), instead of the old flat
           white tiles — each tile gets its own pastel tint so the row doesn't read as
-          one flat block. */}
+          one flat block. The icon badge inside each card is a vivid color-matched
+          gradient square with a soft colored glow (white icon on top), rather than a
+          flat white icon box, so it reads at a glance like a home-screen app icon. */}
       {mobileActiveSection === null && (
         <div className="md:hidden grid grid-cols-3 gap-2.5">
           {canSeeBudgetModule && (
           <button
             type="button"
             onClick={() => goToMobileSection('budget')}
-            className="relative flex flex-col items-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-blue-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
+            className="relative flex flex-col items-center justify-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 h-[104px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-blue-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
           >
-            <div className="p-2.5 bg-white/50 backdrop-blur border border-white/60 shadow-sm rounded-xl">
-              <Wallet className="w-6 h-6 text-blue-600" />
+            <div className="p-2.5 rounded-2xl bg-gradient-to-br from-blue-300 to-blue-500 shadow-[0_6px_16px_-2px_rgba(37,99,235,0.35)] border border-white/30">
+              <Wallet className="w-6 h-6 text-white" />
             </div>
-            <span className="text-xs font-semibold text-slate-700 text-center leading-tight">
+            <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">
               {selectedBudget ? 'MPR Entry' : 'Select a Budget'}
             </span>
           </button>
@@ -2910,91 +2945,91 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           <button
             type="button"
             onClick={() => goToMobileSection('jobs')}
-            className="relative flex flex-col items-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-violet-100/70 via-white/50 to-fuchsia-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
+            className="relative flex flex-col items-center justify-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 h-[104px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-violet-100/70 via-white/50 to-fuchsia-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
           >
-            <div className="p-2.5 bg-white/50 backdrop-blur border border-white/60 shadow-sm rounded-xl relative">
-              <Briefcase className="w-6 h-6 text-violet-600" />
+            <div className="p-2.5 rounded-2xl bg-gradient-to-br from-violet-300 to-violet-500 shadow-[0_6px_16px_-2px_rgba(124,58,237,0.35)] border border-white/30 relative">
+              <Briefcase className="w-6 h-6 text-white" />
               {totalJobsCount > 0 && (
                 <span className="absolute -top-1.5 -right-1.5 text-[10px] font-semibold bg-violet-600 text-white rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 border border-white/70">
                   {totalJobsCount}
                 </span>
               )}
             </div>
-            <span className="text-xs font-semibold text-slate-700 text-center leading-tight">Jobs</span>
+            <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">Jobs</span>
           </button>
-          )}
-          {canSeeMovementClaim && (
-            <button
-              type="button"
-              onClick={() => goToMobileSection('claim')}
-              className="relative flex flex-col items-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-emerald-100/70 via-white/50 to-teal-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
-            >
-              <div className="p-2.5 bg-white/50 backdrop-blur border border-white/60 shadow-sm rounded-xl">
-                <Route className="w-6 h-6 text-emerald-600" />
-              </div>
-              <span className="text-xs font-semibold text-slate-700 text-center leading-tight">Movement Claim</span>
-            </button>
-          )}
-          {canSeeConveyanceClaim && (
-            <button
-              type="button"
-              onClick={() => goToMobileSection('conveyanceClaim')}
-              className="relative flex flex-col items-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-amber-100/70 via-white/50 to-orange-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
-            >
-              <div className="p-2.5 bg-white/50 backdrop-blur border border-white/60 shadow-sm rounded-xl">
-                <Wallet className="w-6 h-6 text-amber-600" />
-              </div>
-              <span className="text-xs font-semibold text-slate-700 text-center leading-tight">Conveyance Bill Claim</span>
-            </button>
           )}
           {canSeeBudgetModule && (
           <button
             type="button"
             onClick={() => goToMobileSection('entries')}
-            className="relative flex flex-col items-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-rose-100/70 via-white/50 to-pink-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
+            className="relative flex flex-col items-center justify-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 h-[104px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-rose-100/70 via-white/50 to-pink-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
           >
-            <div className="p-2.5 bg-white/50 backdrop-blur border border-white/60 shadow-sm rounded-xl relative">
-              <FileText className="w-6 h-6 text-rose-600" />
+            <div className="p-2.5 rounded-2xl bg-gradient-to-br from-rose-300 to-rose-500 shadow-[0_6px_16px_-2px_rgba(225,29,72,0.35)] border border-white/30 relative">
+              <FileText className="w-6 h-6 text-white" />
               {filteredEntries.length > 0 && (
                 <span className="absolute -top-1.5 -right-1.5 text-[10px] font-semibold bg-rose-600 text-white rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 border border-white/70">
                   {filteredEntries.length}
                 </span>
               )}
             </div>
-            <span className="text-xs font-semibold text-slate-700 text-center leading-tight">Job Entry Details</span>
+            <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">Job Entry Details</span>
           </button>
           )}
           {user.can_job_edit && (
             <button
               type="button"
               onClick={() => goToMobileSection('jobEdit')}
-              className="relative flex flex-col items-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-cyan-100/70 via-white/50 to-sky-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
+              className="relative flex flex-col items-center justify-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 h-[104px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-cyan-100/70 via-white/50 to-sky-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
             >
-              <div className="p-2.5 bg-white/50 backdrop-blur border border-white/60 shadow-sm rounded-xl">
-                <Edit2 className="w-6 h-6 text-cyan-600" />
+              <div className="p-2.5 rounded-2xl bg-gradient-to-br from-cyan-300 to-cyan-500 shadow-[0_6px_16px_-2px_rgba(8,145,178,0.35)] border border-white/30">
+                <Edit2 className="w-6 h-6 text-white" />
               </div>
-              <span className="text-xs font-semibold text-slate-700 text-center leading-tight">Job Edit</span>
+              <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">Job Edit</span>
+            </button>
+          )}
+          {canSeeMovementClaim && (
+            <button
+              type="button"
+              onClick={() => goToMobileSection('claim')}
+              className="relative flex flex-col items-center justify-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 h-[104px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-emerald-100/70 via-white/50 to-teal-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
+            >
+              <div className="p-2.5 rounded-2xl bg-gradient-to-br from-emerald-300 to-emerald-500 shadow-[0_6px_16px_-2px_rgba(5,150,105,0.35)] border border-white/30">
+                <Route className="w-6 h-6 text-white" />
+              </div>
+              <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">Movement Claim</span>
+            </button>
+          )}
+          {canSeeConveyanceClaim && (
+            <button
+              type="button"
+              onClick={() => goToMobileSection('conveyanceClaim')}
+              className="relative flex flex-col items-center justify-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 h-[104px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-amber-100/70 via-white/50 to-orange-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
+            >
+              <div className="p-2.5 rounded-2xl bg-gradient-to-br from-amber-300 to-orange-400 shadow-[0_6px_16px_-2px_rgba(217,119,6,0.35)] border border-white/30">
+                <Wallet className="w-6 h-6 text-white" />
+              </div>
+              <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">Conveyance Bill Claim</span>
             </button>
           )}
           <button
             type="button"
             onClick={() => goToMobileSection('employeeDirectory')}
-            className="relative flex flex-col items-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-indigo-100/70 via-white/50 to-blue-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
+            className="relative flex flex-col items-center justify-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 h-[104px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-indigo-100/70 via-white/50 to-blue-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
           >
-            <div className="p-2.5 bg-white/50 backdrop-blur border border-white/60 shadow-sm rounded-xl">
-              <Contact className="w-6 h-6 text-indigo-600" />
+            <div className="p-2.5 rounded-2xl bg-gradient-to-br from-indigo-300 to-indigo-500 shadow-[0_6px_16px_-2px_rgba(79,70,229,0.35)] border border-white/30">
+              <Contact className="w-6 h-6 text-white" />
             </div>
-            <span className="text-xs font-semibold text-slate-700 text-center leading-tight">Employee Directory</span>
+            <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">Employee Directory</span>
           </button>
           <button
             type="button"
             onClick={() => goToMobileSection('noticeBoard')}
-            className="relative flex flex-col items-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-yellow-100/70 via-white/50 to-amber-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
+            className="relative flex flex-col items-center justify-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 h-[104px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-yellow-100/70 via-white/50 to-amber-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
           >
-            <div className="p-2.5 bg-white/50 backdrop-blur border border-white/60 shadow-sm rounded-xl">
-              <Bell className="w-6 h-6 text-amber-600" />
+            <div className="p-2.5 rounded-2xl bg-gradient-to-br from-yellow-300 to-amber-400 shadow-[0_6px_16px_-2px_rgba(217,119,6,0.35)] border border-white/30">
+              <Bell className="w-6 h-6 text-white" />
             </div>
-            <span className="text-xs font-semibold text-slate-700 text-center leading-tight">Notice Board</span>
+            <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">Notice Board</span>
           </button>
         </div>
       )}
@@ -3050,16 +3085,24 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                Menu" lives here (not also duplicated once a Budget is selected —
                "Back to Budgets" below already gets you back to this screen, so
                showing both at once was redundant chrome on a small screen). */
-            <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm lg:sticky lg:top-24">
-              <h3 className="text-lg font-bold text-slate-900 mb-1 flex items-center gap-2">
+            /* Liquid glass on mobile (soft violet-tint gradient + backdrop-blur +
+               big rounded corners), matching the Dashboard tile menu and
+               LeaveSummaryCard's mobile look — desktop (md+) keeps the original
+               plain white card untouched via the md: overrides below. */
+            <div className="bg-gradient-to-br from-violet-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl border border-white/70 rounded-[28px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] p-6 lg:sticky lg:top-24 md:bg-white md:from-transparent md:via-transparent md:to-transparent md:backdrop-blur-none md:border-slate-200 md:rounded-2xl md:shadow-sm">
+              {/* Hidden on mobile — the mobile header now shows this page's own
+                  title in the logo's place (see headerPageTitle.ts above), so
+                  repeating it here would be a redundant duplicate. Desktop has
+                  no such header takeover, so it keeps this heading. */}
+              <h3 className="hidden md:flex text-lg font-bold text-slate-900 mb-1 items-center gap-2">
                 <Wallet className="w-5 h-5 text-blue-600" /> Select a Budget
               </h3>
-              <p className="text-xs text-slate-500 mb-4">
+              <p className="hidden md:block text-xs text-slate-500 mb-4">
                 Pick a Budget imported by the Admin to start a new MPR entry under it.
               </p>
 
               {usableBudgets.length === 0 ? (
-                <div className="text-center text-xs text-slate-400 bg-slate-50 border border-dashed border-slate-200 rounded-xl py-8 px-4 flex flex-col items-center gap-2">
+                <div className="text-center text-xs text-slate-400 bg-white/40 md:bg-slate-50 backdrop-blur md:backdrop-blur-none border border-dashed border-white/60 md:border-slate-200 rounded-xl py-8 px-4 flex flex-col items-center gap-2">
                   <FolderOpen className="w-6 h-6 text-slate-300" />
                   No Budget has been imported by the Admin yet. Please check back later.
                 </div>
@@ -3070,7 +3113,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                       key={b.id}
                       type="button"
                       onClick={() => openBudget(b)}
-                      className="w-full flex items-center justify-between gap-3 text-left p-3.5 bg-slate-50 hover:bg-blue-50 border border-slate-200 hover:border-blue-300 rounded-xl transition-colors group"
+                      className="w-full flex items-center justify-between gap-3 text-left p-3.5 bg-white/50 hover:bg-white/70 backdrop-blur-xl border border-white/60 hover:border-white rounded-2xl shadow-[0_4px_14px_-4px_rgba(15,23,42,0.12)] transition-colors group md:bg-slate-50 md:hover:bg-blue-50 md:backdrop-blur-none md:border-slate-200 md:hover:border-blue-300 md:rounded-xl md:shadow-none"
                     >
                       <div className="min-w-0">
                         <div className="font-semibold text-slate-900 text-sm truncate group-hover:text-blue-700 flex items-center gap-1.5">
@@ -3962,7 +4005,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           {/* Jobs summary card — every distinct Job this user has submitted, as a
               scrollable Job No + Job Name list (not just a bare count). */}
           <div
-            className={`bg-white border border-slate-200 rounded-lg overflow-hidden ${mobileActiveSection === 'jobs' && canSeeBudgetModule ? 'block' : 'hidden'} ${
+            className={`bg-gradient-to-br from-violet-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl border border-white/70 rounded-[28px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] overflow-hidden md:bg-white md:from-transparent md:via-transparent md:to-transparent md:backdrop-blur-none md:border-slate-200 md:rounded-lg md:shadow-none ${mobileActiveSection === 'jobs' && canSeeBudgetModule ? 'block' : 'hidden'} ${
               !showingClaimsPage && desktopActiveSection === 'jobs' && canSeeBudgetModule ? 'md:block' : 'md:hidden'
             }`}
           >
@@ -3986,8 +4029,14 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                 <ArrowLeft className="w-3.5 h-3.5" /> Return to Entry
               </button>
             )}
-            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
-              <div className="flex items-center gap-2.5">
+            {/* The icon/title/description here is hidden on mobile — the mobile
+                header now shows this page's own "Jobs" title in the logo's
+                place (see headerPageTitle.ts), so repeating it would be a
+                redundant duplicate. The count badge stays (it's live data,
+                not a duplicate label). Desktop has no such header takeover,
+                so it keeps the full row. */}
+            <div className="flex items-center justify-end md:justify-between px-5 py-4 border-b border-white/40 md:border-slate-100">
+              <div className="hidden md:flex items-center gap-2.5">
                 <div className="p-2 bg-blue-50 rounded-lg">
                   <Briefcase className="w-4 h-4 text-blue-600" />
                 </div>
@@ -3996,25 +4045,25 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                   <div className="text-xs text-slate-400">Total Job entries submitted</div>
                 </div>
               </div>
-              <span className="text-sm font-semibold text-slate-900 bg-slate-100 px-2.5 py-1 rounded-full">
+              <span className="text-sm font-semibold text-slate-900 bg-white/50 md:bg-slate-100 backdrop-blur md:backdrop-blur-none px-2.5 py-1 rounded-full">
                 {totalJobsCount}
               </span>
             </div>
             {uniqueJobsList.length === 0 ? (
               <p className="text-sm text-slate-400 px-5 py-4">No Job entries submitted yet.</p>
             ) : (
-              <div className="max-h-64 overflow-y-auto divide-y divide-slate-100">
+              <div className="max-h-64 overflow-y-auto divide-y divide-white/40 md:divide-slate-100">
                 {jobsByBudget.map((group) => (
                   <div key={group.budget_id !== null ? `id:${group.budget_id}` : `none:${group.budget_name || ''}`}>
                     {/* Budget-wise grouping — a sticky header per Budget so it's clear
                         which Jobs belong to which, even while scrolling a long list. */}
-                    <div className="sticky top-0 z-10 px-5 py-1.5 bg-slate-100 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                    <div className="sticky top-0 z-10 px-5 py-1.5 bg-white/60 md:bg-slate-100 backdrop-blur md:backdrop-blur-none text-[11px] font-semibold uppercase tracking-wide text-slate-500">
                       {group.budget_name || 'No Budget'}
                       <span className="ml-1.5 font-normal normal-case text-slate-400">({group.jobs.length})</span>
                     </div>
-                    <div className="divide-y divide-slate-100">
+                    <div className="divide-y divide-white/40 md:divide-slate-100">
                       {group.jobs.map((j) => (
-                        <div key={j.job_no} className="flex items-center gap-1 hover:bg-slate-50 transition-colors">
+                        <div key={j.job_no} className="flex items-center gap-1 hover:bg-white/50 md:hover:bg-slate-50 transition-colors">
                           <button
                             type="button"
                             // Filters "Job Entry Details" down to just this Job (same table,
@@ -4089,18 +4138,23 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           )}
           <div
             ref={entriesSectionRef}
-            className={`bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden ${mobileActiveSection === 'entries' && canSeeBudgetModule ? 'block max-md:!mt-0' : 'hidden'} ${
+            className={`bg-gradient-to-br from-violet-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl border border-white/70 rounded-[28px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] overflow-hidden md:bg-white md:from-transparent md:via-transparent md:to-transparent md:backdrop-blur-none md:border-slate-200 md:rounded-2xl md:shadow-sm ${mobileActiveSection === 'entries' && canSeeBudgetModule ? 'block max-md:!mt-0' : 'hidden'} ${
               !showingClaimsPage && desktopActiveSection === 'entries' && canSeeBudgetModule ? 'md:block' : 'md:hidden'
             }`}
           >
-            <div className="p-6 border-b border-slate-200">
-              <div className="flex justify-between items-center gap-3 flex-wrap">
-                <div>
+            <div className="p-6 border-b border-white/40 md:border-slate-200">
+              <div className="flex justify-end md:justify-between items-center gap-3 flex-wrap">
+                {/* Hidden on mobile — the mobile header now shows this page's
+                    own "Job Entry Details" title in the logo's place (see
+                    headerPageTitle.ts), so repeating it would be a redundant
+                    duplicate. Desktop has no such header takeover, so it
+                    keeps the full heading. */}
+                <div className="hidden md:block">
                   <h3 className="text-lg font-bold text-slate-900">Job Entry Details</h3>
                   <p className="text-xs text-slate-500">Every one of your own submitted MPR entries — search or filter any column below</p>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
-                  <span className="text-xs px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 font-medium border border-slate-200 whitespace-nowrap">
+                  <span className="text-xs px-2.5 py-1 rounded-full bg-white/50 md:bg-slate-100 backdrop-blur md:backdrop-blur-none text-slate-700 font-medium border border-white/60 md:border-slate-200 whitespace-nowrap">
                     {new Set(filteredEntries.map((e) => e.job_no)).size} Job{new Set(filteredEntries.map((e) => e.job_no)).size === 1 ? '' : 's'} • {filteredEntries.length} MPR Entr{filteredEntries.length === 1 ? 'y' : 'ies'}
                   </span>
                   <button
@@ -4124,7 +4178,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                 <button
                   type="button"
                   onClick={() => setShowMobileFilters(true)}
-                  className="w-full flex items-center justify-between px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-600"
+                  className="w-full flex items-center justify-between px-3 py-2 bg-white/50 backdrop-blur-xl border border-white/60 rounded-xl text-xs font-semibold text-slate-600"
                 >
                   <span className="flex items-center gap-1.5">
                     <Search className="w-3.5 h-3.5" /> Filters
@@ -4134,7 +4188,14 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                   </span>
                   <span>▼</span>
                 </button>
-                {showMobileFilters && (
+                {showMobileFilters && createPortal(
+                  // Rendered via a portal straight onto document.body instead of
+                  // in place — this popup lives inside the mobile "liquid glass"
+                  // Job Entry Details card, whose backdrop-blur-xl the CSS spec
+                  // makes a containing block for any `position: fixed`
+                  // descendant (same as `transform`/`filter`), which was pinning
+                  // this popup to that CARD's box instead of the viewport. A
+                  // portal escapes that entirely.
                   <div
                     className="fixed inset-0 z-50 flex items-start"
                     style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 4rem)' }}
@@ -4281,7 +4342,8 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                         Done
                       </button>
                     </div>
-                  </div>
+                  </div>,
+                  document.body
                 )}
               </div>
 

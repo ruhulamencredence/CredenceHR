@@ -4,7 +4,7 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { Route, ArrowLeft, MapPin, LogIn, LogOut, ChevronRight, Inbox } from 'lucide-react';
+import { ArrowLeft, MapPin, LogIn, LogOut, ChevronRight, Inbox } from 'lucide-react';
 import { ClaimRecord } from '../types';
 import { apiUrl } from '../lib/api';
 import { formatDate } from '../lib/formatDate';
@@ -69,7 +69,10 @@ export const MyClaimsCard: React.FC<MyClaimsCardProps> = ({ token, onBack, refre
     // top header + bottom nav bar); flex flex-col + the list's flex-1 below
     // then let the claims list itself take up all the remaining space
     // instead of stopping at a fixed height and leaving empty page below it.
-    <div className="bg-white border border-slate-200 rounded-lg overflow-hidden flex flex-col min-h-[calc(100dvh-14rem)]">
+    // Liquid glass — same Dashboard mobile look as Select a Budget/Jobs/Job
+    // Entry Details/Job Edit. This card is mobile-only (see the comment
+    // above), so no desktop md: split is needed.
+    <div className="bg-gradient-to-br from-violet-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl border border-white/70 rounded-[28px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] overflow-hidden flex flex-col min-h-[calc(100dvh-14rem)]">
       {onBack && (
         <button
           type="button"
@@ -80,17 +83,12 @@ export const MyClaimsCard: React.FC<MyClaimsCardProps> = ({ token, onBack, refre
         </button>
       )}
 
-      <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 shrink-0">
-        <div className="flex items-center gap-2.5">
-          <div className="p-2 bg-blue-50 rounded-lg">
-            <Route className="w-4 h-4 text-blue-600" />
-          </div>
-          <div>
-            <div className="text-sm font-medium text-slate-900">My Claims</div>
-            <div className="text-xs text-slate-400">Your Movement Claim history</div>
-          </div>
-        </div>
-        <span className="text-sm font-semibold text-slate-900 bg-slate-100 px-2.5 py-1 rounded-full">{claims.length}</span>
+      {/* Icon/title/description hidden — the mobile header now shows this
+          page's own "My Claims" title in the logo's place (see
+          headerPageTitle.ts in UserPanel.tsx), so repeating it here would be
+          a redundant duplicate. The count badge stays (it's live data). */}
+      <div className="flex items-center justify-end px-5 py-4 border-b border-white/40 shrink-0">
+        <span className="text-sm font-semibold text-slate-900 bg-white/50 backdrop-blur px-2.5 py-1 rounded-full">{claims.length}</span>
       </div>
 
       {loading ? (
@@ -103,16 +101,16 @@ export const MyClaimsCard: React.FC<MyClaimsCardProps> = ({ token, onBack, refre
           <p className="text-sm">No claims yet — check in from the Movement Claim card when you head out.</p>
         </div>
       ) : (
-        <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
+        <div className="flex-1 overflow-y-auto divide-y divide-white/40">
           {claims.map((c) => (
             // Was a single <button> covering the whole row (tap -> location map).
             // Now a plain <div> instead, since an open claim needs its own nested
             // "Check Out" button below and a <button> can't contain a <button>.
-            <div key={c.id} className="px-5 py-3 hover:bg-slate-50 transition-colors space-y-1.5">
+            <div key={c.id} className="px-5 py-3 hover:bg-white/40 transition-colors space-y-1.5">
               <button
                 type="button"
                 onClick={() => setViewingLocation(c)}
-                className="w-full text-left active:bg-slate-100 -mx-5 px-5 space-y-1.5"
+                className="w-full text-left active:bg-white/50 -mx-5 px-5 space-y-1.5"
               >
                 <div className="flex items-start justify-between gap-3">
                   <span className="text-sm font-medium text-slate-900 truncate">{c.purpose}</span>

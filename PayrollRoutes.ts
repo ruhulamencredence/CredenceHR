@@ -247,6 +247,8 @@ export async function ensurePayrollSchema(dbPool: any): Promise<void> {
         shift_start_time TIME NOT NULL DEFAULT '09:00:00',
         grace_minutes INT NOT NULL DEFAULT 10,
         lates_per_deduction_day INT NOT NULL DEFAULT 3,
+        extreme_grace_minutes INT NOT NULL DEFAULT 60,
+        extreme_lates_per_deduction_day INT NOT NULL DEFAULT 1,
         effective_date DATE NOT NULL,
         created_by INT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -254,15 +256,31 @@ export async function ensurePayrollSchema(dbPool: any): Promise<void> {
         INDEX idx_late_policy_effective (effective_date)
       )
     `);
+    // extreme_grace_minutes/extreme_lates_per_deduction_day — Extreme Delay,
+    // a second, stricter check-in cutoff past the normal Delay grace period
+    // (e.g. checking in past 10:00 instead of just past 9:10). Added via
+    // ALTER since the table above may already exist on a running database
+    // from before this tier existed.
+    try {
+      await dbPool.query(`ALTER TABLE late_policy_settings ADD COLUMN extreme_grace_minutes INT NOT NULL DEFAULT 60`);
+    } catch (err: any) {
+      if (err.code !== "ER_DUP_FIELDNAME") console.warn("⚠️ Could not add late_policy_settings.extreme_grace_minutes column: " + err.message);
+    }
+    try {
+      await dbPool.query(`ALTER TABLE late_policy_settings ADD COLUMN extreme_lates_per_deduction_day INT NOT NULL DEFAULT 1`);
+    } catch (err: any) {
+      if (err.code !== "ER_DUP_FIELDNAME") console.warn("⚠️ Could not add late_policy_settings.extreme_lates_per_deduction_day column: " + err.message);
+    }
     // Seed one default row (09:00 start, 10 min grace i.e. late past 9:10, 3
-    // lates = 1 day deducted) so the feature works out of the box on a fresh
-    // install — only when the table is completely empty, never overwriting an
-    // Admin's own settings.
+    // lates = 1 day deducted; Extreme Delay past 10:00, every occurrence = 1
+    // day deducted) so the feature works out of the box on a fresh install —
+    // only when the table is completely empty, never overwriting an Admin's
+    // own settings.
     const [existingPolicyRows] = await dbPool.query(`SELECT COUNT(*) AS c FROM late_policy_settings`);
     if (Number(existingPolicyRows?.[0]?.c || 0) === 0) {
       await dbPool.query(
-        `INSERT INTO late_policy_settings (shift_start_time, grace_minutes, lates_per_deduction_day, effective_date)
-         VALUES ('09:00:00', 10, 3, '2000-01-01')`
+        `INSERT INTO late_policy_settings (shift_start_time, grace_minutes, lates_per_deduction_day, extreme_grace_minutes, extreme_lates_per_deduction_day, effective_date)
+         VALUES ('09:00:00', 10, 3, 60, 1, '2000-01-01')`
       );
     }
     // late_waivers — HR/Admin excusing one specific (employee, date) late
@@ -1391,7 +1409,15 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       `SELECT * FROM late_policy_settings WHERE effective_date <= ? ORDER BY effective_date DESC, id DESC LIMIT 1`,
       [`${monthYear}-01`]
     );
-    return rows[0] || { shift_start_time: "09:00:00", grace_minutes: 10, lates_per_deduction_day: 3 };
+    return (
+      rows[0] || {
+        shift_start_time: "09:00:00",
+        grace_minutes: 10,
+        lates_per_deduction_day: 3,
+        extreme_grace_minutes: 60,
+        extreme_lates_per_deduction_day: 1
+      }
+    );
   }
 
   // For every employee with a linked login, finds each calendar day in
@@ -1403,6 +1429,12 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
   // late_waivers for that employee are excluded before the caller ever sees
   // them, so "late_count" downstream is always the number that should count
   // toward the lates-per-deduction-day threshold.
+  //
+  // Every late check-in lands in exactly one of two mutually exclusive tiers
+  // — "Delay" (past shift_start_time + grace_minutes) or the stricter
+  // "Extreme Delay" (past shift_start_time + extreme_grace_minutes) — never
+  // both, so a single late morning is never double-counted. Returns both
+  // maps so the caller can price/report them separately.
   async function computeLateDatesByEmployee(
     employees: any[],
     monthStart: string,
@@ -1410,7 +1442,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
     holidayMap: Map<string, any>,
     policy: any,
     excludeWaivers: boolean = true
-  ): Promise<Map<number, string[]>> {
+  ): Promise<{ lateDatesByEmployee: Map<number, string[]>; extremeLateDatesByEmployee: Map<number, string[]> }> {
     const userIds = employees.filter((e: any) => e.user_id).map((e: any) => Number(e.user_id));
     const firstCheckInByUserDate = new Map<number, Map<string, Date>>();
 
@@ -1472,6 +1504,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
 
     const [startH, startM] = String(policy.shift_start_time).split(":").map(Number);
     const thresholdMinutes = startH * 60 + startM + Number(policy.grace_minutes);
+    const extremeThresholdMinutes = startH * 60 + startM + Number(policy.extreme_grace_minutes ?? 60);
 
     const userIdToEmployeeId = new Map<number, number>();
     for (const e of employees) {
@@ -1479,20 +1512,25 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
     }
 
     const lateDatesByEmployee = new Map<number, string[]>();
+    const extremeLateDatesByEmployee = new Map<number, string[]>();
     for (const [userId, dateMap] of firstCheckInByUserDate.entries()) {
       const employeeId = userIdToEmployeeId.get(userId);
       if (!employeeId) continue;
       for (const [dateStr, checkInAt] of dateMap.entries()) {
         if (waivedKeys.has(`${employeeId}_${dateStr}`)) continue;
         const minutesOfDay = checkInAt.getHours() * 60 + checkInAt.getMinutes();
-        if (minutesOfDay > thresholdMinutes) {
+        if (minutesOfDay > extremeThresholdMinutes) {
+          if (!extremeLateDatesByEmployee.has(employeeId)) extremeLateDatesByEmployee.set(employeeId, []);
+          extremeLateDatesByEmployee.get(employeeId)!.push(dateStr);
+        } else if (minutesOfDay > thresholdMinutes) {
           if (!lateDatesByEmployee.has(employeeId)) lateDatesByEmployee.set(employeeId, []);
           lateDatesByEmployee.get(employeeId)!.push(dateStr);
         }
       }
     }
     for (const dates of lateDatesByEmployee.values()) dates.sort();
-    return lateDatesByEmployee;
+    for (const dates of extremeLateDatesByEmployee.values()) dates.sort();
+    return { lateDatesByEmployee, extremeLateDatesByEmployee };
   }
 
   // GET current policy + full change history (newest first) for the Settings
@@ -1520,6 +1558,8 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       const shiftStart = typeof req.body?.shift_start_time === "string" ? req.body.shift_start_time.trim() : "";
       const graceMinutes = Math.round(num(req.body?.grace_minutes, NaN));
       const latesPerDay = Math.round(num(req.body?.lates_per_deduction_day, NaN));
+      const extremeGraceMinutes = Math.round(num(req.body?.extreme_grace_minutes, NaN));
+      const extremeLatesPerDay = Math.round(num(req.body?.extreme_lates_per_deduction_day, NaN));
       const effectiveDate = typeof req.body?.effective_date === "string" ? req.body.effective_date.trim() : "";
 
       if (!/^\d{2}:\d{2}(:\d{2})?$/.test(shiftStart)) {
@@ -1531,15 +1571,25 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       if (!Number.isFinite(latesPerDay) || latesPerDay < 1) {
         return res.status(400).json({ error: "lates_per_deduction_day must be at least 1." });
       }
+      if (!Number.isFinite(extremeGraceMinutes) || extremeGraceMinutes < 0) {
+        return res.status(400).json({ error: "extreme_grace_minutes must be a non-negative number." });
+      }
+      if (extremeGraceMinutes <= graceMinutes) {
+        return res.status(400).json({ error: "Extreme Delay's grace period must be greater than Delay's grace period." });
+      }
+      if (!Number.isFinite(extremeLatesPerDay) || extremeLatesPerDay < 1) {
+        return res.status(400).json({ error: "extreme_lates_per_deduction_day must be at least 1." });
+      }
       if (!/^\d{4}-\d{2}-\d{2}$/.test(effectiveDate)) {
         return res.status(400).json({ error: "effective_date must be in YYYY-MM-DD format." });
       }
 
       const normalizedTime = shiftStart.length === 5 ? `${shiftStart}:00` : shiftStart;
       const result = await queryDB(
-        `INSERT INTO late_policy_settings (shift_start_time, grace_minutes, lates_per_deduction_day, effective_date, created_by)
-         VALUES (?, ?, ?, ?, ?)`,
-        [normalizedTime, graceMinutes, latesPerDay, effectiveDate, req.user.id]
+        `INSERT INTO late_policy_settings
+           (shift_start_time, grace_minutes, lates_per_deduction_day, extreme_grace_minutes, extreme_lates_per_deduction_day, effective_date, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [normalizedTime, graceMinutes, latesPerDay, extremeGraceMinutes, extremeLatesPerDay, effectiveDate, req.user.id]
       );
       res.json({ success: true, id: result.insertId });
     } catch (err: any) {
@@ -1578,16 +1628,28 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       );
       const waiverByDate = new Map<string, any>(allWaivers.map((w: any) => [String(w.waiver_date).slice(0, 10), w]));
 
-      const lateDatesByEmployee = await computeLateDatesByEmployee([empRows[0]], monthStart, monthEnd, holidayMap, policy, false);
+      const { lateDatesByEmployee, extremeLateDatesByEmployee } = await computeLateDatesByEmployee(
+        [empRows[0]], monthStart, monthEnd, holidayMap, policy, false
+      );
       const rawLateDates: string[] = lateDatesByEmployee.get(employeeId) || [];
+      const rawExtremeLateDates: string[] = extremeLateDatesByEmployee.get(employeeId) || [];
 
       const days = rawLateDates.map((d) => ({
         date: d,
+        extreme: false,
+        waived: waiverByDate.has(d),
+        waiver_id: waiverByDate.get(d)?.id || null,
+        reason: waiverByDate.get(d)?.reason || null
+      }));
+      const extremeDays = rawExtremeLateDates.map((d) => ({
+        date: d,
+        extreme: true,
         waived: waiverByDate.has(d),
         waiver_id: waiverByDate.get(d)?.id || null,
         reason: waiverByDate.get(d)?.reason || null
       }));
       const countedLate = days.filter((d) => !d.waived).length;
+      const countedExtremeLate = extremeDays.filter((d) => !d.waived).length;
 
       res.json({
         employee_id: employeeId,
@@ -1595,11 +1657,15 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         policy: {
           shift_start_time: policy.shift_start_time,
           grace_minutes: policy.grace_minutes,
-          lates_per_deduction_day: policy.lates_per_deduction_day
+          lates_per_deduction_day: policy.lates_per_deduction_day,
+          extreme_grace_minutes: policy.extreme_grace_minutes,
+          extreme_lates_per_deduction_day: policy.extreme_lates_per_deduction_day
         },
-        days,
+        days: [...days, ...extremeDays].sort((a, b) => a.date.localeCompare(b.date)),
         late_count: countedLate,
-        deduction_days: Math.floor(countedLate / Number(policy.lates_per_deduction_day || 1))
+        deduction_days: Math.floor(countedLate / Number(policy.lates_per_deduction_day || 1)),
+        extreme_late_count: countedExtremeLate,
+        extreme_deduction_days: Math.floor(countedExtremeLate / Number(policy.extreme_lates_per_deduction_day || 1))
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Failed to load late-day details." });
@@ -1769,8 +1835,11 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       // month, applied against each employee's actual check-in times. Lates
       // already had any waived day dropped inside computeLateDatesByEmployee.
       const latePolicy = await getLatePolicyForMonth(monthYear);
-      const lateDatesByEmployee = await computeLateDatesByEmployee(employees, monthStart, monthEnd, holidayMap, latePolicy);
+      const { lateDatesByEmployee, extremeLateDatesByEmployee } = await computeLateDatesByEmployee(
+        employees, monthStart, monthEnd, holidayMap, latePolicy
+      );
       const latesPerDay = Number(latePolicy.lates_per_deduction_day || 1);
+      const extremeLatesPerDay = Number(latePolicy.extreme_lates_per_deduction_day || 1);
 
       const result = employees.map((e: any) => {
         // has_attendance_data must mean "we actually found at least one
@@ -1784,6 +1853,8 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         const absent = Math.max(0, workingDays - present - leave);
         const lateCount = lateDatesByEmployee.get(e.id)?.length || 0;
         const lateDeductionDays = Math.floor(lateCount / latesPerDay);
+        const extremeLateCount = extremeLateDatesByEmployee.get(e.id)?.length || 0;
+        const extremeLateDeductionDays = Math.floor(extremeLateCount / extremeLatesPerDay);
         return {
           employee_id: e.id,
           employee_code: e.employee_code,
@@ -1798,6 +1869,8 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
           overtime_hours: 0,
           late_count: lateCount,
           late_deduction_days: lateDeductionDays,
+          extreme_late_count: extremeLateCount,
+          extreme_late_deduction_days: extremeLateDeductionDays,
           pending_bonus_amount: pendingBonusByEmployee.get(e.id) || 0,
           has_attendance_data: hasAttendanceData,
           has_salary_structure: hasStructure.has(e.id),
@@ -1812,7 +1885,9 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         late_policy: {
           shift_start_time: latePolicy.shift_start_time,
           grace_minutes: latePolicy.grace_minutes,
-          lates_per_deduction_day: latePolicy.lates_per_deduction_day
+          lates_per_deduction_day: latePolicy.lates_per_deduction_day,
+          extreme_grace_minutes: latePolicy.extreme_grace_minutes,
+          extreme_lates_per_deduction_day: latePolicy.extreme_lates_per_deduction_day
         },
         employees: result
       });
