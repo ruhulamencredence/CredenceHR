@@ -72,10 +72,16 @@ export const MyClaimsCard: React.FC<MyClaimsCardProps> = ({ token, onBack, refre
     claims
       .filter((c) => c.status === 'completed' && c.check_out_lat != null && c.check_out_lng != null)
       .forEach((c) => {
-        reverseGeocode(c.check_in_lat, c.check_in_lng).then((addr) => {
+        // check_in_lat/lng etc. are DECIMAL columns server-side, which node-postgres
+        // (and this API's plain res.json() typing) hands back as numeric *strings*
+        // despite ClaimRecord's `number` type — same reason ClaimLocationMap.tsx
+        // wraps every one of these fields in Number(...) before using them.
+        // Skipping that here throws inside toFixed/reverseGeocode and crashes the
+        // whole render tree (blank screen), so every read below goes through Number().
+        reverseGeocode(Number(c.check_in_lat), Number(c.check_in_lng)).then((addr) => {
           if (!cancelled) setAddresses((prev) => ({ ...prev, [`in-${c.id}`]: addr }));
         });
-        reverseGeocode(c.check_out_lat as number, c.check_out_lng as number).then((addr) => {
+        reverseGeocode(Number(c.check_out_lat), Number(c.check_out_lng)).then((addr) => {
           if (!cancelled) setAddresses((prev) => ({ ...prev, [`out-${c.id}`]: addr }));
         });
       });
@@ -134,11 +140,11 @@ export const MyClaimsCard: React.FC<MyClaimsCardProps> = ({ token, onBack, refre
             const checkOutAddr = addresses[`out-${c.id}`];
             const checkInLabel =
               checkInAddr !== undefined
-                ? checkInAddr ?? `${c.check_in_lat.toFixed(5)}, ${c.check_in_lng.toFixed(5)}`
+                ? checkInAddr ?? `${Number(c.check_in_lat).toFixed(5)}, ${Number(c.check_in_lng).toFixed(5)}`
                 : 'Locating…';
             const checkOutLabel =
               checkOutAddr !== undefined
-                ? checkOutAddr ?? `${(c.check_out_lat as number).toFixed(5)}, ${(c.check_out_lng as number).toFixed(5)}`
+                ? checkOutAddr ?? `${Number(c.check_out_lat).toFixed(5)}, ${Number(c.check_out_lng).toFixed(5)}`
                 : 'Locating…';
             return (
             // Was a single <button> covering the whole row (tap -> location map).
