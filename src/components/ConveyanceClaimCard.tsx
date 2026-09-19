@@ -89,12 +89,14 @@ export const ConveyanceClaimCard: React.FC<ConveyanceClaimCardProps> = ({ token,
           <ModulePath path={['Main', 'Conveyance Bill Claim']} />
         </div>
       )}
-    <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
-      {/* Top Header — on mobile the "+ New Claim" action lives in the
-          floating pill button at the bottom of the page instead (same
-          style/position as Movement Claim's "Add Check In/Out"); on desktop,
-          where that floating button is hidden, it sits here instead. */}
-      <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-100">
+    <div className="bg-gradient-to-br from-violet-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl border border-white/70 rounded-[28px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] overflow-hidden md:bg-white md:from-transparent md:via-transparent md:to-transparent md:backdrop-blur-none md:border-slate-200 md:rounded-lg md:shadow-none">
+      {/* Top Header — hidden on mobile: the mobile header now shows this
+          page's own "Conveyance Bill Claim" title in the logo's place (see
+          headerPageTitle.ts in UserPanel.tsx), so repeating it here would be
+          a redundant duplicate, and "+ New Claim" already lives in the
+          floating pill button at the bottom of the page on mobile. Desktop
+          has no such header takeover, so it keeps the full row. */}
+      <div className="hidden md:flex items-center gap-2 px-4 py-3 border-b border-slate-100">
         <div className="p-1.5 bg-indigo-50 rounded-lg">
           <Wallet className="w-4 h-4 text-indigo-600" />
         </div>
@@ -113,8 +115,10 @@ export const ConveyanceClaimCard: React.FC<ConveyanceClaimCardProps> = ({ token,
 
       {message && <div className="mx-4 mt-2 text-xs px-3 py-2 rounded-lg bg-emerald-50 text-emerald-700">{message}</div>}
 
-      {/* Bottom Content — My Conveyance Claims history */}
-      <div className="px-4 pt-2 pb-1">
+      {/* Bottom Content — My Conveyance Claims history. Extra top padding on
+          mobile since the header row above is hidden there (see above),
+          so this doesn't sit flush against the card's rounded top edge. */}
+      <div className="px-4 pt-5 md:pt-2 pb-1">
         <div className="text-xs font-semibold text-slate-500">My Conveyance Claims</div>
       </div>
 
@@ -125,7 +129,7 @@ export const ConveyanceClaimCard: React.FC<ConveyanceClaimCardProps> = ({ token,
           badge on every pill (white/25%-on-accent when active,
           slate-200-on-slate-500 when not). */}
       <div className="px-4 pt-1.5 pb-1">
-        <div className="flex items-center gap-1.5 rounded-full bg-slate-100 p-1 text-xs font-semibold">
+        <div className="flex items-center gap-1.5 rounded-full bg-white/50 md:bg-slate-100 backdrop-blur md:backdrop-blur-none p-1 text-xs font-semibold">
           {TABS.map((t) => {
             const active = tab === t.key;
             const count = countFor(t.key);
@@ -167,14 +171,14 @@ export const ConveyanceClaimCard: React.FC<ConveyanceClaimCardProps> = ({ token,
         </div>
       ) : (
         <>
-          {/* Mobile — stacked cards (unchanged). */}
-          <div className="md:hidden max-h-72 overflow-y-auto divide-y divide-slate-100">
+          {/* Mobile — stacked cards. */}
+          <div className="md:hidden max-h-72 overflow-y-auto divide-y divide-white/40">
             {filtered.map((c) => (
               <button
                 type="button"
                 key={c.id}
                 onClick={() => setViewingClaim(c)}
-                className="w-full text-left px-4 py-2.5 hover:bg-slate-50 active:bg-slate-100 transition-colors"
+                className="w-full text-left px-4 py-2.5 hover:bg-white/40 active:bg-white/60 transition-colors"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">

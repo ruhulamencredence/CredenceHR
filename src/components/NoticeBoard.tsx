@@ -69,7 +69,13 @@ export const NoticeBoard: React.FC<NoticeBoardProps> = ({ token, onBack }) => {
           </button>
         )}
 
-        <div className="flex items-center gap-3 mb-4">
+        {/* Hidden on mobile — the mobile header now shows this page's own
+            "Notice Board" title in the logo's place (see headerPageTitle.ts
+            in UserPanel.tsx), so repeating it here would be a redundant
+            duplicate. Desktop has no such header takeover, so it keeps the
+            full row. The Back button above stays either way — it's
+            navigation, not a duplicate label. */}
+        <div className="hidden md:flex items-center gap-3 mb-4">
           <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center shrink-0">
             <Bell className="w-5 h-5 text-blue-600" />
           </div>
@@ -95,7 +101,10 @@ export const NoticeBoard: React.FC<NoticeBoardProps> = ({ token, onBack }) => {
         ) : (
           <div className="space-y-3">
             {notices.map((n) => (
-              <div key={n.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+              <div
+                key={n.id}
+                className="bg-gradient-to-br from-violet-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl rounded-[28px] border border-white/70 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] p-5 md:bg-white md:from-transparent md:via-transparent md:to-transparent md:backdrop-blur-none md:rounded-2xl md:border-slate-200 md:shadow-sm"
+              >
                 <div className="flex items-start justify-between gap-3">
                   <h2 className="text-sm font-bold text-slate-900">{n.title}</h2>
                   {n.created_at && (
