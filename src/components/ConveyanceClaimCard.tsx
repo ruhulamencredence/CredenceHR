@@ -260,11 +260,20 @@ export const ConveyanceClaimCard: React.FC<ConveyanceClaimCardProps> = ({ token,
         </>
       )}
 
+    </div>
+
       {/* Floating "New Claim" — mobile only, same style/position as Movement
           Claim's floating "Add Check In/Out" button (bottom-right, sitting
           above BottomNav's fixed bar) instead of the old small header
           button, so the two Claims pages match. z-50 for the same reason
-          that one uses it — always paints on top of BottomNav (z-40). */}
+          that one uses it — always paints on top of BottomNav (z-40).
+          Deliberately a SIBLING of the card above, not nested inside it —
+          the card's own backdrop-blur-xl (liquid glass) makes it a
+          containing block for any `position: fixed` descendant per the CSS
+          spec (same as `transform`/`filter`), which was pinning this button
+          to the CARD's box instead of the viewport and made it drift up/down
+          as the card's own height changed with its content. Sitting outside
+          the card sidesteps that entirely. */}
       <button
         type="button"
         onClick={() => setShowNewClaim(true)}
@@ -278,7 +287,6 @@ export const ConveyanceClaimCard: React.FC<ConveyanceClaimCardProps> = ({ token,
         <NewConveyanceClaimModal token={token} onClose={() => setShowNewClaim(false)} onSubmitted={handleSubmitted} />
       )}
       {viewingClaim && <ConveyanceClaimDetailModal claim={viewingClaim} onClose={() => setViewingClaim(null)} />}
-    </div>
     </>
   );
 };

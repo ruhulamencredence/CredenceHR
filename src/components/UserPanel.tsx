@@ -4188,7 +4188,14 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                   </span>
                   <span>▼</span>
                 </button>
-                {showMobileFilters && (
+                {showMobileFilters && createPortal(
+                  // Rendered via a portal straight onto document.body instead of
+                  // in place — this popup lives inside the mobile "liquid glass"
+                  // Job Entry Details card, whose backdrop-blur-xl the CSS spec
+                  // makes a containing block for any `position: fixed`
+                  // descendant (same as `transform`/`filter`), which was pinning
+                  // this popup to that CARD's box instead of the viewport. A
+                  // portal escapes that entirely.
                   <div
                     className="fixed inset-0 z-50 flex items-start"
                     style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 4rem)' }}
@@ -4335,7 +4342,8 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                         Done
                       </button>
                     </div>
-                  </div>
+                  </div>,
+                  document.body
                 )}
               </div>
 
