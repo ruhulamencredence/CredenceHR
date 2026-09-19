@@ -772,7 +772,7 @@ export default function App() {
         ) : selfServiceView === 'payroll' ? (
           <PayrollModule token={token} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'employeeDirectory' ? (
-          <EmployeeDirectory token={token} user={user} onBack={() => setSelfServiceView(null)} />
+          <EmployeeDirectory token={token} user={user} onBack={() => setSelfServiceView(null)} isActive />
         ) : isAdminView ? (
           <AdminPanel
             token={token}
