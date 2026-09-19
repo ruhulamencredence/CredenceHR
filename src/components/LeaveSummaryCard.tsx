@@ -102,9 +102,11 @@ export const LeaveSummaryCard: React.FC<LeaveSummaryCardProps> = ({ token, onOpe
           overlaps the Dashboard banner, so this reads as one connected card.
           Same liquid-glass treatment as the outer card (translucent white +
           backdrop-blur instead of a flat white box), so the violet header
-          shows softly through it. */}
+          shows softly through it. Extra padding + a stronger blur than
+          before so the content has more breathing room and the header
+          genuinely shows through. */}
       <div className="px-5 sm:px-6 -mt-4 pb-5">
-        <div className="bg-white/50 backdrop-blur-xl border border-white/60 rounded-2xl px-4 py-3 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)]">
+        <div className="bg-white/50 backdrop-blur-2xl border border-white/60 rounded-2xl px-5 py-4 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)]">
           <p className="text-xs font-bold text-slate-900">Total Leave</p>
           <p className="text-[11px] text-slate-500 mt-0.5">Period 1 Jan {year} – 31 Dec {year}</p>
           <div className="mt-2.5 flex items-center gap-6">
