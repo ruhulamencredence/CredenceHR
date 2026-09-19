@@ -502,7 +502,13 @@ const EntryCard = React.memo(function EntryCard({
     // Mobile-only (see its md:hidden wrapper above) — liquid glass to match
     // the rest of the Dashboard's mobile cards (Select a Budget/Jobs), since
     // there's no desktop rendering of this component to keep unchanged.
-    <div className="p-3.5 border border-white/60 rounded-2xl bg-white/50 backdrop-blur-xl shadow-[0_4px_14px_-4px_rgba(15,23,42,0.12)]">
+    // No backdrop-blur here on purpose: this renders once per entry, and a
+    // real roster can be dozens of these on screen/scrolling at once —
+    // backdrop-filter is composited per element, so N of them (especially on
+    // Android WebView's software blur) is what was causing the visible
+    // stutter switching into/scrolling this page. A plain semi-opaque
+    // background keeps the same glass look without that per-item blur cost.
+    <div className="p-3.5 border border-white/60 rounded-2xl bg-white/80 shadow-[0_4px_14px_-4px_rgba(15,23,42,0.12)]">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="flex items-center gap-1.5">
@@ -3112,13 +3118,19 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                   No Budget has been imported by the Admin yet. Please check back later.
                 </div>
               ) : (
+                /* No backdrop-blur on these buttons on purpose — this list can
+                   scroll through many budgets at once, and blurring behind
+                   each one individually (instead of once at the outer card
+                   level above) is what was making this page stutter on
+                   Android. A flatter, more opaque background keeps the same
+                   glass look without a per-row blur cost. */
                 <div className="space-y-2.5 max-h-[65vh] overflow-y-auto pr-1">
                   {usableBudgets.map((b) => (
                     <button
                       key={b.id}
                       type="button"
                       onClick={() => openBudget(b)}
-                      className="w-full flex items-center justify-between gap-3 text-left p-3.5 bg-white/50 hover:bg-white/70 backdrop-blur-xl border border-white/60 hover:border-white rounded-2xl shadow-[0_4px_14px_-4px_rgba(15,23,42,0.12)] transition-colors group md:bg-slate-50 md:hover:bg-blue-50 md:backdrop-blur-none md:border-slate-200 md:hover:border-blue-300 md:rounded-xl md:shadow-none"
+                      className="w-full flex items-center justify-between gap-3 text-left p-3.5 bg-white/80 hover:bg-white/90 border border-white/60 hover:border-white rounded-2xl shadow-[0_4px_14px_-4px_rgba(15,23,42,0.12)] transition-colors group md:bg-slate-50 md:hover:bg-blue-50 md:border-slate-200 md:hover:border-blue-300 md:rounded-xl md:shadow-none"
                     >
                       <div className="min-w-0">
                         <div className="font-semibold text-slate-900 text-sm truncate group-hover:text-blue-700 flex items-center gap-1.5">

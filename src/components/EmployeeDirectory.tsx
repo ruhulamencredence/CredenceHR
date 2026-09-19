@@ -551,13 +551,19 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
                 <p className="text-xs text-slate-400 mt-1">Try a different name, Employee ID, or clear the filters.</p>
               </div>
             ) : viewMode === 'grid' ? (
+              /* No backdrop-blur on these cards — the directory can list
+                 hundreds of employees, and blurring behind every grid card
+                 individually (instead of once, like a single page-level
+                 card) is a real cost on Android WebView's software blur,
+                 especially while scrolling. The tint gradient alone (no
+                 blur) keeps the same glass look at a fraction of the cost. */
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
                 {displayed.map((emp) => (
                   <button
                     key={emp.id}
                     type="button"
                     onClick={() => setSelectedEmployee(emp)}
-                    className={`relative text-left rounded-[28px] sm:rounded-2xl overflow-hidden border border-white/70 sm:border-slate-200 p-3 sm:p-4 space-y-2 sm:space-y-3 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] sm:shadow-sm bg-gradient-to-br ${cardTintClass(emp.name)} sm:bg-none sm:bg-white backdrop-blur-xl sm:backdrop-blur-none hover:shadow-lg hover:border-white sm:hover:border-blue-200 transition-all`}
+                    className={`relative text-left rounded-[28px] sm:rounded-2xl overflow-hidden border border-white/70 sm:border-slate-200 p-3 sm:p-4 space-y-2 sm:space-y-3 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] sm:shadow-sm bg-gradient-to-br ${cardTintClass(emp.name)} sm:bg-none sm:bg-white hover:shadow-lg hover:border-white sm:hover:border-blue-200 transition-all`}
                   >
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
