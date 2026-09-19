@@ -115,37 +115,38 @@ export const LeaveReviewPage: React.FC<LeaveReviewPageProps> = ({ token, onBack 
       {/* Review / Approved / Rejected — every submitted Leave Application
           lands in "Review" first; a decision (see Self Service -> Leave
           Approvals) moves it into Approved or Rejected and nowhere else.
-          Rounded-pill segmented control (matching the reference "Expense
-          Summary" design's Review/Approved/Rejected switcher): a light
-          slate-100 track, the active pill fully filled with the app accent
-          color + white text + soft shadow, and a small round count badge on
-          every pill (white/20-on-accent when active, slate-200-on-slate-500
-          when not). */}
-      <div className="px-5 sm:px-6 mt-4 md:mt-4 pt-4 md:pt-0 flex items-center gap-1.5 rounded-full bg-white/50 md:bg-slate-100 backdrop-blur md:backdrop-blur-none p-1.5 text-xs font-semibold">
-        {TABS.map((t) => {
-          const active = tab === t.key;
-          const count = countFor(t.key);
-          return (
-            <button
-              key={t.key}
-              type="button"
-              onClick={() => setTab(t.key)}
-              className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-full transition-colors ${
-                active ? 'text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'
-              }`}
-              style={active ? { background: 'var(--g-accent)' } : undefined}
-            >
-              {t.label}
-              <span
-                className={`inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold ${
-                  active ? 'bg-white/25 text-white' : 'bg-slate-200 text-slate-500'
+          Same rounded-pill segmented control as Conveyance Bill Claim's
+          Review/Approved/Rejected switcher (identical padding/height/colors)
+          so the two pages read as the same component: a light slate-100
+          track, the active pill fully filled with indigo-600 + white text +
+          soft shadow, and a small round count badge on every pill
+          (white/25%-on-indigo when active, slate-200-on-slate-500 when not). */}
+      <div className="px-4 sm:px-6 mt-4 md:mt-1.5 pt-4 md:pt-0 pb-1">
+        <div className="flex items-center gap-1.5 rounded-full bg-white/50 md:bg-slate-100 backdrop-blur md:backdrop-blur-none p-1 text-xs font-semibold">
+          {TABS.map((t) => {
+            const active = tab === t.key;
+            const count = countFor(t.key);
+            return (
+              <button
+                key={t.key}
+                type="button"
+                onClick={() => setTab(t.key)}
+                className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-full transition-colors ${
+                  active ? 'text-white shadow-sm bg-indigo-600' : 'text-slate-500 hover:text-slate-700'
                 }`}
               >
-                {count}
-              </span>
-            </button>
-          );
-        })}
+                {t.label}
+                <span
+                  className={`inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold ${
+                    active ? 'bg-white/25 text-white' : 'bg-slate-200 text-slate-500'
+                  }`}
+                >
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       <div className="px-5 sm:px-6 py-4">
