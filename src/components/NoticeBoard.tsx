@@ -96,11 +96,16 @@ export const NoticeBoard: React.FC<NoticeBoardProps> = ({ token, onBack }) => {
             <p className="text-sm text-slate-500">No notices posted right now.</p>
           </div>
         ) : (
+          /* No backdrop-blur on these cards on purpose — this list can grow
+             to many notices, and blurring behind each one individually was
+             a real contributor to the app feeling slow/stuttery switching
+             into this page on Android. A flatter, more opaque tint keeps
+             the same glass look without a per-card blur cost. */
           <div className="space-y-3">
             {notices.map((n) => (
               <div
                 key={n.id}
-                className="bg-gradient-to-br from-violet-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl rounded-[28px] border border-white/70 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] p-5 md:bg-white md:from-transparent md:via-transparent md:to-transparent md:backdrop-blur-none md:rounded-2xl md:border-slate-200 md:shadow-sm"
+                className="bg-gradient-to-br from-violet-100/90 via-white/85 to-indigo-50/80 rounded-[28px] border border-white/70 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] p-5 md:bg-white md:from-transparent md:via-transparent md:to-transparent md:rounded-2xl md:border-slate-200 md:shadow-sm"
               >
                 <div className="flex items-start justify-between gap-3">
                   <h2 className="text-sm font-bold text-slate-900">{n.title}</h2>
