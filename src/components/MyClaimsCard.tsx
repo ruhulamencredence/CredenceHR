@@ -4,7 +4,7 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { ArrowLeft, MapPin, LogIn, LogOut, ChevronRight, Inbox } from 'lucide-react';
+import { ArrowLeft, LogIn, LogOut, Inbox } from 'lucide-react';
 import { ClaimRecord } from '../types';
 import { apiUrl } from '../lib/api';
 import { formatDate } from '../lib/formatDate';
@@ -157,68 +157,71 @@ export const MyClaimsCard: React.FC<MyClaimsCardProps> = ({ token, onBack, refre
               key={c.id}
               className="rounded-2xl border border-white/60 bg-white/60 hover:bg-white/80 transition-colors px-4 py-3 space-y-1.5 shadow-[0_2px_10px_-4px_rgba(15,23,42,0.08)]"
             >
-              <button
-                type="button"
-                onClick={() => setViewingLocation(c)}
-                className="w-full text-left active:bg-white/50 -mx-4 px-4 space-y-1.5"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <span className="text-sm font-medium text-slate-900 truncate">{c.purpose}</span>
-                  <span
-                    className={`shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
-                      c.status === 'open'
-                        ? 'bg-amber-50 text-amber-700 border-amber-200'
-                        : 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                    }`}
-                  >
-                    {c.status === 'open' ? 'Open' : 'Completed'}
-                  </span>
-                </div>
+              {/* Purpose + Check In date/time on one line, e.g. "Kakoli, 19-Sep-2026
+                  4:24 PM" — the status badge sits at the end of the same row. */}
+              <div className="flex items-start justify-between gap-3">
+                <span className="text-sm font-medium text-slate-900 truncate">
+                  {c.purpose}, {formatDate(c.check_in_at)}{' '}
+                  {new Date(c.check_in_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                </span>
+                <span
+                  className={`shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
+                    c.status === 'open'
+                      ? 'bg-amber-50 text-amber-700 border-amber-200'
+                      : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                  }`}
+                >
+                  {c.status === 'open' ? 'Open' : 'Completed'}
+                </span>
+              </div>
 
-                {c.check_out_at ? (
-                  // Completed claim — ride-history-style route: a filled dot for
-                  // the Check In point, a dashed connector, then a filled dot for
-                  // the Check Out point, each next to its (reverse-geocoded) place
-                  // name and timestamp — same visual language as the pickup/drop-off
-                  // list on a ride-hailing app's trip history.
-                  <div className="flex items-start gap-2.5 pt-0.5">
-                    <div className="flex flex-col items-center pt-1">
-                      <span className="w-2 h-2 rounded-full bg-emerald-600 shrink-0" />
-                      <span className="w-px flex-1 min-h-[22px] border-l border-dashed border-slate-300" />
-                      <span className="w-2 h-2 rounded-full bg-violet-600 shrink-0" />
-                    </div>
-                    <div className="flex-1 min-w-0 space-y-2.5">
-                      <div>
-                        <p className="text-[11px] text-slate-700 leading-snug truncate">{checkInLabel}</p>
-                        <p className="text-[10px] text-emerald-700">
-                          {formatDate(c.check_in_at)} {new Date(c.check_in_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="text-[11px] text-slate-700 leading-snug truncate">{checkOutLabel}</p>
-                        <p className="text-[10px] text-blue-700">
-                          {formatDate(c.check_out_at)} {new Date(c.check_out_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          {c.distance_km != null ? ` · ${c.distance_km} km` : ''}
-                        </p>
-                      </div>
-                    </div>
+              {/* In/Out location names are the tappable bit now (styled as
+                  hyperlinks) — tapping either opens the same movement-location
+                  map, instead of a separate "View movement location" button. */}
+              {c.check_out_at ? (
+                // Completed claim — ride-history-style route: a filled dot for
+                // the Check In point, a dashed connector, then a filled dot for
+                // the Check Out point, each a clickable place-name link, same
+                // visual language as the pickup/drop-off list on a ride-hailing
+                // app's trip history.
+                <div className="flex items-start gap-2.5 pt-0.5">
+                  <div className="flex flex-col items-center pt-1">
+                    <span className="w-2 h-2 rounded-full bg-emerald-600 shrink-0" />
+                    <span className="w-px flex-1 min-h-[8px] border-l border-dashed border-slate-300" />
+                    <span className="w-2 h-2 rounded-full bg-violet-600 shrink-0" />
                   </div>
-                ) : (
-                  <>
-                    <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
-                      <span className="inline-flex items-center gap-1 text-emerald-700">
-                        <LogIn className="w-3 h-3" />
-                        {formatDate(c.check_in_at)} {new Date(c.check_in_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-slate-400">Not checked out yet.</p>
-                  </>
-                )}
-
-                <div className="flex items-center gap-1 text-[11px] font-semibold text-blue-600">
-                  <MapPin className="w-3 h-3" /> View movement location <ChevronRight className="w-3 h-3" />
+                  <div className="flex-1 min-w-0 space-y-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setViewingLocation(c)}
+                      className="block w-full text-left text-[11px] text-blue-600 hover:text-blue-700 underline underline-offset-2 decoration-blue-300 leading-snug truncate"
+                    >
+                      {checkInLabel}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setViewingLocation(c)}
+                      className="block w-full text-left text-[11px] text-blue-600 hover:text-blue-700 underline underline-offset-2 decoration-blue-300 leading-snug truncate"
+                    >
+                      {checkOutLabel}
+                    </button>
+                  </div>
                 </div>
-              </button>
+              ) : (
+                <div className="flex items-start gap-2.5 pt-0.5">
+                  <LogIn className="w-3 h-3 text-emerald-700 shrink-0 mt-1" />
+                  <div className="flex-1 min-w-0 space-y-1">
+                    <button
+                      type="button"
+                      onClick={() => setViewingLocation(c)}
+                      className="block w-full text-left text-[11px] text-blue-600 hover:text-blue-700 underline underline-offset-2 decoration-blue-300 leading-snug truncate"
+                    >
+                      {checkInLabel}
+                    </button>
+                    <p className="text-[11px] text-slate-400">Not checked out yet.</p>
+                  </div>
+                </div>
+              )}
 
               {/* Only the still-open claim gets this — lets the User complete it
                   right here instead of going back to the Movement Claim page's
