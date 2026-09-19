@@ -23,6 +23,30 @@
   display: none; /* Chrome/Safari/new Edge */
 }
 
+/* Mobile page-switch transition — UserPanel.tsx keeps every mobile section
+   (Dashboard tile menu, Jobs, Job Entry Details, Claims, ...) permanently
+   mounted and just flips a `hidden`/`block` class to switch between them, so
+   there was previously no motion at all between one screen and the next: a
+   hard, instant jump-cut. That reads as the app hanging/buffering rather
+   than switching, even though it's actually fast — there's no visual
+   feedback that anything happened. `display: none -> block` itself can't be
+   transitioned (display isn't animatable), so this uses a keyframe instead:
+   a CSS animation restarts on its own the moment an element goes from
+   display:none to displayed, with no extra JS needed to "replay" it.
+   Applied only to whichever section is currently shown (see UserPanel.tsx). */
+@keyframes mobile-page-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.mobile-page-in {
+  animation: mobile-page-in 0.22s cubic-bezier(0.25, 0.8, 0.4, 1) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .mobile-page-in {
+    animation: none;
+  }
+}
+
 /*
   Design system - modeled on the Gemini app's visual language:
   a quiet, near-white surface; a single colorful brand gradient reserved for the

@@ -8,6 +8,7 @@ import { ArrowLeft, MapPin, LogIn, LogOut, ChevronRight, Inbox } from 'lucide-re
 import { ClaimRecord } from '../types';
 import { apiUrl } from '../lib/api';
 import { formatDate } from '../lib/formatDate';
+import { reverseGeocode } from '../lib/reverseGeocode';
 import ClaimLocationMap from './ClaimLocationMap';
 import { Spinner } from './Spinner';
 
@@ -41,6 +42,12 @@ export const MyClaimsCard: React.FC<MyClaimsCardProps> = ({ token, onBack, refre
   const [claims, setClaims] = useState<ClaimRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [viewingLocation, setViewingLocation] = useState<ClaimRecord | null>(null);
+  // Reverse-geocoded place names for each completed claim's Check In/Out point,
+  // keyed by `in-${claim.id}` / `out-${claim.id}` — filled in lazily below so the
+  // ride-history-style route (dot -> dashed line -> dot) can show real place
+  // names instead of raw coordinates. Missing key = still loading; null = the
+  // lookup failed/found nothing (falls back to the plain coordinates).
+  const [addresses, setAddresses] = useState<Record<string, string | null>>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -59,6 +66,30 @@ export const MyClaimsCard: React.FC<MyClaimsCardProps> = ({ token, onBack, refre
       cancelled = true;
     };
   }, [token, refreshKey]);
+
+  useEffect(() => {
+    let cancelled = false;
+    claims
+      .filter((c) => c.status === 'completed' && c.check_out_lat != null && c.check_out_lng != null)
+      .forEach((c) => {
+        // check_in_lat/lng etc. are DECIMAL columns server-side, which node-postgres
+        // (and this API's plain res.json() typing) hands back as numeric *strings*
+        // despite ClaimRecord's `number` type — same reason ClaimLocationMap.tsx
+        // wraps every one of these fields in Number(...) before using them.
+        // Skipping that here throws inside toFixed/reverseGeocode and crashes the
+        // whole render tree (blank screen), so every read below goes through Number().
+        reverseGeocode(Number(c.check_in_lat), Number(c.check_in_lng)).then((addr) => {
+          if (!cancelled) setAddresses((prev) => ({ ...prev, [`in-${c.id}`]: addr }));
+        });
+        reverseGeocode(Number(c.check_out_lat), Number(c.check_out_lng)).then((addr) => {
+          if (!cancelled) setAddresses((prev) => ({ ...prev, [`out-${c.id}`]: addr }));
+        });
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [claims]);
 
   return (
     // This card is only ever rendered as a dedicated mobile page (both call
@@ -102,7 +133,20 @@ export const MyClaimsCard: React.FC<MyClaimsCardProps> = ({ token, onBack, refre
         </div>
       ) : (
         <div className="flex-1 overflow-y-auto divide-y divide-white/40">
-          {claims.map((c) => (
+          {claims.map((c) => {
+            // undefined = lookup not resolved yet, null = it resolved to nothing
+            // (falls back to plain coordinates below), string = the place name.
+            const checkInAddr = addresses[`in-${c.id}`];
+            const checkOutAddr = addresses[`out-${c.id}`];
+            const checkInLabel =
+              checkInAddr !== undefined
+                ? checkInAddr ?? `${Number(c.check_in_lat).toFixed(5)}, ${Number(c.check_in_lng).toFixed(5)}`
+                : 'Locating…';
+            const checkOutLabel =
+              checkOutAddr !== undefined
+                ? checkOutAddr ?? `${Number(c.check_out_lat).toFixed(5)}, ${Number(c.check_out_lng).toFixed(5)}`
+                : 'Locating…';
+            return (
             // Was a single <button> covering the whole row (tap -> location map).
             // Now a plain <div> instead, since an open claim needs its own nested
             // "Check Out" button below and a <button> can't contain a <button>.
@@ -125,23 +169,44 @@ export const MyClaimsCard: React.FC<MyClaimsCardProps> = ({ token, onBack, refre
                   </span>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
-                  <span className="inline-flex items-center gap-1 text-emerald-700">
-                    <LogIn className="w-3 h-3" />
-                    {formatDate(c.check_in_at)} {new Date(c.check_in_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </span>
-                </div>
-
                 {c.check_out_at ? (
-                  <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
-                    <span className="inline-flex items-center gap-1 text-blue-700">
-                      <LogOut className="w-3 h-3" />
-                      {formatDate(c.check_out_at)} {new Date(c.check_out_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      {c.distance_km != null ? ` · ${c.distance_km} km` : ''}
-                    </span>
+                  // Completed claim — ride-history-style route: a filled dot for
+                  // the Check In point, a dashed connector, then a filled dot for
+                  // the Check Out point, each next to its (reverse-geocoded) place
+                  // name and timestamp — same visual language as the pickup/drop-off
+                  // list on a ride-hailing app's trip history.
+                  <div className="flex items-start gap-2.5 pt-0.5">
+                    <div className="flex flex-col items-center pt-1">
+                      <span className="w-2 h-2 rounded-full bg-emerald-600 shrink-0" />
+                      <span className="w-px flex-1 min-h-[22px] border-l border-dashed border-slate-300" />
+                      <span className="w-2 h-2 rounded-full bg-violet-600 shrink-0" />
+                    </div>
+                    <div className="flex-1 min-w-0 space-y-2.5">
+                      <div>
+                        <p className="text-[11px] text-slate-700 leading-snug truncate">{checkInLabel}</p>
+                        <p className="text-[10px] text-emerald-700">
+                          {formatDate(c.check_in_at)} {new Date(c.check_in_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] text-slate-700 leading-snug truncate">{checkOutLabel}</p>
+                        <p className="text-[10px] text-blue-700">
+                          {formatDate(c.check_out_at)} {new Date(c.check_out_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          {c.distance_km != null ? ` · ${c.distance_km} km` : ''}
+                        </p>
+                      </div>
+                    </div>
                   </div>
                 ) : (
-                  <p className="text-[11px] text-slate-400">Not checked out yet.</p>
+                  <>
+                    <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                      <span className="inline-flex items-center gap-1 text-emerald-700">
+                        <LogIn className="w-3 h-3" />
+                        {formatDate(c.check_in_at)} {new Date(c.check_in_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-400">Not checked out yet.</p>
+                  </>
                 )}
 
                 <div className="flex items-center gap-1 text-[11px] font-semibold text-blue-600">
@@ -163,7 +228,8 @@ export const MyClaimsCard: React.FC<MyClaimsCardProps> = ({ token, onBack, refre
                 </button>
               )}
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
