@@ -43,6 +43,8 @@ interface WizardRow {
   lwp_days: number;
   late_count: number;
   late_deduction_days: number;
+  extreme_late_count: number;
+  extreme_late_deduction_days: number;
   overtime_hours: number;
   overtime_amount: number;
   bonus_amount: number;
@@ -123,7 +125,13 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
   const [calculating, setCalculating] = useState(false);
   const [previewError, setPreviewError] = useState('');
 
-  const [latePolicy, setLatePolicy] = useState<{ shift_start_time: string; grace_minutes: number; lates_per_deduction_day: number } | null>(null);
+  const [latePolicy, setLatePolicy] = useState<{
+    shift_start_time: string;
+    grace_minutes: number;
+    lates_per_deduction_day: number;
+    extreme_grace_minutes: number;
+    extreme_lates_per_deduction_day: number;
+  } | null>(null);
   const [viewingLateFor, setViewingLateFor] = useState<WizardRow | null>(null);
 
   const [paymentMethod, setPaymentMethod] = useState('Bank Transfer');
@@ -190,8 +198,12 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
             absent_days: r.absent_days,
             leave_days: r.leave_days,
             lwp_days: r.lwp_days,
-            late_count: r.late_count,
-            late_deduction_days: r.late_deduction_days,
+            // Delay + Extreme Delay combined — both tiers price identically
+            // (one deducted day per threshold crossed), the server's preview
+            // math just needs the total day count, not which tier it came
+            // from; the tiers stay visually separate in Step 2/late-summary.
+            late_count: r.late_count + r.extreme_late_count,
+            late_deduction_days: r.late_deduction_days + r.extreme_late_deduction_days,
             overtime_amount: r.overtime_amount,
             bonus_amount: r.bonus_amount,
             other_deduction: r.other_deduction
@@ -239,8 +251,8 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
             absent_days: r.absent_days,
             leave_days: r.leave_days,
             lwp_days: r.lwp_days,
-            late_count: r.late_count,
-            late_deduction_days: r.late_deduction_days,
+            late_count: r.late_count + r.extreme_late_count,
+            late_deduction_days: r.late_deduction_days + r.extreme_late_deduction_days,
             overtime_hours: r.overtime_hours,
             overtime_amount: r.overtime_amount,
             bonus_amount: r.bonus_amount,
@@ -346,9 +358,11 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
                   </p>
                   {latePolicy && (
                     <p className="text-[10px] text-slate-400 mt-0.5">
-                      Late Policy: shift starts {latePolicy.shift_start_time?.slice(0, 5)}, grace {latePolicy.grace_minutes} min (late past{' '}
+                      Delay: shift starts {latePolicy.shift_start_time?.slice(0, 5)}, grace {latePolicy.grace_minutes} min (late past{' '}
                       {addMinutesToTime(latePolicy.shift_start_time, latePolicy.grace_minutes)}), {latePolicy.lates_per_deduction_day} lates ={' '}
-                      1 day's pay deducted.
+                      1 day's pay deducted. Extreme Delay: past{' '}
+                      {addMinutesToTime(latePolicy.shift_start_time, latePolicy.extreme_grace_minutes)}, {latePolicy.extreme_lates_per_deduction_day}{' '}
+                      late{latePolicy.extreme_lates_per_deduction_day === 1 ? '' : 's'} = 1 day's pay deducted.
                     </p>
                   )}
                 </div>
@@ -402,7 +416,7 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
                           <td className="px-3 py-2 text-right whitespace-nowrap">
                             <button
                               onClick={() => setViewingLateFor(r)}
-                              disabled={!r.late_count}
+                              disabled={!r.late_count && !r.extreme_late_count}
                               className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[11px] font-semibold ${
                                 r.late_count > 0
                                   ? 'text-amber-700 bg-amber-50 hover:bg-amber-100'
@@ -412,8 +426,20 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
                             >
                               <Clock className="w-3 h-3" /> {r.late_count || 0}
                             </button>
-                            {r.late_deduction_days > 0 && (
-                              <p className="text-[9px] text-rose-500 mt-0.5">−{r.late_deduction_days} day{r.late_deduction_days === 1 ? '' : 's'} pay</p>
+                            {r.extreme_late_count > 0 && (
+                              <button
+                                onClick={() => setViewingLateFor(r)}
+                                className="inline-flex items-center gap-1 px-1.5 py-0.5 ml-1 rounded-md text-[11px] font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100"
+                                title="View / waive Extreme Delay days"
+                              >
+                                <Clock className="w-3 h-3" /> {r.extreme_late_count}
+                              </button>
+                            )}
+                            {(r.late_deduction_days > 0 || r.extreme_late_deduction_days > 0) && (
+                              <p className="text-[9px] text-rose-500 mt-0.5">
+                                −{r.late_deduction_days + r.extreme_late_deduction_days} day
+                                {r.late_deduction_days + r.extreme_late_deduction_days === 1 ? '' : 's'} pay
+                              </p>
                             )}
                           </td>
                           <td className="px-3 py-2 whitespace-nowrap">
@@ -680,6 +706,7 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
 // always re-syncs Step 2 so the row's Late count reflects whatever changed.
 interface LateDay {
   date: string;
+  extreme: boolean;
   waived: boolean;
   waiver_id: number | null;
   reason: string | null;
@@ -693,7 +720,13 @@ const LateDaysModal: React.FC<{
   onClose: () => void;
 }> = ({ authHeaders, employeeId, employeeName, monthYear, onClose }) => {
   const [days, setDays] = useState<LateDay[]>([]);
-  const [policy, setPolicy] = useState<{ shift_start_time: string; grace_minutes: number; lates_per_deduction_day: number } | null>(null);
+  const [policy, setPolicy] = useState<{
+    shift_start_time: string;
+    grace_minutes: number;
+    lates_per_deduction_day: number;
+    extreme_grace_minutes: number;
+    extreme_lates_per_deduction_day: number;
+  } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [busyDate, setBusyDate] = useState<string | null>(null);
@@ -748,8 +781,10 @@ const LateDaysModal: React.FC<{
     }
   };
 
-  const countedLate = days.filter((d) => !d.waived).length;
+  const countedLate = days.filter((d) => !d.waived && !d.extreme).length;
   const deductionDays = policy ? Math.floor(countedLate / Number(policy.lates_per_deduction_day || 1)) : 0;
+  const countedExtremeLate = days.filter((d) => !d.waived && d.extreme).length;
+  const extremeDeductionDays = policy ? Math.floor(countedExtremeLate / Number(policy.extreme_lates_per_deduction_day || 1)) : 0;
 
   return (
     <div className="fixed inset-0 bg-black/40 z-[60] flex items-center justify-center p-4" onClick={onClose}>
@@ -773,20 +808,34 @@ const LateDaysModal: React.FC<{
             <p className="text-xs text-slate-400 text-center py-10">No late days this month.</p>
           ) : (
             <>
-              <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-[11px] text-slate-600">
-                {countedLate} counted late day{countedLate === 1 ? '' : 's'}
-                {policy ? ` — every ${policy.lates_per_deduction_day} lates deducts 1 day's pay` : ''} →{' '}
-                <span className="font-semibold text-rose-600">{deductionDays} day{deductionDays === 1 ? '' : 's'}</span> deducted this run.
+              <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-[11px] text-slate-600 space-y-1">
+                <p>
+                  {countedLate} counted Delay day{countedLate === 1 ? '' : 's'}
+                  {policy ? ` — every ${policy.lates_per_deduction_day} lates deducts 1 day's pay` : ''} →{' '}
+                  <span className="font-semibold text-rose-600">{deductionDays} day{deductionDays === 1 ? '' : 's'}</span> deducted.
+                </p>
+                <p>
+                  {countedExtremeLate} counted Extreme Delay day{countedExtremeLate === 1 ? '' : 's'}
+                  {policy ? ` — every ${policy.extreme_lates_per_deduction_day} deducts 1 day's pay` : ''} →{' '}
+                  <span className="font-semibold text-rose-600">{extremeDeductionDays} day{extremeDeductionDays === 1 ? '' : 's'}</span> deducted.
+                </p>
               </div>
               <div className="space-y-2">
                 {days.map((d) => (
                   <div
                     key={d.date}
-                    className={`border rounded-lg p-2.5 ${d.waived ? 'border-slate-200 bg-slate-50/60' : 'border-amber-200 bg-amber-50/60'}`}
+                    className={`border rounded-lg p-2.5 ${d.waived ? 'border-slate-200 bg-slate-50/60' : d.extreme ? 'border-rose-200 bg-rose-50/60' : 'border-amber-200 bg-amber-50/60'}`}
                   >
                     <div className="flex items-center justify-between">
                       <div>
-                        <p className={`text-xs font-medium ${d.waived ? 'text-slate-400 line-through' : 'text-slate-800'}`}>{dateLabel(d.date)}</p>
+                        <p className={`text-xs font-medium ${d.waived ? 'text-slate-400 line-through' : 'text-slate-800'}`}>
+                          {dateLabel(d.date)}
+                          {d.extreme && (
+                            <span className="ml-1.5 text-[9px] font-semibold uppercase tracking-wide text-rose-600 bg-rose-100 px-1.5 py-0.5 rounded-full">
+                              Extreme
+                            </span>
+                          )}
+                        </p>
                         {d.waived && d.reason && <p className="text-[10px] text-slate-400 mt-0.5">Waived: {d.reason}</p>}
                       </div>
                       {d.waived ? (
