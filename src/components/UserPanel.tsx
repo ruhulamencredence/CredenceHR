@@ -3071,10 +3071,14 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                LeaveSummaryCard's mobile look — desktop (md+) keeps the original
                plain white card untouched via the md: overrides below. */
             <div className="bg-gradient-to-br from-violet-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl border border-white/70 rounded-[28px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] p-6 lg:sticky lg:top-24 md:bg-white md:from-transparent md:via-transparent md:to-transparent md:backdrop-blur-none md:border-slate-200 md:rounded-2xl md:shadow-sm">
-              <h3 className="text-lg font-bold text-slate-900 mb-1 flex items-center gap-2">
+              {/* Hidden on mobile — the mobile header now shows this page's own
+                  title in the logo's place (see headerPageTitle.ts above), so
+                  repeating it here would be a redundant duplicate. Desktop has
+                  no such header takeover, so it keeps this heading. */}
+              <h3 className="hidden md:flex text-lg font-bold text-slate-900 mb-1 items-center gap-2">
                 <Wallet className="w-5 h-5 text-blue-600" /> Select a Budget
               </h3>
-              <p className="text-xs text-slate-500 mb-4">
+              <p className="hidden md:block text-xs text-slate-500 mb-4">
                 Pick a Budget imported by the Admin to start a new MPR entry under it.
               </p>
 
