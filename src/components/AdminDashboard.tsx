@@ -294,9 +294,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user }) =
     const todayDay = new Date().getDate();
     const byUser = new Map<number, any>(attendanceReport.users.map((u) => [Number(u.user_id), u]));
     let thresholdMinutes: number | null = null;
+    let extremeThresholdMinutes: number | null = null;
     if (latePolicy) {
       const [h, m] = String(latePolicy.shift_start_time).split(':').map(Number);
       thresholdMinutes = h * 60 + m + Number(latePolicy.grace_minutes || 0);
+      extremeThresholdMinutes = h * 60 + m + Number(latePolicy.extreme_grace_minutes || 60);
     }
     const rows = employees
       .filter((e) => e.is_active && e.user_id)
@@ -304,9 +306,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user }) =
         const u = byUser.get(Number(e.user_id));
         const d = u?.days?.[todayDay - 1];
         let isDelay = false;
+        let isExtremeDelay = false;
         if (d?.check_in_at && thresholdMinutes != null) {
           const ci = new Date(d.check_in_at);
-          isDelay = ci.getHours() * 60 + ci.getMinutes() > thresholdMinutes;
+          const minutesOfDay = ci.getHours() * 60 + ci.getMinutes();
+          if (extremeThresholdMinutes != null && minutesOfDay > extremeThresholdMinutes) isExtremeDelay = true;
+          else if (minutesOfDay > thresholdMinutes) isDelay = true;
         }
         return {
           id: e.id,
@@ -318,6 +323,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user }) =
           holiday: d?.day_type ? (d.holiday_title || 'Holiday') : null,
           onLeaveToday: false, // filled in below once leaveApplications is cross-referenced
           isDelay,
+          isExtremeDelay,
         };
       });
     // Cross-reference today's approved leave so someone on leave shows as
@@ -336,11 +342,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user }) =
     return q ? withLeave.filter((r) => r.name.toLowerCase().includes(q) || r.designation.toLowerCase().includes(q)) : withLeave;
   }, [employees, attendanceReport, latePolicy, leaveApplications, today, search]);
 
-  // Summary badges above the Quick View table — Total/Present/Absent/Leave
-  // are all real counts from the data above; Extreme Delay has no second
-  // threshold tier in the app's Late Policy (Admin Panel -> Payroll ->
-  // Late Policy only defines one grace-period cutoff), so it stays a
-  // Coming Soon badge rather than inventing an arbitrary second cutoff.
+  // Summary badges above the Quick View table — Total/Present/Absent/Leave/
+  // Delay/Extreme Delay are all real counts from the data above.
   const quickViewSummary = useMemo(() => {
     if (!quickViewRows) return null;
     const total = quickViewRows.length;
@@ -349,7 +352,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user }) =
     const present = quickViewRows.filter((r) => r.present && !r.onLeaveToday).length;
     const absent = quickViewRows.filter((r) => !r.present && !r.onLeaveToday && !r.holiday).length;
     const delay = latePolicy ? quickViewRows.filter((r) => r.isDelay).length : null;
-    return { total, present, absent, onLeave, delay, holiday };
+    const extremeDelay = latePolicy ? quickViewRows.filter((r) => r.isExtremeDelay).length : null;
+    return { total, present, absent, onLeave, delay, extremeDelay, holiday };
   }, [quickViewRows, latePolicy]);
 
   // --- Current Leave Balance (allocated vs taken-this-year) ---
@@ -549,10 +553,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user }) =
                     </span>
                     Delay
                   </span>
-                  <span className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-300">
-                    <span className="w-6 h-6 rounded-full bg-slate-200 text-white flex items-center justify-center text-[10px] font-bold">—</span>
+                  <span className={`flex items-center gap-1.5 text-[11px] font-semibold ${quickViewSummary.extremeDelay != null ? 'text-rose-600' : 'text-slate-300'}`}>
+                    <span className={`w-6 h-6 rounded-full text-white flex items-center justify-center text-[10px] font-bold ${quickViewSummary.extremeDelay != null ? 'bg-rose-600' : 'bg-slate-200'}`}>
+                      {quickViewSummary.extremeDelay != null ? quickViewSummary.extremeDelay : '—'}
+                    </span>
                     Extreme Delay
-                    <span className="text-[8px] font-semibold uppercase tracking-wide text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-full">Soon</span>
                   </span>
                 </div>
               )}
@@ -598,6 +603,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user }) =
                             </span>
                             {r.isDelay && (
                               <span className="ml-1 px-1.5 py-0.5 rounded-md font-medium bg-orange-50 text-orange-600">Delay</span>
+                            )}
+                            {r.isExtremeDelay && (
+                              <span className="ml-1 px-1.5 py-0.5 rounded-md font-medium bg-rose-50 text-rose-600">Extreme Delay</span>
                             )}
                           </td>
                         </tr>
