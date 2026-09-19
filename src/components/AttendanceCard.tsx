@@ -211,7 +211,7 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
   const busy = working !== null || !!pending || loadingStatus;
 
   return (
-    <div className="relative rounded-[24px] overflow-hidden border border-white/70 p-3.5 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-blue-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white transition-all">
+    <div className="relative rounded-[24px] overflow-hidden border border-white/70 p-4 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-blue-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white transition-all">
       <h3 className="text-sm font-bold text-slate-900 mb-2 flex items-center gap-2 min-w-0">
         <UserCheck className="w-4 h-4 text-blue-600 shrink-0" />
         <span className="truncate">My Attendance</span>
@@ -236,19 +236,17 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
       )}
 
       <div className="grid grid-cols-2 gap-2">
-        {/* In Time */}
-        <div className={`rounded-xl px-3 py-2 backdrop-blur border ${hasCheckedIn ? 'bg-blue-100/50 border-white/60' : 'bg-white/40 border-white/50'}`}>
+        {/* In Time — just the time itself, no "via Office/GPS" source line;
+            extra padding + a stronger blur than the card's own backdrop-blur
+            so the gradient behind genuinely shows through this tile instead
+            of the text crowding its rounded corners. */}
+        <div className={`rounded-xl px-4 py-3 backdrop-blur-lg border ${hasCheckedIn ? 'bg-blue-100/50 border-white/60' : 'bg-white/40 border-white/50'}`}>
           <div className="text-xs font-medium text-slate-500">In Time</div>
           {hasCheckedIn && inParts ? (
-            <>
-              <div className="mt-0.5 font-bold text-blue-700">
-                <span className="text-base">{inParts.time}</span>{' '}
-                <span className="text-[11px] align-middle">{inParts.meridiem}</span>
-              </div>
-              {status?.check_in_source === 'office' && (
-                <div className="mt-0.5 text-[10px] font-semibold text-sky-700">via Office Attendance</div>
-              )}
-            </>
+            <div className="mt-0.5 font-bold text-blue-700">
+              <span className="text-base">{inParts.time}</span>{' '}
+              <span className="text-[11px] align-middle">{inParts.meridiem}</span>
+            </div>
           ) : (
             <button
               type="button"
@@ -262,19 +260,15 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
           )}
         </div>
 
-        {/* Out Time */}
-        <div className={`rounded-xl px-3 py-2 backdrop-blur border ${hasCheckedOut ? 'bg-blue-100/50 border-white/60' : 'bg-white/40 border-white/50'}`}>
+        {/* Out Time — same "time only" + extra padding/blur treatment as
+            In Time above. */}
+        <div className={`rounded-xl px-4 py-3 backdrop-blur-lg border ${hasCheckedOut ? 'bg-blue-100/50 border-white/60' : 'bg-white/40 border-white/50'}`}>
           <div className="text-xs font-medium text-slate-500">Out Time</div>
           {hasCheckedOut && outParts ? (
-            <>
-              <div className="mt-0.5 font-bold text-blue-700">
-                <span className="text-base">{outParts.time}</span>{' '}
-                <span className="text-[11px] align-middle">{outParts.meridiem}</span>
-              </div>
-              {status?.check_out_source === 'office' && (
-                <div className="mt-0.5 text-[10px] font-semibold text-sky-700">via Office Attendance</div>
-              )}
-            </>
+            <div className="mt-0.5 font-bold text-blue-700">
+              <span className="text-base">{outParts.time}</span>{' '}
+              <span className="text-[11px] align-middle">{outParts.meridiem}</span>
+            </div>
           ) : (
             <button
               type="button"

@@ -277,10 +277,14 @@ export const ConveyanceClaimCard: React.FC<ConveyanceClaimCardProps> = ({ token,
       <button
         type="button"
         onClick={() => setShowNewClaim(true)}
-        className="md:hidden fixed right-4 z-50 flex items-center gap-2 pl-4 pr-5 py-3 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-full shadow-lg shadow-indigo-600/30 active:scale-95 transition-transform"
+        // Liquid glass pill — same translucent gradient + blur + glossy inset
+        // highlight + colored drop shadow treatment as Check In/Out's and
+        // Submit Leave's floating buttons, instead of the old flat solid
+        // color.
+        className="md:hidden fixed right-4 z-50 flex items-center gap-1.5 pl-3.5 pr-4 py-2.5 rounded-full text-white text-xs font-semibold backdrop-blur-xl border border-white/40 bg-gradient-to-br from-indigo-400/90 via-indigo-600/90 to-violet-700/90 shadow-[0_10px_28px_-6px_rgba(79,70,229,0.55),inset_0_1px_0_rgba(255,255,255,0.45)] active:scale-95 active:shadow-[0_4px_14px_-4px_rgba(79,70,229,0.5),inset_0_1px_0_rgba(255,255,255,0.3)] transition-all"
         style={{ bottom: 'calc(6.5rem + env(safe-area-inset-bottom, 0px))' }}
       >
-        <Plus className="w-4 h-4" /> New Claim
+        <Plus className="w-3.5 h-3.5" /> New Claim
       </button>
 
       {showNewClaim && (
