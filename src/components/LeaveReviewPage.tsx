@@ -72,8 +72,16 @@ export const LeaveReviewPage: React.FC<LeaveReviewPageProps> = ({ token, onBack 
   const countFor = (key: ReviewTab) => applications.filter((a) => a.status === key).length;
 
   return (
+    <>
     <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-      <div className="flex items-center justify-between gap-3 px-5 pt-4 sm:px-6">
+      {/* Back to Menu / Submit Leave — desktop only now. Mobile drops the
+          on-screen Back button (the header shows this page's own "Leave
+          Applications" title in the logo's place, see headerPageTitle.ts in
+          UserPanel.tsx, and the native app's hardware/gesture back already
+          returns to the tile menu via useBackButtonClose) and moves Submit
+          Leave to a floating bottom-right button below, same design/position
+          as Movement Claim's "Add Check In/Out" and Conveyance's "New Claim". */}
+      <div className="hidden md:flex items-center justify-between gap-3 px-5 pt-4 sm:px-6">
         <button
           type="button"
           onClick={onBack}
@@ -91,7 +99,9 @@ export const LeaveReviewPage: React.FC<LeaveReviewPageProps> = ({ token, onBack 
         </button>
       </div>
 
-      <div className="px-5 pt-4 sm:px-6">
+      {/* Heading/description hidden on mobile — redundant with the header's
+          title takeover. Desktop keeps the full block. */}
+      <div className="hidden md:block px-5 pt-4 sm:px-6">
         <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
           <CalendarDays className="w-4 h-4" style={{ color: 'var(--g-accent)' }} /> Leave Applications
         </h3>
@@ -107,7 +117,7 @@ export const LeaveReviewPage: React.FC<LeaveReviewPageProps> = ({ token, onBack 
           color + white text + soft shadow, and a small round count badge on
           every pill (white/20-on-accent when active, slate-200-on-slate-500
           when not). */}
-      <div className="px-5 sm:px-6 mt-4 flex items-center gap-1.5 rounded-full bg-slate-100 p-1.5 text-xs font-semibold">
+      <div className="px-5 sm:px-6 mt-4 md:mt-4 pt-4 md:pt-0 flex items-center gap-1.5 rounded-full bg-slate-100 p-1.5 text-xs font-semibold">
         {TABS.map((t) => {
           const active = tab === t.key;
           const count = countFor(t.key);
@@ -200,6 +210,20 @@ export const LeaveReviewPage: React.FC<LeaveReviewPageProps> = ({ token, onBack 
         )}
       </div>
 
+    </div>
+
+      {/* Floating "Submit Leave" — mobile only, same design/position as
+          Movement Claim's "Add Check In/Out" and Conveyance's "New Claim"
+          floating buttons (bottom-right, above BottomNav's fixed bar). */}
+      <button
+        type="button"
+        onClick={() => setShowNewModal(true)}
+        className="md:hidden fixed right-4 z-50 flex items-center gap-2 pl-4 pr-5 py-3 text-white text-sm font-semibold rounded-full shadow-lg active:scale-95 transition-transform"
+        style={{ bottom: 'calc(6.5rem + env(safe-area-inset-bottom, 0px))', background: 'var(--g-accent)' }}
+      >
+        <Plus className="w-4 h-4" /> Submit Leave
+      </button>
+
       {showNewModal && (
         <NewLeaveApplicationModal
           token={token}
@@ -210,6 +234,6 @@ export const LeaveReviewPage: React.FC<LeaveReviewPageProps> = ({ token, onBack 
           }}
         />
       )}
-    </div>
+    </>
   );
 };
