@@ -13,6 +13,7 @@ import credenceLogo from '../assets/credence-logo.png';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
 import { savePdfCrossPlatform } from '../lib/saveFile';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
+import { setHeaderPageTitle } from '../lib/headerPageTitle';
 import { PdfPreviewModal } from './PdfPreviewModal';
 import { JobEditPanel } from './JobEditPanel';
 import { AttendanceCard } from './AttendanceCard';
@@ -918,6 +919,19 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
       // ignore, it just means a reload won't be able to restore this section.
     }
   }, [mobileActiveSection]);
+  // While the "Select a Budget" tile is the active mobile section, dock this
+  // page's own title into the mobile header (Navbar.tsx) in place of the
+  // company logo — see headerPageTitle.ts, same swap EmployeeDirectory does
+  // for its search icon. Matches the tile's own label (line ~2907) so the
+  // text doesn't change mid-navigation. Cleared on unmount (logout/panel
+  // switch) by the separate effect below, not here, so switching between
+  // this section and another doesn't flash the logo back on for a tick.
+  useEffect(() => {
+    setHeaderPageTitle(mobileActiveSection === 'budget' ? (selectedBudget ? 'MPR Entry' : 'Select a Budget') : null);
+  }, [mobileActiveSection, selectedBudget]);
+  useEffect(() => {
+    return () => setHeaderPageTitle(null);
+  }, []);
   // Switching mobile "pages" (tile taps, the bottom nav bar, etc.) only ever
   // toggles which section is display:block vs hidden — it never remounts or
   // scrolls anything on its own. Without this, jumping to a shorter page (e.g.
@@ -3052,7 +3066,11 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                Menu" lives here (not also duplicated once a Budget is selected —
                "Back to Budgets" below already gets you back to this screen, so
                showing both at once was redundant chrome on a small screen). */
-            <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm lg:sticky lg:top-24">
+            /* Liquid glass on mobile (soft violet-tint gradient + backdrop-blur +
+               big rounded corners), matching the Dashboard tile menu and
+               LeaveSummaryCard's mobile look — desktop (md+) keeps the original
+               plain white card untouched via the md: overrides below. */
+            <div className="bg-gradient-to-br from-violet-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl border border-white/70 rounded-[28px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] p-6 lg:sticky lg:top-24 md:bg-white md:from-transparent md:via-transparent md:to-transparent md:backdrop-blur-none md:border-slate-200 md:rounded-2xl md:shadow-sm">
               <h3 className="text-lg font-bold text-slate-900 mb-1 flex items-center gap-2">
                 <Wallet className="w-5 h-5 text-blue-600" /> Select a Budget
               </h3>
@@ -3061,7 +3079,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
               </p>
 
               {usableBudgets.length === 0 ? (
-                <div className="text-center text-xs text-slate-400 bg-slate-50 border border-dashed border-slate-200 rounded-xl py-8 px-4 flex flex-col items-center gap-2">
+                <div className="text-center text-xs text-slate-400 bg-white/40 md:bg-slate-50 backdrop-blur md:backdrop-blur-none border border-dashed border-white/60 md:border-slate-200 rounded-xl py-8 px-4 flex flex-col items-center gap-2">
                   <FolderOpen className="w-6 h-6 text-slate-300" />
                   No Budget has been imported by the Admin yet. Please check back later.
                 </div>
@@ -3072,7 +3090,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                       key={b.id}
                       type="button"
                       onClick={() => openBudget(b)}
-                      className="w-full flex items-center justify-between gap-3 text-left p-3.5 bg-slate-50 hover:bg-blue-50 border border-slate-200 hover:border-blue-300 rounded-xl transition-colors group"
+                      className="w-full flex items-center justify-between gap-3 text-left p-3.5 bg-white/50 hover:bg-white/70 backdrop-blur-xl border border-white/60 hover:border-white rounded-2xl shadow-[0_4px_14px_-4px_rgba(15,23,42,0.12)] transition-colors group md:bg-slate-50 md:hover:bg-blue-50 md:backdrop-blur-none md:border-slate-200 md:hover:border-blue-300 md:rounded-xl md:shadow-none"
                     >
                       <div className="min-w-0">
                         <div className="font-semibold text-slate-900 text-sm truncate group-hover:text-blue-700 flex items-center gap-1.5">
