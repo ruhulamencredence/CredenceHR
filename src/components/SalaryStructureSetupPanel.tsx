@@ -1370,6 +1370,8 @@ interface LatePolicyRow {
   shift_start_time: string;
   grace_minutes: number;
   lates_per_deduction_day: number;
+  extreme_grace_minutes: number;
+  extreme_lates_per_deduction_day: number;
   effective_date: string;
   changed_by_name: string | null;
   created_at: string;
@@ -1385,6 +1387,8 @@ const LatePolicyPanel: React.FC<{ authHeaders: Record<string, string> }> = ({ au
   const [shiftStart, setShiftStart] = useState('09:00');
   const [graceMinutes, setGraceMinutes] = useState('10');
   const [latesPerDay, setLatesPerDay] = useState('3');
+  const [extremeGraceMinutes, setExtremeGraceMinutes] = useState('60');
+  const [extremeLatesPerDay, setExtremeLatesPerDay] = useState('1');
   const [effectiveDate, setEffectiveDate] = useState(new Date().toISOString().slice(0, 10));
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
@@ -1405,6 +1409,8 @@ const LatePolicyPanel: React.FC<{ authHeaders: Record<string, string> }> = ({ au
         setShiftStart(String(data[0].shift_start_time).slice(0, 5));
         setGraceMinutes(String(data[0].grace_minutes));
         setLatesPerDay(String(data[0].lates_per_deduction_day));
+        setExtremeGraceMinutes(String(data[0].extreme_grace_minutes ?? 60));
+        setExtremeLatesPerDay(String(data[0].extreme_lates_per_deduction_day ?? 1));
       }
     } catch {
       setError('Failed to load Late Policy.');
@@ -1418,16 +1424,18 @@ const LatePolicyPanel: React.FC<{ authHeaders: Record<string, string> }> = ({ au
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const lateCutoff = useMemo(() => {
+  const cutoffFor = (graceMins: string) => {
     const [h, m] = shiftStart.split(':').map(Number);
     if (!Number.isFinite(h) || !Number.isFinite(m)) return '';
-    const total = h * 60 + m + (Number(graceMinutes) || 0);
+    const total = h * 60 + m + (Number(graceMins) || 0);
     const hh = Math.floor((total % 1440) / 60);
     const mm = total % 60;
     const period = hh >= 12 ? 'PM' : 'AM';
     const hour12 = hh % 12 === 0 ? 12 : hh % 12;
     return `${hour12}:${String(mm).padStart(2, '0')} ${period}`;
-  }, [shiftStart, graceMinutes]);
+  };
+  const lateCutoff = useMemo(() => cutoffFor(graceMinutes), [shiftStart, graceMinutes]);
+  const extremeLateCutoff = useMemo(() => cutoffFor(extremeGraceMinutes), [shiftStart, extremeGraceMinutes]);
 
   const save = async () => {
     setSaveError('');
@@ -1444,6 +1452,18 @@ const LatePolicyPanel: React.FC<{ authHeaders: Record<string, string> }> = ({ au
       setSaveError('Lates-per-deduction-day must be at least 1.');
       return;
     }
+    if (!(Number(extremeGraceMinutes) >= 0)) {
+      setSaveError('Extreme Delay grace period must be 0 or more minutes.');
+      return;
+    }
+    if (Number(extremeGraceMinutes) <= Number(graceMinutes)) {
+      setSaveError("Extreme Delay's grace period must be greater than Delay's grace period.");
+      return;
+    }
+    if (!(Number(extremeLatesPerDay) >= 1)) {
+      setSaveError('Extreme Delay lates-per-deduction-day must be at least 1.');
+      return;
+    }
     if (!effectiveDate) {
       setSaveError('Effective date is required.');
       return;
@@ -1457,6 +1477,8 @@ const LatePolicyPanel: React.FC<{ authHeaders: Record<string, string> }> = ({ au
           shift_start_time: shiftStart,
           grace_minutes: Number(graceMinutes),
           lates_per_deduction_day: Number(latesPerDay),
+          extreme_grace_minutes: Number(extremeGraceMinutes),
+          extreme_lates_per_deduction_day: Number(extremeLatesPerDay),
           effective_date: effectiveDate
         })
       });
@@ -1485,10 +1507,16 @@ const LatePolicyPanel: React.FC<{ authHeaders: Record<string, string> }> = ({ au
         </div>
 
         {current && (
-          <div className="bg-blue-50 border border-blue-100 rounded-lg px-3 py-2 text-[11px] text-blue-700">
-            Currently active: shift starts <strong>{String(current.shift_start_time).slice(0, 5)}</strong>, grace{' '}
-            <strong>{current.grace_minutes} min</strong>, <strong>{current.lates_per_deduction_day}</strong> lates = 1 day's pay deducted
-            (since {current.effective_date?.slice(0, 10)}).
+          <div className="bg-blue-50 border border-blue-100 rounded-lg px-3 py-2 text-[11px] text-blue-700 space-y-1">
+            <p>
+              Delay: shift starts <strong>{String(current.shift_start_time).slice(0, 5)}</strong>, grace{' '}
+              <strong>{current.grace_minutes} min</strong>, <strong>{current.lates_per_deduction_day}</strong> lates = 1 day's pay deducted
+              (since {current.effective_date?.slice(0, 10)}).
+            </p>
+            <p>
+              Extreme Delay: grace <strong>{current.extreme_grace_minutes}</strong> min, <strong>{current.extreme_lates_per_deduction_day}</strong>{' '}
+              late{current.extreme_lates_per_deduction_day === 1 ? '' : 's'} = 1 day's pay deducted.
+            </p>
           </div>
         )}
 
@@ -1532,6 +1560,40 @@ const LatePolicyPanel: React.FC<{ authHeaders: Record<string, string> }> = ({ au
           <p className="text-[10px] text-slate-400 mt-1">
             e.g. 3 means every 3rd, 6th, 9th... late in a month deducts one full day's gross pay.
           </p>
+        </div>
+
+        <div className="border-t border-slate-100 pt-3">
+          <h4 className="text-[11px] font-semibold text-slate-700 mb-1">Extreme Delay</h4>
+          <p className="text-[10px] text-slate-400 mb-2">
+            A second, stricter cutoff — checking in this much after shift start counts as Extreme Delay instead of a normal Delay.
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-[11px] text-slate-500 mb-1">Extreme Grace Period (minutes)</label>
+              <input
+                type="number"
+                min="0"
+                value={extremeGraceMinutes}
+                onChange={(e) => setExtremeGraceMinutes(e.target.value)}
+                className="w-full px-2.5 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] text-slate-500 mb-1">Extreme Lates per Deducted Day</label>
+              <input
+                type="number"
+                min="1"
+                value={extremeLatesPerDay}
+                onChange={(e) => setExtremeLatesPerDay(e.target.value)}
+                className="w-full px-2.5 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
+              />
+            </div>
+          </div>
+          {extremeLateCutoff && (
+            <p className="text-[11px] text-slate-500 mt-1.5">
+              → An employee checking in after <strong>{extremeLateCutoff}</strong> is marked Extreme Delay (not counted as a normal Delay) that day.
+            </p>
+          )}
         </div>
 
         <div>
@@ -1578,6 +1640,8 @@ const LatePolicyPanel: React.FC<{ authHeaders: Record<string, string> }> = ({ au
                 <th className="px-4 py-2 font-semibold">Shift Start</th>
                 <th className="px-4 py-2 font-semibold">Grace</th>
                 <th className="px-4 py-2 font-semibold">Lates/Day</th>
+                <th className="px-4 py-2 font-semibold">Extreme Grace</th>
+                <th className="px-4 py-2 font-semibold">Extreme Lates/Day</th>
                 <th className="px-4 py-2 font-semibold">Changed By</th>
               </tr>
             </thead>
@@ -1593,6 +1657,8 @@ const LatePolicyPanel: React.FC<{ authHeaders: Record<string, string> }> = ({ au
                   <td className="px-4 py-2 text-slate-600">{String(h.shift_start_time).slice(0, 5)}</td>
                   <td className="px-4 py-2 text-slate-600">{h.grace_minutes} min</td>
                   <td className="px-4 py-2 text-slate-600">{h.lates_per_deduction_day}</td>
+                  <td className="px-4 py-2 text-slate-600">{h.extreme_grace_minutes} min</td>
+                  <td className="px-4 py-2 text-slate-600">{h.extreme_lates_per_deduction_day}</td>
                   <td className="px-4 py-2 text-slate-500">{h.changed_by_name || '—'}</td>
                 </tr>
               ))}
