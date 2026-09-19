@@ -33,10 +33,21 @@
    transitioned (display isn't animatable), so this uses a keyframe instead:
    a CSS animation restarts on its own the moment an element goes from
    display:none to displayed, with no extra JS needed to "replay" it.
-   Applied only to whichever section is currently shown (see UserPanel.tsx). */
+   Applied only to whichever section is currently shown (see UserPanel.tsx).
+
+   Deliberately animates margin-top, NOT transform: translateY() — a
+   `transform` (even a brief one, even the identity translateY(0) it settles
+   on) makes its element a CSS containing block for any `position: fixed`
+   descendant, exactly like `backdrop-filter`/`filter`/`perspective` do (see
+   the ConveyanceClaimCard/ClaimLocationMap/JobEditPanel fixes for the same
+   bug class). Every one of these page wrappers can contain a page with its
+   own floating fixed button (Leave's "Submit Leave", Conveyance's "New
+   Claim", ...), and transform would pin that button to THIS wrapper's box
+   instead of the viewport — margin-top produces the same slide-in look
+   without ever becoming a containing block. */
 @keyframes mobile-page-in {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; margin-top: 10px; }
+  to { opacity: 1; margin-top: 0; }
 }
 .mobile-page-in {
   animation: mobile-page-in 0.22s cubic-bezier(0.25, 0.8, 0.4, 1) both;
