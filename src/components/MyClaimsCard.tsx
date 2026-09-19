@@ -132,7 +132,7 @@ export const MyClaimsCard: React.FC<MyClaimsCardProps> = ({ token, onBack, refre
           <p className="text-sm">No claims yet — check in from the Movement Claim card when you head out.</p>
         </div>
       ) : (
-        <div className="flex-1 overflow-y-auto divide-y divide-white/40">
+        <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
           {claims.map((c) => {
             // undefined = lookup not resolved yet, null = it resolved to nothing
             // (falls back to plain coordinates below), string = the place name.
@@ -150,11 +150,17 @@ export const MyClaimsCard: React.FC<MyClaimsCardProps> = ({ token, onBack, refre
             // Was a single <button> covering the whole row (tap -> location map).
             // Now a plain <div> instead, since an open claim needs its own nested
             // "Check Out" button below and a <button> can't contain a <button>.
-            <div key={c.id} className="px-5 py-3 hover:bg-white/40 transition-colors space-y-1.5">
+            // Each claim gets its own rounded, bordered card with a gap below it
+            // (space-y-2.5 on the list above) instead of a flush divided list —
+            // makes it visually obvious these are separate, individual claims.
+            <div
+              key={c.id}
+              className="rounded-2xl border border-white/60 bg-white/60 hover:bg-white/80 transition-colors px-4 py-3 space-y-1.5 shadow-[0_2px_10px_-4px_rgba(15,23,42,0.08)]"
+            >
               <button
                 type="button"
                 onClick={() => setViewingLocation(c)}
-                className="w-full text-left active:bg-white/50 -mx-5 px-5 space-y-1.5"
+                className="w-full text-left active:bg-white/50 -mx-4 px-4 space-y-1.5"
               >
                 <div className="flex items-start justify-between gap-3">
                   <span className="text-sm font-medium text-slate-900 truncate">{c.purpose}</span>
