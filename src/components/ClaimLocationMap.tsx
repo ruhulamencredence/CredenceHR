@@ -4,6 +4,7 @@
  */
 
 import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { X, MapPin, Route, LogIn, LogOut } from 'lucide-react';
@@ -94,7 +95,15 @@ export default function ClaimLocationMap({ claim, onClose }: ClaimLocationMapPro
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return (
+  // Rendered via a portal straight onto document.body instead of in place —
+  // same reasoning as NewConveyanceClaimModal: one of this popup's callers
+  // (MyClaimsCard.tsx's mobile "liquid glass" card) has a backdrop-blur-xl
+  // ancestor, which the CSS spec makes a containing block for any
+  // `position: fixed` descendant (same as `transform`/`filter`) — without
+  // the portal this popup was pinned to that CARD's box instead of the
+  // viewport, drifting/clipping as the card's own height changed with its
+  // content. A portal escapes that ancestor entirely, for every caller.
+  return createPortal(
     // z-[60] — deliberately above the Movement Claims page's own floating
     // "Add Check In/Out" button and its Check In/Out sheet (both z-50 in
     // UserPanel.tsx). At equal z-50 this popup and that button sit in the
@@ -169,6 +178,7 @@ export default function ClaimLocationMap({ claim, onClose }: ClaimLocationMapPro
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

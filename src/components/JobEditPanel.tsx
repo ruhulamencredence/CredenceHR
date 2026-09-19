@@ -4,6 +4,7 @@
  */
 
 import React, { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Plus, Trash2, Save, X, Briefcase, Lock, ChevronDown, ChevronRight, Pencil, Calendar, Hash, Scissors } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { formatDate, todayDateOnlyString, dateRangeOptions, formatDateLabel, latestDateStr, isDateBlockedByLeadTime } from '../lib/formatDate';
@@ -1359,7 +1360,14 @@ const JobEditRow: React.FC<JobEditRowProps> = ({ job, token, mprNumbers, isOpen,
           {addEditingItemUid && (() => {
             const editOpt = addItems.find((it) => it.uid === addEditingItemUid);
             if (!editOpt) return null;
-            return (
+            // Rendered via a portal straight onto document.body instead of in
+            // place — this row lives inside JobEditPanel's own mobile "liquid
+            // glass" card, whose backdrop-blur-xl the CSS spec makes a
+            // containing block for any `position: fixed` descendant (same as
+            // `transform`/`filter`), which was pinning this popup to that
+            // CARD's box instead of the viewport. A portal escapes that
+            // entirely, same pattern NewConveyanceClaimModal.tsx uses.
+            return createPortal(
               <div className="fixed inset-0 z-50 flex items-end sm:items-center sm:justify-center" role="dialog" aria-modal="true">
                 <div className="absolute inset-0 bg-black/40" onClick={() => setAddEditingItemUid(null)} />
                 <div className="relative w-full sm:max-w-md max-h-[85vh] overflow-y-auto bg-white rounded-t-2xl sm:rounded-2xl p-5 pb-6 shadow-xl">
@@ -1426,7 +1434,8 @@ const JobEditRow: React.FC<JobEditRowProps> = ({ job, token, mprNumbers, isOpen,
                     </button>
                   </div>
                 </div>
-              </div>
+              </div>,
+              document.body
             );
           })()}
         </div>
