@@ -2898,12 +2898,12 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           <button
             type="button"
             onClick={() => goToMobileSection('budget')}
-            className="relative flex flex-col items-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-blue-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
+            className="relative flex flex-col items-center justify-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 h-[104px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-blue-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
           >
             <div className="p-2.5 rounded-2xl bg-gradient-to-br from-blue-400 to-blue-600 shadow-[0_6px_16px_-2px_rgba(37,99,235,0.55)] border border-white/30">
               <Wallet className="w-6 h-6 text-white" />
             </div>
-            <span className="text-xs font-semibold text-slate-700 text-center leading-tight">
+            <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">
               {selectedBudget ? 'MPR Entry' : 'Select a Budget'}
             </span>
           </button>
@@ -2912,7 +2912,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           <button
             type="button"
             onClick={() => goToMobileSection('jobs')}
-            className="relative flex flex-col items-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-violet-100/70 via-white/50 to-fuchsia-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
+            className="relative flex flex-col items-center justify-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 h-[104px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-violet-100/70 via-white/50 to-fuchsia-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
           >
             <div className="p-2.5 rounded-2xl bg-gradient-to-br from-violet-400 to-violet-600 shadow-[0_6px_16px_-2px_rgba(124,58,237,0.55)] border border-white/30 relative">
               <Briefcase className="w-6 h-6 text-white" />
@@ -2922,38 +2922,38 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                 </span>
               )}
             </div>
-            <span className="text-xs font-semibold text-slate-700 text-center leading-tight">Jobs</span>
+            <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">Jobs</span>
           </button>
           )}
           {canSeeMovementClaim && (
             <button
               type="button"
               onClick={() => goToMobileSection('claim')}
-              className="relative flex flex-col items-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-emerald-100/70 via-white/50 to-teal-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
+              className="relative flex flex-col items-center justify-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 h-[104px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-emerald-100/70 via-white/50 to-teal-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
             >
               <div className="p-2.5 rounded-2xl bg-gradient-to-br from-emerald-400 to-emerald-600 shadow-[0_6px_16px_-2px_rgba(5,150,105,0.55)] border border-white/30">
                 <Route className="w-6 h-6 text-white" />
               </div>
-              <span className="text-xs font-semibold text-slate-700 text-center leading-tight">Movement Claim</span>
+              <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">Movement Claim</span>
             </button>
           )}
           {canSeeConveyanceClaim && (
             <button
               type="button"
               onClick={() => goToMobileSection('conveyanceClaim')}
-              className="relative flex flex-col items-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-amber-100/70 via-white/50 to-orange-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
+              className="relative flex flex-col items-center justify-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 h-[104px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-amber-100/70 via-white/50 to-orange-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
             >
               <div className="p-2.5 rounded-2xl bg-gradient-to-br from-amber-400 to-orange-500 shadow-[0_6px_16px_-2px_rgba(217,119,6,0.55)] border border-white/30">
                 <Wallet className="w-6 h-6 text-white" />
               </div>
-              <span className="text-xs font-semibold text-slate-700 text-center leading-tight">Conveyance Bill Claim</span>
+              <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">Conveyance Bill Claim</span>
             </button>
           )}
           {canSeeBudgetModule && (
           <button
             type="button"
             onClick={() => goToMobileSection('entries')}
-            className="relative flex flex-col items-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-rose-100/70 via-white/50 to-pink-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
+            className="relative flex flex-col items-center justify-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 h-[104px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-rose-100/70 via-white/50 to-pink-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
           >
             <div className="p-2.5 rounded-2xl bg-gradient-to-br from-rose-400 to-rose-600 shadow-[0_6px_16px_-2px_rgba(225,29,72,0.55)] border border-white/30 relative">
               <FileText className="w-6 h-6 text-white" />
@@ -2963,40 +2963,40 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                 </span>
               )}
             </div>
-            <span className="text-xs font-semibold text-slate-700 text-center leading-tight">Job Entry Details</span>
+            <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">Job Entry Details</span>
           </button>
           )}
           {user.can_job_edit && (
             <button
               type="button"
               onClick={() => goToMobileSection('jobEdit')}
-              className="relative flex flex-col items-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-cyan-100/70 via-white/50 to-sky-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
+              className="relative flex flex-col items-center justify-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 h-[104px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-cyan-100/70 via-white/50 to-sky-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
             >
               <div className="p-2.5 rounded-2xl bg-gradient-to-br from-cyan-400 to-cyan-600 shadow-[0_6px_16px_-2px_rgba(8,145,178,0.55)] border border-white/30">
                 <Edit2 className="w-6 h-6 text-white" />
               </div>
-              <span className="text-xs font-semibold text-slate-700 text-center leading-tight">Job Edit</span>
+              <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">Job Edit</span>
             </button>
           )}
           <button
             type="button"
             onClick={() => goToMobileSection('employeeDirectory')}
-            className="relative flex flex-col items-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-indigo-100/70 via-white/50 to-blue-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
+            className="relative flex flex-col items-center justify-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 h-[104px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-indigo-100/70 via-white/50 to-blue-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
           >
             <div className="p-2.5 rounded-2xl bg-gradient-to-br from-indigo-400 to-indigo-600 shadow-[0_6px_16px_-2px_rgba(79,70,229,0.55)] border border-white/30">
               <Contact className="w-6 h-6 text-white" />
             </div>
-            <span className="text-xs font-semibold text-slate-700 text-center leading-tight">Employee Directory</span>
+            <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">Employee Directory</span>
           </button>
           <button
             type="button"
             onClick={() => goToMobileSection('noticeBoard')}
-            className="relative flex flex-col items-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-yellow-100/70 via-white/50 to-amber-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
+            className="relative flex flex-col items-center justify-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 h-[104px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-yellow-100/70 via-white/50 to-amber-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
           >
             <div className="p-2.5 rounded-2xl bg-gradient-to-br from-yellow-400 to-amber-500 shadow-[0_6px_16px_-2px_rgba(217,119,6,0.55)] border border-white/30">
               <Bell className="w-6 h-6 text-white" />
             </div>
-            <span className="text-xs font-semibold text-slate-700 text-center leading-tight">Notice Board</span>
+            <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">Notice Board</span>
           </button>
         </div>
       )}
