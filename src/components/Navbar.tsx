@@ -140,9 +140,6 @@ export const Navbar: React.FC<NavbarProps> = ({
   const { registration: headerSearchReg, barHidden: headerSearchBarHidden } = useHeaderSearchState();
   const showMobileSearchIcon = !!headerSearchReg && headerSearchBarHidden;
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
-  useEffect(() => {
-    if (!showMobileSearchIcon) setMobileSearchOpen(false);
-  }, [showMobileSearchIcon]);
 
   // A mobile sub-page (e.g. "Select a Budget") can instead ask for its own
   // plain title in place of the logo (see headerPageTitle.ts) — same logo
@@ -152,6 +149,14 @@ export const Navbar: React.FC<NavbarProps> = ({
   const headerPageTitle = useHeaderPageTitle();
   const showMobilePageTitle = !!headerPageTitle;
   const showMobileLogoSwap = showMobileSearchIcon || showMobilePageTitle;
+  // A page-title takeover (e.g. "Select a Budget") means this page owns the
+  // whole mobile header row — its own search icon (if some other, unrelated
+  // page had left one docked) and the Weather badge both get out of the way
+  // on mobile, matching the reference screenshot. Desktop is unaffected.
+  const showMobileSearchIconResolved = showMobileSearchIcon && !showMobilePageTitle;
+  useEffect(() => {
+    if (!showMobileSearchIconResolved) setMobileSearchOpen(false);
+  }, [showMobileSearchIconResolved]);
 
   // Circular avatar shown at the top right (initial + role-tinted background) —
   // falls back to this when the account has no Personal Data photo uploaded
@@ -263,7 +268,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           <div
             className={`md:hidden min-w-0 flex items-center overflow-hidden transition-all duration-300 ease-in-out ${
-              showMobileSearchIcon
+              showMobileSearchIconResolved
                 ? mobileSearchOpen
                   ? 'flex-1 max-w-none opacity-100'
                   : 'max-w-[40px] opacity-100'
@@ -345,8 +350,11 @@ export const Navbar: React.FC<NavbarProps> = ({
               own), shown on both the mobile and web header since this
               component is shared by both. See WeatherBadge.tsx for why it
               renders nothing at all rather than a placeholder while loading
-              or offline. */}
-          <WeatherBadge transparent={transparentHeader} />
+              or offline. Hidden on mobile while a page-title takeover (e.g.
+              "Select a Budget") owns the header row — desktop keeps it. */}
+          <div className={showMobilePageTitle ? 'hidden md:block' : ''}>
+            <WeatherBadge transparent={transparentHeader} />
+          </div>
 
           {/* Personal Alerts bell — on by default for every account (no
               module grant needed), shown on both web and the Capacitor
