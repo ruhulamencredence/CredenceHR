@@ -184,16 +184,24 @@ export const JobEditPanel: React.FC<JobEditPanelProps> = ({ token }) => {
   // the whole page scroll, exactly as before.
   if (loading) {
     return (
-      <div className="bg-white border border-slate-200 rounded-2xl shadow-sm flex items-center justify-center gap-2 text-slate-500 text-sm min-h-[calc(100dvh-14rem)] md:min-h-0 md:h-[calc(100vh-4rem)] md:rounded-none md:border-0 md:border-t md:shadow-none">
+      <div className="bg-gradient-to-br from-violet-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl border border-white/70 rounded-[28px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] md:bg-white md:from-transparent md:via-transparent md:to-transparent md:backdrop-blur-none md:border-slate-200 flex items-center justify-center gap-2 text-slate-500 text-sm min-h-[calc(100dvh-14rem)] md:min-h-0 md:h-[calc(100vh-4rem)] md:rounded-none md:border-0 md:border-t md:shadow-none">
         <Spinner size={16} /> Loading Jobs…
       </div>
     );
   }
 
   return (
-    <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden flex flex-col min-h-[calc(100dvh-14rem)] md:min-h-0 md:h-[calc(100vh-4rem)] md:rounded-none md:border-0 md:border-t md:shadow-none">
-      <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between gap-2.5 shrink-0">
-        <div className="flex items-center gap-2.5">
+    // Liquid glass on mobile (matching the Dashboard tile menu / Select a
+    // Budget / Jobs / Job Entry Details look); the md: overrides already
+    // here flatten it back to the original edge-to-edge plain panel on
+    // desktop, unchanged.
+    <div className="bg-gradient-to-br from-violet-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl border border-white/70 rounded-[28px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] overflow-hidden flex flex-col min-h-[calc(100dvh-14rem)] md:bg-white md:from-transparent md:via-transparent md:to-transparent md:backdrop-blur-none md:border-slate-200 md:min-h-0 md:h-[calc(100vh-4rem)] md:rounded-none md:border-0 md:border-t md:shadow-none">
+      <div className="px-6 py-4 border-b border-white/40 md:border-slate-200 flex items-center justify-end md:justify-between gap-2.5 shrink-0">
+        {/* Hidden on mobile — the mobile header now shows this page's own
+            "Job Edit" title in the logo's place (see headerPageTitle.ts),
+            so repeating it would be a redundant duplicate. Desktop has no
+            such header takeover, so it keeps the full row. */}
+        <div className="hidden md:flex items-center gap-2.5">
           <div className="p-2 bg-blue-50 rounded-lg">
             <Briefcase className="w-4 h-4 text-blue-600" />
           </div>
@@ -249,7 +257,7 @@ export const JobEditPanel: React.FC<JobEditPanelProps> = ({ token }) => {
           </div>
         )}
 
-        <div className="divide-y divide-slate-100">
+        <div className="divide-y divide-white/40 md:divide-slate-100">
           {jobs.map((job) => (
             <JobEditRow
               key={job.job_id}

@@ -937,6 +937,8 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
         ? 'Jobs'
         : mobileActiveSection === 'entries'
         ? 'Job Entry Details'
+        : mobileActiveSection === 'jobEdit'
+        ? 'Job Edit'
         : null
     );
   }, [mobileActiveSection, selectedBudget]);
