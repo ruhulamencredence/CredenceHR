@@ -19,6 +19,13 @@ interface EmployeeDirectoryProps {
   token: string;
   user: User;
   onBack: () => void;
+  // UserPanel.tsx keeps this component permanently mounted (just toggling a
+  // CSS `hidden` class) so its scroll position/filters survive switching
+  // away and back — so a mount-only header-search registration would stay
+  // docked into Navbar's mobile header forever, including on the dashboard
+  // tile menu. This tells us whether we're actually the visible section, so
+  // we only dock/undock the header search while that's true.
+  isActive: boolean;
 }
 
 const PAGE_SIZE_OPTIONS = [12, 24] as const;
@@ -153,7 +160,7 @@ const StatusBadge: React.FC<{ isActive: boolean }> = ({ isActive }) => (
   </span>
 );
 
-export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onBack }) => {
+export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onBack, isActive }) => {
   const isNativeApp = Capacitor.isNativePlatform();
 
   const [employees, setEmployees] = useState<EmployeeDirectoryEntry[]>([]);
@@ -211,15 +218,20 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
   // both through the useHeaderSearchState() subscription in headerSearch.ts.
   const searchBarRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
+    // We stay mounted (just hidden) while some other mobile section is
+    // showing, so only dock our search box into the header while we're
+    // actually the visible section — otherwise it'd stay docked forever.
+    if (!isActive) return;
     registerHeaderSearch({
       value: search,
       onChange: setSearch,
       placeholder: 'Search by name or Employee ID…'
     });
     return () => unregisterHeaderSearch();
-  }, [search]);
+  }, [isActive, search]);
 
   useEffect(() => {
+    if (!isActive) return;
     const el = searchBarRef.current;
     if (!el) return;
     const observer = new IntersectionObserver(
@@ -228,7 +240,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
     );
     observer.observe(el);
     return () => observer.disconnect();
-  }, []);
+  }, [isActive]);
 
   useEffect(() => {
     (async () => {
