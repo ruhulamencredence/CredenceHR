@@ -2925,30 +2925,6 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
             <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">Jobs</span>
           </button>
           )}
-          {canSeeMovementClaim && (
-            <button
-              type="button"
-              onClick={() => goToMobileSection('claim')}
-              className="relative flex flex-col items-center justify-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 h-[104px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-emerald-100/70 via-white/50 to-teal-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
-            >
-              <div className="p-2.5 rounded-2xl bg-gradient-to-br from-emerald-300 to-emerald-500 shadow-[0_6px_16px_-2px_rgba(5,150,105,0.35)] border border-white/30">
-                <Route className="w-6 h-6 text-white" />
-              </div>
-              <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">Movement Claim</span>
-            </button>
-          )}
-          {canSeeConveyanceClaim && (
-            <button
-              type="button"
-              onClick={() => goToMobileSection('conveyanceClaim')}
-              className="relative flex flex-col items-center justify-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 h-[104px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-amber-100/70 via-white/50 to-orange-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
-            >
-              <div className="p-2.5 rounded-2xl bg-gradient-to-br from-amber-300 to-orange-400 shadow-[0_6px_16px_-2px_rgba(217,119,6,0.35)] border border-white/30">
-                <Wallet className="w-6 h-6 text-white" />
-              </div>
-              <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">Conveyance Bill Claim</span>
-            </button>
-          )}
           {canSeeBudgetModule && (
           <button
             type="button"
@@ -2976,6 +2952,30 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                 <Edit2 className="w-6 h-6 text-white" />
               </div>
               <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">Job Edit</span>
+            </button>
+          )}
+          {canSeeMovementClaim && (
+            <button
+              type="button"
+              onClick={() => goToMobileSection('claim')}
+              className="relative flex flex-col items-center justify-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 h-[104px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-emerald-100/70 via-white/50 to-teal-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
+            >
+              <div className="p-2.5 rounded-2xl bg-gradient-to-br from-emerald-300 to-emerald-500 shadow-[0_6px_16px_-2px_rgba(5,150,105,0.35)] border border-white/30">
+                <Route className="w-6 h-6 text-white" />
+              </div>
+              <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">Movement Claim</span>
+            </button>
+          )}
+          {canSeeConveyanceClaim && (
+            <button
+              type="button"
+              onClick={() => goToMobileSection('conveyanceClaim')}
+              className="relative flex flex-col items-center justify-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 h-[104px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-amber-100/70 via-white/50 to-orange-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
+            >
+              <div className="p-2.5 rounded-2xl bg-gradient-to-br from-amber-300 to-orange-400 shadow-[0_6px_16px_-2px_rgba(217,119,6,0.35)] border border-white/30">
+                <Wallet className="w-6 h-6 text-white" />
+              </div>
+              <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">Conveyance Bill Claim</span>
             </button>
           )}
           <button
