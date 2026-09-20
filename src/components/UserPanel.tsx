@@ -48,6 +48,13 @@ interface UserPanelProps {
   // enough on its own: this panel keeps showing whichever section (e.g. a
   // Claims page) was previously active/restored from localStorage.
   dashboardNavRequest?: DashboardNavRequest | null;
+  // Reports the live desktopActiveSection/mobileActiveSection back up to
+  // App.tsx on every change, so GlobalSidebar can highlight whichever item
+  // actually matches what's on screen right now (whether it got there via a
+  // GlobalSidebar click, the mobile tile menu, BottomNav, or a
+  // localStorage-restored default on mount) instead of just the last thing
+  // it was asked to navigate to.
+  onActiveSectionChange?: (info: { desktop: string; mobile: string | null }) => void;
 }
 
 // Unique id for one Item entry within an MPR row's itemNames list — see the uid field
@@ -833,7 +840,7 @@ const EntryCard = React.memo(function EntryCard({
   );
 });
 
-export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequest, jobsNavRequest, dashboardNavRequest }) => {
+export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequest, jobsNavRequest, dashboardNavRequest, onActiveSectionChange }) => {
   const [projects, setProjects] = useState<Project[]>([]);
   // True once the initial Project list fetch (fetchMasterData below) has
   // resolved (success or failure) — lets AttendanceCard tell "still loading"
@@ -1110,6 +1117,14 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
       // ignore, it just means a reload won't be able to restore this section.
     }
   }, [desktopActiveSection]);
+
+  // Reports the live desktop/mobile section up to App.tsx (see
+  // onActiveSectionChange above) so GlobalSidebar can highlight whichever
+  // item actually matches what's on screen right now.
+  useEffect(() => {
+    onActiveSectionChange?.({ desktop: desktopActiveSection, mobile: mobileActiveSection });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [desktopActiveSection, mobileActiveSection]);
 
   // Guards a desktop section restored from localStorage above (which runs
   // before canSeeBudgetModule is known) or a permission the Superadmin

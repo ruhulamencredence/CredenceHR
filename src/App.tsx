@@ -63,6 +63,19 @@ export default function App() {
   const [adminNavRequest, setAdminNavRequest] = useState<AdminNavRequest | null>(null);
   // GlobalSidebar's "Dashboard" item — see DashboardNavRequest in types.ts.
   const [dashboardNavRequest, setDashboardNavRequest] = useState<DashboardNavRequest | null>(null);
+  // AdminPanel's own activeTab, reported live via onActiveTabChange (see
+  // AdminPanel.tsx) — used below to tell GlobalSidebar which item is
+  // actually on screen right now, so it can show a "you are here" highlight
+  // instead of never marking anything as current.
+  const [adminActiveTab, setAdminActiveTab] = useState<string>('dashboard');
+  // UserPanel's own desktopActiveSection/mobileActiveSection, reported live
+  // via onActiveSectionChange (see UserPanel.tsx) — same "you are here"
+  // purpose as adminActiveTab above, just split by viewport since UserPanel
+  // tracks a separate current section for each.
+  const [userActiveSection, setUserActiveSection] = useState<{ desktop: string; mobile: string | null }>({
+    desktop: 'dashboard',
+    mobile: null
+  });
   // Navbar's web-only "Self Service" header menu — takes over the main area
   // the same way the Claims/Jobs pages do (see the `main` block below),
   // instead of living inside the Admin/User panel tab structure. null means
@@ -525,6 +538,41 @@ export default function App() {
     }
   };
 
+  // UserPanel's desktopActiveSection/mobileActiveSection values don't share
+  // GlobalSidebar's own item keys 1:1 (different naming/grouping) — this
+  // translates one into the other. Sections with no matching sidebar item
+  // (e.g. Notice Board, or no section open at all on mobile) return null,
+  // which just means nothing gets highlighted.
+  const mapUserSectionToSidebarKey = (section: string | null): string | null => {
+    switch (section) {
+      case 'dashboard': return 'dashboard';
+      case 'budget': return 'entry';
+      case 'jobs': return 'jobs';
+      case 'entries': return 'entryDetails';
+      case 'jobEdit': return 'jobEdit';
+      case 'claim':
+      case 'claims': return 'userMovementClaims';
+      case 'conveyanceClaim': return 'userConveyanceClaims';
+      case 'leave': return 'leaveApplication';
+      case 'timesheet': return 'timesheet';
+      case 'employeeDirectory': return 'employeeDirectory';
+      default: return null;
+    }
+  };
+
+  // Which GlobalSidebar item currently matches what's actually on screen —
+  // computed separately for the mobile overlay drawer and the desktop
+  // persistent column since UserPanel tracks a distinct "current section"
+  // for each (see userActiveSection above). Everything else (Self Service,
+  // Admin Panel, Chat) is the same regardless of viewport.
+  const computeSidebarActiveKey = (viewport: 'mobile' | 'desktop'): string | null => {
+    if (showChat) return 'chat';
+    if (showProfilePage) return null;
+    if (selfServiceView) return selfServiceView;
+    if (isAdminView) return adminActiveTab === 'dashboard' ? 'admin_dashboard' : adminActiveTab;
+    return mapUserSectionToSidebarKey(viewport === 'mobile' ? userActiveSection.mobile : userActiveSection.desktop);
+  };
+
   // Shared nav handlers for GlobalSidebar — identical for the mobile overlay
   // drawer (hamburger-triggered, unchanged) and the persistent desktop
   // column that now sits beside <main> (see the layout below), so both stay
@@ -711,6 +759,7 @@ export default function App() {
         variant="overlay"
         open={globalSidebarOpen}
         onClose={() => setGlobalSidebarOpen(false)}
+        activeKey={computeSidebarActiveKey('mobile')}
         {...sidebarNavProps}
       />
 
@@ -723,6 +772,7 @@ export default function App() {
           variant="persistent"
           open={true}
           onClose={() => {}}
+          activeKey={computeSidebarActiveKey('desktop')}
           {...sidebarNavProps}
         />
 
@@ -779,6 +829,7 @@ export default function App() {
             user={user}
             claimsNavRequest={claimsNavRequest}
             adminNavRequest={adminNavRequest}
+            onActiveTabChange={setAdminActiveTab}
             // AdminPanel's own mobile drawer (navigating BETWEEN admin tabs
             // while already inside the Admin Panel) is now superseded by the
             // single GlobalSidebar above — same tabs are reachable from
@@ -789,7 +840,14 @@ export default function App() {
           />
         ) : (
           <>
-            <UserPanel token={token} user={user} claimsNavRequest={claimsNavRequest} jobsNavRequest={jobsNavRequest} dashboardNavRequest={dashboardNavRequest} />
+            <UserPanel
+              token={token}
+              user={user}
+              claimsNavRequest={claimsNavRequest}
+              jobsNavRequest={jobsNavRequest}
+              dashboardNavRequest={dashboardNavRequest}
+              onActiveSectionChange={setUserActiveSection}
+            />
             {/* Superadmin/Admin-authored Notice popup — only shown on the plain
                 User's dashboard, right after they land here post-login. */}
             <NoticePopup token={token} user={user} />
