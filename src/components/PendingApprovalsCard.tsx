@@ -104,9 +104,13 @@ export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ toke
     }
   };
 
-  // Nothing waiting on this account — and not still loading the first time —
-  // so stay out of the way entirely rather than show an empty card.
-  if (!loading && items.length === 0) return null;
+  // Stay out of the way entirely unless there's actually something waiting on
+  // this account — including while the first fetch is still in flight. This
+  // card is hidden for the vast majority of accounts (most people are never an
+  // approver), so rendering an empty shell + spinner during that fetch meant
+  // every page load flashed a "Pending Approvals" card that vanished a moment
+  // later. Waiting costs nothing: there's no card to hold a place for.
+  if (loading || items.length === 0) return null;
 
   return (
     <div className={`bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden ${className}`}>
@@ -133,54 +137,48 @@ export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ toke
         </div>
       )}
 
-      {loading ? (
-        <div className="p-8 flex justify-center">
-          <Spinner size={18} className="text-slate-400" />
-        </div>
-      ) : (
-        <div className="divide-y divide-slate-100">
-          {items.map((item) => (
-            <div key={`${item.source_type}-${item.id}`} className="p-5 sm:px-6 flex flex-col gap-2.5">
-              <div>
-                <div className="text-sm font-semibold text-slate-900">{sourceTitle(item.source_type)}</div>
-                <div className="text-xs text-slate-500 mt-0.5">
-                  {item.source_label}
-                  {item.source_amount != null && <> &middot; ৳{item.source_amount.toLocaleString('en-BD', { minimumFractionDigits: 2 })}</>}
-                </div>
-                <div className="text-[11px] text-slate-400 mt-1">
-                  From {item.requested_by_name || `User #${item.requested_by}`}
-                  {item.total_steps ? <> &middot; Layer {item.current_step} of {item.total_steps}</> : null}
-                </div>
+      <div className="divide-y divide-slate-100">
+        {items.map((item) => (
+          <div key={`${item.source_type}-${item.id}`} className="p-5 sm:px-6 flex flex-col gap-2.5">
+            <div>
+              <div className="text-sm font-semibold text-slate-900">{sourceTitle(item.source_type)}</div>
+              <div className="text-xs text-slate-500 mt-0.5">
+                {item.source_label}
+                {item.source_amount != null && <> &middot; ৳{item.source_amount.toLocaleString('en-BD', { minimumFractionDigits: 2 })}</>}
               </div>
-              <input
-                type="text"
-                placeholder="Remarks (optional)"
-                value={remarksDraft[item.id] || ''}
-                onChange={(e) => setRemarksDraft((prev) => ({ ...prev, [item.id]: e.target.value }))}
-                className="w-full text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
-              />
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  disabled={actingId === item.id}
-                  onClick={() => handleAct(item, 'rejected')}
-                  className="flex-1 text-xs font-semibold px-3 py-2 rounded-lg bg-rose-50 text-rose-700 hover:bg-rose-100 disabled:opacity-50 transition-colors inline-flex items-center justify-center gap-1"
-                >
-                  <XCircle className="w-3.5 h-3.5" /> Reject
-                </button>
-                <button
-                  type="button"
-                  disabled={actingId === item.id}
-                  onClick={() => handleAct(item, 'approved')}
-                  className="flex-1 text-xs font-semibold px-3 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 transition-colors inline-flex items-center justify-center gap-1"
-                >
-                  {actingId === item.id ? <Spinner size={12} /> : <CheckCircle2 className="w-3.5 h-3.5" />} Approve
-                </button>
+              <div className="text-[11px] text-slate-400 mt-1">
+                From {item.requested_by_name || `User #${item.requested_by}`}
+                {item.total_steps ? <> &middot; Layer {item.current_step} of {item.total_steps}</> : null}
               </div>
             </div>
-          ))}
-        </div>
-      )}
+            <input
+              type="text"
+              placeholder="Remarks (optional)"
+              value={remarksDraft[item.id] || ''}
+              onChange={(e) => setRemarksDraft((prev) => ({ ...prev, [item.id]: e.target.value }))}
+              className="w-full text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
+            />
+            <div className="flex gap-2">
+              <button
+                type="button"
+                disabled={actingId === item.id}
+                onClick={() => handleAct(item, 'rejected')}
+                className="flex-1 text-xs font-semibold px-3 py-2 rounded-lg bg-rose-50 text-rose-700 hover:bg-rose-100 disabled:opacity-50 transition-colors inline-flex items-center justify-center gap-1"
+              >
+                <XCircle className="w-3.5 h-3.5" /> Reject
+              </button>
+              <button
+                type="button"
+                disabled={actingId === item.id}
+                onClick={() => handleAct(item, 'approved')}
+                className="flex-1 text-xs font-semibold px-3 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 transition-colors inline-flex items-center justify-center gap-1"
+              >
+                {actingId === item.id ? <Spinner size={12} /> : <CheckCircle2 className="w-3.5 h-3.5" />} Approve
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 };
