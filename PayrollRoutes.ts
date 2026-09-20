@@ -1672,6 +1672,140 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
     }
   });
 
+  // Self-service counterpart to the two Admin-only endpoints above: the
+  // CALLER'S OWN attendance standing for a month, so an employee can see the
+  // Delay/Extreme Delay count that's going to cost them salary while there's
+  // still time to do something about it, instead of meeting it for the first
+  // time as a deduction line on their payslip.
+  //
+  // Deliberately NOT requireAdmin/requireModule("payroll"): it resolves the
+  // employee from the authenticated user (all_employees.user_id = req.user.id)
+  // and never accepts an employee id from the request, so it can only ever
+  // report on the caller themselves.
+  //
+  // Every figure is computed with the same helpers, policy and waivers the
+  // payroll wizard uses (getHolidayMap / getLatePolicyForMonth /
+  // computeLateDatesByEmployee), because a number here that disagreed with the
+  // eventual deduction would be worse than showing nothing at all.
+  app.get("/api/my-attendance-summary", authenticateToken, async (req: any, res) => {
+    try {
+      const requested = req.query.month_year ? String(req.query.month_year) : "";
+      const monthYear = MONTH_YEAR_RE.test(requested) ? requested : new Date().toISOString().slice(0, 7);
+      const [yy, mm] = monthYear.split("-").map(Number);
+      const daysInMonth = new Date(yy, mm, 0).getDate();
+      const monthStart = `${monthYear}-01`;
+      const monthEnd = `${monthYear}-${String(daysInMonth).padStart(2, "0")}`;
+
+      const empRows = await queryDB(
+        "SELECT id, user_id, zk_device_pin FROM all_employees WHERE user_id = ? LIMIT 1",
+        [req.user.id]
+      );
+      // No Employee record is linked to this login, so there's no payroll
+      // identity to report on — say so plainly rather than 404, and let the
+      // caller render nothing.
+      if (empRows.length === 0) return res.json({ linked: false, month_year: monthYear });
+      const employee = empRows[0];
+
+      const holidayMap = await getHolidayMap(queryDB, monthStart, monthEnd);
+      const workingDays = Math.max(1, daysInMonth - holidayMap.size);
+
+      // Present days — the same two sources the payroll wizard reads: Remote
+      // Attendance check-ins, plus Office (ZKTeco) punches for any day with no
+      // remote row. Held in a Set so a day recorded in both counts once.
+      const presentDays = new Set<string>();
+      const remoteRows = await queryDB(
+        `SELECT attendance_date FROM attendance
+         WHERE user_id = ? AND attendance_date BETWEEN ? AND ? AND check_in_at IS NOT NULL`,
+        [employee.user_id, monthStart, monthEnd]
+      );
+      for (const r of remoteRows) {
+        const dateStr = String(r.attendance_date).slice(0, 10);
+        if (!holidayMap.has(dateStr)) presentDays.add(dateStr);
+      }
+      if (employee.zk_device_pin) {
+        const officeRows = await queryDB(
+          `SELECT DATE(punch_time) AS attendance_date FROM zk_attendance_logs
+           WHERE device_user_pin = ? AND DATE(punch_time) BETWEEN ? AND ?
+           GROUP BY DATE(punch_time)`,
+          [employee.zk_device_pin, monthStart, monthEnd]
+        );
+        for (const r of officeRows) {
+          const dateStr = String(r.attendance_date).slice(0, 10);
+          if (!holidayMap.has(dateStr)) presentDays.add(dateStr);
+        }
+      }
+
+      // Approved Leave overlapping this month, clipped to the part that
+      // actually falls inside it (a range can straddle two months).
+      let leaveDays = 0;
+      const leaveRows = await queryDB(
+        `SELECT start_date, end_date FROM leave_applications
+         WHERE user_id = ? AND status = 'approved' AND start_date <= ? AND end_date >= ?`,
+        [employee.user_id, monthEnd, monthStart]
+      );
+      for (const l of leaveRows) {
+        const rawStart = String(l.start_date).slice(0, 10);
+        const rawEnd = String(l.end_date).slice(0, 10);
+        const start = rawStart < monthStart ? monthStart : rawStart;
+        const end = rawEnd > monthEnd ? monthEnd : rawEnd;
+        leaveDays += Math.max(0, Math.round((new Date(end).getTime() - new Date(start).getTime()) / 86400000) + 1);
+      }
+      leaveDays = Math.min(workingDays, leaveDays);
+
+      const policy = await getLatePolicyForMonth(monthYear);
+      const { lateDatesByEmployee, extremeLateDatesByEmployee } = await computeLateDatesByEmployee(
+        [employee], monthStart, monthEnd, holidayMap, policy
+      );
+      // Keyed by Number(e.id) inside computeLateDatesByEmployee, so look it up
+      // the same way rather than with whatever type the driver handed back.
+      const lateCount = lateDatesByEmployee.get(Number(employee.id))?.length || 0;
+      const extremeLateCount = extremeLateDatesByEmployee.get(Number(employee.id))?.length || 0;
+      const latesPerDay = Number(policy.lates_per_deduction_day || 1);
+      const extremeLatesPerDay = Number(policy.extreme_lates_per_deduction_day || 1);
+
+      // Working days elapsed so far. For the month in progress, counting the
+      // whole month would report every day still to come as a day not yet
+      // attended, which reads as alarming and isn't true yet; a past month
+      // just uses the full figure. Local Y/M/D rather than toISOString(),
+      // which is UTC and rolls back a day for timezones ahead of it (see the
+      // same note on toDateOnly in server.ts).
+      const now = new Date();
+      const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+      let workingDaysSoFar = workingDays;
+      if (today >= monthStart && today <= monthEnd) {
+        let elapsed = 0;
+        for (let d = 1; d <= daysInMonth; d++) {
+          const dateStr = `${monthYear}-${String(d).padStart(2, "0")}`;
+          if (dateStr > today) break;
+          if (!holidayMap.has(dateStr)) elapsed++;
+        }
+        workingDaysSoFar = Math.max(1, elapsed);
+      }
+
+      res.json({
+        linked: true,
+        month_year: monthYear,
+        working_days: workingDays,
+        working_days_so_far: workingDaysSoFar,
+        present_days: presentDays.size,
+        leave_days: leaveDays,
+        late_count: lateCount,
+        late_deduction_days: Math.floor(lateCount / latesPerDay),
+        extreme_late_count: extremeLateCount,
+        extreme_late_deduction_days: Math.floor(extremeLateCount / extremeLatesPerDay),
+        policy: {
+          shift_start_time: policy.shift_start_time,
+          grace_minutes: policy.grace_minutes,
+          lates_per_deduction_day: latesPerDay,
+          extreme_grace_minutes: policy.extreme_grace_minutes,
+          extreme_lates_per_deduction_day: extremeLatesPerDay
+        }
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to load your attendance summary." });
+    }
+  });
+
   // Excuse (or re-include) one specific late day for one employee. Unique
   // key on (employee_id, waiver_date) means calling this twice for the same
   // day just no-ops the second time rather than erroring.

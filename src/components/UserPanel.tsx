@@ -20,6 +20,7 @@ import { AttendanceCard } from './AttendanceCard';
 import { LeaveSummaryCard } from './LeaveSummaryCard';
 import { PendingApprovalsCard } from './PendingApprovalsCard';
 import { MyRequestsCard } from './MyRequestsCard';
+import { MyMonthAttendanceCard } from './MyMonthAttendanceCard';
 import { HolidayCalendarWidget } from './HolidayCalendarWidget';
 import { LeaveReviewPage } from './LeaveReviewPage';
 import { EmployeeDirectory } from './EmployeeDirectory';
@@ -2795,6 +2796,12 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
             share — it's an actionable list (remarks input + Approve/Reject
             per row), so it earns the width over sitting half-empty. */}
         <PendingApprovalsCard token={token} className="md:col-span-2 xl:col-span-1" />
+
+        {/* This month's own attendance standing — including the Delay/Extreme
+            Delay counts that turn into deducted salary days under the Late
+            Attendance Policy. Full row at md so its four stat tiles get a
+            row each rather than stacking two-by-two in half a column. */}
+        <MyMonthAttendanceCard token={token} className="md:col-span-2 xl:col-span-3" />
 
         {/* Status of everything this account has SUBMITTED (as opposed to
             Pending Approvals above, which is what's waiting on them to
