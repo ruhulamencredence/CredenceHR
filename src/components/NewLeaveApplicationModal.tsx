@@ -76,9 +76,6 @@ export const NewLeaveApplicationModal: React.FC<NewLeaveApplicationModalProps> =
   const [leaveType, setLeaveType] = useState<string>('');
   const [startDate, setStartDate] = useState(today);
   const [endDate, setEndDate] = useState(today);
-  const [isContinuous, setIsContinuous] = useState(false);
-  const [isPrefix, setIsPrefix] = useState(false);
-  const [isSuffix, setIsSuffix] = useState(false);
   const [isHalfDay, setIsHalfDay] = useState(false);
   const [includeExtraWorkDates, setIncludeExtraWorkDates] = useState(false);
   const [isForeignLeave, setIsForeignLeave] = useState(false);
@@ -189,9 +186,6 @@ export const NewLeaveApplicationModal: React.FC<NewLeaveApplicationModalProps> =
           start_date: startDate,
           end_date: endDate,
           day_count: dayCount,
-          is_continuous: isContinuous,
-          is_prefix: isPrefix,
-          is_suffix: isSuffix,
           is_half_day: isHalfDay,
           include_extra_work_dates: includeExtraWorkDates,
           is_foreign_leave: isForeignLeave,
@@ -267,18 +261,6 @@ export const NewLeaveApplicationModal: React.FC<NewLeaveApplicationModalProps> =
               </>
             )}
             <span className="flex-1" />
-            <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer">
-              <input type="checkbox" checked={isContinuous} onChange={(e) => setIsContinuous(e.target.checked)} className="w-3.5 h-3.5 rounded accent-blue-600" />
-              Continuous
-            </label>
-            <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer">
-              <input type="checkbox" checked={isPrefix} onChange={(e) => setIsPrefix(e.target.checked)} className="w-3.5 h-3.5 rounded accent-blue-600" />
-              Prefix
-            </label>
-            <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer">
-              <input type="checkbox" checked={isSuffix} onChange={(e) => setIsSuffix(e.target.checked)} className="w-3.5 h-3.5 rounded accent-blue-600" />
-              Suffix
-            </label>
             <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer">
               <input type="checkbox" checked={isHalfDay} onChange={(e) => setIsHalfDay(e.target.checked)} className="w-3.5 h-3.5 rounded accent-blue-600" />
               Half Day
