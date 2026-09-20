@@ -19,6 +19,7 @@ import { JobEditPanel } from './JobEditPanel';
 import { AttendanceCard } from './AttendanceCard';
 import { LeaveSummaryCard } from './LeaveSummaryCard';
 import { PendingApprovalsCard } from './PendingApprovalsCard';
+import { MyRequestsCard } from './MyRequestsCard';
 import { HolidayCalendarWidget } from './HolidayCalendarWidget';
 import { LeaveReviewPage } from './LeaveReviewPage';
 import { EmployeeDirectory } from './EmployeeDirectory';
@@ -2794,6 +2795,18 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
             share — it's an actionable list (remarks input + Approve/Reject
             per row), so it earns the width over sitting half-empty. */}
         <PendingApprovalsCard token={token} className="md:col-span-2 xl:col-span-1" />
+
+        {/* Status of everything this account has SUBMITTED (as opposed to
+            Pending Approvals above, which is what's waiting on them to
+            decide). Full row at md for the same reason. */}
+        <MyRequestsCard
+          token={token}
+          canSeeMovementClaim={canSeeMovementClaim}
+          canSeeConveyanceClaim={canSeeConveyanceClaim}
+          canSeeTimesheet={canSeeTimesheet}
+          onOpen={(target) => goToMobileSection(target)}
+          className="md:col-span-2 xl:col-span-1"
+        />
       </div>
 
       {/* Movement Claim — reachable via its own tile on mobile and the Navbar's
