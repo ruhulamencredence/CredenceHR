@@ -4692,6 +4692,46 @@ async function startServer() {
     }
   });
 
+  // Every Notice currently posted for this account — same active + targeting
+  // rules as /api/notices/active above, but WITHOUT its dismissal filter, and
+  // newest first.
+  //
+  // Dismissing is meant to stop the login popup from putting a notice in front
+  // of someone again, not to erase it: NoticeBoard.tsx has always described
+  // itself as "somewhere to come back and re-read a notice later", but it
+  // couldn't be while it read the popup's endpoint — one dismissal and the
+  // notice was gone from the board too, with nothing left anywhere in the app
+  // to say it had ever been posted. This is the endpoint the Notice Board and
+  // the Dashboard's notice preview read instead.
+  app.get("/api/notices/board", authenticateToken, async (req: any, res) => {
+    try {
+      const notices = await queryDB("SELECT * FROM notices");
+      const active = notices.filter((n: any) => !!Number(n.is_active));
+      if (active.length === 0) return res.json([]);
+
+      const targets = await queryDB("SELECT * FROM notice_targets");
+      const visible = active.filter((n: any) => {
+        if (n.target_type === "all") return true;
+        return targets.some((t: any) => Number(t.notice_id) === Number(n.id) && Number(t.user_id) === Number(req.user.id));
+      });
+
+      visible.sort((a: any, b: any) => Number(b.id) - Number(a.id));
+
+      res.json(
+        visible.map((n: any) => ({
+          id: n.id,
+          title: n.title,
+          content_html: n.content_html,
+          lottie_json: n.lottie_json || null,
+          lottie_url: n.lottie_url || null,
+          created_at: n.created_at
+        }))
+      );
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Marks one Notice as seen/closed for the calling user — it stops appearing for
   // them (but keeps showing to anyone else it's targeted at who hasn't dismissed it).
   app.post("/api/notices/:id/dismiss", authenticateToken, async (req: any, res) => {
