@@ -75,7 +75,12 @@ export const LeaveSummaryCard: React.FC<LeaveSummaryCardProps> = ({ token, onOpe
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') onOpen();
         }}
-        className="relative rounded-[28px] overflow-hidden border border-white/70 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-violet-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl text-left cursor-pointer hover:shadow-lg hover:border-white transition-all"
+        // Liquid glass on mobile like the rest of that Dashboard; plain white
+        // from md up so it matches the other cards in the desktop Dashboard
+        // grid (see the same note on AttendanceCard). The violet header
+        // inside stays either way — that's this card's own identity, not the
+        // mobile surface treatment.
+        className="relative rounded-[28px] overflow-hidden border border-white/70 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-violet-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl text-left cursor-pointer hover:shadow-lg hover:border-white transition-all md:bg-white md:from-transparent md:via-transparent md:to-transparent md:backdrop-blur-none md:border-slate-200 md:rounded-2xl md:shadow-sm"
       >
       {/* Violet gradient header — same drop-notch corner treatment as the
           mobile Dashboard banner (rounded-b on this card's own top instead,

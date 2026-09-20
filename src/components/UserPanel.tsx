@@ -2780,11 +2780,11 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           own gating <div>: AttendanceCard (no assigned Projects) and
           PendingApprovalsCard (nothing waiting on this account) both render
           null in the common case, and a wrapper would still claim an empty
-          grid cell and punch a hole in the row. items-start keeps each card
-          at its natural height instead of stretching the short ones to match
-          the tallest one in the row. */}
+          grid cell and punch a hole in the row. Cards stretch to their row's
+          height (grid's default) rather than items-start, which left the top
+          row with three ragged bottom edges. */}
       <div
-        className={`hidden gap-6 md:grid-cols-2 xl:grid-cols-3 items-start ${
+        className={`hidden gap-6 md:grid-cols-2 xl:grid-cols-3 ${
           showingClaimsPage || showingMainGroupPage ? 'md:hidden' : 'md:grid'
         }`}
       >
@@ -2803,7 +2803,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
         {/* Takes the full row at md, where there are only two columns to
             share — it's an actionable list (remarks input + Approve/Reject
             per row), so it earns the width over sitting half-empty. */}
-        <PendingApprovalsCard token={token} className="md:col-span-2 xl:col-span-1" />
+        <PendingApprovalsCard token={token} className="md:col-span-2 xl:col-span-3" />
 
         {/* This month's own attendance standing — including the Delay/Extreme
             Delay counts that turn into deducted salary days under the Late
@@ -2820,7 +2820,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           canSeeConveyanceClaim={canSeeConveyanceClaim}
           canSeeTimesheet={canSeeTimesheet}
           onOpen={(target) => goToMobileSection(target)}
-          className="md:col-span-2 xl:col-span-1"
+          className="md:col-span-2 xl:col-span-3"
         />
 
         {/* Notices used to exist only as a one-shot popup after login — once
@@ -2829,7 +2829,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
         <NoticePreviewCard
           token={token}
           onOpen={() => goToMobileSection('noticeBoard')}
-          className="md:col-span-2 xl:col-span-1"
+          className="md:col-span-2 xl:col-span-3"
         />
       </div>
 

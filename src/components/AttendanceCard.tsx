@@ -211,7 +211,12 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
   const busy = working !== null || !!pending || loadingStatus;
 
   return (
-    <div className="relative rounded-[24px] overflow-hidden border border-white/70 p-4 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-blue-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white transition-all">
+    // Liquid glass on mobile, matching the rest of the mobile Dashboard's
+    // cards; plain white from md up, because on the desktop Dashboard this
+    // card sits in a grid beside plain-white ones (Today, This Month, My
+    // Requests) and the tinted-glass treatment made that row read as three
+    // unrelated designs pushed together.
+    <div className="relative rounded-[24px] overflow-hidden border border-white/70 p-4 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-blue-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white transition-all md:bg-white md:from-transparent md:via-transparent md:to-transparent md:backdrop-blur-none md:border-slate-200 md:rounded-2xl md:shadow-sm md:hover:shadow-sm md:hover:border-slate-200">
       <h3 className="text-sm font-bold text-slate-900 mb-2 flex items-center gap-2 min-w-0">
         <UserCheck className="w-4 h-4 text-blue-600 shrink-0" />
         <span className="truncate">My Attendance</span>
