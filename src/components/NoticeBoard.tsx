@@ -33,7 +33,10 @@ export const NoticeBoard: React.FC<NoticeBoardProps> = ({ token, onBack }) => {
       setLoading(true);
       setError('');
       try {
-        const res = await fetch(apiUrl('/api/notices/active'), { headers: { Authorization: `Bearer ${token}` } });
+        // /api/notices/board, not /active — the latter is the login popup's
+        // endpoint and hides anything this account has dismissed, which made
+        // this page unable to do the one thing it exists for (below).
+        const res = await fetch(apiUrl('/api/notices/board'), { headers: { Authorization: `Bearer ${token}` } });
         if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Failed to load Notice Board');
         setNotices(await res.json());
       } catch (err: any) {

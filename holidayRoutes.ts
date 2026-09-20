@@ -224,4 +224,78 @@ export function registerHolidayRoutes(app: Express, deps: HolidayRouteDeps) {
       res.status(500).json({ error: err.message });
     }
   });
+
+  // GET /api/today-overview — the two things an employee plans their day
+  // around: whether today is off / when the next non-working day is, and who
+  // else is out on approved Leave right now.
+  //
+  // Readable by every signed-in account, same as GET /api/holidays above.
+  // Who is out today is an ordinary "who's around" question rather than an HR
+  // record, so this returns ONLY the person's name and the date they're back
+  // — never the leave type, purpose, remarks or balance, which stay between
+  // them and their approvers.
+  app.get("/api/today-overview", authenticateToken, async (_req: any, res) => {
+    try {
+      // Local Y/M/D rather than toISOString(), which is UTC and rolls back a
+      // calendar day for timezones ahead of it (e.g. Bangladesh) — that would
+      // leave this reading yesterday's answer every morning until 6am.
+      const now = new Date();
+      const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+
+      const [todayRows, nextRows, leaveRows] = await Promise.all([
+        queryDB("SELECT entry_date, day_type, title FROM holiday_calendar WHERE entry_date = ?", [today]),
+        queryDB(
+          "SELECT entry_date, day_type, title FROM holiday_calendar WHERE entry_date > ? ORDER BY entry_date ASC LIMIT 1",
+          [today]
+        ),
+        queryDB(
+          `SELECT l.user_id, l.end_date, u.name
+           FROM leave_applications l
+           JOIN users u ON u.id = l.user_id
+           WHERE l.status = 'approved' AND l.start_date <= ? AND l.end_date >= ?`,
+          [today, today]
+        )
+      ]);
+
+      // One person can hold two approved applications that both cover today
+      // (e.g. a range extended by a second request), which would list them
+      // twice — keep one row each, carrying the later return date.
+      const byUser = new Map<number, { user_id: number; name: string; until: string }>();
+      for (const row of leaveRows) {
+        const userId = Number(row.user_id);
+        const until = String(row.end_date).slice(0, 10);
+        const existing = byUser.get(userId);
+        if (!existing || until > existing.until) {
+          byUser.set(userId, { user_id: userId, name: row.name, until });
+        }
+      }
+      const onLeave = Array.from(byUser.values()).sort((a, b) => a.name.localeCompare(b.name));
+
+      const next = nextRows[0]
+        ? {
+            date: String(nextRows[0].entry_date).slice(0, 10),
+            day_type: nextRows[0].day_type,
+            title: nextRows[0].title,
+            days_away: Math.max(
+              0,
+              Math.round(
+                (new Date(String(nextRows[0].entry_date).slice(0, 10)).getTime() - new Date(today).getTime()) / 86400000
+              )
+            )
+          }
+        : null;
+
+      res.json({
+        today,
+        today_off: todayRows[0] ? { day_type: todayRows[0].day_type, title: todayRows[0].title } : null,
+        next_off: next,
+        // Capped so a company-wide holiday season can't turn this into a huge
+        // payload; the true figure is reported alongside it either way.
+        on_leave_today: onLeave.slice(0, 50),
+        on_leave_count: onLeave.length
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
 }

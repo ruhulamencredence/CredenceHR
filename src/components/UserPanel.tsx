@@ -21,6 +21,8 @@ import { LeaveSummaryCard } from './LeaveSummaryCard';
 import { PendingApprovalsCard } from './PendingApprovalsCard';
 import { MyRequestsCard } from './MyRequestsCard';
 import { MyMonthAttendanceCard } from './MyMonthAttendanceCard';
+import { TodayOverviewCard } from './TodayOverviewCard';
+import { NoticePreviewCard } from './NoticePreviewCard';
 import { HolidayCalendarWidget } from './HolidayCalendarWidget';
 import { LeaveReviewPage } from './LeaveReviewPage';
 import { EmployeeDirectory } from './EmployeeDirectory';
@@ -2792,6 +2794,12 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
         {!!user.can_view_leave_summary && (
           <LeaveSummaryCard token={token} onOpen={() => goToMobileSection('leave')} />
         )}
+
+        {/* Next non-working day + who's out on Leave right now — the two
+            planning facts worth a glance. The full Holiday Calendar still
+            sits at the bottom of the Dashboard for browsing actual dates. */}
+        <TodayOverviewCard token={token} />
+
         {/* Takes the full row at md, where there are only two columns to
             share — it's an actionable list (remarks input + Approve/Reject
             per row), so it earns the width over sitting half-empty. */}
@@ -2812,6 +2820,15 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           canSeeConveyanceClaim={canSeeConveyanceClaim}
           canSeeTimesheet={canSeeTimesheet}
           onOpen={(target) => goToMobileSection(target)}
+          className="md:col-span-2 xl:col-span-1"
+        />
+
+        {/* Notices used to exist only as a one-shot popup after login — once
+            dismissed there was nothing left on the Dashboard to say anything
+            had been posted. */}
+        <NoticePreviewCard
+          token={token}
+          onOpen={() => goToMobileSection('noticeBoard')}
           className="md:col-span-2 xl:col-span-1"
         />
       </div>
