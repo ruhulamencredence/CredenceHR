@@ -63,6 +63,13 @@ interface AdminPanelProps {
   // one of 'reports' / 'mprs' / 'imports' / 'editlog' / 'recycle'. Ignored if
   // this Admin hasn't been granted that module.
   adminNavRequest?: AdminNavRequest | null;
+  // Reports this panel's own activeTab back up to App.tsx on every change —
+  // whether it moved because of adminNavRequest above, the "View Reports"
+  // shortcut inside the Dashboard tab, or its own localStorage-restored
+  // default on mount — so GlobalSidebar can highlight whichever item
+  // actually matches what's on screen right now, not just the last thing it
+  // was asked to navigate to.
+  onActiveTabChange?: (tab: string) => void;
 }
 
 // Purely presentational, read-only row — memoized so that typing in the report
@@ -158,7 +165,7 @@ const ReportRow = React.memo(function ReportRow({
   );
 });
 
-export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRequest, adminNavRequest }) => {
+export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRequest, adminNavRequest, onActiveTabChange }) => {
   const isSuperAdmin = user.role === 'superadmin';
   // Which Admin Panel tabs THIS logged-in Admin/Superadmin may see. A Superadmin
   // always gets every tab; a plain Admin only gets the ones the Superadmin granted
@@ -214,6 +221,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       // ignore, it just means a reload won't be able to restore this tab.
     }
   }, [activeTab, user.id]);
+
+  // Reports the live activeTab up to App.tsx (see onActiveTabChange above) so
+  // GlobalSidebar can highlight whichever item actually matches this tab.
+  useEffect(() => {
+    onActiveTabChange?.(activeTab);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
 
   // Navbar's web-only "Claims" header menu — jump straight to the matching tab.
   // Silently ignored if this Admin hasn't been granted that module.

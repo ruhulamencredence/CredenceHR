@@ -67,6 +67,12 @@ interface GlobalSidebarProps {
   // "Chat" item (self-service list below) opens ChatPanel.tsx — same
   // destination the Navbar chat bell opens on desktop.
   onOpenChat: () => void;
+  // Which item's key currently matches what's actually on screen (see
+  // App.tsx's computeSidebarActiveKey) — highlighted so this drawer/column
+  // shows a "you are here" mark instead of every item looking the same
+  // regardless of which page is open. null/undefined means nothing is
+  // highlighted (e.g. ProfilePage is open, which has no sidebar item).
+  activeKey?: string | null;
 }
 
 // One global navigation drawer for the whole app, reachable from the header's
@@ -79,7 +85,7 @@ interface GlobalSidebarProps {
 // drawer) carried over from the old AdminSidebar.
 export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   open, onClose, variant = 'overlay', user, token, photoVersion, onLogout, onGoToDashboard, onGoToJobsTab, onGoToUserClaims,
-  onGoToSelfServiceTab, onGoToAdminClaims, onGoToAdminModule, onOpenProfile, onOpenChat,
+  onGoToSelfServiceTab, onGoToAdminClaims, onGoToAdminModule, onOpenProfile, onOpenChat, activeKey,
 }) => {
   const isPersistent = variant === 'persistent';
   const [reportsOpen, setReportsOpen] = useState(true);
@@ -387,20 +393,23 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     selectAndClose(fn);
   };
 
-  const renderItem = (item: NavItem) => (
-    <button
-      key={item.key}
-      type="button"
-      title={collapsed ? item.label : undefined}
-      onClick={() => selectAndClose(item.onClick)}
-      className={`w-full flex items-center rounded-xl text-white/85 hover:bg-white/10 transition-colors ${
-        collapsed ? 'justify-center px-0 py-2.5' : 'gap-2.5 px-2.5 py-2.5'
-      }`}
-    >
-      <item.icon className="w-[18px] h-[18px] shrink-0" />
-      {!collapsed && <span className="text-[13px] font-medium truncate">{item.label}</span>}
-    </button>
-  );
+  const renderItem = (item: NavItem) => {
+    const active = item.key === activeKey;
+    return (
+      <button
+        key={item.key}
+        type="button"
+        title={collapsed ? item.label : undefined}
+        onClick={() => selectAndClose(item.onClick)}
+        className={`w-full flex items-center rounded-xl transition-colors ${
+          collapsed ? 'justify-center px-0 py-2.5' : 'gap-2.5 px-2.5 py-2.5'
+        } ${active ? 'bg-white/15 text-white shadow-sm' : 'text-white/85 hover:bg-white/10'}`}
+      >
+        <item.icon className="w-[18px] h-[18px] shrink-0" />
+        {!collapsed && <span className={`text-[13px] truncate ${active ? 'font-semibold' : 'font-medium'}`}>{item.label}</span>}
+      </button>
+    );
+  };
 
   // Shared renderer for the collapsible category groups (PEPM Manage,
   // Claims, Attendance, Organization, Workforce, HR): a toggle header +
@@ -432,17 +441,22 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
         </button>
         {isOpen && (
           <div className="mt-0.5 ml-[13px] pl-3.5 border-l border-white/15 space-y-0.5">
-            {items.map((item) => (
-              <button
-                key={item.key}
-                type="button"
-                onClick={() => selectAndClose(item.onClick)}
-                className="w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-left text-white/70 hover:bg-white/10 hover:text-white transition-colors"
-              >
-                <item.icon className="w-3.5 h-3.5 shrink-0" />
-                <span className="text-[12.5px] truncate">{item.label}</span>
-              </button>
-            ))}
+            {items.map((item) => {
+              const active = item.key === activeKey;
+              return (
+                <button
+                  key={item.key}
+                  type="button"
+                  onClick={() => selectAndClose(item.onClick)}
+                  className={`w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-left transition-colors ${
+                    active ? 'bg-white/15 text-white font-semibold' : 'text-white/70 hover:bg-white/10 hover:text-white'
+                  }`}
+                >
+                  <item.icon className="w-3.5 h-3.5 shrink-0" />
+                  <span className="text-[12.5px] truncate">{item.label}</span>
+                </button>
+              );
+            })}
           </div>
         )}
       </div>
@@ -611,12 +625,14 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
             type="button"
             onClick={() => selectAndClose(onGoToDashboard)}
             title={collapsed ? 'Dashboard' : undefined}
-            className={`w-full flex items-center rounded-xl text-white/85 hover:bg-white/10 transition-colors ${
+            className={`w-full flex items-center rounded-xl transition-colors ${
               collapsed ? 'justify-center px-0 py-2.5' : 'gap-2.5 px-2.5 py-2.5'
-            }`}
+            } ${activeKey === 'dashboard' ? 'bg-white/15 text-white shadow-sm' : 'text-white/85 hover:bg-white/10'}`}
           >
             <Home className="w-[18px] h-[18px] shrink-0" />
-            {!collapsed && <span className="text-[13px] font-medium truncate">Dashboard</span>}
+            {!collapsed && (
+              <span className={`text-[13px] truncate ${activeKey === 'dashboard' ? 'font-semibold' : 'font-medium'}`}>Dashboard</span>
+            )}
           </button>
 
           {mainItems.length > 0 && (
