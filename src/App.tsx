@@ -560,6 +560,16 @@ export default function App() {
     }
   };
 
+  // mobileActiveSection isn't actually mobile-only for these values — per
+  // UserPanel.tsx's showingClaimsPage, Movement Claim/My Claims/Conveyance
+  // Bill Claim/Leave/Timesheet/Employee Directory/Notice Board show as their
+  // OWN page on desktop too, driven by this same state. desktopActiveSection
+  // only ever covers Entry/Jobs/Entry Details/Job Edit/Dashboard, so on
+  // desktop these need to be checked first, before falling back to it.
+  const CLAIMS_TYPE_SECTIONS = new Set([
+    'claim', 'claims', 'conveyanceClaim', 'leave', 'timesheet', 'employeeDirectory', 'noticeBoard'
+  ]);
+
   // Which GlobalSidebar item currently matches what's actually on screen —
   // computed separately for the mobile overlay drawer and the desktop
   // persistent column since UserPanel tracks a distinct "current section"
@@ -570,7 +580,11 @@ export default function App() {
     if (showProfilePage) return null;
     if (selfServiceView) return selfServiceView;
     if (isAdminView) return adminActiveTab === 'dashboard' ? 'admin_dashboard' : adminActiveTab;
-    return mapUserSectionToSidebarKey(viewport === 'mobile' ? userActiveSection.mobile : userActiveSection.desktop);
+    if (viewport === 'mobile') return mapUserSectionToSidebarKey(userActiveSection.mobile);
+    if (userActiveSection.mobile && CLAIMS_TYPE_SECTIONS.has(userActiveSection.mobile)) {
+      return mapUserSectionToSidebarKey(userActiveSection.mobile);
+    }
+    return mapUserSectionToSidebarKey(userActiveSection.desktop);
   };
 
   // Shared nav handlers for GlobalSidebar — identical for the mobile overlay
