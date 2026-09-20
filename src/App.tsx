@@ -876,6 +876,7 @@ export default function App() {
       {!Capacitor.isNativePlatform() && (
         <footer className="py-6 text-center text-xs" style={{ background: 'var(--g-text)', color: '#9aa0a6' }}>
           <p>CredenceHR — an in-house application of Credence Housing Limited</p>
+          <p className="mt-1">&copy; 2026 Credence Housing Limited. All rights reserved.</p>
         </footer>
       )}
         </div>
