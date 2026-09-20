@@ -212,8 +212,11 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
         </div>
       </div>
 
-      {/* ---------------- Desktop layout ---------------- */}
-      <div className="hidden md:block max-w-3xl mx-auto px-6 py-8">
+      {/* ---------------- Desktop layout ----------------
+          max-w-5xl, not 3xl: at 3xl this sat as a 768px column stranded in
+          the middle of the content area beside the sidebar, which read as the
+          phone layout blown up rather than a desktop page. */}
+      <div className="hidden md:block max-w-5xl mx-auto px-6 py-8">
         <button
           type="button"
           onClick={onBack}
@@ -248,57 +251,68 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
           </span>
         </section>
 
-        <div className="grid grid-cols-2 gap-4 mt-4">
-          <section className="gemini-card p-5">
-            <p className="text-[11px] font-medium uppercase tracking-wide mb-3" style={{ color: 'var(--g-text-muted)' }}>
-              Contact
-            </p>
-            <div className="flex items-center gap-2.5 py-1.5 text-sm">
-              <Mail className="w-4 h-4 shrink-0" style={{ color: 'var(--g-accent)' }} />
-              <span className="truncate">{user.email || username || '—'}</span>
-            </div>
-            <div className="flex items-center gap-2.5 py-1.5 text-sm">
-              <Building2 className="w-4 h-4 shrink-0" style={{ color: 'var(--g-accent)' }} />
-              <span>Credence Housing Limited, Dhaka</span>
-            </div>
-          </section>
-
-          <button
-            type="button"
-            onClick={() => setShowPersonalData(true)}
-            className="gemini-card p-5 text-left hover:opacity-80 transition-opacity"
-          >
-            <p className="text-[11px] font-medium uppercase tracking-wide mb-3" style={{ color: 'var(--g-text-muted)' }}>
-              Personal Data
-            </p>
-            <div className="flex items-center justify-between gap-2.5 py-1.5 text-sm">
-              <div className="flex items-center gap-2.5">
-                <UserIcon className="w-4 h-4 shrink-0" style={{ color: 'var(--g-accent)' }} />
-                <span>Edit your details</span>
+        {/* Two columns rather than one stacked run: Contact and Personal Data
+            are two or three lines each, so side by side with Settings they
+            fill the width instead of leaving most of the page empty. */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-4 items-start">
+          <div className="lg:col-span-1 space-y-4">
+            <section className="gemini-card p-5">
+              <p className="text-[11px] font-medium uppercase tracking-wide mb-3" style={{ color: 'var(--g-text-muted)' }}>
+                Contact
+              </p>
+              <div className="flex items-center gap-2.5 py-1.5 text-sm">
+                <Mail className="w-4 h-4 shrink-0" style={{ color: 'var(--g-accent)' }} />
+                <span className="truncate">{user.email || username || '—'}</span>
               </div>
-              <ChevronLeft className="w-4 h-4 rotate-180 shrink-0" style={{ color: 'var(--g-text-muted)' }} />
-            </div>
-          </button>
-        </div>
+              <div className="flex items-center gap-2.5 py-1.5 text-sm">
+                <Building2 className="w-4 h-4 shrink-0" style={{ color: 'var(--g-accent)' }} />
+                <span>Credence Housing Limited, Dhaka</span>
+              </div>
+            </section>
 
-        <section className="gemini-card mt-4 overflow-hidden">
-          <p className="text-[11px] font-medium uppercase tracking-wide px-5 pt-4 pb-1" style={{ color: 'var(--g-text-muted)' }}>
-            Settings
-          </p>
-          <ProfileRow icon={<Package className="w-4 h-4" />} label="Asset Management" onClick={() => setShowAssetManagement(true)} padded />
-          <ProfileRow icon={<Lock className="w-4 h-4" />} label="Change Password" onClick={() => setShowChangePassword(true)} padded />
-          {!!username && (
-            <ProfileRow icon={<UserCircle2 className="w-4 h-4" />} label="Change Username" onClick={() => setShowChangeUsername(true)} padded />
-          )}
-          <ProfileRow
-            icon={<LogOut className="w-4 h-4" style={{ color: '#B3261E' }} />}
-            label="Logout"
-            labelColor="#B3261E"
-            onClick={onLogout}
-            last
-            padded
-          />
-        </section>
+            {/* `block` matters: a <button> centres its content vertically, so
+                whenever this card was stretched to match the one beside it,
+                its heading sat lower than that card's and the two rows
+                visibly failed to line up. */}
+            <button
+              type="button"
+              onClick={() => setShowPersonalData(true)}
+              className="gemini-card p-5 block w-full text-left hover:opacity-80 transition-opacity"
+            >
+              <p className="text-[11px] font-medium uppercase tracking-wide mb-3" style={{ color: 'var(--g-text-muted)' }}>
+                Personal Data
+              </p>
+              <div className="flex items-center justify-between gap-2.5 py-1.5 text-sm">
+                <div className="flex items-center gap-2.5">
+                  <UserIcon className="w-4 h-4 shrink-0" style={{ color: 'var(--g-accent)' }} />
+                  <span>Edit your details</span>
+                </div>
+                <ChevronLeft className="w-4 h-4 rotate-180 shrink-0" style={{ color: 'var(--g-text-muted)' }} />
+              </div>
+            </button>
+          </div>
+
+          <section className="gemini-card lg:col-span-2 overflow-hidden">
+            {/* pt-5, matching the p-5 on the cards beside it, so this heading
+                and theirs sit on the same line now that they're side by side. */}
+            <p className="text-[11px] font-medium uppercase tracking-wide px-5 pt-5 pb-1" style={{ color: 'var(--g-text-muted)' }}>
+              Settings
+            </p>
+            <ProfileRow icon={<Package className="w-4 h-4" />} label="Asset Management" onClick={() => setShowAssetManagement(true)} padded />
+            <ProfileRow icon={<Lock className="w-4 h-4" />} label="Change Password" onClick={() => setShowChangePassword(true)} padded />
+            {!!username && (
+              <ProfileRow icon={<UserCircle2 className="w-4 h-4" />} label="Change Username" onClick={() => setShowChangeUsername(true)} padded />
+            )}
+            <ProfileRow
+              icon={<LogOut className="w-4 h-4" style={{ color: '#B3261E' }} />}
+              label="Logout"
+              labelColor="#B3261E"
+              onClick={onLogout}
+              last
+              padded
+            />
+          </section>
+        </div>
       </div>
     </div>
   );
