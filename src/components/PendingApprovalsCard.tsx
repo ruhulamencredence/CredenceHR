@@ -20,6 +20,12 @@ interface MyApprovalItem {
 
 interface PendingApprovalsCardProps {
   token: string;
+  // Applied to this card's own root element rather than a wrapper around it —
+  // used by UserPanel's desktop Dashboard grid to set this card's column span.
+  // A wrapper wouldn't work: this card renders nothing at all when no approval
+  // is waiting (see below), and an empty wrapper would still claim a grid cell
+  // and punch a hole in the row.
+  className?: string;
 }
 
 const sourceTitle = (t: MyApprovalItem['source_type']) =>
@@ -45,7 +51,7 @@ const sourceTitle = (t: MyApprovalItem['source_type']) =>
 // Bill Claim's last step — Approving here always auto-creates a fresh Bill
 // (open the Admin Panel queue instead if you need to attach it to an
 // existing one).
-export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ token }) => {
+export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ token, className = '' }) => {
   const [items, setItems] = useState<MyApprovalItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [actingId, setActingId] = useState<number | null>(null);
@@ -103,7 +109,7 @@ export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ toke
   if (!loading && items.length === 0) return null;
 
   return (
-    <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+    <div className={`bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden ${className}`}>
       <div className="px-5 pt-5 pb-4 sm:px-6 border-b border-slate-200">
         <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
           <ShieldCheck className="w-4 h-4 text-blue-600" /> Pending Approvals

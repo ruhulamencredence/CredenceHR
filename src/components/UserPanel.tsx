@@ -2762,31 +2762,38 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
         </div>
       </div>
 
-      {/* Check In / Check Out (desktop) — mobile now shows this directly
-          under the banner above, in place of the old shortcut-icon notch.
-          Hides on desktop too while a Claims page (below) is the active
-          section, same as the Budget/Jobs/Entries grid and Job Edit further
-          down. Also requires can_use_attendance (Admin Panel -> Users ->
-          Remote Attendance), OFF by default — an Admin or Superadmin must
-          grant it per account before it shows at all. */}
-      {!!user.can_use_attendance && (
-        <div className={`hidden ${showingClaimsPage || showingMainGroupPage ? 'md:hidden' : 'md:block'}`}>
+      {/* Desktop Dashboard cards (Check In/Check Out, Leave Summary, Pending
+          Approvals) — laid out as a responsive grid rather than the mobile
+          layout's single full-width column stretched across a wide screen,
+          which left most of every row empty and read as a phone page blown
+          up. Same cards, same permission gates (can_use_attendance / Admin
+          Panel -> Users -> Remote Attendance, and can_view_leave_summary) as
+          before; mobile is untouched, it renders its own copies further up.
+          Hides wholesale while a Claims page or one of Entry/Jobs/Entry
+          Details/Job Edit is the active section, same as before.
+
+          Each card is a DIRECT grid child rather than being wrapped in its
+          own gating <div>: AttendanceCard (no assigned Projects) and
+          PendingApprovalsCard (nothing waiting on this account) both render
+          null in the common case, and a wrapper would still claim an empty
+          grid cell and punch a hole in the row. items-start keeps each card
+          at its natural height instead of stretching the short ones to match
+          the tallest one in the row. */}
+      <div
+        className={`hidden gap-6 md:grid-cols-2 xl:grid-cols-3 items-start ${
+          showingClaimsPage || showingMainGroupPage ? 'md:hidden' : 'md:grid'
+        }`}
+      >
+        {!!user.can_use_attendance && (
           <AttendanceCard token={token} projects={attendanceProjects} loading={!projectsLoaded} />
-        </div>
-      )}
-
-      {/* Leave Summary (desktop) — same card and same can_view_leave_summary
-          gate as the mobile Dashboard above. */}
-      {!!user.can_view_leave_summary && (
-        <div className={`hidden ${showingClaimsPage || showingMainGroupPage ? 'md:hidden' : 'md:block'}`}>
+        )}
+        {!!user.can_view_leave_summary && (
           <LeaveSummaryCard token={token} onOpen={() => goToMobileSection('leave')} />
-        </div>
-      )}
-
-      {/* Pending Approvals (desktop) — same card/reasoning as the mobile
-          Dashboard above (Part 4 — Role Permissiveness). */}
-      <div className={`hidden ${showingClaimsPage || showingMainGroupPage ? 'md:hidden' : 'md:block'}`}>
-        <PendingApprovalsCard token={token} />
+        )}
+        {/* Takes the full row at md, where there are only two columns to
+            share — it's an actionable list (remarks input + Approve/Reject
+            per row), so it earns the width over sitting half-empty. */}
+        <PendingApprovalsCard token={token} className="md:col-span-2 xl:col-span-1" />
       </div>
 
       {/* Movement Claim — reachable via its own tile on mobile and the Navbar's
