@@ -35,7 +35,6 @@ import {
 } from 'lucide-react';
 import { User } from '../types';
 import { apiUrl } from '../lib/api';
-import { Spinner } from './Spinner';
 
 interface AdminDashboardProps {
   token: string;
@@ -446,9 +445,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user }) =
 
   return (
     <div className="space-y-6">
+      {/* Same pulsing skeleton-card loader as Employee Directory (see
+          EmployeeDirectory.tsx's grid loading state) instead of the app-wide
+          Infinity Lottie Spinner — a plain grid of placeholder cards reads as
+          "this dashboard's tiles are on their way" rather than a generic
+          spinner, and matches the one other place in the app that already
+          does this. */}
       {loading && (
-        <div className="flex items-center justify-center py-16">
-          <Spinner />
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="rounded-2xl border border-slate-200 p-4 space-y-3 animate-pulse">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-full bg-slate-200" />
+                <div className="flex-1 space-y-2">
+                  <div className="h-3 bg-slate-200 rounded w-2/3" />
+                  <div className="h-2.5 bg-slate-100 rounded w-1/2" />
+                </div>
+              </div>
+              <div className="h-2.5 bg-slate-100 rounded w-full" />
+              <div className="h-2.5 bg-slate-100 rounded w-3/4" />
+            </div>
+          ))}
         </div>
       )}
 
