@@ -81,10 +81,18 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
       can_view_timesheet: !!u.can_view_timesheet,
       can_view_leave_application: !!u.can_view_leave_application,
       can_view_my_leave: !!u.can_view_my_leave,
+      can_grant_module_access: !!u.can_grant_module_access,
       attendance_project_id: u.attendance_project_id ?? null
     }));
   }
-  if (lowerSql.startsWith("select id, name, email, role, created_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims from users")) {
+  // GET /api/auth/me's own SELECT — matched on a short, stable prefix (not the
+  // full column list) since that real query has grown extra columns over time
+  // (can_use_tracking, can_view_budget_module, ... can_grant_module_access) and a
+  // full-literal match silently stopped matching and fell through to the [] catch-
+  // all below, making /api/auth/me 404 under the in-memory DB. This prefix is
+  // unique to this query — GET /api/users' own SELECT (handled above) has
+  // "username" as its 4th column instead of "role", so it can never collide here.
+  if (lowerSql.startsWith("select id, name, email, role, created_at, can_edit_delivery_date")) {
     const id = Number(params[0]);
     const user = memoryDb.users.find(u => u.id === id);
     if (!user) return [];
@@ -105,6 +113,7 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
       can_view_timesheet: rest.can_view_timesheet ? 1 : 0,
       can_view_leave_application: rest.can_view_leave_application ? 1 : 0,
       can_view_my_leave: rest.can_view_my_leave ? 1 : 0,
+      can_grant_module_access: rest.can_grant_module_access ? 1 : 0,
       attendance_project_id: rest.attendance_project_id ?? null
     }];
   }
@@ -213,6 +222,30 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
     const user = memoryDb.users.find(u => u.id === id);
     return user ? [{ can_job_edit: user.can_job_edit ? 1 : 0 }] : [];
   }
+  // requireModuleGrantAccess's own fresh-from-DB check (server.ts) — the JWT
+  // payload doesn't carry this flag, so it's always read live here.
+  if (lowerSql.startsWith("select can_grant_module_access from users")) {
+    const id = Number(params[0]);
+    const user = memoryDb.users.find(u => u.id === id);
+    return user ? [{ can_grant_module_access: user.can_grant_module_access ? 1 : 0 }] : [];
+  }
+  // PUT /api/users/:id/feature-permissions' own pre-flight lookup (role + every
+  // field it can update) — was entirely unhandled, so this endpoint always 404'd
+  // ("User not found") under the in-memory DB, for every one of these toggles.
+  if (lowerSql.startsWith("select role, can_edit_delivery_date, can_job_edit, can_use_attendance, can_use_tracking, can_view_leave_summary, attendance_project_id from users")) {
+    const id = Number(params[0]);
+    const user = memoryDb.users.find(u => u.id === id);
+    if (!user) return [];
+    return [{
+      role: user.role,
+      can_edit_delivery_date: user.can_edit_delivery_date !== false ? 1 : 0,
+      can_job_edit: user.can_job_edit ? 1 : 0,
+      can_use_attendance: user.can_use_attendance ? 1 : 0,
+      can_use_tracking: user.can_use_tracking ? 1 : 0,
+      can_view_leave_summary: user.can_view_leave_summary ? 1 : 0,
+      attendance_project_id: user.attendance_project_id ?? null
+    }];
+  }
   if (lowerSql.startsWith("update users set can_edit_delivery_date")) {
     const [can_edit_delivery_date, can_job_edit, can_use_attendance, can_use_tracking, can_view_leave_summary, attendance_project_id, id] = params;
     const user = memoryDb.users.find(u => u.id === Number(id));
@@ -224,6 +257,17 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
       user.can_view_leave_summary = !!Number(can_view_leave_summary);
       user.attendance_project_id = attendance_project_id === null ? null : Number(attendance_project_id);
     }
+    return { affectedRows: user ? 1 : 0 };
+  }
+  // Superadmin-only "Grants Module Access" toggle — matched BEFORE the bulk
+  // can_edit_delivery_date/... UPDATE above would otherwise need to (it doesn't
+  // collide since that one starts with "can_edit_delivery_date", not
+  // "can_grant_module_access", but this is its own separate UPDATE statement —
+  // see PUT /api/users/:id/feature-permissions in UserManagement.ts).
+  if (lowerSql.startsWith("update users set can_grant_module_access")) {
+    const [can_grant_module_access, id] = params;
+    const user = memoryDb.users.find(u => u.id === Number(id));
+    if (user) user.can_grant_module_access = !!Number(can_grant_module_access);
     return { affectedRows: user ? 1 : 0 };
   }
   if (lowerSql.startsWith("update users set can_view_login_location")) {

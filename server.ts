@@ -580,6 +580,22 @@ async function ensureSchemaMigrations() {
     if (err.code !== 'ER_DUP_FIELDNAME') console.warn("⚠️ Could not add users.can_view_login_location column: " + err.message);
   }
   try {
+    // Superadmin-only grant, ONLY ever meaningful for role='admin': lets that Admin
+    // ALSO set OTHER accounts' "Module Access" (Admin Panel -> Users -> Modules —
+    // the admin_module_permissions rows GET/PUT /api/users/:id/module-permissions
+    // manages) themselves, instead of every such grant needing the Superadmin.
+    // Same on/off switch pattern as can_view_login_location above. Deliberately
+    // narrower than that switch's own power, though: a delegated Admin using this
+    // can only set Module Access for role='user' targets, never for another 'admin'
+    // — promoting what an ADMIN can reach stays exclusively the Superadmin's call
+    // (enforced server-side in UserManagement.ts's module-permissions handler, not
+    // just hidden in the UI). OFF by default; a Superadmin always has this
+    // implicitly and is never itself a valid target.
+    await dbPool.query(`ALTER TABLE users ADD COLUMN can_grant_module_access TINYINT(1) NOT NULL DEFAULT 0`);
+  } catch (err: any) {
+    if (err.code !== 'ER_DUP_FIELDNAME') console.warn("⚠️ Could not add users.can_grant_module_access column: " + err.message);
+  }
+  try {
     // Superadmin-only grant: lets a plain Admin ALSO use the User Panel (mark
     // Remote Attendance, submit Claims/Conveyance Bills, enter Job/MPR data) on top
     // of their normal Admin Panel — the same on/off switch pattern as
@@ -3014,14 +3030,40 @@ async function startServer() {
     return res.status(403).json({ error: "Admin access required" });
   };
 
-  // Superadmin-only actions: promoting/demoting a User <-> Admin, and setting which
-  // Admin Panel modules a given Admin or User may access. Never granted through the
-  // API — only the .env-seeded account (see seedAdminFromEnv) is ever a superadmin.
+  // Superadmin-only actions: promoting/demoting a User <-> Admin, and every
+  // per-feature access toggle in Admin Panel -> Users (Attend./Tracking/Leave
+  // Summary/etc., and Module Access UNLESS delegated — see
+  // requireModuleGrantAccess just below for that one exception). Never granted
+  // through the API — only the .env-seeded account (see seedAdminFromEnv) is
+  // ever a superadmin.
   const requireSuperAdmin = (req: any, res: any, next: any) => {
     if (!req.user || req.user.role !== "superadmin") {
       return res.status(403).json({ error: "Superadmin access required" });
     }
     next();
+  };
+
+  // Gate for GET/PUT /api/users/:id/module-permissions ("Module Access" — which
+  // Admin Panel tabs a given Admin/User may reach): a Superadmin always passes;
+  // a plain Admin passes only once the Superadmin has explicitly switched on
+  // can_grant_module_access for THEIR account (see the ALTER TABLE in
+  // ensureDatabaseSchema for the full explanation). Passing this gate is not the
+  // whole story — the handler itself still blocks a delegated (non-superadmin)
+  // Admin from touching a role='admin' or 'superadmin' target, so a delegated
+  // Admin can only ever grant/revoke Module Access for a plain 'user' account.
+  const requireModuleGrantAccess = async (req: any, res: any, next: any) => {
+    if (!req.user) return res.status(401).json({ error: "Access token required" });
+    if (req.user.role === "superadmin") return next();
+    try {
+      // The JWT payload only ever carries id/email/username/role/name (see
+      // authenticateToken above) — this flag isn't in it, so it's read fresh
+      // here rather than trusted off req.user.
+      const rows: any = await queryDB("SELECT can_grant_module_access FROM users WHERE id = ?", [req.user.id]);
+      if (rows.length > 0 && !!Number(rows[0].can_grant_module_access)) return next();
+      return res.status(403).json({ error: "You don't have access to set Module Access. Ask your Superadmin to grant it." });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
   };
 
   // Per-module gate for an Admin or a module-granted User (a Superadmin always
@@ -3080,7 +3122,7 @@ async function startServer() {
   // User Management (Admin Panel -> Users) — kept in their own file
   // (UserManagement.ts), same reasoning as profileRoutes.ts/holidayRoutes.ts/
   // Alerts.ts above.
-  registerUserManagementRoutes(app, { authenticateToken, requireAdmin, requireSuperAdmin, requireModule, queryDB, adminModuleKeys: ADMIN_MODULE_KEYS });
+  registerUserManagementRoutes(app, { authenticateToken, requireAdmin, requireSuperAdmin, requireModuleGrantAccess, requireModule, queryDB, adminModuleKeys: ADMIN_MODULE_KEYS });
 
   // Departments (Admin Panel -> Departments) + Branches (Admin Panel ->
   // Branches) — kept in their own file (DepartmentsAndBranches.ts), same
@@ -3313,6 +3355,11 @@ async function startServer() {
           can_view_timesheet: user.role === "superadmin" ? true : !!Number(user.can_view_timesheet),
           can_view_leave_application: user.role === "superadmin" ? true : !!Number(user.can_view_leave_application),
           can_view_my_leave: user.role === "superadmin" ? true : !!Number(user.can_view_my_leave),
+          // Superadmin-granted, only ever meaningful for role='admin': can this
+          // Admin ALSO set OTHER accounts' Module Access themselves (see the
+          // ALTER TABLE above for the full explanation and its 'user'-target-only
+          // restriction).
+          can_grant_module_access: user.role === "admin" ? !!Number(user.can_grant_module_access) : false,
           // So the Admin Panel can show/hide tabs right after login, before any
           // other fetch. Empty for Users and for Superadmin (who has every module
           // implicitly, not through explicit grants).
@@ -3327,7 +3374,7 @@ async function startServer() {
   app.get("/api/auth/me", authenticateToken, async (req: any, res) => {
     try {
       const users = await queryDB(
-        "SELECT id, name, email, role, created_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, attendance_project_id FROM users WHERE id = ?",
+        "SELECT id, name, email, role, created_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, can_grant_module_access, attendance_project_id FROM users WHERE id = ?",
         [req.user.id]
       );
       if (users.length === 0) return res.status(404).json({ error: "User not found" });
@@ -3349,6 +3396,7 @@ async function startServer() {
         can_view_timesheet: u.role === "superadmin" ? true : !!Number(u.can_view_timesheet),
         can_view_leave_application: u.role === "superadmin" ? true : !!Number(u.can_view_leave_application),
         can_view_my_leave: u.role === "superadmin" ? true : !!Number(u.can_view_my_leave),
+        can_grant_module_access: u.role === "admin" ? !!Number(u.can_grant_module_access) : false,
         module_permissions: (u.role === "admin" || u.role === "user") ? await getAdminModules(u.id) : []
       });
     } catch (err: any) {

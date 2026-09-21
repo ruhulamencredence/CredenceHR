@@ -372,6 +372,15 @@ export interface User {
   // 'admin' it's OFF by default and must be explicitly switched on by the
   // Superadmin (PUT /api/users/:id/login-location-access). Irrelevant for 'user'.
   can_view_login_location?: boolean;
+  // Superadmin-only grant: can this Admin ALSO set OTHER accounts' Module Access
+  // (the module_permissions grant above) themselves, via PUT
+  // /api/users/:id/module-permissions? Always false for role !== 'admin'. OFF by
+  // default, switched on by the Superadmin (PUT /api/users/:id/feature-permissions
+  // with this field — Superadmin-only there too). Deliberately narrower than the
+  // Superadmin's own version of this power: a delegated Admin using it can only
+  // grant/revoke Module Access for a role === 'user' target, never another
+  // 'admin' — enforced server-side, not just hidden in the UI.
+  can_grant_module_access?: boolean;
   // Superadmin-only grant: can this Admin ALSO use the User Panel (mark Remote
   // Attendance, submit Claims/Conveyance Bills, enter Job/MPR data) alongside
   // their Admin Panel? OFF by default for role === 'admin', switched on by the
