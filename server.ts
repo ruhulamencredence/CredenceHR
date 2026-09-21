@@ -1949,7 +1949,7 @@ const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports",
 const PERMISSION_LAYER_KEYS = ["read", "edit_add", "entry_upload", "delete_trash", "permanent_delete"] as const;
 // Which modules currently enforce PERMISSION_LAYER_KEYS — mirrors
 // PERMISSION_LAYER_MODULES in src/types.ts. Rolled out module by module.
-const PERMISSION_LAYER_MODULES = ["departments", "projects"] as const;
+const PERMISSION_LAYER_MODULES = ["departments", "projects", "approvals"] as const;
 
 // Employee Directory extended profile fields (Admin Panel -> Employees ->
 // Edit -> Employee Info / Status / Contact tabs). Single source of truth for
@@ -4218,6 +4218,7 @@ async function startServer() {
     requireAdmin,
     requireSuperAdmin,
     requireModule,
+    requireModuleLayer,
     queryDB,
     getApprovalChain,
     performApprovalAction,

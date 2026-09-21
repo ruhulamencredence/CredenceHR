@@ -56,8 +56,8 @@ export const PERMISSION_LAYERS: { key: PermissionLayerKey; label: string }[] = [
 // Which Admin Panel modules currently enforce the PERMISSION_LAYERS above —
 // being rolled out one module at a time. A module not listed here still only
 // has the old coarse on/off grant (module_permissions), unaffected by any of
-// this. Start: 'departments', then 'projects'.
-export const PERMISSION_LAYER_MODULES: AdminModuleKey[] = ['departments', 'projects'];
+// this. Start: 'departments', then 'projects', then 'approvals'.
+export const PERMISSION_LAYER_MODULES: AdminModuleKey[] = ['departments', 'projects', 'approvals'];
 
 // Global Calendar (Admin Panel -> Holidays) — one row per Weekend/Holiday
 // date. Read by every account (Timesheet needs this so a Weekend/Holiday date
