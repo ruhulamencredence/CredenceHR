@@ -475,7 +475,12 @@ export default function App() {
   // back to (see AuthScreen.tsx's original version of this same check) —
   // window.history.back() itself still works fine even though the hardware
   // back button is intercepted for the exit-app-confirmation flow above.
-  const backToServerBadge = Capacitor.isNativePlatform() && typeof window !== 'undefined' && window.history.length > 1 && (
+  //
+  // Temporarily disabled (hardcoded false below) along with GlobalSidebar's
+  // SERVER_SWITCHER_ENABLED flag — "Set Server" isn't being worked on right
+  // now, so this popup (shown on both the Sign In screen and the Dashboard)
+  // is hidden too until it's picked back up.
+  const backToServerBadge = false && Capacitor.isNativePlatform() && typeof window !== 'undefined' && window.history.length > 1 && (
     <div
       className="fixed left-1/2 -translate-x-1/2 z-[90] flex items-center gap-2.5 pl-3.5 pr-2 py-2 rounded-full shadow-lg"
       style={{
