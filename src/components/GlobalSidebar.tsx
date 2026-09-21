@@ -12,6 +12,11 @@ import credenceLogo from '../assets/credence-logo.png';
 import { useProfilePhoto } from '../lib/useProfilePhoto';
 import { ServerSwitcherModal } from './ServerSwitcherModal';
 
+// Temporarily disabled per request — "Set Server" isn't being worked on
+// right now, so the button (and the modal it opens) is hidden until it's
+// picked back up. Nothing else about the feature was touched/removed.
+const SERVER_SWITCHER_ENABLED = false;
+
 interface NavItem {
   key: string;
   label: string;
@@ -673,7 +678,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
               catalog a Superadmin manages on the web (Admin Panel -> Servers,
               still Superadmin-only to add/edit/delete). Kept out of the "ADMIN
               PANEL" section above since it isn't an admin-only action. */}
-          {isNativeApp && (
+          {SERVER_SWITCHER_ENABLED && isNativeApp && (
             <button
               type="button"
               onClick={() => selectAndClose(() => setShowServerModal(true))}
@@ -696,7 +701,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
         </div>
       </aside>
 
-      {showServerModal && (
+      {SERVER_SWITCHER_ENABLED && showServerModal && (
         <ServerSwitcherModal
           token={token}
           onClose={() => setShowServerModal(false)}
