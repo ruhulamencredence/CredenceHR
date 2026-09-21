@@ -111,6 +111,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   const [orgOpen, setOrgOpen] = useState(false);
   const [workforceOpen, setWorkforceOpen] = useState(false);
   const [hrOpen, setHrOpen] = useState(false);
+  const [misOpen, setMisOpen] = useState(false);
   const photoUrl = useProfilePhoto(token, photoVersion);
 
   // Minimized/collapsed mode — desktop persistent column only (the mobile
@@ -252,10 +253,22 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   if (user.role === 'admin' || user.role === 'superadmin') {
     hrmLeaveGroup.push({ key: 'leaveApprovals', label: 'Leave Approvals', icon: CheckSquare, onClick: () => onGoToSelfServiceTab('leaveApprovals') });
   }
+  // "Payroll" — Coming Soon placeholder (PayrollModule.tsx/PayrollRoutes.ts),
+  // but permission-gated like every other module from the start: a
+  // Superadmin always sees it (canSeeModule), everyone else only once
+  // explicitly granted the 'payroll' module via Admin Panel -> Users ->
+  // Module Access. GET /api/payroll/status enforces the same gate
+  // server-side (requireModule('payroll')), so this is real access control,
+  // not just a hidden menu item. Moved into HRM as its own sub-group.
+  const hrmPayrollGroup: NavItem[] = [];
+  if (canSeeModule('payroll')) {
+    hrmPayrollGroup.push({ key: 'payroll', label: 'Payroll', icon: Banknote, onClick: () => onGoToSelfServiceTab('payroll') });
+  }
   const hrmSubGroups: { key: string; label: string; icon: React.ComponentType<{ className?: string }>; items: NavItem[] }[] = [
     { key: 'my_claim_bill', label: 'My Claim/Bill', icon: Wallet, items: hrmClaimGroup },
     { key: 'hrm_attendance', label: 'Attendance', icon: Clock, items: hrmAttendanceGroup },
     { key: 'hrm_leave_manage', label: 'Leave Manage', icon: ListChecks, items: hrmLeaveGroup },
+    { key: 'hrm_payroll', label: 'Payroll', icon: Banknote, items: hrmPayrollGroup },
   ].filter((g) => g.items.length > 0);
 
   const selfServiceItems: NavItem[] = [];
@@ -277,16 +290,6 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // the HR-editing view gated behind the 'employees' module) — see
   // EmployeeDirectory.tsx / EmployeeDirectoryRoutes.ts.
   selfServiceItems.push({ key: 'employeeDirectory', label: 'Employee Directory', icon: Contact, onClick: () => onGoToSelfServiceTab('employeeDirectory') });
-  // "Payroll" — Coming Soon placeholder (PayrollModule.tsx/PayrollRoutes.ts),
-  // but permission-gated like every other module from the start: a
-  // Superadmin always sees it (canSeeModule), everyone else only once
-  // explicitly granted the 'payroll' module via Admin Panel -> Users ->
-  // Module Access. GET /api/payroll/status enforces the same gate
-  // server-side (requireModule('payroll')), so this is real access control,
-  // not just a hidden menu item.
-  if (canSeeModule('payroll')) {
-    selfServiceItems.push({ key: 'payroll', label: 'Payroll', icon: Banknote, onClick: () => onGoToSelfServiceTab('payroll') });
-  }
   // NOT Admin-gated — a Template Layer or a Leave Application's Reliever can
   // be ANY account, so every account gets this.
   selfServiceItems.push({ key: 'approveApplications', label: 'Approve Application', icon: ShieldCheck, onClick: () => onGoToSelfServiceTab('approveApplications') });
@@ -359,9 +362,9 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     { key: 'departments', label: 'Departments', icon: Users2, onClick: () => onGoToAdminModule('departments') },
   ].filter((i) => canSeeModule(i.key as AdminModuleKey));
 
-  // "Workforce" — people + what's assigned/tracked against them.
+  // "Workforce" — people + what's assigned/tracked against them. "Users" moved
+  // into the new "MIS" group below (alongside Servers).
   const workforceGroup: NavItem[] = [
-    { key: 'users', label: 'Users', icon: Users, onClick: () => onGoToAdminModule('users') },
     { key: 'employees', label: 'Employees', icon: Contact, onClick: () => onGoToAdminModule('employees') },
     { key: 'tracking', label: 'Employee Tracking', icon: Navigation, onClick: () => onGoToAdminModule('tracking') },
     { key: 'asset_management', label: 'Asset Management', icon: Package, onClick: () => onGoToAdminModule('asset_management') },
@@ -399,22 +402,27 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     if (orgGroup.some((i) => i.key === activeKey)) setOrgOpen(true);
     if (workforceGroup.some((i) => i.key === activeKey)) setWorkforceOpen(true);
     if (hrGroup.some((i) => i.key === activeKey)) setHrOpen(true);
+    if (misGroup.some((i) => i.key === activeKey)) setMisOpen(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeKey]);
 
-  // "Servers" — Admin Panel tab (full catalog CRUD), Superadmin-only on any
-  // platform (this is the WEB-oriented management surface — see
-  // ServerProfilesPanel.tsx). Not a grantable module_permissions item like
-  // the groups above (canSeeModule wouldn't apply), so kept as its own flat
-  // item, gated directly on isSuperAdmin.
+  // "MIS" — Users + Servers grouped together. "Servers" (Admin Panel tab,
+  // full catalog CRUD) is Superadmin-only on any platform (this is the
+  // WEB-oriented management surface — see ServerProfilesPanel.tsx) and not a
+  // grantable module_permissions item like most other items, so it's gated
+  // directly on isSuperAdmin rather than canSeeModule. "Users" keeps its
+  // normal canSeeModule gate (moved here from Workforce above).
+  const misGroup: NavItem[] = [
+    { key: 'users', label: 'Users', icon: Users, onClick: () => onGoToAdminModule('users') },
+  ].filter((i) => canSeeModule(i.key as AdminModuleKey));
+  if (isSuperAdmin) {
+    misGroup.push({ key: 'servers', label: 'Servers', icon: Server, onClick: () => onGoToAdminModule('servers') });
+  }
+
+  // Not part of MIS — Superadmin-only, but not "Users/Servers management",
+  // so kept as its own flat item like before.
   const adminFlatItems: NavItem[] = [];
   if (isSuperAdmin) {
-    adminFlatItems.push({
-      key: 'servers',
-      label: 'Servers',
-      icon: Server,
-      onClick: () => onGoToAdminModule('servers'),
-    });
     // Same "not a grantable module" reasoning as Servers above — this exists
     // specifically so a Superadmin can see an Admin's permanent Job Recycle
     // erases too, so it can never be delegated away via module_permissions.
@@ -446,6 +454,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     ...orgGroup,
     ...workforceGroup,
     ...hrGroup,
+    ...misGroup,
     ...adminFlatItems,
   ];
   const searchQuery = sidebarSearch.trim().toLowerCase();
@@ -777,7 +786,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
           {selfServiceItems.map(renderItem)}
 
           {(!!adminDashboardItem || reportsGroup.length > 0 || claimsGroup.length > 0 || attendanceGroup.length > 0 ||
-            orgGroup.length > 0 || workforceGroup.length > 0 || hrGroup.length > 0 || adminFlatItems.length > 0) && (
+            orgGroup.length > 0 || workforceGroup.length > 0 || hrGroup.length > 0 || misGroup.length > 0 || adminFlatItems.length > 0) && (
             <>
               {!collapsed && <p className="px-2.5 mt-3 mb-1.5 text-[10px] font-semibold tracking-wide text-white/50">ADMIN PANEL</p>}
 
@@ -789,6 +798,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
               {renderGroup(orgGroup, 'Organization', Building2, orgOpen, setOrgOpen)}
               {renderGroup(workforceGroup, 'Workforce', Users, workforceOpen, setWorkforceOpen)}
               {renderGroup(hrGroup, 'HR', ShieldCheck, hrOpen, setHrOpen)}
+              {renderGroup(misGroup, 'MIS', Server, misOpen, setMisOpen)}
 
               {adminFlatItems.map(renderItem)}
             </>
