@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
-import { ArrowLeft, ListChecks, Search, Save, Layers, Building2, ChevronDown, ChevronUp, CheckCircle2, AlertTriangle, Plus, X } from 'lucide-react';
-import { User, LeaveBalance } from '../types';
+import { ArrowLeft, ListChecks, Search, Save, Layers, Building2, ChevronDown, ChevronUp, CheckCircle2, AlertTriangle, Plus, X, ShieldCheck } from 'lucide-react';
+import { User, LeaveBalance, LeaveCategoryPolicy } from '../types';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
 import { ModulePath } from './ModulePath';
@@ -62,6 +62,87 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
   const [bulkError, setBulkError] = useState('');
   const [bulkSuccess, setBulkSuccess] = useState('');
 
+  // "Leave Policies" — per Leave Type (Casual/Sick/Leave without Pay + any
+  // custom category) advance-notice/Reliever/max-consecutive-days/exhaustion
+  // rules, enforced server-side on every Leave Application submission. Only
+  // ever shown/usable when canManageAll is true, same as the Bulk panel.
+  const [showPoliciesPanel, setShowPoliciesPanel] = useState(false);
+  const [policies, setPolicies] = useState<LeaveCategoryPolicy[]>([]);
+  const [policyDraft, setPolicyDraft] = useState<Record<string, { min_advance_notice_days: string; reliever_required: boolean; max_consecutive_days: string; require_paid_leave_exhausted: boolean }>>({});
+  const [savingPolicyFor, setSavingPolicyFor] = useState<string | null>(null);
+  const [policyError, setPolicyError] = useState('');
+  const [policySuccess, setPolicySuccess] = useState('');
+
+  const draftFor = (categoryKey: string) =>
+    policyDraft[categoryKey] || { min_advance_notice_days: '0', reliever_required: true, max_consecutive_days: '', require_paid_leave_exhausted: false };
+
+  const fetchPolicies = async () => {
+    try {
+      const res = await fetch(apiUrl('/api/leave-policies'), { headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to load Leave Policies');
+      const rows: LeaveCategoryPolicy[] = Array.isArray(data) ? data : [];
+      setPolicies(rows);
+      setPolicyDraft((prev) => {
+        const next = { ...prev };
+        for (const p of rows) {
+          next[p.category_key] = {
+            min_advance_notice_days: String(p.min_advance_notice_days),
+            reliever_required: p.reliever_required,
+            max_consecutive_days: p.max_consecutive_days === null ? '' : String(p.max_consecutive_days),
+            require_paid_leave_exhausted: p.require_paid_leave_exhausted
+          };
+        }
+        return next;
+      });
+    } catch {
+      // Non-fatal — the panel just falls back to its built-in defaults (no
+      // restriction, Reliever required) until it can load.
+    }
+  };
+
+  const savePolicy = async (categoryKey: string) => {
+    const draft = draftFor(categoryKey);
+    const minAdvanceNoticeDays = Number(draft.min_advance_notice_days);
+    if (!Number.isFinite(minAdvanceNoticeDays) || minAdvanceNoticeDays < 0) {
+      setPolicySuccess('');
+      setPolicyError('Advance Notice (days) must be a non-negative number.');
+      return;
+    }
+    let maxConsecutiveDays: number | null = null;
+    if (draft.max_consecutive_days.trim() !== '') {
+      maxConsecutiveDays = Number(draft.max_consecutive_days);
+      if (!Number.isFinite(maxConsecutiveDays) || maxConsecutiveDays < 1) {
+        setPolicySuccess('');
+        setPolicyError('Max Consecutive Days must be a positive number, or left blank for no cap.');
+        return;
+      }
+    }
+    setSavingPolicyFor(categoryKey);
+    setPolicyError('');
+    setPolicySuccess('');
+    try {
+      const res = await fetch(apiUrl(`/api/leave-policies/${encodeURIComponent(categoryKey)}`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          min_advance_notice_days: minAdvanceNoticeDays,
+          reliever_required: draft.reliever_required,
+          max_consecutive_days: maxConsecutiveDays,
+          require_paid_leave_exhausted: draft.require_paid_leave_exhausted
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to save this Leave Policy');
+      setPolicies((prev) => [...prev.filter((p) => p.category_key !== categoryKey), data]);
+      setPolicySuccess('Policy saved.');
+    } catch (err: any) {
+      setPolicyError(err.message || 'Failed to save this Leave Policy');
+    } finally {
+      setSavingPolicyFor(null);
+    }
+  };
+
   // Custom Leave Categories — Leave Manager can define extra categories on
   // the fly (e.g. "Maternity Leave", "Earned Leave") right from the bulk
   // panel, beyond the fixed Casual/Sick/LWP set. Persisted via
@@ -81,6 +162,18 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
   // What the bulk panel actually renders — fixed categories first, then
   // whatever custom ones exist (fetched) or were just added this session.
   const bulkCategories = [...BUILTIN_CATEGORIES, ...customCategories];
+
+  const FIXED_LEAVE_TYPES: { key: string; label: string }[] = [
+    { key: 'casual', label: 'Casual Leave' },
+    { key: 'sick', label: 'Sick Leave' },
+    { key: 'without_pay', label: 'Leave Without Pay' }
+  ];
+  // Custom category keys here already match leave_applications.leave_type
+  // exactly (unlike BUILTIN_CATEGORIES/bulkCategories above, which use the
+  // separate 'casual_leave'/'sick_leave'/'leave_without_pay' balance-column
+  // naming) — see NewLeaveApplicationModal's leaveTypeOptions for the same
+  // fixed-3-plus-custom-categories pattern this mirrors.
+  const policyCategories = [...FIXED_LEAVE_TYPES, ...customCategories];
 
   const fetchCategories = async () => {
     try {
@@ -167,7 +260,10 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
 
   useEffect(() => {
     fetchBalances();
-    if (canManageAll) fetchCategories();
+    if (canManageAll) {
+      fetchCategories();
+      fetchPolicies();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -669,6 +765,128 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
                   </div>
                 )}
               </div>
+            </div>
+          )}
+
+          {canManageAll && (
+            <div className="border-b border-slate-200 bg-slate-50/60">
+              <button
+                type="button"
+                onClick={() => setShowPoliciesPanel((v) => !v)}
+                className="w-full flex items-center justify-between gap-3 px-6 py-3 text-left hover:bg-slate-100/70 transition-colors"
+              >
+                <span className="flex items-center gap-2 text-xs font-semibold text-slate-700">
+                  <ShieldCheck className="w-3.5 h-3.5 text-blue-600" /> Leave Policies
+                </span>
+                {showPoliciesPanel ? (
+                  <ChevronUp className="w-3.5 h-3.5 text-slate-400" />
+                ) : (
+                  <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                )}
+              </button>
+
+              {showPoliciesPanel && (
+                <div className="px-6 pb-5">
+                  <p className="text-[11px] text-slate-500 mb-3 max-w-2xl">
+                    Set the rules for each Leave Type — how many days ahead it must be applied, whether a Reliever is
+                    required, the longest single application allowed, and (for a type like Leave Without Pay) whether
+                    Casual/Sick must be exhausted first. Enforced automatically when anyone submits a Leave Application.
+                  </p>
+
+                  <div className="space-y-3">
+                    {policyCategories.map((cat) => {
+                      const draft = draftFor(cat.key);
+                      const isSaving = savingPolicyFor === cat.key;
+                      return (
+                        <div key={cat.key} className="rounded-xl border border-slate-200 bg-white p-3.5">
+                          <div className="flex items-center justify-between gap-2 flex-wrap mb-3">
+                            <span className="text-xs font-bold text-slate-800">{cat.label}</span>
+                            <button
+                              type="button"
+                              onClick={() => savePolicy(cat.key)}
+                              disabled={isSaving}
+                              className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50 transition-colors"
+                            >
+                              {isSaving ? <Spinner size={12} className="text-white" /> : <Save className="w-3 h-3" />}
+                              Save
+                            </button>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                            <div>
+                              <label className="block text-[10px] font-semibold text-slate-500 mb-1">
+                                Advance Notice (days)
+                              </label>
+                              <input
+                                type="number"
+                                min={0}
+                                value={draft.min_advance_notice_days}
+                                onChange={(e) =>
+                                  setPolicyDraft((prev) => ({ ...prev, [cat.key]: { ...draftFor(cat.key), min_advance_notice_days: e.target.value } }))
+                                }
+                                className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              />
+                              <p className="text-[10px] text-slate-400 mt-0.5">0 = same-day apply allowed</p>
+                            </div>
+
+                            <div>
+                              <label className="block text-[10px] font-semibold text-slate-500 mb-1">
+                                Max Consecutive Days
+                              </label>
+                              <input
+                                type="number"
+                                min={1}
+                                placeholder="No cap"
+                                value={draft.max_consecutive_days}
+                                onChange={(e) =>
+                                  setPolicyDraft((prev) => ({ ...prev, [cat.key]: { ...draftFor(cat.key), max_consecutive_days: e.target.value } }))
+                                }
+                                className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                              />
+                              <p className="text-[10px] text-slate-400 mt-0.5">Blank = no cap</p>
+                            </div>
+
+                            <label className="flex items-center gap-2 text-xs text-slate-700 mt-1 sm:mt-5 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={draft.reliever_required}
+                                onChange={(e) =>
+                                  setPolicyDraft((prev) => ({ ...prev, [cat.key]: { ...draftFor(cat.key), reliever_required: e.target.checked } }))
+                                }
+                                className="w-3.5 h-3.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                              />
+                              Reliever required
+                            </label>
+
+                            <label className="flex items-center gap-2 text-xs text-slate-700 mt-1 sm:mt-5 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={draft.require_paid_leave_exhausted}
+                                onChange={(e) =>
+                                  setPolicyDraft((prev) => ({ ...prev, [cat.key]: { ...draftFor(cat.key), require_paid_leave_exhausted: e.target.checked } }))
+                                }
+                                className="w-3.5 h-3.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                              />
+                              Only after Casual + Sick exhausted
+                            </label>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {policyError && (
+                    <div className="mt-3 flex items-center gap-2 text-xs px-3 py-2.5 rounded-xl bg-rose-50 text-rose-700">
+                      <AlertTriangle className="w-3.5 h-3.5 shrink-0" /> {policyError}
+                    </div>
+                  )}
+                  {policySuccess && (
+                    <div className="mt-3 flex items-center gap-2 text-xs px-3 py-2.5 rounded-xl bg-emerald-50 text-emerald-700">
+                      <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> {policySuccess}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 

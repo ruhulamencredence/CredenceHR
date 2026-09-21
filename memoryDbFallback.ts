@@ -31,7 +31,15 @@ export const memoryDb = {
   leaveBalances: [] as any[],
   leaveApplications: [] as any[],
   leaveCategories: [] as any[],
-  leaveCategoryBalances: [] as any[]
+  leaveCategoryBalances: [] as any[],
+  // Seeded to match the ('casual',0,1,NULL,0) etc. seed INSERT IGNORE in
+  // server.ts's ensureSchemaMigrations, so in-memory dev behaves the same as
+  // a fresh real-DB install: Reliever always required, no other restriction.
+  leaveCategoryPolicies: [
+    { category_key: "casual", min_advance_notice_days: 0, reliever_required: 1, max_consecutive_days: null, require_paid_leave_exhausted: 0 },
+    { category_key: "sick", min_advance_notice_days: 0, reliever_required: 1, max_consecutive_days: null, require_paid_leave_exhausted: 0 },
+    { category_key: "without_pay", min_advance_notice_days: 0, reliever_required: 1, max_consecutive_days: null, require_paid_leave_exhausted: 0 }
+  ] as any[]
 };
 
 // SQL-string pattern-matching simulator for the in-memory fallback DB, used by queryDB()
@@ -1584,6 +1592,39 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
     });
     return { insertId: newId };
   }
+  if (lowerSql.startsWith("select category_key from leave_categories")) {
+    return memoryDb.leaveCategories.map((c: any) => ({ category_key: c.category_key }));
+  }
+
+  // PER-LEAVE-CATEGORY POLICY (Leave Manage -> "Leave Policies")
+  if (lowerSql.startsWith("select * from leave_category_policies where category_key")) {
+    const key = params[0];
+    return memoryDb.leaveCategoryPolicies.filter((p: any) => p.category_key === key);
+  }
+  if (lowerSql.startsWith("insert into leave_category_policies")) {
+    const [categoryKey, minAdvanceNoticeDays, relieverRequired, maxConsecutiveDays, requirePaidLeaveExhausted, updatedBy] = params;
+    const existing = memoryDb.leaveCategoryPolicies.find((p: any) => p.category_key === categoryKey);
+    if (existing) {
+      existing.min_advance_notice_days = Number(minAdvanceNoticeDays);
+      existing.reliever_required = relieverRequired ? 1 : 0;
+      existing.max_consecutive_days = maxConsecutiveDays === null || maxConsecutiveDays === undefined ? null : Number(maxConsecutiveDays);
+      existing.require_paid_leave_exhausted = requirePaidLeaveExhausted ? 1 : 0;
+      existing.updated_by = updatedBy ?? null;
+      return { affectedRows: 1 };
+    }
+    memoryDb.leaveCategoryPolicies.push({
+      category_key: categoryKey,
+      min_advance_notice_days: Number(minAdvanceNoticeDays),
+      reliever_required: relieverRequired ? 1 : 0,
+      max_consecutive_days: maxConsecutiveDays === null || maxConsecutiveDays === undefined ? null : Number(maxConsecutiveDays),
+      require_paid_leave_exhausted: requirePaidLeaveExhausted ? 1 : 0,
+      updated_by: updatedBy ?? null
+    });
+    return { insertId: memoryDb.leaveCategoryPolicies.length };
+  }
+  if (lowerSql.startsWith("select curdate() as today")) {
+    return [{ today: new Date().toISOString().slice(0, 10) }];
+  }
 
   // LEAVE APPLICATIONS (Self Service -> Leave Application)
   if (lowerSql.startsWith("select id, name from users where role in ('admin','superadmin')")) {
@@ -1591,6 +1632,13 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
       .filter((u: any) => u.role === "admin" || u.role === "superadmin")
       .map((u: any) => ({ id: u.id, name: u.name }))
       .sort((a: any, b: any) => a.name.localeCompare(b.name));
+  }
+  // Reliever existence check in POST /api/leave-applications ("SELECT id,
+  // name FROM users WHERE id = ?") — checked before the "!=" variant below
+  // since both share the same prefix up to "where id ".
+  if (lowerSql.startsWith("select id, name from users where id = ?")) {
+    const id = Number(params[0]);
+    return memoryDb.users.filter((u: any) => u.id === id).map((u: any) => ({ id: u.id, name: u.name }));
   }
   if (lowerSql.startsWith("select id, name from users where id !=")) {
     const excludeId = Number(params[0]);
@@ -1602,7 +1650,7 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
   if (lowerSql.startsWith("insert into leave_applications")) {
     const [
       userId, leaveType, startDate, endDate, dayCount, isContinuous, isPrefix, isSuffix,
-      isHalfDay, includeExtraWorkDates, isForeignLeave, purpose, relieverId
+      isHalfDay, includeExtraWorkDates, isForeignLeave, purpose, relieverId, relieverStatus
     ] = params;
     const newId = memoryDb.leaveApplications.length > 0
       ? Math.max(...memoryDb.leaveApplications.map((a: any) => a.id)) + 1
@@ -1630,8 +1678,8 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
       remarks: null,
       decided_by: null,
       decided_at: null,
-      reliever_id: Number(relieverId),
-      reliever_status: "pending",
+      reliever_id: relieverId === null || relieverId === undefined ? null : Number(relieverId),
+      reliever_status: relieverStatus ?? null,
       reliever_remarks: null,
       reliever_decided_by: null,
       reliever_decided_at: null,
@@ -1639,7 +1687,7 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
     });
     return { insertId: newId };
   }
-  if (lowerSql.startsWith("select la.*, u.name as approver_name, rv.name as reliever_name from leave_applications")) {
+  if (lowerSql.startsWith("select la.*, u.name as approver_name, rv.name as reliever_name")) {
     const userId = Number(params[0]);
     const userMap = new Map<number, any>(memoryDb.users.map((u: any) => [u.id, u]));
     return memoryDb.leaveApplications

@@ -329,6 +329,37 @@ async function ensureSchemaMigrations() {
     console.warn("⚠️ Could not ensure delivery_date_conditions table exists: " + err.message);
   }
 
+  // Per-Leave-Category Policy (Self Service -> Leave Manage -> "Leave
+  // Policies") — see schema.sql's leave_category_policies comment for the
+  // full design. Seeded with today's actual behavior (Reliever always
+  // required, no other restriction) so an existing install's behavior never
+  // silently changes on upgrade — a Leave Manager has to explicitly turn a
+  // restriction on.
+  try {
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS leave_category_policies (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        category_key VARCHAR(100) NOT NULL,
+        min_advance_notice_days INT NOT NULL DEFAULT 0,
+        reliever_required TINYINT(1) NOT NULL DEFAULT 1,
+        max_consecutive_days INT NULL DEFAULT NULL,
+        require_paid_leave_exhausted TINYINT(1) NOT NULL DEFAULT 0,
+        updated_by INT NULL,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_leave_category_policy (category_key),
+        FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
+      )
+    `);
+    await dbPool.query(
+      `INSERT IGNORE INTO leave_category_policies (category_key, min_advance_notice_days, reliever_required, max_consecutive_days, require_paid_leave_exhausted) VALUES
+       ('casual', 0, 1, NULL, 0),
+       ('sick', 0, 1, NULL, 0),
+       ('without_pay', 0, 1, NULL, 0)`
+    );
+  } catch (err: any) {
+    console.warn("⚠️ Could not ensure leave_category_policies table exists: " + err.message);
+  }
+
   // Job Edit Approval queue — same self-healing pattern as entry_edit_history above.
   // See schema.sql's job_edit_requests comment for the full explanation.
   try {
@@ -5890,7 +5921,9 @@ async function startServer() {
     isValidLeaveType,
     getLeaveTypeLabel,
     getLeaveTypeBalance,
-    adjustLeaveTypeBalance
+    adjustLeaveTypeBalance,
+    createTemplateApprovalRequest,
+    finalizeLeaveApplicationApproval
   });
 
   // --- Vite Middleware / Static Serving ---

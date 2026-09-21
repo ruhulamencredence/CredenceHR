@@ -440,6 +440,28 @@ export interface LeaveCategory {
   label: string;
 }
 
+// Per-Leave-Category Policy — Self Service -> Leave Manage -> "Leave
+// Policies" (GET/PUT /api/leave-policies). One per Leave Type: the 3 fixed
+// LeaveType values ('casual'/'sick'/'without_pay') plus any custom Leave
+// Category's key. Enforced server-side in POST /api/leave-applications —
+// this is also fetched by NewLeaveApplicationModal so the form itself can
+// hide the Reliever picker / show the advance-notice minimum up front,
+// matching what the server will actually accept.
+export interface LeaveCategoryPolicy {
+  category_key: string;
+  // Must apply at least this many days before the Leave's Start Date. 0 = no
+  // restriction (same-day/retrospective apply allowed).
+  min_advance_notice_days: number;
+  // Whether a Reliever must be picked for this Leave Type.
+  reliever_required: boolean;
+  // Longest single application allowed for this Leave Type, in days. null =
+  // no cap.
+  max_consecutive_days: number | null;
+  // Leave Without Pay style rule: this Leave Type may only be applied for
+  // once Casual Leave AND Sick Leave balances are both exhausted (0).
+  require_paid_leave_exhausted: boolean;
+}
+
 // One row of Self Service -> Leave Management (GET/PUT /api/leave-balances). A
 // Superadmin or any account with can_manage_leave sees/edits every Admin/User's
 // balances; everyone else only ever gets back their own single row.
