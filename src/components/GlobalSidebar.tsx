@@ -106,10 +106,9 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   const [hrmSubOpenKeys, setHrmSubOpenKeys] = useState<Record<string, boolean>>({});
   const toggleHrmSub = (key: string) => setHrmSubOpenKeys((prev) => ({ ...prev, [key]: !prev[key] }));
   const [reportsOpen, setReportsOpen] = useState(false);
-  const [workforceOpen, setWorkforceOpen] = useState(false);
   const [hrOpen, setHrOpen] = useState(false);
-  // HR's own sub-groups (Attendance, Claims/Bill/Disbursement) — same
-  // independent-toggle pattern as hrmSubOpenKeys above, kept as its own
+  // HR's own sub-groups (Attendance, Claims/Bill/Disbursement, Employee) —
+  // same independent-toggle pattern as hrmSubOpenKeys above, kept as its own
   // state so HR's and HRM's sub-group keys never collide.
   const [hrSubOpenKeys, setHrSubOpenKeys] = useState<Record<string, boolean>>({});
   const toggleHrSub = (key: string) => setHrSubOpenKeys((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -361,9 +360,10 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     { key: 'departments', label: 'Departments', icon: Users2, onClick: () => onGoToAdminModule('departments') },
   ].filter((i) => canSeeModule(i.key as AdminModuleKey));
 
-  // "Workforce" — people + what's assigned/tracked against them. "Users" moved
-  // into the new "MIS" group below (alongside Servers).
-  const workforceGroup: NavItem[] = [
+  // "Employee" — Employees, Employee Tracking, Asset Management. No longer
+  // its own "Workforce" top-level group — merged in as a nested sub-group
+  // inside HR below (Users already moved out to MIS separately).
+  const employeeItems: NavItem[] = [
     { key: 'employees', label: 'Employees', icon: Contact, onClick: () => onGoToAdminModule('employees') },
     { key: 'tracking', label: 'Employee Tracking', icon: Navigation, onClick: () => onGoToAdminModule('tracking') },
     { key: 'asset_management', label: 'Asset Management', icon: Package, onClick: () => onGoToAdminModule('asset_management') },
@@ -392,6 +392,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   const hrSubGroups: { key: string; label: string; icon: React.ComponentType<{ className?: string }>; items: NavItem[] }[] = [
     { key: 'hr_attendance', label: 'Attendance', icon: Fingerprint, items: attendanceItems },
     { key: 'hr_claims_bill', label: 'Claims/Bill/Disbursement', icon: CreditCard, items: claimsItems },
+    { key: 'hr_employee', label: 'Employee', icon: Contact, items: employeeItems },
   ].filter((g) => g.items.length > 0);
 
   // Auto-reveal whichever group the currently-active item lives in — every
@@ -409,7 +410,6 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
       setHrmSubOpenKeys((prev) => (prev[activeHrmSub.key] ? prev : { ...prev, [activeHrmSub.key]: true }));
     }
     if (reportsGroup.some((i) => i.key === activeKey)) setReportsOpen(true);
-    if (workforceGroup.some((i) => i.key === activeKey)) setWorkforceOpen(true);
     if (hrGroup.some((i) => i.key === activeKey)) setHrOpen(true);
     const activeHrSub = hrSubGroups.find((g) => g.items.some((i) => i.key === activeKey));
     if (activeHrSub) {
@@ -465,7 +465,6 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     ...selfServiceItems,
     ...(adminDashboardItem ? [adminDashboardItem] : []),
     ...reportsGroup,
-    ...workforceGroup,
     ...hrGroup,
     ...hrSubGroups.flatMap((g) => g.items),
     ...misGroup,
@@ -841,7 +840,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
           {renderNestedGroup(hrmSubGroups, 'HRM', Users2, hrmOpen, setHrmOpen, hrmSubOpenKeys, toggleHrmSub)}
           {selfServiceItems.map(renderItem)}
 
-          {(!!adminDashboardItem || reportsGroup.length > 0 || workforceGroup.length > 0 ||
+          {(!!adminDashboardItem || reportsGroup.length > 0 ||
             hrGroup.length > 0 || hrSubGroups.length > 0 || misGroup.length > 0 || adminFlatItems.length > 0) && (
             <>
               {!collapsed && <p className="px-2.5 mt-3 mb-1.5 text-[10px] font-semibold tracking-wide text-white/50">ADMIN PANEL</p>}
@@ -849,7 +848,6 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
               {adminDashboardItem && renderItem(adminDashboardItem)}
 
               {renderGroup(reportsGroup, 'PEPM Manage', BarChart3, reportsOpen, setReportsOpen)}
-              {renderGroup(workforceGroup, 'Workforce', Users, workforceOpen, setWorkforceOpen)}
               {renderNestedGroup(hrSubGroups, 'HR', ShieldCheck, hrOpen, setHrOpen, hrSubOpenKeys, toggleHrSub, hrGroup)}
               {renderGroup(misGroup, 'MIS', Server, misOpen, setMisOpen)}
 
