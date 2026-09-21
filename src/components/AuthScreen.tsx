@@ -117,7 +117,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
   return (
     <div
       className="min-h-dvh flex flex-col items-center justify-center px-5 py-6 sm:py-12 relative overflow-hidden"
-      style={{ background: 'var(--g-bg-gradient)', paddingTop: 'calc(env(safe-area-inset-top, 0px) + 1.5rem)' }}
+      style={{ background: 'var(--g-bg-gradient)', paddingTop: 'calc(var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px)) + 1.5rem)' }}
     >
       {/* Soft centered glow, sky blue fading into the violet brand accent —
           matches the Gemini app's home screen composition rather than

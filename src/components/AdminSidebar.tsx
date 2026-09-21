@@ -120,7 +120,7 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
         style={{
           background: 'linear-gradient(165deg, rgba(127,0,255,0.94) 0%, rgba(99,0,198,0.94) 55%, rgba(71,0,142,0.96) 100%)',
           boxShadow: '12px 0 40px rgba(47,0,94,0.35)',
-          paddingTop: 'env(safe-area-inset-top, 0px)',
+          paddingTop: 'var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px))',
         }}
       >
         {/* Collapse/expand toggle riding the right edge, mirrors the reference */}
@@ -143,7 +143,7 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
             type="button"
             onClick={onClose}
             className="absolute right-3 w-7 h-7 rounded-full flex items-center justify-center text-white/70 hover:text-white hover:bg-white/10 transition-colors"
-            style={{ top: 'calc(env(safe-area-inset-top, 0px) + 12px)' }}
+            style={{ top: 'calc(var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px)) + 12px)' }}
             aria-label="Close menu"
           >
             <X className="w-4 h-4" />
