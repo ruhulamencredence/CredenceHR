@@ -98,6 +98,13 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // when the item currently on screen turns out to live inside one, so its
   // highlight is never hidden behind a collapsed group.
   const [jobEntryOpen, setJobEntryOpen] = useState(false);
+  const [hrmOpen, setHrmOpen] = useState(false);
+  // HRM's own sub-groups (My Claim/Bill, Attendance, Leave Manage) each
+  // toggle independently — keyed by hrmSubGroups[].key rather than one
+  // useState per sub-group, since which sub-groups even exist depends on
+  // this account's permissions (see hrmSubGroups below).
+  const [hrmSubOpenKeys, setHrmSubOpenKeys] = useState<Record<string, boolean>>({});
+  const toggleHrmSub = (key: string) => setHrmSubOpenKeys((prev) => ({ ...prev, [key]: !prev[key] }));
   const [reportsOpen, setReportsOpen] = useState(false);
   const [claimsOpen, setClaimsOpen] = useState(false);
   const [attendanceOpen, setAttendanceOpen] = useState(false);
@@ -216,25 +223,49 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   const canSeeTimesheet = isSuperAdmin || !!user.can_view_timesheet;
   const canSeeLeaveApplication = isSuperAdmin || !!user.can_view_leave_application;
   const canSeeMyLeave = isSuperAdmin || !!user.can_view_my_leave;
-  const selfServiceItems: NavItem[] = [];
-  // Moved here from the old "Main" section — same OFF-by-default gates as
-  // before (can_view_movement_claims / can_view_conveyance_claims), just
-  // flat items in Self Service now instead of sitting above it.
+  // "Leave Manage" — same access as LeaveManage.tsx's own canManageAll check
+  // (a Superadmin, or any Admin/User the Superadmin has granted
+  // can_manage_leave to via Admin Panel -> Users -> Module Access -> "Also
+  // allow editing Leave balances").
+  const canManageLeave = user.role === 'superadmin' || !!user.can_manage_leave;
+
+  // "HRM" — a nested group inside Self Service, one level deeper than every
+  // other group here: HRM itself expands to reveal three further collapsible
+  // sub-groups (My Claim/Bill, Attendance, Leave Manage), each independently
+  // toggled. Same "closed by default, auto-opens (both levels) around the
+  // active item" behavior as everything else — see the effect below.
+  const hrmClaimGroup: NavItem[] = [];
   if (hasUserPanel && user.can_view_movement_claims) {
-    selfServiceItems.push({ key: 'userMovementClaims', label: 'Movement Claims', icon: Route, onClick: () => onGoToUserClaims('movementClaims') });
+    hrmClaimGroup.push({ key: 'userMovementClaims', label: 'Movement Claims', icon: Route, onClick: () => onGoToUserClaims('movementClaims') });
   }
   if (hasUserPanel && user.can_view_conveyance_claims) {
-    selfServiceItems.push({ key: 'userConveyanceClaims', label: 'Conveyance Bill Claim', icon: CreditCard, onClick: () => onGoToUserClaims('conveyanceBill') });
+    hrmClaimGroup.push({ key: 'userConveyanceClaims', label: 'Conveyance Bill Claim', icon: CreditCard, onClick: () => onGoToUserClaims('conveyanceBill') });
   }
+  const hrmAttendanceGroup: NavItem[] = [];
   if (canSeeTimesheet) {
-    selfServiceItems.push({ key: 'timesheet', label: 'Timesheet', icon: Clock, onClick: () => onGoToSelfServiceTab('timesheet') });
+    hrmAttendanceGroup.push({ key: 'timesheet', label: 'Timesheet', icon: Clock, onClick: () => onGoToSelfServiceTab('timesheet') });
   }
+  const hrmLeaveGroup: NavItem[] = [];
+  if (canManageLeave) {
+    hrmLeaveGroup.push({ key: 'leaveManagement', label: 'Leave Manage', icon: ListChecks, onClick: () => onGoToSelfServiceTab('leaveManagement') });
+  }
+  if (user.role === 'admin' || user.role === 'superadmin') {
+    hrmLeaveGroup.push({ key: 'leaveApprovals', label: 'Leave Approvals', icon: CheckSquare, onClick: () => onGoToSelfServiceTab('leaveApprovals') });
+  }
+  const hrmSubGroups: { key: string; label: string; icon: React.ComponentType<{ className?: string }>; items: NavItem[] }[] = [
+    { key: 'my_claim_bill', label: 'My Claim/Bill', icon: Wallet, items: hrmClaimGroup },
+    { key: 'hrm_attendance', label: 'Attendance', icon: Clock, items: hrmAttendanceGroup },
+    { key: 'hrm_leave_manage', label: 'Leave Manage', icon: ListChecks, items: hrmLeaveGroup },
+  ].filter((g) => g.items.length > 0);
+
+  const selfServiceItems: NavItem[] = [];
   if (canSeeLeaveApplication) {
     selfServiceItems.push({ key: 'leaveApplication', label: 'Leave Application', icon: CalendarClock, onClick: () => onGoToSelfServiceTab('leaveApplication') });
   }
   // Always visible to every account — only ever shows THIS account's own
   // Leave balance, read-only (see MyLeave.tsx). Distinct from "Leave
-  // Manage" below, which is gated and shows/edits every account's balance.
+  // Manage" (now under HRM below), which is gated and shows/edits every
+  // account's balance.
   if (canSeeMyLeave) {
     selfServiceItems.push({ key: 'myLeave', label: 'My Leave', icon: ListChecks, onClick: () => onGoToSelfServiceTab('myLeave') });
   }
@@ -255,19 +286,6 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // not just a hidden menu item.
   if (canSeeModule('payroll')) {
     selfServiceItems.push({ key: 'payroll', label: 'Payroll', icon: Banknote, onClick: () => onGoToSelfServiceTab('payroll') });
-  }
-  // "Leave Manage" — same access as LeaveManage.tsx's own canManageAll check
-  // (a Superadmin, or any Admin/User the Superadmin has granted
-  // can_manage_leave to via Admin Panel -> Users -> Module Access -> "Also
-  // allow editing Leave balances"). Everyone else never sees this item at
-  // all — same "Set Balance in Bulk" access as before, just its own page/
-  // menu entry now instead of living inside the "My Leave" page.
-  const canManageLeave = user.role === 'superadmin' || !!user.can_manage_leave;
-  if (canManageLeave) {
-    selfServiceItems.push({ key: 'leaveManagement', label: 'Leave Manage', icon: ListChecks, onClick: () => onGoToSelfServiceTab('leaveManagement') });
-  }
-  if (user.role === 'admin' || user.role === 'superadmin') {
-    selfServiceItems.push({ key: 'leaveApprovals', label: 'Leave Approvals', icon: CheckSquare, onClick: () => onGoToSelfServiceTab('leaveApprovals') });
   }
   // NOT Admin-gated — a Template Layer or a Leave Application's Reliever can
   // be ANY account, so every account gets this.
@@ -370,6 +388,11 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   useEffect(() => {
     if (!activeKey) return;
     if (jobEntryGroup.some((i) => i.key === activeKey)) setJobEntryOpen(true);
+    const activeHrmSub = hrmSubGroups.find((g) => g.items.some((i) => i.key === activeKey));
+    if (activeHrmSub) {
+      setHrmOpen(true);
+      setHrmSubOpenKeys((prev) => (prev[activeHrmSub.key] ? prev : { ...prev, [activeHrmSub.key]: true }));
+    }
     if (reportsGroup.some((i) => i.key === activeKey)) setReportsOpen(true);
     if (claimsGroup.some((i) => i.key === activeKey)) setClaimsOpen(true);
     if (attendanceGroup.some((i) => i.key === activeKey)) setAttendanceOpen(true);
@@ -414,6 +437,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   const allSearchableItems: NavItem[] = [
     dashboardSearchItem,
     ...jobEntryGroup,
+    ...hrmSubGroups.flatMap((g) => g.items),
     ...selfServiceItems,
     ...(adminDashboardItem ? [adminDashboardItem] : []),
     ...reportsGroup,
@@ -493,6 +517,80 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
                   <item.icon className="w-3.5 h-3.5 shrink-0" />
                   <span className="text-[12.5px] truncate">{item.label}</span>
                 </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // "HRM" — same idea as renderGroup above, one level deeper: HRM itself
+  // expands to a list of further collapsible sub-groups (My Claim/Bill,
+  // Attendance, Leave Manage), each toggled independently via
+  // hrmSubOpenKeys/toggleHrmSub. While collapsed (desktop minimized column),
+  // falls back to every sub-group's items as one flat icon list, same as
+  // renderGroup's own collapsed fallback.
+  const renderNestedGroup = (
+    subGroups: { key: string; label: string; icon: React.ComponentType<{ className?: string }>; items: NavItem[] }[],
+    label: string,
+    icon: React.ComponentType<{ className?: string }>,
+    isOpen: boolean,
+    setOpen: (fn: (o: boolean) => boolean) => void,
+  ) => {
+    if (subGroups.length === 0) return null;
+    if (collapsed) {
+      return <div key={label} className="space-y-0.5">{subGroups.flatMap((g) => g.items).map(renderItem)}</div>;
+    }
+    const GroupIcon = icon;
+    return (
+      <div key={label}>
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          className="w-full flex items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-white/85 hover:bg-white/10 transition-colors"
+        >
+          <GroupIcon className="w-[18px] h-[18px] shrink-0" />
+          <span className="text-[13px] font-semibold flex-1 text-left">{label}</span>
+          <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
+        </button>
+        {isOpen && (
+          <div className="mt-0.5 ml-[13px] pl-3.5 border-l border-white/15 space-y-0.5">
+            {subGroups.map((g) => {
+              const subOpen = !!hrmSubOpenKeys[g.key];
+              const SubIcon = g.icon;
+              return (
+                <div key={g.key}>
+                  <button
+                    type="button"
+                    onClick={() => toggleHrmSub(g.key)}
+                    className="w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-left text-white/70 hover:bg-white/10 hover:text-white transition-colors"
+                  >
+                    <SubIcon className="w-3.5 h-3.5 shrink-0" />
+                    <span className="text-[12.5px] font-semibold flex-1 text-left truncate">{g.label}</span>
+                    <ChevronDown className={`w-3 h-3 shrink-0 transition-transform duration-200 ${subOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  {subOpen && (
+                    <div className="mt-0.5 ml-[11px] pl-3 border-l border-white/10 space-y-0.5">
+                      {g.items.map((item) => {
+                        const active = item.key === activeKey;
+                        return (
+                          <button
+                            key={item.key}
+                            type="button"
+                            onClick={() => selectAndClose(item.onClick)}
+                            className={`w-full flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-left transition-colors ${
+                              active ? 'bg-white/15 text-white font-semibold' : 'text-white/60 hover:bg-white/10 hover:text-white'
+                            }`}
+                          >
+                            <item.icon className="w-3 h-3 shrink-0" />
+                            <span className="text-[12px] truncate">{item.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               );
             })}
           </div>
@@ -675,6 +773,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
 
           {!collapsed && <p className="px-2.5 mt-3 mb-1.5 text-[10px] font-semibold tracking-wide text-white/50">SELF SERVICE</p>}
           {renderGroup(jobEntryGroup, 'Job Entry', Briefcase, jobEntryOpen, setJobEntryOpen)}
+          {renderNestedGroup(hrmSubGroups, 'HRM', Users2, hrmOpen, setHrmOpen)}
           {selfServiceItems.map(renderItem)}
 
           {(!!adminDashboardItem || reportsGroup.length > 0 || claimsGroup.length > 0 || attendanceGroup.length > 0 ||
