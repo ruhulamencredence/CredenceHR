@@ -38,10 +38,18 @@ interface UserManagementRouteDeps {
   // Valid module keys for the module-permissions PUT below — same
   // ADMIN_MODULE_KEYS array defined once in server.ts.
   adminModuleKeys: readonly string[];
+  // Valid layer keys for the module-permission-layers PUT below — same
+  // PERMISSION_LAYER_KEYS array defined once in server.ts (mirrors
+  // PermissionLayerKey/PERMISSION_LAYERS in src/types.ts).
+  permissionLayerKeys: readonly string[];
+  // Which module keys currently accept layers at all — same
+  // PERMISSION_LAYER_MODULES array defined once in server.ts (mirrors
+  // PERMISSION_LAYER_MODULES in src/types.ts). Rolled out module by module.
+  permissionLayerModules: readonly string[];
 }
 
 export function registerUserManagementRoutes(app: Express, deps: UserManagementRouteDeps) {
-  const { authenticateToken, requireAdmin, requireSuperAdmin, requireModuleGrantAccess, requireModule, queryDB, adminModuleKeys } = deps;
+  const { authenticateToken, requireAdmin, requireSuperAdmin, requireModuleGrantAccess, requireModule, queryDB, adminModuleKeys, permissionLayerKeys, permissionLayerModules } = deps;
 
   // 6. User Management (Admin Only)
   app.post("/api/users", authenticateToken, requireAdmin, requireModule("users"), async (req: any, res) => {
@@ -156,6 +164,14 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
         list.push(row.module_key);
         modulesByUser.set(row.user_id, list);
       }
+      // Same idea, one level more granular — see PERMISSION_LAYER_MODULES.
+      const layerRows: any = await queryDB("SELECT user_id, module_key, layer_key FROM admin_module_permission_layers");
+      const layersByUser = new Map<number, Record<string, string[]>>();
+      for (const row of layerRows) {
+        const byModule = layersByUser.get(row.user_id) || {};
+        (byModule[row.module_key] ||= []).push(row.layer_key);
+        layersByUser.set(row.user_id, byModule);
+      }
 
       // Last Login Location is sensitive (it's a precise coordinate, not just a
       // name) — only a Superadmin sees it by default. A plain Admin only sees it
@@ -198,7 +214,8 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
         can_view_leave_application: u.role === "superadmin" ? true : !!Number(u.can_view_leave_application),
         can_view_my_leave: u.role === "superadmin" ? true : !!Number(u.can_view_my_leave),
         can_grant_module_access: u.role === "admin" ? !!Number(u.can_grant_module_access) : false,
-        module_permissions: (u.role === "admin" || u.role === "user") ? (modulesByUser.get(u.id) || []) : []
+        module_permissions: (u.role === "admin" || u.role === "user") ? (modulesByUser.get(u.id) || []) : [],
+        module_permission_layers: (u.role === "admin" || u.role === "user") ? (layersByUser.get(u.id) || {}) : {}
       })));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -325,6 +342,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
       // Admin-only toggles (Login Location visibility, User Panel access).
       if (role === "user") {
         await queryDB("DELETE FROM admin_module_permissions WHERE user_id = ?", [id]);
+        await queryDB("DELETE FROM admin_module_permission_layers WHERE user_id = ?", [id]);
         await queryDB("DELETE FROM attendance_report_department_access WHERE user_id = ?", [id]);
         await queryDB("DELETE FROM leave_application_department_access WHERE user_id = ?", [id]);
         await queryDB("DELETE FROM conveyance_claim_department_access WHERE user_id = ?", [id]);
@@ -377,6 +395,63 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
         await queryDB("INSERT INTO admin_module_permissions (user_id, module_key) VALUES (?, ?)", [id, moduleKey]);
       }
       res.json({ success: true, modules: valid });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Granular per-module action layers (Read Only/Edit-Add/Entry-Upload/
+  // Delete-Trash/Permanent Delete) for ONE module at a time — Admin Panel ->
+  // Users -> Module Access shows this checkbox row once a module listed in
+  // PERMISSION_LAYER_MODULES (currently just "departments") is itself
+  // ticked above. Layered ON TOP of admin_module_permissions, same
+  // "only meaningful/only saved while the module checkbox is ticked" rule
+  // as the Department-scope endpoints just below. Same gate
+  // (requireModuleGrantAccess) and same delegated-Admin restriction (only a
+  // Superadmin may touch another 'admin' target) as the module-permissions
+  // pair above, since this is just a finer-grained extension of that same
+  // grant.
+  app.get("/api/users/:id/module-permission-layers", authenticateToken, requireModuleGrantAccess, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const moduleKey = String(req.query?.module || "");
+      const rows: any = await queryDB(
+        "SELECT layer_key FROM admin_module_permission_layers WHERE user_id = ? AND module_key = ?",
+        [id, moduleKey]
+      );
+      res.json({ layers: rows.map((r: any) => r.layer_key) });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/users/:id/module-permission-layers", authenticateToken, requireModuleGrantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const moduleKey = String(req.body?.module || "");
+      if (!permissionLayerModules.includes(moduleKey)) {
+        return res.status(400).json({ error: "This module doesn't support permission layers yet." });
+      }
+      const layers: string[] = Array.isArray(req.body?.layers) ? req.body.layers : [];
+      const valid = layers.filter((l) => permissionLayerKeys.includes(l));
+
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "Permission layers only apply to Admin and User accounts." });
+      }
+      if (req.user.role !== "superadmin" && target[0].role !== "user") {
+        return res.status(403).json({ error: "Only the Superadmin can set another Admin's permission layers." });
+      }
+
+      await queryDB("DELETE FROM admin_module_permission_layers WHERE user_id = ? AND module_key = ?", [id, moduleKey]);
+      for (const layerKey of valid) {
+        await queryDB(
+          "INSERT INTO admin_module_permission_layers (user_id, module_key, layer_key) VALUES (?, ?, ?)",
+          [id, moduleKey, layerKey]
+        );
+      }
+      res.json({ success: true, module: moduleKey, layers: valid });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

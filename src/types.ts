@@ -38,6 +38,27 @@ export const ADMIN_MODULES: { key: AdminModuleKey; label: string }[] = [
   { key: 'editlog', label: 'MPR Edit Log' }
 ];
 
+// Granular per-module action layers, layered on top of the coarse module
+// grant above (ADMIN_MODULES/module_permissions) — a Superadmin picks any
+// combination of these per (Admin/User account, module) via Admin Panel ->
+// Users -> Module Access. Independent checkboxes, not hierarchical: having
+// 'delete_trash' does NOT imply 'edit_add' is also granted.
+export type PermissionLayerKey = 'read' | 'edit_add' | 'entry_upload' | 'delete_trash' | 'permanent_delete';
+
+export const PERMISSION_LAYERS: { key: PermissionLayerKey; label: string }[] = [
+  { key: 'read', label: 'Read Only' },
+  { key: 'edit_add', label: 'Edit/Add' },
+  { key: 'entry_upload', label: 'Entry/Upload' },
+  { key: 'delete_trash', label: 'Delete/Trash' },
+  { key: 'permanent_delete', label: 'Permanent Delete' },
+];
+
+// Which Admin Panel modules currently enforce the PERMISSION_LAYERS above —
+// being rolled out one module at a time. A module not listed here still only
+// has the old coarse on/off grant (module_permissions), unaffected by any of
+// this. Start: 'departments'.
+export const PERMISSION_LAYER_MODULES: AdminModuleKey[] = ['departments'];
+
 // Global Calendar (Admin Panel -> Holidays) — one row per Weekend/Holiday
 // date. Read by every account (Timesheet needs this so a Weekend/Holiday date
 // never shows as "Absent"); only accounts granted the 'holidays' module may
@@ -367,6 +388,16 @@ export interface User {
   // role === 'admin' (set by the Superadmin) — empty/absent for 'user' rows, and
   // irrelevant for 'superadmin' (which always has every module).
   module_permissions?: AdminModuleKey[];
+  // Per-module granular permission layers (Read Only/Edit-Add/Entry-Upload/
+  // Delete-Trash/Permanent Delete — see PERMISSION_LAYERS below), layered ON
+  // TOP of module_permissions above: the account still needs the module
+  // itself granted there for any of this to matter. Only meaningful for
+  // modules listed in PERMISSION_LAYER_MODULES — rolled out module by
+  // module, starting with 'departments'. Absent/empty for a granted module
+  // means "every layer except Permanent Delete" (preserves the pre-existing
+  // full-access behavior for anyone already granted that module before this
+  // feature existed) — see requireModuleLayer() in server.ts.
+  module_permission_layers?: Partial<Record<AdminModuleKey, PermissionLayerKey[]>>;
   // Superadmin-only grant: can this account see OTHER users' Last Login Location
   // (Admin Panel -> Users)? Always true for role === 'superadmin'. For role ===
   // 'admin' it's OFF by default and must be explicitly switched on by the
