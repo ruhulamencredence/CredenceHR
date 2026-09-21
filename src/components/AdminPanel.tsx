@@ -5,7 +5,7 @@ import autoTable from 'jspdf-autotable';
 import credenceLogo from '../assets/credence-logo.png';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
 import { savePdfCrossPlatform } from '../lib/saveFile';
-import { Project, Branch, MprNumber, Entry, User, Budget, BudgetItem, BudgetSubmission, UserProjectPermission, EntryEditHistory, EntryPermanentDeleteLog, BulkUserRow, BulkUserResultItem, AdminModuleKey, ADMIN_MODULES, PermissionLayerKey, PERMISSION_LAYERS, PERMISSION_LAYER_MODULES, AttendanceRecord, ClaimsNavRequest, AdminNavRequest, Department, LeaveApplication, PendingJobEdit } from '../types';
+import { Project, Branch, MprNumber, Entry, User, Budget, BudgetItem, BudgetSubmission, UserProjectPermission, EntryEditHistory, EntryPermanentDeleteLog, BulkUserRow, BulkUserResultItem, AdminModuleKey, ADMIN_MODULES, PermissionLayerKey, PERMISSION_LAYERS, PERMISSION_LAYER_MODULES, LeaveManageLayerKey, LEAVE_MANAGE_LAYERS, AttendanceRecord, ClaimsNavRequest, AdminNavRequest, Department, LeaveApplication, PendingJobEdit } from '../types';
 import { Building2, FileText, Users, Users2, BarChart3, Plus, Trash2, Edit2, Search, Filter, UserCheck, Calendar, CalendarClock, Download, Upload, FolderPlus, X, Eye, FileSpreadsheet, KeyRound, History, RotateCcw, Recycle, ListChecks, FileDown, MapPin, LayoutGrid, Navigation, LogIn, LogOut, Bell, Route, ShieldCheck, Wallet, Contact, Lock, Unlock, Mail, CheckCircle2, XCircle, Clock3, ShieldAlert } from 'lucide-react';
 import LocationMapPicker from './LocationMapPicker';
 import { NoticeManager } from './NoticeManager';
@@ -358,6 +358,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // Set per module key, keyed by AdminModuleKey. Initialized in
   // openManageModules below.
   const [moduleLayers, setModuleLayers] = useState<Record<string, Set<PermissionLayerKey>>>({});
+  // Leave Manage's own operation-specific layers (Edit Balance/Set Balance in
+  // Bulk/Add Category/Leave Policy) — same idea as moduleLayers above but for
+  // the "Also allow editing Leave balances" toggle below (can_manage_leave),
+  // not an Admin Module checkbox, since Leave Manage isn't part of the
+  // AdminModuleKey/module_permissions system at all. Initialized in
+  // openManageModules below.
+  const [leaveManageLayers, setLeaveManageLayers] = useState<Set<LeaveManageLayerKey>>(new Set());
   // Department-wise scope for the 'attendance_reports' module only — layered
   // on top of the checkbox above (see PUT /api/users/:id/attendance-report-
   // departments). Empty set = unrestricted (every Department visible), same
@@ -415,7 +422,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     for (const moduleKey of PERMISSION_LAYER_MODULES) {
       const saved = u.module_permission_layers?.[moduleKey];
       if (saved && saved.length > 0) {
-        initialLayers[moduleKey] = new Set(saved);
+        initialLayers[moduleKey] = new Set(saved as PermissionLayerKey[]);
       } else if ((u.module_permissions || []).includes(moduleKey)) {
         initialLayers[moduleKey] = new Set(PERMISSION_LAYERS.map((l) => l.key).filter((k) => k !== 'permanent_delete'));
       } else {
@@ -423,6 +430,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       }
     }
     setModuleLayers(initialLayers);
+    // Leave Manage layers — same "explicit rows win, else full access if
+    // already granted, else nothing" default as above, keyed off
+    // can_manage_leave (the toggle) instead of module_permissions.
+    const savedLeaveLayers = u.module_permission_layers?.leave_manage;
+    if (savedLeaveLayers && savedLeaveLayers.length > 0) {
+      setLeaveManageLayers(new Set(savedLeaveLayers as LeaveManageLayerKey[]));
+    } else if (u.can_manage_leave) {
+      setLeaveManageLayers(new Set(LEAVE_MANAGE_LAYERS.map((l) => l.key)));
+    } else {
+      setLeaveManageLayers(new Set());
+    }
     setManagingModulesFor(u);
 
     // Attendance Report Department scope — fetched fresh every time this
@@ -539,6 +557,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     });
   };
 
+  const toggleLeaveManageLayer = (layer: LeaveManageLayerKey) => {
+    setLeaveManageLayers((prev) => {
+      const next = new Set(prev);
+      if (next.has(layer)) next.delete(layer);
+      else next.add(layer);
+      return next;
+    });
+  };
+
   const handleSaveModulePermissions = async () => {
     if (!managingModulesFor) return;
     setSavingModules(true);
@@ -630,6 +657,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         });
         const lmaData = await lmaRes.json();
         if (!lmaRes.ok) throw new Error(lmaData.error || 'Failed to update Leave Management access');
+      }
+
+      // Leave Manage's own operation-specific layers — only meaningful (and
+      // only saved) while the toggle above is actually on, same "only save
+      // while the master switch is ticked" rule as the module layer saves
+      // further up.
+      if (leaveManagementAccessEnabled) {
+        const leaveLayerRes = await fetch(apiUrl(`/api/users/${managingModulesFor.id}/module-permission-layers`), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ module: 'leave_manage', layers: Array.from(leaveManageLayers) })
+        });
+        const leaveLayerData = await leaveLayerRes.json();
+        if (!leaveLayerRes.ok) throw new Error(leaveLayerData.error || 'Failed to update Leave Manage permission layers');
       }
 
       // Also save the "Movement Claim" and "Conveyance Bill Claim" access
@@ -6407,6 +6448,35 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   />
                 </button>
               </label>
+              {leaveManagementAccessEnabled && (
+                <div className="mb-3 p-3 bg-violet-50 border border-violet-200 rounded-xl">
+                  <p className="text-[11px] font-semibold text-slate-700 flex items-center gap-1.5 mb-1">
+                    <ShieldCheck className="w-3.5 h-3.5 text-violet-600" />
+                    Permission Layers for Leave Manage
+                  </p>
+                  <p className="text-[11px] text-slate-500 mb-2">
+                    Choose exactly what {managingModulesFor.role === 'user' ? 'this User' : 'this Admin'} may do inside
+                    Leave Manage — any combination. Leaving all of these unchecked (while the toggle above stays on)
+                    blocks every action here.
+                  </p>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {LEAVE_MANAGE_LAYERS.map((layer) => (
+                      <label
+                        key={layer.key}
+                        className="flex items-center gap-2 px-2.5 py-1.5 bg-white border border-violet-100 rounded-lg cursor-pointer hover:bg-violet-100/40"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={leaveManageLayers.has(layer.key)}
+                          onChange={() => toggleLeaveManageLayer(layer.key)}
+                          className="w-3.5 h-3.5 rounded border-slate-300 text-violet-600 focus:ring-violet-600 cursor-pointer"
+                        />
+                        <span className="text-xs text-slate-800">{layer.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
               <label
                 className="flex items-center justify-between gap-3 p-3 mb-3 bg-indigo-50 border border-indigo-200 rounded-xl cursor-pointer"
               >

@@ -36,6 +36,11 @@ interface LeaveRouteDeps {
   // leave_application_department_access table comment in server.ts's initDB().
   getLeaveApplicationDeptScope: (userId: number) => Promise<string[] | null>;
   requireLeaveManager: (req: any, res: any, next: any) => Promise<any>;
+  // Finer-grained gate layered on top of requireLeaveManager above — one of
+  // "edit_balance"/"bulk_set_balance"/"add_category"/"edit_policy" (see
+  // LEAVE_MANAGE_LAYER_KEYS in server.ts). Applied to each of Leave Manage's
+  // 4 write routes below, one layer per route.
+  requireLeaveManagerLayer: (layer: "edit_balance" | "bulk_set_balance" | "add_category" | "edit_policy") => any;
   hasLeaveManageAccess: (userId: number, role: string) => Promise<boolean>;
   getCurrentStepApprovers: (request: any) => Promise<{ user_id: number; user_name: string | null }[]>;
   createAlert: (...args: any[]) => Promise<any>;
@@ -72,6 +77,7 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
     requireModule,
     getLeaveApplicationDeptScope,
     requireLeaveManager,
+    requireLeaveManagerLayer,
     hasLeaveManageAccess,
     getCurrentStepApprovers,
     createAlert,
@@ -318,7 +324,7 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
   // exists (e.g. two Leave Managers typed the same/similar name), that
   // existing one is handed back instead of erroring, so "Add Category" in
   // the bulk panel always ends up pointing at one shared category.
-  app.post("/api/leave-categories", authenticateToken, requireLeaveManager, async (req: any, res) => {
+  app.post("/api/leave-categories", authenticateToken, requireLeaveManager, requireLeaveManagerLayer("add_category"), async (req: any, res) => {
     try {
       const label = typeof req.body?.label === "string" ? req.body.label.trim().slice(0, 100) : "";
       if (!label) return res.status(400).json({ error: "Category name is required." });
@@ -382,7 +388,7 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
   // Manage write below) sets the policy for one Leave Type. Upserts so a
   // custom category can be configured the first time without a pre-existing
   // row.
-  app.put("/api/leave-policies/:categoryKey", authenticateToken, requireLeaveManager, async (req: any, res) => {
+  app.put("/api/leave-policies/:categoryKey", authenticateToken, requireLeaveManager, requireLeaveManagerLayer("edit_policy"), async (req: any, res) => {
     try {
       const categoryKey = String(req.params.categoryKey || "").trim();
       if (!categoryKey || !(await isValidLeaveType(categoryKey))) {
@@ -427,7 +433,7 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
   // NOTE: registered BEFORE PUT /api/leave-balances/:userId on purpose — Express
   // matches routes in registration order and :userId would otherwise swallow
   // this exact path (matching "bulk" as if it were a userId) and 404 first.
-  app.put("/api/leave-balances/bulk", authenticateToken, requireLeaveManager, async (req: any, res) => {
+  app.put("/api/leave-balances/bulk", authenticateToken, requireLeaveManager, requireLeaveManagerLayer("bulk_set_balance"), async (req: any, res) => {
     try {
       const body = req.body || {};
 
@@ -568,7 +574,7 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
   // PUT: set one account's Casual/Sick/Leave-without-Pay balance. Superadmin or
   // can_manage_leave-granted only (requireLeaveManager) — a plain account can
   // never edit even its own row here.
-  app.put("/api/leave-balances/:userId", authenticateToken, requireLeaveManager, async (req: any, res) => {
+  app.put("/api/leave-balances/:userId", authenticateToken, requireLeaveManager, requireLeaveManagerLayer("edit_balance"), async (req: any, res) => {
     try {
       const { userId } = req.params;
       const casual = Number(req.body?.casual_leave);

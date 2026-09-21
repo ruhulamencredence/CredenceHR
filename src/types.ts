@@ -59,6 +59,26 @@ export const PERMISSION_LAYERS: { key: PermissionLayerKey; label: string }[] = [
 // this. Start: 'departments', then 'projects', then 'approvals', then 'users'.
 export const PERMISSION_LAYER_MODULES: AdminModuleKey[] = ['departments', 'projects', 'approvals', 'users'];
 
+// Leave Manage's own operation-specific layers — same independent-checkbox
+// mechanism as PERMISSION_LAYERS above, but named after this module's real
+// operations instead of the generic Read/Edit-Add/Entry-Upload/Delete-Trash/
+// Permanent-Delete set, since Leave Manage's 4 writes don't map cleanly onto
+// that set (there's no "delete" or "read only" concept here — see
+// LeaveManage.tsx). Also unlike every module in PERMISSION_LAYER_MODULES,
+// Leave Manage isn't an Admin Panel "module" at all — access is the flat
+// can_manage_leave boolean (User.can_manage_leave, granted via the "Also
+// allow editing Leave balances" toggle), which these layers narrow further,
+// same "no saved rows -> full access" default as everywhere else on this
+// system (see requireLeaveManagerLayer() in server.ts).
+export type LeaveManageLayerKey = 'edit_balance' | 'bulk_set_balance' | 'add_category' | 'edit_policy';
+
+export const LEAVE_MANAGE_LAYERS: { key: LeaveManageLayerKey; label: string }[] = [
+  { key: 'edit_balance', label: 'Edit Balance (single account)' },
+  { key: 'bulk_set_balance', label: 'Set Balance in Bulk' },
+  { key: 'add_category', label: 'Add Category' },
+  { key: 'edit_policy', label: 'Leave Policy' },
+];
+
 // Global Calendar (Admin Panel -> Holidays) — one row per Weekend/Holiday
 // date. Read by every account (Timesheet needs this so a Weekend/Holiday date
 // never shows as "Absent"); only accounts granted the 'holidays' module may
@@ -388,16 +408,21 @@ export interface User {
   // role === 'admin' (set by the Superadmin) — empty/absent for 'user' rows, and
   // irrelevant for 'superadmin' (which always has every module).
   module_permissions?: AdminModuleKey[];
-  // Per-module granular permission layers (Read Only/Edit-Add/Entry-Upload/
-  // Delete-Trash/Permanent Delete — see PERMISSION_LAYERS below), layered ON
-  // TOP of module_permissions above: the account still needs the module
-  // itself granted there for any of this to matter. Only meaningful for
-  // modules listed in PERMISSION_LAYER_MODULES — rolled out module by
-  // module, starting with 'departments'. Absent/empty for a granted module
-  // means "every layer except Permanent Delete" (preserves the pre-existing
-  // full-access behavior for anyone already granted that module before this
-  // feature existed) — see requireModuleLayer() in server.ts.
-  module_permission_layers?: Partial<Record<AdminModuleKey, PermissionLayerKey[]>>;
+  // Per-module granular permission layers, keyed by module_key. Server-side
+  // this is one map covering every module on the layer system — most keys
+  // are AdminModuleKeys from PERMISSION_LAYER_MODULES (values are
+  // PermissionLayerKey[], layered ON TOP of module_permissions above: the
+  // account still needs the module itself granted there for any of this to
+  // matter), but a key can also be a non-module feature like 'leave_manage'
+  // (values are that feature's own layer key set — see LEAVE_MANAGE_LAYERS)
+  // whose base grant lives elsewhere (can_manage_leave for 'leave_manage').
+  // Kept as a loose Record<string, string[]> rather than
+  // Partial<Record<AdminModuleKey, PermissionLayerKey[]>> so it can hold
+  // both shapes. Absent/empty for a granted module/feature means "full
+  // access" (preserves the pre-existing behavior for anyone already granted
+  // it before this feature existed) — see requireModuleLayer()/
+  // requireLeaveManagerLayer() in server.ts.
+  module_permission_layers?: Record<string, string[]>;
   // Superadmin-only grant: can this account see OTHER users' Last Login Location
   // (Admin Panel -> Users)? Always true for role === 'superadmin'. For role ===
   // 'admin' it's OFF by default and must be explicitly switched on by the
