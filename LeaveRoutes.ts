@@ -50,6 +50,18 @@ interface LeaveRouteDeps {
   getLeaveTypeLabel: (leaveType: string) => Promise<string>;
   getLeaveTypeBalance: (userId: number, leaveType: string) => Promise<number>;
   adjustLeaveTypeBalance: (userId: number, leaveType: string, delta: number) => Promise<void>;
+  // Per-Leave-Category Policy (Leave Manage -> "Leave Policies") — used by
+  // POST /api/leave-applications below to decide whether a Reliever is
+  // required for this submission, and if not, to hand the application
+  // straight to the Dynamic Approval Engine itself (the same two calls
+  // approveLeaveApplicationReliever makes once a real Reliever approves).
+  createTemplateApprovalRequest: (
+    requestType: "conveyance" | "leave" | "timesheet",
+    sourceType: "user_claim" | "attendance_correction" | "leave_application",
+    sourceId: number,
+    requestedBy: number
+  ) => Promise<{ autoApproved: boolean; template: any | null }>;
+  finalizeLeaveApplicationApproval: (leaveId: number, approvedBy: number | null, remarks: string | null) => Promise<void>;
 }
 
 export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
@@ -68,7 +80,9 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
     isValidLeaveType,
     getLeaveTypeLabel,
     getLeaveTypeBalance,
-    adjustLeaveTypeBalance
+    adjustLeaveTypeBalance,
+    createTemplateApprovalRequest,
+    finalizeLeaveApplicationApproval
   } = deps;
 
   // Every custom Leave Category defined so far, as a category_key -> label
@@ -323,6 +337,74 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
         [key, label, req.user.id]
       );
       res.json({ id: Number(result.insertId), key, label });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Per-Leave-Category Policy (Leave Manage -> "Leave Policies"). Open to ANY
+  // authenticated account, same reasoning as GET /api/leave-categories above
+  // — NewLeaveApplicationModal reads this too (to hide the Reliever picker
+  // and show the advance-notice minimum for whatever Leave Type is picked),
+  // not just the Leave Manage screen. A category with no row yet (a custom
+  // category defined before this feature existed) is filled in with the same
+  // "no restriction, Reliever required" defaults leave_category_policies is
+  // seeded with, so callers never have to special-case a missing row.
+  const DEFAULT_LEAVE_POLICY = { min_advance_notice_days: 0, reliever_required: true, max_consecutive_days: null as number | null, require_paid_leave_exhausted: false };
+  async function getLeavePolicy(categoryKey: string) {
+    const rows: any = await queryDB("SELECT * FROM leave_category_policies WHERE category_key = ?", [categoryKey]);
+    if (rows.length === 0) return { category_key: categoryKey, ...DEFAULT_LEAVE_POLICY };
+    const r = rows[0];
+    return {
+      category_key: categoryKey,
+      min_advance_notice_days: Number(r.min_advance_notice_days) || 0,
+      reliever_required: !!Number(r.reliever_required),
+      max_consecutive_days: r.max_consecutive_days === null ? null : Number(r.max_consecutive_days),
+      require_paid_leave_exhausted: !!Number(r.require_paid_leave_exhausted)
+    };
+  }
+
+  app.get("/api/leave-policies", authenticateToken, async (req: any, res) => {
+    try {
+      const [fixedTypes, categories]: [any, any] = await Promise.all([
+        Promise.resolve(["casual", "sick", "without_pay"]),
+        queryDB("SELECT category_key FROM leave_categories")
+      ]);
+      const keys = [...fixedTypes, ...categories.map((c: any) => c.category_key)];
+      const policies = await Promise.all(keys.map((k: string) => getLeavePolicy(k)));
+      res.json(policies);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // PUT: Leave Manager (requireLeaveManager — same gate as every other Leave
+  // Manage write below) sets the policy for one Leave Type. Upserts so a
+  // custom category can be configured the first time without a pre-existing
+  // row.
+  app.put("/api/leave-policies/:categoryKey", authenticateToken, requireLeaveManager, async (req: any, res) => {
+    try {
+      const categoryKey = String(req.params.categoryKey || "").trim();
+      if (!categoryKey || !(await isValidLeaveType(categoryKey))) {
+        return res.status(400).json({ error: "Unknown Leave Type." });
+      }
+      const minAdvanceNoticeDays = Math.max(0, Math.trunc(Number(req.body?.min_advance_notice_days)) || 0);
+      const relieverRequired = !!req.body?.reliever_required;
+      const maxConsecutiveDaysRaw = req.body?.max_consecutive_days;
+      const maxConsecutiveDays =
+        maxConsecutiveDaysRaw === null || maxConsecutiveDaysRaw === undefined || maxConsecutiveDaysRaw === ""
+          ? null
+          : Math.max(1, Math.trunc(Number(maxConsecutiveDaysRaw)) || 1);
+      const requirePaidLeaveExhausted = !!req.body?.require_paid_leave_exhausted;
+
+      await queryDB(
+        `INSERT INTO leave_category_policies (category_key, min_advance_notice_days, reliever_required, max_consecutive_days, require_paid_leave_exhausted, updated_by)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE min_advance_notice_days = VALUES(min_advance_notice_days), reliever_required = VALUES(reliever_required),
+           max_consecutive_days = VALUES(max_consecutive_days), require_paid_leave_exhausted = VALUES(require_paid_leave_exhausted), updated_by = VALUES(updated_by)`,
+        [categoryKey, minAdvanceNoticeDays, relieverRequired, maxConsecutiveDays, requirePaidLeaveExhausted, req.user.id]
+      );
+      res.json(await getLeavePolicy(categoryKey));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -668,16 +750,39 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
       const trimmedPurpose = typeof purpose === "string" ? purpose.trim() : "";
       if (!trimmedPurpose) return res.status(400).json({ error: "Purpose is required." });
 
-      const relieverUserId = Number(reliever_id);
-      if (!relieverUserId || !Number.isFinite(relieverUserId)) {
-        return res.status(400).json({ error: "Select a Reliever." });
+      // Per-Leave-Category Policy (Leave Manage -> "Leave Policies") — every
+      // rule below is enforced here, server-side, never just hidden/validated
+      // in the form, since a tampered client request must not be able to skip
+      // it either.
+      const policy = await getLeavePolicy(leave_type);
+
+      // Advance notice: Start Date must be at least N calendar days from today.
+      if (policy.min_advance_notice_days > 0) {
+        const todayRows: any = await queryDB("SELECT CURDATE() AS today");
+        const todayStr = String(todayRows[0].today).slice(0, 10);
+        const today = new Date(`${todayStr}T00:00:00`);
+        const start = new Date(`${start_date}T00:00:00`);
+        const noticeDays = Math.round((start.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+        if (noticeDays < policy.min_advance_notice_days) {
+          return res.status(400).json({
+            error: `This Leave Type must be applied at least ${policy.min_advance_notice_days} day${policy.min_advance_notice_days === 1 ? "" : "s"} before the Start Date.`
+          });
+        }
       }
-      if (relieverUserId === Number(req.user.id)) {
-        return res.status(400).json({ error: "You can't select yourself as Reliever." });
-      }
-      const relieverRows: any = await queryDB("SELECT id, name FROM users WHERE id = ?", [relieverUserId]);
-      if (relieverRows.length === 0) {
-        return res.status(400).json({ error: "Selected Reliever not found." });
+
+      let relieverUserId: number | null = null;
+      if (policy.reliever_required) {
+        relieverUserId = Number(reliever_id);
+        if (!relieverUserId || !Number.isFinite(relieverUserId)) {
+          return res.status(400).json({ error: "Select a Reliever." });
+        }
+        if (relieverUserId === Number(req.user.id)) {
+          return res.status(400).json({ error: "You can't select yourself as Reliever." });
+        }
+        const relieverRows: any = await queryDB("SELECT id, name FROM users WHERE id = ?", [relieverUserId]);
+        if (relieverRows.length === 0) {
+          return res.status(400).json({ error: "Selected Reliever not found." });
+        }
       }
 
       // Calendar days between start/end, inclusive of both ends — Half Day trims
@@ -690,6 +795,23 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
       const dayCount = diffDays <= 0 ? 0 : (is_half_day ? Math.max(0.5, diffDays - 0.5) : diffDays);
       if (dayCount <= 0) return res.status(400).json({ error: "Day Count must be greater than 0." });
 
+      if (policy.max_consecutive_days !== null && dayCount > policy.max_consecutive_days) {
+        return res.status(400).json({
+          error: `This Leave Type allows at most ${policy.max_consecutive_days} consecutive day${policy.max_consecutive_days === 1 ? "" : "s"} per application.`
+        });
+      }
+
+      // Leave-Without-Pay style rule: only once Casual AND Sick are both 0.
+      if (policy.require_paid_leave_exhausted) {
+        const [casualBalance, sickBalance] = await Promise.all([
+          getLeaveTypeBalance(req.user.id, "casual"),
+          getLeaveTypeBalance(req.user.id, "sick")
+        ]);
+        if (casualBalance > 0 || sickBalance > 0) {
+          return res.status(400).json({ error: "You must exhaust your Casual Leave and Sick Leave balances before applying for this Leave Type." });
+        }
+      }
+
       const currentBalance = await getLeaveTypeBalance(req.user.id, leave_type);
       if (dayCount > currentBalance) {
         return res.status(400).json({ error: `Day Count (${dayCount}) exceeds your remaining balance (${currentBalance}) for this Leave Type.` });
@@ -699,28 +821,37 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
       const result: any = await queryDB(
         `INSERT INTO leave_applications
           (user_id, leave_type, start_date, end_date, day_count, is_continuous, is_prefix, is_suffix, is_half_day, include_extra_work_dates, is_foreign_leave, purpose, approver_id, status, apply_date, reliever_id, reliever_status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'pending', CURDATE(), ?, 'pending')`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'pending', CURDATE(), ?, ?)`,
         [
           req.user.id, leave_type, start_date, end_date, dayCount,
           !!is_continuous, !!is_prefix, !!is_suffix, !!is_half_day, !!include_extra_work_dates, !!is_foreign_leave,
-          trimmedPurpose, relieverUserId
+          trimmedPurpose, relieverUserId, relieverUserId ? "pending" : null
         ]
       );
 
-      // Reliever workflow — the request sits waiting on the picked Reliever
-      // first; the Dynamic Approval Engine (createTemplateApprovalRequest)
-      // only gets invoked once that Reliever Approves — see
-      // approveLeaveApplicationReliever / POST
-      // /api/leave-applications/:id/reliever-decision below. Nothing to
-      // auto-approve here at submission time anymore.
-      await createAlert(queryDB, {
-        userId: relieverUserId,
-        type: "leave_application",
-        title: "You've Been Selected as Reliever",
-        message: `${req.user.name} selected you as Reliever for their Leave Application (${start_date} to ${end_date}). Please review it.`,
-        relatedType: "leave_application",
-        relatedId: result.insertId
-      });
+      if (relieverUserId) {
+        // Reliever workflow — the request sits waiting on the picked Reliever
+        // first; the Dynamic Approval Engine (createTemplateApprovalRequest)
+        // only gets invoked once that Reliever Approves — see
+        // approveLeaveApplicationReliever / POST
+        // /api/leave-applications/:id/reliever-decision below.
+        await createAlert(queryDB, {
+          userId: relieverUserId,
+          type: "leave_application",
+          title: "You've Been Selected as Reliever",
+          message: `${req.user.name} selected you as Reliever for their Leave Application (${start_date} to ${end_date}). Please review it.`,
+          relatedType: "leave_application",
+          relatedId: result.insertId
+        });
+      } else {
+        // This Leave Type's policy doesn't require a Reliever — skip straight
+        // to the Dynamic Approval Engine, exactly what approveLeaveApplicationReliever
+        // does once a real Reliever approves.
+        const { autoApproved } = await createTemplateApprovalRequest("leave", "leave_application", result.insertId, req.user.id);
+        if (autoApproved) {
+          await finalizeLeaveApplicationApproval(result.insertId, null, "Auto-approved (no Approval Template configured for Leave, and no Reliever required for this Leave Type).");
+        }
+      }
 
       res.json({ success: true, id: result.insertId, day_count: dayCount });
     } catch (err: any) {

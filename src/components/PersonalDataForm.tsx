@@ -203,7 +203,10 @@ export const PersonalDataForm: React.FC<PersonalDataFormProps> = ({ token, onBac
 
   return (
     <div className="w-full min-h-[calc(100vh-4rem)]" style={{ background: 'var(--g-surface-muted)' }}>
-      <div className="max-w-lg mx-auto px-4 pt-3 pb-28">
+      {/* max-w-lg is the phone width; on desktop that left this as a 512px
+          strip down the middle of the page. pb-28 is only there to clear the
+          Update bar, which stops being fixed at md (see below). */}
+      <div className="max-w-lg md:max-w-5xl mx-auto px-4 md:px-6 pt-3 pb-28 md:pb-10">
         <div className="flex items-center gap-2 mb-3">
           <button
             type="button"
@@ -222,9 +225,16 @@ export const PersonalDataForm: React.FC<PersonalDataFormProps> = ({ token, onBac
             <Spinner size={28} />
           </div>
         ) : (
-          <form onSubmit={handleSubmit} className="space-y-4">
+          /* One column on a phone; the two sections sit side by side from md
+             up, where stacking them left the right half of the page empty.
+             items-start keeps each at its natural height — the personal
+             details section is taller than the address one. */
+          <form
+            onSubmit={handleSubmit}
+            className="space-y-4 md:space-y-0 md:grid md:grid-cols-2 md:gap-4 md:items-start"
+          >
             {error && (
-              <div className="flex items-start gap-2 text-sm px-3 py-2.5 rounded-xl bg-rose-50 text-rose-700 border border-rose-200">
+              <div className="flex items-start gap-2 text-sm px-3 py-2.5 rounded-xl bg-rose-50 text-rose-700 border border-rose-200 md:col-span-2">
                 <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
                 <span>{error}</span>
               </div>
@@ -364,12 +374,16 @@ export const PersonalDataForm: React.FC<PersonalDataFormProps> = ({ token, onBac
               </div>
             </section>
 
-            <div className="fixed bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-white via-white/95 to-transparent">
-              <div className="max-w-lg mx-auto">
+            {/* Pinned to the bottom of the screen on a phone, where the form
+                is longer than the viewport and Update needs to stay in reach.
+                On desktop it goes back into the flow (md:static): floating
+                there, it sat on top of the form and covered the City field. */}
+            <div className="fixed bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-white via-white/95 to-transparent md:static md:col-span-2 md:p-0 md:pt-2 md:bg-none">
+              <div className="max-w-lg mx-auto md:max-w-none md:flex md:justify-end">
                 <button
                   type="submit"
                   disabled={saving}
-                  className="w-full py-3 rounded-full text-white text-sm font-semibold shadow-sm disabled:opacity-60 flex items-center justify-center gap-2"
+                  className="w-full md:w-auto md:px-12 py-3 rounded-full text-white text-sm font-semibold shadow-sm disabled:opacity-60 flex items-center justify-center gap-2"
                   style={{ background: 'linear-gradient(90deg, #7F00FF, #6300C6)' }}
                 >
                   {saving && <Spinner size={16} className="text-white" />}

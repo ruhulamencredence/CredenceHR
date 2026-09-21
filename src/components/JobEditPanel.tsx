@@ -345,6 +345,11 @@ const JobEditRow: React.FC<JobEditRowProps> = ({ job, token, mprNumbers, isOpen,
   // up to the server alongside the delete request.
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
   const [deleteReason, setDeleteReason] = useState('');
+  // Tapping an MPR row's Item opens the same read-only detail view "Job Entry
+  // Details" shows for it (Specification/Qty/Job Duration/Budget alongside the
+  // Item Name) — this table only ever has room for MPR No/Item/Qty/Delivery
+  // Date/Status/Actions, so the rest was otherwise only visible over there.
+  const [viewingEntry, setViewingEntry] = useState<Entry | null>(null);
 
   const [showAddForm, setShowAddForm] = useState(false);
   const [budgetItems, setBudgetItems] = useState<BudgetItem[]>([]);
@@ -791,9 +796,14 @@ const JobEditRow: React.FC<JobEditRowProps> = ({ job, token, mprNumbers, isOpen,
                       />
                     )}
                   </div>
-                  <p className="text-sm text-slate-800 font-medium leading-snug break-words mt-1.5" title={e.item_name}>
+                  <button
+                    type="button"
+                    onClick={() => setViewingEntry(e)}
+                    className="text-sm text-blue-700 font-medium leading-snug break-words mt-1.5 text-left underline decoration-dotted underline-offset-2"
+                    title={`${e.item_name} — tap for full details`}
+                  >
                     {e.item_name}
-                  </p>
+                  </button>
 
                   <div className="grid grid-cols-2 gap-3 mt-3">
                     <div>
@@ -951,8 +961,15 @@ const JobEditRow: React.FC<JobEditRowProps> = ({ job, token, mprNumbers, isOpen,
                   <React.Fragment key={e.id}>
                   <tr className={pending ? 'bg-amber-50/40' : undefined}>
                     <td className="px-3 py-2 font-medium text-slate-800">{e.mpr_no}</td>
-                    <td className="px-3 py-2 text-slate-600 max-w-[220px] truncate" title={e.item_name}>
-                      {e.item_name}
+                    <td className="px-3 py-2 max-w-[220px]">
+                      <button
+                        type="button"
+                        onClick={() => setViewingEntry(e)}
+                        className="text-blue-700 hover:underline truncate block max-w-full text-left"
+                        title={`${e.item_name} — click for full details`}
+                      >
+                        {e.item_name}
+                      </button>
                     </td>
                     <td className="px-3 py-2 text-slate-600">{e.requisitioned_qty ?? '—'}</td>
                     <td className="px-3 py-2 text-slate-600">
@@ -1440,6 +1457,54 @@ const JobEditRow: React.FC<JobEditRowProps> = ({ job, token, mprNumbers, isOpen,
           })()}
         </div>
       )}
+
+      {/* Item detail popup — same fields "Job Entry Details" shows for a saved MPR
+          entry (Job Name, MPR No, Item Name, Specification, Qty, Job Duration,
+          Delivery Date, Budget), opened by tapping an Item above. Portaled to
+          document.body like the Delivery Date popup just above, so it isn't
+          clipped by the table's overflow-x-auto wrapper. */}
+      {viewingEntry &&
+        createPortal(
+          <div className="fixed inset-0 z-50 flex items-end sm:items-center sm:justify-center" role="dialog" aria-modal="true">
+            <div className="absolute inset-0 bg-black/40" onClick={() => setViewingEntry(null)} />
+            <div className="relative w-full sm:max-w-md max-h-[85vh] overflow-y-auto bg-white rounded-t-2xl sm:rounded-2xl p-5 pb-6 shadow-xl">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-sm font-bold text-slate-900">MPR Item Details</h3>
+                <button
+                  type="button"
+                  onClick={() => setViewingEntry(null)}
+                  className="p-1 text-slate-400 hover:text-slate-600"
+                  aria-label="Close item details"
+                >
+                  <X className="w-4.5 h-4.5" />
+                </button>
+              </div>
+              <div className="space-y-3">
+                {[
+                  ['Job Name', job.job_name],
+                  ['MPR No', viewingEntry.mpr_no],
+                  ['Item Name', viewingEntry.item_name],
+                  ['Specification', viewingEntry.specification || '—'],
+                  [
+                    'Qty',
+                    viewingEntry.requisitioned_qty !== null && viewingEntry.requisitioned_qty !== undefined
+                      ? `${viewingEntry.requisitioned_qty}${viewingEntry.req_qty ? ` / ${viewingEntry.req_qty}` : ''}`
+                      : viewingEntry.req_qty || '—'
+                  ],
+                  ['Job Duration', job.job_duration || '—'],
+                  ['Delivery Date', formatDate(viewingEntry.delivery_date) || '—'],
+                  ['Budget', job.budget_name || '—']
+                ].map(([label, value]) => (
+                  <div key={label}>
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">{label}</p>
+                    <p className="text-sm text-slate-800 mt-0.5">{value}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   );
 };

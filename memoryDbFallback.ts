@@ -31,7 +31,15 @@ export const memoryDb = {
   leaveBalances: [] as any[],
   leaveApplications: [] as any[],
   leaveCategories: [] as any[],
-  leaveCategoryBalances: [] as any[]
+  leaveCategoryBalances: [] as any[],
+  // Seeded to match the ('casual',0,1,NULL,0) etc. seed INSERT IGNORE in
+  // server.ts's ensureSchemaMigrations, so in-memory dev behaves the same as
+  // a fresh real-DB install: Reliever always required, no other restriction.
+  leaveCategoryPolicies: [
+    { category_key: "casual", min_advance_notice_days: 0, reliever_required: 1, max_consecutive_days: null, require_paid_leave_exhausted: 0 },
+    { category_key: "sick", min_advance_notice_days: 0, reliever_required: 1, max_consecutive_days: null, require_paid_leave_exhausted: 0 },
+    { category_key: "without_pay", min_advance_notice_days: 0, reliever_required: 1, max_consecutive_days: null, require_paid_leave_exhausted: 0 }
+  ] as any[]
 };
 
 // SQL-string pattern-matching simulator for the in-memory fallback DB, used by queryDB()
@@ -81,10 +89,18 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
       can_view_timesheet: !!u.can_view_timesheet,
       can_view_leave_application: !!u.can_view_leave_application,
       can_view_my_leave: !!u.can_view_my_leave,
+      can_grant_module_access: !!u.can_grant_module_access,
       attendance_project_id: u.attendance_project_id ?? null
     }));
   }
-  if (lowerSql.startsWith("select id, name, email, role, created_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims from users")) {
+  // GET /api/auth/me's own SELECT — matched on a short, stable prefix (not the
+  // full column list) since that real query has grown extra columns over time
+  // (can_use_tracking, can_view_budget_module, ... can_grant_module_access) and a
+  // full-literal match silently stopped matching and fell through to the [] catch-
+  // all below, making /api/auth/me 404 under the in-memory DB. This prefix is
+  // unique to this query — GET /api/users' own SELECT (handled above) has
+  // "username" as its 4th column instead of "role", so it can never collide here.
+  if (lowerSql.startsWith("select id, name, email, role, created_at, can_edit_delivery_date")) {
     const id = Number(params[0]);
     const user = memoryDb.users.find(u => u.id === id);
     if (!user) return [];
@@ -105,6 +121,7 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
       can_view_timesheet: rest.can_view_timesheet ? 1 : 0,
       can_view_leave_application: rest.can_view_leave_application ? 1 : 0,
       can_view_my_leave: rest.can_view_my_leave ? 1 : 0,
+      can_grant_module_access: rest.can_grant_module_access ? 1 : 0,
       attendance_project_id: rest.attendance_project_id ?? null
     }];
   }
@@ -213,6 +230,30 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
     const user = memoryDb.users.find(u => u.id === id);
     return user ? [{ can_job_edit: user.can_job_edit ? 1 : 0 }] : [];
   }
+  // requireModuleGrantAccess's own fresh-from-DB check (server.ts) — the JWT
+  // payload doesn't carry this flag, so it's always read live here.
+  if (lowerSql.startsWith("select can_grant_module_access from users")) {
+    const id = Number(params[0]);
+    const user = memoryDb.users.find(u => u.id === id);
+    return user ? [{ can_grant_module_access: user.can_grant_module_access ? 1 : 0 }] : [];
+  }
+  // PUT /api/users/:id/feature-permissions' own pre-flight lookup (role + every
+  // field it can update) — was entirely unhandled, so this endpoint always 404'd
+  // ("User not found") under the in-memory DB, for every one of these toggles.
+  if (lowerSql.startsWith("select role, can_edit_delivery_date, can_job_edit, can_use_attendance, can_use_tracking, can_view_leave_summary, attendance_project_id from users")) {
+    const id = Number(params[0]);
+    const user = memoryDb.users.find(u => u.id === id);
+    if (!user) return [];
+    return [{
+      role: user.role,
+      can_edit_delivery_date: user.can_edit_delivery_date !== false ? 1 : 0,
+      can_job_edit: user.can_job_edit ? 1 : 0,
+      can_use_attendance: user.can_use_attendance ? 1 : 0,
+      can_use_tracking: user.can_use_tracking ? 1 : 0,
+      can_view_leave_summary: user.can_view_leave_summary ? 1 : 0,
+      attendance_project_id: user.attendance_project_id ?? null
+    }];
+  }
   if (lowerSql.startsWith("update users set can_edit_delivery_date")) {
     const [can_edit_delivery_date, can_job_edit, can_use_attendance, can_use_tracking, can_view_leave_summary, attendance_project_id, id] = params;
     const user = memoryDb.users.find(u => u.id === Number(id));
@@ -224,6 +265,17 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
       user.can_view_leave_summary = !!Number(can_view_leave_summary);
       user.attendance_project_id = attendance_project_id === null ? null : Number(attendance_project_id);
     }
+    return { affectedRows: user ? 1 : 0 };
+  }
+  // Superadmin-only "Grants Module Access" toggle — matched BEFORE the bulk
+  // can_edit_delivery_date/... UPDATE above would otherwise need to (it doesn't
+  // collide since that one starts with "can_edit_delivery_date", not
+  // "can_grant_module_access", but this is its own separate UPDATE statement —
+  // see PUT /api/users/:id/feature-permissions in UserManagement.ts).
+  if (lowerSql.startsWith("update users set can_grant_module_access")) {
+    const [can_grant_module_access, id] = params;
+    const user = memoryDb.users.find(u => u.id === Number(id));
+    if (user) user.can_grant_module_access = !!Number(can_grant_module_access);
     return { affectedRows: user ? 1 : 0 };
   }
   if (lowerSql.startsWith("update users set can_view_login_location")) {
@@ -660,6 +712,26 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
     const [budget_id, user_id] = params;
     return memoryDb.budget_submissions.filter(s => s.budget_id === budget_id && s.user_id === user_id);
   }
+  // Admin "Submissions" panel — everyone who's Final Submitted this Budget, with
+  // their name and how many active entries they still have under it.
+  if (lowerSql.startsWith("select bs.user_id, bs.submitted_at, u.name as user_name")) {
+    const budget_id = params[0];
+    return memoryDb.budget_submissions
+      .filter((s: any) => s.budget_id === budget_id)
+      .map((s: any) => {
+        const u = memoryDb.users.find((usr: any) => usr.id === s.user_id);
+        const active_entry_count = memoryDb.entries.filter(
+          (e: any) => e.budget_id === s.budget_id && e.created_by === s.user_id && !e.deleted_at
+        ).length;
+        return {
+          user_id: s.user_id,
+          submitted_at: s.submitted_at,
+          user_name: u ? u.name : null,
+          active_entry_count
+        };
+      })
+      .sort((a: any, b: any) => new Date(b.submitted_at).getTime() - new Date(a.submitted_at).getTime());
+  }
   if (lowerSql.startsWith("insert into budget_submissions")) {
     const [budget_id, user_id] = params;
     const existing = memoryDb.budget_submissions.find(s => s.budget_id === budget_id && s.user_id === user_id);
@@ -667,6 +739,17 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
     const newId = memoryDb.budget_submissions.length + 1;
     memoryDb.budget_submissions.push({ id: newId, budget_id, user_id, submitted_at: new Date() });
     return { insertId: newId };
+  }
+  // Single-user unlock (auto-unlock on last-entry delete, and the Admin's manual
+  // "Unlock Submission" button) — must be matched BEFORE the whole-budget wipe
+  // below, since that one's prefix would otherwise swallow this query too.
+  if (lowerSql.startsWith("delete from budget_submissions where budget_id") && lowerSql.includes("user_id")) {
+    const [budget_id, user_id] = params;
+    const before = memoryDb.budget_submissions.length;
+    memoryDb.budget_submissions = memoryDb.budget_submissions.filter(
+      s => !(s.budget_id === budget_id && s.user_id === user_id)
+    );
+    return { affectedRows: before - memoryDb.budget_submissions.length };
   }
   if (lowerSql.startsWith("delete from budget_submissions where budget_id")) {
     const budget_id = Number(params[0]);
@@ -816,6 +899,19 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
       (e: any) => e.mpr_id === mpr_id && e.budget_id === budget_id && !e.deleted_at
     );
   }
+  // Auto-unlock check (EntriesRoutes.ts unlockBudgetSubmissionIfEmpty) — same
+  // budget_id+created_by shape as the generic check below, but scoped to ACTIVE
+  // entries only, so it must be matched first.
+  if (
+    lowerSql.startsWith("select id from entries where budget_id") &&
+    lowerSql.includes("created_by") &&
+    lowerSql.includes("deleted_at is null")
+  ) {
+    const [budget_id, created_by] = params;
+    return memoryDb.entries.filter(
+      e => e.budget_id === budget_id && e.created_by === created_by && !e.deleted_at
+    );
+  }
   if (lowerSql.startsWith("select id from entries where budget_id") && lowerSql.includes("created_by")) {
     const [budget_id, created_by] = params;
     return memoryDb.entries.filter(e => e.budget_id === budget_id && e.created_by === created_by);
@@ -864,11 +960,16 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
     return { affectedRows: e ? 1 : 0 };
   }
   // Recycle-bin lookups (SELECT id, deleted_at FROM entries WHERE id = ?) used by
-  // the restore / permanent-delete routes.
-  if (lowerSql.startsWith("select id, deleted_at from entries where id")) {
+  // the restore / permanent-delete routes, and the delete_entry Job Edit request
+  // approval lookup (SELECT id, deleted_at, budget_id FROM entries WHERE id = ?),
+  // which additionally needs budget_id for the auto-unlock check.
+  if (
+    lowerSql.startsWith("select id, deleted_at from entries where id") ||
+    lowerSql.startsWith("select id, deleted_at, budget_id from entries where id")
+  ) {
     const id = Number(params[0]);
     const e = memoryDb.entries.find((en: any) => en.id === id);
-    return e ? [{ id: e.id, deleted_at: e.deleted_at || null }] : [];
+    return e ? [{ id: e.id, deleted_at: e.deleted_at || null, budget_id: e.budget_id ?? null }] : [];
   }
   if (lowerSql.startsWith("update entries set item_name")) {
     const [item_name, delivery_date, mpr_id, id] = params;
@@ -1491,6 +1592,39 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
     });
     return { insertId: newId };
   }
+  if (lowerSql.startsWith("select category_key from leave_categories")) {
+    return memoryDb.leaveCategories.map((c: any) => ({ category_key: c.category_key }));
+  }
+
+  // PER-LEAVE-CATEGORY POLICY (Leave Manage -> "Leave Policies")
+  if (lowerSql.startsWith("select * from leave_category_policies where category_key")) {
+    const key = params[0];
+    return memoryDb.leaveCategoryPolicies.filter((p: any) => p.category_key === key);
+  }
+  if (lowerSql.startsWith("insert into leave_category_policies")) {
+    const [categoryKey, minAdvanceNoticeDays, relieverRequired, maxConsecutiveDays, requirePaidLeaveExhausted, updatedBy] = params;
+    const existing = memoryDb.leaveCategoryPolicies.find((p: any) => p.category_key === categoryKey);
+    if (existing) {
+      existing.min_advance_notice_days = Number(minAdvanceNoticeDays);
+      existing.reliever_required = relieverRequired ? 1 : 0;
+      existing.max_consecutive_days = maxConsecutiveDays === null || maxConsecutiveDays === undefined ? null : Number(maxConsecutiveDays);
+      existing.require_paid_leave_exhausted = requirePaidLeaveExhausted ? 1 : 0;
+      existing.updated_by = updatedBy ?? null;
+      return { affectedRows: 1 };
+    }
+    memoryDb.leaveCategoryPolicies.push({
+      category_key: categoryKey,
+      min_advance_notice_days: Number(minAdvanceNoticeDays),
+      reliever_required: relieverRequired ? 1 : 0,
+      max_consecutive_days: maxConsecutiveDays === null || maxConsecutiveDays === undefined ? null : Number(maxConsecutiveDays),
+      require_paid_leave_exhausted: requirePaidLeaveExhausted ? 1 : 0,
+      updated_by: updatedBy ?? null
+    });
+    return { insertId: memoryDb.leaveCategoryPolicies.length };
+  }
+  if (lowerSql.startsWith("select curdate() as today")) {
+    return [{ today: new Date().toISOString().slice(0, 10) }];
+  }
 
   // LEAVE APPLICATIONS (Self Service -> Leave Application)
   if (lowerSql.startsWith("select id, name from users where role in ('admin','superadmin')")) {
@@ -1498,6 +1632,13 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
       .filter((u: any) => u.role === "admin" || u.role === "superadmin")
       .map((u: any) => ({ id: u.id, name: u.name }))
       .sort((a: any, b: any) => a.name.localeCompare(b.name));
+  }
+  // Reliever existence check in POST /api/leave-applications ("SELECT id,
+  // name FROM users WHERE id = ?") — checked before the "!=" variant below
+  // since both share the same prefix up to "where id ".
+  if (lowerSql.startsWith("select id, name from users where id = ?")) {
+    const id = Number(params[0]);
+    return memoryDb.users.filter((u: any) => u.id === id).map((u: any) => ({ id: u.id, name: u.name }));
   }
   if (lowerSql.startsWith("select id, name from users where id !=")) {
     const excludeId = Number(params[0]);
@@ -1509,7 +1650,7 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
   if (lowerSql.startsWith("insert into leave_applications")) {
     const [
       userId, leaveType, startDate, endDate, dayCount, isContinuous, isPrefix, isSuffix,
-      isHalfDay, includeExtraWorkDates, isForeignLeave, purpose, relieverId
+      isHalfDay, includeExtraWorkDates, isForeignLeave, purpose, relieverId, relieverStatus
     ] = params;
     const newId = memoryDb.leaveApplications.length > 0
       ? Math.max(...memoryDb.leaveApplications.map((a: any) => a.id)) + 1
@@ -1537,8 +1678,8 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
       remarks: null,
       decided_by: null,
       decided_at: null,
-      reliever_id: Number(relieverId),
-      reliever_status: "pending",
+      reliever_id: relieverId === null || relieverId === undefined ? null : Number(relieverId),
+      reliever_status: relieverStatus ?? null,
       reliever_remarks: null,
       reliever_decided_by: null,
       reliever_decided_at: null,
@@ -1546,7 +1687,7 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
     });
     return { insertId: newId };
   }
-  if (lowerSql.startsWith("select la.*, u.name as approver_name, rv.name as reliever_name from leave_applications")) {
+  if (lowerSql.startsWith("select la.*, u.name as approver_name, rv.name as reliever_name")) {
     const userId = Number(params[0]);
     const userMap = new Map<number, any>(memoryDb.users.map((u: any) => [u.id, u]));
     return memoryDb.leaveApplications

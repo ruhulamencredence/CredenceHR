@@ -372,6 +372,15 @@ export interface User {
   // 'admin' it's OFF by default and must be explicitly switched on by the
   // Superadmin (PUT /api/users/:id/login-location-access). Irrelevant for 'user'.
   can_view_login_location?: boolean;
+  // Superadmin-only grant: can this Admin ALSO set OTHER accounts' Module Access
+  // (the module_permissions grant above) themselves, via PUT
+  // /api/users/:id/module-permissions? Always false for role !== 'admin'. OFF by
+  // default, switched on by the Superadmin (PUT /api/users/:id/feature-permissions
+  // with this field — Superadmin-only there too). Deliberately narrower than the
+  // Superadmin's own version of this power: a delegated Admin using it can only
+  // grant/revoke Module Access for a role === 'user' target, never another
+  // 'admin' — enforced server-side, not just hidden in the UI.
+  can_grant_module_access?: boolean;
   // Superadmin-only grant: can this Admin ALSO use the User Panel (mark Remote
   // Attendance, submit Claims/Conveyance Bills, enter Job/MPR data) alongside
   // their Admin Panel? OFF by default for role === 'admin', switched on by the
@@ -429,6 +438,28 @@ export interface LeaveCategory {
   id: number;
   key: string;
   label: string;
+}
+
+// Per-Leave-Category Policy — Self Service -> Leave Manage -> "Leave
+// Policies" (GET/PUT /api/leave-policies). One per Leave Type: the 3 fixed
+// LeaveType values ('casual'/'sick'/'without_pay') plus any custom Leave
+// Category's key. Enforced server-side in POST /api/leave-applications —
+// this is also fetched by NewLeaveApplicationModal so the form itself can
+// hide the Reliever picker / show the advance-notice minimum up front,
+// matching what the server will actually accept.
+export interface LeaveCategoryPolicy {
+  category_key: string;
+  // Must apply at least this many days before the Leave's Start Date. 0 = no
+  // restriction (same-day/retrospective apply allowed).
+  min_advance_notice_days: number;
+  // Whether a Reliever must be picked for this Leave Type.
+  reliever_required: boolean;
+  // Longest single application allowed for this Leave Type, in days. null =
+  // no cap.
+  max_consecutive_days: number | null;
+  // Leave Without Pay style rule: this Leave Type may only be applied for
+  // once Casual Leave AND Sick Leave balances are both exhausted (0).
+  require_paid_leave_exhausted: boolean;
 }
 
 // One row of Self Service -> Leave Management (GET/PUT /api/leave-balances). A
@@ -798,6 +829,17 @@ export interface Budget {
   // matched Rate/Category onto every entry under this Budget, and who ran it.
   rate_approved_at?: string | null;
   rate_approved_by?: number | null;
+}
+
+// One row of GET /api/budgets/:id/submissions (Admin-only) — a user who has
+// Final Submitted this Budget. active_entry_count is how many of their entries
+// under it are still active (not soft-deleted); the Admin's "Unlock" button
+// (DELETE /api/budgets/:id/submissions/:userId) works whether this is 0 or not.
+export interface BudgetSubmission {
+  user_id: number;
+  user_name: string | null;
+  submitted_at: string;
+  active_entry_count: number;
 }
 
 export interface BudgetItem {

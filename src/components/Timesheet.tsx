@@ -14,6 +14,7 @@ import { AttendanceCorrectionModal } from './AttendanceCorrectionModal';
 import { AttendanceCorrectionStatusModal } from './AttendanceCorrectionStatusModal';
 import { Spinner } from './Spinner';
 import { ModulePath } from './ModulePath';
+import { setHeaderPageTitle } from '../lib/headerPageTitle';
 
 interface TimesheetProps {
   token: string;
@@ -126,7 +127,11 @@ const DateCard: React.FC<{
     <div
       onClick={onClick}
       title={cardTitle}
-      className="border border-slate-200 rounded-xl p-4 hover:bg-blue-50/60 hover:border-blue-200 transition-colors cursor-pointer"
+      // No backdrop-blur on these day cards: a month renders ~30 of them, and
+      // a blur layer each is what made other list pages stutter on Android
+      // (see the Employee Directory / Job Entry Details fix). A flatter,
+      // more opaque white gives the same glass look at no per-card cost.
+      className="border border-white/60 md:border-slate-200 rounded-2xl md:rounded-xl bg-white/80 md:bg-white p-4 hover:bg-white/95 md:hover:bg-blue-50/60 md:hover:border-blue-200 transition-colors cursor-pointer"
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-900">
@@ -201,6 +206,18 @@ export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceP
   // the Android APK build hides it — the bottom nav is the only way to leave
   // this section there, matching onBack no longer being rendered above.
   const isNativeApp = Capacitor.isNativePlatform();
+
+  // Dock "Timesheet" into the mobile header in the logo's place while this
+  // page is open, the same swap Claims/Conveyance/Leave do. Owned here rather
+  // than by whoever rendered us, because this page is reached two ways — the
+  // GlobalSidebar (App.tsx renders it directly, with UserPanel unmounted) and
+  // the bottom nav (UserPanel's own section) — and only the component itself
+  // is present on both paths.
+  useEffect(() => {
+    setHeaderPageTitle('Timesheet');
+    return () => setHeaderPageTitle(null);
+  }, []);
+
   const [records, setRecords] = useState<AttendanceRecord[]>([]);
   const [corrections, setCorrections] = useState<AttendanceCorrection[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -348,13 +365,25 @@ export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceP
   return (
     <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900" style={{ background: 'var(--g-bg-gradient)' }}>
       <div className="w-full px-2 sm:px-6 lg:px-8 pt-3 pb-8">
+        {/* Breadcrumb is desktop-only: hidden on the APK (isNativeApp) and,
+            via hidden md:block, on a narrow browser window too — the mobile
+            layout shows "Timesheet" in the header instead, so the
+            "Self Service / Timesheet" path is redundant there. */}
         {!isNativeApp && (
-          <div className="px-2 sm:px-0">
+          <div className="hidden md:block px-2 sm:px-0">
             <ModulePath path={['Self Service', 'Timesheet']} />
           </div>
         )}
-        <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
-          <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+        {/* Liquid glass on mobile (soft violet-tint gradient + backdrop-blur +
+            big rounded corners), same as Conveyance Bill Claim / My Claims /
+            Leave Applications; the md: overrides keep the original plain
+            white panel on desktop. */}
+        <div className="bg-gradient-to-br from-violet-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl border border-white/70 rounded-[28px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] overflow-hidden md:bg-white md:from-transparent md:via-transparent md:to-transparent md:backdrop-blur-none md:border-slate-200 md:rounded-lg md:shadow-none">
+          {/* Hidden on mobile — the header shows this page's own "Timesheet"
+              title in the logo's place (see headerPageTitle.ts), so repeating
+              it here would just be a duplicate. Desktop has no such takeover
+              and keeps the full row. */}
+          <div className="hidden md:flex items-center justify-between px-5 py-4 border-b border-slate-100">
             <div className="flex items-center gap-2.5">
               <div className="p-2 bg-blue-50 rounded-lg">
                 <Clock className="w-4 h-4 text-blue-600" />
@@ -368,8 +397,9 @@ export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceP
 
           {/* Month Wise / Day Wise / Custom Range — segmented control, same
               rounded-pill treatment LeaveReviewPage's Review/Approved/Rejected
-              switcher uses. */}
-          <div className="mx-3 sm:mx-6 mt-4 flex items-center gap-1.5 rounded-full bg-slate-100 p-1.5 text-xs font-semibold">
+              switcher uses. Extra top padding on mobile since the header row
+              above is hidden there. */}
+          <div className="mx-3 sm:mx-6 mt-5 md:mt-4 flex items-center gap-1.5 rounded-full bg-white/50 md:bg-slate-100 backdrop-blur md:backdrop-blur-none p-1.5 text-xs font-semibold">
             {TABS.map((t) => {
               const active = tab === t.key;
               return (
@@ -464,7 +494,7 @@ export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceP
                   ) : (
                     <div className="space-y-3">
                       {dayRecords.map((r) => (
-                        <div key={r.id} className="border border-slate-200 rounded-xl p-4">
+                        <div key={r.id} className="border border-white/60 md:border-slate-200 rounded-2xl md:rounded-xl bg-white/80 md:bg-white p-4">
                           <div className="flex flex-wrap items-center gap-2 text-xs font-bold text-slate-900">
                             <MapPin className="w-3.5 h-3.5 text-blue-600" /> {r.project_name || 'Project'}
                             <ApprovalBadge approval={r.check_in_approval} label="In" />
