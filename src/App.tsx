@@ -46,41 +46,6 @@ import { startBackgroundTracking, stopBackgroundTracking } from './lib/backgroun
 import { connectChatSocket, disconnectChatSocket } from './lib/chatSocket';
 import { initPushNotifications, clearPushToken } from './lib/pushNotifications';
 
-// TEMPORARY diagnostic — remove once the status-bar-overlap investigation on
-// tall/punch-hole displays (MainActivity.java's native inset injection) is
-// confirmed fixed. Shows what --native-safe-area-inset-top/-bottom actually
-// resolved to on THIS device, so a screenshot tells us directly whether the
-// native injection landed a sane value at all, instead of guessing blind.
-// Native-app only; renders nothing on the web build.
-const InsetDebugBadge: React.FC = () => {
-  const [value, setValue] = useState('reading...');
-  useEffect(() => {
-    if (!Capacitor.isNativePlatform()) return;
-    const read = () => {
-      const style = getComputedStyle(document.documentElement);
-      const top = style.getPropertyValue('--native-safe-area-inset-top').trim() || '(unset)';
-      const bottom = style.getPropertyValue('--native-safe-area-inset-bottom').trim() || '(unset)';
-      setValue(`top:${top} bottom:${bottom}`);
-    };
-    read();
-    const t1 = setTimeout(read, 800);
-    const t2 = setTimeout(read, 2000);
-    return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-    };
-  }, []);
-  if (!Capacitor.isNativePlatform()) return null;
-  return (
-    <div
-      className="fixed right-1 z-[95] text-[9px] font-mono px-1.5 py-0.5 rounded"
-      style={{ top: 'calc(env(safe-area-inset-top, 0px) + 2px)', background: 'rgba(0,0,0,0.55)', color: '#0f0' }}
-    >
-      {value}
-    </div>
-  );
-};
-
 export default function App() {
   const [token, setToken] = useState<string | null>(localStorage.getItem('mpr_token'));
   const [user, setUser] = useState<User | null>(() => {
@@ -541,7 +506,6 @@ export default function App() {
         {pullToRefreshIndicator}
         {pullToRefreshFullscreenLoader}
         {backToServerBadge}
-        <InsetDebugBadge />
         {showExitPrompt && (
           <div
             className="fixed left-1/2 -translate-x-1/2 z-[100] px-4 py-2.5 rounded-full text-sm font-medium text-white shadow-lg"
@@ -695,7 +659,6 @@ export default function App() {
       {pullToRefreshIndicator}
       {pullToRefreshFullscreenLoader}
       {backToServerBadge}
-      <InsetDebugBadge />
       <Navbar
         user={user}
         token={token || ''}
