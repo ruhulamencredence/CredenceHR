@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   X, LogOut, Home, Wallet, Briefcase, FileText, Edit2, Route, CreditCard,
   CalendarClock, ListChecks, CheckSquare, ChevronDown, Building2, Users, Users2,
@@ -93,12 +93,16 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   onGoToSelfServiceTab, onGoToAdminClaims, onGoToAdminModule, onOpenProfile, onOpenChat, activeKey,
 }) => {
   const isPersistent = variant === 'persistent';
-  const [reportsOpen, setReportsOpen] = useState(true);
-  const [claimsOpen, setClaimsOpen] = useState(true);
-  const [attendanceOpen, setAttendanceOpen] = useState(true);
-  const [orgOpen, setOrgOpen] = useState(true);
-  const [workforceOpen, setWorkforceOpen] = useState(true);
-  const [hrOpen, setHrOpen] = useState(true);
+  // Closed by default — a group only opens when the user explicitly taps its
+  // header, or (see the effect below, once every group's items are known)
+  // when the item currently on screen turns out to live inside one, so its
+  // highlight is never hidden behind a collapsed group.
+  const [reportsOpen, setReportsOpen] = useState(false);
+  const [claimsOpen, setClaimsOpen] = useState(false);
+  const [attendanceOpen, setAttendanceOpen] = useState(false);
+  const [orgOpen, setOrgOpen] = useState(false);
+  const [workforceOpen, setWorkforceOpen] = useState(false);
+  const [hrOpen, setHrOpen] = useState(false);
   const photoUrl = useProfilePhoto(token, photoVersion);
 
   // Minimized/collapsed mode — desktop persistent column only (the mobile
@@ -345,6 +349,23 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     // ADMIN_MODULES in types.ts.
     { key: 'leave_applications', label: 'Monthly Leave Application', icon: CalendarClock, onClick: () => onGoToAdminModule('leave_applications') },
   ].filter((i) => canSeeModule(i.key as AdminModuleKey));
+
+  // Auto-reveal whichever group the currently-active item lives in — every
+  // group above starts collapsed (the user has to tap to open one), but that
+  // must never hide the "you are here" highlight for whatever's actually on
+  // screen right now (e.g. picked from the search results below, or just
+  // landed on directly/after a reload) inside a still-closed group. Only
+  // ever opens a group, never closes one the user already opened by hand.
+  useEffect(() => {
+    if (!activeKey) return;
+    if (reportsGroup.some((i) => i.key === activeKey)) setReportsOpen(true);
+    if (claimsGroup.some((i) => i.key === activeKey)) setClaimsOpen(true);
+    if (attendanceGroup.some((i) => i.key === activeKey)) setAttendanceOpen(true);
+    if (orgGroup.some((i) => i.key === activeKey)) setOrgOpen(true);
+    if (workforceGroup.some((i) => i.key === activeKey)) setWorkforceOpen(true);
+    if (hrGroup.some((i) => i.key === activeKey)) setHrOpen(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeKey]);
 
   // "Servers" — Admin Panel tab (full catalog CRUD), Superadmin-only on any
   // platform (this is the WEB-oriented management surface — see
