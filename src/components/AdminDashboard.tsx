@@ -457,7 +457,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user }) =
           {/* Stat tiles skeleton — same grid + tile count as the real one below */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
             {Array.from({ length: statTiles.length }).map((_, i) => (
-              <div key={i} className="rounded-2xl p-3.5 flex flex-col gap-2 border border-slate-200 bg-white animate-pulse">
+              <div key={i} className="rounded-2xl p-3.5 flex flex-col gap-2 border border-slate-200 animate-pulse">
                 <div className="w-9 h-9 rounded-full bg-slate-200" />
                 <div className="h-2.5 bg-slate-200 rounded w-3/4" />
                 <div className="h-4 bg-slate-100 rounded w-1/2" />
@@ -467,7 +467,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user }) =
 
           {/* Quick View + Claim Amount skeleton */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            <div className="lg:col-span-2 bg-white border border-slate-200 rounded-2xl p-5 shadow-sm animate-pulse">
+            <div className="lg:col-span-2 border border-slate-200 rounded-2xl p-5 animate-pulse">
               <div className="flex items-center justify-between mb-4">
                 <div className="h-4 bg-slate-200 rounded w-24" />
                 <div className="h-7 bg-slate-100 rounded-full w-40" />
@@ -483,7 +483,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user }) =
                 ))}
               </div>
             </div>
-            <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm animate-pulse">
+            <div className="border border-slate-200 rounded-2xl p-5 animate-pulse">
               <div className="h-4 bg-slate-200 rounded w-28 mb-4" />
               <div className="flex items-end justify-between gap-3 h-40 px-1">
                 {Array.from({ length: 6 }).map((_, i) => (
@@ -498,7 +498,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user }) =
 
           {/* Attendance Summary + Notice skeleton */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            <div className="lg:col-span-2 bg-white border border-slate-200 rounded-2xl p-5 shadow-sm animate-pulse">
+            <div className="lg:col-span-2 border border-slate-200 rounded-2xl p-5 animate-pulse">
               <div className="h-4 bg-slate-200 rounded w-52 mb-4" />
               <div className="flex items-end gap-[3px] h-40 overflow-hidden">
                 {Array.from({ length: 30 }).map((_, i) => (
@@ -509,7 +509,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user }) =
                 ))}
               </div>
             </div>
-            <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm animate-pulse">
+            <div className="border border-slate-200 rounded-2xl p-5 animate-pulse">
               <div className="h-4 bg-slate-200 rounded w-16 mb-4" />
               <div className="space-y-3">
                 {Array.from({ length: 4 }).map((_, i) => (
@@ -524,7 +524,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user }) =
 
           {/* Current Leave Balance + Attendance Missed skeleton */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            <div className="lg:col-span-2 bg-white border border-slate-200 rounded-2xl p-5 shadow-sm animate-pulse">
+            <div className="lg:col-span-2 border border-slate-200 rounded-2xl p-5 animate-pulse">
               <div className="h-4 bg-slate-200 rounded w-40 mb-4" />
               <div className="space-y-2.5">
                 {Array.from({ length: 5 }).map((_, i) => (
@@ -532,7 +532,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user }) =
                 ))}
               </div>
             </div>
-            <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm opacity-70 animate-pulse">
+            <div className="border border-slate-100 rounded-2xl p-5 opacity-70 animate-pulse">
               <div className="h-4 bg-slate-200 rounded w-32 mb-4" />
               <div className="h-16 bg-slate-100 rounded-lg" />
             </div>
@@ -540,7 +540,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user }) =
 
           {/* Leave Calendar + Task Status skeleton */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            <div className="lg:col-span-2 bg-white border border-slate-200 rounded-2xl p-5 shadow-sm animate-pulse">
+            <div className="lg:col-span-2 border border-slate-200 rounded-2xl p-5 animate-pulse">
               <div className="flex items-center justify-between mb-4">
                 <div className="h-4 bg-slate-200 rounded w-28" />
                 <div className="h-6 bg-slate-100 rounded-full w-28" />
@@ -551,7 +551,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user }) =
                 ))}
               </div>
             </div>
-            <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm opacity-70 animate-pulse">
+            <div className="border border-slate-100 rounded-2xl p-5 opacity-70 animate-pulse">
               <div className="h-4 bg-slate-200 rounded w-36 mb-4" />
               <div className="h-20 bg-slate-100 rounded-lg" />
             </div>
