@@ -1949,7 +1949,7 @@ const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports",
 const PERMISSION_LAYER_KEYS = ["read", "edit_add", "entry_upload", "delete_trash", "permanent_delete"] as const;
 // Which modules currently enforce PERMISSION_LAYER_KEYS — mirrors
 // PERMISSION_LAYER_MODULES in src/types.ts. Rolled out module by module.
-const PERMISSION_LAYER_MODULES = ["departments"] as const;
+const PERMISSION_LAYER_MODULES = ["departments", "projects"] as const;
 
 // Employee Directory extended profile fields (Admin Panel -> Employees ->
 // Edit -> Employee Info / Status / Contact tabs). Single source of truth for
@@ -3610,7 +3610,7 @@ async function startServer() {
     return { lat, lng, label, radius };
   }
 
-  app.post("/api/projects", authenticateToken, requireAdmin, requireModule("projects"), async (req: any, res) => {
+  app.post("/api/projects", authenticateToken, requireAdmin, requireModule("projects"), requireModuleLayer("projects", "edit_add"), async (req: any, res) => {
     try {
       const { project_name } = req.body;
       if (!project_name) return res.status(400).json({ error: "Project name is required" });
@@ -3637,7 +3637,7 @@ async function startServer() {
     }
   });
 
-  app.put("/api/projects/:id", authenticateToken, requireAdmin, requireModule("projects"), async (req, res) => {
+  app.put("/api/projects/:id", authenticateToken, requireAdmin, requireModule("projects"), requireModuleLayer("projects", "edit_add"), async (req, res) => {
     try {
       const { id } = req.params;
       const { project_name } = req.body;
@@ -3655,7 +3655,7 @@ async function startServer() {
     }
   });
 
-  app.delete("/api/projects/:id", authenticateToken, requireAdmin, requireModule("projects"), async (req, res) => {
+  app.delete("/api/projects/:id", authenticateToken, requireAdmin, requireModule("projects"), requireModuleLayer("projects", "delete_trash"), async (req, res) => {
     try {
       const { id } = req.params;
       await queryDB("DELETE FROM user_project_permissions WHERE project_id = ?", [id]);
