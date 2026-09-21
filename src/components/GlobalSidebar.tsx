@@ -108,6 +108,11 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   const [reportsOpen, setReportsOpen] = useState(false);
   const [workforceOpen, setWorkforceOpen] = useState(false);
   const [hrOpen, setHrOpen] = useState(false);
+  // HR's own sub-groups (Attendance, Claims/Bill/Disbursement) — same
+  // independent-toggle pattern as hrmSubOpenKeys above, kept as its own
+  // state so HR's and HRM's sub-group keys never collide.
+  const [hrSubOpenKeys, setHrSubOpenKeys] = useState<Record<string, boolean>>({});
+  const toggleHrSub = (key: string) => setHrSubOpenKeys((prev) => ({ ...prev, [key]: !prev[key] }));
   const [misOpen, setMisOpen] = useState(false);
   const photoUrl = useProfilePhoto(token, photoVersion);
 
@@ -377,9 +382,17 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     // ADMIN_MODULES in types.ts.
     { key: 'leave_applications', label: 'Monthly Leave Application', icon: CalendarClock, onClick: () => onGoToAdminModule('leave_applications') },
     ...departmentsItem,
-    ...claimsItems,
-    ...attendanceItems,
-  ].filter((i) => canSeeModule(i.key as AdminModuleKey) || i.key === 'my_conveyance');
+  ].filter((i) => canSeeModule(i.key as AdminModuleKey));
+
+  // HR's own nested sub-groups — "Attendance" (Remote Attendance, Monthly
+  // Attendance Report, Office Attendance) and "Claims/Bill/Disbursement"
+  // (Movement Claims, Conveyance Bill Claim, Conveyance Disbursement, My
+  // Conveyance Bill Claim), each independently collapsible, same 2-level
+  // nested pattern as HRM's own sub-groups above.
+  const hrSubGroups: { key: string; label: string; icon: React.ComponentType<{ className?: string }>; items: NavItem[] }[] = [
+    { key: 'hr_attendance', label: 'Attendance', icon: Fingerprint, items: attendanceItems },
+    { key: 'hr_claims_bill', label: 'Claims/Bill/Disbursement', icon: CreditCard, items: claimsItems },
+  ].filter((g) => g.items.length > 0);
 
   // Auto-reveal whichever group the currently-active item lives in — every
   // group above starts collapsed (the user has to tap to open one), but that
@@ -398,6 +411,11 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     if (reportsGroup.some((i) => i.key === activeKey)) setReportsOpen(true);
     if (workforceGroup.some((i) => i.key === activeKey)) setWorkforceOpen(true);
     if (hrGroup.some((i) => i.key === activeKey)) setHrOpen(true);
+    const activeHrSub = hrSubGroups.find((g) => g.items.some((i) => i.key === activeKey));
+    if (activeHrSub) {
+      setHrOpen(true);
+      setHrSubOpenKeys((prev) => (prev[activeHrSub.key] ? prev : { ...prev, [activeHrSub.key]: true }));
+    }
     if (misGroup.some((i) => i.key === activeKey)) setMisOpen(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeKey]);
@@ -449,6 +467,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     ...reportsGroup,
     ...workforceGroup,
     ...hrGroup,
+    ...hrSubGroups.flatMap((g) => g.items),
     ...misGroup,
     ...adminFlatItems,
   ];
@@ -529,22 +548,30 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     );
   };
 
-  // "HRM" — same idea as renderGroup above, one level deeper: HRM itself
-  // expands to a list of further collapsible sub-groups (My Claim/Bill,
-  // Attendance, Leave Manage), each toggled independently via
-  // hrmSubOpenKeys/toggleHrmSub. While collapsed (desktop minimized column),
-  // falls back to every sub-group's items as one flat icon list, same as
-  // renderGroup's own collapsed fallback.
+  // "HRM"/"HR" — same idea as renderGroup above, one level deeper: the group
+  // itself expands to a list of further collapsible sub-groups (HRM: My
+  // Claim/Bill, Attendance, Leave Manage, Payroll; HR: Attendance,
+  // Claims/Bill/Disbursement), each toggled independently via its own
+  // subOpenKeys/toggleSub pair (kept separate per parent group so their sub-
+  // group keys never collide). `flatItems`, when given, renders as plain
+  // leaf buttons above the sub-groups — HR's own Approvals/Notices/Holidays/
+  // Monthly Leave Application/Departments stay flat inside HR rather than
+  // needing a sub-group of their own. While collapsed (desktop minimized
+  // column), falls back to every flat item + sub-group item as one flat icon
+  // list, same as renderGroup's own collapsed fallback.
   const renderNestedGroup = (
     subGroups: { key: string; label: string; icon: React.ComponentType<{ className?: string }>; items: NavItem[] }[],
     label: string,
     icon: React.ComponentType<{ className?: string }>,
     isOpen: boolean,
     setOpen: (fn: (o: boolean) => boolean) => void,
+    subOpenKeys: Record<string, boolean>,
+    toggleSub: (key: string) => void,
+    flatItems: NavItem[] = [],
   ) => {
-    if (subGroups.length === 0) return null;
+    if (subGroups.length === 0 && flatItems.length === 0) return null;
     if (collapsed) {
-      return <div key={label} className="space-y-0.5">{subGroups.flatMap((g) => g.items).map(renderItem)}</div>;
+      return <div key={label} className="space-y-0.5">{[...flatItems, ...subGroups.flatMap((g) => g.items)].map(renderItem)}</div>;
     }
     const GroupIcon = icon;
     return (
@@ -560,14 +587,30 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
         </button>
         {isOpen && (
           <div className="mt-0.5 ml-[13px] pl-3.5 border-l border-white/15 space-y-0.5">
+            {flatItems.map((item) => {
+              const active = item.key === activeKey;
+              return (
+                <button
+                  key={item.key}
+                  type="button"
+                  onClick={() => selectAndClose(item.onClick)}
+                  className={`w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-left transition-colors ${
+                    active ? 'bg-white/15 text-white font-semibold' : 'text-white/70 hover:bg-white/10 hover:text-white'
+                  }`}
+                >
+                  <item.icon className="w-3.5 h-3.5 shrink-0" />
+                  <span className="text-[12.5px] truncate">{item.label}</span>
+                </button>
+              );
+            })}
             {subGroups.map((g) => {
-              const subOpen = !!hrmSubOpenKeys[g.key];
+              const subOpen = !!subOpenKeys[g.key];
               const SubIcon = g.icon;
               return (
                 <div key={g.key}>
                   <button
                     type="button"
-                    onClick={() => toggleHrmSub(g.key)}
+                    onClick={() => toggleSub(g.key)}
                     className="w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-left text-white/70 hover:bg-white/10 hover:text-white transition-colors"
                   >
                     <SubIcon className="w-3.5 h-3.5 shrink-0" />
@@ -777,11 +820,11 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
 
           {!collapsed && <p className="px-2.5 mt-3 mb-1.5 text-[10px] font-semibold tracking-wide text-white/50">SELF SERVICE</p>}
           {renderGroup(jobEntryGroup, 'Job Entry', Briefcase, jobEntryOpen, setJobEntryOpen)}
-          {renderNestedGroup(hrmSubGroups, 'HRM', Users2, hrmOpen, setHrmOpen)}
+          {renderNestedGroup(hrmSubGroups, 'HRM', Users2, hrmOpen, setHrmOpen, hrmSubOpenKeys, toggleHrmSub)}
           {selfServiceItems.map(renderItem)}
 
           {(!!adminDashboardItem || reportsGroup.length > 0 || workforceGroup.length > 0 ||
-            hrGroup.length > 0 || misGroup.length > 0 || adminFlatItems.length > 0) && (
+            hrGroup.length > 0 || hrSubGroups.length > 0 || misGroup.length > 0 || adminFlatItems.length > 0) && (
             <>
               {!collapsed && <p className="px-2.5 mt-3 mb-1.5 text-[10px] font-semibold tracking-wide text-white/50">ADMIN PANEL</p>}
 
@@ -789,7 +832,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
 
               {renderGroup(reportsGroup, 'PEPM Manage', BarChart3, reportsOpen, setReportsOpen)}
               {renderGroup(workforceGroup, 'Workforce', Users, workforceOpen, setWorkforceOpen)}
-              {renderGroup(hrGroup, 'HR', ShieldCheck, hrOpen, setHrOpen)}
+              {renderNestedGroup(hrSubGroups, 'HR', ShieldCheck, hrOpen, setHrOpen, hrSubOpenKeys, toggleHrSub, hrGroup)}
               {renderGroup(misGroup, 'MIS', Server, misOpen, setMisOpen)}
 
               {adminFlatItems.map(renderItem)}
