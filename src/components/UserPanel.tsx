@@ -4783,7 +4783,12 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           Mobile is untouched (max-md:!mt-0 only ever canceled the mobile gap; the
           extra rules above only take effect at md+). */}
       {user.can_job_edit && !isNativeApp && !showingClaimsPage && desktopActiveSection === 'jobEdit' && (
-        <div className="hidden md:block">
+        // !mt-0 cancels the space-y-8 gap this still picks up from the (hidden)
+        // section before it — same reasoning as JobEditPanel's own negative
+        // margins below, just for the smaller top-only gap: without it this sat
+        // under both that mt-8 AND the container's own pt-8, a ~4rem gap above
+        // just a breadcrumb before an otherwise near-empty page.
+        <div className="hidden md:block !mt-0">
           <ModulePath path={['Main', 'Job Edits']} />
         </div>
       )}
