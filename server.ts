@@ -899,6 +899,32 @@ async function ensureSchemaMigrations() {
   } catch (err: any) {
     console.warn("⚠️ Could not ensure admin_module_permissions table exists: " + err.message);
   }
+  // Granular per-module action layers (Read Only/Edit-Add/Entry-Upload/
+  // Delete-Trash/Permanent Delete — see PERMISSION_LAYERS in src/types.ts),
+  // layered ON TOP of admin_module_permissions above: a row here is only
+  // meaningful for an account that already has module_key granted there. Set
+  // by the Superadmin (Admin Panel -> Users -> Module Access, shown once a
+  // module listed in PERMISSION_LAYER_MODULES is checked). One row per
+  // (user, module, layer) — a module with NO rows here for a given user
+  // falls back to "every layer except permanent_delete" (see
+  // requireModuleLayer() below), so granting the module alone keeps today's
+  // full-access behavior, exactly like every other module not yet on this
+  // system at all. Rolled out module by module, starting with 'departments'.
+  try {
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS admin_module_permission_layers (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        module_key VARCHAR(50) NOT NULL,
+        layer_key VARCHAR(30) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY unique_user_module_layer (user_id, module_key, layer_key),
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      )
+    `);
+  } catch (err: any) {
+    console.warn("⚠️ Could not ensure admin_module_permission_layers table exists: " + err.message);
+  }
   // Department-wise scoping for the 'attendance_reports' module only — set by
   // the Superadmin on top of admin_module_permissions (Admin Panel -> Users ->
   // Module Access -> "Attendance Report Departments", shown once
@@ -1916,6 +1942,15 @@ const USER_CLAIM_CATEGORIES = ["Transport", "Fuel", "Toll", "Parking", "Others"]
 
 const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports", "users", "attendance", "attendance_reports", "leave_applications", "recycle", "editlog", "notices", "claims", "approvals", "conveyance", "disbursement", "employees", "departments", "tracking", "office_attendance", "holidays", "payroll", "asset_management"] as const;
 
+// Granular per-module action layers — mirrors PermissionLayerKey/
+// PERMISSION_LAYERS in src/types.ts (single source of truth is duplicated
+// here, not imported, same convention as ADMIN_MODULE_KEYS/ADMIN_MODULES
+// above — this file has no import of the frontend's types.ts).
+const PERMISSION_LAYER_KEYS = ["read", "edit_add", "entry_upload", "delete_trash", "permanent_delete"] as const;
+// Which modules currently enforce PERMISSION_LAYER_KEYS — mirrors
+// PERMISSION_LAYER_MODULES in src/types.ts. Rolled out module by module.
+const PERMISSION_LAYER_MODULES = ["departments"] as const;
+
 // Employee Directory extended profile fields (Admin Panel -> Employees ->
 // Edit -> Employee Info / Status / Contact tabs). Single source of truth for
 // column names — used to build the ALTER TABLE migration above and the
@@ -1964,6 +1999,40 @@ async function getAdminModules(userId: number): Promise<string[]> {
     return rows.map((r: any) => r.module_key);
   } catch {
     return [];
+  }
+}
+
+// The layers explicitly granted for one (user, module) pair — NOT the
+// effective set (see requireModuleLayer()'s fallback for that); an empty
+// array here just means no rows exist yet, which the caller interprets.
+async function getModulePermissionLayersForModule(userId: number, moduleKey: string): Promise<string[]> {
+  try {
+    const rows: any = await queryDB(
+      "SELECT layer_key FROM admin_module_permission_layers WHERE user_id = ? AND module_key = ?",
+      [userId, moduleKey]
+    );
+    return rows.map((r: any) => r.layer_key);
+  } catch {
+    return [];
+  }
+}
+
+// Every (module -> layers[]) row for this account in one query — used to
+// serialize module_permission_layers on login/me/the Users list, same shape
+// as getAdminModules()'s modulesByUser grouping in UserManagement.ts.
+async function getAllModulePermissionLayers(userId: number): Promise<Record<string, string[]>> {
+  try {
+    const rows: any = await queryDB(
+      "SELECT module_key, layer_key FROM admin_module_permission_layers WHERE user_id = ?",
+      [userId]
+    );
+    const byModule: Record<string, string[]> = {};
+    for (const row of rows) {
+      (byModule[row.module_key] ||= []).push(row.layer_key);
+    }
+    return byModule;
+  } catch {
+    return {};
   }
 }
 
@@ -3137,6 +3206,44 @@ async function startServer() {
     }
   };
 
+  // Per-module ACTION gate (Read Only/Edit-Add/Entry-Upload/Delete-Trash/
+  // Permanent Delete — see PERMISSION_LAYER_KEYS above), layered on top of
+  // requireModule(moduleKey): a Superadmin always passes; an Admin/User must
+  // already have moduleKey itself granted (same check requireModule does)
+  // AND, if that module is one of PERMISSION_LAYER_MODULES, have `layer`
+  // explicitly granted too. A module NOT in PERMISSION_LAYER_MODULES yet
+  // ignores `layer` entirely (unaffected, old coarse on/off behavior). For a
+  // module that IS in PERMISSION_LAYER_MODULES but has NO layer rows at all
+  // recorded for this account, falls back to "every layer except
+  // permanent_delete" — preserves full access for every account already
+  // granted that module before this feature existed, so turning this system
+  // on for a module is never a silent regression; a Superadmin only actually
+  // restricts anything once they explicitly save a narrower set in the
+  // Module Access modal.
+  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number]) =>
+    async (req: any, res: any, next: any) => {
+      if (!req.user) return res.status(401).json({ error: "Access token required" });
+      if (req.user.role === "superadmin") return next();
+      if (req.user.role !== "admin" && req.user.role !== "user") return res.status(403).json({ error: "Admin access required" });
+      try {
+        const modules = await getAdminModules(req.user.id);
+        if (!modules.includes(moduleKey)) {
+          return res.status(403).json({ error: "You don't have access to this section. Ask your Superadmin to grant it." });
+        }
+        if (!(PERMISSION_LAYER_MODULES as readonly string[]).includes(moduleKey)) return next();
+        const grantedLayers = await getModulePermissionLayersForModule(req.user.id, moduleKey);
+        const effectiveLayers = grantedLayers.length > 0
+          ? grantedLayers
+          : PERMISSION_LAYER_KEYS.filter((k) => k !== "permanent_delete");
+        if (!effectiveLayers.includes(layer)) {
+          return res.status(403).json({ error: "You don't have permission to do this. Ask your Superadmin to grant it." });
+        }
+        next();
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
+      }
+    };
+
   // Personal Data / profile-photo routes — kept in their own file
   // (profileRoutes.ts) instead of growing this already-huge file further.
   registerProfileRoutes(app, { authenticateToken, queryDB });
@@ -3153,13 +3260,13 @@ async function startServer() {
   // User Management (Admin Panel -> Users) — kept in their own file
   // (UserManagement.ts), same reasoning as profileRoutes.ts/holidayRoutes.ts/
   // Alerts.ts above.
-  registerUserManagementRoutes(app, { authenticateToken, requireAdmin, requireSuperAdmin, requireModuleGrantAccess, requireModule, queryDB, adminModuleKeys: ADMIN_MODULE_KEYS });
+  registerUserManagementRoutes(app, { authenticateToken, requireAdmin, requireSuperAdmin, requireModuleGrantAccess, requireModule, queryDB, adminModuleKeys: ADMIN_MODULE_KEYS, permissionLayerKeys: PERMISSION_LAYER_KEYS, permissionLayerModules: PERMISSION_LAYER_MODULES });
 
   // Departments (Admin Panel -> Departments) + Branches (Admin Panel ->
   // Branches) — kept in their own file (DepartmentsAndBranches.ts), same
   // reasoning as profileRoutes.ts/holidayRoutes.ts/Alerts.ts/UserManagement.ts
   // above.
-  registerDepartmentsAndBranchesRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB });
+  registerDepartmentsAndBranchesRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, queryDB });
 
   // Server Profiles (Admin Panel -> Servers) — kept in their own file
   // (ServerProfileRoutes.ts), same reasoning as profileRoutes.ts/
@@ -3394,7 +3501,9 @@ async function startServer() {
           // So the Admin Panel can show/hide tabs right after login, before any
           // other fetch. Empty for Users and for Superadmin (who has every module
           // implicitly, not through explicit grants).
-          module_permissions: (user.role === "admin" || user.role === "user") ? await getAdminModules(user.id) : []
+          module_permissions: (user.role === "admin" || user.role === "user") ? await getAdminModules(user.id) : [],
+          // Same reasoning, one level more granular — see PERMISSION_LAYER_MODULES.
+          module_permission_layers: (user.role === "admin" || user.role === "user") ? await getAllModulePermissionLayers(user.id) : {}
         }
       });
     } catch (err: any) {
@@ -3428,7 +3537,8 @@ async function startServer() {
         can_view_leave_application: u.role === "superadmin" ? true : !!Number(u.can_view_leave_application),
         can_view_my_leave: u.role === "superadmin" ? true : !!Number(u.can_view_my_leave),
         can_grant_module_access: u.role === "admin" ? !!Number(u.can_grant_module_access) : false,
-        module_permissions: (u.role === "admin" || u.role === "user") ? await getAdminModules(u.id) : []
+        module_permissions: (u.role === "admin" || u.role === "user") ? await getAdminModules(u.id) : [],
+        module_permission_layers: (u.role === "admin" || u.role === "user") ? await getAllModulePermissionLayers(u.id) : {}
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message });

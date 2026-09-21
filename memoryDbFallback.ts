@@ -18,6 +18,7 @@ export const memoryDb = {
   material_categories: [] as any[],
   rate_file_meta: null as any,
   adminModulePermissions: [] as any[],
+  adminModulePermissionLayers: [] as any[],
   attendance: [] as any[],
   location_pings: [] as any[],
   notices: [] as any[],
@@ -372,6 +373,47 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
     const [userId, moduleKey] = params;
     memoryDb.adminModulePermissions.push({ user_id: Number(userId), module_key: moduleKey });
     return { insertId: memoryDb.adminModulePermissions.length };
+  }
+
+  // ADMIN MODULE PERMISSION LAYERS (Superadmin -> per-module Read Only/Edit-
+  // Add/Entry-Upload/Delete-Trash/Permanent Delete, layered on top of the
+  // grant above)
+  if (lowerSql.startsWith("select layer_key from admin_module_permission_layers where user_id")) {
+    const [userId, moduleKey] = params;
+    return memoryDb.adminModulePermissionLayers
+      .filter((r: any) => r.user_id === Number(userId) && r.module_key === moduleKey)
+      .map((r: any) => ({ layer_key: r.layer_key }));
+  }
+  if (lowerSql.startsWith("select module_key, layer_key from admin_module_permission_layers where user_id")) {
+    const userId = Number(params[0]);
+    return memoryDb.adminModulePermissionLayers
+      .filter((r: any) => r.user_id === userId)
+      .map((r: any) => ({ module_key: r.module_key, layer_key: r.layer_key }));
+  }
+  if (lowerSql.startsWith("select user_id, module_key, layer_key from admin_module_permission_layers")) {
+    return memoryDb.adminModulePermissionLayers.map((r: any) => ({ user_id: r.user_id, module_key: r.module_key, layer_key: r.layer_key }));
+  }
+  if (lowerSql.startsWith("delete from admin_module_permission_layers where user_id")) {
+    // Two shapes share this prefix: "...WHERE user_id = ?" alone (role
+    // demote — wipe every module's layers for this account) and "...WHERE
+    // user_id = ? AND module_key = ?" (Module Access save — wipe just one
+    // module's layers). Distinguished by param count, not text, since one
+    // query string is a prefix of the other.
+    const userId = Number(params[0]);
+    if (params.length >= 2) {
+      const moduleKey = params[1];
+      memoryDb.adminModulePermissionLayers = memoryDb.adminModulePermissionLayers.filter(
+        (r: any) => !(r.user_id === userId && r.module_key === moduleKey)
+      );
+    } else {
+      memoryDb.adminModulePermissionLayers = memoryDb.adminModulePermissionLayers.filter((r: any) => r.user_id !== userId);
+    }
+    return { affectedRows: 1 };
+  }
+  if (lowerSql.startsWith("insert into admin_module_permission_layers")) {
+    const [userId, moduleKey, layerKey] = params;
+    memoryDb.adminModulePermissionLayers.push({ user_id: Number(userId), module_key: moduleKey, layer_key: layerKey });
+    return { insertId: memoryDb.adminModulePermissionLayers.length };
   }
 
   // PROJECTS

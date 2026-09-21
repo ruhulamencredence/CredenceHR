@@ -5,7 +5,7 @@ import autoTable from 'jspdf-autotable';
 import credenceLogo from '../assets/credence-logo.png';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
 import { savePdfCrossPlatform } from '../lib/saveFile';
-import { Project, Branch, MprNumber, Entry, User, Budget, BudgetItem, BudgetSubmission, UserProjectPermission, EntryEditHistory, EntryPermanentDeleteLog, BulkUserRow, BulkUserResultItem, AdminModuleKey, ADMIN_MODULES, AttendanceRecord, ClaimsNavRequest, AdminNavRequest, Department, LeaveApplication, PendingJobEdit } from '../types';
+import { Project, Branch, MprNumber, Entry, User, Budget, BudgetItem, BudgetSubmission, UserProjectPermission, EntryEditHistory, EntryPermanentDeleteLog, BulkUserRow, BulkUserResultItem, AdminModuleKey, ADMIN_MODULES, PermissionLayerKey, PERMISSION_LAYERS, PERMISSION_LAYER_MODULES, AttendanceRecord, ClaimsNavRequest, AdminNavRequest, Department, LeaveApplication, PendingJobEdit } from '../types';
 import { Building2, FileText, Users, Users2, BarChart3, Plus, Trash2, Edit2, Search, Filter, UserCheck, Calendar, CalendarClock, Download, Upload, FolderPlus, X, Eye, FileSpreadsheet, KeyRound, History, RotateCcw, Recycle, ListChecks, FileDown, MapPin, LayoutGrid, Navigation, LogIn, LogOut, Bell, Route, ShieldCheck, Wallet, Contact, Lock, Unlock, Mail, CheckCircle2, XCircle, Clock3, ShieldAlert } from 'lucide-react';
 import LocationMapPicker from './LocationMapPicker';
 import { NoticeManager } from './NoticeManager';
@@ -351,6 +351,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // Superadmin types — cleared whenever a fresh Module Access modal opens
   // (see setManagingModulesFor(...) call sites).
   const [moduleSearchQuery, setModuleSearchQuery] = useState('');
+  // Granular per-module action layers (Read Only/Edit-Add/Entry-Upload/
+  // Delete-Trash/Permanent Delete) — only meaningful for modules listed in
+  // PERMISSION_LAYER_MODULES (currently just 'departments'), shown as an
+  // extra checkbox row once that module's own checkbox above is ticked. One
+  // Set per module key, keyed by AdminModuleKey. Initialized in
+  // openManageModules below.
+  const [moduleLayers, setModuleLayers] = useState<Record<string, Set<PermissionLayerKey>>>({});
   // Department-wise scope for the 'attendance_reports' module only — layered
   // on top of the checkbox above (see PUT /api/users/:id/attendance-report-
   // departments). Empty set = unrestricted (every Department visible), same
@@ -397,6 +404,25 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     setLeaveApplicationAccessEnabled(!!u.can_view_leave_application);
     setMyLeaveAccessEnabled(!!u.can_view_my_leave);
     setModuleSearchQuery('');
+    // Permission layers — one Set per module in PERMISSION_LAYER_MODULES.
+    // Explicit saved rows win; a module this account already has granted
+    // (u.module_permissions) but with NO saved layer rows yet falls back to
+    // "every layer except Permanent Delete" (mirrors requireModuleLayer()'s
+    // server-side default, so the checkboxes shown here always match what's
+    // actually enforced) — a module not yet granted starts with nothing
+    // checked.
+    const initialLayers: Record<string, Set<PermissionLayerKey>> = {};
+    for (const moduleKey of PERMISSION_LAYER_MODULES) {
+      const saved = u.module_permission_layers?.[moduleKey];
+      if (saved && saved.length > 0) {
+        initialLayers[moduleKey] = new Set(saved);
+      } else if ((u.module_permissions || []).includes(moduleKey)) {
+        initialLayers[moduleKey] = new Set(PERMISSION_LAYERS.map((l) => l.key).filter((k) => k !== 'permanent_delete'));
+      } else {
+        initialLayers[moduleKey] = new Set();
+      }
+    }
+    setModuleLayers(initialLayers);
     setManagingModulesFor(u);
 
     // Attendance Report Department scope — fetched fresh every time this
@@ -504,6 +530,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     });
   };
 
+  const toggleModuleLayer = (moduleKey: AdminModuleKey, layer: PermissionLayerKey) => {
+    setModuleLayers((prev) => {
+      const current = new Set(prev[moduleKey] || []);
+      if (current.has(layer)) current.delete(layer);
+      else current.add(layer);
+      return { ...prev, [moduleKey]: current };
+    });
+  };
+
   const handleSaveModulePermissions = async () => {
     if (!managingModulesFor) return;
     setSavingModules(true);
@@ -515,6 +550,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to update module access');
+
+      // Permission layers (Read Only/Edit-Add/Entry-Upload/Delete-Trash/
+      // Permanent Delete) for each module that supports them — same "only
+      // meaningful/only saved while the module checkbox is ticked" rule as
+      // the Department-scope blocks just below.
+      for (const moduleKey of PERMISSION_LAYER_MODULES) {
+        if (!selectedModules.has(moduleKey)) continue;
+        const layerRes = await fetch(apiUrl(`/api/users/${managingModulesFor.id}/module-permission-layers`), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ module: moduleKey, layers: Array.from(moduleLayers[moduleKey] || []) })
+        });
+        const layerData = await layerRes.json();
+        if (!layerRes.ok) throw new Error(layerData.error || `Failed to update permission layers for ${moduleKey}`);
+      }
 
       // Department-wise scope for the 'attendance_reports' module — only
       // meaningful (and only saved) while that module is actually checked
@@ -6548,6 +6598,35 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                             />
                             <span className="text-sm font-medium text-slate-900">{m.label}</span>
                           </label>
+                          {(PERMISSION_LAYER_MODULES as readonly AdminModuleKey[]).includes(m.key) && selectedModules.has(m.key) && (
+                            <div className="ml-2 mt-1 mb-1 p-3 bg-violet-50 border border-violet-200 rounded-xl">
+                              <p className="text-[11px] font-semibold text-slate-700 flex items-center gap-1.5 mb-1">
+                                <ShieldCheck className="w-3.5 h-3.5 text-violet-600" />
+                                Permission Layers for {m.label}
+                              </p>
+                              <p className="text-[11px] text-slate-500 mb-2">
+                                Choose exactly what {managingModulesFor?.role === 'user' ? 'this User' : 'this Admin'} may
+                                do inside {m.label} — any combination. Leaving all of these unchecked (while the module
+                                itself stays checked above) blocks every action here.
+                              </p>
+                              <div className="grid grid-cols-2 gap-1.5">
+                                {PERMISSION_LAYERS.map((layer) => (
+                                  <label
+                                    key={layer.key}
+                                    className="flex items-center gap-2 px-2.5 py-1.5 bg-white border border-violet-100 rounded-lg cursor-pointer hover:bg-violet-100/40"
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={(moduleLayers[m.key] || new Set()).has(layer.key)}
+                                      onChange={() => toggleModuleLayer(m.key, layer.key)}
+                                      className="w-3.5 h-3.5 rounded border-slate-300 text-violet-600 focus:ring-violet-600 cursor-pointer"
+                                    />
+                                    <span className="text-xs text-slate-800">{layer.label}</span>
+                                  </label>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                           {m.key === 'attendance_reports' && selectedModules.has('attendance_reports') && (
                             <div className="ml-2 mt-1 mb-1 p-3 bg-amber-50 border border-amber-200 rounded-xl">
                               <p className="text-[11px] font-semibold text-slate-700 flex items-center gap-1.5 mb-1">
