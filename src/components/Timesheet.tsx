@@ -365,8 +365,12 @@ export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceP
   return (
     <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900" style={{ background: 'var(--g-bg-gradient)' }}>
       <div className="w-full px-2 sm:px-6 lg:px-8 pt-3 pb-8">
+        {/* Breadcrumb is desktop-only: hidden on the APK (isNativeApp) and,
+            via hidden md:block, on a narrow browser window too — the mobile
+            layout shows "Timesheet" in the header instead, so the
+            "Self Service / Timesheet" path is redundant there. */}
         {!isNativeApp && (
-          <div className="px-2 sm:px-0">
+          <div className="hidden md:block px-2 sm:px-0">
             <ModulePath path={['Self Service', 'Timesheet']} />
           </div>
         )}
