@@ -1,12 +1,17 @@
 package com.mprtracker.app;
 
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.view.WindowManager;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebView;
 import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.BridgeWebViewClient;
@@ -23,6 +28,23 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        // Set up edge-to-edge natively, synchronously, right here -- rather
+        // than solely relying on App.tsx's StatusBar.setOverlaysWebView({
+        // overlay: true }), which only runs later (async, from JS, after the
+        // bundle has loaded). On some devices/timings the window's real
+        // insets were still being computed with decorFitsSystemWindows still
+        // true when our own insets listener below first fired, so it
+        // captured a stale/zero value that never got corrected -- these two
+        // calls guarantee the window is already in its final edge-to-edge
+        // state before the very first insets dispatch, on top of what the
+        // theme's windowLayoutInDisplayCutoutMode="shortEdges" already sets.
+        WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            WindowManager.LayoutParams attrs = getWindow().getAttributes();
+            attrs.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+            getWindow().setAttributes(attrs);
+        }
 
         webView = this.bridge.getWebView();
         appServerUrl = this.bridge.getServerUrl();
@@ -70,6 +92,17 @@ public class MainActivity extends BridgeActivity {
                 // definitely ready, so the CSS variable it sets always ends
                 // up applied at least once per load.
                 ViewCompat.requestApplyInsets(webView);
+                // Belt-and-braces: on a few OEM skins the FIRST insets
+                // dispatch after a fresh page load still lands before the
+                // window has fully settled into its edge-to-edge layout,
+                // carrying a stale (often 0) value that never gets
+                // corrected because nothing changes again afterward. One
+                // more request half a second later re-reads whatever the
+                // window's real insets are by then and re-injects them --
+                // a no-op (same value written twice) everywhere else.
+                new Handler(Looper.getMainLooper()).postDelayed(
+                    () -> ViewCompat.requestApplyInsets(webView), 500
+                );
             }
         });
 
@@ -96,6 +129,20 @@ public class MainActivity extends BridgeActivity {
             int bottomPx = insets.getInsets(
                 WindowInsetsCompat.Type.navigationBars() | WindowInsetsCompat.Type.displayCutout()
             ).bottom;
+            // Some heavily-customized OEM skins report a wrong (often 0)
+            // status bar inset through the modern WindowInsetsCompat API for
+            // their own non-standard status bar implementation, even with
+            // decorFitsSystemWindows/windowLayoutInDisplayCutoutMode both set
+            // correctly above. android:dimen/status_bar_height is a much
+            // older, internal-but-stable resource that's still present (and
+            // still accurate) on virtually every Android build, including
+            // those, since too much legacy platform/OEM code still depends
+            // on it directly -- used here only as a floor, never lowering
+            // whatever the modern API already got right.
+            int legacyStatusBarResId = getResources().getIdentifier("status_bar_height", "dimen", "android");
+            if (legacyStatusBarResId > 0) {
+                topPx = Math.max(topPx, getResources().getDimensionPixelSize(legacyStatusBarResId));
+            }
             float density = getResources().getDisplayMetrics().density;
             float topCssPx = density > 0 ? topPx / density : topPx;
             float bottomCssPx = density > 0 ? bottomPx / density : bottomPx;
