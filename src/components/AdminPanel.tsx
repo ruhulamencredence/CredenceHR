@@ -33,18 +33,32 @@ import { useBackButtonClose } from '../lib/useBackButtonClose';
 
 // Module Access modal (Admin Panel -> Users -> per-Admin/User "Module
 // Access") groups the same Admin Panel tabs into the same labeled clusters
-// the Navbar's own "PEPM Manage" / "Manage" / "Workforce" header dropdowns
-// use, so granting access reads the same way it's navigated. Projects stays
-// under "Manage" (Navbar's own grouping), not PEPM. Any ADMIN_MODULES key
-// not listed under one of these falls into "Other" automatically.
+// GlobalSidebar.tsx itself uses (PEPM Manage / HR + its own nested
+// Attendance, Claims/Bill/Disbursement and Employee sub-groups / MIS /
+// Payroll), so granting access reads the same way it's navigated in the
+// sidebar. HR's sub-groups are flattened into their own "HR - ..." labels
+// here since this list has no nested-group UI. Any ADMIN_MODULES key not
+// listed under one of these falls into "Other" automatically.
 const MODULE_ACCESS_GROUPS: { label: string; keys: AdminModuleKey[] }[] = [
-  { label: 'PEPM Manage', keys: ['reports', 'mprs', 'imports', 'editlog', 'recycle'] },
-  { label: 'Manage', keys: ['projects', 'branches', 'users', 'employees', 'notices'] },
-  { label: 'Workforce', keys: ['approvals', 'tracking', 'holidays'] },
+  { label: 'PEPM Manage', keys: ['reports', 'mprs', 'imports', 'recycle', 'editlog'] },
+  { label: 'HR', keys: ['approvals', 'notices', 'holidays', 'leave_applications', 'departments'] },
+  { label: 'HR - Attendance', keys: ['attendance', 'attendance_reports', 'office_attendance'] },
+  { label: 'HR - Claims/Bill/Disbursement', keys: ['claims', 'conveyance', 'disbursement'] },
+  { label: 'HR - Employee', keys: ['employees', 'tracking', 'asset_management'] },
+  { label: 'MIS', keys: ['users', 'projects', 'branches'] },
+  { label: 'Payroll', keys: ['payroll'] },
   {
     label: 'Other',
     keys: ADMIN_MODULES.map((m) => m.key).filter(
-      (key) => !['reports', 'mprs', 'imports', 'editlog', 'recycle', 'projects', 'branches', 'users', 'employees', 'notices', 'approvals', 'tracking', 'holidays'].includes(key)
+      (key) => ![
+        'reports', 'mprs', 'imports', 'recycle', 'editlog',
+        'approvals', 'notices', 'holidays', 'leave_applications', 'departments',
+        'attendance', 'attendance_reports', 'office_attendance',
+        'claims', 'conveyance', 'disbursement',
+        'employees', 'tracking', 'asset_management',
+        'users', 'projects', 'branches',
+        'payroll',
+      ].includes(key)
     )
   }
 ];
@@ -333,6 +347,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [newEmailInput, setNewEmailInput] = useState('');
   const [changingEmail, setChangingEmail] = useState(false);
   const [selectedModules, setSelectedModules] = useState<Set<AdminModuleKey>>(new Set());
+  // Filters the "Admin Module" checkbox list below by label as the
+  // Superadmin types — cleared whenever a fresh Module Access modal opens
+  // (see setManagingModulesFor(...) call sites).
+  const [moduleSearchQuery, setModuleSearchQuery] = useState('');
   // Department-wise scope for the 'attendance_reports' module only — layered
   // on top of the checkbox above (see PUT /api/users/:id/attendance-report-
   // departments). Empty set = unrestricted (every Department visible), same
@@ -378,6 +396,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     setTimesheetAccessEnabled(!!u.can_view_timesheet);
     setLeaveApplicationAccessEnabled(!!u.can_view_leave_application);
     setMyLeaveAccessEnabled(!!u.can_view_my_leave);
+    setModuleSearchQuery('');
     setManagingModulesFor(u);
 
     // Attendance Report Department scope — fetched fresh every time this
@@ -6498,8 +6517,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 {managingModulesFor.role === 'user' && ' They\'ll keep their normal User Panel too, with a switcher to open these tabs.'}
                 {' '}Unchecked tabs are hidden for them, and the matching API routes are blocked server-side too.
               </p>
+              <div className="relative mb-3">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={moduleSearchQuery}
+                  onChange={(e) => setModuleSearchQuery(e.target.value)}
+                  placeholder="Search modules…"
+                  className="w-full pl-9 pr-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-blue-600"
+                />
+              </div>
               {MODULE_ACCESS_GROUPS.map((group) => {
-                const groupModules = ADMIN_MODULES.filter((m) => group.keys.includes(m.key));
+                const moduleQuery = moduleSearchQuery.trim().toLowerCase();
+                const groupModules = ADMIN_MODULES.filter((m) => group.keys.includes(m.key) && m.label.toLowerCase().includes(moduleQuery));
                 if (groupModules.length === 0) return null;
                 return (
                   <div key={group.label} className="mb-3">
