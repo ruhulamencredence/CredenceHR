@@ -61,7 +61,7 @@ interface GlobalSidebarProps {
   // module_permissions (a Superadmin always sees all of them).
   // 'my_conveyance' is the one exception below: not its own module_permissions
   // entry, just the "My Conveyance Bill Claim" sub-view shown alongside
-  // 'conveyance' in claimsGroup, gated on the same 'conveyance' grant.
+  // 'conveyance' in the HR group, gated on the same 'conveyance' grant.
   onGoToAdminModule: (target: Exclude<AdminModuleKey, 'claims' | 'conveyance'> | 'my_conveyance' | 'dashboard' | 'servers' | 'permanent_delete_log') => void;
   // Android APK build info modal — previously a header icon, moved in here so
   // the header itself can stay down to just hamburger + profile + logout.
@@ -106,9 +106,6 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   const [hrmSubOpenKeys, setHrmSubOpenKeys] = useState<Record<string, boolean>>({});
   const toggleHrmSub = (key: string) => setHrmSubOpenKeys((prev) => ({ ...prev, [key]: !prev[key] }));
   const [reportsOpen, setReportsOpen] = useState(false);
-  const [claimsOpen, setClaimsOpen] = useState(false);
-  const [attendanceOpen, setAttendanceOpen] = useState(false);
-  const [orgOpen, setOrgOpen] = useState(false);
   const [workforceOpen, setWorkforceOpen] = useState(false);
   const [hrOpen, setHrOpen] = useState(false);
   const [misOpen, setMisOpen] = useState(false);
@@ -317,11 +314,10 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     { key: 'editlog', label: 'MPR Edit Log', icon: History, onClick: () => onGoToAdminModule('editlog') },
   ].filter((i) => canSeeModule(i.key as AdminModuleKey));
 
-  // "Claims" group (expandable, same pattern as Reports above) — was three
-  // separate flat items (Movement Claims, Conveyance Bill Claim, Conveyance
-  // Disbursement); grouped under one collapsible header now that there are
-  // three of them, instead of each sitting loose in the flat admin list.
-  const claimsGroup: NavItem[] = [
+  // "Claims" — Movement Claims, Conveyance Bill Claim, Conveyance
+  // Disbursement. No longer its own collapsible group — merged as flat
+  // items into "HR" below.
+  const claimsItems: NavItem[] = [
     { key: 'claims', label: 'Movement Claims', icon: Route, onClick: () => onGoToAdminClaims('claims') },
     { key: 'conveyance', label: 'Conveyance Bill Claim', icon: CreditCard, onClick: () => onGoToAdminClaims('conveyance') },
     { key: 'disbursement', label: 'Conveyance Disbursement', icon: Banknote, onClick: () => onGoToAdminModule('disbursement') },
@@ -332,7 +328,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // their own record (the tab above shows everyone ELSE's, and this account
   // may not have User Panel/can_view_conveyance_claims access at all).
   if (canSeeModule('conveyance')) {
-    claimsGroup.push({
+    claimsItems.push({
       key: 'my_conveyance',
       label: 'My Conveyance Bill Claim',
       icon: Wallet,
@@ -340,25 +336,23 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     });
   }
 
-  // "Attendance" group (expandable, same pattern as Claims above) — was
-  // three separate flat items (Remote Attendance, Monthly Attendance Report,
-  // Office Attendance); grouped under one collapsible header now that there
-  // are three of them, instead of each sitting loose in the flat admin list.
-  const attendanceGroup: NavItem[] = [
+  // "Attendance" — Remote Attendance, Monthly Attendance Report, Office
+  // Attendance. No longer its own collapsible group — merged as flat items
+  // into "HR" below.
+  const attendanceItems: NavItem[] = [
     { key: 'attendance', label: 'Remote Attendance', icon: Navigation, onClick: () => onGoToAdminModule('attendance') },
     { key: 'attendance_reports', label: 'Monthly Attendance Report', icon: Calendar, onClick: () => onGoToAdminModule('attendance_reports') },
     { key: 'office_attendance', label: 'Office Attendance', icon: Fingerprint, onClick: () => onGoToAdminModule('office_attendance') },
   ].filter((i) => canSeeModule(i.key as AdminModuleKey));
 
-  // The rest of the Admin Panel's modules, grouped into categories (same
-  // collapsible-group pattern as PEPM Manage/Claims/Attendance above)
-  // instead of one long flat list — easier to scan once "Employees",
-  // "Departments", "Notices" etc. all sit loose together.
-
-  // "Organization" — company structure/setup.
-  const orgGroup: NavItem[] = [
+  // "Organization" — Projects, Branches. No longer its own collapsible
+  // group — Projects/Branches merged into "MIS" below, Departments merged
+  // into "HR" below.
+  const orgItems: NavItem[] = [
     { key: 'projects', label: 'Projects', icon: Building2, onClick: () => onGoToAdminModule('projects') },
     { key: 'branches', label: 'Branches', icon: Building2, onClick: () => onGoToAdminModule('branches') },
+  ].filter((i) => canSeeModule(i.key as AdminModuleKey));
+  const departmentsItem: NavItem[] = [
     { key: 'departments', label: 'Departments', icon: Users2, onClick: () => onGoToAdminModule('departments') },
   ].filter((i) => canSeeModule(i.key as AdminModuleKey));
 
@@ -370,7 +364,9 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     { key: 'asset_management', label: 'Asset Management', icon: Package, onClick: () => onGoToAdminModule('asset_management') },
   ].filter((i) => canSeeModule(i.key as AdminModuleKey));
 
-  // "HR" — approvals, notices, holidays, leave reporting.
+  // "HR" — approvals, notices, holidays, leave reporting, plus Departments
+  // (from the dissolved Organization group) and every item from the
+  // dissolved Claims/Attendance groups.
   const hrGroup: NavItem[] = [
     { key: 'approvals', label: 'Approvals', icon: ShieldCheck, onClick: () => onGoToAdminModule('approvals') },
     { key: 'notices', label: 'Notices', icon: Bell, onClick: () => onGoToAdminModule('notices') },
@@ -380,7 +376,10 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     // Manage" item and from the "Leave Approvals" item above) — see
     // ADMIN_MODULES in types.ts.
     { key: 'leave_applications', label: 'Monthly Leave Application', icon: CalendarClock, onClick: () => onGoToAdminModule('leave_applications') },
-  ].filter((i) => canSeeModule(i.key as AdminModuleKey));
+    ...departmentsItem,
+    ...claimsItems,
+    ...attendanceItems,
+  ].filter((i) => canSeeModule(i.key as AdminModuleKey) || i.key === 'my_conveyance');
 
   // Auto-reveal whichever group the currently-active item lives in — every
   // group above starts collapsed (the user has to tap to open one), but that
@@ -397,23 +396,22 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
       setHrmSubOpenKeys((prev) => (prev[activeHrmSub.key] ? prev : { ...prev, [activeHrmSub.key]: true }));
     }
     if (reportsGroup.some((i) => i.key === activeKey)) setReportsOpen(true);
-    if (claimsGroup.some((i) => i.key === activeKey)) setClaimsOpen(true);
-    if (attendanceGroup.some((i) => i.key === activeKey)) setAttendanceOpen(true);
-    if (orgGroup.some((i) => i.key === activeKey)) setOrgOpen(true);
     if (workforceGroup.some((i) => i.key === activeKey)) setWorkforceOpen(true);
     if (hrGroup.some((i) => i.key === activeKey)) setHrOpen(true);
     if (misGroup.some((i) => i.key === activeKey)) setMisOpen(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeKey]);
 
-  // "MIS" — Users + Servers grouped together. "Servers" (Admin Panel tab,
-  // full catalog CRUD) is Superadmin-only on any platform (this is the
-  // WEB-oriented management surface — see ServerProfilesPanel.tsx) and not a
-  // grantable module_permissions item like most other items, so it's gated
-  // directly on isSuperAdmin rather than canSeeModule. "Users" keeps its
-  // normal canSeeModule gate (moved here from Workforce above).
+  // "MIS" — Users + Servers, plus Projects/Branches (from the dissolved
+  // Organization group). "Servers" (Admin Panel tab, full catalog CRUD) is
+  // Superadmin-only on any platform (this is the WEB-oriented management
+  // surface — see ServerProfilesPanel.tsx) and not a grantable
+  // module_permissions item like most other items, so it's gated directly
+  // on isSuperAdmin rather than canSeeModule. Everything else here keeps its
+  // normal canSeeModule gate.
   const misGroup: NavItem[] = [
     { key: 'users', label: 'Users', icon: Users, onClick: () => onGoToAdminModule('users') },
+    ...orgItems,
   ].filter((i) => canSeeModule(i.key as AdminModuleKey));
   if (isSuperAdmin) {
     misGroup.push({ key: 'servers', label: 'Servers', icon: Server, onClick: () => onGoToAdminModule('servers') });
@@ -449,9 +447,6 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     ...selfServiceItems,
     ...(adminDashboardItem ? [adminDashboardItem] : []),
     ...reportsGroup,
-    ...claimsGroup,
-    ...attendanceGroup,
-    ...orgGroup,
     ...workforceGroup,
     ...hrGroup,
     ...misGroup,
@@ -785,17 +780,14 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
           {renderNestedGroup(hrmSubGroups, 'HRM', Users2, hrmOpen, setHrmOpen)}
           {selfServiceItems.map(renderItem)}
 
-          {(!!adminDashboardItem || reportsGroup.length > 0 || claimsGroup.length > 0 || attendanceGroup.length > 0 ||
-            orgGroup.length > 0 || workforceGroup.length > 0 || hrGroup.length > 0 || misGroup.length > 0 || adminFlatItems.length > 0) && (
+          {(!!adminDashboardItem || reportsGroup.length > 0 || workforceGroup.length > 0 ||
+            hrGroup.length > 0 || misGroup.length > 0 || adminFlatItems.length > 0) && (
             <>
               {!collapsed && <p className="px-2.5 mt-3 mb-1.5 text-[10px] font-semibold tracking-wide text-white/50">ADMIN PANEL</p>}
 
               {adminDashboardItem && renderItem(adminDashboardItem)}
 
               {renderGroup(reportsGroup, 'PEPM Manage', BarChart3, reportsOpen, setReportsOpen)}
-              {renderGroup(claimsGroup, 'Claims', CreditCard, claimsOpen, setClaimsOpen)}
-              {renderGroup(attendanceGroup, 'Attendance', Fingerprint, attendanceOpen, setAttendanceOpen)}
-              {renderGroup(orgGroup, 'Organization', Building2, orgOpen, setOrgOpen)}
               {renderGroup(workforceGroup, 'Workforce', Users, workforceOpen, setWorkforceOpen)}
               {renderGroup(hrGroup, 'HR', ShieldCheck, hrOpen, setHrOpen)}
               {renderGroup(misGroup, 'MIS', Server, misOpen, setMisOpen)}
