@@ -665,7 +665,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
 
         </nav>
 
-        <div className="p-3 pb-[calc(env(safe-area-inset-bottom,0px)+12px)] space-y-2">
+        <div className="p-3 pb-[calc(var(--native-safe-area-inset-bottom,env(safe-area-inset-bottom,0px))+12px)] space-y-2">
           {/* "Set Server" — native-app-only, EVERY account (not just Superadmin):
               any employee's device may need to point at a different
               company/deployment server, same as picking a different site to sign

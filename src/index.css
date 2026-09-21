@@ -113,7 +113,7 @@ body {
      Capacitor renders edge-to-edge by default. paddingTop for the status bar is
      handled on the sticky Navbar itself instead (see Navbar.tsx), since only the
      header needs to push down — the rest of the page already starts below it. */
-  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-bottom: var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
   background: var(--g-bg-gradient);
   background-attachment: fixed;
   color: var(--g-text);
@@ -241,5 +241,5 @@ body {
      env(safe-area-inset-top) alone reads 0/short on some tall/cutout
      displays; falls back to plain env() everywhere else. */
   padding-top: var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px));
-  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-bottom: var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
 }

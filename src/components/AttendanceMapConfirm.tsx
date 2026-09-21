@@ -341,7 +341,7 @@ export default function AttendanceMapConfirm({
       className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4"
       style={{
         paddingTop: 'calc(var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px)) + 0.5rem)',
-        paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 0.5rem)'
+        paddingBottom: 'calc(var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) + 0.5rem)'
       }}
     >
       <div
