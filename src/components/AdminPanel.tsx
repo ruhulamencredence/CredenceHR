@@ -184,6 +184,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // column. Always true for a Superadmin; a plain Admin needs the Superadmin to
   // have explicitly granted user.can_view_login_location.
   const canSeeLoginLocation = isSuperAdmin || !!user.can_view_login_location;
+  // Whether THIS logged-in Admin/Superadmin can set another account's Module
+  // Access (the "Modules" column below). Always true for a Superadmin; a plain
+  // Admin needs the Superadmin to have explicitly granted
+  // user.can_grant_module_access — and even then, only ever against a role='user'
+  // target (enforced again per-row below, and server-side in
+  // PUT /api/users/:id/module-permissions).
+  const canGrantModuleAccess = isSuperAdmin || !!user.can_grant_module_access;
 
   const [activeTab, setActiveTab] = useState<'dashboard' | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'my_conveyance' | 'disbursement' | 'holidays' | 'asset_management' | 'servers' | 'permanent_delete_log'>(
     () => {
@@ -2338,7 +2345,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // the server keeps the others at their current value.
   const handleFeaturePermissionToggle = async (
     userId: number,
-    field: 'can_edit_delivery_date' | 'can_job_edit' | 'can_use_attendance' | 'can_use_tracking' | 'can_view_leave_summary',
+    field:
+      | 'can_edit_delivery_date'
+      | 'can_job_edit'
+      | 'can_use_attendance'
+      | 'can_use_tracking'
+      | 'can_view_leave_summary'
+      // Superadmin-only, and only ever sent for a role='admin' target — the
+      // server silently ignores it from anyone/anything else (see PUT
+      // /api/users/:id/feature-permissions in UserManagement.ts).
+      | 'can_grant_module_access',
     value: boolean
   ) => {
     try {
@@ -5124,11 +5140,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   <th className="w-24 px-2.5 py-2 text-left">Name</th>
                   <th className="w-28 px-2.5 py-2 text-left">Login ID</th>
                   <th className="w-20 px-2.5 py-2 text-left">Role</th>
-                  {isSuperAdmin && <th className="w-24 px-2.5 py-2 text-left">Modules</th>}
+                  {canGrantModuleAccess && <th className="w-24 px-2.5 py-2 text-left">Modules</th>}
                   <th className="w-24 px-2.5 py-2 text-left">Projects</th>
                   <th className="px-2.5 py-2 text-left">Joined</th>
                   {canSeeLoginLocation && <th className="w-32 px-2.5 py-2 text-left">Last Login</th>}
                   {isSuperAdmin && <th className="px-2.5 py-2 text-left">Location</th>}
+                  {isSuperAdmin && <th className="w-24 px-2.5 py-2 text-left">Grants Modules</th>}
                   <th className="px-2.5 py-2 text-left">Delivery</th>
                   <th className="px-2.5 py-2 text-left">Job Edit</th>
                   <th className="px-2.5 py-2 text-left">Attend.</th>
@@ -5143,8 +5160,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   <tr>
                     <td
                       colSpan={
-                        3 + (isSuperAdmin ? 1 : 0) + 1 + 1 + (canSeeLoginLocation ? 1 : 0) +
-                        (isSuperAdmin ? 1 : 0) + 1 + 1 + 1 + 1 + 1 + 1 + 1
+                        3 + (canGrantModuleAccess ? 1 : 0) + 1 + 1 + (canSeeLoginLocation ? 1 : 0) +
+                        (isSuperAdmin ? 1 : 0) + (isSuperAdmin ? 1 : 0) + 1 + 1 + 1 + 1 + 1 + 1 + 1
                       }
                       className="px-4 py-8 text-center text-sm text-slate-400"
                     >
@@ -5154,6 +5171,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 ) : filteredUsers.map((u) => {
                   const grantedCount = projectIdsForUser(u.id).size;
                   const grantedModuleCount = (u.module_permissions || []).length;
+                  // Same rule the Actions column (Change Login ID/Reset Password/
+                  // Delete) already applies: a delegated (non-superadmin) Admin
+                  // can only touch a role='user' row, never another 'admin' —
+                  // reused here for the Delivery/Job Edit/Attend./Attend.
+                  // Project/Tracking/Leave toggle cells below, which previously
+                  // had no such gate at all (server-enforced now too, see PUT
+                  // /api/users/:id/feature-permissions in UserManagement.ts).
+                  const canEditFeaturesFor = u.role !== 'superadmin' && (u.role !== 'admin' || isSuperAdmin);
                   return (
                   <tr key={u.id} className="hover:bg-slate-50/80 transition-colors">
                     <td className="px-3 py-3 font-medium text-slate-900 text-xs truncate" title={u.name}>{u.name}</td>
@@ -5188,11 +5213,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                         </span>
                       )}
                     </td>
-                    {isSuperAdmin && (
+                    {canGrantModuleAccess && (
                       <td className="px-3 py-3 text-xs">
                         {u.role === 'superadmin' ? (
                           <span className="text-slate-400 truncate block">All (Super)</span>
-                        ) : u.role === 'admin' || u.role === 'user' ? (
+                        ) : /* A delegated (non-superadmin) Admin with can_grant_module_access can only
+                               ever reach a role='user' target here — an 'admin' row falls through to
+                               the "—" case below for them, same restriction the server enforces on
+                               PUT /api/users/:id/module-permissions. */
+                        u.role === 'user' || (u.role === 'admin' && isSuperAdmin) ? (
                           <button
                             type="button"
                             onClick={() => openManageModules(u)}
@@ -5275,40 +5304,74 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                         )}
                       </td>
                     )}
+                    {isSuperAdmin && (
+                      <td className="px-3 py-3 whitespace-nowrap text-xs">
+                        {u.role === 'admin' ? (
+                          <button
+                            type="button"
+                            onClick={() => handleFeaturePermissionToggle(u.id, 'can_grant_module_access', !u.can_grant_module_access)}
+                            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                              u.can_grant_module_access ? 'bg-emerald-500' : 'bg-slate-300'
+                            }`}
+                            title={
+                              u.can_grant_module_access
+                                ? "Can set OTHER Users' Module Access (never another Admin's) — click to revoke"
+                                : "Can't set Module Access for anyone — click to grant"
+                            }
+                          >
+                            <span
+                              className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                                u.can_grant_module_access ? 'translate-x-[18px]' : 'translate-x-1'
+                              }`}
+                            />
+                          </button>
+                        ) : (
+                          <span className="text-slate-300">—</span>
+                        )}
+                      </td>
+                    )}
                     <td className="px-3 py-3 whitespace-nowrap text-xs">
-                      <button
-                        type="button"
-                        onClick={() => handleFeaturePermissionToggle(u.id, 'can_edit_delivery_date', !(u.can_edit_delivery_date ?? true))}
-                        className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                          (u.can_edit_delivery_date ?? true) ? 'bg-emerald-500' : 'bg-slate-300'
-                        }`}
-                        title={(u.can_edit_delivery_date ?? true) ? 'On — click to turn off' : 'Off — click to turn on'}
-                      >
-                        <span
-                          className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                            (u.can_edit_delivery_date ?? true) ? 'translate-x-[18px]' : 'translate-x-1'
+                      {canEditFeaturesFor ? (
+                        <button
+                          type="button"
+                          onClick={() => handleFeaturePermissionToggle(u.id, 'can_edit_delivery_date', !(u.can_edit_delivery_date ?? true))}
+                          className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                            (u.can_edit_delivery_date ?? true) ? 'bg-emerald-500' : 'bg-slate-300'
                           }`}
-                        />
-                      </button>
+                          title={(u.can_edit_delivery_date ?? true) ? 'On — click to turn off' : 'Off — click to turn on'}
+                        >
+                          <span
+                            className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                              (u.can_edit_delivery_date ?? true) ? 'translate-x-[18px]' : 'translate-x-1'
+                            }`}
+                          />
+                        </button>
+                      ) : (
+                        <span className="text-slate-300">—</span>
+                      )}
                     </td>
                     <td className="px-3 py-3 whitespace-nowrap text-xs">
-                      <button
-                        type="button"
-                        onClick={() => handleFeaturePermissionToggle(u.id, 'can_job_edit', !u.can_job_edit)}
-                        className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                          u.can_job_edit ? 'bg-emerald-500' : 'bg-slate-300'
-                        }`}
-                        title={u.can_job_edit ? 'On — click to turn off' : 'Off — click to turn on'}
-                      >
-                        <span
-                          className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                            u.can_job_edit ? 'translate-x-[18px]' : 'translate-x-1'
+                      {canEditFeaturesFor ? (
+                        <button
+                          type="button"
+                          onClick={() => handleFeaturePermissionToggle(u.id, 'can_job_edit', !u.can_job_edit)}
+                          className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                            u.can_job_edit ? 'bg-emerald-500' : 'bg-slate-300'
                           }`}
-                        />
-                      </button>
+                          title={u.can_job_edit ? 'On — click to turn off' : 'Off — click to turn on'}
+                        >
+                          <span
+                            className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                              u.can_job_edit ? 'translate-x-[18px]' : 'translate-x-1'
+                            }`}
+                          />
+                        </button>
+                      ) : (
+                        <span className="text-slate-300">—</span>
+                      )}
                     </td>
                     <td className="px-3 py-3 whitespace-nowrap text-xs">
-                      {u.role === 'superadmin' ? (
+                      {!canEditFeaturesFor ? (
                         <span className="text-slate-300">—</span>
                       ) : (
                         <button
@@ -5332,7 +5395,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                       )}
                     </td>
                     <td className="px-3 py-3 whitespace-nowrap text-xs">
-                      {u.role === 'superadmin' ? (
+                      {!canEditFeaturesFor ? (
                         <span className="text-slate-300">—</span>
                       ) : (
                         <select
@@ -5356,7 +5419,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                       )}
                     </td>
                     <td className="px-3 py-3 whitespace-nowrap text-xs">
-                      {u.role === 'superadmin' ? (
+                      {!canEditFeaturesFor ? (
                         <span className="text-slate-300">—</span>
                       ) : (
                         <button
@@ -5380,7 +5443,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                       )}
                     </td>
                     <td className="px-3 py-3 whitespace-nowrap text-xs">
-                      {u.role === 'superadmin' ? (
+                      {!canEditFeaturesFor ? (
                         <span className="text-slate-300">—</span>
                       ) : (
                         <button

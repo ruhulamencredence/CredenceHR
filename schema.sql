@@ -50,6 +50,16 @@ CREATE TABLE IF NOT EXISTS users (
   -- a plain Admin sees it ONLY if the Superadmin has explicitly switched this on
   -- for their account. Meaningless for role='user' rows.
   can_view_login_location TINYINT(1) NOT NULL DEFAULT 0,
+  -- Superadmin-only grant, only ever meaningful for role='admin': lets that Admin
+  -- ALSO set OTHER accounts' Module Access (Admin Panel -> Users -> Modules —
+  -- admin_module_permissions rows) themselves, instead of every such grant
+  -- needing the Superadmin (Admin Panel -> Users -> per-Admin "Grants Modules"
+  -- toggle, same on/off pattern as can_view_login_location above). OFF by
+  -- default. Deliberately narrower than the Superadmin's own version of this
+  -- power: a delegated Admin using it can only grant/revoke Module Access for a
+  -- role='user' target, never another 'admin' — enforced server-side in
+  -- UserManagement.ts, not just hidden in the UI.
+  can_grant_module_access TINYINT(1) NOT NULL DEFAULT 0,
   -- Superadmin-only grant: lets a plain Admin ALSO use the User Panel (mark Remote
   -- Attendance, submit Claims/Conveyance Bills, enter Job/MPR data) alongside their
   -- normal Admin Panel (Admin Panel -> Users -> per-Admin "User Panel Access"
