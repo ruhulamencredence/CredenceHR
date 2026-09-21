@@ -97,6 +97,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // header, or (see the effect below, once every group's items are known)
   // when the item currently on screen turns out to live inside one, so its
   // highlight is never hidden behind a collapsed group.
+  const [jobEntryOpen, setJobEntryOpen] = useState(false);
   const [reportsOpen, setReportsOpen] = useState(false);
   const [claimsOpen, setClaimsOpen] = useState(false);
   const [attendanceOpen, setAttendanceOpen] = useState(false);
@@ -172,9 +173,10 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   const isSuperAdmin = user.role === 'superadmin';
 
   // Same Superadmin-gated pattern as canSeeModule below, but ON by default —
-  // gates the Entry/Jobs/Entry Details items in mainItems just below (Job
+  // gates the Entry/Jobs/Entry Details items in jobEntryGroup just below (Job
   // Edits stays on its own separate user.can_job_edit gate, and the Movement/
-  // Conveyance Claims items further down keep their own OFF-by-default gates).
+  // Conveyance Claims items further down (now in selfServiceItems) keep their
+  // own OFF-by-default gates).
   const canSeeBudgetModule = isSuperAdmin || user.can_view_budget_module !== false;
 
   // Per-module visibility — mirrors AdminPanel.tsx's own `canSee` (Superadmin
@@ -186,24 +188,24 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     onClose();
   };
 
-  // "Main" — User Panel's own workflow, this account's identity as an
-  // employee rather than an admin reviewer.
-  const mainItems: NavItem[] = [];
+  // "Job Entry" — User Panel's own MPR workflow, now a collapsible sub-group
+  // inside "Self Service" instead of its own top-level "MAIN" section (which
+  // otherwise never actually collapsed anything — every account either saw
+  // all of it or none of it). Named "Job Entry", not "PEPM Manage" — Admin
+  // Panel already has its own group with that exact label (reportsGroup
+  // below) for something unrelated (Reports/MPR Nos/Data Import/Job Recycle/
+  // MPR Edit Log); reusing the name here would show two different "PEPM
+  // Manage" groups in the same sidebar.
+  const jobEntryGroup: NavItem[] = [];
   if (hasUserPanel) {
     if (canSeeBudgetModule) {
-      mainItems.push({ key: 'entry', label: 'Entry', icon: Wallet, onClick: () => onGoToJobsTab('entry') });
-      mainItems.push({ key: 'jobs', label: 'Jobs', icon: Briefcase, onClick: () => onGoToJobsTab('jobs') });
-      mainItems.push({ key: 'entryDetails', label: 'Entry Details', icon: FileText, onClick: () => onGoToJobsTab('entryDetails') });
+      jobEntryGroup.push({ key: 'entry', label: 'Entry', icon: Wallet, onClick: () => onGoToJobsTab('entry') });
+      jobEntryGroup.push({ key: 'jobs', label: 'Jobs', icon: Briefcase, onClick: () => onGoToJobsTab('jobs') });
+      jobEntryGroup.push({ key: 'entryDetails', label: 'Entry Details', icon: FileText, onClick: () => onGoToJobsTab('entryDetails') });
     }
     if (user.can_job_edit) {
-      mainItems.push({ key: 'jobEdit', label: 'Job Edits', icon: Edit2, onClick: () => onGoToJobsTab('jobEdit') });
+      jobEntryGroup.push({ key: 'jobEdit', label: 'Job Edits', icon: Edit2, onClick: () => onGoToJobsTab('jobEdit') });
     }
-  }
-  if (hasUserPanel && user.can_view_movement_claims) {
-    mainItems.push({ key: 'userMovementClaims', label: 'Movement Claims', icon: Route, onClick: () => onGoToUserClaims('movementClaims') });
-  }
-  if (hasUserPanel && user.can_view_conveyance_claims) {
-    mainItems.push({ key: 'userConveyanceClaims', label: 'Conveyance Bill Claim', icon: CreditCard, onClick: () => onGoToUserClaims('conveyanceBill') });
   }
 
   // "Self Service" — everyday employee items. Employee Directory stays
@@ -215,6 +217,15 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   const canSeeLeaveApplication = isSuperAdmin || !!user.can_view_leave_application;
   const canSeeMyLeave = isSuperAdmin || !!user.can_view_my_leave;
   const selfServiceItems: NavItem[] = [];
+  // Moved here from the old "Main" section — same OFF-by-default gates as
+  // before (can_view_movement_claims / can_view_conveyance_claims), just
+  // flat items in Self Service now instead of sitting above it.
+  if (hasUserPanel && user.can_view_movement_claims) {
+    selfServiceItems.push({ key: 'userMovementClaims', label: 'Movement Claims', icon: Route, onClick: () => onGoToUserClaims('movementClaims') });
+  }
+  if (hasUserPanel && user.can_view_conveyance_claims) {
+    selfServiceItems.push({ key: 'userConveyanceClaims', label: 'Conveyance Bill Claim', icon: CreditCard, onClick: () => onGoToUserClaims('conveyanceBill') });
+  }
   if (canSeeTimesheet) {
     selfServiceItems.push({ key: 'timesheet', label: 'Timesheet', icon: Clock, onClick: () => onGoToSelfServiceTab('timesheet') });
   }
@@ -358,6 +369,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // ever opens a group, never closes one the user already opened by hand.
   useEffect(() => {
     if (!activeKey) return;
+    if (jobEntryGroup.some((i) => i.key === activeKey)) setJobEntryOpen(true);
     if (reportsGroup.some((i) => i.key === activeKey)) setReportsOpen(true);
     if (claimsGroup.some((i) => i.key === activeKey)) setClaimsOpen(true);
     if (attendanceGroup.some((i) => i.key === activeKey)) setAttendanceOpen(true);
@@ -401,7 +413,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   const dashboardSearchItem: NavItem = { key: 'dashboard', label: 'Dashboard', icon: Home, onClick: onGoToDashboard };
   const allSearchableItems: NavItem[] = [
     dashboardSearchItem,
-    ...mainItems,
+    ...jobEntryGroup,
     ...selfServiceItems,
     ...(adminDashboardItem ? [adminDashboardItem] : []),
     ...reportsGroup,
@@ -661,14 +673,8 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
             )}
           </button>
 
-          {mainItems.length > 0 && (
-            <>
-              {!collapsed && <p className="px-2.5 mt-3 mb-1.5 text-[10px] font-semibold tracking-wide text-white/50">MAIN</p>}
-              {mainItems.map(renderItem)}
-            </>
-          )}
-
           {!collapsed && <p className="px-2.5 mt-3 mb-1.5 text-[10px] font-semibold tracking-wide text-white/50">SELF SERVICE</p>}
+          {renderGroup(jobEntryGroup, 'Job Entry', Briefcase, jobEntryOpen, setJobEntryOpen)}
           {selfServiceItems.map(renderItem)}
 
           {(!!adminDashboardItem || reportsGroup.length > 0 || claimsGroup.length > 0 || attendanceGroup.length > 0 ||
