@@ -147,7 +147,11 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
     <div
       className={
         large
-          ? 'bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden max-w-2xl'
+          // No max-w here either (was max-w-2xl): this variant is used in
+          // exactly one place, the desktop Dashboard, where every card above
+          // it now runs the full content width — a 672px calendar left-
+          // aligned under them just left a large empty patch beside itself.
+          ? 'bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden'
           // No max-w/mx-auto here (previously max-w-sm mx-auto) — that
           // centered this card at a fixed 384px width regardless of the
           // actual viewport, so on any phone wider than that it sat visibly

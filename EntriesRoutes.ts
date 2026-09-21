@@ -43,6 +43,33 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
     toDateOnlyString
   } = deps;
 
+  // Auto-unlock helper: a Budget's "already submitted" lock (budget_submissions
+  // row, per budget_id+user_id) exists to stop a user adding more entries once
+  // they've marked a Budget finished — but it was only ever meant to hold while
+  // that submission still has at least 1 active entry behind it, the same
+  // invariant POST /api/budgets/:id/submit enforces going in. If an Admin (or an
+  // approved Job Edit delete request) removes the user's last active entry under
+  // that Budget, the lock has nothing left to protect and should lift itself —
+  // otherwise the user is stuck forever with a "submitted" Budget that has zero
+  // entries on it and no way back in. Called after every entry soft-delete below;
+  // a no-op when no submission row exists yet (the common case — most deletes
+  // happen before the user ever submits) or when the user still has other active
+  // entries under this Budget.
+  const unlockBudgetSubmissionIfEmpty = async (budgetId: number | null | undefined, userId: number | null | undefined) => {
+    if (!budgetId || !userId) return;
+    try {
+      const remaining = await queryDB(
+        "SELECT id FROM entries WHERE budget_id = ? AND created_by = ? AND deleted_at IS NULL LIMIT 1",
+        [budgetId, userId]
+      );
+      if (remaining.length === 0) {
+        await queryDB("DELETE FROM budget_submissions WHERE budget_id = ? AND user_id = ?", [budgetId, userId]);
+      }
+    } catch (err: any) {
+      console.warn("⚠️ Could not check/auto-unlock Budget submission: " + err.message);
+    }
+  };
+
   // 5. Entries
   //
   // Regular Users only ever see THEIR OWN entries here (Recent Entries must not leak
@@ -1635,6 +1662,11 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
       }
 
       await queryDB("UPDATE entries SET deleted_at = NOW(), deleted_by = ? WHERE id = ?", [req.user.id, id]);
+      // Entry is gone — if that was this entry's owner's last active entry under
+      // this Budget, and they'd already Final Submitted it, lift the lock (see
+      // unlockBudgetSubmissionIfEmpty above). Scoped to entry.created_by, not
+      // whoever is deleting (an Admin deleting someone else's entry).
+      await unlockBudgetSubmissionIfEmpty(entry.budget_id, entry.created_by);
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Failed to delete entry" });
@@ -2027,7 +2059,7 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
         if (!request.entry_id) {
           return res.status(400).json({ error: "This request no longer points at a valid entry." });
         }
-        const entryRows = await queryDB("SELECT id, deleted_at FROM entries WHERE id = ?", [request.entry_id]);
+        const entryRows = await queryDB("SELECT id, deleted_at, budget_id FROM entries WHERE id = ?", [request.entry_id]);
         if (entryRows.length === 0 || entryRows[0].deleted_at) {
           return res.status(400).json({ error: "This MPR row no longer exists or was already deleted." });
         }
@@ -2035,6 +2067,11 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
           request.requested_by,
           request.entry_id
         ]);
+        // Same auto-unlock as the direct delete path above — this delete_entry
+        // request only exists because the Budget was already locked, so the
+        // requester (request.requested_by, the entry's owner) is exactly who to
+        // check.
+        await unlockBudgetSubmissionIfEmpty(entryRows[0].budget_id, request.requested_by);
         await queryDB(
           "UPDATE job_edit_requests SET status = 'approved', reviewed_by = ?, reviewed_at = NOW(), review_note = ? WHERE id = ?",
           [req.user.id, note || null, id]

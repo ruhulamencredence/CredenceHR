@@ -50,6 +50,16 @@ CREATE TABLE IF NOT EXISTS users (
   -- a plain Admin sees it ONLY if the Superadmin has explicitly switched this on
   -- for their account. Meaningless for role='user' rows.
   can_view_login_location TINYINT(1) NOT NULL DEFAULT 0,
+  -- Superadmin-only grant, only ever meaningful for role='admin': lets that Admin
+  -- ALSO set OTHER accounts' Module Access (Admin Panel -> Users -> Modules —
+  -- admin_module_permissions rows) themselves, instead of every such grant
+  -- needing the Superadmin (Admin Panel -> Users -> per-Admin "Grants Modules"
+  -- toggle, same on/off pattern as can_view_login_location above). OFF by
+  -- default. Deliberately narrower than the Superadmin's own version of this
+  -- power: a delegated Admin using it can only grant/revoke Module Access for a
+  -- role='user' target, never another 'admin' — enforced server-side in
+  -- UserManagement.ts, not just hidden in the UI.
+  can_grant_module_access TINYINT(1) NOT NULL DEFAULT 0,
   -- Superadmin-only grant: lets a plain Admin ALSO use the User Panel (mark Remote
   -- Attendance, submit Claims/Conveyance Bills, enter Job/MPR data) alongside their
   -- normal Admin Panel (Admin Panel -> Users -> per-Admin "User Panel Access"
@@ -208,6 +218,44 @@ CREATE TABLE IF NOT EXISTS leave_category_balances (
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (category_id) REFERENCES leave_categories(id) ON DELETE CASCADE
 );
+
+-- Per-Leave-Category Policy (Self Service -> Leave Manage -> "Leave
+-- Policies"). One row per Leave Type — the 3 fixed types (category_key
+-- 'casual', 'sick', 'without_pay', matching leave_applications.leave_type
+-- exactly) plus any custom Leave Category (category_key = its leave_categories.
+-- category_key, e.g. "custom_maternity_leave"). A missing row for a custom
+-- category means "no restrictions" (defaults below). Enforced server-side in
+-- POST /api/leave-applications (LeaveRoutes.ts) — never just a UI hint.
+CREATE TABLE IF NOT EXISTS leave_category_policies (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  category_key VARCHAR(100) NOT NULL,
+  -- Must apply at least this many days before the Leave's Start Date. 0 = no
+  -- restriction (same-day/retrospective apply allowed, e.g. Sick Leave).
+  min_advance_notice_days INT NOT NULL DEFAULT 0,
+  -- Whether a Reliever must be picked for this Leave Type. When off, the
+  -- application skips the Reliever step entirely and goes straight into the
+  -- Dynamic Approval Engine, same as if a Reliever had just approved it.
+  reliever_required TINYINT(1) NOT NULL DEFAULT 1,
+  -- Longest single application allowed for this Leave Type, in days. NULL =
+  -- no cap.
+  max_consecutive_days INT NULL DEFAULT NULL,
+  -- Leave Without Pay style rule: this Leave Type may only be applied for once
+  -- the account's Casual Leave AND Sick Leave balances are both exhausted (0).
+  require_paid_leave_exhausted TINYINT(1) NOT NULL DEFAULT 0,
+  updated_by INT NULL,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uniq_leave_category_policy (category_key),
+  FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
+);
+
+-- Seed the 3 fixed Leave Types with today's actual behavior (Reliever always
+-- required, no advance-notice/consecutive-day/exhaustion rule) so turning a
+-- restriction ON is always an explicit Leave Manager action, never a silent
+-- behavior change on upgrade.
+INSERT IGNORE INTO leave_category_policies (category_key, min_advance_notice_days, reliever_required, max_consecutive_days, require_paid_leave_exhausted) VALUES
+  ('casual', 0, 1, NULL, 0),
+  ('sick', 0, 1, NULL, 0),
+  ('without_pay', 0, 1, NULL, 0);
 
 -- Leave Applications Table (Self Service -> Leave Application). One row per
 -- submitted application. Submitting one (POST /api/leave-applications)

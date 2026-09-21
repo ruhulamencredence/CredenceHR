@@ -23,6 +23,12 @@ interface UserManagementRouteDeps {
   authenticateToken: any;
   requireAdmin: any;
   requireSuperAdmin: any;
+  // Gate for the Module Access endpoints below — a Superadmin always passes;
+  // a plain Admin passes once the Superadmin has switched on their
+  // can_grant_module_access flag (see server.ts's ensureDatabaseSchema for
+  // the full explanation). The handlers themselves still restrict what a
+  // delegated Admin can do with it — see the 'user'-target-only check below.
+  requireModuleGrantAccess: any;
   // Same requireModule(moduleKey) factory used by every other Admin Panel
   // module in server.ts — pass "users" through it here so a Superadmin can
   // grant/revoke the Users module's access independently of every other
@@ -35,7 +41,7 @@ interface UserManagementRouteDeps {
 }
 
 export function registerUserManagementRoutes(app: Express, deps: UserManagementRouteDeps) {
-  const { authenticateToken, requireAdmin, requireSuperAdmin, requireModule, queryDB, adminModuleKeys } = deps;
+  const { authenticateToken, requireAdmin, requireSuperAdmin, requireModuleGrantAccess, requireModule, queryDB, adminModuleKeys } = deps;
 
   // 6. User Management (Admin Only)
   app.post("/api/users", authenticateToken, requireAdmin, requireModule("users"), async (req: any, res) => {
@@ -137,7 +143,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
   app.get("/api/users", authenticateToken, requireAdmin, requireModule("users"), async (req: any, res) => {
     try {
       const users = await queryDB(
-        "SELECT id, name, email, username, role, created_at, last_login_lat, last_login_lng, last_login_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, attendance_project_id FROM users ORDER BY created_at DESC"
+        "SELECT id, name, email, username, role, created_at, last_login_lat, last_login_lng, last_login_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, can_grant_module_access, attendance_project_id FROM users ORDER BY created_at DESC"
       );
       // Attach each Admin's module_permissions so the Superadmin's "Module Access"
       // UI has them without a separate round trip per row. Only role='admin' rows
@@ -191,6 +197,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
         can_view_timesheet: u.role === "superadmin" ? true : !!Number(u.can_view_timesheet),
         can_view_leave_application: u.role === "superadmin" ? true : !!Number(u.can_view_leave_application),
         can_view_my_leave: u.role === "superadmin" ? true : !!Number(u.can_view_my_leave),
+        can_grant_module_access: u.role === "admin" ? !!Number(u.can_grant_module_access) : false,
         module_permissions: (u.role === "admin" || u.role === "user") ? (modulesByUser.get(u.id) || []) : []
       })));
     } catch (err: any) {
@@ -329,9 +336,14 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
     }
   });
 
-  // Superadmin sets which Admin Panel modules a given Admin may access — the tabs
-  // are: projects, mprs, imports, reports, users, recycle, editlog.
-  app.get("/api/users/:id/module-permissions", authenticateToken, requireSuperAdmin, async (req, res) => {
+  // Sets which Admin Panel modules a given Admin or User may access — the tabs
+  // are: projects, mprs, imports, reports, users, recycle, editlog, etc. Normally
+  // Superadmin-only; a plain Admin reaches these two routes only once the
+  // Superadmin has switched on can_grant_module_access for THEIR account (see
+  // requireModuleGrantAccess in server.ts) — and even then, the PUT below still
+  // blocks them from touching another 'admin' account, so a delegated Admin can
+  // only ever grant/revoke Module Access for a plain 'user'.
+  app.get("/api/users/:id/module-permissions", authenticateToken, requireModuleGrantAccess, async (req, res) => {
     try {
       const { id } = req.params;
       const rows: any = await queryDB("SELECT module_key FROM admin_module_permissions WHERE user_id = ?", [id]);
@@ -341,7 +353,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
     }
   });
 
-  app.put("/api/users/:id/module-permissions", authenticateToken, requireSuperAdmin, async (req, res) => {
+  app.put("/api/users/:id/module-permissions", authenticateToken, requireModuleGrantAccess, async (req: any, res) => {
     try {
       const { id } = req.params;
       const modules: string[] = Array.isArray(req.body?.modules) ? req.body.modules : [];
@@ -351,6 +363,13 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
       if (target.length === 0) return res.status(404).json({ error: "User not found" });
       if (target[0].role !== "admin" && target[0].role !== "user") {
         return res.status(400).json({ error: "Module access only applies to Admin and User accounts." });
+      }
+      // A delegated (non-superadmin) Admin using can_grant_module_access can only
+      // ever reach a role='user' target — promoting what another ADMIN can see in
+      // the Admin Panel stays exclusively the Superadmin's call, same as who gets
+      // promoted to 'admin' in the first place (PUT /api/users/:id/role below).
+      if (req.user.role !== "superadmin" && target[0].role !== "user") {
+        return res.status(403).json({ error: "Only the Superadmin can set another Admin's Module Access." });
       }
 
       await queryDB("DELETE FROM admin_module_permissions WHERE user_id = ?", [id]);
@@ -751,7 +770,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
   //    column/Manage Projects modal), which only ever governs the Budget/Jobs/MPR
   //    workflow, not Attendance.
   // Any field can be sent alone; the others keep their current value.
-  app.put("/api/users/:id/feature-permissions", authenticateToken, requireAdmin, requireModule("users"), async (req, res) => {
+  app.put("/api/users/:id/feature-permissions", authenticateToken, requireAdmin, requireModule("users"), async (req: any, res) => {
     try {
       const { id } = req.params;
       const existingRows = await queryDB(
@@ -763,6 +782,13 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
       // guessing its id directly — the Users list already hides it from them.
       if (existingRows[0].role === "superadmin" && req.user.role !== "superadmin") {
         return res.status(404).json({ error: "User not found" });
+      }
+      // Nor another Admin's account — every OTHER Admin-targeting action in this
+      // file (Change Login ID, Reset Password, Delete) already stops here too;
+      // these feature toggles had been missing the same check, letting any Admin
+      // with the "users" module flip another Admin's own feature flags.
+      if (existingRows[0].role === "admin" && req.user.role !== "superadmin") {
+        return res.status(403).json({ error: "Only the Superadmin can change another Admin's permissions." });
       }
       const current = existingRows[0];
       const can_edit_delivery_date =
@@ -797,6 +823,20 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
           return res.status(400).json({ error: "Invalid attendance_project_id" });
         }
       }
+      // can_grant_module_access is Superadmin-settable only, even though this
+      // whole endpoint is reachable by any Admin with the "users" module (see
+      // the role check above for why that's safe for the OTHER fields here) —
+      // a delegated Admin granting itself or another Admin this same delegated
+      // power would defeat the point of it. Silently ignored (not an error) from
+      // anyone else, same as every other field here that's simply absent from
+      // req.body keeping its current value.
+      let can_grant_module_access: number | null = null;
+      if (req.user.role === "superadmin" && existingRows[0].role === "admin" && req.body.can_grant_module_access !== undefined) {
+        can_grant_module_access = req.body.can_grant_module_access ? 1 : 0;
+      }
+      if (can_grant_module_access !== null) {
+        await queryDB("UPDATE users SET can_grant_module_access = ? WHERE id = ?", [can_grant_module_access, id]);
+      }
       await queryDB(
         "UPDATE users SET can_edit_delivery_date = ?, can_job_edit = ?, can_use_attendance = ?, can_use_tracking = ?, can_view_leave_summary = ?, attendance_project_id = ? WHERE id = ?",
         [can_edit_delivery_date, can_job_edit, can_use_attendance, can_use_tracking, can_view_leave_summary, attendance_project_id, id]
@@ -808,7 +848,8 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
         can_use_attendance: !!can_use_attendance,
         can_use_tracking: !!can_use_tracking,
         can_view_leave_summary: !!can_view_leave_summary,
-        attendance_project_id
+        attendance_project_id,
+        ...(can_grant_module_access !== null ? { can_grant_module_access: !!can_grant_module_access } : {})
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -861,7 +902,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
 
   // Replaces the full set of Project permissions for one User in one call
   // (Admin Panel sends the complete list of checked Project IDs each save).
-  app.put("/api/users/:id/projects", authenticateToken, requireAdmin, requireModule("users"), async (req, res) => {
+  app.put("/api/users/:id/projects", authenticateToken, requireAdmin, requireModule("users"), async (req: any, res) => {
     try {
       const { id } = req.params;
       const { project_ids } = req.body;

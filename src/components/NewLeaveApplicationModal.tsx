@@ -6,7 +6,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X, AlertTriangle, CheckCircle2, CalendarDays, UserCheck } from 'lucide-react';
-import { LeaveType, LeaveBalance, LeaveApprover, LeaveCategory } from '../types';
+import { LeaveType, LeaveBalance, LeaveApprover, LeaveCategory, LeaveCategoryPolicy } from '../types';
 import { apiUrl } from '../lib/api';
 import { todayDateOnlyString, formatDate } from '../lib/formatDate';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
@@ -71,14 +71,17 @@ export const NewLeaveApplicationModal: React.FC<NewLeaveApplicationModalProps> =
   // Casual/Sick/LWP. Any authenticated account can call this endpoint (see
   // its route comment), not just Leave Managers.
   const [categories, setCategories] = useState<LeaveCategory[]>([]);
+  // Per-Leave-Category Policy (Leave Manage -> "Leave Policies") — drives
+  // whether the Reliever field below is shown/required and the advance-notice
+  // hint under Leave Duration. The server enforces the same rules regardless
+  // (see POST /api/leave-applications), this is just so the form matches
+  // what it will actually accept instead of surprising the applicant at submit.
+  const [policies, setPolicies] = useState<LeaveCategoryPolicy[]>([]);
   const [loadingContext, setLoadingContext] = useState(true);
 
   const [leaveType, setLeaveType] = useState<string>('');
   const [startDate, setStartDate] = useState(today);
   const [endDate, setEndDate] = useState(today);
-  const [isContinuous, setIsContinuous] = useState(false);
-  const [isPrefix, setIsPrefix] = useState(false);
-  const [isSuffix, setIsSuffix] = useState(false);
   const [isHalfDay, setIsHalfDay] = useState(false);
   const [includeExtraWorkDates, setIncludeExtraWorkDates] = useState(false);
   const [isForeignLeave, setIsForeignLeave] = useState(false);
@@ -118,6 +121,11 @@ export const NewLeaveApplicationModal: React.FC<NewLeaveApplicationModalProps> =
         if (!cancelled && catRes.ok) {
           const catRows = await catRes.json();
           setCategories(Array.isArray(catRows) ? catRows : []);
+        }
+        const polRes = await fetch(apiUrl('/api/leave-policies'), { headers: authHeaders });
+        if (!cancelled && polRes.ok) {
+          const polRows = await polRes.json();
+          setPolicies(Array.isArray(polRows) ? polRows : []);
         }
       } catch {
         // Offline/unreachable — balance strip just stays empty; the form
@@ -159,16 +167,39 @@ export const NewLeaveApplicationModal: React.FC<NewLeaveApplicationModalProps> =
     return balance.custom_leaves?.find((c) => c.key === leaveType)?.balance ?? 0;
   }, [balance, leaveType]);
 
+  // Defaults match the seeded server-side behavior (Reliever required, no
+  // other restriction) so the form never under-validates before this loads.
+  const selectedPolicy = useMemo(
+    () =>
+      policies.find((p) => p.category_key === leaveType) || {
+        category_key: leaveType,
+        min_advance_notice_days: 0,
+        reliever_required: true,
+        max_consecutive_days: null,
+        require_paid_leave_exhausted: false
+      },
+    [policies, leaveType]
+  );
+
   const validate = (): string | null => {
     if (!leaveType) return 'Select a Leave Type.';
     if (!startDate || !endDate) return 'Start Date and End Date are required.';
     if (endDate < startDate) return "End Date can't be before Start Date.";
     if (dayCount <= 0) return 'Day Count must be greater than 0.';
+    if (selectedPolicy.min_advance_notice_days > 0) {
+      const noticeDays = Math.round((new Date(`${startDate}T00:00:00`).getTime() - new Date(`${today}T00:00:00`).getTime()) / (1000 * 60 * 60 * 24));
+      if (noticeDays < selectedPolicy.min_advance_notice_days) {
+        return `${leaveTypeOptions.find((o) => o.value === leaveType)?.label || 'This Leave Type'} must be applied at least ${selectedPolicy.min_advance_notice_days} day${selectedPolicy.min_advance_notice_days === 1 ? '' : 's'} before the Start Date.`;
+      }
+    }
+    if (selectedPolicy.max_consecutive_days !== null && dayCount > selectedPolicy.max_consecutive_days) {
+      return `This Leave Type allows at most ${selectedPolicy.max_consecutive_days} consecutive day${selectedPolicy.max_consecutive_days === 1 ? '' : 's'} per application.`;
+    }
     if (availableBalance !== null && dayCount > availableBalance) {
       return `Day Count (${dayCount}) exceeds your remaining balance (${availableBalance}) for this Leave Type.`;
     }
     if (!purpose.trim()) return 'Purpose is required.';
-    if (!relieverId) return 'Select a Reliever.';
+    if (selectedPolicy.reliever_required && !relieverId) return 'Select a Reliever.';
     return null;
   };
 
@@ -189,14 +220,11 @@ export const NewLeaveApplicationModal: React.FC<NewLeaveApplicationModalProps> =
           start_date: startDate,
           end_date: endDate,
           day_count: dayCount,
-          is_continuous: isContinuous,
-          is_prefix: isPrefix,
-          is_suffix: isSuffix,
           is_half_day: isHalfDay,
           include_extra_work_dates: includeExtraWorkDates,
           is_foreign_leave: isForeignLeave,
           purpose: purpose.trim(),
-          reliever_id: Number(relieverId)
+          reliever_id: relieverId ? Number(relieverId) : null
         })
       });
       const data = await res.json();
@@ -268,18 +296,6 @@ export const NewLeaveApplicationModal: React.FC<NewLeaveApplicationModalProps> =
             )}
             <span className="flex-1" />
             <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer">
-              <input type="checkbox" checked={isContinuous} onChange={(e) => setIsContinuous(e.target.checked)} className="w-3.5 h-3.5 rounded accent-blue-600" />
-              Continuous
-            </label>
-            <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer">
-              <input type="checkbox" checked={isPrefix} onChange={(e) => setIsPrefix(e.target.checked)} className="w-3.5 h-3.5 rounded accent-blue-600" />
-              Prefix
-            </label>
-            <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer">
-              <input type="checkbox" checked={isSuffix} onChange={(e) => setIsSuffix(e.target.checked)} className="w-3.5 h-3.5 rounded accent-blue-600" />
-              Suffix
-            </label>
-            <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer">
               <input type="checkbox" checked={isHalfDay} onChange={(e) => setIsHalfDay(e.target.checked)} className="w-3.5 h-3.5 rounded accent-blue-600" />
               Half Day
             </label>
@@ -303,6 +319,11 @@ export const NewLeaveApplicationModal: React.FC<NewLeaveApplicationModalProps> =
                   </option>
                 ))}
               </select>
+              {leaveType && selectedPolicy.require_paid_leave_exhausted && (
+                <p className="text-[11px] text-amber-600 mt-1">
+                  Only allowed once your Casual Leave and Sick Leave balances are both exhausted.
+                </p>
+              )}
             </div>
             <div>
               <label className="block text-[11px] font-semibold text-slate-500 mb-1">Day Count</label>
@@ -343,33 +364,48 @@ export const NewLeaveApplicationModal: React.FC<NewLeaveApplicationModalProps> =
                 setEndDate(e);
               }}
             />
+            {leaveType && selectedPolicy.min_advance_notice_days > 0 && (
+              <p className="text-[11px] text-amber-600 mt-1.5">
+                Must be applied at least {selectedPolicy.min_advance_notice_days} day
+                {selectedPolicy.min_advance_notice_days === 1 ? '' : 's'} before the Start Date.
+              </p>
+            )}
+            {leaveType && selectedPolicy.max_consecutive_days !== null && (
+              <p className="text-[11px] text-slate-400 mt-1">
+                Max {selectedPolicy.max_consecutive_days} consecutive day{selectedPolicy.max_consecutive_days === 1 ? '' : 's'} per application for this Leave Type.
+              </p>
+            )}
           </div>
 
-          {/* Reliever — required; ANY account (GET
-              /api/leave-applications/relievers). The request sits waiting on
-              this account's own Approve/Reject FIRST — only once they
-              Approve does it move into the Template-driven Approval
-              Workflow below. */}
-          <div>
-            <label className="block text-[11px] font-semibold text-slate-500 mb-1">
-              Reliever <span className="text-rose-500">*</span>
-            </label>
-            <select
-              value={relieverId}
-              onChange={(e) => setRelieverId(e.target.value)}
-              className="w-full text-sm px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none"
-            >
-              <option value="">Select Reliever</option>
-              {relievers.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.name}
-                </option>
-              ))}
-            </select>
-            <p className="text-[11px] text-slate-400 mt-1">
-              Whoever will cover your work while you're away — they review this first, before it goes to your approver(s).
-            </p>
-          </div>
+          {/* Reliever — per Leave Type Policy (Leave Manage -> "Leave
+              Policies"); ANY account (GET /api/leave-applications/relievers).
+              When required, the request sits waiting on this account's own
+              Approve/Reject FIRST — only once they Approve does it move into
+              the Template-driven Approval Workflow below. When this Leave
+              Type's policy doesn't require one, the field is hidden entirely
+              and the application skips straight to that Approval Workflow. */}
+          {selectedPolicy.reliever_required && (
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-500 mb-1">
+                Reliever <span className="text-rose-500">*</span>
+              </label>
+              <select
+                value={relieverId}
+                onChange={(e) => setRelieverId(e.target.value)}
+                className="w-full text-sm px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none"
+              >
+                <option value="">Select Reliever</option>
+                {relievers.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.name}
+                  </option>
+                ))}
+              </select>
+              <p className="text-[11px] text-slate-400 mt-1">
+                Whoever will cover your work while you're away — they review this first, before it goes to your approver(s).
+              </p>
+            </div>
+          )}
 
           {/* Purpose — the Approver picker that used to sit next to this is
               gone (Part 5): routing through the Dynamic Approval Engine is
@@ -390,7 +426,11 @@ export const NewLeaveApplicationModal: React.FC<NewLeaveApplicationModalProps> =
 
           <div className="flex items-start gap-2 text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5">
             <UserCheck className="w-3.5 h-3.5 shrink-0 mt-0.5 text-blue-600" />
-            <span>Your Reliever reviews this first. Once they approve, it's routed automatically to your approver(s) — no need to pick anyone else.</span>
+            <span>
+              {selectedPolicy.reliever_required
+                ? "Your Reliever reviews this first. Once they approve, it's routed automatically to your approver(s) — no need to pick anyone else."
+                : "This Leave Type doesn't require a Reliever — it's routed automatically to your approver(s) once submitted."}
+            </span>
           </div>
 
           {error && (

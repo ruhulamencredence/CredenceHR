@@ -35,7 +35,6 @@ import {
 } from 'lucide-react';
 import { User } from '../types';
 import { apiUrl } from '../lib/api';
-import { Spinner } from './Spinner';
 
 interface AdminDashboardProps {
   token: string;
@@ -446,10 +445,118 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user }) =
 
   return (
     <div className="space-y-6">
+      {/* Same pulsing skeleton style as Employee Directory (animate-pulse gray
+          bars — see EmployeeDirectory.tsx's grid loading state) instead of the
+          app-wide Infinity Lottie Spinner, but one placeholder per ACTUAL card
+          below — stat tiles, Quick View table, both charts, Notice list,
+          Leave Balance table and the Leave Calendar — each shaped/sized like
+          its real counterpart, so the page doesn't jump around once the real
+          content swaps in. */}
       {loading && (
-        <div className="flex items-center justify-center py-16">
-          <Spinner />
-        </div>
+        <>
+          {/* Stat tiles skeleton — same grid + tile count as the real one below */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+            {Array.from({ length: statTiles.length }).map((_, i) => (
+              <div key={i} className="rounded-2xl p-3.5 flex flex-col gap-2 border border-slate-200 animate-pulse">
+                <div className="w-9 h-9 rounded-full bg-slate-200" />
+                <div className="h-2.5 bg-slate-200 rounded w-3/4" />
+                <div className="h-4 bg-slate-100 rounded w-1/2" />
+              </div>
+            ))}
+          </div>
+
+          {/* Quick View + Claim Amount skeleton */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div className="lg:col-span-2 border border-slate-200 rounded-2xl p-5 animate-pulse">
+              <div className="flex items-center justify-between mb-4">
+                <div className="h-4 bg-slate-200 rounded w-24" />
+                <div className="h-7 bg-slate-100 rounded-full w-40" />
+              </div>
+              <div className="flex flex-wrap gap-3 mb-4 pb-4 border-b border-slate-100">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <div key={i} className="h-6 bg-slate-100 rounded-full w-20" />
+                ))}
+              </div>
+              <div className="space-y-2.5">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <div key={i} className="h-8 bg-slate-100 rounded-lg w-full" />
+                ))}
+              </div>
+            </div>
+            <div className="border border-slate-200 rounded-2xl p-5 animate-pulse">
+              <div className="h-4 bg-slate-200 rounded w-28 mb-4" />
+              <div className="flex items-end justify-between gap-3 h-40 px-1">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <div key={i} className="flex-1 flex items-end justify-center gap-1 h-32">
+                    <div className="w-1/2 rounded-t-md bg-slate-200" style={{ height: `${30 + (i % 3) * 20}%` }} />
+                    <div className="w-1/2 rounded-t-md bg-slate-100" style={{ height: `${20 + (i % 4) * 15}%` }} />
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Attendance Summary + Notice skeleton */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div className="lg:col-span-2 border border-slate-200 rounded-2xl p-5 animate-pulse">
+              <div className="h-4 bg-slate-200 rounded w-52 mb-4" />
+              <div className="flex items-end gap-[3px] h-40 overflow-hidden">
+                {Array.from({ length: 30 }).map((_, i) => (
+                  <div key={i} className="flex flex-col items-center justify-end h-full shrink-0" style={{ minWidth: 8 }}>
+                    <div className="w-2 rounded-t-sm bg-slate-100" style={{ height: `${20 + (i % 5) * 10}%` }} />
+                    <div className="w-2 rounded-t-sm bg-slate-200" style={{ height: `${30 + (i % 4) * 12}%` }} />
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="border border-slate-200 rounded-2xl p-5 animate-pulse">
+              <div className="h-4 bg-slate-200 rounded w-16 mb-4" />
+              <div className="space-y-3">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <div key={i} className="space-y-1.5 pb-3 border-b border-slate-50 last:border-0">
+                    <div className="h-3 bg-slate-200 rounded w-3/4" />
+                    <div className="h-2.5 bg-slate-100 rounded w-full" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Current Leave Balance + Attendance Missed skeleton */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div className="lg:col-span-2 border border-slate-200 rounded-2xl p-5 animate-pulse">
+              <div className="h-4 bg-slate-200 rounded w-40 mb-4" />
+              <div className="space-y-2.5">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <div key={i} className="h-8 bg-slate-100 rounded-lg w-full" />
+                ))}
+              </div>
+            </div>
+            <div className="border border-slate-100 rounded-2xl p-5 opacity-70 animate-pulse">
+              <div className="h-4 bg-slate-200 rounded w-32 mb-4" />
+              <div className="h-16 bg-slate-100 rounded-lg" />
+            </div>
+          </div>
+
+          {/* Leave Calendar + Task Status skeleton */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div className="lg:col-span-2 border border-slate-200 rounded-2xl p-5 animate-pulse">
+              <div className="flex items-center justify-between mb-4">
+                <div className="h-4 bg-slate-200 rounded w-28" />
+                <div className="h-6 bg-slate-100 rounded-full w-28" />
+              </div>
+              <div className="grid grid-cols-7 gap-1">
+                {Array.from({ length: 35 }).map((_, i) => (
+                  <div key={i} className="min-h-[52px] rounded-lg bg-slate-100" />
+                ))}
+              </div>
+            </div>
+            <div className="border border-slate-100 rounded-2xl p-5 opacity-70 animate-pulse">
+              <div className="h-4 bg-slate-200 rounded w-36 mb-4" />
+              <div className="h-20 bg-slate-100 rounded-lg" />
+            </div>
+          </div>
+        </>
       )}
 
       {!loading && (
