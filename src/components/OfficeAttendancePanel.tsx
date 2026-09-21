@@ -484,7 +484,7 @@ export const OfficeAttendancePanel: React.FC<OfficeAttendancePanelProps> = ({ to
               the Navbar's actual rendered bottom edge on every device. */}
           <thead
             className="sticky z-10 bg-slate-50 border-b border-slate-200 text-xs text-slate-500"
-            style={{ top: 'calc(4rem + env(safe-area-inset-top, 0px))' }}
+            style={{ top: 'calc(4rem + var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px)))' }}
           >
             <tr>
               <th className="text-left px-3 py-2 font-medium">Employee</th>
