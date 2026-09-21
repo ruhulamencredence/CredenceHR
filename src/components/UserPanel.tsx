@@ -2758,7 +2758,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
         </div>
       </div>
 
-      <div className={`relative z-10 w-full px-2 sm:px-6 lg:px-8 ${mobileActiveSection === null ? 'pt-3' : 'pt-0 md:pt-8'} pb-[calc(9rem+env(safe-area-inset-bottom,0px))] md:pb-8 space-y-8 max-md:space-y-3`}>
+      <div className={`relative z-10 w-full px-2 sm:px-6 lg:px-8 ${mobileActiveSection === null ? 'pt-3' : 'pt-0 md:pt-8'} pb-[calc(9rem+var(--native-safe-area-inset-bottom,env(safe-area-inset-bottom,0px)))] md:pb-8 space-y-8 max-md:space-y-3`}>
       {/* Desktop-only plain welcome banner (no avatar/bell/drop-notch — those
           are the mobile-specific drop-banner design above). Same gating the
           single banner used before this change. */}
@@ -2934,7 +2934,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           // of the old flat solid color. Shadow flattens on press for
           // tactile feedback.
           className="md:hidden fixed right-4 z-50 flex items-center gap-1.5 pl-3.5 pr-4 py-2.5 rounded-full text-white text-xs font-semibold backdrop-blur-xl border border-white/40 bg-gradient-to-br from-blue-400/90 via-blue-600/90 to-indigo-700/90 shadow-[0_10px_28px_-6px_rgba(37,99,235,0.55),inset_0_1px_0_rgba(255,255,255,0.45)] active:scale-95 active:shadow-[0_4px_14px_-4px_rgba(37,99,235,0.5),inset_0_1px_0_rgba(255,255,255,0.3)] transition-all"
-          style={{ bottom: 'calc(6.5rem + env(safe-area-inset-bottom, 0px))' }}
+          style={{ bottom: 'calc(6.5rem + var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)))' }}
         >
           <Plus className="w-3.5 h-3.5" /> Add Check In/Out
         </button>
@@ -2956,7 +2956,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
             className="md:hidden fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-2"
             style={{
               paddingTop: 'calc(var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px)) + 0.5rem)',
-              paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 0.5rem)'
+              paddingBottom: 'calc(var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) + 0.5rem)'
             }}
             role="dialog"
             aria-modal="true"

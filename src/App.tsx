@@ -546,7 +546,7 @@ export default function App() {
           <div
             className="fixed left-1/2 -translate-x-1/2 z-[100] px-4 py-2.5 rounded-full text-sm font-medium text-white shadow-lg"
             style={{
-              bottom: 'calc(env(safe-area-inset-bottom, 0px) + 20px)',
+              bottom: 'calc(var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) + 20px)',
               background: 'rgba(15, 23, 42, 0.92)'
             }}
           >
@@ -928,7 +928,7 @@ export default function App() {
         <div
           className="fixed left-1/2 -translate-x-1/2 z-[100] px-4 py-2.5 rounded-full text-sm font-medium text-white shadow-lg"
           style={{
-            bottom: 'calc(env(safe-area-inset-bottom, 0px) + 20px)',
+            bottom: 'calc(var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) + 20px)',
             background: 'rgba(15, 23, 42, 0.92)'
           }}
         >
