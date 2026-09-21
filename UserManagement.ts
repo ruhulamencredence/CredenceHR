@@ -34,6 +34,16 @@ interface UserManagementRouteDeps {
   // grant/revoke the Users module's access independently of every other
   // module.
   requireModule: (moduleKey: "users") => any;
+  // Per-module action gate (Read Only/Edit-Add/Entry-Upload/Delete-Trash/
+  // Permanent Delete) — "users" is wired up to it below: create/reset-
+  // password/change-email/feature-permissions/project-assignment need
+  // "edit_add", Bulk Add Users needs "entry_upload", delete needs
+  // "delete_trash". The Module Access / Module Access Layers / role-promote
+  // / per-feature-toggle endpoints further down are deliberately left on
+  // their existing gates (requireModuleGrantAccess / requireSuperAdmin) —
+  // those are separate, stricter permission dimensions, not part of the
+  // "users" module grant. See requireModuleLayer() in server.ts.
+  requireModuleLayer: (moduleKey: "users", layer: "read" | "edit_add" | "entry_upload" | "delete_trash" | "permanent_delete") => any;
   queryDB: (sql: string, params?: any[]) => Promise<any>;
   // Valid module keys for the module-permissions PUT below — same
   // ADMIN_MODULE_KEYS array defined once in server.ts.
@@ -49,10 +59,10 @@ interface UserManagementRouteDeps {
 }
 
 export function registerUserManagementRoutes(app: Express, deps: UserManagementRouteDeps) {
-  const { authenticateToken, requireAdmin, requireSuperAdmin, requireModuleGrantAccess, requireModule, queryDB, adminModuleKeys, permissionLayerKeys, permissionLayerModules } = deps;
+  const { authenticateToken, requireAdmin, requireSuperAdmin, requireModuleGrantAccess, requireModule, requireModuleLayer, queryDB, adminModuleKeys, permissionLayerKeys, permissionLayerModules } = deps;
 
   // 6. User Management (Admin Only)
-  app.post("/api/users", authenticateToken, requireAdmin, requireModule("users"), async (req: any, res) => {
+  app.post("/api/users", authenticateToken, requireAdmin, requireModule("users"), requireModuleLayer("users", "edit_add"), async (req: any, res) => {
     try {
       const { name, email, password, role } = req.body;
       if (!name || !email || !password) {
@@ -89,7 +99,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
   // app doesn't have one; a forgotten password is always solved by an Admin from
   // here). Same "can't touch the Superadmin's own account" rule as every other
   // per-user Admin action.
-  app.put("/api/users/:id/reset-password", authenticateToken, requireAdmin, requireModule("users"), async (req: any, res) => {
+  app.put("/api/users/:id/reset-password", authenticateToken, requireAdmin, requireModule("users"), requireModuleLayer("users", "edit_add"), async (req: any, res) => {
     try {
       const { id } = req.params;
       const { new_password } = req.body;
@@ -117,7 +127,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
   // with) — same idea as reset-password above: the Admin sets it directly, no
   // confirmation email or old-value check needed. Same "can't touch the
   // Superadmin's own account" rule as every other per-user Admin action.
-  app.put("/api/users/:id/email", authenticateToken, requireAdmin, requireModule("users"), async (req: any, res) => {
+  app.put("/api/users/:id/email", authenticateToken, requireAdmin, requireModule("users"), requireModuleLayer("users", "edit_add"), async (req: any, res) => {
     try {
       const { id } = req.params;
       const new_email = String(req.body.new_email || "").trim();
@@ -238,7 +248,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
   //    a password, even though the login ID would still disambiguate them.
   // Every row is reported back as either created or skipped (with a reason) so the
   // Admin can see exactly what happened without guessing from a single count.
-  app.post("/api/users/bulk", authenticateToken, requireAdmin, requireModule("users"), async (req, res) => {
+  app.post("/api/users/bulk", authenticateToken, requireAdmin, requireModule("users"), requireModuleLayer("users", "entry_upload"), async (req, res) => {
     try {
       const rows = req.body?.rows;
       if (!Array.isArray(rows) || rows.length === 0) {
@@ -403,7 +413,8 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
   // Granular per-module action layers (Read Only/Edit-Add/Entry-Upload/
   // Delete-Trash/Permanent Delete) for ONE module at a time — Admin Panel ->
   // Users -> Module Access shows this checkbox row once a module listed in
-  // PERMISSION_LAYER_MODULES (currently just "departments") is itself
+  // PERMISSION_LAYER_MODULES (rolled out module by module — see that
+  // constant in server.ts/src/types.ts for the current list) is itself
   // ticked above. Layered ON TOP of admin_module_permissions, same
   // "only meaningful/only saved while the module checkbox is ticked" rule
   // as the Department-scope endpoints just below. Same gate
@@ -845,7 +856,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
   //    column/Manage Projects modal), which only ever governs the Budget/Jobs/MPR
   //    workflow, not Attendance.
   // Any field can be sent alone; the others keep their current value.
-  app.put("/api/users/:id/feature-permissions", authenticateToken, requireAdmin, requireModule("users"), async (req: any, res) => {
+  app.put("/api/users/:id/feature-permissions", authenticateToken, requireAdmin, requireModule("users"), requireModuleLayer("users", "edit_add"), async (req: any, res) => {
     try {
       const { id } = req.params;
       const existingRows = await queryDB(
@@ -931,7 +942,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
     }
   });
 
-  app.delete("/api/users/:id", authenticateToken, requireAdmin, requireModule("users"), async (req: any, res) => {
+  app.delete("/api/users/:id", authenticateToken, requireAdmin, requireModule("users"), requireModuleLayer("users", "delete_trash"), async (req: any, res) => {
     try {
       const { id } = req.params;
       if (Number(id) === req.user.id) {
@@ -977,7 +988,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
 
   // Replaces the full set of Project permissions for one User in one call
   // (Admin Panel sends the complete list of checked Project IDs each save).
-  app.put("/api/users/:id/projects", authenticateToken, requireAdmin, requireModule("users"), async (req: any, res) => {
+  app.put("/api/users/:id/projects", authenticateToken, requireAdmin, requireModule("users"), requireModuleLayer("users", "edit_add"), async (req: any, res) => {
     try {
       const { id } = req.params;
       const { project_ids } = req.body;

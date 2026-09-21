@@ -1949,7 +1949,7 @@ const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports",
 const PERMISSION_LAYER_KEYS = ["read", "edit_add", "entry_upload", "delete_trash", "permanent_delete"] as const;
 // Which modules currently enforce PERMISSION_LAYER_KEYS — mirrors
 // PERMISSION_LAYER_MODULES in src/types.ts. Rolled out module by module.
-const PERMISSION_LAYER_MODULES = ["departments", "projects", "approvals"] as const;
+const PERMISSION_LAYER_MODULES = ["departments", "projects", "approvals", "users"] as const;
 
 // Employee Directory extended profile fields (Admin Panel -> Employees ->
 // Edit -> Employee Info / Status / Contact tabs). Single source of truth for
@@ -3260,7 +3260,7 @@ async function startServer() {
   // User Management (Admin Panel -> Users) — kept in their own file
   // (UserManagement.ts), same reasoning as profileRoutes.ts/holidayRoutes.ts/
   // Alerts.ts above.
-  registerUserManagementRoutes(app, { authenticateToken, requireAdmin, requireSuperAdmin, requireModuleGrantAccess, requireModule, queryDB, adminModuleKeys: ADMIN_MODULE_KEYS, permissionLayerKeys: PERMISSION_LAYER_KEYS, permissionLayerModules: PERMISSION_LAYER_MODULES });
+  registerUserManagementRoutes(app, { authenticateToken, requireAdmin, requireSuperAdmin, requireModuleGrantAccess, requireModule, requireModuleLayer, queryDB, adminModuleKeys: ADMIN_MODULE_KEYS, permissionLayerKeys: PERMISSION_LAYER_KEYS, permissionLayerModules: PERMISSION_LAYER_MODULES });
 
   // Departments (Admin Panel -> Departments) + Branches (Admin Panel ->
   // Branches) — kept in their own file (DepartmentsAndBranches.ts), same
