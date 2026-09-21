@@ -964,6 +964,12 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
         ? 'Notice Board'
         : mobileActiveSection === 'leave'
         ? 'Leave Applications'
+        : mobileActiveSection === 'timesheet'
+        ? // Timesheet.tsx sets this itself too (it's also reachable straight
+          // from GlobalSidebar, with this panel unmounted) — matching it here
+          // keeps this effect from clearing the title back to null while that
+          // page is the active section.
+          'Timesheet'
         : null
     );
   }, [mobileActiveSection, selectedBudget]);
