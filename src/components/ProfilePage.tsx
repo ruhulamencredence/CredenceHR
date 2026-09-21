@@ -127,7 +127,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
               fill="url(#profileHeaderGradientMobile)"
             />
           </svg>
-          <div className="relative px-4 pt-3 pb-14" style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 12px)' }}>
+          <div className="relative px-4 pt-3 pb-14" style={{ paddingTop: 'calc(var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px)) + 12px)' }}>
             <button
               type="button"
               onClick={onBack}

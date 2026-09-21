@@ -194,7 +194,13 @@ export const Navbar: React.FC<NavbarProps> = ({
         // clock/signal/battery row. This padding pushes the logo/menu row
         // below the notch/clock so nothing sits under it, while the
         // gradient painted on this same element keeps covering that area.
-        paddingTop: 'env(safe-area-inset-top, 0px)'
+        // var(--native-safe-area-inset-top) — set by MainActivity.java from
+        // the real Android WindowInsetsCompat on the APK build, since plain
+        // env(safe-area-inset-top) alone reads 0/short of the real cutout
+        // height on some tall/high-density punch-hole displays, which is
+        // what let the status bar overlap this row on those devices; falls
+        // back to plain env() everywhere else (including the web build).
+        paddingTop: 'var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px))'
       }}
     >
       <div className="w-full px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
