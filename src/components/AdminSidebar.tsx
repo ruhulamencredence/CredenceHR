@@ -323,7 +323,7 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
 
         {/* Bottom quick-action card */}
         {!collapsed ? (
-          <div className="p-3 pb-[calc(env(safe-area-inset-bottom,0px)+12px)]">
+          <div className="p-3 pb-[calc(var(--native-safe-area-inset-bottom,env(safe-area-inset-bottom,0px))+12px)]">
             <div className="rounded-2xl p-4 bg-white/10 border border-white/15">
               <p className="text-[13px] font-semibold text-white">
                 {counts.recycle > 0 ? `${counts.recycle} job${counts.recycle === 1 ? '' : 's'} in recycle` : "You're all caught up"}
@@ -342,7 +342,7 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
             </div>
           </div>
         ) : (
-          <div className="p-3 pb-[calc(env(safe-area-inset-bottom,0px)+12px)] flex justify-center">
+          <div className="p-3 pb-[calc(var(--native-safe-area-inset-bottom,env(safe-area-inset-bottom,0px))+12px)] flex justify-center">
             <button
               type="button"
               onClick={() => selectAndClose(counts.recycle > 0 ? 'recycle' : 'reports')}

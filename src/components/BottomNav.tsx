@@ -163,7 +163,7 @@ export function BottomNav({ active, onChange, canViewMovementClaim = true, canVi
         </div>
       </div>
 
-      <div style={{ height: 'env(safe-area-inset-bottom, 0px)', background: 'var(--g-accent)' }} />
+      <div style={{ height: 'var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px))', background: 'var(--g-accent)' }} />
     </nav>
   );
 }
