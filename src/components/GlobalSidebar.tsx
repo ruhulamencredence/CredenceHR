@@ -513,15 +513,22 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
       return <div key={label} className="space-y-0.5">{items.map(renderItem)}</div>;
     }
     const GroupIcon = icon;
+    // Highlights the group's own header whenever the currently-active item
+    // lives inside it — so "where am I" is visible even while the group
+    // sits collapsed, not just once it's opened and the leaf item itself
+    // lights up below.
+    const groupActive = items.some((i) => i.key === activeKey);
     return (
       <div key={label}>
         <button
           type="button"
           onClick={() => setOpen((o) => !o)}
-          className="w-full flex items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-white/85 hover:bg-white/10 transition-colors"
+          className={`w-full flex items-center gap-2.5 rounded-xl px-2.5 py-2.5 transition-colors ${
+            groupActive ? 'bg-white/10 text-white' : 'text-white/85 hover:bg-white/10'
+          }`}
         >
           <GroupIcon className="w-[18px] h-[18px] shrink-0" />
-          <span className="text-[13px] font-semibold flex-1 text-left">{label}</span>
+          <span className={`text-[13px] flex-1 text-left ${groupActive ? 'font-bold' : 'font-semibold'}`}>{label}</span>
           <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
         </button>
         {isOpen && (
@@ -574,15 +581,23 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
       return <div key={label} className="space-y-0.5">{[...flatItems, ...subGroups.flatMap((g) => g.items)].map(renderItem)}</div>;
     }
     const GroupIcon = icon;
+    // Same "highlight the header whenever the active item lives inside"
+    // behavior as renderGroup above, checked across both flatItems and every
+    // sub-group's items — the outer HRM/HR header lights up whichever level
+    // the active item sits at, and each sub-group's own header lights up too
+    // when it's specifically that sub-group holding the active item.
+    const groupActive = flatItems.some((i) => i.key === activeKey) || subGroups.some((g) => g.items.some((i) => i.key === activeKey));
     return (
       <div key={label}>
         <button
           type="button"
           onClick={() => setOpen((o) => !o)}
-          className="w-full flex items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-white/85 hover:bg-white/10 transition-colors"
+          className={`w-full flex items-center gap-2.5 rounded-xl px-2.5 py-2.5 transition-colors ${
+            groupActive ? 'bg-white/10 text-white' : 'text-white/85 hover:bg-white/10'
+          }`}
         >
           <GroupIcon className="w-[18px] h-[18px] shrink-0" />
-          <span className="text-[13px] font-semibold flex-1 text-left">{label}</span>
+          <span className={`text-[13px] flex-1 text-left ${groupActive ? 'font-bold' : 'font-semibold'}`}>{label}</span>
           <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
         </button>
         {isOpen && (
@@ -605,16 +620,19 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
             })}
             {subGroups.map((g) => {
               const subOpen = !!subOpenKeys[g.key];
+              const subActive = g.items.some((i) => i.key === activeKey);
               const SubIcon = g.icon;
               return (
                 <div key={g.key}>
                   <button
                     type="button"
                     onClick={() => toggleSub(g.key)}
-                    className="w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-left text-white/70 hover:bg-white/10 hover:text-white transition-colors"
+                    className={`w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-left transition-colors ${
+                      subActive ? 'bg-white/10 text-white' : 'text-white/70 hover:bg-white/10 hover:text-white'
+                    }`}
                   >
                     <SubIcon className="w-3.5 h-3.5 shrink-0" />
-                    <span className="text-[12.5px] font-semibold flex-1 text-left truncate">{g.label}</span>
+                    <span className={`text-[12.5px] flex-1 text-left truncate ${subActive ? 'font-bold' : 'font-semibold'}`}>{g.label}</span>
                     <ChevronDown className={`w-3 h-3 shrink-0 transition-transform duration-200 ${subOpen ? 'rotate-180' : ''}`} />
                   </button>
                   {subOpen && (
