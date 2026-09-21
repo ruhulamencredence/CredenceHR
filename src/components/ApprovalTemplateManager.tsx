@@ -47,7 +47,8 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
   const [isDefaultDraft, setIsDefaultDraft] = useState(false);
   const [isActiveDraft, setIsActiveDraft] = useState(true);
   const [stepsDraft, setStepsDraft] = useState<StepDraft[]>([{ approver_user_ids: [] }]);
-  const [addApproverChoice, setAddApproverChoice] = useState<Record<number, string>>({});
+  const [approverSearch, setApproverSearch] = useState<Record<number, string>>({});
+  const [openApproverDropdown, setOpenApproverDropdown] = useState<number | null>(null);
   const [dragStepIndex, setDragStepIndex] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [editorError, setEditorError] = useState<string | null>(null);
@@ -105,6 +106,8 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
     setIsDefaultDraft(false);
     setIsActiveDraft(true);
     setStepsDraft([{ approver_user_ids: [] }]);
+    setApproverSearch({});
+    setOpenApproverDropdown(null);
     setEditorError(null);
     setShowEditor(true);
   };
@@ -123,6 +126,8 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
       setStepsDraft(
         (data.steps || []).map((s: ApprovalTemplateStep) => ({ approver_user_ids: s.approvers.map((a) => a.user_id) }))
       );
+      setApproverSearch({});
+      setOpenApproverDropdown(null);
       setShowEditor(true);
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message || 'Failed to load this template' });
@@ -140,13 +145,13 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
       return next;
     });
   };
-  const addApproverToStep = (stepIdx: number) => {
-    const uid = Number(addApproverChoice[stepIdx]);
+  const addApproverToStep = (stepIdx: number, uid: number) => {
     if (!uid) return;
     setStepsDraft((prev) =>
       prev.map((s, i) => (i === stepIdx && !s.approver_user_ids.includes(uid) ? { ...s, approver_user_ids: [...s.approver_user_ids, uid] } : s))
     );
-    setAddApproverChoice((prev) => ({ ...prev, [stepIdx]: '' }));
+    setApproverSearch((prev) => ({ ...prev, [stepIdx]: '' }));
+    setOpenApproverDropdown(null);
   };
   const removeApproverFromStep = (stepIdx: number, uid: number) => {
     setStepsDraft((prev) => prev.map((s, i) => (i === stepIdx ? { ...s, approver_user_ids: s.approver_user_ids.filter((x) => x !== uid) } : s)));
@@ -583,29 +588,46 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
                       ))}
                     </div>
 
-                    <div className="flex gap-2 pl-7">
-                      <select
-                        value={addApproverChoice[idx] || ''}
-                        onChange={(e) => setAddApproverChoice((prev) => ({ ...prev, [idx]: e.target.value }))}
-                        className="flex-1 text-xs px-2.5 py-2 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
-                      >
-                        <option value="">Add an approver — one member per row, add the whole team to represent a Department…</option>
-                        {users
+                    <div className="relative pl-7">
+                      <input
+                        type="text"
+                        value={approverSearch[idx] || ''}
+                        onChange={(e) => {
+                          setApproverSearch((prev) => ({ ...prev, [idx]: e.target.value }));
+                          setOpenApproverDropdown(idx);
+                        }}
+                        onFocus={() => setOpenApproverDropdown(idx)}
+                        onBlur={() => setTimeout(() => setOpenApproverDropdown((cur) => (cur === idx ? null : cur)), 150)}
+                        placeholder="Search an employee by name to add as approver — one member per row, add the whole team to represent a Department…"
+                        className="w-full text-xs px-2.5 py-2 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                      />
+                      {openApproverDropdown === idx && (() => {
+                        const q = (approverSearch[idx] || '').trim().toLowerCase();
+                        const matches = users
                           .filter((u) => !step.approver_user_ids.includes(u.id))
-                          .map((u) => (
-                            <option key={u.id} value={u.id}>
-                              {u.name} ({u.role})
-                            </option>
-                          ))}
-                      </select>
-                      <button
-                        type="button"
-                        onClick={() => addApproverToStep(idx)}
-                        disabled={!addApproverChoice[idx]}
-                        className="text-xs font-semibold px-3 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-white disabled:opacity-50 transition-colors whitespace-nowrap"
-                      >
-                        Add
-                      </button>
+                          .filter((u) => !q || u.name.toLowerCase().includes(q))
+                          .slice(0, 30);
+                        return (
+                          <div className="absolute z-20 left-0 right-0 mt-1 max-h-56 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-lg">
+                            {matches.length === 0 ? (
+                              <div className="px-3 py-2 text-xs text-slate-400">No matching employee found.</div>
+                            ) : (
+                              matches.map((u) => (
+                                <button
+                                  key={u.id}
+                                  type="button"
+                                  onMouseDown={(e) => e.preventDefault()}
+                                  onClick={() => addApproverToStep(idx, u.id)}
+                                  className="w-full flex items-center justify-between gap-2 text-left text-xs px-3 py-2 hover:bg-blue-50 text-slate-700"
+                                >
+                                  <span className="font-medium">{u.name}</span>
+                                  <span className="text-slate-400">{u.role}</span>
+                                </button>
+                              ))
+                            )}
+                          </div>
+                        );
+                      })()}
                     </div>
                   </div>
                 ))}
