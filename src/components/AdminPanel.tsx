@@ -28,6 +28,7 @@ import { Spinner } from './Spinner';
 import { apiUrl } from '../lib/api';
 import { formatDate, todayDateOnlyString } from '../lib/formatDate';
 import { useStableCallback } from '../lib/useStableCallback';
+import { reverseGeocode } from '../lib/reverseGeocode';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
 
 // Module Access modal (Admin Panel -> Users -> per-Admin/User "Module
@@ -164,6 +165,42 @@ const ReportRow = React.memo(function ReportRow({
     </tr>
   );
 });
+
+// User Management's "Last Login" column — was showing the bare lat/lng pair
+// (e.g. "23.7519, 90.3741"), meaningless to read at a glance. Reverse-geocodes
+// it into a short place name via the same free Nominatim helper My Claims
+// already uses for Check In/Out points, with the raw coordinates kept as a
+// title tooltip and the Google Maps link unchanged. Self-contained per row
+// (not a bulk lookup keyed by the whole Users list) so it only ever looks up
+// what's actually rendered, and re-lookups are free — reverseGeocode's own
+// cache (keyed by rounded coordinate) already dedupes accounts sharing a
+// login spot, like an office Wi-Fi gate.
+const LastLoginAddress: React.FC<{ lat: number; lng: number; asOf?: string }> = ({ lat, lng, asOf }) => {
+  const [address, setAddress] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setAddress(null);
+    reverseGeocode(lat, lng).then((addr) => {
+      if (!cancelled) setAddress(addr);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [lat, lng]);
+
+  return (
+    <a
+      href={`https://maps.google.com/?q=${lat},${lng}`}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex items-start gap-1 text-blue-700 hover:text-blue-900 hover:underline"
+      title={`${lat.toFixed(4)}, ${lng.toFixed(4)}${asOf ? ` — as of ${formatDate(asOf)}` : ''}`}
+    >
+      <MapPin className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+      <span className="line-clamp-2">{address ?? `${lat.toFixed(4)}, ${lng.toFixed(4)}`}</span>
+    </a>
+  );
+};
 
 export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRequest, adminNavRequest, onActiveTabChange }) => {
   const isSuperAdmin = user.role === 'superadmin';
@@ -5143,7 +5180,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   {canGrantModuleAccess && <th className="w-24 px-2.5 py-2 text-left">Modules</th>}
                   <th className="w-24 px-2.5 py-2 text-left">Projects</th>
                   <th className="px-2.5 py-2 text-left">Joined</th>
-                  {canSeeLoginLocation && <th className="w-32 px-2.5 py-2 text-left">Last Login</th>}
+                  {canSeeLoginLocation && <th className="w-48 px-2.5 py-2 text-left">Last Login</th>}
                   {isSuperAdmin && <th className="px-2.5 py-2 text-left">Location</th>}
                   {isSuperAdmin && <th className="w-24 px-2.5 py-2 text-left">Grants Modules</th>}
                   <th className="px-2.5 py-2 text-left">Delivery</th>
@@ -5263,16 +5300,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                     {canSeeLoginLocation && (
                       <td className="px-3 py-3 text-xs">
                         {u.last_login_lat != null && u.last_login_lng != null ? (
-                          <a
-                            href={`https://maps.google.com/?q=${u.last_login_lat},${u.last_login_lng}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-start gap-1 text-blue-700 hover:text-blue-900 hover:underline font-mono break-all"
-                            title={u.last_login_at ? `As of ${formatDate(u.last_login_at)}` : undefined}
-                          >
-                            <MapPin className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                            <span>{Number(u.last_login_lat).toFixed(4)}, {Number(u.last_login_lng).toFixed(4)}</span>
-                          </a>
+                          <LastLoginAddress
+                            lat={Number(u.last_login_lat)}
+                            lng={Number(u.last_login_lng)}
+                            asOf={u.last_login_at || undefined}
+                          />
                         ) : (
                           <span className="text-slate-400">No login yet</span>
                         )}
