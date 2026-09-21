@@ -5,8 +5,8 @@ import autoTable from 'jspdf-autotable';
 import credenceLogo from '../assets/credence-logo.png';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
 import { savePdfCrossPlatform } from '../lib/saveFile';
-import { Project, Branch, MprNumber, Entry, User, Budget, BudgetItem, UserProjectPermission, EntryEditHistory, EntryPermanentDeleteLog, BulkUserRow, BulkUserResultItem, AdminModuleKey, ADMIN_MODULES, AttendanceRecord, ClaimsNavRequest, AdminNavRequest, Department, LeaveApplication, PendingJobEdit } from '../types';
-import { Building2, FileText, Users, Users2, BarChart3, Plus, Trash2, Edit2, Search, Filter, UserCheck, Calendar, CalendarClock, Download, Upload, FolderPlus, X, Eye, FileSpreadsheet, KeyRound, History, RotateCcw, Recycle, ListChecks, FileDown, MapPin, LayoutGrid, Navigation, LogIn, LogOut, Bell, Route, ShieldCheck, Wallet, Contact, Lock, Mail, CheckCircle2, XCircle, Clock3, ShieldAlert } from 'lucide-react';
+import { Project, Branch, MprNumber, Entry, User, Budget, BudgetItem, BudgetSubmission, UserProjectPermission, EntryEditHistory, EntryPermanentDeleteLog, BulkUserRow, BulkUserResultItem, AdminModuleKey, ADMIN_MODULES, AttendanceRecord, ClaimsNavRequest, AdminNavRequest, Department, LeaveApplication, PendingJobEdit } from '../types';
+import { Building2, FileText, Users, Users2, BarChart3, Plus, Trash2, Edit2, Search, Filter, UserCheck, Calendar, CalendarClock, Download, Upload, FolderPlus, X, Eye, FileSpreadsheet, KeyRound, History, RotateCcw, Recycle, ListChecks, FileDown, MapPin, LayoutGrid, Navigation, LogIn, LogOut, Bell, Route, ShieldCheck, Wallet, Contact, Lock, Unlock, Mail, CheckCircle2, XCircle, Clock3, ShieldAlert } from 'lucide-react';
 import LocationMapPicker from './LocationMapPicker';
 import { NoticeManager } from './NoticeManager';
 import { EmployeesPanel } from './EmployeesPanel';
@@ -1261,6 +1261,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [savingRange, setSavingRange] = useState(false);
   const [rangeError, setRangeError] = useState('');
 
+  // Budget Submissions modal — who has Final Submitted this Budget, with a manual
+  // "Unlock" per user (see /api/budgets/:id/submissions and the DELETE next to it;
+  // the same lock also lifts itself automatically once a user's last active entry
+  // under the Budget is deleted, this modal is the Admin's manual override for it).
+  const [submissionsBudget, setSubmissionsBudget] = useState<Budget | null>(null);
+  const [budgetSubmissions, setBudgetSubmissions] = useState<BudgetSubmission[]>([]);
+  const [loadingSubmissions, setLoadingSubmissions] = useState(false);
+  const [unlockingUserId, setUnlockingUserId] = useState<number | null>(null);
+
   // Add-user form state
   const [newUserName, setNewUserName] = useState('');
   const [newUserEmail, setNewUserEmail] = useState('');
@@ -1303,6 +1312,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   useBackButtonClose(showRateFileModal, () => setShowRateFileModal(false));
   useBackButtonClose(viewingBudget !== null, () => setViewingBudget(null));
   useBackButtonClose(rangeBudget !== null, () => setRangeBudget(null));
+  useBackButtonClose(submissionsBudget !== null, () => setSubmissionsBudget(null));
   useBackButtonClose(showBulkUsers, () => setShowBulkUsers(false));
   useBackButtonClose(approveResult !== null, () => setApproveResult(null));
 
@@ -2066,6 +2076,57 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       setRangeError(err.message);
     } finally {
       setSavingRange(false);
+    }
+  };
+
+  // --- Budget Submissions modal (manual unlock) ---
+
+  const fetchBudgetSubmissions = async (budget: Budget) => {
+    setLoadingSubmissions(true);
+    try {
+      const res = await fetch(apiUrl(`/api/budgets/${budget.id}/submissions`), {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) setBudgetSubmissions(await res.json());
+    } catch (err) {
+      console.error('Failed to load Budget submissions', err);
+    } finally {
+      setLoadingSubmissions(false);
+    }
+  };
+
+  const openSubmissionsModal = (budget: Budget) => {
+    setSubmissionsBudget(budget);
+    setBudgetSubmissions([]);
+    fetchBudgetSubmissions(budget);
+  };
+
+  const closeSubmissionsModal = () => {
+    setSubmissionsBudget(null);
+    setBudgetSubmissions([]);
+  };
+
+  // Manual unlock: lifts this one user's Final Submit lock on this Budget, whether
+  // or not they still have active entries under it (the automatic version — see
+  // EntriesRoutes.ts unlockBudgetSubmissionIfEmpty — only fires once their entries
+  // are all gone; this is the Admin's override for any other reason to reopen it).
+  const handleUnlockSubmission = async (userId: number) => {
+    if (!submissionsBudget) return;
+    if (!confirm('Unlock this user\'s Final Submit on this Budget? They will be able to add new entries to it again.')) return;
+    setUnlockingUserId(userId);
+    try {
+      const res = await fetch(apiUrl(`/api/budgets/${submissionsBudget.id}/submissions/${userId}`), {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to unlock');
+      setBudgetSubmissions((prev) => prev.filter((s) => s.user_id !== userId));
+      setMessage({ type: 'success', text: 'Submission unlocked — this user can add entries to this Budget again.' });
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message || 'Failed to unlock this submission.' });
+    } finally {
+      setUnlockingUserId(null);
     }
   };
 
@@ -4584,6 +4645,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                         <td className="px-4 py-3 text-right text-xs">
                           <div className="flex items-center justify-end gap-1">
                             <button
+                              onClick={() => openSubmissionsModal(b)}
+                              className="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
+                              title="See who has Final Submitted this budget, and unlock them if needed"
+                            >
+                              <Unlock className="w-4 h-4" />
+                            </button>
+                            <button
                               onClick={() => openRangeModal(b)}
                               className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
                               title="Set allowed Delivery Date range for this budget"
@@ -6693,6 +6761,69 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   {savingRange ? 'Saving...' : 'Save Range'}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Budget Submissions modal — every user who has Final Submitted this budget,
+          with a manual Unlock per user. See openSubmissionsModal/handleUnlockSubmission
+          above and GET/DELETE /api/budgets/:id/submissions on the server. */}
+      {submissionsBudget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50" onClick={closeSubmissionsModal}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="p-5 border-b border-slate-200 flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                  <Unlock className="w-4 h-4 text-amber-600" /> Budget Submissions
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Budget <span className="font-semibold">"{submissionsBudget.budget_name}"</span> — everyone who has Final
+                  Submitted this budget. A submitted user can't add new entries to it; Unlock lifts that for one user, even
+                  if they still have entries here. (This lifts on its own the moment a user's last active entry under this
+                  Budget is deleted — Unlock is only needed for any other reason to reopen it.)
+                </p>
+              </div>
+              <button
+                onClick={closeSubmissionsModal}
+                className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-colors shrink-0"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="overflow-auto flex-1 p-5">
+              {loadingSubmissions ? (
+                <p className="text-xs text-slate-400 text-center py-6">Loading...</p>
+              ) : budgetSubmissions.length === 0 ? (
+                <p className="text-xs text-slate-400 text-center py-6">No one has Final Submitted this budget yet.</p>
+              ) : (
+                <div className="space-y-2">
+                  {budgetSubmissions.map((s) => (
+                    <div
+                      key={s.user_id}
+                      className="flex items-center justify-between gap-3 border border-slate-200 rounded-xl p-3"
+                    >
+                      <div className="min-w-0">
+                        <div className="text-sm font-semibold text-slate-900 truncate">{s.user_name || `User #${s.user_id}`}</div>
+                        <div className="text-[11px] text-slate-500 mt-0.5">
+                          Submitted {formatDate(s.submitted_at)} •{' '}
+                          {s.active_entry_count > 0
+                            ? `${s.active_entry_count} active entr${s.active_entry_count === 1 ? 'y' : 'ies'}`
+                            : 'No active entries left'}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => handleUnlockSubmission(s.user_id)}
+                        disabled={unlockingUserId === s.user_id}
+                        className="flex items-center gap-1.5 py-1.5 px-3 bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-700 font-semibold rounded-lg transition-all disabled:opacity-50 whitespace-nowrap text-xs shrink-0"
+                      >
+                        <Unlock className="w-3.5 h-3.5" />
+                        {unlockingUserId === s.user_id ? 'Unlocking...' : 'Unlock'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>
