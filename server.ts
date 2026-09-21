@@ -1951,6 +1951,28 @@ const PERMISSION_LAYER_KEYS = ["read", "edit_add", "entry_upload", "delete_trash
 // PERMISSION_LAYER_MODULES in src/types.ts. Rolled out module by module.
 const PERMISSION_LAYER_MODULES = ["departments", "projects", "approvals", "users"] as const;
 
+// Leave Manage's own operation-specific layers — mirrors LeaveManageLayerKey/
+// LEAVE_MANAGE_LAYERS in src/types.ts. Not part of PERMISSION_LAYER_MODULES/
+// PERMISSION_LAYER_KEYS above since Leave Manage isn't an Admin Panel
+// "module" (no admin_module_permissions grant) and its operations don't map
+// onto the generic Read/Edit-Add/Entry-Upload/Delete-Trash/Permanent-Delete
+// set — see requireLeaveManagerLayer() below.
+const LEAVE_MANAGE_LAYER_KEYS = ["edit_balance", "bulk_set_balance", "add_category", "edit_policy"] as const;
+
+// Every (module_key -> its allowed layer keys) the Module Access Layers PUT
+// endpoint (UserManagement.ts) accepts — a single map instead of one flat
+// key list, since Leave Manage uses its own distinct set instead of
+// PERMISSION_LAYER_KEYS. Add an entry here (and to
+// src/components/AdminPanel.tsx's rendering) whenever a new module/feature
+// is rolled onto this system.
+const MODULE_LAYER_KEY_SETS: Record<string, readonly string[]> = {
+  departments: PERMISSION_LAYER_KEYS,
+  projects: PERMISSION_LAYER_KEYS,
+  approvals: PERMISSION_LAYER_KEYS,
+  users: PERMISSION_LAYER_KEYS,
+  leave_manage: LEAVE_MANAGE_LAYER_KEYS,
+};
+
 // Employee Directory extended profile fields (Admin Panel -> Employees ->
 // Edit -> Employee Info / Status / Contact tabs). Single source of truth for
 // column names — used to build the ALTER TABLE migration above and the
@@ -3260,7 +3282,7 @@ async function startServer() {
   // User Management (Admin Panel -> Users) — kept in their own file
   // (UserManagement.ts), same reasoning as profileRoutes.ts/holidayRoutes.ts/
   // Alerts.ts above.
-  registerUserManagementRoutes(app, { authenticateToken, requireAdmin, requireSuperAdmin, requireModuleGrantAccess, requireModule, requireModuleLayer, queryDB, adminModuleKeys: ADMIN_MODULE_KEYS, permissionLayerKeys: PERMISSION_LAYER_KEYS, permissionLayerModules: PERMISSION_LAYER_MODULES });
+  registerUserManagementRoutes(app, { authenticateToken, requireAdmin, requireSuperAdmin, requireModuleGrantAccess, requireModule, requireModuleLayer, queryDB, adminModuleKeys: ADMIN_MODULE_KEYS, moduleLayerKeySets: MODULE_LAYER_KEY_SETS });
 
   // Departments (Admin Panel -> Departments) + Branches (Admin Panel ->
   // Branches) — kept in their own file (DepartmentsAndBranches.ts), same
@@ -3351,6 +3373,39 @@ async function startServer() {
       const ok = await hasLeaveManageAccess(req.user.id, req.user.role);
       if (!ok) {
         return res.status(403).json({ error: "You don't have access to manage Leave balances. Ask your Superadmin to grant it." });
+      }
+      next();
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  };
+
+  // Finer-grained gate layered on TOP of requireLeaveManager above — Leave
+  // Manage isn't an Admin Panel "module" (no admin_module_permissions row;
+  // access is the flat can_manage_leave boolean requireLeaveManager already
+  // checks), so it can't reuse requireModuleLayer()'s getAdminModules()
+  // check. Instead this reuses the SAME admin_module_permission_layers
+  // storage/helpers (getModulePermissionLayersForModule) with the synthetic
+  // module_key "leave_manage" — that table's module_key column is a free
+  // string, not FK'd to AdminModuleKey, so this just works. Layer keys here
+  // are operation-specific (see LEAVE_MANAGE_LAYER_KEYS), not the generic
+  // Read/Edit-Add/Entry-Upload/Delete-Trash/Permanent-Delete set every other
+  // module uses — Leave Manage's 4 writes don't map cleanly onto those.
+  // Same "no saved rows -> full access" fallback as requireModuleLayer, so
+  // granting can_manage_leave alone (today's only lever) keeps working
+  // exactly as before until a Superadmin explicitly narrows it.
+  const requireLeaveManagerLayer = (layer: typeof LEAVE_MANAGE_LAYER_KEYS[number]) => async (req: any, res: any, next: any) => {
+    if (!req.user) return res.status(401).json({ error: "Access token required" });
+    if (req.user.role === "superadmin") return next();
+    try {
+      const ok = await hasLeaveManageAccess(req.user.id, req.user.role);
+      if (!ok) {
+        return res.status(403).json({ error: "You don't have access to manage Leave balances. Ask your Superadmin to grant it." });
+      }
+      const grantedLayers = await getModulePermissionLayersForModule(req.user.id, "leave_manage");
+      const effectiveLayers = grantedLayers.length > 0 ? grantedLayers : LEAVE_MANAGE_LAYER_KEYS;
+      if (!effectiveLayers.includes(layer)) {
+        return res.status(403).json({ error: "You don't have permission to do this. Ask your Superadmin to grant it." });
       }
       next();
     } catch (err: any) {
@@ -6024,6 +6079,7 @@ async function startServer() {
     requireModule,
     getLeaveApplicationDeptScope,
     requireLeaveManager,
+    requireLeaveManagerLayer,
     hasLeaveManageAccess,
     getCurrentStepApprovers,
     createAlert,

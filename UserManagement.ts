@@ -48,18 +48,20 @@ interface UserManagementRouteDeps {
   // Valid module keys for the module-permissions PUT below — same
   // ADMIN_MODULE_KEYS array defined once in server.ts.
   adminModuleKeys: readonly string[];
-  // Valid layer keys for the module-permission-layers PUT below — same
-  // PERMISSION_LAYER_KEYS array defined once in server.ts (mirrors
-  // PermissionLayerKey/PERMISSION_LAYERS in src/types.ts).
-  permissionLayerKeys: readonly string[];
-  // Which module keys currently accept layers at all — same
-  // PERMISSION_LAYER_MODULES array defined once in server.ts (mirrors
-  // PERMISSION_LAYER_MODULES in src/types.ts). Rolled out module by module.
-  permissionLayerModules: readonly string[];
+  // Every (module_key -> its allowed layer keys) the module-permission-layers
+  // PUT below validates against — same MODULE_LAYER_KEY_SETS map defined
+  // once in server.ts. Most modules share the generic Read Only/Edit-Add/
+  // Entry-Upload/Delete-Trash/Permanent-Delete set (PERMISSION_LAYER_KEYS in
+  // server.ts/src/types.ts), but a module_key here can point at its own
+  // distinct set instead (e.g. "leave_manage" uses operation-specific
+  // layers — see LEAVE_MANAGE_LAYER_KEYS in server.ts) — this route treats
+  // every module_key the same way regardless, just via a different allowed
+  // set. A module_key not present in this map doesn't support layers yet.
+  moduleLayerKeySets: Record<string, readonly string[]>;
 }
 
 export function registerUserManagementRoutes(app: Express, deps: UserManagementRouteDeps) {
-  const { authenticateToken, requireAdmin, requireSuperAdmin, requireModuleGrantAccess, requireModule, requireModuleLayer, queryDB, adminModuleKeys, permissionLayerKeys, permissionLayerModules } = deps;
+  const { authenticateToken, requireAdmin, requireSuperAdmin, requireModuleGrantAccess, requireModule, requireModuleLayer, queryDB, adminModuleKeys, moduleLayerKeySets } = deps;
 
   // 6. User Management (Admin Only)
   app.post("/api/users", authenticateToken, requireAdmin, requireModule("users"), requireModuleLayer("users", "edit_add"), async (req: any, res) => {
@@ -440,11 +442,12 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
     try {
       const { id } = req.params;
       const moduleKey = String(req.body?.module || "");
-      if (!permissionLayerModules.includes(moduleKey)) {
+      const allowedLayerKeys = moduleLayerKeySets[moduleKey];
+      if (!allowedLayerKeys) {
         return res.status(400).json({ error: "This module doesn't support permission layers yet." });
       }
       const layers: string[] = Array.isArray(req.body?.layers) ? req.body.layers : [];
-      const valid = layers.filter((l) => permissionLayerKeys.includes(l));
+      const valid = layers.filter((l) => allowedLayerKeys.includes(l));
 
       const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
       if (target.length === 0) return res.status(404).json({ error: "User not found" });
