@@ -660,6 +660,26 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
     const [budget_id, user_id] = params;
     return memoryDb.budget_submissions.filter(s => s.budget_id === budget_id && s.user_id === user_id);
   }
+  // Admin "Submissions" panel — everyone who's Final Submitted this Budget, with
+  // their name and how many active entries they still have under it.
+  if (lowerSql.startsWith("select bs.user_id, bs.submitted_at, u.name as user_name")) {
+    const budget_id = params[0];
+    return memoryDb.budget_submissions
+      .filter((s: any) => s.budget_id === budget_id)
+      .map((s: any) => {
+        const u = memoryDb.users.find((usr: any) => usr.id === s.user_id);
+        const active_entry_count = memoryDb.entries.filter(
+          (e: any) => e.budget_id === s.budget_id && e.created_by === s.user_id && !e.deleted_at
+        ).length;
+        return {
+          user_id: s.user_id,
+          submitted_at: s.submitted_at,
+          user_name: u ? u.name : null,
+          active_entry_count
+        };
+      })
+      .sort((a: any, b: any) => new Date(b.submitted_at).getTime() - new Date(a.submitted_at).getTime());
+  }
   if (lowerSql.startsWith("insert into budget_submissions")) {
     const [budget_id, user_id] = params;
     const existing = memoryDb.budget_submissions.find(s => s.budget_id === budget_id && s.user_id === user_id);
@@ -667,6 +687,17 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
     const newId = memoryDb.budget_submissions.length + 1;
     memoryDb.budget_submissions.push({ id: newId, budget_id, user_id, submitted_at: new Date() });
     return { insertId: newId };
+  }
+  // Single-user unlock (auto-unlock on last-entry delete, and the Admin's manual
+  // "Unlock Submission" button) — must be matched BEFORE the whole-budget wipe
+  // below, since that one's prefix would otherwise swallow this query too.
+  if (lowerSql.startsWith("delete from budget_submissions where budget_id") && lowerSql.includes("user_id")) {
+    const [budget_id, user_id] = params;
+    const before = memoryDb.budget_submissions.length;
+    memoryDb.budget_submissions = memoryDb.budget_submissions.filter(
+      s => !(s.budget_id === budget_id && s.user_id === user_id)
+    );
+    return { affectedRows: before - memoryDb.budget_submissions.length };
   }
   if (lowerSql.startsWith("delete from budget_submissions where budget_id")) {
     const budget_id = Number(params[0]);
@@ -816,6 +847,19 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
       (e: any) => e.mpr_id === mpr_id && e.budget_id === budget_id && !e.deleted_at
     );
   }
+  // Auto-unlock check (EntriesRoutes.ts unlockBudgetSubmissionIfEmpty) — same
+  // budget_id+created_by shape as the generic check below, but scoped to ACTIVE
+  // entries only, so it must be matched first.
+  if (
+    lowerSql.startsWith("select id from entries where budget_id") &&
+    lowerSql.includes("created_by") &&
+    lowerSql.includes("deleted_at is null")
+  ) {
+    const [budget_id, created_by] = params;
+    return memoryDb.entries.filter(
+      e => e.budget_id === budget_id && e.created_by === created_by && !e.deleted_at
+    );
+  }
   if (lowerSql.startsWith("select id from entries where budget_id") && lowerSql.includes("created_by")) {
     const [budget_id, created_by] = params;
     return memoryDb.entries.filter(e => e.budget_id === budget_id && e.created_by === created_by);
@@ -864,11 +908,16 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
     return { affectedRows: e ? 1 : 0 };
   }
   // Recycle-bin lookups (SELECT id, deleted_at FROM entries WHERE id = ?) used by
-  // the restore / permanent-delete routes.
-  if (lowerSql.startsWith("select id, deleted_at from entries where id")) {
+  // the restore / permanent-delete routes, and the delete_entry Job Edit request
+  // approval lookup (SELECT id, deleted_at, budget_id FROM entries WHERE id = ?),
+  // which additionally needs budget_id for the auto-unlock check.
+  if (
+    lowerSql.startsWith("select id, deleted_at from entries where id") ||
+    lowerSql.startsWith("select id, deleted_at, budget_id from entries where id")
+  ) {
     const id = Number(params[0]);
     const e = memoryDb.entries.find((en: any) => en.id === id);
-    return e ? [{ id: e.id, deleted_at: e.deleted_at || null }] : [];
+    return e ? [{ id: e.id, deleted_at: e.deleted_at || null, budget_id: e.budget_id ?? null }] : [];
   }
   if (lowerSql.startsWith("update entries set item_name")) {
     const [item_name, delivery_date, mpr_id, id] = params;

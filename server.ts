@@ -4980,6 +4980,61 @@ async function startServer() {
     }
   });
 
+  // List everyone who has Final Submitted a given Budget (Admin-only) — feeds the
+  // "Submissions" panel on the Data Import page, which is where the manual unlock
+  // button below lives. active_entry_count is shown alongside each name so the
+  // Admin can see at a glance whether a user's submission still has entries behind
+  // it (normal) or is already empty (would auto-unlock the moment any of their
+  // entries got deleted — see unlockBudgetSubmissionIfEmpty in EntriesRoutes.ts —
+  // but isn't wrong to leave alone either, hence the manual override existing too).
+  app.get(
+    "/api/budgets/:id/submissions",
+    authenticateToken,
+    requireAdmin,
+    requireModule("imports"),
+    async (req, res) => {
+      try {
+        const budgetId = Number(req.params.id);
+        const rows = await queryDB(
+          `SELECT bs.user_id, bs.submitted_at, u.name AS user_name,
+             (SELECT COUNT(*) FROM entries e
+                WHERE e.budget_id = bs.budget_id AND e.created_by = bs.user_id AND e.deleted_at IS NULL
+             ) AS active_entry_count
+           FROM budget_submissions bs
+           JOIN users u ON u.id = bs.user_id
+           WHERE bs.budget_id = ?
+           ORDER BY bs.submitted_at DESC`,
+          [budgetId]
+        );
+        res.json(rows.map((r: any) => ({ ...r, active_entry_count: Number(r.active_entry_count) })));
+      } catch (err: any) {
+        res.status(500).json({ error: err.message || "Failed to load Budget submissions" });
+      }
+    }
+  );
+
+  // Manual "Unlock Submission" (Admin-only) — lifts a single user's Final Submit
+  // lock on this Budget regardless of whether they still have active entries under
+  // it, for whenever the Admin wants to let someone back in to add/fix entries
+  // without waiting on (or instead of) the automatic unlock above. Same effect as
+  // that automatic path: just removing the budget_submissions row.
+  app.delete(
+    "/api/budgets/:id/submissions/:userId",
+    authenticateToken,
+    requireAdmin,
+    requireModule("imports"),
+    async (req, res) => {
+      try {
+        const budgetId = Number(req.params.id);
+        const userId = Number(req.params.userId);
+        await queryDB("DELETE FROM budget_submissions WHERE budget_id = ? AND user_id = ?", [budgetId, userId]);
+        res.json({ success: true });
+      } catch (err: any) {
+        res.status(500).json({ error: err.message || "Failed to unlock this Budget submission" });
+      }
+    }
+  );
+
   // "Approve & Calculate" — Admin action per Budget. Matches every one of this Budget's
   // MPR entries against the Rate File (Item Name + Specification -> Rate, Item Name ->
   // Materials Category), computes Amount = Rate x Req. Qty, and writes the result onto

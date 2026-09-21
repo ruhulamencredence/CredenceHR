@@ -800,6 +800,17 @@ export interface Budget {
   rate_approved_by?: number | null;
 }
 
+// One row of GET /api/budgets/:id/submissions (Admin-only) — a user who has
+// Final Submitted this Budget. active_entry_count is how many of their entries
+// under it are still active (not soft-deleted); the Admin's "Unlock" button
+// (DELETE /api/budgets/:id/submissions/:userId) works whether this is 0 or not.
+export interface BudgetSubmission {
+  user_id: number;
+  user_name: string | null;
+  submitted_at: string;
+  active_entry_count: number;
+}
+
 export interface BudgetItem {
   id: number;
   budget_id: number;
