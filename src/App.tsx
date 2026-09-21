@@ -479,7 +479,7 @@ export default function App() {
     <div
       className="fixed left-1/2 -translate-x-1/2 z-[90] flex items-center gap-2.5 pl-3.5 pr-2 py-2 rounded-full shadow-lg"
       style={{
-        top: 'calc(env(safe-area-inset-top, 0px) + 10px)',
+        top: 'calc(var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px)) + 10px)',
         background: 'var(--g-surface)',
         border: '1px solid var(--g-border)'
       }}

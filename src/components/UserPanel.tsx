@@ -2955,7 +2955,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           <div
             className="md:hidden fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-2"
             style={{
-              paddingTop: 'calc(env(safe-area-inset-top, 0px) + 0.5rem)',
+              paddingTop: 'calc(var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px)) + 0.5rem)',
               paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 0.5rem)'
             }}
             role="dialog"
@@ -4287,7 +4287,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                   // portal escapes that entirely.
                   <div
                     className="fixed inset-0 z-50 flex items-start"
-                    style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 4rem)' }}
+                    style={{ paddingTop: 'calc(var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px)) + 4rem)' }}
                     role="dialog"
                     aria-modal="true"
                   >
@@ -4825,7 +4825,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
       {message && (
         <div
           className="fixed inset-x-3 z-50 flex justify-center"
-          style={{ top: 'calc(env(safe-area-inset-top, 0px) + 0.75rem)' }}
+          style={{ top: 'calc(var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px)) + 0.75rem)' }}
           role="alert"
           aria-live="assertive"
         >

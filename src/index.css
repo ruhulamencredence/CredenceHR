@@ -236,6 +236,10 @@ body {
   position: fixed;
   inset: 0;
   z-index: 60;
-  padding-top: env(safe-area-inset-top, 0px);
+  /* var(--native-safe-area-inset-top) — set by MainActivity.java on the
+     Android APK build from the real WindowInsetsCompat, since
+     env(safe-area-inset-top) alone reads 0/short on some tall/cutout
+     displays; falls back to plain env() everywhere else. */
+  padding-top: var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px));
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
