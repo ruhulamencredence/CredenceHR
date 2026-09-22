@@ -25,6 +25,12 @@ import { registerAssetManagementRoutes, ensureAssetManagementSchema } from "./As
 import { registerEntriesRoutes } from "./EntriesRoutes";
 import { registerEmployeeTransferRoutes, ensureEmployeeTransferSchema } from "./EmployeeTransferRoutes";
 import { registerEmployeeDirectoryRoutes } from "./EmployeeDirectoryRoutes";
+import { registerExitOffboardingRoutes, ensureExitOffboardingSchema } from "./ExitOffboardingRoutes";
+import { registerPerformanceRoutes, ensurePerformanceSchema } from "./PerformanceRoutes";
+import { registerRecruitmentRoutes, ensureRecruitmentSchema } from "./RecruitmentRoutes";
+import { registerGrievanceRoutes, ensureGrievanceSchema } from "./GrievanceRoutes";
+import { registerHRAnalyticsRoutes } from "./HRAnalyticsRoutes";
+import { registerDocumentVaultRoutes, ensureDocumentVaultSchema } from "./DocumentVaultRoutes";
 import { Server as SocketIOServer } from "socket.io";
 import { ensureChatSchema, registerChatRoutes, setupChatSocket } from "./ChatRoutes";
 import { memoryDb, queryMemoryDb, EMPLOYEE_BOOL_FIELDS } from "./memoryDbFallback";
@@ -201,6 +207,17 @@ async function ensureSchemaMigrations() {
   // — table + schema owned by EmployeeTransferRoutes.ts, only the call site
   // lives here, same as every other self-healing migration in this function.
   await ensureEmployeeTransferSchema(dbPool);
+
+  // World-class HRM extension modules — Exit/Offboarding, Performance
+  // Management, Recruitment/ATS, Grievance & Disciplinary, Document Vault
+  // (HR Analytics has no tables of its own, just aggregation queries over
+  // these and existing tables) — each owns its schema in its own file, same
+  // self-healing pattern as every migration above.
+  await ensureExitOffboardingSchema(dbPool);
+  await ensurePerformanceSchema(dbPool);
+  await ensureRecruitmentSchema(dbPool);
+  await ensureGrievanceSchema(dbPool);
+  await ensureDocumentVaultSchema(dbPool);
 
   // Server Profiles (Admin Panel -> Servers, Superadmin-only) — table +
   // schema owned by ServerProfileRoutes.ts, only the call site lives here,
@@ -2035,7 +2052,7 @@ async function ensureSchemaMigrations() {
 // of truth here and mirrored in src/types.ts (ADMIN_MODULES) for the UI.
 const USER_CLAIM_CATEGORIES = ["Transport", "Fuel", "Toll", "Parking", "Others"] as const;
 
-const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports", "users", "attendance", "attendance_reports", "leave_applications", "recycle", "editlog", "notices", "claims", "approvals", "conveyance", "disbursement", "employees", "departments", "tracking", "office_attendance", "holidays", "payroll", "asset_management"] as const;
+const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports", "users", "attendance", "attendance_reports", "leave_applications", "recycle", "editlog", "notices", "claims", "approvals", "conveyance", "disbursement", "employees", "departments", "tracking", "office_attendance", "holidays", "payroll", "asset_management", "exit_offboarding", "performance_management", "recruitment", "grievance_disciplinary", "hr_analytics", "document_vault"] as const;
 
 // Granular per-module action layers — mirrors PermissionLayerKey/
 // PERMISSION_LAYERS in src/types.ts (single source of truth is duplicated
@@ -4321,6 +4338,17 @@ async function startServer() {
     requireModule,
     queryDB
   });
+
+  // World-class HRM extension modules (Exit/Offboarding, Performance
+  // Management, Recruitment/ATS, Grievance & Disciplinary, HR Analytics,
+  // Document Vault) — each its own AdminModuleKey, each in its own file,
+  // same reasoning as every registerXRoutes call above.
+  registerExitOffboardingRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB, getAdminModules });
+  registerPerformanceRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB, getAdminModules });
+  registerRecruitmentRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB });
+  registerGrievanceRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB, getAdminModules });
+  registerHRAnalyticsRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB });
+  registerDocumentVaultRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB, getAdminModules });
 
   // Employee Directory (Self Service -> "Employee Directory") — kept in its
   // own file (EmployeeDirectoryRoutes.ts), same reasoning as

@@ -50,8 +50,104 @@ export const memoryDb = {
   leaveBalanceWorkflows: [
     { id: 1, name: "General", scope_type: "general", designation: null, is_active: 1, created_by: null, created_at: new Date() }
   ] as any[],
-  leaveBalanceWorkflowItems: [] as any[]
+  leaveBalanceWorkflowItems: [] as any[],
+
+  // Exit/Offboarding + Full & Final Settlement, Performance Management,
+  // Recruitment/ATS, Grievance & Disciplinary, Document Vault — all simple
+  // CRUD tables handled generically by simulateGenericTable() below rather
+  // than bespoke per-query handlers (see that function's own comment).
+  exitRequests: [] as any[],
+  exitClearanceItems: [] as any[],
+  finalSettlements: [] as any[],
+  performanceCycles: [] as any[],
+  performanceGoals: [] as any[],
+  performanceReviews: [] as any[],
+  jobPostings: [] as any[],
+  jobCandidates: [] as any[],
+  candidateInterviews: [] as any[],
+  grievances: [] as any[],
+  disciplinaryActions: [] as any[],
+  employeeDocuments: [] as any[],
+  documentSignatures: [] as any[]
 };
+
+// Generic simple-table CRUD simulator, used by every module below that has
+// no exotic query shapes — INSERT INTO t (cols...) VALUES (...), UPDATE t SET
+// col = ?, ... WHERE id = ?, DELETE FROM t WHERE id = ?, SELECT * FROM t
+// WHERE id = ?, and SELECT * FROM t (any other/no WHERE clause just returns
+// every row — those routes always filter/sort in JS afterwards instead of
+// relying on a real WHERE, the same trick GET /api/leave-balances etc. above
+// already lean on for all_employees, so this single generic path covers
+// every query those route files actually send). Saves writing ~10 bespoke
+// handlers per table the way the tables above needed.
+function simulateGenericTable(table: string, store: any[], sql: string, lowerSql: string, params: any[]): any {
+  if (lowerSql.startsWith(`insert into ${table}`)) {
+    const colsMatch = sql.match(/\(([^)]+)\)\s*values/i);
+    const cols = colsMatch ? colsMatch[1].split(",").map((c) => c.trim()) : [];
+    const newId = store.length ? Math.max(...store.map((r: any) => Number(r.id))) + 1 : 1;
+    const row: any = { id: newId, created_at: new Date() };
+    cols.forEach((col, i) => {
+      row[col] = params[i] !== undefined ? params[i] : null;
+    });
+    store.push(row);
+    return { insertId: newId };
+  }
+  if (lowerSql.startsWith(`update ${table} set`)) {
+    // 's' (dotAll) flag: several of this codebase's UPDATE statements are
+    // multi-line template literals (e.g. ExitOffboardingRoutes.ts's
+    // settlement update), and a plain `.` never matches `\n` — without it
+    // this silently captures nothing past the first line break, updating
+    // zero columns instead of throwing, which is much harder to notice.
+    const setMatch = sql.match(/set\s+(.+?)\s+where/is);
+    const cols = setMatch ? setMatch[1].split(",").map((c) => c.trim().split("=")[0].trim()) : [];
+    const id = Number(params[params.length - 1]);
+    const row = store.find((r: any) => Number(r.id) === id);
+    if (row) {
+      cols.forEach((col, i) => {
+        row[col] = params[i] !== undefined ? params[i] : null;
+      });
+      row.updated_at = new Date();
+    }
+    return { affectedRows: row ? 1 : 0 };
+  }
+  if (lowerSql.startsWith(`delete from ${table} where id`)) {
+    const id = Number(params[0]);
+    const before = store.length;
+    const kept = store.filter((r: any) => Number(r.id) !== id);
+    store.length = 0;
+    store.push(...kept);
+    return { affectedRows: before - store.length };
+  }
+  if (lowerSql.startsWith(`select * from ${table} where id`)) {
+    const id = Number(params[0]);
+    return store.filter((r: any) => Number(r.id) === id);
+  }
+  if (lowerSql.startsWith(`select * from ${table}`)) {
+    return [...store];
+  }
+  return undefined;
+}
+
+// Every table simulateGenericTable() above covers, mapped to its memoryDb
+// array — checked in order right before queryMemoryDb's final `return []`
+// fallback, so any bespoke handler already matched earlier in the function
+// (none needed yet, but a future exception could still be added above this
+// point) always takes priority.
+const GENERIC_TABLES: [string, any[]][] = [
+  ["exit_clearance_items", memoryDb.exitClearanceItems],
+  ["exit_requests", memoryDb.exitRequests],
+  ["final_settlements", memoryDb.finalSettlements],
+  ["performance_cycles", memoryDb.performanceCycles],
+  ["performance_goals", memoryDb.performanceGoals],
+  ["performance_reviews", memoryDb.performanceReviews],
+  ["job_postings", memoryDb.jobPostings],
+  ["job_candidates", memoryDb.jobCandidates],
+  ["candidate_interviews", memoryDb.candidateInterviews],
+  ["grievances", memoryDb.grievances],
+  ["disciplinary_actions", memoryDb.disciplinaryActions],
+  ["employee_documents", memoryDb.employeeDocuments],
+  ["document_signatures", memoryDb.documentSignatures]
+];
 memoryDb.leaveCategories = [{ id: 1, category_key: "custom_earn_leave", label: "Earn Leave", created_by: null, created_at: new Date() }];
 
 // SQL-string pattern-matching simulator for the in-memory fallback DB, used by queryDB()
@@ -1944,6 +2040,36 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
       row.reliever_decided_at = new Date();
     }
     return { affectedRows: row ? 1 : 0 };
+  }
+
+  // "give me every user row" fallback for the HR Advanced modules
+  // (Exit/Offboarding, Performance, Recruitment, Grievance, Analytics,
+  // Document Vault) — each reads whichever of id/name/role it needs off a
+  // plain, WHERE-less `SELECT id, name FROM users` or `SELECT * FROM
+  // users`, always filtered/joined in JS afterwards. Deliberately narrow
+  // (exact, WHERE-less prefixes only) rather than "any select mentioning
+  // users" — a broader match would also swallow unrelated queries with
+  // their own real WHERE clause (e.g. UserManagement.ts's duplicate-email
+  // check, `SELECT id FROM users WHERE email = ?`), silently returning
+  // every user instead of an empty/filtered result and breaking THEIR
+  // logic instead of just leaving it at the pre-existing "no handler ->
+  // empty array" fallback.
+  if (
+    lowerSql === "select id, name from users" ||
+    lowerSql === "select * from users" ||
+    lowerSql === "select id, name, email, role from users"
+  ) {
+    return [...memoryDb.users];
+  }
+
+  // Exit/Offboarding, Performance Management, Recruitment/ATS, Grievance &
+  // Disciplinary, Document Vault — generic simple-table CRUD (see
+  // simulateGenericTable's own comment above).
+  for (const [table, store] of GENERIC_TABLES) {
+    if (lowerSql.includes(table)) {
+      const result = simulateGenericTable(table, store, sql, lowerSql, params);
+      if (result !== undefined) return result;
+    }
   }
 
   return [];

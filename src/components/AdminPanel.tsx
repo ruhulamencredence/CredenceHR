@@ -22,6 +22,12 @@ import { OfficeAttendancePanel } from './OfficeAttendancePanel';
 import { DeliveryDateConditionsPanel } from './DeliveryDateConditionsPanel';
 import { HolidayCalendarPanel } from './HolidayCalendarPanel';
 import { AssetManagementAdmin } from './AssetManagementAdmin';
+import { ExitOffboardingPanel } from './ExitOffboardingPanel';
+import { PerformanceManagementPanel } from './PerformanceManagementPanel';
+import { RecruitmentPanel } from './RecruitmentPanel';
+import { GrievanceDisciplinaryPanel } from './GrievanceDisciplinaryPanel';
+import { HRAnalyticsDashboard } from './HRAnalyticsDashboard';
+import { DocumentVaultPanel } from './DocumentVaultPanel';
 import { ServerProfilesPanel } from './ServerProfilesPanel';
 import { AdminDashboard } from './AdminDashboard';
 import { Spinner } from './Spinner';
@@ -243,7 +249,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // PUT /api/users/:id/module-permissions).
   const canGrantModuleAccess = isSuperAdmin || !!user.can_grant_module_access;
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'my_conveyance' | 'disbursement' | 'holidays' | 'asset_management' | 'servers' | 'permanent_delete_log'>(
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'my_conveyance' | 'disbursement' | 'holidays' | 'asset_management' | 'servers' | 'permanent_delete_log' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault'>(
     () => {
       // Restores whichever tab this Admin was last looking at — see the
       // "pull down to reload" note in App.tsx: since a reload now has to be
@@ -3832,6 +3838,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           <AssetManagementAdmin />
         </div>
       )}
+
+      {/* TABS: world-class HRM extension modules — Exit/Offboarding,
+          Performance Management, Recruitment/ATS, Grievance & Disciplinary,
+          HR Analytics, Document Vault. Each gated behind its own
+          AdminModuleKey, same as every tab above. */}
+      {activeTab === 'exit_offboarding' && <ExitOffboardingPanel token={token} />}
+      {activeTab === 'performance_management' && <PerformanceManagementPanel token={token} />}
+      {activeTab === 'recruitment' && <RecruitmentPanel token={token} />}
+      {activeTab === 'grievance_disciplinary' && <GrievanceDisciplinaryPanel token={token} />}
+      {activeTab === 'hr_analytics' && <HRAnalyticsDashboard token={token} />}
+      {activeTab === 'document_vault' && <DocumentVaultPanel token={token} />}
 
       {/* TAB: SERVERS — Superadmin-only catalog of backend deployments
           (IP/URL) the Android app can switch between after login. Not a

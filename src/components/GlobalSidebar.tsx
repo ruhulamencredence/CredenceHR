@@ -5,6 +5,7 @@ import {
   BarChart3, Upload, History, Recycle, Navigation, Bell, ShieldCheck,
   Contact, Calendar, Clock, Fingerprint, Banknote, Package, LayoutDashboard, Server, MessageSquare,
   ChevronsLeft, ChevronsRight, ShieldAlert, Search,
+  Target, UserPlus, Gavel, FolderLock, Sparkles,
 } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { User, AdminModuleKey } from '../types';
@@ -389,10 +390,25 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // (Movement Claims, Conveyance Bill Claim, Conveyance Disbursement, My
   // Conveyance Bill Claim), each independently collapsible, same 2-level
   // nested pattern as HRM's own sub-groups above.
+  // World-class HRM extension modules (Exit/Offboarding, Performance,
+  // Recruitment, Grievance & Disciplinary, HR Analytics, Document Vault) —
+  // each its own AdminModuleKey/admin_module_permissions grant, same as
+  // every other item here; grouped together so they don't crowd the flat
+  // hrGroup list above.
+  const hrAdvancedItems: NavItem[] = [
+    { key: 'exit_offboarding', label: 'Exit / Offboarding', icon: LogOut, onClick: () => onGoToAdminModule('exit_offboarding') },
+    { key: 'performance_management', label: 'Performance Management', icon: Target, onClick: () => onGoToAdminModule('performance_management') },
+    { key: 'recruitment', label: 'Recruitment (ATS)', icon: UserPlus, onClick: () => onGoToAdminModule('recruitment') },
+    { key: 'grievance_disciplinary', label: 'Grievance & Disciplinary', icon: Gavel, onClick: () => onGoToAdminModule('grievance_disciplinary') },
+    { key: 'hr_analytics', label: 'HR Analytics', icon: BarChart3, onClick: () => onGoToAdminModule('hr_analytics') },
+    { key: 'document_vault', label: 'Document Vault', icon: FolderLock, onClick: () => onGoToAdminModule('document_vault') },
+  ].filter((i) => canSeeModule(i.key as AdminModuleKey));
+
   const hrSubGroups: { key: string; label: string; icon: React.ComponentType<{ className?: string }>; items: NavItem[] }[] = [
     { key: 'hr_attendance', label: 'Attendance', icon: Fingerprint, items: attendanceItems },
     { key: 'hr_claims_bill', label: 'Claims/Bill/Disbursement', icon: CreditCard, items: claimsItems },
     { key: 'hr_employee', label: 'Employee', icon: Contact, items: employeeItems },
+    { key: 'hr_advanced', label: 'HR Advanced', icon: Sparkles, items: hrAdvancedItems },
   ].filter((g) => g.items.length > 0);
 
   // Auto-reveal whichever group the currently-active item lives in — every
