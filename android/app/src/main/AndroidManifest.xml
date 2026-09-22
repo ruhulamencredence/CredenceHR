@@ -1,7 +1,14 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- allowBackup=false: with it true (Android's default), the WebView's
+         localStorage — including the login JWT (see App.tsx's mpr_token) —
+         got swept into Android Auto Backup and silently restored on a fresh
+         install signed into the same Google account, so uninstalling the
+         app never actually logged anyone out (and, worse, could carry a
+         session onto a different device backed up to the same account).
+         false means an uninstall now genuinely clears everything. -->
     <application
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
