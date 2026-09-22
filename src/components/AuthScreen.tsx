@@ -116,7 +116,15 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
 
   return (
     <div
-      className="min-h-dvh flex flex-col items-center justify-center px-5 py-6 sm:py-12 relative overflow-hidden"
+      // Was overflow-hidden — harmless on desktop, but on a phone it also
+      // blocked the page from scrolling at all, so when the on-screen
+      // keyboard opened while typing (Email/Project Name, then Password,
+      // which sits lower), the browser had nowhere to scroll the focused
+      // field into view and it stayed hidden behind the keyboard.
+      // overflow-y-auto lets that happen normally; nothing here actually
+      // needed the clipping (the decorative glow below is sized to this
+      // div's own bounds, inset-0, so it was never overflowing it anyway).
+      className="min-h-dvh flex flex-col items-center justify-center px-5 py-6 sm:py-12 relative overflow-y-auto"
       style={{ background: 'var(--g-bg-gradient)', paddingTop: 'calc(var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px)) + 1.5rem)' }}
     >
       {/* Soft centered glow, sky blue fading into the violet brand accent —
