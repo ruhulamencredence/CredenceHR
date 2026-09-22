@@ -542,6 +542,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     const source = users.find((usr) => usr.id === sourceUserId);
     if (!source) return;
     applyUserAccessToForm(source);
+    // "User Panel Access" is Admin-only server-side (PUT .../user-panel-
+    // access 400s for a 'user' role target) and the toggle itself is only
+    // ever rendered for an Admin target — copying from an Admin source onto
+    // a 'user' role target would otherwise leave this checked-but-hidden,
+    // which then fires (and 400s) the save call below since it no longer
+    // matches the target's own (always-false) can_access_user_panel.
+    if (managingModulesFor?.role !== 'admin') {
+      setUserPanelAccessEnabled(false);
+    }
     setCopyAccessNotice(`Copied access from ${source.name} — review below, then click "Save Access" to apply it.`);
   };
 
@@ -668,8 +677,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       }
 
       // Also save the "User Panel Access" toggle, only if it actually changed —
-      // this is a separate Superadmin-only switch from the tab checkboxes above.
-      if (userPanelAccessEnabled !== !!managingModulesFor.can_access_user_panel) {
+      // this is a separate Superadmin-only switch from the tab checkboxes
+      // above. Admin-only server-side (PUT .../user-panel-access 400s for a
+      // 'user' role target) — also gated here, not just by the toggle being
+      // hidden in the UI for non-Admin targets, since "Copy access from…"
+      // can otherwise leave userPanelAccessEnabled mismatched against a
+      // 'user' role target's own (always-false) can_access_user_panel after
+      // copying from an Admin source, which would otherwise fire this PUT
+      // and 400.
+      if (managingModulesFor.role === 'admin' && userPanelAccessEnabled !== !!managingModulesFor.can_access_user_panel) {
         const upaRes = await fetch(apiUrl(`/api/users/${managingModulesFor.id}/user-panel-access`), {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
