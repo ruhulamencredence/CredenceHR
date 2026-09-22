@@ -68,7 +68,17 @@ export const memoryDb = {
   grievances: [] as any[],
   disciplinaryActions: [] as any[],
   employeeDocuments: [] as any[],
-  documentSignatures: [] as any[]
+  documentSignatures: [] as any[],
+  // Chat/Alerts push notification device tokens (ChatRoutes.ts's POST/DELETE
+  // /api/chat/push-token, PushNotificationService.ts's sendPushToUserIds/
+  // sendPushToRoomMembers) — was missing a handler entirely, so in
+  // memory-fallback mode every push-token INSERT/SELECT silently no-opped:
+  // registration "succeeded" (200 OK) but nothing was ever actually stored,
+  // and every push send read back zero tokens and sent nothing. See the
+  // explicit handlers below (not simulateGenericTable — this table's INSERT
+  // is an upsert with ON DUPLICATE KEY UPDATE, and its SELECTs use IN(...)/
+  // a JOIN, neither of which the generic simulator understands).
+  chatPushTokens: [] as any[]
 };
 
 // Generic simple-table CRUD simulator, used by every module below that has
@@ -2060,6 +2070,46 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
     lowerSql === "select id, name, email, role from users"
   ) {
     return [...memoryDb.users];
+  }
+
+  // Chat/Alerts push notification device tokens (see memoryDb.chatPushTokens
+  // above for why this needs its own handler instead of the generic one).
+  if (lowerSql.includes("chat_push_tokens")) {
+    if (lowerSql.startsWith("insert into chat_push_tokens")) {
+      const [userId, token, platform] = params;
+      const existing = memoryDb.chatPushTokens.find((t: any) => t.token === token);
+      if (existing) {
+        existing.user_id = Number(userId);
+        existing.platform = platform;
+      } else {
+        memoryDb.chatPushTokens.push({ id: memoryDb.chatPushTokens.length + 1, user_id: Number(userId), token, platform });
+      }
+      return { affectedRows: 1 };
+    }
+    if (lowerSql.startsWith("delete from chat_push_tokens")) {
+      if (lowerSql.includes("token in (")) {
+        // Dead-token cleanup after a failed push send (see
+        // PushNotificationService.ts) — params is the list of dead tokens.
+        memoryDb.chatPushTokens = memoryDb.chatPushTokens.filter((t: any) => !params.includes(t.token));
+        return { affectedRows: 1 };
+      }
+      const [token, userId] = params;
+      const before = memoryDb.chatPushTokens.length;
+      memoryDb.chatPushTokens = memoryDb.chatPushTokens.filter((t: any) => !(t.token === token && t.user_id === Number(userId)));
+      return { affectedRows: before - memoryDb.chatPushTokens.length };
+    }
+    if (lowerSql.startsWith("select") && lowerSql.includes("where user_id in")) {
+      // sendPushToUserIds (PushNotificationService.ts) — a plain user_id
+      // IN (?, ?, ...) list, no JOIN.
+      const ids = params.map((p: any) => Number(p));
+      return memoryDb.chatPushTokens.filter((t: any) => ids.includes(t.user_id)).map((t: any) => ({ token: t.token }));
+    }
+    if (lowerSql.startsWith("select") && lowerSql.includes("join chat_room_members")) {
+      // sendPushToRoomMembers — Chat itself has no memory-fallback storage
+      // for chat_rooms/chat_room_members yet, so this always reads back
+      // empty (pre-existing gap, unrelated to Alerts push).
+      return [];
+    }
   }
 
   // Exit/Offboarding, Performance Management, Recruitment/ATS, Grievance &
