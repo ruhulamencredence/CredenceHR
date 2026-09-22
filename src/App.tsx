@@ -24,6 +24,7 @@ const AdminPanel = lazy(() => import('./components/AdminPanel').then(m => ({ def
 // as UserPanel/AdminPanel above, so an account that never opens Chat never
 // pays for it.
 const ChatPanel = lazy(() => import('./components/ChatPanel').then(m => ({ default: m.ChatPanel })));
+const AlertsPage = lazy(() => import('./components/AlertsPage').then(m => ({ default: m.AlertsPage })));
 
 import { AppLoader } from './components/AppLoader';
 import { Spinner } from './components/Spinner';
@@ -156,6 +157,11 @@ export default function App() {
   // jumping back to that same old room.
   const [pendingChatRoomId, setPendingChatRoomId] = useState<number | null>(null);
 
+  // AlertsPage.tsx — opened from GlobalSidebar's "Alerts" item or the
+  // AlertsBell dropdown's "View all" footer link. Same not-persisted-across-
+  // reload reasoning as showChat above.
+  const [showAlertsPage, setShowAlertsPage] = useState(false);
+
   // Bumped right after a Personal Data photo upload succeeds (see
   // ProfilePage's onPhotoUpdated below) — passed to every avatar spot
   // (Navbar, GlobalSidebar, ProfilePage itself) as a dependency so
@@ -276,6 +282,7 @@ export default function App() {
     setSelfServiceView(null);
     setShowProfilePage(false);
           setShowChat(false);
+          setShowAlertsPage(false);
   };
 
   const handleLogout = () => {
@@ -324,17 +331,29 @@ export default function App() {
     if (token) connectChatSocket(token);
   }, [token]);
 
-  // Chat push notifications — registers this device's FCM token (no-op on
-  // web / without Firebase configured, see pushNotifications.ts). Tapping a
+  // Push notifications — registers this device's FCM token (no-op on web /
+  // without Firebase configured, see pushNotifications.ts). Tapping a Chat
   // push while the app was backgrounded/closed jumps straight into that
-  // conversation via pendingChatRoomId, consumed by ChatPanel below.
+  // conversation via pendingChatRoomId, consumed by ChatPanel below. Tapping
+  // an Alerts push (any other alert type — leave decisions, conveyance
+  // claims, ...) opens the Alerts page instead, same as GlobalSidebar's own
+  // "Alerts" item.
   useEffect(() => {
     if (token) {
-      initPushNotifications(token, (roomId) => {
-        setSelfServiceView(null);
-        setShowProfilePage(false);
-        setPendingChatRoomId(roomId);
-        setShowChat(true);
+      initPushNotifications(token, {
+        onChatTap: (roomId) => {
+          setSelfServiceView(null);
+          setShowProfilePage(false);
+          setShowAlertsPage(false);
+          setPendingChatRoomId(roomId);
+          setShowChat(true);
+        },
+        onAlertTap: () => {
+          setSelfServiceView(null);
+          setShowProfilePage(false);
+          setShowChat(false);
+          setShowAlertsPage(true);
+        }
       });
     }
   }, [token]);
@@ -599,6 +618,7 @@ export default function App() {
   // Admin Panel, Chat) is the same regardless of viewport.
   const computeSidebarActiveKey = (viewport: 'mobile' | 'desktop'): string | null => {
     if (showChat) return 'chat';
+    if (showAlertsPage) return 'alerts';
     if (showProfilePage) return null;
     if (selfServiceView) return selfServiceView;
     if (isAdminView) return adminActiveTab === 'dashboard' ? 'admin_dashboard' : adminActiveTab;
@@ -623,6 +643,7 @@ export default function App() {
       setSelfServiceView(null);
       setShowProfilePage(false);
           setShowChat(false);
+          setShowAlertsPage(false);
       setViewMode('user');
       // Also reset UserPanel's own persisted section (mobile tile menu /
       // desktop tab) back to the dashboard default — see dashboardNavRequest
@@ -636,6 +657,7 @@ export default function App() {
       setSelfServiceView(null);
       setShowProfilePage(false);
           setShowChat(false);
+          setShowAlertsPage(false);
       setViewMode('user');
       setJobsNavRequest({ target, ts: Date.now() });
     },
@@ -643,6 +665,7 @@ export default function App() {
       setSelfServiceView(null);
       setShowProfilePage(false);
           setShowChat(false);
+          setShowAlertsPage(false);
       setViewMode('user');
       setClaimsNavRequest({ target, ts: Date.now() });
     },
@@ -650,6 +673,7 @@ export default function App() {
       setSelfServiceView(null);
       setShowProfilePage(false);
           setShowChat(false);
+          setShowAlertsPage(false);
       setViewMode('admin');
       setClaimsNavRequest({ target: target === 'claims' ? 'movementClaims' : 'conveyanceBill', ts: Date.now() });
     },
@@ -657,12 +681,14 @@ export default function App() {
       setSelfServiceView(null);
       setShowProfilePage(false);
           setShowChat(false);
+          setShowAlertsPage(false);
       setViewMode('admin');
       setAdminNavRequest({ target, ts: Date.now() });
     },
     onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'myLeave' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory') => {
       setShowProfilePage(false);
           setShowChat(false);
+          setShowAlertsPage(false);
       if (target === 'leaveApplication') {
         // Routes into UserPanel's own mobileActiveSection = 'leave' instead
         // of this file's separate selfServiceView state — the SAME
@@ -681,9 +707,16 @@ export default function App() {
     onOpenProfile: () => {
       setSelfServiceView(null);
       setShowChat(false);
+      setShowAlertsPage(false);
       setShowProfilePage(true);
     },
     onOpenChat: openChat,
+    onOpenAlerts: () => {
+      setSelfServiceView(null);
+      setShowProfilePage(false);
+      setShowChat(false);
+      setShowAlertsPage(true);
+    },
   };
 
   return (
@@ -711,6 +744,7 @@ export default function App() {
                 setSelfServiceView(null);
                 setShowProfilePage(false);
           setShowChat(false);
+          setShowAlertsPage(false);
                 setViewMode(mode);
               }
             : undefined
@@ -725,6 +759,7 @@ export default function App() {
           setSelfServiceView(null);
           setShowProfilePage(false);
           setShowChat(false);
+          setShowAlertsPage(false);
           setViewMode('user');
           setDashboardNavRequest({ ts: Date.now() });
         }}
@@ -741,12 +776,14 @@ export default function App() {
           setSelfServiceView(null);
           setShowProfilePage(false);
           setShowChat(false);
+          setShowAlertsPage(false);
           setClaimsNavRequest({ target: 'movementClaims', ts: Date.now() });
         }}
         onGoToConveyanceBillClaim={() => {
           setSelfServiceView(null);
           setShowProfilePage(false);
           setShowChat(false);
+          setShowAlertsPage(false);
           setClaimsNavRequest({ target: 'conveyanceBill', ts: Date.now() });
         }}
         onGoToJobsTab={(target) => {
@@ -758,6 +795,7 @@ export default function App() {
           setSelfServiceView(null);
           setShowProfilePage(false);
           setShowChat(false);
+          setShowAlertsPage(false);
           if (canSwitchPanels) setViewMode('user');
           setJobsNavRequest({ target, ts: Date.now() });
         }}
@@ -769,6 +807,7 @@ export default function App() {
           setSelfServiceView(null);
           setShowProfilePage(false);
           setShowChat(false);
+          setShowAlertsPage(false);
           if (canSwitchPanels) setViewMode('admin');
           setAdminNavRequest({ target, ts: Date.now() });
         }}
@@ -776,6 +815,7 @@ export default function App() {
           setSelfServiceView(null);
           setShowProfilePage(false);
           setShowChat(false);
+          setShowAlertsPage(false);
           if (canSwitchPanels) setViewMode('admin');
           setAdminNavRequest({ target, ts: Date.now() });
         }}
@@ -783,22 +823,26 @@ export default function App() {
           setSelfServiceView(null);
           setShowProfilePage(false);
           setShowChat(false);
+          setShowAlertsPage(false);
           if (canSwitchPanels) setViewMode('admin');
           setAdminNavRequest({ target, ts: Date.now() });
         }}
         onGoToSelfServiceTab={(target) => {
           setShowProfilePage(false);
           setShowChat(false);
+          setShowAlertsPage(false);
           setSelfServiceView(target);
         }}
         onOpenMobileMenu={() => setGlobalSidebarOpen(true)}
         onOpenProfile={() => {
           setSelfServiceView(null);
           setShowChat(false);
+          setShowAlertsPage(false);
           setShowProfilePage(true);
         }}
         onOpenChat={openChat}
         isChatOpen={showChat}
+        onOpenAlerts={sidebarNavProps.onOpenAlerts}
       />
 
       {/* Mobile-only overlay drawer (see Navbar.tsx's md:hidden hamburger) —
@@ -835,6 +879,15 @@ export default function App() {
             onBack={() => setShowChat(false)}
             initialRoomId={pendingChatRoomId}
             onInitialRoomHandled={() => setPendingChatRoomId(null)}
+          />
+        ) : showAlertsPage ? (
+          <AlertsPage
+            token={token || ''}
+            onBack={() => setShowAlertsPage(false)}
+            onOpenLeaveApplication={() => {
+              setShowAlertsPage(false);
+              sidebarNavProps.onGoToSelfServiceTab('leaveApplication');
+            }}
           />
         ) : showProfilePage ? (
           <ProfilePage

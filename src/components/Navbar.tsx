@@ -101,6 +101,9 @@ interface NavbarProps {
   // Hides this bell while ChatPanel.tsx is the page currently showing, same
   // reasoning as isProfilePageOpen hiding the avatar button above.
   isChatOpen?: boolean;
+  // AlertsBell's dropdown footer "View all" link — opens AlertsPage.tsx,
+  // same full-page destination GlobalSidebar's own "Alerts" item opens.
+  onOpenAlerts: () => void;
 }
 
 // Styled after the Gemini app's top bar: a plain white surface, the Credence
@@ -125,7 +128,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenMobileMenu,
   onOpenProfile,
   onOpenChat,
-  isChatOpen
+  isChatOpen,
+  onOpenAlerts
 }) => {
   // Both the User Panel and the Admin Panel now get the fully transparent
   // header on the native Android APK (per request) — the web build keeps the
@@ -371,7 +375,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               Leave Application alert jumps to Self Service -> Leave
               Application, same destination the "Self Service" menu above
               points at. */}
-          <AlertsBell token={token} onOpenLeaveApplication={() => onGoToSelfServiceTab('leaveApplication')} />
+          <AlertsBell token={token} onOpenLeaveApplication={() => onGoToSelfServiceTab('leaveApplication')} onViewAll={onOpenAlerts} />
 
           {/* Chat bell — hidden while ChatPanel.tsx is already the page
               showing, same isProfilePageOpen/avatar pattern below. */}
