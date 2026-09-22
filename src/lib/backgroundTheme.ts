@@ -28,27 +28,30 @@ export interface BackgroundTheme {
   gradient: string;
 }
 
+// Color-stop percentages pushed further out (light stop's own share roughly
+// doubled from the first pass) so the pale center reads as the dominant
+// area of the glow, with the deep tone only taking over near the edges.
 export const BACKGROUND_THEMES: BackgroundTheme[] = [
   {
     id: 'violet',
     label: 'Violet',
     swatch: '#B36AFF',
     gradient:
-      'radial-gradient(ellipse 90% 60% at 50% 20%, #EFE0FF 0%, #D2A8FF 32%, #7F00FF 68%, #47008E 100%)'
+      'radial-gradient(ellipse 90% 60% at 50% 20%, #EFE0FF 0%, #D2A8FF 50%, #7F00FF 82%, #47008E 100%)'
   },
   {
     id: 'deep-violet',
     label: 'Deep Violet',
     swatch: '#6300C6',
     gradient:
-      'radial-gradient(ellipse 90% 60% at 50% 20%, #F3E8FF 0%, #B36AFF 30%, #6300C6 62%, #380071 100%)'
+      'radial-gradient(ellipse 90% 60% at 50% 20%, #F3E8FF 0%, #B36AFF 48%, #6300C6 78%, #380071 100%)'
   },
   {
     id: 'sunset',
     label: 'Sunset',
     swatch: '#EA4B1E',
     gradient:
-      'radial-gradient(ellipse 90% 60% at 50% 20%, #FFE9DE 0%, #FFB38F 28%, #7F00FF 66%, #380071 100%)'
+      'radial-gradient(ellipse 90% 60% at 50% 20%, #FFE9DE 0%, #FFB38F 46%, #7F00FF 80%, #380071 100%)'
   }
 ];
 
