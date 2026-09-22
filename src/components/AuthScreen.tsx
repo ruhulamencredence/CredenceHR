@@ -198,8 +198,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
             centered next to the form. On mobile these stack above the form
             instead — see the lg:hidden duplicate block below. */}
         <div className="hidden lg:flex lg:w-1/2 flex-col items-center text-center">
-          <img src={credenceLogo} alt="Credence" className="h-14 w-auto mb-6" />
-          <div className="w-72 h-72 pointer-events-none">
+          <img src={credenceLogo} alt="Credence" className="h-14 w-auto mb-4" />
+          <div className="w-80 h-80 pointer-events-none">
             <Suspense fallback={<div className="w-full h-full" />}>
               <AuthHeroLottie className="w-full h-full" />
             </Suspense>
@@ -208,10 +208,12 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
 
         {/* Mobile: logo + a smaller Lottie hero animation above the form
             (hidden on desktop, where the block above takes over on the left
-            side instead, at full size). */}
-        <div className="flex lg:hidden flex-col items-center text-center mb-4 sm:mb-6">
-          <img src={credenceLogo} alt="Credence" className="h-9 sm:h-11 w-auto mb-3 sm:mb-4" />
-          <div className="w-36 h-36 sm:w-44 sm:h-44 pointer-events-none">
+            side instead, at full size). Pulled up a bit (-mt-2) so the
+            bigger animation below doesn't push the card as far down the
+            screen — less blank space above the logo instead. */}
+        <div className="flex lg:hidden flex-col items-center text-center mb-3 sm:mb-4 -mt-2">
+          <img src={credenceLogo} alt="Credence" className="h-9 sm:h-11 w-auto mb-1.5 sm:mb-2" />
+          <div className="w-52 h-52 sm:w-60 sm:h-60 pointer-events-none">
             <Suspense fallback={<div className="w-full h-full" />}>
               <AuthHeroLottie className="w-full h-full" />
             </Suspense>
@@ -221,8 +223,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
         {/* Right side (desktop) / below (mobile): greeting + the sign-in form,
             so "Welcome back" always sits directly above the fields it belongs to. */}
         <div className="lg:w-1/2">
-        <div className="text-center lg:text-left mb-5">
-          <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight gemini-gradient-text mb-2">
+        <div className="text-center lg:text-left mb-3">
+          <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight uppercase gemini-gradient-text mb-2">
             Welcome back
           </h1>
           <p className="text-sm" style={{ color: 'var(--g-text-muted)' }}>
