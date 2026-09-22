@@ -6424,60 +6424,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 </label>
               )}
               <label
-                className="flex items-center justify-between gap-3 p-3 mb-3 bg-emerald-50 border border-emerald-200 rounded-xl cursor-pointer"
-              >
-                <span>
-                  <span className="text-sm font-semibold text-slate-900 block">Also allow editing Leave balances</span>
-                  <span className="text-[11px] text-slate-500">
-                    Lets this {managingModulesFor.role === 'user' ? 'User' : 'Admin'} edit everyone's Casual/Sick/Leave-without-Pay
-                    balance on Self Service → Leave Management, the same as the Superadmin can.
-                  </span>
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setLeaveManagementAccessEnabled((v) => !v)}
-                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${
-                    leaveManagementAccessEnabled ? 'bg-emerald-500' : 'bg-slate-300'
-                  }`}
-                  title={leaveManagementAccessEnabled ? 'On — click to turn off' : 'Off — click to turn on'}
-                >
-                  <span
-                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                      leaveManagementAccessEnabled ? 'translate-x-[18px]' : 'translate-x-1'
-                    }`}
-                  />
-                </button>
-              </label>
-              {leaveManagementAccessEnabled && (
-                <div className="mb-3 p-3 bg-violet-50 border border-violet-200 rounded-xl">
-                  <p className="text-[11px] font-semibold text-slate-700 flex items-center gap-1.5 mb-1">
-                    <ShieldCheck className="w-3.5 h-3.5 text-violet-600" />
-                    Permission Layers for Leave Manage
-                  </p>
-                  <p className="text-[11px] text-slate-500 mb-2">
-                    Choose exactly what {managingModulesFor.role === 'user' ? 'this User' : 'this Admin'} may do inside
-                    Leave Manage — any combination. Leaving all of these unchecked (while the toggle above stays on)
-                    blocks every action here.
-                  </p>
-                  <div className="grid grid-cols-2 gap-1.5">
-                    {LEAVE_MANAGE_LAYERS.map((layer) => (
-                      <label
-                        key={layer.key}
-                        className="flex items-center gap-2 px-2.5 py-1.5 bg-white border border-violet-100 rounded-lg cursor-pointer hover:bg-violet-100/40"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={leaveManageLayers.has(layer.key)}
-                          onChange={() => toggleLeaveManageLayer(layer.key)}
-                          className="w-3.5 h-3.5 rounded border-slate-300 text-violet-600 focus:ring-violet-600 cursor-pointer"
-                        />
-                        <span className="text-xs text-slate-800">{layer.label}</span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              )}
-              <label
                 className="flex items-center justify-between gap-3 p-3 mb-3 bg-indigo-50 border border-indigo-200 rounded-xl cursor-pointer"
               >
                 <span>
@@ -6647,6 +6593,66 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   className="w-full pl-9 pr-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-blue-600"
                 />
               </div>
+              {/* "Also allow editing Leave balances" — this is an Admin Panel
+                  module toggle (Leave Manage), not a User-Panel-facing grant
+                  like the switches on the left, even though it isn't part of
+                  the ADMIN_MODULES/module_permissions checklist below (it's
+                  gated by the separate can_manage_leave flag) — so it lives
+                  here in the Admin Module column instead. */}
+              <label
+                className="flex items-center justify-between gap-3 p-3 mb-3 bg-emerald-50 border border-emerald-200 rounded-xl cursor-pointer"
+              >
+                <span>
+                  <span className="text-sm font-semibold text-slate-900 block">Also allow editing Leave balances</span>
+                  <span className="text-[11px] text-slate-500">
+                    Lets this {managingModulesFor.role === 'user' ? 'User' : 'Admin'} edit everyone's Casual/Sick/Leave-without-Pay
+                    balance on Self Service → Leave Management, the same as the Superadmin can.
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setLeaveManagementAccessEnabled((v) => !v)}
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${
+                    leaveManagementAccessEnabled ? 'bg-emerald-500' : 'bg-slate-300'
+                  }`}
+                  title={leaveManagementAccessEnabled ? 'On — click to turn off' : 'Off — click to turn on'}
+                >
+                  <span
+                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                      leaveManagementAccessEnabled ? 'translate-x-[18px]' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </label>
+              {leaveManagementAccessEnabled && (
+                <div className="mb-3 p-3 bg-violet-50 border border-violet-200 rounded-xl">
+                  <p className="text-[11px] font-semibold text-slate-700 flex items-center gap-1.5 mb-1">
+                    <ShieldCheck className="w-3.5 h-3.5 text-violet-600" />
+                    Permission Layers for Leave Manage
+                  </p>
+                  <p className="text-[11px] text-slate-500 mb-2">
+                    Choose exactly what {managingModulesFor.role === 'user' ? 'this User' : 'this Admin'} may do inside
+                    Leave Manage — any combination. Leaving all of these unchecked (while the toggle above stays on)
+                    blocks every action here.
+                  </p>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {LEAVE_MANAGE_LAYERS.map((layer) => (
+                      <label
+                        key={layer.key}
+                        className="flex items-center gap-2 px-2.5 py-1.5 bg-white border border-violet-100 rounded-lg cursor-pointer hover:bg-violet-100/40"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={leaveManageLayers.has(layer.key)}
+                          onChange={() => toggleLeaveManageLayer(layer.key)}
+                          className="w-3.5 h-3.5 rounded border-slate-300 text-violet-600 focus:ring-violet-600 cursor-pointer"
+                        />
+                        <span className="text-xs text-slate-800">{layer.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
               {MODULE_ACCESS_GROUPS.map((group) => {
                 const moduleQuery = moduleSearchQuery.trim().toLowerCase();
                 const groupModules = ADMIN_MODULES.filter((m) => group.keys.includes(m.key) && m.label.toLowerCase().includes(moduleQuery));
