@@ -39,9 +39,20 @@ export const memoryDb = {
   leaveCategoryPolicies: [
     { category_key: "casual", min_advance_notice_days: 0, reliever_required: 1, max_consecutive_days: null, require_paid_leave_exhausted: 0 },
     { category_key: "sick", min_advance_notice_days: 0, reliever_required: 1, max_consecutive_days: null, require_paid_leave_exhausted: 0 },
-    { category_key: "without_pay", min_advance_notice_days: 0, reliever_required: 1, max_consecutive_days: null, require_paid_leave_exhausted: 0 }
-  ] as any[]
+    { category_key: "without_pay", min_advance_notice_days: 0, reliever_required: 1, max_consecutive_days: null, require_paid_leave_exhausted: 0 },
+    { category_key: "custom_earn_leave", min_advance_notice_days: 0, reliever_required: 0, max_consecutive_days: null, require_paid_leave_exhausted: 0 }
+  ] as any[],
+  // Earn Leave — seeded to match the INSERT IGNORE INTO leave_categories
+  // ('custom_earn_leave', 'Earn Leave', NULL) seed in server.ts, so it shows
+  // up in Set Balance in Bulk/Leave Policies/the Leave Type dropdown in
+  // in-memory dev mode exactly like a fresh real-DB install.
+  leaveYearSettings: null as any,
+  leaveBalanceWorkflows: [
+    { id: 1, name: "General", scope_type: "general", designation: null, is_active: 1, created_by: null, created_at: new Date() }
+  ] as any[],
+  leaveBalanceWorkflowItems: [] as any[]
 };
+memoryDb.leaveCategories = [{ id: 1, category_key: "custom_earn_leave", label: "Earn Leave", created_by: null, created_at: new Date() }];
 
 // SQL-string pattern-matching simulator for the in-memory fallback DB, used by queryDB()
 // in server.ts when MySQL is unavailable (local preview/testing without XAMPP running).
@@ -1548,6 +1559,15 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
       .map((u: any) => ({ id: u.id, name: u.name, role: u.role }))
       .sort((a: any, b: any) => a.name.localeCompare(b.name));
   }
+  // Leave Balance Workflows' applyAllActiveWorkflows() — every login account a
+  // workflow can possibly target.
+  if (lowerSql.startsWith("select id from users where role in")) {
+    return memoryDb.users.filter((u: any) => u.role === "admin" || u.role === "user").map((u: any) => ({ id: u.id }));
+  }
+  // Leave Year auto-rollover's "who applies the workflows" acting account.
+  if (lowerSql.startsWith("select id from users where role = 'superadmin'")) {
+    return memoryDb.users.filter((u: any) => u.role === "superadmin").slice(0, 1).map((u: any) => ({ id: u.id }));
+  }
   if (lowerSql.startsWith("select * from leave_balances where user_id")) {
     const userId = Number(params[0]);
     return memoryDb.leaveBalances.filter((b: any) => b.user_id === userId);
@@ -1664,6 +1684,142 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
     });
     return { insertId: memoryDb.leaveCategoryPolicies.length };
   }
+
+  // LEAVE YEAR SETTINGS (Leave Manage -> "Year Settings")
+  if (lowerSql.startsWith("select * from leave_year_settings")) {
+    return memoryDb.leaveYearSettings ? [memoryDb.leaveYearSettings] : [];
+  }
+  if (lowerSql.startsWith("insert ignore into leave_year_settings")) {
+    if (!memoryDb.leaveYearSettings) {
+      const [id, closeMonthDay, startMonthDay, autoRollover] = params;
+      memoryDb.leaveYearSettings = {
+        id, close_month_day: closeMonthDay, start_month_day: startMonthDay,
+        auto_rollover: autoRollover ? 1 : 0, last_rollover_year: null, updated_by: null
+      };
+    }
+    return { affectedRows: 1 };
+  }
+  if (lowerSql.startsWith("insert into leave_year_settings")) {
+    const [closeMonthDay, startMonthDay, autoRollover, updatedBy] = params;
+    memoryDb.leaveYearSettings = {
+      id: 1, close_month_day: closeMonthDay, start_month_day: startMonthDay,
+      auto_rollover: autoRollover ? 1 : 0,
+      last_rollover_year: memoryDb.leaveYearSettings?.last_rollover_year ?? null,
+      updated_by: updatedBy ?? null
+    };
+    return { affectedRows: 1 };
+  }
+  if (lowerSql.startsWith("update leave_year_settings set last_rollover_year")) {
+    if (memoryDb.leaveYearSettings) memoryDb.leaveYearSettings.last_rollover_year = params[0];
+    return { affectedRows: memoryDb.leaveYearSettings ? 1 : 0 };
+  }
+
+  // LEAVE BALANCE WORKFLOWS (Leave Manage -> "Leave Balance Workflows")
+  if (lowerSql.startsWith("select * from leave_balance_workflows where id") && lowerSql.includes("and is_active")) {
+    const id = Number(params[0]);
+    return memoryDb.leaveBalanceWorkflows.filter((w: any) => w.id === id && Number(w.is_active) === 1);
+  }
+  if (lowerSql.startsWith("select * from leave_balance_workflows where id")) {
+    const id = Number(params[0]);
+    return memoryDb.leaveBalanceWorkflows.filter((w: any) => w.id === id);
+  }
+  if (lowerSql.startsWith("select * from leave_balance_workflows where is_active")) {
+    return memoryDb.leaveBalanceWorkflows.filter((w: any) => Number(w.is_active) === 1);
+  }
+  if (lowerSql.startsWith("select * from leave_balance_workflows")) {
+    return [...memoryDb.leaveBalanceWorkflows];
+  }
+  if (
+    lowerSql.startsWith(
+      "select id from leave_balance_workflows where scope_type = 'designation' and lower(designation) = lower(?) and id"
+    )
+  ) {
+    const [designation, excludeId] = params;
+    return memoryDb.leaveBalanceWorkflows.filter(
+      (w: any) =>
+        w.scope_type === "designation" &&
+        String(w.designation || "").toLowerCase() === String(designation).toLowerCase() &&
+        w.id !== Number(excludeId)
+    );
+  }
+  if (lowerSql.startsWith("select id from leave_balance_workflows where scope_type = 'designation' and lower(designation)")) {
+    const [designation] = params;
+    return memoryDb.leaveBalanceWorkflows.filter(
+      (w: any) => w.scope_type === "designation" && String(w.designation || "").toLowerCase() === String(designation).toLowerCase()
+    );
+  }
+  if (lowerSql.startsWith("insert ignore into leave_balance_workflows")) {
+    if (!memoryDb.leaveBalanceWorkflows.some((w: any) => w.id === 1)) {
+      memoryDb.leaveBalanceWorkflows.push({
+        id: 1, name: "General", scope_type: "general", designation: null, is_active: 1, created_by: null, created_at: new Date()
+      });
+    }
+    return { affectedRows: 1 };
+  }
+  if (lowerSql.startsWith("insert into leave_balance_workflows")) {
+    const [name, designation, createdBy] = params;
+    const newId = memoryDb.leaveBalanceWorkflows.length ? Math.max(...memoryDb.leaveBalanceWorkflows.map((w: any) => w.id)) + 1 : 1;
+    memoryDb.leaveBalanceWorkflows.push({
+      id: newId, name, scope_type: "designation", designation, is_active: 1, created_by: createdBy, created_at: new Date()
+    });
+    return { insertId: newId };
+  }
+  if (lowerSql.startsWith("update leave_balance_workflows set name")) {
+    const [name, id] = params;
+    const row = memoryDb.leaveBalanceWorkflows.find((w: any) => w.id === Number(id));
+    if (row) row.name = name;
+    return { affectedRows: row ? 1 : 0 };
+  }
+  if (lowerSql.startsWith("update leave_balance_workflows set designation")) {
+    const [designation, id] = params;
+    const row = memoryDb.leaveBalanceWorkflows.find((w: any) => w.id === Number(id));
+    if (row) row.designation = designation;
+    return { affectedRows: row ? 1 : 0 };
+  }
+  if (lowerSql.startsWith("update leave_balance_workflows set is_active")) {
+    const [isActive, id] = params;
+    const row = memoryDb.leaveBalanceWorkflows.find((w: any) => w.id === Number(id));
+    if (row) row.is_active = isActive ? 1 : 0;
+    return { affectedRows: row ? 1 : 0 };
+  }
+  if (lowerSql.startsWith("delete from leave_balance_workflows where id")) {
+    const id = Number(params[0]);
+    memoryDb.leaveBalanceWorkflows = memoryDb.leaveBalanceWorkflows.filter((w: any) => w.id !== id);
+    memoryDb.leaveBalanceWorkflowItems = memoryDb.leaveBalanceWorkflowItems.filter((it: any) => it.workflow_id !== id);
+    return { affectedRows: 1 };
+  }
+
+  // LEAVE BALANCE WORKFLOW ITEMS
+  if (lowerSql.startsWith("select * from leave_balance_workflow_items where workflow_id")) {
+    const workflowId = Number(params[0]);
+    return memoryDb.leaveBalanceWorkflowItems.filter((it: any) => it.workflow_id === workflowId);
+  }
+  if (lowerSql.startsWith("select * from leave_balance_workflow_items")) {
+    return [...memoryDb.leaveBalanceWorkflowItems];
+  }
+  if (lowerSql.startsWith("delete from leave_balance_workflow_items where workflow_id")) {
+    const workflowId = Number(params[0]);
+    memoryDb.leaveBalanceWorkflowItems = memoryDb.leaveBalanceWorkflowItems.filter((it: any) => it.workflow_id !== workflowId);
+    return { affectedRows: 1 };
+  }
+  if (lowerSql.startsWith("insert into leave_balance_workflow_items")) {
+    const [workflowId, categoryKey, balanceDays] = params;
+    const newId = memoryDb.leaveBalanceWorkflowItems.length
+      ? Math.max(...memoryDb.leaveBalanceWorkflowItems.map((it: any) => it.id)) + 1
+      : 1;
+    memoryDb.leaveBalanceWorkflowItems.push({ id: newId, workflow_id: workflowId, category_key: categoryKey, balance_days: balanceDays });
+    return { insertId: newId };
+  }
+
+  // Employee Directory distinct Designations (Leave Balance Workflows' "new Designation workflow" picker)
+  if (lowerSql.startsWith("select distinct designation from all_employees")) {
+    const set = new Set<string>();
+    for (const e of memoryDb.employees) {
+      if (e.designation && String(e.designation).trim()) set.add(String(e.designation).trim());
+    }
+    return Array.from(set).map((designation) => ({ designation }));
+  }
+
   if (lowerSql.startsWith("select curdate() as today")) {
     return [{ today: new Date().toISOString().slice(0, 10) }];
   }

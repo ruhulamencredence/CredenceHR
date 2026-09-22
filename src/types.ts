@@ -70,13 +70,15 @@ export const PERMISSION_LAYER_MODULES: AdminModuleKey[] = ['departments', 'proje
 // allow editing Leave balances" toggle), which these layers narrow further,
 // same "no saved rows -> full access" default as everywhere else on this
 // system (see requireLeaveManagerLayer() in server.ts).
-export type LeaveManageLayerKey = 'edit_balance' | 'bulk_set_balance' | 'add_category' | 'edit_policy';
+export type LeaveManageLayerKey = 'edit_balance' | 'bulk_set_balance' | 'add_category' | 'edit_policy' | 'year_settings' | 'workflow_manage';
 
 export const LEAVE_MANAGE_LAYERS: { key: LeaveManageLayerKey; label: string }[] = [
   { key: 'edit_balance', label: 'Edit Balance' },
   { key: 'bulk_set_balance', label: 'Set Balance in Bulk' },
   { key: 'add_category', label: 'Add Category' },
   { key: 'edit_policy', label: 'Leave Policy' },
+  { key: 'year_settings', label: 'Year Settings' },
+  { key: 'workflow_manage', label: 'Balance Workflows' },
 ];
 
 // Global Calendar (Admin Panel -> Holidays) — one row per Weekend/Holiday
@@ -538,6 +540,48 @@ export interface LeaveBalance {
   // above) that has ever been set via Set Balance in Bulk. Omitted/empty for
   // accounts with no custom-category balance set yet.
   custom_leaves?: { key: string; label: string; balance: number }[];
+}
+
+// Self Service -> Leave Manage -> "Year Settings" (GET/PUT
+// /api/leave-year-settings). close/start_month_day are 'MM-DD' with no year
+// component — the same dates recur every year. start_month_day is normally
+// just the day after close_month_day (suggested client-side, recomputed
+// server-side too if omitted on save) but can be overridden. auto_rollover:
+// when on, the server applies every active Leave Balance Workflow to every
+// account on its own once start_month_day arrives each year (see
+// LeaveBalanceWorkflow below) — last_rollover_year tracks which calendar
+// year that last actually ran for, so it only ever fires once per year.
+export interface LeaveYearSettings {
+  close_month_day: string;
+  start_month_day: string;
+  auto_rollover: boolean;
+  last_rollover_year: number | null;
+}
+
+// Self Service -> Leave Manage -> "Leave Balance Workflows"
+// (GET/POST/PUT/DELETE /api/leave-balance-workflows). A named set of
+// per-category annual balances, applied either Globally ("General" —
+// scope_type 'general', exactly one such row, id 1, can't be renamed/deleted)
+// or to every account whose Employee Directory Designation matches
+// (scope_type 'designation', e.g. "Manager", "GM"). Applying (POST
+// .../apply, or the year-end auto-rollover above) runs General first, then
+// each active Designation workflow — a Designation workflow's own value for
+// a category overrides General's for just that category, for just accounts
+// with that Designation.
+export interface LeaveBalanceWorkflowItem {
+  category_key: string;
+  // Present on GET, omitted when just saving via PUT's `items` array.
+  label?: string;
+  balance_days: number;
+}
+
+export interface LeaveBalanceWorkflow {
+  id: number;
+  name: string;
+  scope_type: 'general' | 'designation';
+  designation: string | null;
+  is_active: boolean;
+  items: LeaveBalanceWorkflowItem[];
 }
 
 // Self Service -> Leave Application. The three built-in Leave types —
