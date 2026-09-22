@@ -116,15 +116,18 @@ export const LeaveSummaryCard: React.FC<LeaveSummaryCardProps> = ({ token, onOpe
 
       {/* Total Leave strip — overlaps the header the same way AttendanceCard
           overlaps the Dashboard banner, so this reads as one connected card.
-          Same liquid-glass treatment as the outer card (translucent white +
-          backdrop-blur instead of a flat white box), so the violet header
-          shows softly through it. backdrop-blur-lg to match My Attendance's
-          own tiles (that card's outer shell is blur-xl, its inner tiles are
-          blur-lg — this strip is the same kind of inner tile). Shorter
+          backdrop-blur-lg is kept for desktop browsers, which render it —
+          but confirmed on real hardware that Android System WebView doesn't
+          render backdrop-filter at all here, and this strip sits directly
+          over the bold violet header gradient, so at the old bg-white/50 a
+          non-blurred device showed a washed-out purple smear instead of a
+          separate white panel (this is what "one flat solid block" was).
+          bg-white/95 makes the strip read as its own distinct panel from
+          opacity alone, independent of whether blur renders. Shorter
           (py-2.5, tighter gaps) than the last pass so the card doesn't run
           as tall.  */}
       <div className="px-5 sm:px-6 -mt-4 pb-5">
-        <div className="bg-white/50 backdrop-blur-lg border border-white/60 rounded-2xl px-5 py-2.5 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)]">
+        <div className="bg-white/95 backdrop-blur-lg border border-white/60 rounded-2xl px-5 py-2.5 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)]">
           <p className="text-xs font-bold text-slate-900">Total Leave</p>
           <p className="text-[11px] text-slate-500 mt-0.5">Period 1 Jan {year} – 31 Dec {year}</p>
           <div className="mt-1.5 flex items-center gap-6">

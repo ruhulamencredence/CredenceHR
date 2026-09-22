@@ -202,8 +202,8 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
         <div className="absolute inset-0 -z-10 backdrop-blur-xl" />
         <div className="h-4 w-32 bg-white/60 rounded-md mb-3" />
         <div className="grid grid-cols-2 gap-2">
-          <div className="rounded-xl px-3 py-2 bg-white/40 border border-white/50 h-14" />
-          <div className="rounded-xl px-3 py-2 bg-white/40 border border-white/50 h-14" />
+          <div className="rounded-xl px-3 py-2 bg-white/80 border border-white/50 h-14" />
+          <div className="rounded-xl px-3 py-2 bg-white/80 border border-white/50 h-14" />
         </div>
       </div>
     );
@@ -223,15 +223,14 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
     // unrelated designs pushed together.
     <div className="relative rounded-[24px] overflow-hidden border border-white/70 p-4 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-blue-100/70 via-white/50 to-indigo-50/40 hover:shadow-lg hover:border-white transition-all md:bg-white md:from-transparent md:via-transparent md:to-transparent md:border-slate-200 md:rounded-2xl md:shadow-sm md:hover:shadow-sm md:hover:border-slate-200">
       {/* backdrop-blur on its own absolutely-positioned layer rather than
-          the same box as overflow-hidden + rounded-[24px] — Android's
-          WebView (unlike desktop Chrome) frequently fails to render
-          backdrop-filter at all when it's combined with overflow-hidden +
-          border-radius on one element (a known Chromium/Android compositor
-          gap), silently leaving the background flat instead. Splitting the
-          blur onto a plain, non-clipped, non-rounded child inset to fill
-          this card works around it — the parent's own overflow-hidden still
-          clips the child into the rounded shape visually, it just isn't the
-          same element carrying the filter anymore. */}
+          the same box as overflow-hidden + rounded-[24px] — kept for
+          desktop browsers, which do render it. Confirmed on real hardware
+          that this device's Android System WebView doesn't render
+          backdrop-filter at all (not a compositor/layering quirk we can
+          work around — the property is just a no-op there), so the inner
+          tiles below no longer depend on the blur to read as a distinct
+          panel: their background opacity alone (bg-white/80, bg-blue-100/80,
+          etc.) now does that job on every device, blur or not. */}
       <div className="absolute inset-0 -z-10 backdrop-blur-xl md:backdrop-blur-none" />
       <h3 className="text-sm font-bold text-slate-900 mb-2 flex items-center gap-2 min-w-0">
         <UserCheck className="w-4 h-4 text-blue-600 shrink-0" />
@@ -246,7 +245,7 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
           <select
             value={projectId}
             onChange={(e) => setProjectId(e.target.value)}
-            className="w-full text-sm px-3 py-2 bg-white/50 backdrop-blur border border-white/60 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none"
+            className="w-full text-sm px-3 py-2 bg-white/85 backdrop-blur border border-white/60 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none"
           >
             <option value="">Select a project…</option>
             {projects.map((p) => (
@@ -258,10 +257,11 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
 
       <div className="grid grid-cols-2 gap-2">
         {/* In Time — just the time itself, no "via Office/GPS" source line;
-            extra padding + a stronger blur than the card's own backdrop-blur
-            so the gradient behind genuinely shows through this tile instead
-            of the text crowding its rounded corners. */}
-        <div className={`rounded-xl px-4 py-3 backdrop-blur-lg border ${hasCheckedIn ? 'bg-blue-100/50 border-white/60' : 'bg-white/40 border-white/50'}`}>
+            extra padding so the text doesn't crowd its rounded corners.
+            bg-white/80 (not the lighter /40 this used to be) reads as a
+            distinct tile on its own even where backdrop-blur-lg doesn't
+            render (Android WebView — see the note above). */}
+        <div className={`rounded-xl px-4 py-3 backdrop-blur-lg border ${hasCheckedIn ? 'bg-blue-100/80 border-white/60' : 'bg-white/80 border-white/50'}`}>
           <div className="text-xs font-medium text-slate-500">In Time</div>
           {hasCheckedIn && inParts ? (
             <div className="mt-0.5 font-bold text-blue-700">
@@ -283,7 +283,7 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
 
         {/* Out Time — same "time only" + extra padding/blur treatment as
             In Time above. */}
-        <div className={`rounded-xl px-4 py-3 backdrop-blur-lg border ${hasCheckedOut ? 'bg-blue-100/50 border-white/60' : 'bg-white/40 border-white/50'}`}>
+        <div className={`rounded-xl px-4 py-3 backdrop-blur-lg border ${hasCheckedOut ? 'bg-blue-100/80 border-white/60' : 'bg-white/80 border-white/50'}`}>
           <div className="text-xs font-medium text-slate-500">Out Time</div>
           {hasCheckedOut && outParts ? (
             <div className="mt-0.5 font-bold text-blue-700">
