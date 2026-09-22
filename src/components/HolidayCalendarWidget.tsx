@@ -6,7 +6,7 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react';
 import { HolidayEntry } from '../types';
-import { apiUrl } from '../lib/api';
+import { apiUrl, dedupedFetchJson } from '../lib/api';
 
 interface HolidayCalendarWidgetProps {
   token: string;
@@ -81,8 +81,11 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
   const fetchHolidays = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(apiUrl('/api/holidays'), { headers: { Authorization: `Bearer ${token}` } });
-      if (res.ok) setEntries(await res.json());
+      // This widget mounts twice on every Dashboard load (compact mobile +
+      // large desktop copies, see UserPanel.tsx) — dedupedFetchJson means
+      // only one of the two actually hits the network.
+      const rows = await dedupedFetchJson(apiUrl('/api/holidays'), token);
+      if (rows) setEntries(rows);
     } catch {
       // Offline/unreachable — the widget just shows a blank calendar; no
       // error banner needed for a read-only Dashboard extra like this.
