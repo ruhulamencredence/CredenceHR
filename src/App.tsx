@@ -546,6 +546,17 @@ export default function App() {
     }
   };
 
+  // Used only by the docked FloatingChatButton (bottom-right corner) — that
+  // button is explicitly meant to open Chat as an in-page popup overlay
+  // (ChatPanel's own .chat-shell already covers the screen as one, dismissed
+  // via its Back arrow) rather than a new browser tab, unlike ChatBell's own
+  // openChat above. Same in-app path openChat already takes on native.
+  const openChatPopup = () => {
+    setSelfServiceView(null);
+    setShowProfilePage(false);
+    setShowChat(true);
+  };
+
   // UserPanel's desktopActiveSection/mobileActiveSection values don't share
   // GlobalSidebar's own item keys 1:1 (different naming/grouping) — this
   // translates one into the other. Sections with no matching sidebar item
@@ -913,7 +924,7 @@ export default function App() {
           Hidden while the native in-app Chat page is already open (on web,
           onOpenChat always opens /chat in a new tab, so showChat never gates
           this there, but the check is harmless either way). */}
-      <FloatingChatButton token={token || ''} onOpenChat={openChat} hidden={showChat} />
+      <FloatingChatButton token={token || ''} onOpenChat={openChatPopup} hidden={showChat} />
 
       {showExitPrompt && (
         <div
