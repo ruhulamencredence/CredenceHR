@@ -149,30 +149,76 @@ export const LeaveReviewPage: React.FC<LeaveReviewPageProps> = ({ token, onBack 
         </div>
       </div>
 
-      <div className="px-5 sm:px-6 py-4">
-        {loading ? (
-          <p className="text-xs text-slate-400 text-center py-8">Loading Leave Applications...</p>
-        ) : filtered.length === 0 ? (
-          <div className="flex flex-col items-center gap-1.5 text-center py-8 text-slate-400">
-            <Inbox className="w-6 h-6 text-slate-300" />
-            <p className="text-xs font-semibold text-slate-500">
-              {tab === 'pending' ? 'Nothing waiting on review.' : tab === 'approved' ? 'No approved Leave yet.' : 'No rejected Leave.'}
+      {loading ? (
+        <p className="text-xs text-slate-400 text-center py-8">Loading Leave Applications...</p>
+      ) : filtered.length === 0 ? (
+        <div className="flex flex-col items-center gap-1.5 text-center py-8 text-slate-400">
+          <Inbox className="w-6 h-6 text-slate-300" />
+          <p className="text-xs font-semibold text-slate-500">
+            {tab === 'pending' ? 'Nothing waiting on review.' : tab === 'approved' ? 'No approved Leave yet.' : 'No rejected Leave.'}
+          </p>
+          {tab === 'pending' && (
+            <p className="text-[11px] text-slate-400 max-w-[220px]">
+              Ready for some time off? Tap "Submit Leave" to apply.
             </p>
-            {tab === 'pending' && (
-              <p className="text-[11px] text-slate-400 max-w-[220px]">
-                Ready for some time off? Tap "Submit Leave" to apply.
-              </p>
-            )}
+          )}
+        </div>
+      ) : (
+        <>
+          {/* Desktop — a real table, same layout/columns/status-pill styling
+              as Admin Panel -> HR -> "Monthly Leave Application" (minus
+              Employee/Department, redundant here since this page is always
+              just the signed-in account's own applications). */}
+          <div className="hidden md:block overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                <tr>
+                  <th className="px-4 py-3">Applied On</th>
+                  <th className="px-4 py-3">Leave Type</th>
+                  <th className="px-4 py-3">Start Date</th>
+                  <th className="px-4 py-3">End Date</th>
+                  <th className="px-4 py-3">Days</th>
+                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3">{tab === 'pending' ? 'Approver' : 'Decided By'}</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {filtered.map((a) => (
+                  <tr key={a.id} className="hover:bg-slate-50">
+                    <td className="px-4 py-3 font-medium text-slate-900">{formatDate(a.apply_date)}</td>
+                    <td className="px-4 py-3 text-slate-600">{leaveTypeLabel(a)}</td>
+                    <td className="px-4 py-3 text-slate-600">{formatDate(a.start_date)}</td>
+                    <td className="px-4 py-3 text-slate-600">{formatDate(a.end_date)}</td>
+                    <td className="px-4 py-3 text-slate-600">{a.day_count}</td>
+                    <td className="px-4 py-3">
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold ${
+                        a.status === 'approved' ? 'bg-emerald-50 text-emerald-700' :
+                        a.status === 'rejected' ? 'bg-rose-50 text-rose-700' : 'bg-amber-50 text-amber-700'
+                      }`}>
+                        {a.status}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {tab === 'pending' ? (a.approver_name || '—') : (a.decided_by_name || '—')}
+                      {a.status === 'rejected' && a.remarks && (
+                        <span className="block text-[11px] text-slate-400 mt-0.5">Reason: {a.remarks}</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-        ) : (
-          <div className="space-y-3">
+
+          {/* Mobile — the original Liquid Glass card list, untouched. */}
+          <div className="md:hidden px-5 sm:px-6 py-4 space-y-3">
             {filtered.map((a) => (
               // No backdrop-blur on these cards on purpose — a per-item blur
               // layer for every application in the list is what made other
               // pages (Employee Directory, Job Entry Details) stutter on
               // Android. A plain, more opaque white keeps the same glass
               // look without that per-item cost.
-              <div key={a.id} className="border border-white/60 md:border-slate-200 rounded-2xl md:rounded-xl bg-white/80 md:bg-white p-3.5">
+              <div key={a.id} className="border border-white/60 rounded-2xl bg-white/80 p-3.5">
                 <div className="flex items-center gap-1.5 text-xs font-bold text-slate-900">
                   <CalendarDays className="w-3.5 h-3.5" style={{ color: 'var(--g-accent)' }} />
                   {formatDate(a.apply_date)}
@@ -217,8 +263,8 @@ export const LeaveReviewPage: React.FC<LeaveReviewPageProps> = ({ token, onBack 
               </div>
             ))}
           </div>
-        )}
-      </div>
+        </>
+      )}
 
     </div>
 
