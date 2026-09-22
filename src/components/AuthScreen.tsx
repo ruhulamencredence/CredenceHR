@@ -1,4 +1,4 @@
-import React, { useState, lazy, Suspense } from 'react';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { Lock, ArrowUp, MapPin, Download } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import credenceLogo from '../assets/credence-logo.png';
@@ -35,6 +35,57 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
   // build). On the plain WEB build (opened in a desktop/mobile browser),
   // login works as before with no location prompt at all.
   const isNativeApp = Capacitor.isNativePlatform();
+
+  // Belt-and-braces for the Android keyboard covering a focused field —
+  // making the page scrollable (see the root div's overflow-y-auto below)
+  // is the primary fix, but the browser's own "scroll the focused input
+  // into view when the keyboard opens" behavior isn't reliable on every
+  // WebView/OEM build (confirmed: it silently doesn't happen on at least
+  // one real device). Scrolling it into view here explicitly, from JS,
+  // doesn't depend on that. The delay gives the on-screen keyboard's own
+  // open animation time to finish resizing the visible viewport first —
+  // scrolling immediately on focus would compute the wrong position
+  // against the still-full-height page.
+  const scrollFieldIntoView = (el: HTMLElement) => {
+    setTimeout(() => el.scrollIntoView({ block: 'center', behavior: 'smooth' }), 300);
+  };
+
+  // overflow-y-auto (above) only lets the page scroll if there's actually
+  // something to scroll TO — on this page's WebView, the keyboard opening
+  // doesn't reliably shrink the visible layout at all (min-h-dvh's `dvh`
+  // unit not recomputing on keyboard open is a known WebView gap on some
+  // Android builds), so the container never grew taller than the viewport
+  // and scrollFieldIntoView above had nowhere to actually scroll to. Asking
+  // the Capacitor Keyboard plugin directly for the keyboard's real height
+  // and reserving that much space at the bottom (padding-bottom, merged
+  // into the root div's style below) guarantees real scrollable room to
+  // move into, independent of whether dvh/visualViewport behave correctly
+  // on this device — same fix as ChatPanel.tsx's own keyboard handling.
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  useEffect(() => {
+    if (!isNativeApp) return;
+    let willShowHandle: { remove: () => void } | undefined;
+    let willHideHandle: { remove: () => void } | undefined;
+    (async () => {
+      try {
+        const { Keyboard } = await import('@capacitor/keyboard');
+        willShowHandle = await Keyboard.addListener('keyboardWillShow', (info) => {
+          setKeyboardHeight(info.keyboardHeight);
+        });
+        willHideHandle = await Keyboard.addListener('keyboardWillHide', () => {
+          setKeyboardHeight(0);
+        });
+      } catch {
+        // Plugin unavailable — the page still scrolls on its own if the
+        // WebView resizes correctly, just without this extra guarantee.
+      }
+    })();
+    return () => {
+      willShowHandle?.remove();
+      willHideHandle?.remove();
+    };
+  }, [isNativeApp]);
 
   // Location permission is mandatory before login is allowed on the app
   // (Admin decision): if the user declines, login is blocked rather than
@@ -116,8 +167,20 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
 
   return (
     <div
-      className="min-h-dvh flex flex-col items-center justify-center px-5 py-6 sm:py-12 relative overflow-hidden"
-      style={{ background: 'var(--g-bg-gradient)', paddingTop: 'calc(var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px)) + 1.5rem)' }}
+      // Was overflow-hidden — harmless on desktop, but on a phone it also
+      // blocked the page from scrolling at all, so when the on-screen
+      // keyboard opened while typing (Email/Project Name, then Password,
+      // which sits lower), the browser had nowhere to scroll the focused
+      // field into view and it stayed hidden behind the keyboard.
+      // overflow-y-auto lets that happen normally; nothing here actually
+      // needed the clipping (the decorative glow below is sized to this
+      // div's own bounds, inset-0, so it was never overflowing it anyway).
+      className="min-h-dvh flex flex-col items-center justify-center px-5 py-6 sm:py-12 relative overflow-y-auto"
+      style={{
+        background: 'var(--g-bg-gradient)',
+        paddingTop: 'calc(var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px)) + 1.5rem)',
+        ...(keyboardHeight > 0 ? { paddingBottom: keyboardHeight } : null)
+      }}
     >
       {/* Soft centered glow, sky blue fading into the violet brand accent —
           matches the Gemini app's home screen composition rather than
@@ -135,8 +198,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
             centered next to the form. On mobile these stack above the form
             instead — see the lg:hidden duplicate block below. */}
         <div className="hidden lg:flex lg:w-1/2 flex-col items-center text-center">
-          <img src={credenceLogo} alt="Credence" className="h-14 w-auto mb-6" />
-          <div className="w-72 h-72 pointer-events-none">
+          <img src={credenceLogo} alt="Credence" className="h-14 w-auto mb-4" />
+          <div className="w-80 h-80 pointer-events-none">
             <Suspense fallback={<div className="w-full h-full" />}>
               <AuthHeroLottie className="w-full h-full" />
             </Suspense>
@@ -145,10 +208,12 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
 
         {/* Mobile: logo + a smaller Lottie hero animation above the form
             (hidden on desktop, where the block above takes over on the left
-            side instead, at full size). */}
-        <div className="flex lg:hidden flex-col items-center text-center mb-4 sm:mb-6">
-          <img src={credenceLogo} alt="Credence" className="h-9 sm:h-11 w-auto mb-3 sm:mb-4" />
-          <div className="w-36 h-36 sm:w-44 sm:h-44 pointer-events-none">
+            side instead, at full size). Pulled up a bit (-mt-2) so the
+            bigger animation below doesn't push the card as far down the
+            screen — less blank space above the logo instead. */}
+        <div className="flex lg:hidden flex-col items-center text-center mb-3 sm:mb-4 -mt-2">
+          <img src={credenceLogo} alt="Credence" className="h-9 sm:h-11 w-auto mb-1.5 sm:mb-2" />
+          <div className="w-52 h-52 sm:w-60 sm:h-60 pointer-events-none">
             <Suspense fallback={<div className="w-full h-full" />}>
               <AuthHeroLottie className="w-full h-full" />
             </Suspense>
@@ -158,8 +223,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
         {/* Right side (desktop) / below (mobile): greeting + the sign-in form,
             so "Welcome back" always sits directly above the fields it belongs to. */}
         <div className="lg:w-1/2">
-        <div className="text-center lg:text-left mb-5">
-          <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight gemini-gradient-text mb-2">
+        <div className="text-center lg:text-left mb-3">
+          <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight uppercase gemini-gradient-text mb-2">
             Welcome back
           </h1>
           <p className="text-sm" style={{ color: 'var(--g-text-muted)' }}>
@@ -189,7 +254,10 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
                 placeholder="you@company.com or Project Name"
                 className="block w-full px-5 py-3.5 rounded-full text-[15px] placeholder-slate-400 focus:outline-none transition-shadow"
                 style={{ background: 'var(--g-surface-muted)', border: '1px solid transparent', color: 'var(--g-text)' }}
-                onFocus={(e) => (e.currentTarget.style.boxShadow = '0 0 0 2px var(--g-accent)')}
+                onFocus={(e) => {
+                  e.currentTarget.style.boxShadow = '0 0 0 2px var(--g-accent)';
+                  scrollFieldIntoView(e.currentTarget);
+                }}
                 onBlur={(e) => (e.currentTarget.style.boxShadow = 'none')}
               />
             </div>
@@ -207,7 +275,10 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
                   placeholder="••••••••"
                   className="block w-full pl-5 pr-11 py-3.5 rounded-full text-[15px] placeholder-slate-400 focus:outline-none transition-shadow"
                   style={{ background: 'var(--g-surface-muted)', border: '1px solid transparent', color: 'var(--g-text)' }}
-                  onFocus={(e) => (e.currentTarget.style.boxShadow = '0 0 0 2px var(--g-accent)')}
+                  onFocus={(e) => {
+                    e.currentTarget.style.boxShadow = '0 0 0 2px var(--g-accent)';
+                    scrollFieldIntoView(e.currentTarget);
+                  }}
                   onBlur={(e) => (e.currentTarget.style.boxShadow = 'none')}
                 />
                 <Lock className="w-4 h-4 absolute right-4 top-1/2 -translate-y-1/2" style={{ color: 'var(--g-text-muted)' }} />
