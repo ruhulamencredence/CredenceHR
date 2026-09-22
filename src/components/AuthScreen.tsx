@@ -1,4 +1,4 @@
-import React, { useState, lazy, Suspense } from 'react';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { Lock, ArrowUp, MapPin, Download } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import credenceLogo from '../assets/credence-logo.png';
@@ -49,6 +49,43 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
   const scrollFieldIntoView = (el: HTMLElement) => {
     setTimeout(() => el.scrollIntoView({ block: 'center', behavior: 'smooth' }), 300);
   };
+
+  // overflow-y-auto (above) only lets the page scroll if there's actually
+  // something to scroll TO — on this page's WebView, the keyboard opening
+  // doesn't reliably shrink the visible layout at all (min-h-dvh's `dvh`
+  // unit not recomputing on keyboard open is a known WebView gap on some
+  // Android builds), so the container never grew taller than the viewport
+  // and scrollFieldIntoView above had nowhere to actually scroll to. Asking
+  // the Capacitor Keyboard plugin directly for the keyboard's real height
+  // and reserving that much space at the bottom (padding-bottom, merged
+  // into the root div's style below) guarantees real scrollable room to
+  // move into, independent of whether dvh/visualViewport behave correctly
+  // on this device — same fix as ChatPanel.tsx's own keyboard handling.
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+
+  useEffect(() => {
+    if (!isNativeApp) return;
+    let willShowHandle: { remove: () => void } | undefined;
+    let willHideHandle: { remove: () => void } | undefined;
+    (async () => {
+      try {
+        const { Keyboard } = await import('@capacitor/keyboard');
+        willShowHandle = await Keyboard.addListener('keyboardWillShow', (info) => {
+          setKeyboardHeight(info.keyboardHeight);
+        });
+        willHideHandle = await Keyboard.addListener('keyboardWillHide', () => {
+          setKeyboardHeight(0);
+        });
+      } catch {
+        // Plugin unavailable — the page still scrolls on its own if the
+        // WebView resizes correctly, just without this extra guarantee.
+      }
+    })();
+    return () => {
+      willShowHandle?.remove();
+      willHideHandle?.remove();
+    };
+  }, [isNativeApp]);
 
   // Location permission is mandatory before login is allowed on the app
   // (Admin decision): if the user declines, login is blocked rather than
@@ -139,7 +176,11 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
       // needed the clipping (the decorative glow below is sized to this
       // div's own bounds, inset-0, so it was never overflowing it anyway).
       className="min-h-dvh flex flex-col items-center justify-center px-5 py-6 sm:py-12 relative overflow-y-auto"
-      style={{ background: 'var(--g-bg-gradient)', paddingTop: 'calc(var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px)) + 1.5rem)' }}
+      style={{
+        background: 'var(--g-bg-gradient)',
+        paddingTop: 'calc(var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px)) + 1.5rem)',
+        ...(keyboardHeight > 0 ? { paddingBottom: keyboardHeight } : null)
+      }}
     >
       {/* Soft centered glow, sky blue fading into the violet brand accent —
           matches the Gemini app's home screen composition rather than
