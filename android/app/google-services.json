@@ -7,6 +7,25 @@
   "client": [
     {
       "client_info": {
+        "mobilesdk_app_id": "1:672448725694:android:48804cde1022511a4754ef",
+        "android_client_info": {
+          "package_name": "com.mprtracker.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDDGCg3rOurkGi-k87mGKspJl4uvDCJCIY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
         "mobilesdk_app_id": "1:672448725694:android:099173f993379fd54754ef",
         "android_client_info": {
           "package_name": "my.CredenceHR"
