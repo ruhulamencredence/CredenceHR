@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">Monthly Budget Optimization</string>
-    <string name="title_activity_main">Monthly Budget Optimization</string>
+    <string name="app_name">CredenceHR</string>
+    <string name="title_activity_main">CredenceHR</string>
     <string name="package_name">com.mprtracker.app</string>
     <string name="custom_url_scheme">com.mprtracker.app</string>
 
