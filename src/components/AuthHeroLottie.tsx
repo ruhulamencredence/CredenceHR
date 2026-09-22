@@ -1,6 +1,6 @@
 import React from 'react';
 import { Lottie } from 'lottie-react';
-import authHeroAnimation from '../assets/auth-hero.json';
+import authHeroAnimation from '../assets/team-hierarchy.json';
 
 // Split out from AuthScreen.tsx and loaded via React.lazy() there so the
 // (fairly heavy) lottie-react library + this JSON animation are their own
