@@ -36,6 +36,20 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
   // login works as before with no location prompt at all.
   const isNativeApp = Capacitor.isNativePlatform();
 
+  // Belt-and-braces for the Android keyboard covering a focused field —
+  // making the page scrollable (see the root div's overflow-y-auto below)
+  // is the primary fix, but the browser's own "scroll the focused input
+  // into view when the keyboard opens" behavior isn't reliable on every
+  // WebView/OEM build (confirmed: it silently doesn't happen on at least
+  // one real device). Scrolling it into view here explicitly, from JS,
+  // doesn't depend on that. The delay gives the on-screen keyboard's own
+  // open animation time to finish resizing the visible viewport first —
+  // scrolling immediately on focus would compute the wrong position
+  // against the still-full-height page.
+  const scrollFieldIntoView = (el: HTMLElement) => {
+    setTimeout(() => el.scrollIntoView({ block: 'center', behavior: 'smooth' }), 300);
+  };
+
   // Location permission is mandatory before login is allowed on the app
   // (Admin decision): if the user declines, login is blocked rather than
   // proceeding without a location. Only the LATEST login's coordinates are
@@ -197,7 +211,10 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
                 placeholder="you@company.com or Project Name"
                 className="block w-full px-5 py-3.5 rounded-full text-[15px] placeholder-slate-400 focus:outline-none transition-shadow"
                 style={{ background: 'var(--g-surface-muted)', border: '1px solid transparent', color: 'var(--g-text)' }}
-                onFocus={(e) => (e.currentTarget.style.boxShadow = '0 0 0 2px var(--g-accent)')}
+                onFocus={(e) => {
+                  e.currentTarget.style.boxShadow = '0 0 0 2px var(--g-accent)';
+                  scrollFieldIntoView(e.currentTarget);
+                }}
                 onBlur={(e) => (e.currentTarget.style.boxShadow = 'none')}
               />
             </div>
@@ -215,7 +232,10 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
                   placeholder="••••••••"
                   className="block w-full pl-5 pr-11 py-3.5 rounded-full text-[15px] placeholder-slate-400 focus:outline-none transition-shadow"
                   style={{ background: 'var(--g-surface-muted)', border: '1px solid transparent', color: 'var(--g-text)' }}
-                  onFocus={(e) => (e.currentTarget.style.boxShadow = '0 0 0 2px var(--g-accent)')}
+                  onFocus={(e) => {
+                    e.currentTarget.style.boxShadow = '0 0 0 2px var(--g-accent)';
+                    scrollFieldIntoView(e.currentTarget);
+                  }}
                   onBlur={(e) => (e.currentTarget.style.boxShadow = 'none')}
                 />
                 <Lock className="w-4 h-4 absolute right-4 top-1/2 -translate-y-1/2" style={{ color: 'var(--g-text-muted)' }} />
