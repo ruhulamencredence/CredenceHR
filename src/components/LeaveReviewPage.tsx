@@ -112,7 +112,10 @@ export const LeaveReviewPage: React.FC<LeaveReviewPageProps> = ({ token, onBack 
         <p className="text-xs text-slate-500 mt-0.5">Review, Approved and Rejected — every Leave Application you've submitted</p>
       </div>
 
-      {/* Review / Approved / Rejected — every submitted Leave Application
+      {/* Review / Approved / Rejected — mobile only now (see the desktop
+          table below, which shows every status at once via its own Status
+          column instead, same as Admin Panel -> HR -> "Monthly Leave
+          Application" has no tabs either). Every submitted Leave Application
           lands in "Review" first; a decision (see Self Service -> Leave
           Approvals) moves it into Approved or Rejected and nowhere else.
           Same rounded-pill segmented control as Conveyance Bill Claim's
@@ -121,8 +124,8 @@ export const LeaveReviewPage: React.FC<LeaveReviewPageProps> = ({ token, onBack 
           track, the active pill fully filled with indigo-600 + white text +
           soft shadow, and a small round count badge on every pill
           (white/25%-on-indigo when active, slate-200-on-slate-500 when not). */}
-      <div className="px-4 sm:px-6 mt-4 md:mt-1.5 pt-4 md:pt-0 pb-1">
-        <div className="flex items-center gap-1.5 rounded-full bg-white/50 md:bg-slate-100 backdrop-blur md:backdrop-blur-none p-1 text-xs font-semibold">
+      <div className="md:hidden px-4 sm:px-6 mt-4 pt-4 pb-1">
+        <div className="flex items-center gap-1.5 rounded-full bg-white/50 backdrop-blur p-1 text-xs font-semibold">
           {TABS.map((t) => {
             const active = tab === t.key;
             const count = countFor(t.key);
@@ -149,6 +152,66 @@ export const LeaveReviewPage: React.FC<LeaveReviewPageProps> = ({ token, onBack 
         </div>
       </div>
 
+      {/* Desktop — a real table, every status at once (Applied On newest
+          first), same layout/columns/status-pill styling as Admin Panel ->
+          HR -> "Monthly Leave Application" (minus Employee/Department,
+          redundant here since this page is always just the signed-in
+          account's own applications). No tabs — the Status column already
+          shows Review/Approved/Rejected per row. */}
+      <div className="hidden md:block">
+        {loading ? (
+          <p className="text-xs text-slate-400 text-center py-8">Loading Leave Applications...</p>
+        ) : applications.length === 0 ? (
+          <p className="px-4 py-10 text-center text-sm text-slate-400">No Leave Applications found.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                <tr>
+                  <th className="px-4 py-3">Applied On</th>
+                  <th className="px-4 py-3">Leave Type</th>
+                  <th className="px-4 py-3">Start Date</th>
+                  <th className="px-4 py-3">End Date</th>
+                  <th className="px-4 py-3">Days</th>
+                  <th className="px-4 py-3">Status</th>
+                  <th className="px-4 py-3">Approver / Decided By</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {[...applications]
+                  .sort((a, b) => Number(b.id) - Number(a.id))
+                  .map((a) => (
+                    <tr key={a.id} className="hover:bg-slate-50">
+                      <td className="px-4 py-3 font-medium text-slate-900">{formatDate(a.apply_date)}</td>
+                      <td className="px-4 py-3 text-slate-600">{leaveTypeLabel(a)}</td>
+                      <td className="px-4 py-3 text-slate-600">{formatDate(a.start_date)}</td>
+                      <td className="px-4 py-3 text-slate-600">{formatDate(a.end_date)}</td>
+                      <td className="px-4 py-3 text-slate-600">{a.day_count}</td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold ${
+                          a.status === 'approved' ? 'bg-emerald-50 text-emerald-700' :
+                          a.status === 'rejected' ? 'bg-rose-50 text-rose-700' : 'bg-amber-50 text-amber-700'
+                        }`}>
+                          {a.status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-slate-600">
+                        {a.status === 'pending' ? (a.approver_name || '—') : (a.decided_by_name || '—')}
+                        {a.status === 'rejected' && a.remarks && (
+                          <span className="block text-[11px] text-slate-400 mt-0.5">Reason: {a.remarks}</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Mobile — the original Liquid Glass card list, untouched (still
+          tab-filtered by Review/Approved/Rejected above). */}
+      <div className="md:hidden">
       {loading ? (
         <p className="text-xs text-slate-400 text-center py-8">Loading Leave Applications...</p>
       ) : filtered.length === 0 ? (
@@ -164,54 +227,7 @@ export const LeaveReviewPage: React.FC<LeaveReviewPageProps> = ({ token, onBack 
           )}
         </div>
       ) : (
-        <>
-          {/* Desktop — a real table, same layout/columns/status-pill styling
-              as Admin Panel -> HR -> "Monthly Leave Application" (minus
-              Employee/Department, redundant here since this page is always
-              just the signed-in account's own applications). */}
-          <div className="hidden md:block overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                <tr>
-                  <th className="px-4 py-3">Applied On</th>
-                  <th className="px-4 py-3">Leave Type</th>
-                  <th className="px-4 py-3">Start Date</th>
-                  <th className="px-4 py-3">End Date</th>
-                  <th className="px-4 py-3">Days</th>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="px-4 py-3">{tab === 'pending' ? 'Approver' : 'Decided By'}</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {filtered.map((a) => (
-                  <tr key={a.id} className="hover:bg-slate-50">
-                    <td className="px-4 py-3 font-medium text-slate-900">{formatDate(a.apply_date)}</td>
-                    <td className="px-4 py-3 text-slate-600">{leaveTypeLabel(a)}</td>
-                    <td className="px-4 py-3 text-slate-600">{formatDate(a.start_date)}</td>
-                    <td className="px-4 py-3 text-slate-600">{formatDate(a.end_date)}</td>
-                    <td className="px-4 py-3 text-slate-600">{a.day_count}</td>
-                    <td className="px-4 py-3">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold ${
-                        a.status === 'approved' ? 'bg-emerald-50 text-emerald-700' :
-                        a.status === 'rejected' ? 'bg-rose-50 text-rose-700' : 'bg-amber-50 text-amber-700'
-                      }`}>
-                        {a.status}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-slate-600">
-                      {tab === 'pending' ? (a.approver_name || '—') : (a.decided_by_name || '—')}
-                      {a.status === 'rejected' && a.remarks && (
-                        <span className="block text-[11px] text-slate-400 mt-0.5">Reason: {a.remarks}</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Mobile — the original Liquid Glass card list, untouched. */}
-          <div className="md:hidden px-5 sm:px-6 py-4 space-y-3">
+          <div className="px-5 sm:px-6 py-4 space-y-3">
             {filtered.map((a) => (
               // No backdrop-blur on these cards on purpose — a per-item blur
               // layer for every application in the list is what made other
@@ -263,8 +279,8 @@ export const LeaveReviewPage: React.FC<LeaveReviewPageProps> = ({ token, onBack 
               </div>
             ))}
           </div>
-        </>
       )}
+      </div>
 
     </div>
 
