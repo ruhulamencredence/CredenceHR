@@ -80,8 +80,19 @@ export const LeaveSummaryCard: React.FC<LeaveSummaryCardProps> = ({ token, onOpe
         // grid (see the same note on AttendanceCard). The violet header
         // inside stays either way — that's this card's own identity, not the
         // mobile surface treatment.
-        className="relative rounded-[28px] overflow-hidden border border-white/70 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-violet-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl text-left cursor-pointer hover:shadow-lg hover:border-white transition-all md:bg-white md:from-transparent md:via-transparent md:to-transparent md:backdrop-blur-none md:border-slate-200 md:rounded-2xl md:shadow-sm"
+        className="relative rounded-[28px] overflow-hidden border border-white/70 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-violet-100/70 via-white/50 to-indigo-50/40 text-left cursor-pointer hover:shadow-lg hover:border-white transition-all md:bg-white md:from-transparent md:via-transparent md:to-transparent md:border-slate-200 md:rounded-2xl md:shadow-sm"
       >
+      {/* Blur lives on its own non-clipped layer instead of directly on the
+          outer rounded-[28px] overflow-hidden div above — Android WebView's
+          compositor frequently fails to render backdrop-filter when it's on
+          the SAME element as overflow-hidden + border-radius (no error, the
+          background just stays a flat, opaque block instead of glassy). The
+          fix used on AttendanceCard: put backdrop-blur-xl on an absolutely
+          positioned inset-0 child with no border-radius/overflow of its own;
+          the outer div's own overflow-hidden still clips it into the same
+          rounded shape visually. md:hidden since desktop uses a flat white
+          card with no blur at all (see md:bg-white above). */}
+      <div className="absolute inset-0 -z-10 backdrop-blur-xl md:hidden" />
       {/* Violet gradient header — same drop-notch corner treatment as the
           mobile Dashboard banner (rounded-b on this card's own top instead,
           since it sits inline among other cards rather than at the very top
