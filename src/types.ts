@@ -73,7 +73,7 @@ export const PERMISSION_LAYER_MODULES: AdminModuleKey[] = ['departments', 'proje
 export type LeaveManageLayerKey = 'edit_balance' | 'bulk_set_balance' | 'add_category' | 'edit_policy';
 
 export const LEAVE_MANAGE_LAYERS: { key: LeaveManageLayerKey; label: string }[] = [
-  { key: 'edit_balance', label: 'Edit Balance (single account)' },
+  { key: 'edit_balance', label: 'Edit Balance' },
   { key: 'bulk_set_balance', label: 'Set Balance in Bulk' },
   { key: 'add_category', label: 'Add Category' },
   { key: 'edit_policy', label: 'Leave Policy' },

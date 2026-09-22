@@ -6371,13 +6371,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           onClick={() => setManagingModulesFor(null)}
         >
           <div
-            className="bg-white border border-slate-200 rounded-2xl max-w-md md:max-w-4xl w-full max-h-[90vh] flex flex-col shadow-2xl"
+            className="bg-white border border-slate-200 rounded-2xl max-w-md md:max-w-5xl xl:max-w-6xl w-full max-h-[92vh] flex flex-col shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="p-5 border-b border-slate-200 flex justify-between items-center">
+            <div className="p-5 md:p-6 border-b border-slate-200 flex justify-between items-center">
               <div>
-                <h3 className="text-base font-bold text-slate-900">Module Access</h3>
-                <p className="text-xs text-slate-500">{managingModulesFor.name} • {managingModulesFor.email}</p>
+                <h3 className="text-base md:text-lg font-bold text-slate-900">Module Access</h3>
+                <p className="text-xs md:text-sm text-slate-500">{managingModulesFor.name} • {managingModulesFor.email}</p>
               </div>
               <button
                 onClick={() => setManagingModulesFor(null)}
@@ -6390,15 +6390,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
             {/* Two columns on desktop (User Module toggles on the left, Admin
                 Module tab checkboxes on the right) instead of one long
                 cramped-looking vertical list stretched across a narrow
-                fixed-width card — the modal itself is wider on md+ too (see
-                max-w-md md:max-w-4xl above). Mobile keeps the original single
+                fixed-width card — the modal itself is much wider on md+/xl+
+                too (see max-w-md md:max-w-5xl xl:max-w-6xl above), with more
+                generous padding/gaps than a mobile-first default so the web
+                view has real breathing room instead of reading like a phone
+                layout just stretched wide. Mobile keeps the original single
                 stacked column, unchanged. */}
-            <div className="p-5 overflow-y-auto flex-1 md:grid md:grid-cols-2 md:gap-x-8 md:items-start">
-            <div className="space-y-2">
+            <div className="p-5 md:p-8 overflow-y-auto flex-1 md:grid md:grid-cols-2 md:gap-x-10 xl:gap-x-16 md:items-start">
+            <div className="space-y-3">
               <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">User Module</p>
               {managingModulesFor.role === 'admin' && (
                 <label
-                  className="flex items-center justify-between gap-3 p-3 mb-3 bg-blue-50 border border-blue-200 rounded-xl cursor-pointer"
+                  className="flex items-center justify-between gap-3 p-3.5 mb-3 bg-blue-50 border border-blue-200 rounded-xl cursor-pointer"
                 >
                   <span>
                     <span className="text-sm font-semibold text-slate-900 block">Also allow User Panel access</span>
@@ -6424,7 +6427,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 </label>
               )}
               <label
-                className="flex items-center justify-between gap-3 p-3 mb-3 bg-indigo-50 border border-indigo-200 rounded-xl cursor-pointer"
+                className="flex items-center justify-between gap-3 p-3.5 mb-3 bg-indigo-50 border border-indigo-200 rounded-xl cursor-pointer"
               >
                 <span>
                   <span className="text-sm font-semibold text-slate-900 block">Allow Budget / Jobs / Job Entry Details</span>
@@ -6450,7 +6453,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 </button>
               </label>
               <label
-                className="flex items-center justify-between gap-3 p-3 mb-3 bg-sky-50 border border-sky-200 rounded-xl cursor-pointer"
+                className="flex items-center justify-between gap-3 p-3.5 mb-3 bg-sky-50 border border-sky-200 rounded-xl cursor-pointer"
               >
                 <span>
                   <span className="text-sm font-semibold text-slate-900 block">Also allow Movement Claim</span>
@@ -6475,7 +6478,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 </button>
               </label>
               <label
-                className="flex items-center justify-between gap-3 p-3 mb-3 bg-sky-50 border border-sky-200 rounded-xl cursor-pointer"
+                className="flex items-center justify-between gap-3 p-3.5 mb-3 bg-sky-50 border border-sky-200 rounded-xl cursor-pointer"
               >
                 <span>
                   <span className="text-sm font-semibold text-slate-900 block">Also allow Conveyance Bill Claim</span>
@@ -6500,7 +6503,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 </button>
               </label>
               <label
-                className="flex items-center justify-between gap-3 p-3 mb-3 bg-sky-50 border border-sky-200 rounded-xl cursor-pointer"
+                className="flex items-center justify-between gap-3 p-3.5 mb-3 bg-sky-50 border border-sky-200 rounded-xl cursor-pointer"
               >
                 <span>
                   <span className="text-sm font-semibold text-slate-900 block">Also allow Timesheet</span>
@@ -6525,7 +6528,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 </button>
               </label>
               <label
-                className="flex items-center justify-between gap-3 p-3 mb-3 bg-sky-50 border border-sky-200 rounded-xl cursor-pointer"
+                className="flex items-center justify-between gap-3 p-3.5 mb-3 bg-sky-50 border border-sky-200 rounded-xl cursor-pointer"
               >
                 <span>
                   <span className="text-sm font-semibold text-slate-900 block">Also allow Leave Application</span>
@@ -6550,7 +6553,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 </button>
               </label>
               <label
-                className="flex items-center justify-between gap-3 p-3 mb-3 bg-sky-50 border border-sky-200 rounded-xl cursor-pointer"
+                className="flex items-center justify-between gap-3 p-3.5 mb-3 bg-sky-50 border border-sky-200 rounded-xl cursor-pointer"
               >
                 <span>
                   <span className="text-sm font-semibold text-slate-900 block">Also allow My Leave</span>
@@ -6576,21 +6579,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
               </label>
             </div>
 
-            <div className="space-y-2 mt-4 md:mt-0 pt-4 md:pt-0 border-t md:border-t-0 md:border-l border-slate-100 md:pl-8">
+            <div className="space-y-3 mt-6 md:mt-0 pt-6 md:pt-0 border-t md:border-t-0 md:border-l border-slate-100 md:pl-10 xl:pl-16">
               <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">Admin Module</p>
-              <p className="text-xs text-slate-500 mb-2">
+              <p className="text-xs md:text-sm text-slate-500 mb-2">
                 Choose which Admin Panel tabs this {managingModulesFor.role === 'user' ? 'User' : 'Admin'} can open.
                 {managingModulesFor.role === 'user' && ' They\'ll keep their normal User Panel too, with a switcher to open these tabs.'}
                 {' '}Unchecked tabs are hidden for them, and the matching API routes are blocked server-side too.
               </p>
               <div className="relative mb-3">
-                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
                   value={moduleSearchQuery}
                   onChange={(e) => setModuleSearchQuery(e.target.value)}
                   placeholder="Search modules…"
-                  className="w-full pl-9 pr-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-blue-600"
+                  className="w-full pl-10 pr-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-blue-600"
                 />
               </div>
               {/* "Also allow editing Leave balances" — this is an Admin Panel
@@ -6600,7 +6603,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   gated by the separate can_manage_leave flag) — so it lives
                   here in the Admin Module column instead. */}
               <label
-                className="flex items-center justify-between gap-3 p-3 mb-3 bg-emerald-50 border border-emerald-200 rounded-xl cursor-pointer"
+                className="flex items-center justify-between gap-3 p-3.5 mb-3 bg-emerald-50 border border-emerald-200 rounded-xl cursor-pointer"
               >
                 <span>
                   <span className="text-sm font-semibold text-slate-900 block">Also allow editing Leave balances</span>
@@ -6635,7 +6638,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                     Leave Manage — any combination. Leaving all of these unchecked (while the toggle above stays on)
                     blocks every action here.
                   </p>
-                  <div className="grid grid-cols-2 gap-1.5">
+                  <div className="grid grid-cols-2 xl:grid-cols-3 gap-2">
                     {LEAVE_MANAGE_LAYERS.map((layer) => (
                       <label
                         key={layer.key}
@@ -6658,13 +6661,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 const groupModules = ADMIN_MODULES.filter((m) => group.keys.includes(m.key) && m.label.toLowerCase().includes(moduleQuery));
                 if (groupModules.length === 0) return null;
                 return (
-                  <div key={group.label} className="mb-3">
-                    <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">{group.label}</p>
-                    <div className="space-y-1.5">
+                  <div key={group.label} className="mb-4">
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-2">{group.label}</p>
+                    <div className="space-y-2">
                       {groupModules.map((m) => (
                         <React.Fragment key={m.key}>
                           <label
-                            className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-100 transition-colors"
+                            className="flex items-center gap-3 p-3.5 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-100 transition-colors"
                           >
                             <input
                               type="checkbox"
@@ -6685,7 +6688,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                                 do inside {m.label} — any combination. Leaving all of these unchecked (while the module
                                 itself stays checked above) blocks every action here.
                               </p>
-                              <div className="grid grid-cols-2 gap-1.5">
+                              <div className="grid grid-cols-2 xl:grid-cols-3 gap-2">
                                 {PERMISSION_LAYERS.map((layer) => (
                                   <label
                                     key={layer.key}
