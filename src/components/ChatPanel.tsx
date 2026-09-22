@@ -491,27 +491,38 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
     };
   }, []);
 
-  // Android keyboard covering the message input — .chat-shell's `position:
-  // fixed; inset: 0` (index.css) already tracks the real visible viewport on
-  // its own in most modern WebViews, but older/OEM ones don't always reflow
-  // reliably. Belt-and-braces: when the OS keyboard actually finishes
-  // opening, re-scroll to the latest message so the input bar sitting right
-  // below it is pulled back on-screen too.
+  // Android keyboard covering the message input — window.visualViewport
+  // (above) is supposed to track the real visible area on its own, but on
+  // several real-device WebViews (confirmed: keyboard opens, the input bar
+  // stays hidden underneath it — visualViewport's resize event never fires,
+  // or fires with a stale height) it doesn't. Rather than depend on that,
+  // ask the Capacitor Keyboard plugin directly for the keyboard's actual
+  // height and reserve that much space at the bottom of .chat-shell via
+  // padding-bottom (merged into the style below) — this works regardless of
+  // whether visualViewport itself is reliable on a given device.
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
-    let didShowHandle: { remove: () => void } | undefined;
+    let willShowHandle: { remove: () => void } | undefined;
+    let willHideHandle: { remove: () => void } | undefined;
     (async () => {
       try {
         const { Keyboard } = await import('@capacitor/keyboard');
-        didShowHandle = await Keyboard.addListener('keyboardDidShow', () => {
+        willShowHandle = await Keyboard.addListener('keyboardWillShow', (info) => {
+          setKeyboardHeight(info.keyboardHeight);
           scrollMessagesToBottom(true);
+        });
+        willHideHandle = await Keyboard.addListener('keyboardWillHide', () => {
+          setKeyboardHeight(0);
         });
       } catch {
         // Plugin unavailable — the .chat-shell layout above is still the primary fix.
       }
     })();
     return () => {
-      didShowHandle?.remove();
+      willShowHandle?.remove();
+      willHideHandle?.remove();
     };
   }, [scrollMessagesToBottom]);
 
@@ -748,7 +759,14 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
   return (
     <div
       className={variant === 'modal' ? 'flex bg-white w-full h-full min-h-0' : 'chat-shell flex bg-white'}
-      style={variant === 'fullscreen' && viewportSize ? { top: viewportSize.top, height: viewportSize.height } : undefined}
+      style={
+        variant === 'fullscreen'
+          ? {
+              ...(viewportSize ? { top: viewportSize.top, height: viewportSize.height } : null),
+              ...(keyboardHeight > 0 ? { paddingBottom: keyboardHeight } : null)
+            }
+          : undefined
+      }
     >
       {/* Sidebar: room list */}
       <div className={`w-full md:w-[360px] border-r border-slate-200 flex flex-col ${activeRoomId ? 'hidden md:flex' : 'flex'}`}>
