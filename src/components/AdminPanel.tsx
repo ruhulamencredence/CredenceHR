@@ -6,7 +6,7 @@ import credenceLogo from '../assets/credence-logo.png';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
 import { savePdfCrossPlatform } from '../lib/saveFile';
 import { Project, Branch, MprNumber, Entry, User, Budget, BudgetItem, BudgetSubmission, UserProjectPermission, EntryEditHistory, EntryPermanentDeleteLog, BulkUserRow, BulkUserResultItem, AdminModuleKey, ADMIN_MODULES, PermissionLayerKey, PERMISSION_LAYERS, PERMISSION_LAYER_MODULES, LeaveManageLayerKey, LEAVE_MANAGE_LAYERS, AttendanceRecord, ClaimsNavRequest, AdminNavRequest, Department, LeaveApplication, PendingJobEdit } from '../types';
-import { Building2, FileText, Users, Users2, BarChart3, Plus, Trash2, Edit2, Search, Filter, UserCheck, Calendar, CalendarClock, Download, Upload, FolderPlus, X, Eye, FileSpreadsheet, KeyRound, History, RotateCcw, Recycle, ListChecks, FileDown, MapPin, LayoutGrid, Navigation, LogIn, LogOut, Bell, Route, ShieldCheck, Wallet, Contact, Lock, Unlock, Mail, CheckCircle2, XCircle, Clock3, ShieldAlert } from 'lucide-react';
+import { Building2, FileText, Users, Users2, BarChart3, Plus, Trash2, Edit2, Search, Filter, UserCheck, Calendar, CalendarClock, Download, Upload, FolderPlus, X, Eye, FileSpreadsheet, KeyRound, History, RotateCcw, Recycle, ListChecks, FileDown, MapPin, LayoutGrid, Navigation, LogIn, LogOut, Bell, Route, ShieldCheck, Wallet, Contact, Lock, Unlock, Mail, CheckCircle2, XCircle, Clock3, ShieldAlert, Copy } from 'lucide-react';
 import LocationMapPicker from './LocationMapPicker';
 import { NoticeManager } from './NoticeManager';
 import { EmployeesPanel } from './EmployeesPanel';
@@ -351,6 +351,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // Superadmin types — cleared whenever a fresh Module Access modal opens
   // (see setManagingModulesFor(...) call sites).
   const [moduleSearchQuery, setModuleSearchQuery] = useState('');
+  // Transient confirmation shown under the "Copy access from" picker after a
+  // copy — cleared whenever a fresh Module Access modal opens.
+  const [copyAccessNotice, setCopyAccessNotice] = useState('');
   // Granular per-module action layers (Read Only/Edit-Add/Entry-Upload/
   // Delete-Trash/Permanent Delete) — only meaningful for modules listed in
   // PERMISSION_LAYER_MODULES (currently just 'departments'), shown as an
@@ -400,7 +403,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [myLeaveAccessEnabled, setMyLeaveAccessEnabled] = useState(false);
   const [savingModules, setSavingModules] = useState(false);
 
-  const openManageModules = (u: User) => {
+  // Populates every Module Access form field (User Module toggles, Admin
+  // Module checkboxes + their permission layers, Leave Manage layers, and
+  // Department scopes) from a given account `u` — shared by openManageModules
+  // below (u = the account actually being edited) AND copyAccessFrom further
+  // down (u = a DIFFERENT account whose access is being copied onto whoever
+  // is currently open in the modal). Deliberately does NOT touch
+  // managingModulesFor or moduleSearchQuery — those identify/filter the
+  // modal itself, not the access being edited, so copyAccessFrom must leave
+  // them alone (the modal stays open on the account being edited; only the
+  // form fields change, and nothing is saved until "Save Access" is clicked).
+  const applyUserAccessToForm = (u: User) => {
     setSelectedModules(new Set(u.module_permissions || []));
     setUserPanelAccessEnabled(!!u.can_access_user_panel);
     setLeaveManagementAccessEnabled(!!u.can_manage_leave);
@@ -410,7 +423,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     setTimesheetAccessEnabled(!!u.can_view_timesheet);
     setLeaveApplicationAccessEnabled(!!u.can_view_leave_application);
     setMyLeaveAccessEnabled(!!u.can_view_my_leave);
-    setModuleSearchQuery('');
     // Permission layers — one Set per module in PERMISSION_LAYER_MODULES.
     // Explicit saved rows win; a module this account already has granted
     // (u.module_permissions) but with NO saved layer rows yet falls back to
@@ -441,7 +453,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     } else {
       setLeaveManageLayers(new Set());
     }
-    setManagingModulesFor(u);
 
     // Attendance Report Department scope — fetched fresh every time this
     // modal opens (never trust stale state from a previously-managed user).
@@ -510,6 +521,28 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       })
       .catch(() => {})
       .finally(() => setLoadingConveyanceClaimDepts(false));
+  };
+
+  const openManageModules = (u: User) => {
+    applyUserAccessToForm(u);
+    setModuleSearchQuery('');
+    setCopyAccessNotice('');
+    setManagingModulesFor(u);
+  };
+
+  // "Copy access from" (Module Access -> header dropdown) — copies every
+  // field applyUserAccessToForm sets from `sourceUser` onto the form for
+  // whoever is CURRENTLY open in the modal (managingModulesFor stays
+  // unchanged). Nothing is persisted until the Superadmin reviews the
+  // now-updated checkboxes/toggles and clicks "Save Access" — this only
+  // pre-fills the form, exactly like opening the modal fresh would, just
+  // sourced from a different account's saved access instead of the target's
+  // own.
+  const copyAccessFrom = (sourceUserId: number) => {
+    const source = users.find((usr) => usr.id === sourceUserId);
+    if (!source) return;
+    applyUserAccessToForm(source);
+    setCopyAccessNotice(`Copied access from ${source.name} — review below, then click "Save Access" to apply it.`);
   };
 
   const toggleAttendanceReportDept = (name: string) => {
@@ -6374,17 +6407,62 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
             className="bg-white border border-slate-200 rounded-2xl max-w-md md:max-w-5xl xl:max-w-6xl w-full max-h-[92vh] flex flex-col shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="p-5 md:p-6 border-b border-slate-200 flex justify-between items-center">
-              <div>
-                <h3 className="text-base md:text-lg font-bold text-slate-900">Module Access</h3>
-                <p className="text-xs md:text-sm text-slate-500">{managingModulesFor.name} • {managingModulesFor.email}</p>
+            <div className="p-5 md:p-6 border-b border-slate-200">
+              <div className="flex justify-between items-center mb-3">
+                <div>
+                  <h3 className="text-base md:text-lg font-bold text-slate-900">Module Access</h3>
+                  <p className="text-xs md:text-sm text-slate-500">{managingModulesFor.name} • {managingModulesFor.email}</p>
+                </div>
+                <button
+                  onClick={() => setManagingModulesFor(null)}
+                  className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
               </div>
-              <button
-                onClick={() => setManagingModulesFor(null)}
-                className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
+              {/* Search (filters the Admin Module checklist below) + Copy
+                  Access (pre-fills every field on this form — toggles, Admin
+                  Module checkboxes, permission layers, Department scopes —
+                  from another account's saved access, so a Superadmin can
+                  set up one account and reuse it for the next instead of
+                  re-ticking everything by hand; nothing is saved until "Save
+                  Access" is clicked) both live in the header now — no room
+                  for them once the two columns below start, and they apply
+                  to the whole form, not just one column. */}
+              <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
+                <div className="relative flex-1">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={moduleSearchQuery}
+                    onChange={(e) => setModuleSearchQuery(e.target.value)}
+                    placeholder="Search modules…"
+                    className="w-full pl-10 pr-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-blue-600"
+                  />
+                </div>
+                <div className="relative flex-1 sm:max-w-[220px]">
+                  <Copy className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <select
+                    value=""
+                    onChange={(e) => {
+                      if (e.target.value) copyAccessFrom(Number(e.target.value));
+                    }}
+                    className="w-full pl-10 pr-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-blue-600 cursor-pointer appearance-none"
+                  >
+                    <option value="">Copy access from…</option>
+                    {users
+                      .filter((u) => u.id !== managingModulesFor.id && u.role !== 'superadmin')
+                      .map((u) => (
+                        <option key={u.id} value={u.id}>{u.name} ({u.role === 'admin' ? 'Admin' : 'User'})</option>
+                      ))}
+                  </select>
+                </div>
+              </div>
+              {copyAccessNotice && (
+                <p className="mt-2 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+                  {copyAccessNotice}
+                </p>
+              )}
             </div>
 
             {/* Two columns on desktop (User Module toggles on the left, Admin
@@ -6586,16 +6664,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 {managingModulesFor.role === 'user' && ' They\'ll keep their normal User Panel too, with a switcher to open these tabs.'}
                 {' '}Unchecked tabs are hidden for them, and the matching API routes are blocked server-side too.
               </p>
-              <div className="relative mb-3">
-                <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  value={moduleSearchQuery}
-                  onChange={(e) => setModuleSearchQuery(e.target.value)}
-                  placeholder="Search modules…"
-                  className="w-full pl-10 pr-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-blue-600"
-                />
-              </div>
               {/* "Also allow editing Leave balances" — this is an Admin Panel
                   module toggle (Leave Manage), not a User-Panel-facing grant
                   like the switches on the left, even though it isn't part of
