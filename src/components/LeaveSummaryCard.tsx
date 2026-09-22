@@ -82,17 +82,15 @@ export const LeaveSummaryCard: React.FC<LeaveSummaryCardProps> = ({ token, onOpe
         // mobile surface treatment.
         className="relative rounded-[28px] overflow-hidden border border-white/70 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-violet-100/70 via-white/50 to-indigo-50/40 text-left cursor-pointer hover:shadow-lg hover:border-white transition-all md:bg-white md:from-transparent md:via-transparent md:to-transparent md:border-slate-200 md:rounded-2xl md:shadow-sm"
       >
-      {/* Blur lives on its own non-clipped layer instead of directly on the
-          outer rounded-[28px] overflow-hidden div above — Android WebView's
-          compositor frequently fails to render backdrop-filter when it's on
-          the SAME element as overflow-hidden + border-radius (no error, the
-          background just stays a flat, opaque block instead of glassy). The
-          fix used on AttendanceCard: put backdrop-blur-xl on an absolutely
-          positioned inset-0 child with no border-radius/overflow of its own;
-          the outer div's own overflow-hidden still clips it into the same
-          rounded shape visually. md:hidden since desktop uses a flat white
-          card with no blur at all (see md:bg-white above). */}
-      <div className="absolute inset-0 -z-10 backdrop-blur-xl md:hidden" />
+      {/* No backdrop-blur on this outer shell (there used to be one, split
+          onto its own absolutely-positioned -z-10 child layer to work
+          around an Android compositor gap) — confirmed on real hardware
+          that this device's WebView doesn't render backdrop-filter at all,
+          so that layer was dead weight, and the negative-z-index child was
+          the likely cause of a separate bug where the card's background
+          would render correctly on first paint and then disappear after a
+          reload. The "Total Leave" strip below doesn't depend on blur to
+          read as a distinct panel — see the note on it further down. */}
       {/* Violet gradient header — same drop-notch corner treatment as the
           mobile Dashboard banner (rounded-b on this card's own top instead,
           since it sits inline among other cards rather than at the very top
