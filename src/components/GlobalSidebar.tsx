@@ -117,6 +117,14 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   const [hrSubOpenKeys, setHrSubOpenKeys] = useState<Record<string, boolean>>({});
   const toggleHrSub = (key: string) => setHrSubOpenKeys((prev) => ({ ...prev, [key]: !prev[key] }));
   const [misOpen, setMisOpen] = useState(false);
+  // "SELF SERVICE" / "ADMIN PANEL" — the two top-level section headers
+  // above, now clickable the same way every group inside them already is:
+  // tap the header to reveal its groups/items, tap a group inside to reveal
+  // its own items. Closed by default, same convention as every group below
+  // (see the auto-reveal effect further down for the one exception: whatever
+  // section holds the currently-active item always opens).
+  const [selfServiceOpen, setSelfServiceOpen] = useState(false);
+  const [adminPanelOpen, setAdminPanelOpen] = useState(false);
   const photoUrl = useProfilePhoto(token, photoVersion);
 
   // Minimized/collapsed mode — desktop persistent column only (the mobile
@@ -425,20 +433,25 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // ever opens a group, never closes one the user already opened by hand.
   useEffect(() => {
     if (!activeKey) return;
-    if (jobEntryGroup.some((i) => i.key === activeKey)) setJobEntryOpen(true);
+    if (jobEntryGroup.some((i) => i.key === activeKey)) { setSelfServiceOpen(true); setJobEntryOpen(true); }
     const activeHrmSub = hrmSubGroups.find((g) => g.items.some((i) => i.key === activeKey));
     if (activeHrmSub) {
+      setSelfServiceOpen(true);
       setHrmOpen(true);
       setHrmSubOpenKeys((prev) => (prev[activeHrmSub.key] ? prev : { ...prev, [activeHrmSub.key]: true }));
     }
-    if (reportsGroup.some((i) => i.key === activeKey)) setReportsOpen(true);
-    if (hrGroup.some((i) => i.key === activeKey)) setHrOpen(true);
+    if (selfServiceItems.some((i) => i.key === activeKey)) setSelfServiceOpen(true);
+    if (adminDashboardItem && adminDashboardItem.key === activeKey) setAdminPanelOpen(true);
+    if (reportsGroup.some((i) => i.key === activeKey)) { setAdminPanelOpen(true); setReportsOpen(true); }
+    if (hrGroup.some((i) => i.key === activeKey)) { setAdminPanelOpen(true); setHrOpen(true); }
     const activeHrSub = hrSubGroups.find((g) => g.items.some((i) => i.key === activeKey));
     if (activeHrSub) {
+      setAdminPanelOpen(true);
       setHrOpen(true);
       setHrSubOpenKeys((prev) => (prev[activeHrSub.key] ? prev : { ...prev, [activeHrSub.key]: true }));
     }
-    if (misGroup.some((i) => i.key === activeKey)) setMisOpen(true);
+    if (misGroup.some((i) => i.key === activeKey)) { setAdminPanelOpen(true); setMisOpen(true); }
+    if (adminFlatItems.some((i) => i.key === activeKey)) setAdminPanelOpen(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeKey]);
 
@@ -857,16 +870,39 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
             )}
           </button>
 
-          {!collapsed && <p className="px-2.5 mt-3 mb-1.5 text-[10px] font-semibold tracking-wide text-white/50">SELF SERVICE</p>}
-          {renderGroup(jobEntryGroup, 'Job Entry', Briefcase, jobEntryOpen, setJobEntryOpen)}
-          {renderNestedGroup(hrmSubGroups, 'HRM', Users2, hrmOpen, setHrmOpen, hrmSubOpenKeys, toggleHrmSub)}
-          {selfServiceItems.map(renderItem)}
+          {!collapsed && (
+            <button
+              type="button"
+              onClick={() => setSelfServiceOpen((o) => !o)}
+              className="w-full flex items-center justify-between px-2.5 mt-3 mb-1.5 py-1 rounded-lg hover:bg-white/10 transition-colors"
+            >
+              <span className="text-[10px] font-semibold tracking-wide text-white/50">SELF SERVICE</span>
+              <ChevronDown className={`w-3 h-3 text-white/50 transition-transform duration-200 ${selfServiceOpen ? 'rotate-180' : ''}`} />
+            </button>
+          )}
+          {(collapsed || selfServiceOpen) && (
+            <>
+              {renderGroup(jobEntryGroup, 'Job Entry', Briefcase, jobEntryOpen, setJobEntryOpen)}
+              {renderNestedGroup(hrmSubGroups, 'HRM', Users2, hrmOpen, setHrmOpen, hrmSubOpenKeys, toggleHrmSub)}
+              {selfServiceItems.map(renderItem)}
+            </>
+          )}
 
           {(!!adminDashboardItem || reportsGroup.length > 0 ||
             hrGroup.length > 0 || hrSubGroups.length > 0 || misGroup.length > 0 || adminFlatItems.length > 0) && (
             <>
-              {!collapsed && <p className="px-2.5 mt-3 mb-1.5 text-[10px] font-semibold tracking-wide text-white/50">ADMIN PANEL</p>}
-
+              {!collapsed && (
+                <button
+                  type="button"
+                  onClick={() => setAdminPanelOpen((o) => !o)}
+                  className="w-full flex items-center justify-between px-2.5 mt-3 mb-1.5 py-1 rounded-lg hover:bg-white/10 transition-colors"
+                >
+                  <span className="text-[10px] font-semibold tracking-wide text-white/50">ADMIN PANEL</span>
+                  <ChevronDown className={`w-3 h-3 text-white/50 transition-transform duration-200 ${adminPanelOpen ? 'rotate-180' : ''}`} />
+                </button>
+              )}
+              {(collapsed || adminPanelOpen) && (
+                <>
               {adminDashboardItem && renderItem(adminDashboardItem)}
 
               {renderGroup(reportsGroup, 'PEPM Manage', BarChart3, reportsOpen, setReportsOpen)}
@@ -874,6 +910,8 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
               {renderGroup(misGroup, 'MIS', Server, misOpen, setMisOpen)}
 
               {adminFlatItems.map(renderItem)}
+                </>
+              )}
             </>
           )}
 
