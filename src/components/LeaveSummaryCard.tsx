@@ -7,7 +7,7 @@ import React, { useEffect, useState } from 'react';
 import { CalendarDays } from 'lucide-react';
 import { Lottie } from 'lottie-react';
 import { LeaveApplication, LeaveBalance } from '../types';
-import { apiUrl } from '../lib/api';
+import { apiUrl, dedupedFetchJson } from '../lib/api';
 import beachAnimation from '../assets/Beach.json';
 
 interface LeaveSummaryCardProps {
@@ -35,15 +35,15 @@ export const LeaveSummaryCard: React.FC<LeaveSummaryCardProps> = ({ token, onOpe
 
   const load = async () => {
     try {
-      const [appsRes, balRes] = await Promise.all([
-        fetch(apiUrl('/api/leave-applications/mine'), { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(apiUrl('/api/leave-balances/mine'), { headers: { Authorization: `Bearer ${token}` } })
+      // This card mounts twice on every Dashboard load (mobile + desktop
+      // copies, see UserPanel.tsx) — dedupedFetchJson means only one of the
+      // two actually hits the network.
+      const [apps, rows] = await Promise.all([
+        dedupedFetchJson(apiUrl('/api/leave-applications/mine'), token),
+        dedupedFetchJson(apiUrl('/api/leave-balances/mine'), token)
       ]);
-      if (appsRes.ok) setApplications(await appsRes.json());
-      if (balRes.ok) {
-        const rows = await balRes.json();
-        setBalance(Array.isArray(rows) && rows.length > 0 ? rows[0] : null);
-      }
+      if (apps) setApplications(apps);
+      if (rows) setBalance(Array.isArray(rows) && rows.length > 0 ? rows[0] : null);
     } catch {
       // Offline/unreachable — the card just shows whatever it already had (or
       // stays empty).
