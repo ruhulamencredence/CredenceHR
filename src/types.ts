@@ -3,7 +3,7 @@ export type UserRole = 'superadmin' | 'admin' | 'user';
 // Every Admin Panel tab. A Superadmin implicitly has all of these; a plain Admin
 // only sees/uses the ones the Superadmin has explicitly granted via
 // PUT /api/users/:id/module-permissions. Mirrors ADMIN_MODULE_KEYS in server.ts.
-export type AdminModuleKey = 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'recycle' | 'editlog' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'disbursement' | 'employees' | 'departments' | 'tracking' | 'office_attendance' | 'holidays' | 'payroll' | 'asset_management';
+export type AdminModuleKey = 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'recycle' | 'editlog' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'disbursement' | 'employees' | 'departments' | 'tracking' | 'office_attendance' | 'holidays' | 'payroll' | 'asset_management' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault';
 
 export const ADMIN_MODULES: { key: AdminModuleKey; label: string }[] = [
   { key: 'reports', label: 'Reports' },
@@ -35,7 +35,13 @@ export const ADMIN_MODULES: { key: AdminModuleKey; label: string }[] = [
   { key: 'payroll', label: 'Payroll' },
   { key: 'asset_management', label: 'Asset Management' },
   { key: 'recycle', label: 'Job Recycle' },
-  { key: 'editlog', label: 'MPR Edit Log' }
+  { key: 'editlog', label: 'MPR Edit Log' },
+  { key: 'exit_offboarding', label: 'Exit / Offboarding' },
+  { key: 'performance_management', label: 'Performance Management' },
+  { key: 'recruitment', label: 'Recruitment (ATS)' },
+  { key: 'grievance_disciplinary', label: 'Grievance & Disciplinary' },
+  { key: 'hr_analytics', label: 'HR Analytics' },
+  { key: 'document_vault', label: 'Document Vault' }
 ];
 
 // Granular per-module action layers, layered on top of the coarse module
@@ -1440,7 +1446,7 @@ export interface AdminNavRequest {
   // never grantable to an Admin/User the way every other Admin Panel module is.
   // 'permanent_delete_log' is the same — Superadmin-only, see
   // GET /api/entries/permanent-delete-log in EntriesRoutes.ts.
-  target: 'dashboard' | 'reports' | 'mprs' | 'imports' | 'editlog' | 'recycle' | 'projects' | 'branches' | 'users' | 'notices' | 'approvals' | 'attendance' | 'attendance_reports' | 'employees' | 'departments' | 'tracking' | 'holidays' | 'disbursement' | 'my_conveyance' | 'asset_management' | 'servers' | 'permanent_delete_log';
+  target: 'dashboard' | 'reports' | 'mprs' | 'imports' | 'editlog' | 'recycle' | 'projects' | 'branches' | 'users' | 'notices' | 'approvals' | 'attendance' | 'attendance_reports' | 'employees' | 'departments' | 'tracking' | 'holidays' | 'disbursement' | 'my_conveyance' | 'asset_management' | 'servers' | 'permanent_delete_log' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault';
   ts: number;
 }
 
