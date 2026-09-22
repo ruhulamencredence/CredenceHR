@@ -35,6 +35,13 @@ interface ApprovalRouteDeps {
   requireAdmin: any;
   requireSuperAdmin: any;
   requireModule: (moduleKey: string) => any;
+  // Per-module action gate (Read Only/Edit-Add/Entry-Upload/Delete-Trash/
+  // Permanent Delete) — Approvals is wired up to "edit_add" for the two
+  // write actions module-gated here (acting on a pending approval,
+  // reassigning Templates); Template CRUD itself is Superadmin-only already
+  // (see requireSuperAdmin further down), so it never needs this. See
+  // requireModuleLayer() in server.ts for the exact semantics.
+  requireModuleLayer: (moduleKey: string, layer: "read" | "edit_add" | "entry_upload" | "delete_trash" | "permanent_delete") => any;
   queryDB: (sql: string, params?: any[]) => Promise<any>;
   getApprovalChain: () => Promise<any[]>;
   performApprovalAction: (...args: any[]) => Promise<any>;
@@ -53,6 +60,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
     requireAdmin,
     requireSuperAdmin,
     requireModule,
+    requireModuleLayer,
     queryDB,
     getApprovalChain,
     performApprovalAction,
@@ -289,7 +297,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
   // Approve on the LAST step marks the whole request 'approved'; otherwise it just
   // advances current_step to the next layer. A Reject is terminal — the chain stops
   // there regardless of which step it happened at.
-  app.post("/api/approvals/:id/act", authenticateToken, requireAdmin, requireModule("approvals"), async (req: any, res) => {
+  app.post("/api/approvals/:id/act", authenticateToken, requireAdmin, requireModule("approvals"), requireModuleLayer("approvals", "edit_add"), async (req: any, res) => {
     try {
       const { id } = req.params;
       const action = req.body?.action;
@@ -847,7 +855,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
   // Sets (or clears, with template_id: null) one employee's explicit template
   // pick for one request_type. Clearing just deletes the row — that employee
   // falls back to the request_type's default from then on.
-  app.put("/api/template-assignments", authenticateToken, requireAdmin, requireModule("approvals"), async (req: any, res) => {
+  app.put("/api/template-assignments", authenticateToken, requireAdmin, requireModule("approvals"), requireModuleLayer("approvals", "edit_add"), async (req: any, res) => {
     try {
       const employeeUserId = Number(req.body?.employee_user_id);
       const requestType = req.body?.request_type;

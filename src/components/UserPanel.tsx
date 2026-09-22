@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Capacitor } from '@capacitor/core';
-import { Project, MprNumber, Entry, Budget, BudgetItem, User, MprUsage, ClaimsNavRequest, JobsNavRequest, DashboardNavRequest } from '../types';
+import { Project, MprNumber, Entry, Budget, BudgetItem, User, MprUsage, ClaimsNavRequest, JobsNavRequest, DashboardNavRequest, LeaveNavRequest } from '../types';
 import { Calendar, Building2, FileText, Package, Clock, Plus, AlertTriangle, CheckCircle2, ChevronRight, X, Trash2, Edit2, Lock, Wallet, ArrowLeft, FolderOpen, ListChecks, Search, Save, Briefcase, FileDown, Scissors, Route, Info, Contact, Bell } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { formatDate, todayDateOnlyString, dateRangeOptions, formatDateLabel, latestDateStr, isDateBlockedByLeadTime } from '../lib/formatDate';
@@ -52,6 +52,10 @@ interface UserPanelProps {
   // enough on its own: this panel keeps showing whichever section (e.g. a
   // Claims page) was previously active/restored from localStorage.
   dashboardNavRequest?: DashboardNavRequest | null;
+  // GlobalSidebar's "Leave Application" item (and Navbar's AlertsBell) — sets
+  // mobileActiveSection to 'leave', the SAME LeaveReviewPage.tsx the
+  // Dashboard's own Leave Summary card and mobile bottom nav already open.
+  leaveNavRequest?: LeaveNavRequest | null;
   // Reports the live desktopActiveSection/mobileActiveSection back up to
   // App.tsx on every change, so GlobalSidebar can highlight whichever item
   // actually matches what's on screen right now (whether it got there via a
@@ -844,7 +848,7 @@ const EntryCard = React.memo(function EntryCard({
   );
 });
 
-export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequest, jobsNavRequest, dashboardNavRequest, onActiveSectionChange }) => {
+export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequest, jobsNavRequest, dashboardNavRequest, leaveNavRequest, onActiveSectionChange }) => {
   const [projects, setProjects] = useState<Project[]>([]);
   // True once the initial Project list fetch (fetchMasterData below) has
   // resolved (success or failure) — lets AttendanceCard tell "still loading"
@@ -1026,8 +1030,13 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // that card's "tap to open" target IS this same page. Previously ungated
   // (every account saw "Leave" in the bottom bar regardless of permission);
   // now an account without it falls back to "Directory" instead — see
-  // BottomNav.tsx.
-  const canSeeLeave = user.role === 'superadmin' || !!user.can_view_leave_summary;
+  // BottomNav.tsx. ALSO true for can_view_leave_application — GlobalSidebar's
+  // "Leave Application" item now opens this exact page too (see
+  // leaveNavRequest below), and that item is gated by can_view_leave_application
+  // (a separate, older grant from before LeaveReviewPage/the Leave Summary
+  // card existed) — OR'd together so an account already granted the older
+  // flag doesn't lose access to the page its own sidebar item points at.
+  const canSeeLeave = user.role === 'superadmin' || !!user.can_view_leave_summary || !!user.can_view_leave_application;
   // Guards a section restored from localStorage (see the lazy initializer above,
   // which runs before these grants are known) or a permission the Superadmin
   // revokes mid-session — bounces back to the tile menu instead of leaving a
@@ -1076,6 +1085,18 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
     window.scrollTo({ top: 0, behavior: 'smooth' });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [claimsNavRequest]);
+
+  // GlobalSidebar's "Leave Application" item (and Navbar's AlertsBell) — same
+  // pattern as claimsNavRequest above: puts LeaveReviewPage on screen here
+  // instead of App.tsx rendering a separate component, so there's exactly one
+  // Leave Application interface regardless of entry point.
+  useEffect(() => {
+    if (!leaveNavRequest) return;
+    if (!canSeeLeave) return;
+    setMobileActiveSection('leave');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leaveNavRequest]);
 
   // Which of Entry/Jobs/Entry Details/Job Edits is the active "page" on
   // desktop — mirrors mobileActiveSection's job-related values, but tracked

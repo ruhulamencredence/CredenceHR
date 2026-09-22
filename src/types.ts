@@ -3,7 +3,7 @@ export type UserRole = 'superadmin' | 'admin' | 'user';
 // Every Admin Panel tab. A Superadmin implicitly has all of these; a plain Admin
 // only sees/uses the ones the Superadmin has explicitly granted via
 // PUT /api/users/:id/module-permissions. Mirrors ADMIN_MODULE_KEYS in server.ts.
-export type AdminModuleKey = 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'recycle' | 'editlog' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'disbursement' | 'employees' | 'departments' | 'tracking' | 'office_attendance' | 'holidays' | 'payroll' | 'asset_management';
+export type AdminModuleKey = 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'recycle' | 'editlog' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'disbursement' | 'employees' | 'departments' | 'tracking' | 'office_attendance' | 'holidays' | 'payroll' | 'asset_management' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault';
 
 export const ADMIN_MODULES: { key: AdminModuleKey; label: string }[] = [
   { key: 'reports', label: 'Reports' },
@@ -35,7 +35,56 @@ export const ADMIN_MODULES: { key: AdminModuleKey; label: string }[] = [
   { key: 'payroll', label: 'Payroll' },
   { key: 'asset_management', label: 'Asset Management' },
   { key: 'recycle', label: 'Job Recycle' },
-  { key: 'editlog', label: 'MPR Edit Log' }
+  { key: 'editlog', label: 'MPR Edit Log' },
+  { key: 'exit_offboarding', label: 'Exit / Offboarding' },
+  { key: 'performance_management', label: 'Performance Management' },
+  { key: 'recruitment', label: 'Recruitment (ATS)' },
+  { key: 'grievance_disciplinary', label: 'Grievance & Disciplinary' },
+  { key: 'hr_analytics', label: 'HR Analytics' },
+  { key: 'document_vault', label: 'Document Vault' }
+];
+
+// Granular per-module action layers, layered on top of the coarse module
+// grant above (ADMIN_MODULES/module_permissions) — a Superadmin picks any
+// combination of these per (Admin/User account, module) via Admin Panel ->
+// Users -> Module Access. Independent checkboxes, not hierarchical: having
+// 'delete_trash' does NOT imply 'edit_add' is also granted.
+export type PermissionLayerKey = 'read' | 'edit_add' | 'entry_upload' | 'delete_trash' | 'permanent_delete';
+
+export const PERMISSION_LAYERS: { key: PermissionLayerKey; label: string }[] = [
+  { key: 'read', label: 'Read Only' },
+  { key: 'edit_add', label: 'Edit/Add' },
+  { key: 'entry_upload', label: 'Entry/Upload' },
+  { key: 'delete_trash', label: 'Delete/Trash' },
+  { key: 'permanent_delete', label: 'Permanent Delete' },
+];
+
+// Which Admin Panel modules currently enforce the PERMISSION_LAYERS above —
+// being rolled out one module at a time. A module not listed here still only
+// has the old coarse on/off grant (module_permissions), unaffected by any of
+// this. Start: 'departments', then 'projects', then 'approvals', then 'users'.
+export const PERMISSION_LAYER_MODULES: AdminModuleKey[] = ['departments', 'projects', 'approvals', 'users'];
+
+// Leave Manage's own operation-specific layers — same independent-checkbox
+// mechanism as PERMISSION_LAYERS above, but named after this module's real
+// operations instead of the generic Read/Edit-Add/Entry-Upload/Delete-Trash/
+// Permanent-Delete set, since Leave Manage's 4 writes don't map cleanly onto
+// that set (there's no "delete" or "read only" concept here — see
+// LeaveManage.tsx). Also unlike every module in PERMISSION_LAYER_MODULES,
+// Leave Manage isn't an Admin Panel "module" at all — access is the flat
+// can_manage_leave boolean (User.can_manage_leave, granted via the "Also
+// allow editing Leave balances" toggle), which these layers narrow further,
+// same "no saved rows -> full access" default as everywhere else on this
+// system (see requireLeaveManagerLayer() in server.ts).
+export type LeaveManageLayerKey = 'edit_balance' | 'bulk_set_balance' | 'add_category' | 'edit_policy' | 'year_settings' | 'workflow_manage';
+
+export const LEAVE_MANAGE_LAYERS: { key: LeaveManageLayerKey; label: string }[] = [
+  { key: 'edit_balance', label: 'Edit Balance' },
+  { key: 'bulk_set_balance', label: 'Set Balance in Bulk' },
+  { key: 'add_category', label: 'Add Category' },
+  { key: 'edit_policy', label: 'Leave Policy' },
+  { key: 'year_settings', label: 'Year Settings' },
+  { key: 'workflow_manage', label: 'Balance Workflows' },
 ];
 
 // Global Calendar (Admin Panel -> Holidays) — one row per Weekend/Holiday
@@ -367,6 +416,21 @@ export interface User {
   // role === 'admin' (set by the Superadmin) — empty/absent for 'user' rows, and
   // irrelevant for 'superadmin' (which always has every module).
   module_permissions?: AdminModuleKey[];
+  // Per-module granular permission layers, keyed by module_key. Server-side
+  // this is one map covering every module on the layer system — most keys
+  // are AdminModuleKeys from PERMISSION_LAYER_MODULES (values are
+  // PermissionLayerKey[], layered ON TOP of module_permissions above: the
+  // account still needs the module itself granted there for any of this to
+  // matter), but a key can also be a non-module feature like 'leave_manage'
+  // (values are that feature's own layer key set — see LEAVE_MANAGE_LAYERS)
+  // whose base grant lives elsewhere (can_manage_leave for 'leave_manage').
+  // Kept as a loose Record<string, string[]> rather than
+  // Partial<Record<AdminModuleKey, PermissionLayerKey[]>> so it can hold
+  // both shapes. Absent/empty for a granted module/feature means "full
+  // access" (preserves the pre-existing behavior for anyone already granted
+  // it before this feature existed) — see requireModuleLayer()/
+  // requireLeaveManagerLayer() in server.ts.
+  module_permission_layers?: Record<string, string[]>;
   // Superadmin-only grant: can this account see OTHER users' Last Login Location
   // (Admin Panel -> Users)? Always true for role === 'superadmin'. For role ===
   // 'admin' it's OFF by default and must be explicitly switched on by the
@@ -482,6 +546,48 @@ export interface LeaveBalance {
   // above) that has ever been set via Set Balance in Bulk. Omitted/empty for
   // accounts with no custom-category balance set yet.
   custom_leaves?: { key: string; label: string; balance: number }[];
+}
+
+// Self Service -> Leave Manage -> "Year Settings" (GET/PUT
+// /api/leave-year-settings). close/start_month_day are 'MM-DD' with no year
+// component — the same dates recur every year. start_month_day is normally
+// just the day after close_month_day (suggested client-side, recomputed
+// server-side too if omitted on save) but can be overridden. auto_rollover:
+// when on, the server applies every active Leave Balance Workflow to every
+// account on its own once start_month_day arrives each year (see
+// LeaveBalanceWorkflow below) — last_rollover_year tracks which calendar
+// year that last actually ran for, so it only ever fires once per year.
+export interface LeaveYearSettings {
+  close_month_day: string;
+  start_month_day: string;
+  auto_rollover: boolean;
+  last_rollover_year: number | null;
+}
+
+// Self Service -> Leave Manage -> "Leave Balance Workflows"
+// (GET/POST/PUT/DELETE /api/leave-balance-workflows). A named set of
+// per-category annual balances, applied either Globally ("General" —
+// scope_type 'general', exactly one such row, id 1, can't be renamed/deleted)
+// or to every account whose Employee Directory Designation matches
+// (scope_type 'designation', e.g. "Manager", "GM"). Applying (POST
+// .../apply, or the year-end auto-rollover above) runs General first, then
+// each active Designation workflow — a Designation workflow's own value for
+// a category overrides General's for just that category, for just accounts
+// with that Designation.
+export interface LeaveBalanceWorkflowItem {
+  category_key: string;
+  // Present on GET, omitted when just saving via PUT's `items` array.
+  label?: string;
+  balance_days: number;
+}
+
+export interface LeaveBalanceWorkflow {
+  id: number;
+  name: string;
+  scope_type: 'general' | 'designation';
+  designation: string | null;
+  is_active: boolean;
+  items: LeaveBalanceWorkflowItem[];
 }
 
 // Self Service -> Leave Application. The three built-in Leave types —
@@ -1340,7 +1446,7 @@ export interface AdminNavRequest {
   // never grantable to an Admin/User the way every other Admin Panel module is.
   // 'permanent_delete_log' is the same — Superadmin-only, see
   // GET /api/entries/permanent-delete-log in EntriesRoutes.ts.
-  target: 'dashboard' | 'reports' | 'mprs' | 'imports' | 'editlog' | 'recycle' | 'projects' | 'branches' | 'users' | 'notices' | 'approvals' | 'attendance' | 'attendance_reports' | 'employees' | 'departments' | 'tracking' | 'holidays' | 'disbursement' | 'my_conveyance' | 'asset_management' | 'servers' | 'permanent_delete_log';
+  target: 'dashboard' | 'reports' | 'mprs' | 'imports' | 'editlog' | 'recycle' | 'projects' | 'branches' | 'users' | 'notices' | 'approvals' | 'attendance' | 'attendance_reports' | 'employees' | 'departments' | 'tracking' | 'holidays' | 'disbursement' | 'my_conveyance' | 'asset_management' | 'servers' | 'permanent_delete_log' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault';
   ts: number;
 }
 
@@ -1362,6 +1468,21 @@ export interface JobsNavRequest {
 // only switching viewMode to 'user' while UserPanel keeps showing whichever
 // section (e.g. a Claims page) was left active/persisted from before.
 export interface DashboardNavRequest {
+  ts: number;
+}
+
+// Fired by GlobalSidebar's "Leave Application" item and Navbar's AlertsBell
+// (a leave-related alert) — same bump-`ts`-on-every-click pattern as
+// ClaimsNavRequest above. Consumed by UserPanel only: switches its
+// mobileActiveSection to 'leave', the SAME LeaveReviewPage.tsx the
+// Dashboard's own Leave Summary card and mobile bottom nav already open —
+// previously these two entry points routed to two entirely different
+// components (App.tsx's own separate LeaveApplication.tsx, now removed, vs
+// UserPanel's LeaveReviewPage.tsx), so which interface you got depended on
+// which way you navigated in. Only one target (there's nothing to
+// disambiguate — unlike ClaimsNavRequest/JobsNavRequest, which each cover
+// several distinct pages), so no `target` field, just the re-fire ts.
+export interface LeaveNavRequest {
   ts: number;
 }
 

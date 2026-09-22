@@ -34,6 +34,15 @@ interface ChatPanelProps {
   // onInitialRoomHandled so re-opening Chat later doesn't keep jumping back.
   initialRoomId?: number | null;
   onInitialRoomHandled?: () => void;
+  // 'fullscreen' (default): the original behavior — .chat-shell takes over
+  // the whole viewport via `position: fixed; inset: 0`, tracking
+  // window.visualViewport itself. 'modal': used by App.tsx's docked
+  // FloatingChatButton popup, which already renders its own fixed backdrop +
+  // sized card (New Leave Application-modal-sized) around this component —
+  // here ChatPanel just needs to fill that card (w-full h-full), not the
+  // whole screen, so the fixed positioning/visualViewport tracking below is
+  // skipped entirely in this mode.
+  variant?: 'fullscreen' | 'modal';
 }
 
 function timeOnly(iso: string): string {
@@ -160,7 +169,7 @@ const AudioAttachment: React.FC<{ token: string; messageId: number }> = ({ token
   return <audio controls src={url} className="w-56 max-w-full h-9" />;
 };
 
-export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initialRoomId, onInitialRoomHandled }) => {
+export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initialRoomId, onInitialRoomHandled, variant = 'fullscreen' }) => {
   const [rooms, setRooms] = useState<ChatRoom[]>([]);
   const [activeRoomId, setActiveRoomId] = useState<number | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -223,7 +232,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
   // impossible: it can never move anything outside itself.
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const messageInputRef = useRef<HTMLInputElement>(null);
+  const messageInputRef = useRef<HTMLTextAreaElement>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Ref mirror of activeRoomId so the socket listeners below (registered
   // once on mount) always see the CURRENT room without needing to
@@ -453,6 +462,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
   // math is needed beyond the `if (!vv) return` guard below (an
   // unsupported browser just keeps .chat-shell's CSS `inset: 0` instead).
   useEffect(() => {
+    if (variant === 'modal') return;
     const vv = window.visualViewport;
     if (!vv) return;
     const update = () => setViewportSize({ height: vv.height, top: vv.offsetTop });
@@ -463,7 +473,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
       vv.removeEventListener('resize', update);
       vv.removeEventListener('scroll', update);
     };
-  }, []);
+  }, [variant]);
 
   // Locks the OUTER page from scrolling at all while a conversation is open.
   // .chat-shell (index.css) already takes ChatPanel out of the page's normal
@@ -481,27 +491,38 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
     };
   }, []);
 
-  // Android keyboard covering the message input — .chat-shell's `position:
-  // fixed; inset: 0` (index.css) already tracks the real visible viewport on
-  // its own in most modern WebViews, but older/OEM ones don't always reflow
-  // reliably. Belt-and-braces: when the OS keyboard actually finishes
-  // opening, re-scroll to the latest message so the input bar sitting right
-  // below it is pulled back on-screen too.
+  // Android keyboard covering the message input — window.visualViewport
+  // (above) is supposed to track the real visible area on its own, but on
+  // several real-device WebViews (confirmed: keyboard opens, the input bar
+  // stays hidden underneath it — visualViewport's resize event never fires,
+  // or fires with a stale height) it doesn't. Rather than depend on that,
+  // ask the Capacitor Keyboard plugin directly for the keyboard's actual
+  // height and reserve that much space at the bottom of .chat-shell via
+  // padding-bottom (merged into the style below) — this works regardless of
+  // whether visualViewport itself is reliable on a given device.
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
-    let didShowHandle: { remove: () => void } | undefined;
+    let willShowHandle: { remove: () => void } | undefined;
+    let willHideHandle: { remove: () => void } | undefined;
     (async () => {
       try {
         const { Keyboard } = await import('@capacitor/keyboard');
-        didShowHandle = await Keyboard.addListener('keyboardDidShow', () => {
+        willShowHandle = await Keyboard.addListener('keyboardWillShow', (info) => {
+          setKeyboardHeight(info.keyboardHeight);
           scrollMessagesToBottom(true);
+        });
+        willHideHandle = await Keyboard.addListener('keyboardWillHide', () => {
+          setKeyboardHeight(0);
         });
       } catch {
         // Plugin unavailable — the .chat-shell layout above is still the primary fix.
       }
     })();
     return () => {
-      didShowHandle?.remove();
+      willShowHandle?.remove();
+      willHideHandle?.remove();
     };
   }, [scrollMessagesToBottom]);
 
@@ -588,6 +609,18 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
         .catch(() => finish());
     }
   }, [messageInput, activeRoomId, sending, replyTo, token]);
+
+  // Message box grows with its content (now a <textarea>, so Enter can make
+  // a new line instead of always sending — see the onKeyDown below) up to a
+  // cap, then scrolls internally. Re-measured on every change, including a
+  // programmatic clear back to '' after sending, which needs the height
+  // reset back to one row too.
+  useEffect(() => {
+    const el = messageInputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 128)}px`;
+  }, [messageInput]);
 
   // Shared by sendAttachment (image/file picker) and sendAudioMessage
   // (voice recording) below — both end up as a base64 body POSTed to the
@@ -737,8 +770,15 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
 
   return (
     <div
-      className="chat-shell flex bg-white"
-      style={viewportSize ? { top: viewportSize.top, height: viewportSize.height } : undefined}
+      className={variant === 'modal' ? 'flex bg-white w-full h-full min-h-0' : 'chat-shell flex bg-white'}
+      style={
+        variant === 'fullscreen'
+          ? {
+              ...(viewportSize ? { top: viewportSize.top, height: viewportSize.height } : null),
+              ...(keyboardHeight > 0 ? { paddingBottom: keyboardHeight } : null)
+            }
+          : undefined
+      }
     >
       {/* Sidebar: room list */}
       <div className={`w-full md:w-[360px] border-r border-slate-200 flex flex-col ${activeRoomId ? 'hidden md:flex' : 'flex'}`}>
@@ -1012,14 +1052,25 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                   <button type="button" onClick={() => fileInputRef.current?.click()} className="p-2 text-slate-500 hover:bg-slate-100 rounded-full shrink-0">
                     <Paperclip className="w-5 h-5" />
                   </button>
-                  <input
+                  <textarea
                     ref={messageInputRef}
-                    type="text"
                     value={messageInput}
                     onChange={(e) => handleTyping(e.target.value, e.target.selectionStart ?? e.target.value.length)}
-                    onKeyDown={(e) => e.key === 'Enter' && sendTextMessage()}
+                    onKeyDown={(e) => {
+                      // Plain Enter (and the mobile keyboard's return key,
+                      // which fires the same event) inserts a newline —
+                      // its default <textarea> behavior, left alone here.
+                      // Only an explicit Ctrl/Cmd+Enter sends, as a desktop
+                      // power-user shortcut; the Send button below is the
+                      // primary way to send on every platform.
+                      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                        e.preventDefault();
+                        sendTextMessage();
+                      }
+                    }}
                     placeholder={activeRoom.type !== 'direct' ? 'Type a message, @ to mention' : 'Type a message'}
-                    className="flex-1 py-2.5 px-4 bg-slate-100 rounded-full border-none focus:outline-none focus:ring-2 focus:ring-blue-600 text-sm"
+                    rows={1}
+                    className="flex-1 py-2.5 px-4 bg-slate-100 rounded-2xl border-none resize-none leading-5 max-h-32 overflow-y-auto focus:outline-none focus:ring-2 focus:ring-blue-600 text-sm"
                   />
                   {messageInput.trim() ? (
                     <button

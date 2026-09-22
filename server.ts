@@ -25,6 +25,12 @@ import { registerAssetManagementRoutes, ensureAssetManagementSchema } from "./As
 import { registerEntriesRoutes } from "./EntriesRoutes";
 import { registerEmployeeTransferRoutes, ensureEmployeeTransferSchema } from "./EmployeeTransferRoutes";
 import { registerEmployeeDirectoryRoutes } from "./EmployeeDirectoryRoutes";
+import { registerExitOffboardingRoutes, ensureExitOffboardingSchema } from "./ExitOffboardingRoutes";
+import { registerPerformanceRoutes, ensurePerformanceSchema } from "./PerformanceRoutes";
+import { registerRecruitmentRoutes, ensureRecruitmentSchema } from "./RecruitmentRoutes";
+import { registerGrievanceRoutes, ensureGrievanceSchema } from "./GrievanceRoutes";
+import { registerHRAnalyticsRoutes } from "./HRAnalyticsRoutes";
+import { registerDocumentVaultRoutes, ensureDocumentVaultSchema } from "./DocumentVaultRoutes";
 import { Server as SocketIOServer } from "socket.io";
 import { ensureChatSchema, registerChatRoutes, setupChatSocket } from "./ChatRoutes";
 import { memoryDb, queryMemoryDb, EMPLOYEE_BOOL_FIELDS } from "./memoryDbFallback";
@@ -202,6 +208,17 @@ async function ensureSchemaMigrations() {
   // lives here, same as every other self-healing migration in this function.
   await ensureEmployeeTransferSchema(dbPool);
 
+  // World-class HRM extension modules — Exit/Offboarding, Performance
+  // Management, Recruitment/ATS, Grievance & Disciplinary, Document Vault
+  // (HR Analytics has no tables of its own, just aggregation queries over
+  // these and existing tables) — each owns its schema in its own file, same
+  // self-healing pattern as every migration above.
+  await ensureExitOffboardingSchema(dbPool);
+  await ensurePerformanceSchema(dbPool);
+  await ensureRecruitmentSchema(dbPool);
+  await ensureGrievanceSchema(dbPool);
+  await ensureDocumentVaultSchema(dbPool);
+
   // Server Profiles (Admin Panel -> Servers, Superadmin-only) — table +
   // schema owned by ServerProfileRoutes.ts, only the call site lives here,
   // same as every other self-healing migration in this function.
@@ -354,7 +371,8 @@ async function ensureSchemaMigrations() {
       `INSERT IGNORE INTO leave_category_policies (category_key, min_advance_notice_days, reliever_required, max_consecutive_days, require_paid_leave_exhausted) VALUES
        ('casual', 0, 1, NULL, 0),
        ('sick', 0, 1, NULL, 0),
-       ('without_pay', 0, 1, NULL, 0)`
+       ('without_pay', 0, 1, NULL, 0),
+       ('custom_earn_leave', 0, 0, NULL, 0)`
     );
   } catch (err: any) {
     console.warn("⚠️ Could not ensure leave_category_policies table exists: " + err.message);
@@ -898,6 +916,32 @@ async function ensureSchemaMigrations() {
     `);
   } catch (err: any) {
     console.warn("⚠️ Could not ensure admin_module_permissions table exists: " + err.message);
+  }
+  // Granular per-module action layers (Read Only/Edit-Add/Entry-Upload/
+  // Delete-Trash/Permanent Delete — see PERMISSION_LAYERS in src/types.ts),
+  // layered ON TOP of admin_module_permissions above: a row here is only
+  // meaningful for an account that already has module_key granted there. Set
+  // by the Superadmin (Admin Panel -> Users -> Module Access, shown once a
+  // module listed in PERMISSION_LAYER_MODULES is checked). One row per
+  // (user, module, layer) — a module with NO rows here for a given user
+  // falls back to "every layer except permanent_delete" (see
+  // requireModuleLayer() below), so granting the module alone keeps today's
+  // full-access behavior, exactly like every other module not yet on this
+  // system at all. Rolled out module by module, starting with 'departments'.
+  try {
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS admin_module_permission_layers (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        module_key VARCHAR(50) NOT NULL,
+        layer_key VARCHAR(30) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY unique_user_module_layer (user_id, module_key, layer_key),
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      )
+    `);
+  } catch (err: any) {
+    console.warn("⚠️ Could not ensure admin_module_permission_layers table exists: " + err.message);
   }
   // Department-wise scoping for the 'attendance_reports' module only — set by
   // the Superadmin on top of admin_module_permissions (Admin Panel -> Users ->
@@ -1649,6 +1693,22 @@ async function ensureSchemaMigrations() {
   } catch (err: any) {
     console.warn("⚠️ Could not ensure leave_categories table exists: " + err.message);
   }
+  // Earn Leave (accrual leave) didn't exist as a category at all before, so
+  // no account could ever apply for it and Leave Policies had nothing to
+  // configure for it. Seeded once as an ordinary Custom Leave Category (same
+  // row shape "Add Category" in the bulk panel would create) so it gets the
+  // whole existing pipeline — Set Balance in Bulk, Leave Policies, Leave
+  // Application submission — for free, with no separate code path. Balance
+  // itself is NOT auto-accrued here; a Leave Manager sets it via Set Balance
+  // in Bulk or a Leave Balance Workflow (see leave_balance_workflows below)
+  // same as any other category.
+  try {
+    await dbPool.query(
+      `INSERT IGNORE INTO leave_categories (category_key, label, created_by) VALUES ('custom_earn_leave', 'Earn Leave', NULL)`
+    );
+  } catch (err: any) {
+    console.warn("⚠️ Could not seed the Earn Leave category: " + err.message);
+  }
   // Per-account balance for each Custom Leave Category above — the dynamic
   // equivalent of leave_balances' fixed three columns.
   try {
@@ -1666,6 +1726,84 @@ async function ensureSchemaMigrations() {
     `);
   } catch (err: any) {
     console.warn("⚠️ Could not ensure leave_category_balances table exists: " + err.message);
+  }
+  // Leave Manage -> "Year Settings" — a single row (id=1) holding the
+  // recurring HR Leave Year close/start dates (MM-DD, no year component —
+  // the same close/start date applies every year) and whether the year
+  // should roll over automatically. start_month_day is normally just the day
+  // after close_month_day (suggested client-side), but stored separately
+  // since an admin can still override it. See checkAndRunLeaveYearRollover in
+  // LeaveRoutes.ts for what "auto_rollover" actually does once the start
+  // date arrives — applies every active Leave Balance Workflow below to
+  // every account, same as clicking "Apply Now" by hand.
+  try {
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS leave_year_settings (
+        id INT PRIMARY KEY DEFAULT 1,
+        close_month_day VARCHAR(5) NOT NULL DEFAULT '12-31',
+        start_month_day VARCHAR(5) NOT NULL DEFAULT '01-01',
+        auto_rollover TINYINT(1) NOT NULL DEFAULT 0,
+        last_rollover_year INT NULL,
+        updated_by INT NULL,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
+      )
+    `);
+    await dbPool.query(
+      `INSERT IGNORE INTO leave_year_settings (id, close_month_day, start_month_day, auto_rollover) VALUES (1, '12-31', '01-01', 0)`
+    );
+  } catch (err: any) {
+    console.warn("⚠️ Could not ensure leave_year_settings table exists: " + err.message);
+  }
+  // Leave Manage -> "Leave Balance Workflows" — a named set of per-category
+  // annual balances, applied to accounts either Globally ("General", scope_type
+  // 'general', exactly one such row — seeded below, id=1, can never be
+  // deleted) or to every account whose Employee Directory row has a matching
+  // Designation (scope_type 'designation', e.g. "Manager", "GM"). Applying
+  // (POST /api/leave-balance-workflows/apply, or the year-end auto-rollover
+  // above) runs General first, then each active Designation workflow, so a
+  // Designation-specific balance for a category overrides the General one
+  // for just that category, for just accounts with that Designation — any
+  // category the Designation workflow doesn't mention keeps its General
+  // value. See leave_balance_workflow_items below for the per-category
+  // amounts themselves.
+  try {
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS leave_balance_workflows (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        scope_type ENUM('general', 'designation') NOT NULL DEFAULT 'designation',
+        designation VARCHAR(255) NULL,
+        is_active TINYINT(1) NOT NULL DEFAULT 1,
+        created_by INT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+      )
+    `);
+    await dbPool.query(
+      `INSERT IGNORE INTO leave_balance_workflows (id, name, scope_type, designation, is_active) VALUES (1, 'General', 'general', NULL, 1)`
+    );
+  } catch (err: any) {
+    console.warn("⚠️ Could not ensure leave_balance_workflows table exists: " + err.message);
+  }
+  // Per-Leave-Category balance amount within a Leave Balance Workflow above.
+  // category_key matches "Set Balance in Bulk"'s own key naming — the 3 fixed
+  // 'casual_leave'/'sick_leave'/'leave_without_pay' balance-column names, or a
+  // custom category's leave_categories.category_key (e.g. 'custom_earn_leave').
+  try {
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS leave_balance_workflow_items (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        workflow_id INT NOT NULL,
+        category_key VARCHAR(100) NOT NULL,
+        balance_days DECIMAL(5, 1) NOT NULL DEFAULT 0,
+        UNIQUE KEY uniq_workflow_category (workflow_id, category_key),
+        FOREIGN KEY (workflow_id) REFERENCES leave_balance_workflows(id) ON DELETE CASCADE
+      )
+    `);
+  } catch (err: any) {
+    console.warn("⚠️ Could not ensure leave_balance_workflow_items table exists: " + err.message);
   }
   // Self Service -> Leave Application — one row per submitted application.
   // Submitting one immediately deducts day_count from the matching
@@ -1914,7 +2052,38 @@ async function ensureSchemaMigrations() {
 // of truth here and mirrored in src/types.ts (ADMIN_MODULES) for the UI.
 const USER_CLAIM_CATEGORIES = ["Transport", "Fuel", "Toll", "Parking", "Others"] as const;
 
-const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports", "users", "attendance", "attendance_reports", "leave_applications", "recycle", "editlog", "notices", "claims", "approvals", "conveyance", "disbursement", "employees", "departments", "tracking", "office_attendance", "holidays", "payroll", "asset_management"] as const;
+const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports", "users", "attendance", "attendance_reports", "leave_applications", "recycle", "editlog", "notices", "claims", "approvals", "conveyance", "disbursement", "employees", "departments", "tracking", "office_attendance", "holidays", "payroll", "asset_management", "exit_offboarding", "performance_management", "recruitment", "grievance_disciplinary", "hr_analytics", "document_vault"] as const;
+
+// Granular per-module action layers — mirrors PermissionLayerKey/
+// PERMISSION_LAYERS in src/types.ts (single source of truth is duplicated
+// here, not imported, same convention as ADMIN_MODULE_KEYS/ADMIN_MODULES
+// above — this file has no import of the frontend's types.ts).
+const PERMISSION_LAYER_KEYS = ["read", "edit_add", "entry_upload", "delete_trash", "permanent_delete"] as const;
+// Which modules currently enforce PERMISSION_LAYER_KEYS — mirrors
+// PERMISSION_LAYER_MODULES in src/types.ts. Rolled out module by module.
+const PERMISSION_LAYER_MODULES = ["departments", "projects", "approvals", "users"] as const;
+
+// Leave Manage's own operation-specific layers — mirrors LeaveManageLayerKey/
+// LEAVE_MANAGE_LAYERS in src/types.ts. Not part of PERMISSION_LAYER_MODULES/
+// PERMISSION_LAYER_KEYS above since Leave Manage isn't an Admin Panel
+// "module" (no admin_module_permissions grant) and its operations don't map
+// onto the generic Read/Edit-Add/Entry-Upload/Delete-Trash/Permanent-Delete
+// set — see requireLeaveManagerLayer() below.
+const LEAVE_MANAGE_LAYER_KEYS = ["edit_balance", "bulk_set_balance", "add_category", "edit_policy", "year_settings", "workflow_manage"] as const;
+
+// Every (module_key -> its allowed layer keys) the Module Access Layers PUT
+// endpoint (UserManagement.ts) accepts — a single map instead of one flat
+// key list, since Leave Manage uses its own distinct set instead of
+// PERMISSION_LAYER_KEYS. Add an entry here (and to
+// src/components/AdminPanel.tsx's rendering) whenever a new module/feature
+// is rolled onto this system.
+const MODULE_LAYER_KEY_SETS: Record<string, readonly string[]> = {
+  departments: PERMISSION_LAYER_KEYS,
+  projects: PERMISSION_LAYER_KEYS,
+  approvals: PERMISSION_LAYER_KEYS,
+  users: PERMISSION_LAYER_KEYS,
+  leave_manage: LEAVE_MANAGE_LAYER_KEYS,
+};
 
 // Employee Directory extended profile fields (Admin Panel -> Employees ->
 // Edit -> Employee Info / Status / Contact tabs). Single source of truth for
@@ -1964,6 +2133,40 @@ async function getAdminModules(userId: number): Promise<string[]> {
     return rows.map((r: any) => r.module_key);
   } catch {
     return [];
+  }
+}
+
+// The layers explicitly granted for one (user, module) pair — NOT the
+// effective set (see requireModuleLayer()'s fallback for that); an empty
+// array here just means no rows exist yet, which the caller interprets.
+async function getModulePermissionLayersForModule(userId: number, moduleKey: string): Promise<string[]> {
+  try {
+    const rows: any = await queryDB(
+      "SELECT layer_key FROM admin_module_permission_layers WHERE user_id = ? AND module_key = ?",
+      [userId, moduleKey]
+    );
+    return rows.map((r: any) => r.layer_key);
+  } catch {
+    return [];
+  }
+}
+
+// Every (module -> layers[]) row for this account in one query — used to
+// serialize module_permission_layers on login/me/the Users list, same shape
+// as getAdminModules()'s modulesByUser grouping in UserManagement.ts.
+async function getAllModulePermissionLayers(userId: number): Promise<Record<string, string[]>> {
+  try {
+    const rows: any = await queryDB(
+      "SELECT module_key, layer_key FROM admin_module_permission_layers WHERE user_id = ?",
+      [userId]
+    );
+    const byModule: Record<string, string[]> = {};
+    for (const row of rows) {
+      (byModule[row.module_key] ||= []).push(row.layer_key);
+    }
+    return byModule;
+  } catch {
+    return {};
   }
 }
 
@@ -3137,6 +3340,44 @@ async function startServer() {
     }
   };
 
+  // Per-module ACTION gate (Read Only/Edit-Add/Entry-Upload/Delete-Trash/
+  // Permanent Delete — see PERMISSION_LAYER_KEYS above), layered on top of
+  // requireModule(moduleKey): a Superadmin always passes; an Admin/User must
+  // already have moduleKey itself granted (same check requireModule does)
+  // AND, if that module is one of PERMISSION_LAYER_MODULES, have `layer`
+  // explicitly granted too. A module NOT in PERMISSION_LAYER_MODULES yet
+  // ignores `layer` entirely (unaffected, old coarse on/off behavior). For a
+  // module that IS in PERMISSION_LAYER_MODULES but has NO layer rows at all
+  // recorded for this account, falls back to "every layer except
+  // permanent_delete" — preserves full access for every account already
+  // granted that module before this feature existed, so turning this system
+  // on for a module is never a silent regression; a Superadmin only actually
+  // restricts anything once they explicitly save a narrower set in the
+  // Module Access modal.
+  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number]) =>
+    async (req: any, res: any, next: any) => {
+      if (!req.user) return res.status(401).json({ error: "Access token required" });
+      if (req.user.role === "superadmin") return next();
+      if (req.user.role !== "admin" && req.user.role !== "user") return res.status(403).json({ error: "Admin access required" });
+      try {
+        const modules = await getAdminModules(req.user.id);
+        if (!modules.includes(moduleKey)) {
+          return res.status(403).json({ error: "You don't have access to this section. Ask your Superadmin to grant it." });
+        }
+        if (!(PERMISSION_LAYER_MODULES as readonly string[]).includes(moduleKey)) return next();
+        const grantedLayers = await getModulePermissionLayersForModule(req.user.id, moduleKey);
+        const effectiveLayers = grantedLayers.length > 0
+          ? grantedLayers
+          : PERMISSION_LAYER_KEYS.filter((k) => k !== "permanent_delete");
+        if (!effectiveLayers.includes(layer)) {
+          return res.status(403).json({ error: "You don't have permission to do this. Ask your Superadmin to grant it." });
+        }
+        next();
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
+      }
+    };
+
   // Personal Data / profile-photo routes — kept in their own file
   // (profileRoutes.ts) instead of growing this already-huge file further.
   registerProfileRoutes(app, { authenticateToken, queryDB });
@@ -3153,13 +3394,13 @@ async function startServer() {
   // User Management (Admin Panel -> Users) — kept in their own file
   // (UserManagement.ts), same reasoning as profileRoutes.ts/holidayRoutes.ts/
   // Alerts.ts above.
-  registerUserManagementRoutes(app, { authenticateToken, requireAdmin, requireSuperAdmin, requireModuleGrantAccess, requireModule, queryDB, adminModuleKeys: ADMIN_MODULE_KEYS });
+  registerUserManagementRoutes(app, { authenticateToken, requireAdmin, requireSuperAdmin, requireModuleGrantAccess, requireModule, requireModuleLayer, queryDB, adminModuleKeys: ADMIN_MODULE_KEYS, moduleLayerKeySets: MODULE_LAYER_KEY_SETS });
 
   // Departments (Admin Panel -> Departments) + Branches (Admin Panel ->
   // Branches) — kept in their own file (DepartmentsAndBranches.ts), same
   // reasoning as profileRoutes.ts/holidayRoutes.ts/Alerts.ts/UserManagement.ts
   // above.
-  registerDepartmentsAndBranchesRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB });
+  registerDepartmentsAndBranchesRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, queryDB });
 
   // Server Profiles (Admin Panel -> Servers) — kept in their own file
   // (ServerProfileRoutes.ts), same reasoning as profileRoutes.ts/
@@ -3244,6 +3485,39 @@ async function startServer() {
       const ok = await hasLeaveManageAccess(req.user.id, req.user.role);
       if (!ok) {
         return res.status(403).json({ error: "You don't have access to manage Leave balances. Ask your Superadmin to grant it." });
+      }
+      next();
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  };
+
+  // Finer-grained gate layered on TOP of requireLeaveManager above — Leave
+  // Manage isn't an Admin Panel "module" (no admin_module_permissions row;
+  // access is the flat can_manage_leave boolean requireLeaveManager already
+  // checks), so it can't reuse requireModuleLayer()'s getAdminModules()
+  // check. Instead this reuses the SAME admin_module_permission_layers
+  // storage/helpers (getModulePermissionLayersForModule) with the synthetic
+  // module_key "leave_manage" — that table's module_key column is a free
+  // string, not FK'd to AdminModuleKey, so this just works. Layer keys here
+  // are operation-specific (see LEAVE_MANAGE_LAYER_KEYS), not the generic
+  // Read/Edit-Add/Entry-Upload/Delete-Trash/Permanent-Delete set every other
+  // module uses — Leave Manage's 4 writes don't map cleanly onto those.
+  // Same "no saved rows -> full access" fallback as requireModuleLayer, so
+  // granting can_manage_leave alone (today's only lever) keeps working
+  // exactly as before until a Superadmin explicitly narrows it.
+  const requireLeaveManagerLayer = (layer: typeof LEAVE_MANAGE_LAYER_KEYS[number]) => async (req: any, res: any, next: any) => {
+    if (!req.user) return res.status(401).json({ error: "Access token required" });
+    if (req.user.role === "superadmin") return next();
+    try {
+      const ok = await hasLeaveManageAccess(req.user.id, req.user.role);
+      if (!ok) {
+        return res.status(403).json({ error: "You don't have access to manage Leave balances. Ask your Superadmin to grant it." });
+      }
+      const grantedLayers = await getModulePermissionLayersForModule(req.user.id, "leave_manage");
+      const effectiveLayers = grantedLayers.length > 0 ? grantedLayers : LEAVE_MANAGE_LAYER_KEYS;
+      if (!effectiveLayers.includes(layer)) {
+        return res.status(403).json({ error: "You don't have permission to do this. Ask your Superadmin to grant it." });
       }
       next();
     } catch (err: any) {
@@ -3394,7 +3668,9 @@ async function startServer() {
           // So the Admin Panel can show/hide tabs right after login, before any
           // other fetch. Empty for Users and for Superadmin (who has every module
           // implicitly, not through explicit grants).
-          module_permissions: (user.role === "admin" || user.role === "user") ? await getAdminModules(user.id) : []
+          module_permissions: (user.role === "admin" || user.role === "user") ? await getAdminModules(user.id) : [],
+          // Same reasoning, one level more granular — see PERMISSION_LAYER_MODULES.
+          module_permission_layers: (user.role === "admin" || user.role === "user") ? await getAllModulePermissionLayers(user.id) : {}
         }
       });
     } catch (err: any) {
@@ -3428,7 +3704,8 @@ async function startServer() {
         can_view_leave_application: u.role === "superadmin" ? true : !!Number(u.can_view_leave_application),
         can_view_my_leave: u.role === "superadmin" ? true : !!Number(u.can_view_my_leave),
         can_grant_module_access: u.role === "admin" ? !!Number(u.can_grant_module_access) : false,
-        module_permissions: (u.role === "admin" || u.role === "user") ? await getAdminModules(u.id) : []
+        module_permissions: (u.role === "admin" || u.role === "user") ? await getAdminModules(u.id) : [],
+        module_permission_layers: (u.role === "admin" || u.role === "user") ? await getAllModulePermissionLayers(u.id) : {}
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -3500,7 +3777,7 @@ async function startServer() {
     return { lat, lng, label, radius };
   }
 
-  app.post("/api/projects", authenticateToken, requireAdmin, requireModule("projects"), async (req: any, res) => {
+  app.post("/api/projects", authenticateToken, requireAdmin, requireModule("projects"), requireModuleLayer("projects", "edit_add"), async (req: any, res) => {
     try {
       const { project_name } = req.body;
       if (!project_name) return res.status(400).json({ error: "Project name is required" });
@@ -3527,7 +3804,7 @@ async function startServer() {
     }
   });
 
-  app.put("/api/projects/:id", authenticateToken, requireAdmin, requireModule("projects"), async (req, res) => {
+  app.put("/api/projects/:id", authenticateToken, requireAdmin, requireModule("projects"), requireModuleLayer("projects", "edit_add"), async (req, res) => {
     try {
       const { id } = req.params;
       const { project_name } = req.body;
@@ -3545,7 +3822,7 @@ async function startServer() {
     }
   });
 
-  app.delete("/api/projects/:id", authenticateToken, requireAdmin, requireModule("projects"), async (req, res) => {
+  app.delete("/api/projects/:id", authenticateToken, requireAdmin, requireModule("projects"), requireModuleLayer("projects", "delete_trash"), async (req, res) => {
     try {
       const { id } = req.params;
       await queryDB("DELETE FROM user_project_permissions WHERE project_id = ?", [id]);
@@ -4062,6 +4339,17 @@ async function startServer() {
     queryDB
   });
 
+  // World-class HRM extension modules (Exit/Offboarding, Performance
+  // Management, Recruitment/ATS, Grievance & Disciplinary, HR Analytics,
+  // Document Vault) — each its own AdminModuleKey, each in its own file,
+  // same reasoning as every registerXRoutes call above.
+  registerExitOffboardingRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB, getAdminModules });
+  registerPerformanceRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB, getAdminModules });
+  registerRecruitmentRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB });
+  registerGrievanceRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB, getAdminModules });
+  registerHRAnalyticsRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB });
+  registerDocumentVaultRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB, getAdminModules });
+
   // Employee Directory (Self Service -> "Employee Directory") — kept in its
   // own file (EmployeeDirectoryRoutes.ts), same reasoning as
   // EmployeeTransferRoutes.ts above. Deliberately NOT requireAdmin/
@@ -4108,6 +4396,7 @@ async function startServer() {
     requireAdmin,
     requireSuperAdmin,
     requireModule,
+    requireModuleLayer,
     queryDB,
     getApprovalChain,
     performApprovalAction,
@@ -5913,6 +6202,7 @@ async function startServer() {
     requireModule,
     getLeaveApplicationDeptScope,
     requireLeaveManager,
+    requireLeaveManagerLayer,
     hasLeaveManageAccess,
     getCurrentStepApprovers,
     createAlert,

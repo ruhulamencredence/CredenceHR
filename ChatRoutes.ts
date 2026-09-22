@@ -48,85 +48,17 @@
 import type { Express } from "express";
 import type { Server as SocketIOServer } from "socket.io";
 import jwt from "jsonwebtoken";
-import admin from "firebase-admin";
+import { sendPushToRoomMembers } from "./PushNotificationService";
 
 interface ChatRouteDeps {
   authenticateToken: any;
   queryDB: (sql: string, params?: any[]) => Promise<any>;
 }
 
-// Push notifications (Android, via Firebase Cloud Messaging) — entirely
-// optional. Set FIREBASE_SERVICE_ACCOUNT_JSON (the full JSON contents of a
-// Firebase service account key, e.g. from a secrets manager or one-line env
-// var) to enable; every push call below silently no-ops otherwise, so Chat
-// itself (Socket.IO delivery, REST) works identically with or without it.
-// Manual setup this needs, none of which this code can do for you:
-//   1. Create a Firebase project (console.firebase.google.com), add an
-//      Android app to it with this app's applicationId (see
-//      android/app/build.gradle), download google-services.json into
-//      android/app/.
-//   2. Project Settings -> Service Accounts -> Generate new private key —
-//      that JSON file's contents go into FIREBASE_SERVICE_ACCOUNT_JSON.
-//   3. Add @capacitor/push-notifications and rebuild the APK (see
-//      src/lib/pushNotifications.ts for the client-side half).
-let firebaseApp: admin.app.App | null | undefined;
-function getFirebaseApp(): admin.app.App | null {
-  if (firebaseApp !== undefined) return firebaseApp;
-  const json = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
-  if (!json) {
-    console.warn("ℹ️ FIREBASE_SERVICE_ACCOUNT_JSON not set — Chat push notifications disabled (everything else works normally).");
-    firebaseApp = null;
-    return null;
-  }
-  try {
-    firebaseApp = admin.initializeApp({ credential: admin.credential.cert(JSON.parse(json)) });
-  } catch (err: any) {
-    console.warn("⚠️ Could not initialize Firebase (check FIREBASE_SERVICE_ACCOUNT_JSON) — Chat push notifications disabled: " + err.message);
-    firebaseApp = null;
-  }
-  return firebaseApp;
-}
-
-async function sendPushToRoomMembers(
-  queryDB: ChatRouteDeps["queryDB"],
-  roomId: number,
-  excludeUserId: number,
-  title: string,
-  body: string,
-  data: Record<string, string>
-): Promise<void> {
-  const app = getFirebaseApp();
-  if (!app) return;
-  try {
-    const rows = await queryDB(
-      `SELECT t.token FROM chat_push_tokens t
-       JOIN chat_room_members m ON m.user_id = t.user_id AND m.room_id = ?
-       WHERE t.user_id != ?`,
-      [roomId, excludeUserId]
-    );
-    if (rows.length === 0) return;
-    const result = await admin.messaging(app).sendEachForMulticast({
-      tokens: rows.map((r: any) => r.token),
-      notification: { title, body },
-      data,
-      android: { priority: "high" }
-    });
-    // Firebase returns per-token success/failure rather than throwing — a
-    // token failing with "not registered" means the app was uninstalled or
-    // reinstalled without re-registering, so it's just dead weight now.
-    const deadTokens: string[] = [];
-    result.responses.forEach((r, i) => {
-      if (!r.success && r.error?.code === "messaging/registration-token-not-registered") {
-        deadTokens.push(rows[i].token);
-      }
-    });
-    if (deadTokens.length > 0) {
-      await queryDB(`DELETE FROM chat_push_tokens WHERE token IN (${deadTokens.map(() => "?").join(",")})`, deadTokens);
-    }
-  } catch (err: any) {
-    console.warn("⚠️ Chat push send failed: " + err.message);
-  }
-}
+// Push notifications (Android, via Firebase Cloud Messaging) — see
+// PushNotificationService.ts (getFirebaseApp/sendPushToRoomMembers, shared
+// with Alerts.ts) for the setup steps and the "entirely optional" no-op
+// behavior when FIREBASE_SERVICE_ACCOUNT_JSON isn't set.
 
 // Fire-and-forget from both the REST POST /messages route and the socket
 // 'send_message' handler right after a message is persisted+broadcast —
