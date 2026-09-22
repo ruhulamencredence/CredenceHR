@@ -196,10 +196,6 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
   if (loading && projects.length === 0) {
     return (
       <div className="relative rounded-[24px] overflow-hidden border border-white/70 p-3.5 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-blue-100/70 via-white/50 to-indigo-50/40 animate-pulse">
-        {/* backdrop-blur lives on its own layer, not the same rounded +
-            overflow-hidden box it blurs inside of — see the note on the
-            real card below for why. */}
-        <div className="absolute inset-0 -z-10 backdrop-blur-xl" />
         <div className="h-4 w-32 bg-white/60 rounded-md mb-3" />
         <div className="grid grid-cols-2 gap-2">
           <div className="rounded-xl px-3 py-2 bg-white/80 border border-white/50 h-14" />
@@ -222,16 +218,16 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
     // Requests) and the tinted-glass treatment made that row read as three
     // unrelated designs pushed together.
     <div className="relative rounded-[24px] overflow-hidden border border-white/70 p-4 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-blue-100/70 via-white/50 to-indigo-50/40 hover:shadow-lg hover:border-white transition-all md:bg-white md:from-transparent md:via-transparent md:to-transparent md:border-slate-200 md:rounded-2xl md:shadow-sm md:hover:shadow-sm md:hover:border-slate-200">
-      {/* backdrop-blur on its own absolutely-positioned layer rather than
-          the same box as overflow-hidden + rounded-[24px] — kept for
-          desktop browsers, which do render it. Confirmed on real hardware
-          that this device's Android System WebView doesn't render
-          backdrop-filter at all (not a compositor/layering quirk we can
-          work around — the property is just a no-op there), so the inner
-          tiles below no longer depend on the blur to read as a distinct
-          panel: their background opacity alone (bg-white/80, bg-blue-100/80,
-          etc.) now does that job on every device, blur or not. */}
-      <div className="absolute inset-0 -z-10 backdrop-blur-xl md:backdrop-blur-none" />
+      {/* No backdrop-blur on this outer shell (there used to be one, split
+          onto its own absolutely-positioned -z-10 child layer to work
+          around an Android compositor gap) — confirmed on real hardware
+          that this device's WebView doesn't render backdrop-filter at all,
+          so that layer was dead weight, and the negative-z-index child was
+          the likely cause of a separate bug where the card's background
+          would render correctly on first paint and then disappear after a
+          reload. The inner tiles below don't depend on blur to read as a
+          distinct panel: their background opacity alone (bg-white/80,
+          bg-blue-100/80, etc.) does that job on every device, blur or not. */}
       <h3 className="text-sm font-bold text-slate-900 mb-2 flex items-center gap-2 min-w-0">
         <UserCheck className="w-4 h-4 text-blue-600 shrink-0" />
         <span className="truncate">My Attendance</span>
