@@ -198,8 +198,8 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
       <div className="relative rounded-[24px] overflow-hidden border border-white/70 p-3.5 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-blue-100/70 via-white/50 to-indigo-50/40 animate-pulse">
         <div className="h-4 w-32 bg-white/60 rounded-md mb-3" />
         <div className="grid grid-cols-2 gap-2">
-          <div className="rounded-xl px-3 py-2 bg-white/80 border border-white/50 h-14" />
-          <div className="rounded-xl px-3 py-2 bg-white/80 border border-white/50 h-14" />
+          <div className="rounded-xl px-3 py-2 bg-white/70 border border-white/50 h-14" />
+          <div className="rounded-xl px-3 py-2 bg-white/70 border border-white/50 h-14" />
         </div>
       </div>
     );
@@ -254,10 +254,11 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
       <div className="grid grid-cols-2 gap-2">
         {/* In Time — just the time itself, no "via Office/GPS" source line;
             extra padding so the text doesn't crowd its rounded corners.
-            bg-white/80 (not the lighter /40 this used to be) reads as a
-            distinct tile on its own even where backdrop-blur-lg doesn't
-            render (Android WebView — see the note above). */}
-        <div className={`rounded-xl px-4 py-3 backdrop-blur-lg border ${hasCheckedIn ? 'bg-blue-100/80 border-white/60' : 'bg-white/80 border-white/50'}`}>
+            bg-white/70 (not the flatter /40 this used to be) reads as its
+            own distinct tile even where backdrop-blur-lg doesn't render
+            (Android WebView — see the note above), while staying low
+            enough to keep some translucency instead of a flat opaque box. */}
+        <div className={`rounded-xl px-4 py-3 backdrop-blur-lg border ${hasCheckedIn ? 'bg-blue-100/70 border-white/60' : 'bg-white/70 border-white/50'}`}>
           <div className="text-xs font-medium text-slate-500">In Time</div>
           {hasCheckedIn && inParts ? (
             <div className="mt-0.5 font-bold text-blue-700">
@@ -279,7 +280,7 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
 
         {/* Out Time — same "time only" + extra padding/blur treatment as
             In Time above. */}
-        <div className={`rounded-xl px-4 py-3 backdrop-blur-lg border ${hasCheckedOut ? 'bg-blue-100/80 border-white/60' : 'bg-white/80 border-white/50'}`}>
+        <div className={`rounded-xl px-4 py-3 backdrop-blur-lg border ${hasCheckedOut ? 'bg-blue-100/70 border-white/60' : 'bg-white/70 border-white/50'}`}>
           <div className="text-xs font-medium text-slate-500">Out Time</div>
           {hasCheckedOut && outParts ? (
             <div className="mt-0.5 font-bold text-blue-700">
