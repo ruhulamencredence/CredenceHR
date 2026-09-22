@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect, useRef, Suspense, lazy } from 'react';
 import { Capacitor } from '@capacitor/core';
-import { RefreshCw, ArrowLeft } from 'lucide-react';
+import { RefreshCw, ArrowLeft, X } from 'lucide-react';
 import { User, ClaimsNavRequest, AdminNavRequest, JobsNavRequest, AdminModuleKey, DashboardNavRequest, LeaveNavRequest } from './types';
 import { AuthScreen } from './components/AuthScreen';
 import { Navbar } from './components/Navbar';
@@ -143,6 +143,12 @@ export default function App() {
   // isn't persisted across a reload — reopening Chat re-syncs instantly from
   // the server, so there's nothing worth restoring a stale "was open" flag for.
   const [showChat, setShowChat] = useState(false);
+  // Docked FloatingChatButton's own popup — a New-Leave-Application-sized
+  // centered modal card (see the render block near FloatingChatButton below),
+  // kept fully separate from showChat above so Navbar's ChatBell (which still
+  // opens Chat in a new browser tab on web, or takes over the whole screen on
+  // native) is completely unaffected by this.
+  const [showChatPopup, setShowChatPopup] = useState(false);
   // Set when a Chat push notification is tapped (see initPushNotifications
   // below) so ChatPanel opens straight to that conversation instead of just
   // landing on the room list. Cleared once ChatPanel has consumed it (see
@@ -547,14 +553,11 @@ export default function App() {
   };
 
   // Used only by the docked FloatingChatButton (bottom-right corner) — that
-  // button is explicitly meant to open Chat as an in-page popup overlay
-  // (ChatPanel's own .chat-shell already covers the screen as one, dismissed
-  // via its Back arrow) rather than a new browser tab, unlike ChatBell's own
-  // openChat above. Same in-app path openChat already takes on native.
+  // button is explicitly meant to open Chat as a centered popup card, sized
+  // like the New Leave Application modal, rather than a full-screen takeover
+  // or a new browser tab. See showChatPopup's render block below.
   const openChatPopup = () => {
-    setSelfServiceView(null);
-    setShowProfilePage(false);
-    setShowChat(true);
+    setShowChatPopup(true);
   };
 
   // UserPanel's desktopActiveSection/mobileActiveSection values don't share
@@ -921,10 +924,44 @@ export default function App() {
       {/* Docked chat launcher — web only (see the component's own md:flex),
           bottom-right, above everything else. Navbar's ChatBell up top still
           opens the same place; this is just a second, always-visible way in.
-          Hidden while the native in-app Chat page is already open (on web,
-          onOpenChat always opens /chat in a new tab, so showChat never gates
-          this there, but the check is harmless either way). */}
-      <FloatingChatButton token={token || ''} onOpenChat={openChatPopup} hidden={showChat} />
+          Hidden while the native in-app Chat page or this button's own popup
+          is already open. */}
+      <FloatingChatButton token={token || ''} onOpenChat={openChatPopup} hidden={showChat || showChatPopup} />
+
+      {/* FloatingChatButton's popup — a centered card sized like
+          NewLeaveApplicationModal (max-w-3xl, rounded-2xl, its own backdrop)
+          instead of taking over the whole screen the way showChat above
+          does. ChatPanel's own Back arrow is mobile-only (md:hidden), so
+          this needs its own close button + backdrop-click-to-close. */}
+      {showChatPopup && user && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4"
+          onClick={(e) => { if (e.target === e.currentTarget) setShowChatPopup(false); }}
+        >
+          <div
+            className="bg-white border border-slate-200 rounded-2xl max-w-3xl w-full overflow-hidden shadow-2xl flex flex-col relative"
+            style={{ height: '85vh', maxHeight: '720px' }}
+          >
+            <button
+              type="button"
+              onClick={() => setShowChatPopup(false)}
+              title="Close"
+              aria-label="Close chat"
+              className="absolute top-3 right-3 z-10 p-1.5 bg-white/90 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-full shadow transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
+            <Suspense fallback={<AppLoader />}>
+              <ChatPanel
+                user={user}
+                token={token || ''}
+                onBack={() => setShowChatPopup(false)}
+                variant="modal"
+              />
+            </Suspense>
+          </div>
+        </div>
+      )}
 
       {showExitPrompt && (
         <div

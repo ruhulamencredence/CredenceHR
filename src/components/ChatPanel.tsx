@@ -34,6 +34,15 @@ interface ChatPanelProps {
   // onInitialRoomHandled so re-opening Chat later doesn't keep jumping back.
   initialRoomId?: number | null;
   onInitialRoomHandled?: () => void;
+  // 'fullscreen' (default): the original behavior — .chat-shell takes over
+  // the whole viewport via `position: fixed; inset: 0`, tracking
+  // window.visualViewport itself. 'modal': used by App.tsx's docked
+  // FloatingChatButton popup, which already renders its own fixed backdrop +
+  // sized card (New Leave Application-modal-sized) around this component —
+  // here ChatPanel just needs to fill that card (w-full h-full), not the
+  // whole screen, so the fixed positioning/visualViewport tracking below is
+  // skipped entirely in this mode.
+  variant?: 'fullscreen' | 'modal';
 }
 
 function timeOnly(iso: string): string {
@@ -160,7 +169,7 @@ const AudioAttachment: React.FC<{ token: string; messageId: number }> = ({ token
   return <audio controls src={url} className="w-56 max-w-full h-9" />;
 };
 
-export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initialRoomId, onInitialRoomHandled }) => {
+export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initialRoomId, onInitialRoomHandled, variant = 'fullscreen' }) => {
   const [rooms, setRooms] = useState<ChatRoom[]>([]);
   const [activeRoomId, setActiveRoomId] = useState<number | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -453,6 +462,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
   // math is needed beyond the `if (!vv) return` guard below (an
   // unsupported browser just keeps .chat-shell's CSS `inset: 0` instead).
   useEffect(() => {
+    if (variant === 'modal') return;
     const vv = window.visualViewport;
     if (!vv) return;
     const update = () => setViewportSize({ height: vv.height, top: vv.offsetTop });
@@ -463,7 +473,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
       vv.removeEventListener('resize', update);
       vv.removeEventListener('scroll', update);
     };
-  }, []);
+  }, [variant]);
 
   // Locks the OUTER page from scrolling at all while a conversation is open.
   // .chat-shell (index.css) already takes ChatPanel out of the page's normal
@@ -737,8 +747,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
 
   return (
     <div
-      className="chat-shell flex bg-white"
-      style={viewportSize ? { top: viewportSize.top, height: viewportSize.height } : undefined}
+      className={variant === 'modal' ? 'flex bg-white w-full h-full min-h-0' : 'chat-shell flex bg-white'}
+      style={variant === 'fullscreen' && viewportSize ? { top: viewportSize.top, height: viewportSize.height } : undefined}
     >
       {/* Sidebar: room list */}
       <div className={`w-full md:w-[360px] border-r border-slate-200 flex flex-col ${activeRoomId ? 'hidden md:flex' : 'flex'}`}>
