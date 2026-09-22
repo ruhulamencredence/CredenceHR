@@ -28,6 +28,7 @@ const ChatPanel = lazy(() => import('./components/ChatPanel').then(m => ({ defau
 import { AppLoader } from './components/AppLoader';
 import { Spinner } from './components/Spinner';
 import { ApkModal } from './components/ApkModal';
+import { FloatingChatButton } from './components/FloatingChatButton';
 import { LeaveManage } from './components/LeaveManage';
 import { MyLeave } from './components/MyLeave';
 import { LeaveApprovals } from './components/LeaveApprovals';
@@ -905,6 +906,14 @@ export default function App() {
         isOpen={isApkModalOpen}
         onClose={() => setIsApkModalOpen(false)}
       />
+
+      {/* Docked chat launcher — web only (see the component's own md:flex),
+          bottom-right, above everything else. Navbar's ChatBell up top still
+          opens the same place; this is just a second, always-visible way in.
+          Hidden while the native in-app Chat page is already open (on web,
+          onOpenChat always opens /chat in a new tab, so showChat never gates
+          this there, but the check is harmless either way). */}
+      <FloatingChatButton token={token || ''} onOpenChat={openChat} hidden={showChat} />
 
       {showExitPrompt && (
         <div
