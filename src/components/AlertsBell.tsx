@@ -17,6 +17,9 @@ interface AlertsBellProps {
   // in Navbar already points at) — optional so this component still works
   // standing alone if nothing wires it up.
   onOpenLeaveApplication?: () => void;
+  // Dropdown footer "View all" link — opens AlertsPage.tsx (the full-page
+  // inbox), since this dropdown itself only ever shows the 50 most recent.
+  onViewAll?: () => void;
 }
 
 // Personal Alerts inbox — same component renders in the shared Navbar on
@@ -25,7 +28,7 @@ interface AlertsBellProps {
 // unlike the Admin Panel tabs). Polls the lightweight unread-count endpoint
 // so the badge stays current without re-fetching the whole list constantly;
 // the full list is only fetched when the dropdown is actually opened.
-export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplication }) => {
+export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplication, onViewAll }) => {
   const [unreadCount, setUnreadCount] = useState(0);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [open, setOpen] = useState(false);
@@ -220,6 +223,20 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
               ))
             )}
           </div>
+
+          {onViewAll && (
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                onViewAll();
+              }}
+              className="w-full px-4 py-2.5 text-xs font-medium text-center border-t hover:opacity-70"
+              style={{ borderColor: 'var(--g-border, #e5e7eb)', color: 'var(--g-accent)' }}
+            >
+              View all
+            </button>
+          )}
         </div>
       )}
     </div>

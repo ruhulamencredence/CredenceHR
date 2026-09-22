@@ -73,6 +73,9 @@ interface GlobalSidebarProps {
   // "Chat" item (self-service list below) opens ChatPanel.tsx — same
   // destination the Navbar chat bell opens on desktop.
   onOpenChat: () => void;
+  // "Alerts" item (self-service list below) opens AlertsPage.tsx — same
+  // destination the Navbar AlertsBell dropdown's "View all" link opens.
+  onOpenAlerts: () => void;
   // Which item's key currently matches what's actually on screen (see
   // App.tsx's computeSidebarActiveKey) — highlighted so this drawer/column
   // shows a "you are here" mark instead of every item looking the same
@@ -91,7 +94,7 @@ interface GlobalSidebarProps {
 // drawer) carried over from the old AdminSidebar.
 export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   open, onClose, variant = 'overlay', user, token, photoVersion, onLogout, onGoToDashboard, onGoToJobsTab, onGoToUserClaims,
-  onGoToSelfServiceTab, onGoToAdminClaims, onGoToAdminModule, onOpenProfile, onOpenChat, activeKey,
+  onGoToSelfServiceTab, onGoToAdminClaims, onGoToAdminModule, onOpenProfile, onOpenChat, onOpenAlerts, activeKey,
 }) => {
   const isPersistent = variant === 'persistent';
   // Closed by default — a group only opens when the user explicitly taps its
@@ -287,6 +290,9 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // Chat (Direct/Group/Community messaging, ChatPanel.tsx) — NOT gated,
   // every signed-in account gets it, same as Employee Directory just below.
   selfServiceItems.push({ key: 'chat', label: 'Chat', icon: MessageSquare, onClick: onOpenChat });
+  // Alerts (AlertsPage.tsx) — same visibility as Chat above: every
+  // signed-in account, not gated behind any module grant.
+  selfServiceItems.push({ key: 'alerts', label: 'Alerts', icon: Bell, onClick: onOpenAlerts });
   // Company-wide roster, browsable by every account regardless of role or
   // Admin Panel module access (unlike Admin Panel -> Employees, which is
   // the HR-editing view gated behind the 'employees' module) — see
