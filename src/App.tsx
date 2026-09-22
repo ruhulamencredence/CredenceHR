@@ -6,7 +6,7 @@
 import React, { useState, useEffect, useRef, Suspense, lazy } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { RefreshCw, ArrowLeft } from 'lucide-react';
-import { User, ClaimsNavRequest, AdminNavRequest, JobsNavRequest, AdminModuleKey, DashboardNavRequest } from './types';
+import { User, ClaimsNavRequest, AdminNavRequest, JobsNavRequest, AdminModuleKey, DashboardNavRequest, LeaveNavRequest } from './types';
 import { AuthScreen } from './components/AuthScreen';
 import { Navbar } from './components/Navbar';
 import { GlobalSidebar } from './components/GlobalSidebar';
@@ -28,7 +28,6 @@ const ChatPanel = lazy(() => import('./components/ChatPanel').then(m => ({ defau
 import { AppLoader } from './components/AppLoader';
 import { Spinner } from './components/Spinner';
 import { ApkModal } from './components/ApkModal';
-import { LeaveApplication } from './components/LeaveApplication';
 import { LeaveManage } from './components/LeaveManage';
 import { MyLeave } from './components/MyLeave';
 import { LeaveApprovals } from './components/LeaveApprovals';
@@ -63,6 +62,9 @@ export default function App() {
   const [adminNavRequest, setAdminNavRequest] = useState<AdminNavRequest | null>(null);
   // GlobalSidebar's "Dashboard" item — see DashboardNavRequest in types.ts.
   const [dashboardNavRequest, setDashboardNavRequest] = useState<DashboardNavRequest | null>(null);
+  // GlobalSidebar's "Leave Application" item (and Navbar's AlertsBell) — see
+  // LeaveNavRequest in types.ts.
+  const [leaveNavRequest, setLeaveNavRequest] = useState<LeaveNavRequest | null>(null);
   // AdminPanel's own activeTab, reported live via onActiveTabChange (see
   // AdminPanel.tsx) — used below to tell GlobalSidebar which item is
   // actually on screen right now, so it can show a "you are here" highlight
@@ -646,6 +648,19 @@ export default function App() {
     onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'myLeave' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory') => {
       setShowProfilePage(false);
           setShowChat(false);
+      if (target === 'leaveApplication') {
+        // Routes into UserPanel's own mobileActiveSection = 'leave' instead
+        // of this file's separate selfServiceView state — the SAME
+        // LeaveReviewPage.tsx the Dashboard's Leave Summary card and mobile
+        // bottom nav already open, so there's exactly one Leave Application
+        // interface regardless of entry point (see leaveNavRequest above and
+        // LeaveNavRequest in types.ts). Switches into the User Panel first,
+        // same as onGoToJobsTab/onGoToUserClaims above.
+        setSelfServiceView(null);
+        setViewMode('user');
+        setLeaveNavRequest({ ts: Date.now() });
+        return;
+      }
       setSelfServiceView(target);
     },
     onOpenProfile: () => {
@@ -826,8 +841,6 @@ export default function App() {
               });
             }}
           />
-        ) : selfServiceView === 'leaveApplication' ? (
-          <LeaveApplication token={token} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'myLeave' ? (
           <MyLeave token={token} user={user} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'leaveManagement' ? (
@@ -865,6 +878,7 @@ export default function App() {
               claimsNavRequest={claimsNavRequest}
               jobsNavRequest={jobsNavRequest}
               dashboardNavRequest={dashboardNavRequest}
+              leaveNavRequest={leaveNavRequest}
               onActiveSectionChange={setUserActiveSection}
             />
             {/* Superadmin/Admin-authored Notice popup — only shown on the plain

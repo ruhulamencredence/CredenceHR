@@ -1421,6 +1421,21 @@ export interface DashboardNavRequest {
   ts: number;
 }
 
+// Fired by GlobalSidebar's "Leave Application" item and Navbar's AlertsBell
+// (a leave-related alert) — same bump-`ts`-on-every-click pattern as
+// ClaimsNavRequest above. Consumed by UserPanel only: switches its
+// mobileActiveSection to 'leave', the SAME LeaveReviewPage.tsx the
+// Dashboard's own Leave Summary card and mobile bottom nav already open —
+// previously these two entry points routed to two entirely different
+// components (App.tsx's own separate LeaveApplication.tsx, now removed, vs
+// UserPanel's LeaveReviewPage.tsx), so which interface you got depended on
+// which way you navigated in. Only one target (there's nothing to
+// disambiguate — unlike ClaimsNavRequest/JobsNavRequest, which each cover
+// several distinct pages), so no `target` field, just the re-fire ts.
+export interface LeaveNavRequest {
+  ts: number;
+}
+
 // Chat (Direct/Group/Community messaging) — see ChatRoutes.ts for the
 // server-side data model these mirror.
 export interface ChatDirectoryUser {
