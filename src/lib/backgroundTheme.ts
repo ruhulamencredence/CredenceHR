@@ -17,7 +17,7 @@
 // background-attachment: fixed (already set on body in index.css) keeps it
 // anchored to the viewport either way, rather than scrolling with content.
 
-export type BackgroundThemeId = 'violet' | 'deep-violet' | 'sunset';
+export type BackgroundThemeId = 'default' | 'violet' | 'deep-violet' | 'sunset';
 
 export interface BackgroundTheme {
   id: BackgroundThemeId;
@@ -28,35 +28,45 @@ export interface BackgroundTheme {
   gradient: string;
 }
 
-// Color-stop percentages pushed further out (light stop's own share roughly
-// doubled from the first pass) so the pale center reads as the dominant
-// area of the glow, with the deep tone only taking over near the edges.
+// Color-stop percentages pushed further out again (light stop's own share
+// now most of the glow) so the pale center dominates the screen, with the
+// deep tone only showing right at the corners/edges.
 export const BACKGROUND_THEMES: BackgroundTheme[] = [
+  {
+    // The app's original background (index.css's own --g-bg-gradient
+    // default, before this picker existed) — kept as its own selectable
+    // option, and the one every account starts on, rather than switching
+    // everyone over to one of the 3 new looks by default.
+    id: 'default',
+    label: 'Default',
+    swatch: '#DBEEFF',
+    gradient: 'linear-gradient(160deg, #eaf6ff 0%, #dbeeff 30%, #e7dcff 65%, #ede0ff 100%)'
+  },
   {
     id: 'violet',
     label: 'Violet',
     swatch: '#B36AFF',
     gradient:
-      'radial-gradient(ellipse 90% 60% at 50% 20%, #EFE0FF 0%, #D2A8FF 50%, #7F00FF 82%, #47008E 100%)'
+      'radial-gradient(ellipse 90% 60% at 50% 20%, #EFE0FF 0%, #D2A8FF 65%, #7F00FF 90%, #47008E 100%)'
   },
   {
     id: 'deep-violet',
     label: 'Deep Violet',
     swatch: '#6300C6',
     gradient:
-      'radial-gradient(ellipse 90% 60% at 50% 20%, #F3E8FF 0%, #B36AFF 48%, #6300C6 78%, #380071 100%)'
+      'radial-gradient(ellipse 90% 60% at 50% 20%, #F3E8FF 0%, #B36AFF 62%, #6300C6 88%, #380071 100%)'
   },
   {
     id: 'sunset',
     label: 'Sunset',
     swatch: '#EA4B1E',
     gradient:
-      'radial-gradient(ellipse 90% 60% at 50% 20%, #FFE9DE 0%, #FFB38F 46%, #7F00FF 80%, #380071 100%)'
+      'radial-gradient(ellipse 90% 60% at 50% 20%, #FFE9DE 0%, #FFB38F 60%, #7F00FF 88%, #380071 100%)'
   }
 ];
 
 const STORAGE_KEY = 'mpr_bg_theme';
-const DEFAULT_THEME: BackgroundThemeId = 'violet';
+const DEFAULT_THEME: BackgroundThemeId = 'default';
 
 export function getSavedBackgroundTheme(): BackgroundThemeId {
   try {
