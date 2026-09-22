@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
-import { ArrowLeft, ListChecks, Search, Save, Layers, Building2, ChevronDown, ChevronUp, CheckCircle2, AlertTriangle, Plus, X, ShieldCheck } from 'lucide-react';
-import { User, LeaveBalance, LeaveCategoryPolicy } from '../types';
+import { ArrowLeft, ListChecks, Search, Save, Layers, Building2, ChevronDown, ChevronUp, CheckCircle2, AlertTriangle, Plus, X, ShieldCheck, CalendarClock, GitBranch, Trash2, PlayCircle, Power } from 'lucide-react';
+import { User, LeaveBalance, LeaveCategoryPolicy, LeaveYearSettings, LeaveBalanceWorkflow } from '../types';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
 import { ModulePath } from './ModulePath';
@@ -143,6 +143,247 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
     }
   };
 
+  // "Year Settings" — the recurring HR Leave Year close/start dates
+  // (MM-DD, no year — same dates every year) plus whether the next Leave
+  // Year should start automatically once the start date arrives. Only ever
+  // shown/usable when canManageAll is true, same as every other panel here.
+  const [showYearSettingsPanel, setShowYearSettingsPanel] = useState(false);
+  const [yearSettings, setYearSettings] = useState<LeaveYearSettings | null>(null);
+  const [yearSettingsDraft, setYearSettingsDraft] = useState({ close_month_day: '12-31', start_month_day: '01-01', auto_rollover: false });
+  const [savingYearSettings, setSavingYearSettings] = useState(false);
+  const [yearSettingsError, setYearSettingsError] = useState('');
+  const [yearSettingsSuccess, setYearSettingsSuccess] = useState('');
+
+  // MM-DD helpers — mirrors normalizeMonthDay/dayAfterMonthDay in
+  // LeaveRoutes.ts so the Start Date suggestion shown here matches exactly
+  // what the server would compute if it were left blank. 2024 is just a
+  // leap-year canvas for the <input type="date"> round-trip below; no real
+  // year is ever stored.
+  const suggestNextDay = (monthDay: string): string => {
+    const m = /^(\d{1,2})-(\d{1,2})$/.exec(monthDay.trim());
+    if (!m) return monthDay;
+    const month = Number(m[1]);
+    const day = Number(m[2]);
+    if (month < 1 || month > 12) return monthDay;
+    const d = new Date(2024, month - 1, day);
+    d.setDate(d.getDate() + 1);
+    return `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+
+  const fetchYearSettings = async () => {
+    try {
+      const res = await fetch(apiUrl('/api/leave-year-settings'), { headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to load Year Settings');
+      setYearSettings(data);
+      setYearSettingsDraft({ close_month_day: data.close_month_day, start_month_day: data.start_month_day, auto_rollover: data.auto_rollover });
+    } catch {
+      // Non-fatal — the panel just falls back to its built-in defaults
+      // (Dec 31 close / Jan 1 start, auto-rollover off) until it can load.
+    }
+  };
+
+  // Changing the Close Date re-suggests the Start Date, but only when the
+  // Start Date still matches the OLD suggestion — an admin who already typed
+  // a deliberately different Start Date never gets it silently overwritten.
+  const handleCloseDateChange = (value: string) => {
+    setYearSettingsDraft((prev) => {
+      const prevSuggested = suggestNextDay(prev.close_month_day);
+      const nextStart = prev.start_month_day === prevSuggested || !prev.start_month_day ? suggestNextDay(value) : prev.start_month_day;
+      return { ...prev, close_month_day: value, start_month_day: nextStart };
+    });
+  };
+
+  const saveYearSettings = async () => {
+    setSavingYearSettings(true);
+    setYearSettingsError('');
+    setYearSettingsSuccess('');
+    try {
+      const res = await fetch(apiUrl('/api/leave-year-settings'), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(yearSettingsDraft)
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to save Year Settings');
+      setYearSettings(data);
+      setYearSettingsDraft({ close_month_day: data.close_month_day, start_month_day: data.start_month_day, auto_rollover: data.auto_rollover });
+      setYearSettingsSuccess('Year Settings saved.');
+    } catch (err: any) {
+      setYearSettingsError(err.message || 'Failed to save Year Settings');
+    } finally {
+      setSavingYearSettings(false);
+    }
+  };
+
+  // "Leave Balance Workflows" — General (everyone) plus one workflow per
+  // Designation (MD/GM/AGM/DGM/Manager, etc, free text matching the Employee
+  // Directory's Designation field), each holding its own per-category annual
+  // balance. Applying (by hand here, or automatically at Year Settings'
+  // Start Date when auto_rollover is on) sets every matching account's
+  // balance the same way "Set Balance in Bulk" above already does.
+  const [showWorkflowsPanel, setShowWorkflowsPanel] = useState(false);
+  const [workflows, setWorkflows] = useState<LeaveBalanceWorkflow[]>([]);
+  const [workflowDesignationOptions, setWorkflowDesignationOptions] = useState<string[]>([]);
+  const [workflowDrafts, setWorkflowDrafts] = useState<Record<number, Record<string, string>>>({});
+  const [workflowError, setWorkflowError] = useState('');
+  const [workflowSuccess, setWorkflowSuccess] = useState('');
+  const [savingWorkflowId, setSavingWorkflowId] = useState<number | null>(null);
+  const [applyingWorkflowId, setApplyingWorkflowId] = useState<number | 'all' | null>(null);
+  const [deletingWorkflowId, setDeletingWorkflowId] = useState<number | null>(null);
+  const [showAddWorkflow, setShowAddWorkflow] = useState(false);
+  const [newWorkflowName, setNewWorkflowName] = useState('');
+  const [newWorkflowDesignation, setNewWorkflowDesignation] = useState('');
+  const [addingWorkflow, setAddingWorkflow] = useState(false);
+
+  const DESIGNATION_QUICK_PICKS = ['MD', 'GM', 'AGM', 'DGM', 'Manager'];
+
+  const draftsForNewWorkflow = () => Object.fromEntries(bulkCategories.map((c) => [c.key, '']));
+
+  const fetchWorkflows = async () => {
+    try {
+      const res = await fetch(apiUrl('/api/leave-balance-workflows'), { headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to load Leave Balance Workflows');
+      const wfs: LeaveBalanceWorkflow[] = Array.isArray(data.workflows) ? data.workflows : [];
+      setWorkflows(wfs);
+      setWorkflowDesignationOptions(Array.isArray(data.designations) ? data.designations : []);
+      setWorkflowDrafts((prev) => {
+        const next = { ...prev };
+        for (const wf of wfs) {
+          const draft: Record<string, string> = { ...draftsForNewWorkflow(), ...next[wf.id] };
+          for (const it of wf.items) draft[it.category_key] = String(it.balance_days);
+          next[wf.id] = draft;
+        }
+        return next;
+      });
+    } catch {
+      // Non-fatal — the panel just shows nothing to edit until it can load.
+    }
+  };
+
+  const saveWorkflow = async (workflowId: number) => {
+    const draft = workflowDrafts[workflowId] || {};
+    const items: { category_key: string; balance_days: number }[] = [];
+    for (const cat of bulkCategories) {
+      const raw = (draft[cat.key] ?? '').trim();
+      if (raw === '') continue;
+      const num = Number(raw);
+      if (!Number.isFinite(num) || num < 0) {
+        setWorkflowSuccess('');
+        setWorkflowError(`"${cat.label}" must be a non-negative number.`);
+        return;
+      }
+      items.push({ category_key: cat.key, balance_days: num });
+    }
+    setSavingWorkflowId(workflowId);
+    setWorkflowError('');
+    setWorkflowSuccess('');
+    try {
+      const res = await fetch(apiUrl(`/api/leave-balance-workflows/${workflowId}`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ items })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to save this Workflow');
+      setWorkflows((prev) => prev.map((w) => (w.id === workflowId ? { ...w, items: data.items } : w)));
+      setWorkflowSuccess('Workflow saved.');
+    } catch (err: any) {
+      setWorkflowError(err.message || 'Failed to save this Workflow');
+    } finally {
+      setSavingWorkflowId(null);
+    }
+  };
+
+  const toggleWorkflowActive = async (wf: LeaveBalanceWorkflow) => {
+    setWorkflowError('');
+    try {
+      const res = await fetch(apiUrl(`/api/leave-balance-workflows/${wf.id}`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ is_active: !wf.is_active })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to update this Workflow');
+      setWorkflows((prev) => prev.map((w) => (w.id === wf.id ? { ...w, is_active: data.is_active } : w)));
+    } catch (err: any) {
+      setWorkflowError(err.message || 'Failed to update this Workflow');
+    }
+  };
+
+  const addWorkflow = async () => {
+    const name = newWorkflowName.trim();
+    const designation = newWorkflowDesignation.trim();
+    if (!name || !designation) {
+      setWorkflowSuccess('');
+      setWorkflowError('Workflow name and Designation are both required.');
+      return;
+    }
+    setAddingWorkflow(true);
+    setWorkflowError('');
+    setWorkflowSuccess('');
+    try {
+      const res = await fetch(apiUrl('/api/leave-balance-workflows'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ name, designation })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to create this Workflow');
+      const newWf: LeaveBalanceWorkflow = { id: data.id, name: data.name, scope_type: 'designation', designation: data.designation, is_active: true, items: [] };
+      setWorkflows((prev) => [...prev, newWf]);
+      setWorkflowDrafts((prev) => ({ ...prev, [data.id]: draftsForNewWorkflow() }));
+      setNewWorkflowName('');
+      setNewWorkflowDesignation('');
+      setShowAddWorkflow(false);
+    } catch (err: any) {
+      setWorkflowError(err.message || 'Failed to create this Workflow');
+    } finally {
+      setAddingWorkflow(false);
+    }
+  };
+
+  const deleteWorkflow = async (workflowId: number) => {
+    if (!window.confirm('Delete this Leave Balance Workflow? This cannot be undone.')) return;
+    setDeletingWorkflowId(workflowId);
+    setWorkflowError('');
+    try {
+      const res = await fetch(apiUrl(`/api/leave-balance-workflows/${workflowId}`), {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to delete this Workflow');
+      setWorkflows((prev) => prev.filter((w) => w.id !== workflowId));
+    } catch (err: any) {
+      setWorkflowError(err.message || 'Failed to delete this Workflow');
+    } finally {
+      setDeletingWorkflowId(null);
+    }
+  };
+
+  const applyWorkflow = async (workflowId: number | null) => {
+    setApplyingWorkflowId(workflowId ?? 'all');
+    setWorkflowError('');
+    setWorkflowSuccess('');
+    try {
+      const res = await fetch(apiUrl('/api/leave-balance-workflows/apply'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(workflowId ? { workflow_id: workflowId } : {})
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to apply');
+      setWorkflowSuccess(`Applied to ${data.updated_count} account${data.updated_count === 1 ? '' : 's'}.`);
+      await fetchBalances();
+    } catch (err: any) {
+      setWorkflowError(err.message || 'Failed to apply');
+    } finally {
+      setApplyingWorkflowId(null);
+    }
+  };
+
   // Custom Leave Categories — Leave Manager can define extra categories on
   // the fly (e.g. "Maternity Leave", "Earned Leave") right from the bulk
   // panel, beyond the fixed Casual/Sick/LWP set. Persisted via
@@ -263,6 +504,8 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
     if (canManageAll) {
       fetchCategories();
       fetchPolicies();
+      fetchYearSettings();
+      fetchWorkflows();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -883,6 +1126,329 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
                   {policySuccess && (
                     <div className="mt-3 flex items-center gap-2 text-xs px-3 py-2.5 rounded-xl bg-emerald-50 text-emerald-700">
                       <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> {policySuccess}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {canManageAll && (
+            <div className="border-b border-slate-200 bg-slate-50/60">
+              <button
+                type="button"
+                onClick={() => setShowYearSettingsPanel((v) => !v)}
+                className="w-full flex items-center justify-between gap-3 px-6 py-3 text-left hover:bg-slate-100/70 transition-colors"
+              >
+                <span className="flex items-center gap-2 text-xs font-semibold text-slate-700">
+                  <CalendarClock className="w-3.5 h-3.5 text-blue-600" /> Year Settings
+                </span>
+                {showYearSettingsPanel ? (
+                  <ChevronUp className="w-3.5 h-3.5 text-slate-400" />
+                ) : (
+                  <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                )}
+              </button>
+
+              {showYearSettingsPanel && (
+                <div className="px-6 pb-5">
+                  <p className="text-[11px] text-slate-500 mb-3 max-w-2xl">
+                    When the HR Leave Year closes and the next one starts. Start Date is suggested as the day right after
+                    Close Date, but can be changed. Tick "Start next year automatically" to have every active Leave
+                    Balance Workflow below applied on its own once the Start Date arrives each year — leave it unticked to
+                    trigger that by hand instead, from "Apply Now" in Leave Balance Workflows.
+                  </p>
+
+                  <div className="flex flex-wrap items-end gap-3">
+                    <div>
+                      <label className="block text-[10px] font-semibold text-slate-500 mb-1">Year Close Date</label>
+                      <input
+                        type="date"
+                        value={`2024-${yearSettingsDraft.close_month_day}`}
+                        onChange={(e) => {
+                          const parts = e.target.value.split('-');
+                          if (parts.length === 3) handleCloseDateChange(`${parts[1]}-${parts[2]}`);
+                        }}
+                        className="w-40 px-3 py-2 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-semibold text-slate-500 mb-1">Year Start Date (suggested)</label>
+                      <input
+                        type="date"
+                        value={`2024-${yearSettingsDraft.start_month_day}`}
+                        onChange={(e) => {
+                          const parts = e.target.value.split('-');
+                          if (parts.length === 3) setYearSettingsDraft((prev) => ({ ...prev, start_month_day: `${parts[1]}-${parts[2]}` }));
+                        }}
+                        className="w-40 px-3 py-2 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+
+                    <label className="flex items-center gap-2 text-xs text-slate-700 mb-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={yearSettingsDraft.auto_rollover}
+                        onChange={(e) => setYearSettingsDraft((prev) => ({ ...prev, auto_rollover: e.target.checked }))}
+                        className="w-3.5 h-3.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      Start next year automatically
+                    </label>
+
+                    <button
+                      type="button"
+                      onClick={saveYearSettings}
+                      disabled={savingYearSettings}
+                      className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl transition-colors disabled:opacity-50 mb-0.5"
+                    >
+                      {savingYearSettings ? <Spinner size={14} /> : <Save className="w-3.5 h-3.5" />}
+                      {savingYearSettings ? 'Saving…' : 'Save'}
+                    </button>
+                  </div>
+
+                  {yearSettings?.last_rollover_year && (
+                    <p className="text-[11px] text-slate-400 mt-2">
+                      Leave Year last auto-started for {yearSettings.last_rollover_year}.
+                    </p>
+                  )}
+
+                  {yearSettingsError && (
+                    <div className="mt-3 flex items-center gap-2 text-xs px-3 py-2.5 rounded-xl bg-rose-50 text-rose-700">
+                      <AlertTriangle className="w-3.5 h-3.5 shrink-0" /> {yearSettingsError}
+                    </div>
+                  )}
+                  {yearSettingsSuccess && (
+                    <div className="mt-3 flex items-center gap-2 text-xs px-3 py-2.5 rounded-xl bg-emerald-50 text-emerald-700">
+                      <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> {yearSettingsSuccess}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {canManageAll && (
+            <div className="border-b border-slate-200 bg-slate-50/60">
+              <button
+                type="button"
+                onClick={() => setShowWorkflowsPanel((v) => !v)}
+                className="w-full flex items-center justify-between gap-3 px-6 py-3 text-left hover:bg-slate-100/70 transition-colors"
+              >
+                <span className="flex items-center gap-2 text-xs font-semibold text-slate-700">
+                  <GitBranch className="w-3.5 h-3.5 text-blue-600" /> Leave Balance Workflows
+                </span>
+                {showWorkflowsPanel ? (
+                  <ChevronUp className="w-3.5 h-3.5 text-slate-400" />
+                ) : (
+                  <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                )}
+              </button>
+
+              {showWorkflowsPanel && (
+                <div className="px-6 pb-5">
+                  <p className="text-[11px] text-slate-500 mb-3 max-w-2xl">
+                    Dynamic, Designation-wise annual leave balances. "General" applies to every account; a Designation
+                    workflow (e.g. Manager, GM) overrides General's balance for just its own categories, for just accounts
+                    with that Designation (from the Employee Directory). Apply Now sets balances right away, same as Set
+                    Balance in Bulk above.
+                  </p>
+
+                  <div className="space-y-3">
+                    {workflows.map((wf) => {
+                      const draft = workflowDrafts[wf.id] || {};
+                      const isSaving = savingWorkflowId === wf.id;
+                      const isApplying = applyingWorkflowId === wf.id;
+                      const isDeleting = deletingWorkflowId === wf.id;
+                      return (
+                        <div
+                          key={wf.id}
+                          className={`rounded-xl border p-3.5 ${wf.is_active ? 'border-slate-200 bg-white' : 'border-slate-200 bg-slate-50/60 opacity-70'}`}
+                        >
+                          <div className="flex items-center justify-between gap-2 flex-wrap mb-3">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-bold text-slate-800">{wf.name}</span>
+                              {wf.scope_type === 'designation' && (
+                                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                  {wf.designation}
+                                </span>
+                              )}
+                              {wf.scope_type === 'general' && (
+                                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
+                                  Everyone
+                                </span>
+                              )}
+                              {!wf.is_active && (
+                                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+                                  Inactive
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => toggleWorkflowActive(wf)}
+                                title={wf.is_active ? 'Deactivate' : 'Activate'}
+                                className={`flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1.5 rounded-lg border transition-colors ${
+                                  wf.is_active ? 'text-slate-500 border-slate-200 hover:bg-slate-100' : 'text-emerald-700 border-emerald-200 hover:bg-emerald-50'
+                                }`}
+                              >
+                                <Power className="w-3 h-3" /> {wf.is_active ? 'Deactivate' : 'Activate'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => saveWorkflow(wf.id)}
+                                disabled={isSaving}
+                                className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50 transition-colors"
+                              >
+                                {isSaving ? <Spinner size={12} className="text-white" /> : <Save className="w-3 h-3" />}
+                                Save
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => applyWorkflow(wf.id)}
+                                disabled={isApplying || !wf.is_active}
+                                title={!wf.is_active ? 'Activate this workflow first' : 'Apply this workflow now'}
+                                className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50 transition-colors"
+                              >
+                                {isApplying ? <Spinner size={12} className="text-white" /> : <PlayCircle className="w-3 h-3" />}
+                                Apply Now
+                              </button>
+                              {wf.scope_type === 'designation' && (
+                                <button
+                                  type="button"
+                                  onClick={() => deleteWorkflow(wf.id)}
+                                  disabled={isDeleting}
+                                  title="Delete this Workflow"
+                                  className="flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1.5 rounded-lg text-rose-600 border border-rose-200 hover:bg-rose-50 disabled:opacity-50 transition-colors"
+                                >
+                                  {isDeleting ? <Spinner size={12} /> : <Trash2 className="w-3 h-3" />}
+                                </button>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="flex flex-wrap gap-3">
+                            {bulkCategories.map((cat) => (
+                              <div key={cat.key}>
+                                <label className="block text-[10px] font-semibold text-slate-500 mb-1">{cat.label}</label>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  step={0.5}
+                                  value={draft[cat.key] ?? ''}
+                                  onChange={(e) =>
+                                    setWorkflowDrafts((prev) => ({ ...prev, [wf.id]: { ...prev[wf.id], [cat.key]: e.target.value } }))
+                                  }
+                                  placeholder="0"
+                                  className="w-24 px-3 py-2 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                />
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {showAddWorkflow ? (
+                    <div className="mt-3 rounded-xl border border-dashed border-blue-300 p-3.5">
+                      <div className="flex flex-wrap items-end gap-2">
+                        <div>
+                          <label className="block text-[10px] font-semibold text-slate-500 mb-1">Workflow name</label>
+                          <input
+                            type="text"
+                            autoFocus
+                            disabled={addingWorkflow}
+                            value={newWorkflowName}
+                            onChange={(e) => setNewWorkflowName(e.target.value)}
+                            placeholder="e.g. Manager Leave Policy"
+                            className="w-48 px-3 py-2 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-semibold text-slate-500 mb-1">Designation</label>
+                          <input
+                            type="text"
+                            list="leave-workflow-designation-options"
+                            disabled={addingWorkflow}
+                            value={newWorkflowDesignation}
+                            onChange={(e) => setNewWorkflowDesignation(e.target.value)}
+                            placeholder="e.g. Manager"
+                            className="w-40 px-3 py-2 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                          />
+                          <datalist id="leave-workflow-designation-options">
+                            {workflowDesignationOptions.map((d) => (
+                              <option key={d} value={d} />
+                            ))}
+                          </datalist>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={addWorkflow}
+                          disabled={addingWorkflow}
+                          className="flex items-center gap-1 px-3 py-2 bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold rounded-xl transition-colors disabled:opacity-50"
+                        >
+                          {addingWorkflow && <Spinner size={12} />}
+                          {addingWorkflow ? 'Adding…' : 'Add'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowAddWorkflow(false);
+                            setNewWorkflowName('');
+                            setNewWorkflowDesignation('');
+                          }}
+                          className="px-2.5 py-2 text-slate-400 hover:text-slate-600 text-xs"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5 mt-2">
+                        {DESIGNATION_QUICK_PICKS.map((d) => (
+                          <button
+                            key={d}
+                            type="button"
+                            onClick={() => {
+                              setNewWorkflowDesignation(d);
+                              if (!newWorkflowName.trim()) setNewWorkflowName(`${d} Leave Policy`);
+                            }}
+                            className="text-[10px] font-semibold px-2 py-1 rounded-full border border-slate-200 text-slate-600 hover:border-blue-300 hover:text-blue-600 transition-colors"
+                          >
+                            {d}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setShowAddWorkflow(true)}
+                      className="mt-3 flex items-center gap-1 px-3 py-2 text-xs font-semibold text-blue-600 border border-dashed border-blue-300 rounded-xl hover:bg-blue-50 transition-colors"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> Add Designation Workflow
+                    </button>
+                  )}
+
+                  <div className="mt-3">
+                    <button
+                      type="button"
+                      onClick={() => applyWorkflow(null)}
+                      disabled={applyingWorkflowId === 'all'}
+                      className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-xl transition-colors disabled:opacity-50"
+                    >
+                      {applyingWorkflowId === 'all' ? <Spinner size={14} /> : <PlayCircle className="w-3.5 h-3.5" />}
+                      {applyingWorkflowId === 'all' ? 'Applying…' : 'Apply All Active Workflows Now'}
+                    </button>
+                  </div>
+
+                  {workflowError && (
+                    <div className="mt-3 flex items-center gap-2 text-xs px-3 py-2.5 rounded-xl bg-rose-50 text-rose-700">
+                      <AlertTriangle className="w-3.5 h-3.5 shrink-0" /> {workflowError}
+                    </div>
+                  )}
+                  {workflowSuccess && (
+                    <div className="mt-3 flex items-center gap-2 text-xs px-3 py-2.5 rounded-xl bg-emerald-50 text-emerald-700">
+                      <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> {workflowSuccess}
                     </div>
                   )}
                 </div>

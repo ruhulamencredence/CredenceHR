@@ -354,7 +354,8 @@ async function ensureSchemaMigrations() {
       `INSERT IGNORE INTO leave_category_policies (category_key, min_advance_notice_days, reliever_required, max_consecutive_days, require_paid_leave_exhausted) VALUES
        ('casual', 0, 1, NULL, 0),
        ('sick', 0, 1, NULL, 0),
-       ('without_pay', 0, 1, NULL, 0)`
+       ('without_pay', 0, 1, NULL, 0),
+       ('custom_earn_leave', 0, 0, NULL, 0)`
     );
   } catch (err: any) {
     console.warn("⚠️ Could not ensure leave_category_policies table exists: " + err.message);
@@ -1675,6 +1676,22 @@ async function ensureSchemaMigrations() {
   } catch (err: any) {
     console.warn("⚠️ Could not ensure leave_categories table exists: " + err.message);
   }
+  // Earn Leave (accrual leave) didn't exist as a category at all before, so
+  // no account could ever apply for it and Leave Policies had nothing to
+  // configure for it. Seeded once as an ordinary Custom Leave Category (same
+  // row shape "Add Category" in the bulk panel would create) so it gets the
+  // whole existing pipeline — Set Balance in Bulk, Leave Policies, Leave
+  // Application submission — for free, with no separate code path. Balance
+  // itself is NOT auto-accrued here; a Leave Manager sets it via Set Balance
+  // in Bulk or a Leave Balance Workflow (see leave_balance_workflows below)
+  // same as any other category.
+  try {
+    await dbPool.query(
+      `INSERT IGNORE INTO leave_categories (category_key, label, created_by) VALUES ('custom_earn_leave', 'Earn Leave', NULL)`
+    );
+  } catch (err: any) {
+    console.warn("⚠️ Could not seed the Earn Leave category: " + err.message);
+  }
   // Per-account balance for each Custom Leave Category above — the dynamic
   // equivalent of leave_balances' fixed three columns.
   try {
@@ -1692,6 +1709,84 @@ async function ensureSchemaMigrations() {
     `);
   } catch (err: any) {
     console.warn("⚠️ Could not ensure leave_category_balances table exists: " + err.message);
+  }
+  // Leave Manage -> "Year Settings" — a single row (id=1) holding the
+  // recurring HR Leave Year close/start dates (MM-DD, no year component —
+  // the same close/start date applies every year) and whether the year
+  // should roll over automatically. start_month_day is normally just the day
+  // after close_month_day (suggested client-side), but stored separately
+  // since an admin can still override it. See checkAndRunLeaveYearRollover in
+  // LeaveRoutes.ts for what "auto_rollover" actually does once the start
+  // date arrives — applies every active Leave Balance Workflow below to
+  // every account, same as clicking "Apply Now" by hand.
+  try {
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS leave_year_settings (
+        id INT PRIMARY KEY DEFAULT 1,
+        close_month_day VARCHAR(5) NOT NULL DEFAULT '12-31',
+        start_month_day VARCHAR(5) NOT NULL DEFAULT '01-01',
+        auto_rollover TINYINT(1) NOT NULL DEFAULT 0,
+        last_rollover_year INT NULL,
+        updated_by INT NULL,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
+      )
+    `);
+    await dbPool.query(
+      `INSERT IGNORE INTO leave_year_settings (id, close_month_day, start_month_day, auto_rollover) VALUES (1, '12-31', '01-01', 0)`
+    );
+  } catch (err: any) {
+    console.warn("⚠️ Could not ensure leave_year_settings table exists: " + err.message);
+  }
+  // Leave Manage -> "Leave Balance Workflows" — a named set of per-category
+  // annual balances, applied to accounts either Globally ("General", scope_type
+  // 'general', exactly one such row — seeded below, id=1, can never be
+  // deleted) or to every account whose Employee Directory row has a matching
+  // Designation (scope_type 'designation', e.g. "Manager", "GM"). Applying
+  // (POST /api/leave-balance-workflows/apply, or the year-end auto-rollover
+  // above) runs General first, then each active Designation workflow, so a
+  // Designation-specific balance for a category overrides the General one
+  // for just that category, for just accounts with that Designation — any
+  // category the Designation workflow doesn't mention keeps its General
+  // value. See leave_balance_workflow_items below for the per-category
+  // amounts themselves.
+  try {
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS leave_balance_workflows (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        scope_type ENUM('general', 'designation') NOT NULL DEFAULT 'designation',
+        designation VARCHAR(255) NULL,
+        is_active TINYINT(1) NOT NULL DEFAULT 1,
+        created_by INT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+      )
+    `);
+    await dbPool.query(
+      `INSERT IGNORE INTO leave_balance_workflows (id, name, scope_type, designation, is_active) VALUES (1, 'General', 'general', NULL, 1)`
+    );
+  } catch (err: any) {
+    console.warn("⚠️ Could not ensure leave_balance_workflows table exists: " + err.message);
+  }
+  // Per-Leave-Category balance amount within a Leave Balance Workflow above.
+  // category_key matches "Set Balance in Bulk"'s own key naming — the 3 fixed
+  // 'casual_leave'/'sick_leave'/'leave_without_pay' balance-column names, or a
+  // custom category's leave_categories.category_key (e.g. 'custom_earn_leave').
+  try {
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS leave_balance_workflow_items (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        workflow_id INT NOT NULL,
+        category_key VARCHAR(100) NOT NULL,
+        balance_days DECIMAL(5, 1) NOT NULL DEFAULT 0,
+        UNIQUE KEY uniq_workflow_category (workflow_id, category_key),
+        FOREIGN KEY (workflow_id) REFERENCES leave_balance_workflows(id) ON DELETE CASCADE
+      )
+    `);
+  } catch (err: any) {
+    console.warn("⚠️ Could not ensure leave_balance_workflow_items table exists: " + err.message);
   }
   // Self Service -> Leave Application — one row per submitted application.
   // Submitting one immediately deducts day_count from the matching
@@ -1957,7 +2052,7 @@ const PERMISSION_LAYER_MODULES = ["departments", "projects", "approvals", "users
 // "module" (no admin_module_permissions grant) and its operations don't map
 // onto the generic Read/Edit-Add/Entry-Upload/Delete-Trash/Permanent-Delete
 // set — see requireLeaveManagerLayer() below.
-const LEAVE_MANAGE_LAYER_KEYS = ["edit_balance", "bulk_set_balance", "add_category", "edit_policy"] as const;
+const LEAVE_MANAGE_LAYER_KEYS = ["edit_balance", "bulk_set_balance", "add_category", "edit_policy", "year_settings", "workflow_manage"] as const;
 
 // Every (module_key -> its allowed layer keys) the Module Access Layers PUT
 // endpoint (UserManagement.ts) accepts — a single map instead of one flat

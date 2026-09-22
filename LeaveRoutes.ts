@@ -37,10 +37,11 @@ interface LeaveRouteDeps {
   getLeaveApplicationDeptScope: (userId: number) => Promise<string[] | null>;
   requireLeaveManager: (req: any, res: any, next: any) => Promise<any>;
   // Finer-grained gate layered on top of requireLeaveManager above — one of
-  // "edit_balance"/"bulk_set_balance"/"add_category"/"edit_policy" (see
-  // LEAVE_MANAGE_LAYER_KEYS in server.ts). Applied to each of Leave Manage's
-  // 4 write routes below, one layer per route.
-  requireLeaveManagerLayer: (layer: "edit_balance" | "bulk_set_balance" | "add_category" | "edit_policy") => any;
+  // "edit_balance"/"bulk_set_balance"/"add_category"/"edit_policy"/
+  // "year_settings"/"workflow_manage" (see LEAVE_MANAGE_LAYER_KEYS in
+  // server.ts). Applied to each of Leave Manage's write routes below, one
+  // layer per route.
+  requireLeaveManagerLayer: (layer: "edit_balance" | "bulk_set_balance" | "add_category" | "edit_policy" | "year_settings" | "workflow_manage") => any;
   hasLeaveManageAccess: (userId: number, role: string) => Promise<boolean>;
   getCurrentStepApprovers: (request: any) => Promise<{ user_id: number; user_name: string | null }[]>;
   createAlert: (...args: any[]) => Promise<any>;
@@ -179,6 +180,182 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
       [key, fallbackLabel, createdBy]
     );
     return Number(result.insertId);
+  }
+
+  // Applies a set of fixed/custom category balances to many accounts at
+  // once, docking whatever each account has already used this calendar year
+  // off the new total (same "new total - already used, floored at 0" rule
+  // getUsedThisYear's doc comment explains) — the exact inner loop PUT
+  // /api/leave-balances/bulk below used to have inline, now shared with the
+  // Leave Balance Workflow "Apply Now"/auto-rollover path
+  // (applyAllActiveWorkflows below) so both ways of bulk-setting balances
+  // can never drift out of sync.
+  async function applyBalancesToTargets(
+    targetIds: number[],
+    fixedValues: Partial<Record<"casual_leave" | "sick_leave" | "leave_without_pay", number>>,
+    customValues: Record<string, number>,
+    actingUserId: number
+  ): Promise<void> {
+    const categoryIdByKey = new Map<string, number>();
+    for (const key of Object.keys(customValues)) {
+      categoryIdByKey.set(key, await findOrCreateCategoryByKey(key, actingUserId));
+    }
+
+    for (const userId of targetIds) {
+      const used = await getUsedThisYear(userId);
+
+      if (Object.keys(fixedValues).length > 0) {
+        const existingRows: any = await queryDB("SELECT * FROM leave_balances WHERE user_id = ?", [userId]);
+        const existing = existingRows[0];
+        const nextCasual =
+          fixedValues.casual_leave !== undefined ? Math.max(0, fixedValues.casual_leave - used.casual) : Number(existing?.casual_leave || 0);
+        const nextSick =
+          fixedValues.sick_leave !== undefined ? Math.max(0, fixedValues.sick_leave - used.sick) : Number(existing?.sick_leave || 0);
+        const nextLwp =
+          fixedValues.leave_without_pay !== undefined
+            ? Math.max(0, fixedValues.leave_without_pay - used.without_pay)
+            : Number(existing?.leave_without_pay || 0);
+
+        if (existing) {
+          await queryDB(
+            "UPDATE leave_balances SET casual_leave = ?, sick_leave = ?, leave_without_pay = ? WHERE user_id = ?",
+            [nextCasual, nextSick, nextLwp, userId]
+          );
+        } else {
+          await queryDB(
+            "INSERT INTO leave_balances (user_id, casual_leave, sick_leave, leave_without_pay) VALUES (?, ?, ?, ?)",
+            [userId, nextCasual, nextSick, nextLwp]
+          );
+        }
+      }
+
+      for (const key of Object.keys(customValues)) {
+        const nextBalance = Math.max(0, customValues[key] - (used.custom[key] || 0));
+        await queryDB(
+          "INSERT INTO leave_category_balances (user_id, category_id, balance) VALUES (?, ?, ?) " +
+            "ON DUPLICATE KEY UPDATE balance = VALUES(balance)",
+          [userId, categoryIdByKey.get(key), nextBalance]
+        );
+      }
+    }
+  }
+
+  // Leave Manage -> "Leave Balance Workflows" — resolves every active
+  // workflow's per-category balances onto the accounts it targets (General
+  // -> every account, a Designation workflow -> every account whose Employee
+  // Directory row has that Designation) and applies them via
+  // applyBalancesToTargets above. General is always applied first so a
+  // Designation workflow's own values for the categories it defines
+  // naturally win (applied second, same accounts). Used by both the manual
+  // "Apply Now" button (POST /api/leave-balance-workflows/apply) and the
+  // year-end auto-rollover (checkAndRunLeaveYearRollover below). Returns how
+  // many (workflow, account) balance writes actually happened, so callers can
+  // tell "nothing to apply" apart from a real 0-account workflow.
+  async function applyAllActiveWorkflows(actingUserId: number, onlyWorkflowId?: number): Promise<number> {
+    const workflows: any = onlyWorkflowId
+      ? await queryDB("SELECT * FROM leave_balance_workflows WHERE id = ? AND is_active = 1", [onlyWorkflowId])
+      : await queryDB("SELECT * FROM leave_balance_workflows WHERE is_active = 1");
+    if (workflows.length === 0) return 0;
+    workflows.sort((a: any, b: any) => (a.scope_type === "general" ? 0 : 1) - (b.scope_type === "general" ? 0 : 1));
+
+    const [users, employees, items] = await Promise.all([
+      queryDB("SELECT id FROM users WHERE role IN ('admin', 'user')"),
+      queryDB("SELECT * FROM all_employees WHERE user_id IS NOT NULL"),
+      queryDB("SELECT * FROM leave_balance_workflow_items")
+    ]);
+    const designationByUserId = new Map<number, string>();
+    for (const e of employees) {
+      if (e.designation) designationByUserId.set(Number(e.user_id), String(e.designation).trim().toLowerCase());
+    }
+    const itemsByWorkflow = new Map<number, any[]>();
+    for (const it of items) {
+      const wid = Number(it.workflow_id);
+      if (!itemsByWorkflow.has(wid)) itemsByWorkflow.set(wid, []);
+      itemsByWorkflow.get(wid)!.push(it);
+    }
+    const allUserIds = users.map((u: any) => Number(u.id));
+
+    let appliedCount = 0;
+    for (const wf of workflows) {
+      const targetIds =
+        wf.scope_type === "general"
+          ? allUserIds
+          : allUserIds.filter((id: number) => designationByUserId.get(id) === String(wf.designation || "").trim().toLowerCase());
+      if (targetIds.length === 0) continue;
+
+      const wfItems = itemsByWorkflow.get(Number(wf.id)) || [];
+      const fixedValues: Partial<Record<"casual_leave" | "sick_leave" | "leave_without_pay", number>> = {};
+      const customValues: Record<string, number> = {};
+      for (const it of wfItems) {
+        const val = Number(it.balance_days) || 0;
+        if (it.category_key === "casual_leave" || it.category_key === "sick_leave" || it.category_key === "leave_without_pay") {
+          fixedValues[it.category_key as "casual_leave" | "sick_leave" | "leave_without_pay"] = val;
+        } else {
+          customValues[it.category_key] = val;
+        }
+      }
+      if (Object.keys(fixedValues).length === 0 && Object.keys(customValues).length === 0) continue;
+
+      await applyBalancesToTargets(targetIds, fixedValues, customValues, actingUserId);
+      appliedCount += targetIds.length;
+    }
+    return appliedCount;
+  }
+
+  // Leave Manage -> "Year Settings" — MM-DD validation shared by GET/PUT
+  // /api/leave-year-settings below. 2024 is just a leap-year canvas so Feb 29
+  // validates/adds correctly; no actual year is stored.
+  function normalizeMonthDay(value: any): string | null {
+    const s = typeof value === "string" ? value.trim() : "";
+    const m = /^(\d{1,2})-(\d{1,2})$/.exec(s);
+    if (!m) return null;
+    const month = Number(m[1]);
+    const day = Number(m[2]);
+    if (month < 1 || month > 12) return null;
+    const daysInMonth = new Date(2024, month, 0).getDate();
+    if (day < 1 || day > daysInMonth) return null;
+    return `${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  }
+
+  function dayAfterMonthDay(monthDay: string): string {
+    const [month, day] = monthDay.split("-").map(Number);
+    const d = new Date(2024, month - 1, day);
+    d.setDate(d.getDate() + 1);
+    return `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  }
+
+  // Runs once at startup and then every 6 hours (see setInterval near the
+  // bottom of this function) — the closest thing to a real year-end cron job
+  // this app has. A no-op unless Year Settings' auto_rollover is on AND
+  // today has reached this year's start_month_day AND this calendar year
+  // hasn't already been rolled over (last_rollover_year), so it's safe to
+  // call this often; it only ever actually applies workflows once per year.
+  async function checkAndRunLeaveYearRollover(): Promise<void> {
+    try {
+      const rows: any = await queryDB("SELECT * FROM leave_year_settings WHERE id = 1");
+      const settings = rows[0];
+      if (!settings || !Number(settings.auto_rollover)) return;
+
+      const startMonthDay = normalizeMonthDay(settings.start_month_day) || "01-01";
+      const [sm, sd] = startMonthDay.split("-").map(Number);
+      const now = new Date();
+      const currentYear = now.getFullYear();
+      const startThisYear = new Date(currentYear, sm - 1, sd);
+      if (now < startThisYear) return;
+
+      const lastRolloverYear = settings.last_rollover_year ? Number(settings.last_rollover_year) : null;
+      if (lastRolloverYear === currentYear) return;
+
+      const superadmins: any = await queryDB("SELECT id FROM users WHERE role = 'superadmin' LIMIT 1");
+      const actingUserId = superadmins[0] ? Number(superadmins[0].id) : settings.updated_by ? Number(settings.updated_by) : null;
+      if (!actingUserId) return;
+
+      await applyAllActiveWorkflows(actingUserId);
+      await queryDB("UPDATE leave_year_settings SET last_rollover_year = ? WHERE id = 1", [currentYear]);
+      console.log(`✅ Leave Year auto-rollover applied for ${currentYear} (start date ${startMonthDay}).`);
+    } catch (err: any) {
+      console.warn("⚠️ Leave Year auto-rollover check failed: " + err.message);
+    }
   }
 
   // Self Service -> Leave Application / Leave Summary card (own balance only).
@@ -493,68 +670,7 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
         return res.status(400).json({ error: "No matching accounts found for that selection." });
       }
 
-      // Resolve every custom category key to its id ONCE up front (creating
-      // it if it's somehow missing) rather than once per account.
-      const categoryIdByKey = new Map<string, number>();
-      for (const key of Object.keys(customValues)) {
-        categoryIdByKey.set(key, await findOrCreateCategoryByKey(key, req.user.id));
-      }
-
-      for (const userId of targetIds) {
-        // Already-spent-this-year comes off the new total per account (both
-        // the 3 fixed fields below and any custom category), so someone who
-        // already took leave this year doesn't get handed the full fresh
-        // quota on top of what they've used. Fetched once per account,
-        // shared by both sections below.
-        const used = Object.keys(fixedValues).length > 0 || Object.keys(customValues).length > 0
-          ? await getUsedThisYear(userId)
-          : null;
-
-        if (Object.keys(fixedValues).length > 0) {
-          // Fields NOT present in fixedValues keep the account's existing
-          // stored value untouched.
-          const existingRows: any = await queryDB("SELECT * FROM leave_balances WHERE user_id = ?", [userId]);
-          const existing = existingRows[0];
-          const nextCasual =
-            fixedValues.casual_leave !== undefined
-              ? Math.max(0, fixedValues.casual_leave - used!.casual)
-              : Number(existing?.casual_leave || 0);
-          const nextSick =
-            fixedValues.sick_leave !== undefined
-              ? Math.max(0, fixedValues.sick_leave - used!.sick)
-              : Number(existing?.sick_leave || 0);
-          const nextLwp =
-            fixedValues.leave_without_pay !== undefined
-              ? Math.max(0, fixedValues.leave_without_pay - used!.without_pay)
-              : Number(existing?.leave_without_pay || 0);
-
-          if (existing) {
-            await queryDB(
-              "UPDATE leave_balances SET casual_leave = ?, sick_leave = ?, leave_without_pay = ? WHERE user_id = ?",
-              [nextCasual, nextSick, nextLwp, userId]
-            );
-          } else {
-            await queryDB(
-              "INSERT INTO leave_balances (user_id, casual_leave, sick_leave, leave_without_pay) VALUES (?, ?, ?, ?)",
-              [userId, nextCasual, nextSick, nextLwp]
-            );
-          }
-        }
-
-        // Same already-spent-this-year adjustment as the 3 fixed fields above
-        // — a custom category can now actually be applied against (Leave
-        // Type dropdown), so Set Balance in Bulk has to dock what's already
-        // been taken this year the same way, or re-running it would hand
-        // back the full fresh quota on top of leave already used.
-        for (const key of Object.keys(customValues)) {
-          const nextBalance = Math.max(0, customValues[key] - (used!.custom[key] || 0));
-          await queryDB(
-            "INSERT INTO leave_category_balances (user_id, category_id, balance) VALUES (?, ?, ?) " +
-              "ON DUPLICATE KEY UPDATE balance = VALUES(balance)",
-            [userId, categoryIdByKey.get(key), nextBalance]
-          );
-        }
-      }
+      await applyBalancesToTargets(targetIds, fixedValues, customValues, req.user.id);
 
       res.json({
         success: true,
@@ -1172,4 +1288,243 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
       res.status(500).json({ error: err.message });
     }
   });
+
+  // Leave Manage -> "Year Settings". GET is Leave-Manager-only (unlike
+  // leave-categories/leave-policies above, nothing outside Leave Manage
+  // itself needs this).
+  app.get("/api/leave-year-settings", authenticateToken, requireLeaveManager, async (req: any, res) => {
+    try {
+      const rows: any = await queryDB("SELECT * FROM leave_year_settings WHERE id = 1");
+      const r = rows[0];
+      res.json({
+        close_month_day: r?.close_month_day || "12-31",
+        start_month_day: r?.start_month_day || "01-01",
+        auto_rollover: !!Number(r?.auto_rollover || 0),
+        last_rollover_year: r?.last_rollover_year ?? null
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // PUT: close_month_day is required; start_month_day is optional — if
+  // omitted, it's auto-suggested as the very next day after close_month_day
+  // (the same suggestion the frontend already shows before saving, computed
+  // again here so a client that skips it still gets a sane value).
+  app.put("/api/leave-year-settings", authenticateToken, requireLeaveManager, requireLeaveManagerLayer("year_settings"), async (req: any, res) => {
+    try {
+      const body = req.body || {};
+      const closeMonthDay = normalizeMonthDay(body.close_month_day);
+      if (!closeMonthDay) return res.status(400).json({ error: "Year Close Date must be a valid date (MM-DD)." });
+      const startMonthDay =
+        body.start_month_day !== undefined && body.start_month_day !== null && String(body.start_month_day).trim() !== ""
+          ? normalizeMonthDay(body.start_month_day)
+          : dayAfterMonthDay(closeMonthDay);
+      if (!startMonthDay) return res.status(400).json({ error: "Year Start Date must be a valid date (MM-DD)." });
+      const autoRollover = !!body.auto_rollover;
+
+      await queryDB(
+        `INSERT INTO leave_year_settings (id, close_month_day, start_month_day, auto_rollover, updated_by) VALUES (1, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE close_month_day = VALUES(close_month_day), start_month_day = VALUES(start_month_day),
+           auto_rollover = VALUES(auto_rollover), updated_by = VALUES(updated_by)`,
+        [closeMonthDay, startMonthDay, autoRollover, req.user.id]
+      );
+
+      const rows: any = await queryDB("SELECT * FROM leave_year_settings WHERE id = 1");
+      const r = rows[0];
+      res.json({
+        close_month_day: r.close_month_day,
+        start_month_day: r.start_month_day,
+        auto_rollover: !!Number(r.auto_rollover),
+        last_rollover_year: r.last_rollover_year ?? null
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Leave Manage -> "Leave Balance Workflows". GET returns every workflow
+  // (General first) with its per-category items already resolved to labels,
+  // plus the distinct Designations found in the Employee Directory (for the
+  // "new Designation workflow" picker) — Leave-Manager-only, same reasoning
+  // as Year Settings above.
+  app.get("/api/leave-balance-workflows", authenticateToken, requireLeaveManager, async (req: any, res) => {
+    try {
+      const [workflows, items, customCategories, employees] = await Promise.all([
+        queryDB("SELECT * FROM leave_balance_workflows"),
+        queryDB("SELECT * FROM leave_balance_workflow_items"),
+        queryDB("SELECT id, category_key, label FROM leave_categories"),
+        queryDB("SELECT DISTINCT designation FROM all_employees WHERE designation IS NOT NULL AND designation <> ''")
+      ]);
+      const labelByKey = new Map<string, string>([
+        ["casual_leave", "Casual Leave"],
+        ["sick_leave", "Sick Leave"],
+        ["leave_without_pay", "Leave without Pay"]
+      ]);
+      for (const c of customCategories) labelByKey.set(c.category_key, c.label);
+
+      const sorted = [...workflows].sort((a: any, b: any) => {
+        if (a.scope_type === "general" && b.scope_type !== "general") return -1;
+        if (a.scope_type !== "general" && b.scope_type === "general") return 1;
+        return String(a.name || "").localeCompare(String(b.name || ""));
+      });
+
+      res.json({
+        workflows: sorted.map((wf: any) => ({
+          id: Number(wf.id),
+          name: wf.name,
+          scope_type: wf.scope_type,
+          designation: wf.designation || null,
+          is_active: !!Number(wf.is_active),
+          items: items
+            .filter((it: any) => Number(it.workflow_id) === Number(wf.id))
+            .map((it: any) => ({
+              category_key: it.category_key,
+              label: labelByKey.get(it.category_key) || it.category_key,
+              balance_days: Number(it.balance_days)
+            }))
+        })),
+        designations: (employees as any[]).map((e: any) => String(e.designation)).sort((a: string, b: string) => a.localeCompare(b))
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST: create a new Designation-scoped workflow shell (General already
+  // exists — seeded once at startup, id=1, never created here). Items are
+  // added afterwards via PUT below, same "create the shell, then edit it"
+  // flow leave-categories/leave-policies already use.
+  app.post("/api/leave-balance-workflows", authenticateToken, requireLeaveManager, requireLeaveManagerLayer("workflow_manage"), async (req: any, res) => {
+    try {
+      const name = typeof req.body?.name === "string" ? req.body.name.trim().slice(0, 100) : "";
+      const designation = typeof req.body?.designation === "string" ? req.body.designation.trim().slice(0, 255) : "";
+      if (!name) return res.status(400).json({ error: "Workflow name is required." });
+      if (!designation) return res.status(400).json({ error: "Designation is required for a new workflow." });
+
+      const existing: any = await queryDB(
+        "SELECT id FROM leave_balance_workflows WHERE scope_type = 'designation' AND LOWER(designation) = LOWER(?)",
+        [designation]
+      );
+      if (existing.length > 0) {
+        return res.status(400).json({ error: `A workflow for "${designation}" already exists.` });
+      }
+
+      const result: any = await queryDB(
+        "INSERT INTO leave_balance_workflows (name, scope_type, designation, is_active, created_by) VALUES (?, 'designation', ?, 1, ?)",
+        [name, designation, req.user.id]
+      );
+      res.json({ id: Number(result.insertId), name, scope_type: "designation", designation, is_active: true, items: [] });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // PUT: rename/toggle a workflow and/or replace its items in one call.
+  // General (id=1, scope_type 'general') keeps its name/designation locked —
+  // only its items and is_active can change. items, when present, fully
+  // REPLACES this workflow's per-category balances (delete-then-insert,
+  // simpler and safer than trying to diff against what's already there).
+  app.put("/api/leave-balance-workflows/:id", authenticateToken, requireLeaveManager, requireLeaveManagerLayer("workflow_manage"), async (req: any, res) => {
+    try {
+      const id = Number(req.params.id);
+      const rows: any = await queryDB("SELECT * FROM leave_balance_workflows WHERE id = ?", [id]);
+      const workflow = rows[0];
+      if (!workflow) return res.status(404).json({ error: "Workflow not found." });
+
+      if (workflow.scope_type !== "general") {
+        if (typeof req.body?.name === "string" && req.body.name.trim()) {
+          await queryDB("UPDATE leave_balance_workflows SET name = ? WHERE id = ?", [req.body.name.trim().slice(0, 100), id]);
+        }
+        if (typeof req.body?.designation === "string" && req.body.designation.trim()) {
+          const designation = req.body.designation.trim().slice(0, 255);
+          const clash: any = await queryDB(
+            "SELECT id FROM leave_balance_workflows WHERE scope_type = 'designation' AND LOWER(designation) = LOWER(?) AND id != ?",
+            [designation, id]
+          );
+          if (clash.length > 0) return res.status(400).json({ error: `A workflow for "${designation}" already exists.` });
+          await queryDB("UPDATE leave_balance_workflows SET designation = ? WHERE id = ?", [designation, id]);
+        }
+      }
+      if (req.body?.is_active !== undefined) {
+        await queryDB("UPDATE leave_balance_workflows SET is_active = ? WHERE id = ?", [req.body.is_active ? 1 : 0, id]);
+      }
+
+      if (Array.isArray(req.body?.items)) {
+        const items: { category_key: string; balance_days: number }[] = [];
+        for (const raw of req.body.items) {
+          const categoryKey = typeof raw?.category_key === "string" ? raw.category_key.trim() : "";
+          if (!categoryKey) continue;
+          const balanceDays = Number(raw?.balance_days);
+          if (!Number.isFinite(balanceDays) || balanceDays < 0) {
+            return res.status(400).json({ error: "Each Leave Balance Workflow amount must be a non-negative number." });
+          }
+          items.push({ category_key: categoryKey, balance_days: balanceDays });
+        }
+        await queryDB("DELETE FROM leave_balance_workflow_items WHERE workflow_id = ?", [id]);
+        for (const item of items) {
+          await queryDB("INSERT INTO leave_balance_workflow_items (workflow_id, category_key, balance_days) VALUES (?, ?, ?)", [
+            id,
+            item.category_key,
+            item.balance_days
+          ]);
+        }
+      }
+
+      const [updatedRows, updatedItems]: [any, any] = await Promise.all([
+        queryDB("SELECT * FROM leave_balance_workflows WHERE id = ?", [id]),
+        queryDB("SELECT * FROM leave_balance_workflow_items WHERE workflow_id = ?", [id])
+      ]);
+      const wf = updatedRows[0];
+      res.json({
+        id: Number(wf.id),
+        name: wf.name,
+        scope_type: wf.scope_type,
+        designation: wf.designation || null,
+        is_active: !!Number(wf.is_active),
+        items: updatedItems.map((it: any) => ({ category_key: it.category_key, balance_days: Number(it.balance_days) }))
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // DELETE: Designation-scoped workflows only — General (id=1) can never be
+  // removed, it's the always-present fallback every account without a
+  // matching Designation workflow still gets.
+  app.delete("/api/leave-balance-workflows/:id", authenticateToken, requireLeaveManager, requireLeaveManagerLayer("workflow_manage"), async (req: any, res) => {
+    try {
+      const id = Number(req.params.id);
+      const rows: any = await queryDB("SELECT * FROM leave_balance_workflows WHERE id = ?", [id]);
+      const workflow = rows[0];
+      if (!workflow) return res.status(404).json({ error: "Workflow not found." });
+      if (workflow.scope_type === "general") return res.status(400).json({ error: "The General workflow can't be deleted." });
+      await queryDB("DELETE FROM leave_balance_workflows WHERE id = ?", [id]);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST: apply every active Leave Balance Workflow right now (General, then
+  // each active Designation workflow) — the same thing the year-end
+  // auto-rollover does automatically, triggered by hand. Optional
+  // workflow_id applies just that one workflow instead of all of them.
+  app.post("/api/leave-balance-workflows/apply", authenticateToken, requireLeaveManager, requireLeaveManagerLayer("workflow_manage"), async (req: any, res) => {
+    try {
+      const onlyId = req.body?.workflow_id !== undefined && req.body?.workflow_id !== null ? Number(req.body.workflow_id) : undefined;
+      const appliedCount = await applyAllActiveWorkflows(req.user.id, onlyId);
+      if (appliedCount === 0) {
+        return res.status(400).json({ error: "No matching accounts, or the workflow(s) have no balances set yet." });
+      }
+      res.json({ success: true, updated_count: appliedCount });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Kick off the year-end auto-rollover check once at startup, then every 6
+  // hours — see checkAndRunLeaveYearRollover's own doc comment above.
+  checkAndRunLeaveYearRollover();
+  setInterval(checkAndRunLeaveYearRollover, 6 * 60 * 60 * 1000);
 }
