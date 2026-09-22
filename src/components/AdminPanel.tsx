@@ -5,8 +5,8 @@ import autoTable from 'jspdf-autotable';
 import credenceLogo from '../assets/credence-logo.png';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
 import { savePdfCrossPlatform } from '../lib/saveFile';
-import { Project, Branch, MprNumber, Entry, User, Budget, BudgetItem, BudgetSubmission, UserProjectPermission, EntryEditHistory, EntryPermanentDeleteLog, BulkUserRow, BulkUserResultItem, AdminModuleKey, ADMIN_MODULES, AttendanceRecord, ClaimsNavRequest, AdminNavRequest, Department, LeaveApplication, PendingJobEdit } from '../types';
-import { Building2, FileText, Users, Users2, BarChart3, Plus, Trash2, Edit2, Search, Filter, UserCheck, Calendar, CalendarClock, Download, Upload, FolderPlus, X, Eye, FileSpreadsheet, KeyRound, History, RotateCcw, Recycle, ListChecks, FileDown, MapPin, LayoutGrid, Navigation, LogIn, LogOut, Bell, Route, ShieldCheck, Wallet, Contact, Lock, Unlock, Mail, CheckCircle2, XCircle, Clock3, ShieldAlert } from 'lucide-react';
+import { Project, Branch, MprNumber, Entry, User, Budget, BudgetItem, BudgetSubmission, UserProjectPermission, EntryEditHistory, EntryPermanentDeleteLog, BulkUserRow, BulkUserResultItem, AdminModuleKey, ADMIN_MODULES, PermissionLayerKey, PERMISSION_LAYERS, PERMISSION_LAYER_MODULES, LeaveManageLayerKey, LEAVE_MANAGE_LAYERS, AttendanceRecord, ClaimsNavRequest, AdminNavRequest, Department, LeaveApplication, PendingJobEdit } from '../types';
+import { Building2, FileText, Users, Users2, BarChart3, Plus, Trash2, Edit2, Search, Filter, UserCheck, Calendar, CalendarClock, Download, Upload, FolderPlus, X, Eye, FileSpreadsheet, KeyRound, History, RotateCcw, Recycle, ListChecks, FileDown, MapPin, LayoutGrid, Navigation, LogIn, LogOut, Bell, Route, ShieldCheck, Wallet, Contact, Lock, Unlock, Mail, CheckCircle2, XCircle, Clock3, ShieldAlert, Copy } from 'lucide-react';
 import LocationMapPicker from './LocationMapPicker';
 import { NoticeManager } from './NoticeManager';
 import { EmployeesPanel } from './EmployeesPanel';
@@ -22,6 +22,12 @@ import { OfficeAttendancePanel } from './OfficeAttendancePanel';
 import { DeliveryDateConditionsPanel } from './DeliveryDateConditionsPanel';
 import { HolidayCalendarPanel } from './HolidayCalendarPanel';
 import { AssetManagementAdmin } from './AssetManagementAdmin';
+import { ExitOffboardingPanel } from './ExitOffboardingPanel';
+import { PerformanceManagementPanel } from './PerformanceManagementPanel';
+import { RecruitmentPanel } from './RecruitmentPanel';
+import { GrievanceDisciplinaryPanel } from './GrievanceDisciplinaryPanel';
+import { HRAnalyticsDashboard } from './HRAnalyticsDashboard';
+import { DocumentVaultPanel } from './DocumentVaultPanel';
 import { ServerProfilesPanel } from './ServerProfilesPanel';
 import { AdminDashboard } from './AdminDashboard';
 import { Spinner } from './Spinner';
@@ -33,18 +39,32 @@ import { useBackButtonClose } from '../lib/useBackButtonClose';
 
 // Module Access modal (Admin Panel -> Users -> per-Admin/User "Module
 // Access") groups the same Admin Panel tabs into the same labeled clusters
-// the Navbar's own "PEPM Manage" / "Manage" / "Workforce" header dropdowns
-// use, so granting access reads the same way it's navigated. Projects stays
-// under "Manage" (Navbar's own grouping), not PEPM. Any ADMIN_MODULES key
-// not listed under one of these falls into "Other" automatically.
+// GlobalSidebar.tsx itself uses (PEPM Manage / HR + its own nested
+// Attendance, Claims/Bill/Disbursement and Employee sub-groups / MIS /
+// Payroll), so granting access reads the same way it's navigated in the
+// sidebar. HR's sub-groups are flattened into their own "HR - ..." labels
+// here since this list has no nested-group UI. Any ADMIN_MODULES key not
+// listed under one of these falls into "Other" automatically.
 const MODULE_ACCESS_GROUPS: { label: string; keys: AdminModuleKey[] }[] = [
-  { label: 'PEPM Manage', keys: ['reports', 'mprs', 'imports', 'editlog', 'recycle'] },
-  { label: 'Manage', keys: ['projects', 'branches', 'users', 'employees', 'notices'] },
-  { label: 'Workforce', keys: ['approvals', 'tracking', 'holidays'] },
+  { label: 'PEPM Manage', keys: ['reports', 'mprs', 'imports', 'recycle', 'editlog'] },
+  { label: 'HR', keys: ['approvals', 'notices', 'holidays', 'leave_applications', 'departments'] },
+  { label: 'HR - Attendance', keys: ['attendance', 'attendance_reports', 'office_attendance'] },
+  { label: 'HR - Claims/Bill/Disbursement', keys: ['claims', 'conveyance', 'disbursement'] },
+  { label: 'HR - Employee', keys: ['employees', 'tracking', 'asset_management'] },
+  { label: 'MIS', keys: ['users', 'projects', 'branches'] },
+  { label: 'Payroll', keys: ['payroll'] },
   {
     label: 'Other',
     keys: ADMIN_MODULES.map((m) => m.key).filter(
-      (key) => !['reports', 'mprs', 'imports', 'editlog', 'recycle', 'projects', 'branches', 'users', 'employees', 'notices', 'approvals', 'tracking', 'holidays'].includes(key)
+      (key) => ![
+        'reports', 'mprs', 'imports', 'recycle', 'editlog',
+        'approvals', 'notices', 'holidays', 'leave_applications', 'departments',
+        'attendance', 'attendance_reports', 'office_attendance',
+        'claims', 'conveyance', 'disbursement',
+        'employees', 'tracking', 'asset_management',
+        'users', 'projects', 'branches',
+        'payroll',
+      ].includes(key)
     )
   }
 ];
@@ -229,7 +249,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // PUT /api/users/:id/module-permissions).
   const canGrantModuleAccess = isSuperAdmin || !!user.can_grant_module_access;
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'my_conveyance' | 'disbursement' | 'holidays' | 'asset_management' | 'servers' | 'permanent_delete_log'>(
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'my_conveyance' | 'disbursement' | 'holidays' | 'asset_management' | 'servers' | 'permanent_delete_log' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault'>(
     () => {
       // Restores whichever tab this Admin was last looking at — see the
       // "pull down to reload" note in App.tsx: since a reload now has to be
@@ -333,6 +353,27 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [newEmailInput, setNewEmailInput] = useState('');
   const [changingEmail, setChangingEmail] = useState(false);
   const [selectedModules, setSelectedModules] = useState<Set<AdminModuleKey>>(new Set());
+  // Filters the "Admin Module" checkbox list below by label as the
+  // Superadmin types — cleared whenever a fresh Module Access modal opens
+  // (see setManagingModulesFor(...) call sites).
+  const [moduleSearchQuery, setModuleSearchQuery] = useState('');
+  // Transient confirmation shown under the "Copy access from" picker after a
+  // copy — cleared whenever a fresh Module Access modal opens.
+  const [copyAccessNotice, setCopyAccessNotice] = useState('');
+  // Granular per-module action layers (Read Only/Edit-Add/Entry-Upload/
+  // Delete-Trash/Permanent Delete) — only meaningful for modules listed in
+  // PERMISSION_LAYER_MODULES (currently just 'departments'), shown as an
+  // extra checkbox row once that module's own checkbox above is ticked. One
+  // Set per module key, keyed by AdminModuleKey. Initialized in
+  // openManageModules below.
+  const [moduleLayers, setModuleLayers] = useState<Record<string, Set<PermissionLayerKey>>>({});
+  // Leave Manage's own operation-specific layers (Edit Balance/Set Balance in
+  // Bulk/Add Category/Leave Policy) — same idea as moduleLayers above but for
+  // the "Also allow editing Leave balances" toggle below (can_manage_leave),
+  // not an Admin Module checkbox, since Leave Manage isn't part of the
+  // AdminModuleKey/module_permissions system at all. Initialized in
+  // openManageModules below.
+  const [leaveManageLayers, setLeaveManageLayers] = useState<Set<LeaveManageLayerKey>>(new Set());
   // Department-wise scope for the 'attendance_reports' module only — layered
   // on top of the checkbox above (see PUT /api/users/:id/attendance-report-
   // departments). Empty set = unrestricted (every Department visible), same
@@ -368,7 +409,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [myLeaveAccessEnabled, setMyLeaveAccessEnabled] = useState(false);
   const [savingModules, setSavingModules] = useState(false);
 
-  const openManageModules = (u: User) => {
+  // Populates every Module Access form field (User Module toggles, Admin
+  // Module checkboxes + their permission layers, Leave Manage layers, and
+  // Department scopes) from a given account `u` — shared by openManageModules
+  // below (u = the account actually being edited) AND copyAccessFrom further
+  // down (u = a DIFFERENT account whose access is being copied onto whoever
+  // is currently open in the modal). Deliberately does NOT touch
+  // managingModulesFor or moduleSearchQuery — those identify/filter the
+  // modal itself, not the access being edited, so copyAccessFrom must leave
+  // them alone (the modal stays open on the account being edited; only the
+  // form fields change, and nothing is saved until "Save Access" is clicked).
+  const applyUserAccessToForm = (u: User) => {
     setSelectedModules(new Set(u.module_permissions || []));
     setUserPanelAccessEnabled(!!u.can_access_user_panel);
     setLeaveManagementAccessEnabled(!!u.can_manage_leave);
@@ -378,7 +429,36 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     setTimesheetAccessEnabled(!!u.can_view_timesheet);
     setLeaveApplicationAccessEnabled(!!u.can_view_leave_application);
     setMyLeaveAccessEnabled(!!u.can_view_my_leave);
-    setManagingModulesFor(u);
+    // Permission layers — one Set per module in PERMISSION_LAYER_MODULES.
+    // Explicit saved rows win; a module this account already has granted
+    // (u.module_permissions) but with NO saved layer rows yet falls back to
+    // "every layer except Permanent Delete" (mirrors requireModuleLayer()'s
+    // server-side default, so the checkboxes shown here always match what's
+    // actually enforced) — a module not yet granted starts with nothing
+    // checked.
+    const initialLayers: Record<string, Set<PermissionLayerKey>> = {};
+    for (const moduleKey of PERMISSION_LAYER_MODULES) {
+      const saved = u.module_permission_layers?.[moduleKey];
+      if (saved && saved.length > 0) {
+        initialLayers[moduleKey] = new Set(saved as PermissionLayerKey[]);
+      } else if ((u.module_permissions || []).includes(moduleKey)) {
+        initialLayers[moduleKey] = new Set(PERMISSION_LAYERS.map((l) => l.key).filter((k) => k !== 'permanent_delete'));
+      } else {
+        initialLayers[moduleKey] = new Set();
+      }
+    }
+    setModuleLayers(initialLayers);
+    // Leave Manage layers — same "explicit rows win, else full access if
+    // already granted, else nothing" default as above, keyed off
+    // can_manage_leave (the toggle) instead of module_permissions.
+    const savedLeaveLayers = u.module_permission_layers?.leave_manage;
+    if (savedLeaveLayers && savedLeaveLayers.length > 0) {
+      setLeaveManageLayers(new Set(savedLeaveLayers as LeaveManageLayerKey[]));
+    } else if (u.can_manage_leave) {
+      setLeaveManageLayers(new Set(LEAVE_MANAGE_LAYERS.map((l) => l.key)));
+    } else {
+      setLeaveManageLayers(new Set());
+    }
 
     // Attendance Report Department scope — fetched fresh every time this
     // modal opens (never trust stale state from a previously-managed user).
@@ -449,6 +529,37 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       .finally(() => setLoadingConveyanceClaimDepts(false));
   };
 
+  const openManageModules = (u: User) => {
+    applyUserAccessToForm(u);
+    setModuleSearchQuery('');
+    setCopyAccessNotice('');
+    setManagingModulesFor(u);
+  };
+
+  // "Copy access from" (Module Access -> header dropdown) — copies every
+  // field applyUserAccessToForm sets from `sourceUser` onto the form for
+  // whoever is CURRENTLY open in the modal (managingModulesFor stays
+  // unchanged). Nothing is persisted until the Superadmin reviews the
+  // now-updated checkboxes/toggles and clicks "Save Access" — this only
+  // pre-fills the form, exactly like opening the modal fresh would, just
+  // sourced from a different account's saved access instead of the target's
+  // own.
+  const copyAccessFrom = (sourceUserId: number) => {
+    const source = users.find((usr) => usr.id === sourceUserId);
+    if (!source) return;
+    applyUserAccessToForm(source);
+    // "User Panel Access" is Admin-only server-side (PUT .../user-panel-
+    // access 400s for a 'user' role target) and the toggle itself is only
+    // ever rendered for an Admin target — copying from an Admin source onto
+    // a 'user' role target would otherwise leave this checked-but-hidden,
+    // which then fires (and 400s) the save call below since it no longer
+    // matches the target's own (always-false) can_access_user_panel.
+    if (managingModulesFor?.role !== 'admin') {
+      setUserPanelAccessEnabled(false);
+    }
+    setCopyAccessNotice(`Copied access from ${source.name} — review below, then click "Save Access" to apply it.`);
+  };
+
   const toggleAttendanceReportDept = (name: string) => {
     setAttendanceReportDepts((prev) => {
       const next = new Set(prev);
@@ -485,6 +596,24 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     });
   };
 
+  const toggleModuleLayer = (moduleKey: AdminModuleKey, layer: PermissionLayerKey) => {
+    setModuleLayers((prev) => {
+      const current = new Set(prev[moduleKey] || []);
+      if (current.has(layer)) current.delete(layer);
+      else current.add(layer);
+      return { ...prev, [moduleKey]: current };
+    });
+  };
+
+  const toggleLeaveManageLayer = (layer: LeaveManageLayerKey) => {
+    setLeaveManageLayers((prev) => {
+      const next = new Set(prev);
+      if (next.has(layer)) next.delete(layer);
+      else next.add(layer);
+      return next;
+    });
+  };
+
   const handleSaveModulePermissions = async () => {
     if (!managingModulesFor) return;
     setSavingModules(true);
@@ -496,6 +625,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to update module access');
+
+      // Permission layers (Read Only/Edit-Add/Entry-Upload/Delete-Trash/
+      // Permanent Delete) for each module that supports them — same "only
+      // meaningful/only saved while the module checkbox is ticked" rule as
+      // the Department-scope blocks just below.
+      for (const moduleKey of PERMISSION_LAYER_MODULES) {
+        if (!selectedModules.has(moduleKey)) continue;
+        const layerRes = await fetch(apiUrl(`/api/users/${managingModulesFor.id}/module-permission-layers`), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ module: moduleKey, layers: Array.from(moduleLayers[moduleKey] || []) })
+        });
+        const layerData = await layerRes.json();
+        if (!layerRes.ok) throw new Error(layerData.error || `Failed to update permission layers for ${moduleKey}`);
+      }
 
       // Department-wise scope for the 'attendance_reports' module — only
       // meaningful (and only saved) while that module is actually checked
@@ -539,8 +683,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       }
 
       // Also save the "User Panel Access" toggle, only if it actually changed —
-      // this is a separate Superadmin-only switch from the tab checkboxes above.
-      if (userPanelAccessEnabled !== !!managingModulesFor.can_access_user_panel) {
+      // this is a separate Superadmin-only switch from the tab checkboxes
+      // above. Admin-only server-side (PUT .../user-panel-access 400s for a
+      // 'user' role target) — also gated here, not just by the toggle being
+      // hidden in the UI for non-Admin targets, since "Copy access from…"
+      // can otherwise leave userPanelAccessEnabled mismatched against a
+      // 'user' role target's own (always-false) can_access_user_panel after
+      // copying from an Admin source, which would otherwise fire this PUT
+      // and 400.
+      if (managingModulesFor.role === 'admin' && userPanelAccessEnabled !== !!managingModulesFor.can_access_user_panel) {
         const upaRes = await fetch(apiUrl(`/api/users/${managingModulesFor.id}/user-panel-access`), {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -561,6 +712,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         });
         const lmaData = await lmaRes.json();
         if (!lmaRes.ok) throw new Error(lmaData.error || 'Failed to update Leave Management access');
+      }
+
+      // Leave Manage's own operation-specific layers — only meaningful (and
+      // only saved) while the toggle above is actually on, same "only save
+      // while the master switch is ticked" rule as the module layer saves
+      // further up.
+      if (leaveManagementAccessEnabled) {
+        const leaveLayerRes = await fetch(apiUrl(`/api/users/${managingModulesFor.id}/module-permission-layers`), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ module: 'leave_manage', layers: Array.from(leaveManageLayers) })
+        });
+        const leaveLayerData = await leaveLayerRes.json();
+        if (!leaveLayerRes.ok) throw new Error(leaveLayerData.error || 'Failed to update Leave Manage permission layers');
       }
 
       // Also save the "Movement Claim" and "Conveyance Bill Claim" access
@@ -3674,6 +3839,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         </div>
       )}
 
+      {/* TABS: world-class HRM extension modules — Exit/Offboarding,
+          Performance Management, Recruitment/ATS, Grievance & Disciplinary,
+          HR Analytics, Document Vault. Each gated behind its own
+          AdminModuleKey, same as every tab above. */}
+      {activeTab === 'exit_offboarding' && <ExitOffboardingPanel token={token} />}
+      {activeTab === 'performance_management' && <PerformanceManagementPanel token={token} />}
+      {activeTab === 'recruitment' && <RecruitmentPanel token={token} />}
+      {activeTab === 'grievance_disciplinary' && <GrievanceDisciplinaryPanel token={token} />}
+      {activeTab === 'hr_analytics' && <HRAnalyticsDashboard token={token} />}
+      {activeTab === 'document_vault' && <DocumentVaultPanel token={token} />}
+
       {/* TAB: SERVERS — Superadmin-only catalog of backend deployments
           (IP/URL) the Android app can switch between after login. Not a
           grantable AdminModuleKey (see ServerProfileRoutes.ts) — access is
@@ -5169,10 +5345,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           )}
           <div className="overflow-x-auto">
             <table className="w-full divide-y divide-slate-200">
-              {/* Sticky under the app header (Navbar is sticky top-0 h-16 —
-                  see Navbar.tsx) so scrolling a long User list never scrolls
-                  the column headers out of view underneath it. */}
-              <thead className="sticky top-16 z-10 bg-slate-50 text-slate-500 text-[11px] uppercase tracking-wider">
+              {/* Was `sticky top-16 z-10` (to keep column headers visible
+                  while scrolling a long User list, under Navbar's own
+                  sticky top-0 h-16) — removed: `position: sticky` on a
+                  <thead> inside a plain (non-scrolling-container) table
+                  doesn't reliably reserve its own space against the
+                  <tbody> that follows it, so once stuck it painted directly
+                  on top of the table's very first row, hiding it entirely
+                  behind this opaque background (most visible with a
+                  search narrowed to exactly one result — the row was still
+                  there, just invisible underneath the header). A plain
+                  static header has no such conflict. */}
+              <thead className="bg-slate-50 text-slate-500 text-[11px] uppercase tracking-wider">
                 <tr>
                   <th className="w-24 px-2.5 py-2 text-left">Name</th>
                   <th className="w-28 px-2.5 py-2 text-left">Login ID</th>
@@ -6261,34 +6445,82 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           onClick={() => setManagingModulesFor(null)}
         >
           <div
-            className="bg-white border border-slate-200 rounded-2xl max-w-md md:max-w-4xl w-full max-h-[90vh] flex flex-col shadow-2xl"
+            className="bg-white border border-slate-200 rounded-2xl max-w-md md:max-w-5xl xl:max-w-6xl w-full max-h-[92vh] flex flex-col shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="p-5 border-b border-slate-200 flex justify-between items-center">
-              <div>
-                <h3 className="text-base font-bold text-slate-900">Module Access</h3>
-                <p className="text-xs text-slate-500">{managingModulesFor.name} • {managingModulesFor.email}</p>
+            <div className="p-5 md:p-6 border-b border-slate-200">
+              <div className="flex justify-between items-center mb-3">
+                <div>
+                  <h3 className="text-base md:text-lg font-bold text-slate-900">Module Access</h3>
+                  <p className="text-xs md:text-sm text-slate-500">{managingModulesFor.name} • {managingModulesFor.email}</p>
+                </div>
+                <button
+                  onClick={() => setManagingModulesFor(null)}
+                  className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-colors"
+                >
+                  <X className="w-5 h-5" />
+                </button>
               </div>
-              <button
-                onClick={() => setManagingModulesFor(null)}
-                className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
+              {/* Search (filters the Admin Module checklist below) + Copy
+                  Access (pre-fills every field on this form — toggles, Admin
+                  Module checkboxes, permission layers, Department scopes —
+                  from another account's saved access, so a Superadmin can
+                  set up one account and reuse it for the next instead of
+                  re-ticking everything by hand; nothing is saved until "Save
+                  Access" is clicked) both live in the header now — no room
+                  for them once the two columns below start, and they apply
+                  to the whole form, not just one column. */}
+              <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
+                <div className="relative flex-1">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={moduleSearchQuery}
+                    onChange={(e) => setModuleSearchQuery(e.target.value)}
+                    placeholder="Search modules…"
+                    className="w-full pl-10 pr-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-blue-600"
+                  />
+                </div>
+                <div className="relative flex-1 sm:max-w-[220px]">
+                  <Copy className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <select
+                    value=""
+                    onChange={(e) => {
+                      if (e.target.value) copyAccessFrom(Number(e.target.value));
+                    }}
+                    className="w-full pl-10 pr-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-blue-600 cursor-pointer appearance-none"
+                  >
+                    <option value="">Copy access from…</option>
+                    {users
+                      .filter((u) => u.id !== managingModulesFor.id && u.role !== 'superadmin')
+                      .map((u) => (
+                        <option key={u.id} value={u.id}>{u.name} ({u.role === 'admin' ? 'Admin' : 'User'})</option>
+                      ))}
+                  </select>
+                </div>
+              </div>
+              {copyAccessNotice && (
+                <p className="mt-2 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+                  {copyAccessNotice}
+                </p>
+              )}
             </div>
 
             {/* Two columns on desktop (User Module toggles on the left, Admin
                 Module tab checkboxes on the right) instead of one long
                 cramped-looking vertical list stretched across a narrow
-                fixed-width card — the modal itself is wider on md+ too (see
-                max-w-md md:max-w-4xl above). Mobile keeps the original single
+                fixed-width card — the modal itself is much wider on md+/xl+
+                too (see max-w-md md:max-w-5xl xl:max-w-6xl above), with more
+                generous padding/gaps than a mobile-first default so the web
+                view has real breathing room instead of reading like a phone
+                layout just stretched wide. Mobile keeps the original single
                 stacked column, unchanged. */}
-            <div className="p-5 overflow-y-auto flex-1 md:grid md:grid-cols-2 md:gap-x-8 md:items-start">
-            <div className="space-y-2">
+            <div className="p-5 md:p-8 overflow-y-auto flex-1 md:grid md:grid-cols-2 md:gap-x-10 xl:gap-x-16 md:items-start">
+            <div className="space-y-3">
               <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">User Module</p>
               {managingModulesFor.role === 'admin' && (
                 <label
-                  className="flex items-center justify-between gap-3 p-3 mb-3 bg-blue-50 border border-blue-200 rounded-xl cursor-pointer"
+                  className="flex items-center justify-between gap-3 p-3.5 mb-3 bg-blue-50 border border-blue-200 rounded-xl cursor-pointer"
                 >
                   <span>
                     <span className="text-sm font-semibold text-slate-900 block">Also allow User Panel access</span>
@@ -6314,32 +6546,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 </label>
               )}
               <label
-                className="flex items-center justify-between gap-3 p-3 mb-3 bg-emerald-50 border border-emerald-200 rounded-xl cursor-pointer"
-              >
-                <span>
-                  <span className="text-sm font-semibold text-slate-900 block">Also allow editing Leave balances</span>
-                  <span className="text-[11px] text-slate-500">
-                    Lets this {managingModulesFor.role === 'user' ? 'User' : 'Admin'} edit everyone's Casual/Sick/Leave-without-Pay
-                    balance on Self Service → Leave Management, the same as the Superadmin can.
-                  </span>
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setLeaveManagementAccessEnabled((v) => !v)}
-                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${
-                    leaveManagementAccessEnabled ? 'bg-emerald-500' : 'bg-slate-300'
-                  }`}
-                  title={leaveManagementAccessEnabled ? 'On — click to turn off' : 'Off — click to turn on'}
-                >
-                  <span
-                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                      leaveManagementAccessEnabled ? 'translate-x-[18px]' : 'translate-x-1'
-                    }`}
-                  />
-                </button>
-              </label>
-              <label
-                className="flex items-center justify-between gap-3 p-3 mb-3 bg-indigo-50 border border-indigo-200 rounded-xl cursor-pointer"
+                className="flex items-center justify-between gap-3 p-3.5 mb-3 bg-indigo-50 border border-indigo-200 rounded-xl cursor-pointer"
               >
                 <span>
                   <span className="text-sm font-semibold text-slate-900 block">Allow Budget / Jobs / Job Entry Details</span>
@@ -6365,7 +6572,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 </button>
               </label>
               <label
-                className="flex items-center justify-between gap-3 p-3 mb-3 bg-sky-50 border border-sky-200 rounded-xl cursor-pointer"
+                className="flex items-center justify-between gap-3 p-3.5 mb-3 bg-sky-50 border border-sky-200 rounded-xl cursor-pointer"
               >
                 <span>
                   <span className="text-sm font-semibold text-slate-900 block">Also allow Movement Claim</span>
@@ -6390,7 +6597,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 </button>
               </label>
               <label
-                className="flex items-center justify-between gap-3 p-3 mb-3 bg-sky-50 border border-sky-200 rounded-xl cursor-pointer"
+                className="flex items-center justify-between gap-3 p-3.5 mb-3 bg-sky-50 border border-sky-200 rounded-xl cursor-pointer"
               >
                 <span>
                   <span className="text-sm font-semibold text-slate-900 block">Also allow Conveyance Bill Claim</span>
@@ -6415,7 +6622,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 </button>
               </label>
               <label
-                className="flex items-center justify-between gap-3 p-3 mb-3 bg-sky-50 border border-sky-200 rounded-xl cursor-pointer"
+                className="flex items-center justify-between gap-3 p-3.5 mb-3 bg-sky-50 border border-sky-200 rounded-xl cursor-pointer"
               >
                 <span>
                   <span className="text-sm font-semibold text-slate-900 block">Also allow Timesheet</span>
@@ -6440,7 +6647,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 </button>
               </label>
               <label
-                className="flex items-center justify-between gap-3 p-3 mb-3 bg-sky-50 border border-sky-200 rounded-xl cursor-pointer"
+                className="flex items-center justify-between gap-3 p-3.5 mb-3 bg-sky-50 border border-sky-200 rounded-xl cursor-pointer"
               >
                 <span>
                   <span className="text-sm font-semibold text-slate-900 block">Also allow Leave Application</span>
@@ -6465,7 +6672,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 </button>
               </label>
               <label
-                className="flex items-center justify-between gap-3 p-3 mb-3 bg-sky-50 border border-sky-200 rounded-xl cursor-pointer"
+                className="flex items-center justify-between gap-3 p-3.5 mb-3 bg-sky-50 border border-sky-200 rounded-xl cursor-pointer"
               >
                 <span>
                   <span className="text-sm font-semibold text-slate-900 block">Also allow My Leave</span>
@@ -6491,24 +6698,85 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
               </label>
             </div>
 
-            <div className="space-y-2 mt-4 md:mt-0 pt-4 md:pt-0 border-t md:border-t-0 md:border-l border-slate-100 md:pl-8">
+            <div className="space-y-3 mt-6 md:mt-0 pt-6 md:pt-0 border-t md:border-t-0 md:border-l border-slate-100 md:pl-10 xl:pl-16">
               <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">Admin Module</p>
-              <p className="text-xs text-slate-500 mb-2">
+              <p className="text-xs md:text-sm text-slate-500 mb-2">
                 Choose which Admin Panel tabs this {managingModulesFor.role === 'user' ? 'User' : 'Admin'} can open.
                 {managingModulesFor.role === 'user' && ' They\'ll keep their normal User Panel too, with a switcher to open these tabs.'}
                 {' '}Unchecked tabs are hidden for them, and the matching API routes are blocked server-side too.
               </p>
+              {/* "Also allow editing Leave balances" — this is an Admin Panel
+                  module toggle (Leave Manage), not a User-Panel-facing grant
+                  like the switches on the left, even though it isn't part of
+                  the ADMIN_MODULES/module_permissions checklist below (it's
+                  gated by the separate can_manage_leave flag) — so it lives
+                  here in the Admin Module column instead. */}
+              <label
+                className="flex items-center justify-between gap-3 p-3.5 mb-3 bg-emerald-50 border border-emerald-200 rounded-xl cursor-pointer"
+              >
+                <span>
+                  <span className="text-sm font-semibold text-slate-900 block">Also allow editing Leave balances</span>
+                  <span className="text-[11px] text-slate-500">
+                    Lets this {managingModulesFor.role === 'user' ? 'User' : 'Admin'} edit everyone's Casual/Sick/Leave-without-Pay
+                    balance on Self Service → Leave Management, the same as the Superadmin can.
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setLeaveManagementAccessEnabled((v) => !v)}
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${
+                    leaveManagementAccessEnabled ? 'bg-emerald-500' : 'bg-slate-300'
+                  }`}
+                  title={leaveManagementAccessEnabled ? 'On — click to turn off' : 'Off — click to turn on'}
+                >
+                  <span
+                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                      leaveManagementAccessEnabled ? 'translate-x-[18px]' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </label>
+              {leaveManagementAccessEnabled && (
+                <div className="mb-3 p-3 bg-violet-50 border border-violet-200 rounded-xl">
+                  <p className="text-[11px] font-semibold text-slate-700 flex items-center gap-1.5 mb-1">
+                    <ShieldCheck className="w-3.5 h-3.5 text-violet-600" />
+                    Permission Layers for Leave Manage
+                  </p>
+                  <p className="text-[11px] text-slate-500 mb-2">
+                    Choose exactly what {managingModulesFor.role === 'user' ? 'this User' : 'this Admin'} may do inside
+                    Leave Manage — any combination. Leaving all of these unchecked (while the toggle above stays on)
+                    blocks every action here.
+                  </p>
+                  <div className="grid grid-cols-2 xl:grid-cols-3 gap-2">
+                    {LEAVE_MANAGE_LAYERS.map((layer) => (
+                      <label
+                        key={layer.key}
+                        className="flex items-center gap-2 px-2.5 py-1.5 bg-white border border-violet-100 rounded-lg cursor-pointer hover:bg-violet-100/40"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={leaveManageLayers.has(layer.key)}
+                          onChange={() => toggleLeaveManageLayer(layer.key)}
+                          className="w-3.5 h-3.5 rounded border-slate-300 text-violet-600 focus:ring-violet-600 cursor-pointer"
+                        />
+                        <span className="text-xs text-slate-800">{layer.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
               {MODULE_ACCESS_GROUPS.map((group) => {
-                const groupModules = ADMIN_MODULES.filter((m) => group.keys.includes(m.key));
+                const moduleQuery = moduleSearchQuery.trim().toLowerCase();
+                const groupModules = ADMIN_MODULES.filter((m) => group.keys.includes(m.key) && m.label.toLowerCase().includes(moduleQuery));
                 if (groupModules.length === 0) return null;
                 return (
-                  <div key={group.label} className="mb-3">
-                    <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">{group.label}</p>
-                    <div className="space-y-1.5">
+                  <div key={group.label} className="mb-4">
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-2">{group.label}</p>
+                    <div className="space-y-2">
                       {groupModules.map((m) => (
                         <React.Fragment key={m.key}>
                           <label
-                            className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-100 transition-colors"
+                            className="flex items-center gap-3 p-3.5 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-100 transition-colors"
                           >
                             <input
                               type="checkbox"
@@ -6518,6 +6786,35 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                             />
                             <span className="text-sm font-medium text-slate-900">{m.label}</span>
                           </label>
+                          {(PERMISSION_LAYER_MODULES as readonly AdminModuleKey[]).includes(m.key) && selectedModules.has(m.key) && (
+                            <div className="ml-2 mt-1 mb-1 p-3 bg-violet-50 border border-violet-200 rounded-xl">
+                              <p className="text-[11px] font-semibold text-slate-700 flex items-center gap-1.5 mb-1">
+                                <ShieldCheck className="w-3.5 h-3.5 text-violet-600" />
+                                Permission Layers for {m.label}
+                              </p>
+                              <p className="text-[11px] text-slate-500 mb-2">
+                                Choose exactly what {managingModulesFor?.role === 'user' ? 'this User' : 'this Admin'} may
+                                do inside {m.label} — any combination. Leaving all of these unchecked (while the module
+                                itself stays checked above) blocks every action here.
+                              </p>
+                              <div className="grid grid-cols-2 xl:grid-cols-3 gap-2">
+                                {PERMISSION_LAYERS.map((layer) => (
+                                  <label
+                                    key={layer.key}
+                                    className="flex items-center gap-2 px-2.5 py-1.5 bg-white border border-violet-100 rounded-lg cursor-pointer hover:bg-violet-100/40"
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={(moduleLayers[m.key] || new Set()).has(layer.key)}
+                                      onChange={() => toggleModuleLayer(m.key, layer.key)}
+                                      className="w-3.5 h-3.5 rounded border-slate-300 text-violet-600 focus:ring-violet-600 cursor-pointer"
+                                    />
+                                    <span className="text-xs text-slate-800">{layer.label}</span>
+                                  </label>
+                                ))}
+                              </div>
+                            </div>
+                          )}
                           {m.key === 'attendance_reports' && selectedModules.has('attendance_reports') && (
                             <div className="ml-2 mt-1 mb-1 p-3 bg-amber-50 border border-amber-200 rounded-xl">
                               <p className="text-[11px] font-semibold text-slate-700 flex items-center gap-1.5 mb-1">

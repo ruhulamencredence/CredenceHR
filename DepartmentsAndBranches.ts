@@ -29,11 +29,16 @@ interface DepartmentsAndBranchesRouteDeps {
   // module in server.ts — pass "departments"/"branches" through it here so a
   // Superadmin can grant/revoke each module's access independently.
   requireModule: (moduleKey: "departments" | "branches") => any;
+  // Per-module action gate (Read Only/Edit-Add/Entry-Upload/Delete-Trash/
+  // Permanent Delete) — Departments is the first module wired up to this;
+  // Branches stays on requireModule alone for now. See requireModuleLayer()
+  // in server.ts for the exact semantics.
+  requireModuleLayer: (moduleKey: "departments" | "branches", layer: "read" | "edit_add" | "entry_upload" | "delete_trash" | "permanent_delete") => any;
   queryDB: (sql: string, params?: any[]) => Promise<any>;
 }
 
 export function registerDepartmentsAndBranchesRoutes(app: Express, deps: DepartmentsAndBranchesRouteDeps) {
-  const { authenticateToken, requireAdmin, requireModule, queryDB } = deps;
+  const { authenticateToken, requireAdmin, requireModule, requireModuleLayer, queryDB } = deps;
 
   // Branches (Admin Panel -> Branches, its own AdminModuleKey/module permission,
   // separate from Projects). Same GPS-pinned-site shape as a Project, kept in
@@ -169,7 +174,7 @@ export function registerDepartmentsAndBranchesRoutes(app: Express, deps: Departm
     }
   });
 
-  app.post("/api/departments", authenticateToken, requireAdmin, requireModule("departments"), async (req: any, res) => {
+  app.post("/api/departments", authenticateToken, requireAdmin, requireModule("departments"), requireModuleLayer("departments", "edit_add"), async (req: any, res) => {
     try {
       const name = String(req.body?.name || "").trim();
       if (!name) return res.status(400).json({ error: "Department name is required." });
@@ -196,7 +201,7 @@ export function registerDepartmentsAndBranchesRoutes(app: Express, deps: Departm
     }
   });
 
-  app.put("/api/departments/:id", authenticateToken, requireAdmin, requireModule("departments"), async (req: any, res) => {
+  app.put("/api/departments/:id", authenticateToken, requireAdmin, requireModule("departments"), requireModuleLayer("departments", "edit_add"), async (req: any, res) => {
     try {
       const id = Number(req.params.id);
       const existing = await queryDB("SELECT * FROM departments WHERE id = ?", [id]);
@@ -261,7 +266,7 @@ export function registerDepartmentsAndBranchesRoutes(app: Express, deps: Departm
   // Deleting a Department only detaches it — all_employees.department_id ON
   // DELETE SET NULL (see initDB()), so every Employee just loses the
   // structured link; their plain-text `department` mirror is untouched.
-  app.delete("/api/departments/:id", authenticateToken, requireAdmin, requireModule("departments"), async (req, res) => {
+  app.delete("/api/departments/:id", authenticateToken, requireAdmin, requireModule("departments"), requireModuleLayer("departments", "delete_trash"), async (req, res) => {
     try {
       const id = Number(req.params.id);
       const existing = await queryDB("SELECT * FROM departments WHERE id = ?", [id]);

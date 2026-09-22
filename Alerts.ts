@@ -25,6 +25,7 @@
 // added, after 'leave_application'.
 
 import type { Express } from "express";
+import { sendPushToUserIds } from "./PushNotificationService";
 
 export type AlertType = "leave_application" | "conveyance_claim" | "conveyance_disbursed" | "asset_requisition";
 
@@ -102,7 +103,18 @@ export async function createAlert(
     );
   } catch (err: any) {
     console.warn("⚠️ Could not write alert: " + err.message);
+    return;
   }
+  // Fire-and-forget — never awaited by the caller, same reasoning as
+  // ChatRoutes.ts's notifyNewMessage: a push failure never affects the
+  // alert itself, which is already in this account's inbox by the time
+  // this runs. No-ops entirely until FIREBASE_SERVICE_ACCOUNT_JSON is set
+  // (see PushNotificationService.ts).
+  void sendPushToUserIds(queryDB, [params.userId], params.title, params.message, {
+    type: params.type,
+    relatedType: params.relatedType || "",
+    relatedId: params.relatedId != null ? String(params.relatedId) : ""
+  });
 }
 
 export function registerAlertRoutes(app: Express, deps: AlertRouteDeps) {

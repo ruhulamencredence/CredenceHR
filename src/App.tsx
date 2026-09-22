@@ -5,8 +5,8 @@
 
 import React, { useState, useEffect, useRef, Suspense, lazy } from 'react';
 import { Capacitor } from '@capacitor/core';
-import { RefreshCw, ArrowLeft } from 'lucide-react';
-import { User, ClaimsNavRequest, AdminNavRequest, JobsNavRequest, AdminModuleKey, DashboardNavRequest } from './types';
+import { RefreshCw, ArrowLeft, X } from 'lucide-react';
+import { User, ClaimsNavRequest, AdminNavRequest, JobsNavRequest, AdminModuleKey, DashboardNavRequest, LeaveNavRequest } from './types';
 import { AuthScreen } from './components/AuthScreen';
 import { Navbar } from './components/Navbar';
 import { GlobalSidebar } from './components/GlobalSidebar';
@@ -24,11 +24,12 @@ const AdminPanel = lazy(() => import('./components/AdminPanel').then(m => ({ def
 // as UserPanel/AdminPanel above, so an account that never opens Chat never
 // pays for it.
 const ChatPanel = lazy(() => import('./components/ChatPanel').then(m => ({ default: m.ChatPanel })));
+const AlertsPage = lazy(() => import('./components/AlertsPage').then(m => ({ default: m.AlertsPage })));
 
 import { AppLoader } from './components/AppLoader';
 import { Spinner } from './components/Spinner';
 import { ApkModal } from './components/ApkModal';
-import { LeaveApplication } from './components/LeaveApplication';
+import { FloatingChatButton } from './components/FloatingChatButton';
 import { LeaveManage } from './components/LeaveManage';
 import { MyLeave } from './components/MyLeave';
 import { LeaveApprovals } from './components/LeaveApprovals';
@@ -45,41 +46,6 @@ import { apiUrl } from './lib/api';
 import { startBackgroundTracking, stopBackgroundTracking } from './lib/backgroundTracking';
 import { connectChatSocket, disconnectChatSocket } from './lib/chatSocket';
 import { initPushNotifications, clearPushToken } from './lib/pushNotifications';
-
-// TEMPORARY diagnostic — remove once the status-bar-overlap investigation on
-// tall/punch-hole displays (MainActivity.java's native inset injection) is
-// confirmed fixed. Shows what --native-safe-area-inset-top/-bottom actually
-// resolved to on THIS device, so a screenshot tells us directly whether the
-// native injection landed a sane value at all, instead of guessing blind.
-// Native-app only; renders nothing on the web build.
-const InsetDebugBadge: React.FC = () => {
-  const [value, setValue] = useState('reading...');
-  useEffect(() => {
-    if (!Capacitor.isNativePlatform()) return;
-    const read = () => {
-      const style = getComputedStyle(document.documentElement);
-      const top = style.getPropertyValue('--native-safe-area-inset-top').trim() || '(unset)';
-      const bottom = style.getPropertyValue('--native-safe-area-inset-bottom').trim() || '(unset)';
-      setValue(`top:${top} bottom:${bottom}`);
-    };
-    read();
-    const t1 = setTimeout(read, 800);
-    const t2 = setTimeout(read, 2000);
-    return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-    };
-  }, []);
-  if (!Capacitor.isNativePlatform()) return null;
-  return (
-    <div
-      className="fixed right-1 z-[95] text-[9px] font-mono px-1.5 py-0.5 rounded"
-      style={{ top: 'calc(env(safe-area-inset-top, 0px) + 2px)', background: 'rgba(0,0,0,0.55)', color: '#0f0' }}
-    >
-      {value}
-    </div>
-  );
-};
 
 export default function App() {
   const [token, setToken] = useState<string | null>(localStorage.getItem('mpr_token'));
@@ -98,6 +64,9 @@ export default function App() {
   const [adminNavRequest, setAdminNavRequest] = useState<AdminNavRequest | null>(null);
   // GlobalSidebar's "Dashboard" item — see DashboardNavRequest in types.ts.
   const [dashboardNavRequest, setDashboardNavRequest] = useState<DashboardNavRequest | null>(null);
+  // GlobalSidebar's "Leave Application" item (and Navbar's AlertsBell) — see
+  // LeaveNavRequest in types.ts.
+  const [leaveNavRequest, setLeaveNavRequest] = useState<LeaveNavRequest | null>(null);
   // AdminPanel's own activeTab, reported live via onActiveTabChange (see
   // AdminPanel.tsx) — used below to tell GlobalSidebar which item is
   // actually on screen right now, so it can show a "you are here" highlight
@@ -175,12 +144,23 @@ export default function App() {
   // isn't persisted across a reload — reopening Chat re-syncs instantly from
   // the server, so there's nothing worth restoring a stale "was open" flag for.
   const [showChat, setShowChat] = useState(false);
+  // Docked FloatingChatButton's own popup — a New-Leave-Application-sized
+  // centered modal card (see the render block near FloatingChatButton below),
+  // kept fully separate from showChat above so Navbar's ChatBell (which still
+  // opens Chat in a new browser tab on web, or takes over the whole screen on
+  // native) is completely unaffected by this.
+  const [showChatPopup, setShowChatPopup] = useState(false);
   // Set when a Chat push notification is tapped (see initPushNotifications
   // below) so ChatPanel opens straight to that conversation instead of just
   // landing on the room list. Cleared once ChatPanel has consumed it (see
   // its onInitialRoomHandled prop) so re-showing Chat later doesn't keep
   // jumping back to that same old room.
   const [pendingChatRoomId, setPendingChatRoomId] = useState<number | null>(null);
+
+  // AlertsPage.tsx — opened from GlobalSidebar's "Alerts" item or the
+  // AlertsBell dropdown's "View all" footer link. Same not-persisted-across-
+  // reload reasoning as showChat above.
+  const [showAlertsPage, setShowAlertsPage] = useState(false);
 
   // Bumped right after a Personal Data photo upload succeeds (see
   // ProfilePage's onPhotoUpdated below) — passed to every avatar spot
@@ -302,6 +282,7 @@ export default function App() {
     setSelfServiceView(null);
     setShowProfilePage(false);
           setShowChat(false);
+          setShowAlertsPage(false);
   };
 
   const handleLogout = () => {
@@ -350,17 +331,29 @@ export default function App() {
     if (token) connectChatSocket(token);
   }, [token]);
 
-  // Chat push notifications — registers this device's FCM token (no-op on
-  // web / without Firebase configured, see pushNotifications.ts). Tapping a
+  // Push notifications — registers this device's FCM token (no-op on web /
+  // without Firebase configured, see pushNotifications.ts). Tapping a Chat
   // push while the app was backgrounded/closed jumps straight into that
-  // conversation via pendingChatRoomId, consumed by ChatPanel below.
+  // conversation via pendingChatRoomId, consumed by ChatPanel below. Tapping
+  // an Alerts push (any other alert type — leave decisions, conveyance
+  // claims, ...) opens the Alerts page instead, same as GlobalSidebar's own
+  // "Alerts" item.
   useEffect(() => {
     if (token) {
-      initPushNotifications(token, (roomId) => {
-        setSelfServiceView(null);
-        setShowProfilePage(false);
-        setPendingChatRoomId(roomId);
-        setShowChat(true);
+      initPushNotifications(token, {
+        onChatTap: (roomId) => {
+          setSelfServiceView(null);
+          setShowProfilePage(false);
+          setShowAlertsPage(false);
+          setPendingChatRoomId(roomId);
+          setShowChat(true);
+        },
+        onAlertTap: () => {
+          setSelfServiceView(null);
+          setShowProfilePage(false);
+          setShowChat(false);
+          setShowAlertsPage(true);
+        }
       });
     }
   }, [token]);
@@ -510,7 +503,12 @@ export default function App() {
   // back to (see AuthScreen.tsx's original version of this same check) —
   // window.history.back() itself still works fine even though the hardware
   // back button is intercepted for the exit-app-confirmation flow above.
-  const backToServerBadge = Capacitor.isNativePlatform() && typeof window !== 'undefined' && window.history.length > 1 && (
+  //
+  // Temporarily disabled (hardcoded false below) along with GlobalSidebar's
+  // SERVER_SWITCHER_ENABLED flag — "Set Server" isn't being worked on right
+  // now, so this popup (shown on both the Sign In screen and the Dashboard)
+  // is hidden too until it's picked back up.
+  const backToServerBadge = false && Capacitor.isNativePlatform() && typeof window !== 'undefined' && window.history.length > 1 && (
     <div
       className="fixed left-1/2 -translate-x-1/2 z-[90] flex items-center gap-2.5 pl-3.5 pr-2 py-2 rounded-full shadow-lg"
       style={{
@@ -541,7 +539,6 @@ export default function App() {
         {pullToRefreshIndicator}
         {pullToRefreshFullscreenLoader}
         {backToServerBadge}
-        <InsetDebugBadge />
         {showExitPrompt && (
           <div
             className="fixed left-1/2 -translate-x-1/2 z-[100] px-4 py-2.5 rounded-full text-sm font-medium text-white shadow-lg"
@@ -572,6 +569,14 @@ export default function App() {
     } else {
       window.open('/chat', '_blank', 'noopener');
     }
+  };
+
+  // Used only by the docked FloatingChatButton (bottom-right corner) — that
+  // button is explicitly meant to open Chat as a centered popup card, sized
+  // like the New Leave Application modal, rather than a full-screen takeover
+  // or a new browser tab. See showChatPopup's render block below.
+  const openChatPopup = () => {
+    setShowChatPopup(true);
   };
 
   // UserPanel's desktopActiveSection/mobileActiveSection values don't share
@@ -613,6 +618,7 @@ export default function App() {
   // Admin Panel, Chat) is the same regardless of viewport.
   const computeSidebarActiveKey = (viewport: 'mobile' | 'desktop'): string | null => {
     if (showChat) return 'chat';
+    if (showAlertsPage) return 'alerts';
     if (showProfilePage) return null;
     if (selfServiceView) return selfServiceView;
     if (isAdminView) return adminActiveTab === 'dashboard' ? 'admin_dashboard' : adminActiveTab;
@@ -637,6 +643,7 @@ export default function App() {
       setSelfServiceView(null);
       setShowProfilePage(false);
           setShowChat(false);
+          setShowAlertsPage(false);
       setViewMode('user');
       // Also reset UserPanel's own persisted section (mobile tile menu /
       // desktop tab) back to the dashboard default — see dashboardNavRequest
@@ -650,6 +657,7 @@ export default function App() {
       setSelfServiceView(null);
       setShowProfilePage(false);
           setShowChat(false);
+          setShowAlertsPage(false);
       setViewMode('user');
       setJobsNavRequest({ target, ts: Date.now() });
     },
@@ -657,6 +665,7 @@ export default function App() {
       setSelfServiceView(null);
       setShowProfilePage(false);
           setShowChat(false);
+          setShowAlertsPage(false);
       setViewMode('user');
       setClaimsNavRequest({ target, ts: Date.now() });
     },
@@ -664,6 +673,7 @@ export default function App() {
       setSelfServiceView(null);
       setShowProfilePage(false);
           setShowChat(false);
+          setShowAlertsPage(false);
       setViewMode('admin');
       setClaimsNavRequest({ target: target === 'claims' ? 'movementClaims' : 'conveyanceBill', ts: Date.now() });
     },
@@ -671,20 +681,42 @@ export default function App() {
       setSelfServiceView(null);
       setShowProfilePage(false);
           setShowChat(false);
+          setShowAlertsPage(false);
       setViewMode('admin');
       setAdminNavRequest({ target, ts: Date.now() });
     },
     onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'myLeave' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory') => {
       setShowProfilePage(false);
           setShowChat(false);
+          setShowAlertsPage(false);
+      if (target === 'leaveApplication') {
+        // Routes into UserPanel's own mobileActiveSection = 'leave' instead
+        // of this file's separate selfServiceView state — the SAME
+        // LeaveReviewPage.tsx the Dashboard's Leave Summary card and mobile
+        // bottom nav already open, so there's exactly one Leave Application
+        // interface regardless of entry point (see leaveNavRequest above and
+        // LeaveNavRequest in types.ts). Switches into the User Panel first,
+        // same as onGoToJobsTab/onGoToUserClaims above.
+        setSelfServiceView(null);
+        setViewMode('user');
+        setLeaveNavRequest({ ts: Date.now() });
+        return;
+      }
       setSelfServiceView(target);
     },
     onOpenProfile: () => {
       setSelfServiceView(null);
       setShowChat(false);
+      setShowAlertsPage(false);
       setShowProfilePage(true);
     },
     onOpenChat: openChat,
+    onOpenAlerts: () => {
+      setSelfServiceView(null);
+      setShowProfilePage(false);
+      setShowChat(false);
+      setShowAlertsPage(true);
+    },
   };
 
   return (
@@ -695,7 +727,6 @@ export default function App() {
       {pullToRefreshIndicator}
       {pullToRefreshFullscreenLoader}
       {backToServerBadge}
-      <InsetDebugBadge />
       <Navbar
         user={user}
         token={token || ''}
@@ -713,6 +744,7 @@ export default function App() {
                 setSelfServiceView(null);
                 setShowProfilePage(false);
           setShowChat(false);
+          setShowAlertsPage(false);
                 setViewMode(mode);
               }
             : undefined
@@ -727,6 +759,7 @@ export default function App() {
           setSelfServiceView(null);
           setShowProfilePage(false);
           setShowChat(false);
+          setShowAlertsPage(false);
           setViewMode('user');
           setDashboardNavRequest({ ts: Date.now() });
         }}
@@ -743,12 +776,14 @@ export default function App() {
           setSelfServiceView(null);
           setShowProfilePage(false);
           setShowChat(false);
+          setShowAlertsPage(false);
           setClaimsNavRequest({ target: 'movementClaims', ts: Date.now() });
         }}
         onGoToConveyanceBillClaim={() => {
           setSelfServiceView(null);
           setShowProfilePage(false);
           setShowChat(false);
+          setShowAlertsPage(false);
           setClaimsNavRequest({ target: 'conveyanceBill', ts: Date.now() });
         }}
         onGoToJobsTab={(target) => {
@@ -760,6 +795,7 @@ export default function App() {
           setSelfServiceView(null);
           setShowProfilePage(false);
           setShowChat(false);
+          setShowAlertsPage(false);
           if (canSwitchPanels) setViewMode('user');
           setJobsNavRequest({ target, ts: Date.now() });
         }}
@@ -771,6 +807,7 @@ export default function App() {
           setSelfServiceView(null);
           setShowProfilePage(false);
           setShowChat(false);
+          setShowAlertsPage(false);
           if (canSwitchPanels) setViewMode('admin');
           setAdminNavRequest({ target, ts: Date.now() });
         }}
@@ -778,6 +815,7 @@ export default function App() {
           setSelfServiceView(null);
           setShowProfilePage(false);
           setShowChat(false);
+          setShowAlertsPage(false);
           if (canSwitchPanels) setViewMode('admin');
           setAdminNavRequest({ target, ts: Date.now() });
         }}
@@ -785,22 +823,26 @@ export default function App() {
           setSelfServiceView(null);
           setShowProfilePage(false);
           setShowChat(false);
+          setShowAlertsPage(false);
           if (canSwitchPanels) setViewMode('admin');
           setAdminNavRequest({ target, ts: Date.now() });
         }}
         onGoToSelfServiceTab={(target) => {
           setShowProfilePage(false);
           setShowChat(false);
+          setShowAlertsPage(false);
           setSelfServiceView(target);
         }}
         onOpenMobileMenu={() => setGlobalSidebarOpen(true)}
         onOpenProfile={() => {
           setSelfServiceView(null);
           setShowChat(false);
+          setShowAlertsPage(false);
           setShowProfilePage(true);
         }}
         onOpenChat={openChat}
         isChatOpen={showChat}
+        onOpenAlerts={sidebarNavProps.onOpenAlerts}
       />
 
       {/* Mobile-only overlay drawer (see Navbar.tsx's md:hidden hamburger) —
@@ -838,6 +880,15 @@ export default function App() {
             initialRoomId={pendingChatRoomId}
             onInitialRoomHandled={() => setPendingChatRoomId(null)}
           />
+        ) : showAlertsPage ? (
+          <AlertsPage
+            token={token || ''}
+            onBack={() => setShowAlertsPage(false)}
+            onOpenLeaveApplication={() => {
+              setShowAlertsPage(false);
+              sidebarNavProps.onGoToSelfServiceTab('leaveApplication');
+            }}
+          />
         ) : showProfilePage ? (
           <ProfilePage
             user={user}
@@ -858,8 +909,6 @@ export default function App() {
               });
             }}
           />
-        ) : selfServiceView === 'leaveApplication' ? (
-          <LeaveApplication token={token} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'myLeave' ? (
           <MyLeave token={token} user={user} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'leaveManagement' ? (
@@ -897,6 +946,7 @@ export default function App() {
               claimsNavRequest={claimsNavRequest}
               jobsNavRequest={jobsNavRequest}
               dashboardNavRequest={dashboardNavRequest}
+              leaveNavRequest={leaveNavRequest}
               onActiveSectionChange={setUserActiveSection}
             />
             {/* Superadmin/Admin-authored Notice popup — only shown on the plain
@@ -923,6 +973,48 @@ export default function App() {
         isOpen={isApkModalOpen}
         onClose={() => setIsApkModalOpen(false)}
       />
+
+      {/* Docked chat launcher — web only (see the component's own md:flex),
+          bottom-right, above everything else. Navbar's ChatBell up top still
+          opens the same place; this is just a second, always-visible way in.
+          Hidden while the native in-app Chat page or this button's own popup
+          is already open. */}
+      <FloatingChatButton token={token || ''} onOpenChat={openChatPopup} hidden={showChat || showChatPopup} />
+
+      {/* FloatingChatButton's popup — a centered card sized like
+          NewLeaveApplicationModal (max-w-3xl, rounded-2xl, its own backdrop)
+          instead of taking over the whole screen the way showChat above
+          does. ChatPanel's own Back arrow is mobile-only (md:hidden), so
+          this needs its own close button + backdrop-click-to-close. */}
+      {showChatPopup && user && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4"
+          onClick={(e) => { if (e.target === e.currentTarget) setShowChatPopup(false); }}
+        >
+          <div
+            className="bg-white border border-slate-200 rounded-2xl max-w-3xl w-full overflow-hidden shadow-2xl flex flex-col relative"
+            style={{ height: '85vh', maxHeight: '720px' }}
+          >
+            <button
+              type="button"
+              onClick={() => setShowChatPopup(false)}
+              title="Close"
+              aria-label="Close chat"
+              className="absolute top-3 right-3 z-10 p-1.5 bg-white/90 text-slate-500 hover:text-slate-900 hover:bg-slate-100 rounded-full shadow transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
+            <Suspense fallback={<AppLoader />}>
+              <ChatPanel
+                user={user}
+                token={token || ''}
+                onBack={() => setShowChatPopup(false)}
+                variant="modal"
+              />
+            </Suspense>
+          </div>
+        </div>
+      )}
 
       {showExitPrompt && (
         <div
