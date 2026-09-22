@@ -232,7 +232,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
   // impossible: it can never move anything outside itself.
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const messageInputRef = useRef<HTMLInputElement>(null);
+  const messageInputRef = useRef<HTMLTextAreaElement>(null);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Ref mirror of activeRoomId so the socket listeners below (registered
   // once on mount) always see the CURRENT room without needing to
@@ -609,6 +609,18 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
         .catch(() => finish());
     }
   }, [messageInput, activeRoomId, sending, replyTo, token]);
+
+  // Message box grows with its content (now a <textarea>, so Enter can make
+  // a new line instead of always sending — see the onKeyDown below) up to a
+  // cap, then scrolls internally. Re-measured on every change, including a
+  // programmatic clear back to '' after sending, which needs the height
+  // reset back to one row too.
+  useEffect(() => {
+    const el = messageInputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 128)}px`;
+  }, [messageInput]);
 
   // Shared by sendAttachment (image/file picker) and sendAudioMessage
   // (voice recording) below — both end up as a base64 body POSTed to the
@@ -1040,14 +1052,25 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                   <button type="button" onClick={() => fileInputRef.current?.click()} className="p-2 text-slate-500 hover:bg-slate-100 rounded-full shrink-0">
                     <Paperclip className="w-5 h-5" />
                   </button>
-                  <input
+                  <textarea
                     ref={messageInputRef}
-                    type="text"
                     value={messageInput}
                     onChange={(e) => handleTyping(e.target.value, e.target.selectionStart ?? e.target.value.length)}
-                    onKeyDown={(e) => e.key === 'Enter' && sendTextMessage()}
+                    onKeyDown={(e) => {
+                      // Plain Enter (and the mobile keyboard's return key,
+                      // which fires the same event) inserts a newline —
+                      // its default <textarea> behavior, left alone here.
+                      // Only an explicit Ctrl/Cmd+Enter sends, as a desktop
+                      // power-user shortcut; the Send button below is the
+                      // primary way to send on every platform.
+                      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                        e.preventDefault();
+                        sendTextMessage();
+                      }
+                    }}
                     placeholder={activeRoom.type !== 'direct' ? 'Type a message, @ to mention' : 'Type a message'}
-                    className="flex-1 py-2.5 px-4 bg-slate-100 rounded-full border-none focus:outline-none focus:ring-2 focus:ring-blue-600 text-sm"
+                    rows={1}
+                    className="flex-1 py-2.5 px-4 bg-slate-100 rounded-2xl border-none resize-none leading-5 max-h-32 overflow-y-auto focus:outline-none focus:ring-2 focus:ring-blue-600 text-sm"
                   />
                   {messageInput.trim() ? (
                     <button
