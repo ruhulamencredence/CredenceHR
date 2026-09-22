@@ -8,7 +8,7 @@ import { Capacitor } from '@capacitor/core';
 import { Geolocation } from '@capacitor/geolocation';
 import { UserCheck, Play, CheckCircle2, AlertTriangle, MapPin } from 'lucide-react';
 import { Project, AttendanceRecord } from '../types';
-import { apiUrl } from '../lib/api';
+import { apiUrl, dedupedFetchJson } from '../lib/api';
 import AttendanceMapConfirm from './AttendanceMapConfirm';
 import { ApprovalBadge } from './ApprovalBadge';
 import { Spinner } from './Spinner';
@@ -108,10 +108,11 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
     setMessage(null);
     (async () => {
       try {
-        const res = await fetch(apiUrl(`/api/attendance/status?project_id=${projectId}`), {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        if (!cancelled && res.ok) setStatus(await res.json());
+        // This card mounts twice on every Dashboard load (mobile + desktop
+        // copies, see UserPanel.tsx) — dedupedFetchJson means only one of
+        // the two actually hits the network.
+        const row = await dedupedFetchJson(apiUrl(`/api/attendance/status?project_id=${projectId}`), token);
+        if (!cancelled && row) setStatus(row);
       } catch {
         // Offline or server unreachable — leave status as-is, the buttons still work.
       } finally {
