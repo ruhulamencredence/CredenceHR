@@ -5345,10 +5345,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           )}
           <div className="overflow-x-auto">
             <table className="w-full divide-y divide-slate-200">
-              {/* Sticky under the app header (Navbar is sticky top-0 h-16 —
-                  see Navbar.tsx) so scrolling a long User list never scrolls
-                  the column headers out of view underneath it. */}
-              <thead className="sticky top-16 z-10 bg-slate-50 text-slate-500 text-[11px] uppercase tracking-wider">
+              {/* Was `sticky top-16 z-10` (to keep column headers visible
+                  while scrolling a long User list, under Navbar's own
+                  sticky top-0 h-16) — removed: `position: sticky` on a
+                  <thead> inside a plain (non-scrolling-container) table
+                  doesn't reliably reserve its own space against the
+                  <tbody> that follows it, so once stuck it painted directly
+                  on top of the table's very first row, hiding it entirely
+                  behind this opaque background (most visible with a
+                  search narrowed to exactly one result — the row was still
+                  there, just invisible underneath the header). A plain
+                  static header has no such conflict. */}
+              <thead className="bg-slate-50 text-slate-500 text-[11px] uppercase tracking-wider">
                 <tr>
                   <th className="w-24 px-2.5 py-2 text-left">Name</th>
                   <th className="w-28 px-2.5 py-2 text-left">Login ID</th>
