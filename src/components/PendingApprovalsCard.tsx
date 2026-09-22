@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { ShieldCheck, CheckCircle2, XCircle, AlertCircle } from 'lucide-react';
-import { apiUrl } from '../lib/api';
+import { apiUrl, dedupedFetchJson } from '../lib/api';
 import { Spinner } from './Spinner';
 
 // One row from GET /api/my-approvals — a trimmed-down ApprovalRequest, just
@@ -60,8 +60,11 @@ export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ toke
 
   const load = async () => {
     try {
-      const res = await fetch(apiUrl('/api/my-approvals'), { headers: { Authorization: `Bearer ${token}` } });
-      if (res.ok) setItems(await res.json());
+      // This card mounts twice on every Dashboard load (mobile + desktop
+      // copies, see UserPanel.tsx) — dedupedFetchJson means only one of the
+      // two actually hits the network.
+      const rows = await dedupedFetchJson(apiUrl('/api/my-approvals'), token);
+      if (rows) setItems(rows);
     } catch {
       // Offline/unreachable — card just stays with whatever it already had.
     } finally {
