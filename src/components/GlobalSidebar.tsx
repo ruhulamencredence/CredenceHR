@@ -396,7 +396,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // (from the dissolved Organization group) and every item from the
   // dissolved Claims/Attendance groups.
   const hrGroup: NavItem[] = [
-    { key: 'approvals', label: 'Approvals', icon: ShieldCheck, onClick: () => onGoToAdminModule('approvals') },
+    { key: 'approvals', label: 'Approval Chain', icon: ShieldCheck, onClick: () => onGoToAdminModule('approvals') },
     { key: 'notices', label: 'Notices', icon: Bell, onClick: () => onGoToAdminModule('notices') },
     { key: 'holidays', label: 'Holidays', icon: Calendar, onClick: () => onGoToAdminModule('holidays') },
     // Read-only "who applied for Leave" report, gated by its own
@@ -891,7 +891,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
           {(collapsed || selfServiceOpen) && (
             <>
               {renderGroup(jobEntryGroup, 'Job Entry', Briefcase, jobEntryOpen, setJobEntryOpen)}
-              {renderNestedGroup(hrmSubGroups, 'HRM', Users2, hrmOpen, setHrmOpen, hrmSubOpenKeys, toggleHrmSub)}
+              {renderNestedGroup(hrmSubGroups, 'My HR', Users2, hrmOpen, setHrmOpen, hrmSubOpenKeys, toggleHrmSub)}
               {selfServiceItems.map(renderItem)}
             </>
           )}
@@ -914,7 +914,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
               {adminDashboardItem && renderItem(adminDashboardItem)}
 
               {renderGroup(reportsGroup, 'PEPM Manage', BarChart3, reportsOpen, setReportsOpen)}
-              {renderNestedGroup(hrSubGroups, 'HR', ShieldCheck, hrOpen, setHrOpen, hrSubOpenKeys, toggleHrSub, hrGroup)}
+              {renderNestedGroup(hrSubGroups, 'HRM', ShieldCheck, hrOpen, setHrOpen, hrSubOpenKeys, toggleHrSub, hrGroup)}
               {renderGroup(misGroup, 'MIS', Server, misOpen, setMisOpen)}
 
               {adminFlatItems.map(renderItem)}
