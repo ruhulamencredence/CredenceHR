@@ -350,7 +350,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       // The reliever query is similarly scoped directly in SQL instead of
       // pulling every Leave Application ever filed — see the old version's
       // comment (now below) on why this exists.
-      const [pendingRequests, templateStepApproverRows, chain, relieverRows] = await Promise.all([
+      const [pendingRequests, templateStepApproverRows, chain, relieverRows, allClearanceItems, allExitRequests] = await Promise.all([
         queryDB("SELECT * FROM approval_requests WHERE status = 'pending' ORDER BY id ASC"),
         queryDB(
           `SELECT s.template_id, s.step_order, sa.user_id
@@ -361,7 +361,21 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
         queryDB(
           "SELECT * FROM leave_applications WHERE reliever_id = ? AND reliever_status = 'pending' AND status = 'pending'",
           [myId]
-        )
+        ),
+        // Exit/Offboarding clearance — same "own personal queue, no
+        // approval_chain_steps row" shape as the reliever workflow above:
+        // ExitOffboardingRoutes.ts stamps a department's currently-assigned
+        // approver directly onto exit_clearance_items.approver_user_id at
+        // creation time (see that file), so this is a plain scoped lookup,
+        // not a chain/template walk. Full-table SELECTs, filtered in JS
+        // below — ExitOffboardingRoutes.ts's own top comment already
+        // establishes that style for this data ("every write route here
+        // only ever does WHERE id = ? in SQL, everything else filtered/
+        // joined in JS"), and it's the only form the in-memory fallback DB's
+        // generic-table simulator actually understands (it pattern-matches
+        // `SELECT * FROM <table>` verbatim, not an arbitrary WHERE clause).
+        queryDB("SELECT * FROM exit_clearance_items"),
+        queryDB("SELECT * FROM exit_requests")
       ]);
       const templateStepApproverIds = new Map<string, number[]>();
       for (const r of templateStepApproverRows) {
@@ -400,6 +414,16 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       // Application ever filed and filtering in JS.)
       const relieverItems = relieverRows;
 
+      // Exit clearance items — this account's own not-yet-cleared items
+      // whose exit request has actually reached 'clearance' (HR's own
+      // initial 'pending' review doesn't route to department heads yet).
+      const clearanceExitById = new Map<number, any>(
+        allExitRequests.filter((er: any) => er.status === "clearance").map((er: any) => [Number(er.id), er])
+      );
+      const clearanceItems = allClearanceItems.filter(
+        (ci: any) => Number(ci.approver_user_id) === myId && !Number(ci.is_cleared) && clearanceExitById.has(Number(ci.exit_id))
+      );
+
       // Phase 2 — only the specific user_claims/attendance_corrections/
       // leave_applications/projects/users rows `mine` and relieverItems
       // actually reference, instead of every row in each of those tables
@@ -414,7 +438,11 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
         .map((r: any) => Number(r.source_id));
       const leaveApplicationIds = mine.filter((r: any) => r.source_type === "leave_application").map((r: any) => Number(r.source_id));
       const requestedByIds = Array.from(
-        new Set([...mine.map((r: any) => Number(r.requested_by)), ...relieverItems.map((la: any) => Number(la.user_id))])
+        new Set([
+          ...mine.map((r: any) => Number(r.requested_by)),
+          ...relieverItems.map((la: any) => Number(la.user_id)),
+          ...clearanceItems.map((ci: any) => Number(clearanceExitById.get(Number(ci.exit_id))!.user_id))
+        ])
       );
 
       const fetchByIds = (table: string, ids: number[], columns = "*") =>
@@ -495,6 +523,21 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
             current_step: null,
             total_steps: null,
             created_at: la.created_at
+          };
+        }),
+        ...clearanceItems.map((ci: any) => {
+          const er = clearanceExitById.get(Number(ci.exit_id))!;
+          return {
+            id: ci.id,
+            source_type: "exit_clearance",
+            source_id: ci.id,
+            source_label: `${ci.department} Clearance — ${ci.item_label}`,
+            source_amount: null,
+            requested_by: er.user_id,
+            requested_by_name: requesterMap.get(Number(er.user_id))?.name || null,
+            current_step: null,
+            total_steps: null,
+            created_at: er.created_at
           };
         })
       ];
@@ -584,7 +627,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
     if (!Array.isArray(steps) || steps.length === 0) {
       throw new Error("A template needs at least one Layer/Step.");
     }
-    const allUsers = await queryDB("SELECT id FROM users");
+    const allUsers = await queryDB("SELECT * FROM users");
     const validUserIds = new Set<number>(allUsers.map((u: any) => Number(u.id)));
     const cleaned: { approver_user_ids: number[] }[] = [];
     steps.forEach((step: any, idx: number) => {

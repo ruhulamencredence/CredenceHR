@@ -16,6 +16,7 @@
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Capacitor } from '@capacitor/core';
+import { VoiceRecorder } from 'capacitor-voice-recorder';
 import {
   ArrowLeft, Search, Plus, X, Send, Paperclip, Check, CheckCheck,
   Users, UserPlus, Shield, LogOut, Trash2, MessageSquare, Link as LinkIcon, Mic
@@ -190,11 +191,19 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
   // the most recent unclosed "@" before the cursor, or null when not
   // currently mid-mention. See handleTyping/insertMention below.
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
-  // Voice message recording — MediaRecorder over getUserMedia({audio:true}).
-  // Requires RECORD_AUDIO in AndroidManifest.xml (Capacitor's default
-  // WebChromeClient then handles the runtime permission prompt itself, no
-  // custom native code needed). Falls back to a plain alert() if denied/
-  // unavailable — text/image/file messages are unaffected either way.
+  // Voice message recording. On the native Android app this goes through
+  // the capacitor-voice-recorder plugin (native mic APIs) rather than the
+  // browser's getUserMedia — the WebView here loads the app over plain
+  // http:// (see capacitor.config.ts's server.url), and getUserMedia is
+  // gated behind a secure-context check (https:// or localhost) that a
+  // plain LAN/IP http:// origin never satisfies, so it always failed with a
+  // generic "no permission" error regardless of what AndroidManifest.xml
+  // declared. The native plugin talks to Android's mic APIs directly and
+  // isn't subject to that browser restriction. getUserMedia + MediaRecorder
+  // is kept as the path for the web build (desktop/mobile browsers, usually
+  // served over a real https:// domain where the secure-context check
+  // passes fine). Falls back to a plain alert() if denied/unavailable
+  // either way — text/image/file messages are unaffected.
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -652,7 +661,11 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
         });
         if (res.ok) {
           const message: ChatMessage = await res.json();
-          setMessages((prev) => [...prev, message]);
+          // The server also broadcasts this new message over the socket's
+          // 'receive_message' event (see the onReceive handler above) to
+          // every room member, sender included — whichever of the two
+          // arrives second needs to no-op instead of adding a duplicate.
+          setMessages((prev) => (prev.some((m) => m.id === message.id) ? prev : [...prev, message]));
         }
       } catch {
         alert('Could not send — check your connection and try again.');
@@ -673,17 +686,51 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
   );
 
   const sendAudioMessage = useCallback(
-    (blob: Blob) =>
-      uploadAttachmentMessage({
+    (blob: Blob) => {
+      // Native recordings come back as audio/aac; web recordings as
+      // audio/webm — match the filename extension to whichever this is so
+      // it at least previews sensibly if ever downloaded/opened directly.
+      const ext = blob.type.includes('aac') ? 'aac' : 'webm';
+      return uploadAttachmentMessage({
         blob,
         messageType: 'audio',
-        filename: 'voice-message.webm',
+        filename: `voice-message.${ext}`,
         mimetype: blob.type || 'audio/webm'
-      }),
+      });
+    },
     [uploadAttachmentMessage]
   );
 
+  // Converts the plugin's base64 recording (no data: prefix) into a Blob,
+  // the same shape sendAudioMessage/uploadAttachmentMessage already expect
+  // from the web MediaRecorder path.
+  function base64ToBlob(base64: string, mimeType: string): Blob {
+    const byteChars = atob(base64);
+    const bytes = new Uint8Array(byteChars.length);
+    for (let i = 0; i < byteChars.length; i++) bytes[i] = byteChars.charCodeAt(i);
+    return new Blob([bytes], { type: mimeType });
+  }
+
   const startRecording = useCallback(async () => {
+    if (Capacitor.isNativePlatform()) {
+      try {
+        const { value: canRecord } = await VoiceRecorder.canDeviceVoiceRecord();
+        if (!canRecord) throw new Error('Device cannot record audio');
+        let { value: hasPermission } = await VoiceRecorder.hasAudioRecordingPermission();
+        if (!hasPermission) {
+          ({ value: hasPermission } = await VoiceRecorder.requestAudioRecordingPermission());
+        }
+        if (!hasPermission) throw new Error('Microphone permission denied');
+        await VoiceRecorder.startRecording();
+        setIsRecording(true);
+        setRecordingSeconds(0);
+        recordingTimerRef.current = setInterval(() => setRecordingSeconds((s) => s + 1), 1000);
+      } catch {
+        alert('Could not access the microphone — check that this app has microphone permission.');
+      }
+      return;
+    }
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       recordingStreamRef.current = stream;
@@ -706,6 +753,27 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
   // send=false discards the recording (mic X button); send=true uploads it.
   const stopRecording = useCallback(
     (send: boolean) => {
+      if (Capacitor.isNativePlatform()) {
+        if (recordingTimerRef.current) {
+          clearInterval(recordingTimerRef.current);
+          recordingTimerRef.current = null;
+        }
+        setIsRecording(false);
+        void (async () => {
+          try {
+            const result = await VoiceRecorder.stopRecording();
+            if (send && result.value?.recordDataBase64) {
+              const blob = base64ToBlob(result.value.recordDataBase64, result.value.mimeType || 'audio/aac');
+              void sendAudioMessage(blob);
+            }
+          } catch {
+            // Discarded (send=false) or nothing was actually recorded —
+            // nothing to send either way.
+          }
+        })();
+        return;
+      }
+
       const recorder = mediaRecorderRef.current;
       if (!recorder) return;
       recorder.onstop = () => {
@@ -734,6 +802,11 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
     return () => {
       recordingStreamRef.current?.getTracks().forEach((t) => t.stop());
       if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+      if (Capacitor.isNativePlatform()) {
+        VoiceRecorder.stopRecording().catch(() => {
+          // Nothing was recording — expected the vast majority of the time.
+        });
+      }
     };
   }, []);
 

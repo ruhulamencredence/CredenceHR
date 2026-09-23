@@ -84,20 +84,30 @@ export function registerDepartmentsAndBranchesRoutes(app: Express, deps: Departm
     return { lat, lng, label, radius };
   }
 
+  // Which Holiday Calendar (Admin Panel -> Holidays) applies to every
+  // Employee at this Branch — 'head_office' unless the request explicitly
+  // says 'project_site', matching the branches.branch_type column's own
+  // default.
+  function parseBranchType(body: any): "head_office" | "project_site" {
+    return body.branch_type === "project_site" ? "project_site" : "head_office";
+  }
+
   app.post("/api/branches", authenticateToken, requireAdmin, requireModule("branches"), async (req: any, res) => {
     try {
       const { branch_name } = req.body;
       if (!branch_name) return res.status(400).json({ error: "Branch name is required" });
       const location = parseBranchLocation(req.body);
       if ("error" in location) return res.status(400).json({ error: location.error });
+      const branchType = parseBranchType(req.body);
 
       const result = await queryDB(
-        "INSERT INTO branches (branch_name, location_lat, location_lng, location_label, location_radius, created_by) VALUES (?, ?, ?, ?, ?, ?)",
-        [branch_name.trim(), location.lat, location.lng, location.label, location.radius, req.user.id]
+        "INSERT INTO branches (branch_name, branch_type, location_lat, location_lng, location_label, location_radius, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [branch_name.trim(), branchType, location.lat, location.lng, location.label, location.radius, req.user.id]
       );
       res.json({
         id: result.insertId,
         branch_name: branch_name.trim(),
+        branch_type: branchType,
         location_lat: location.lat,
         location_lng: location.lng,
         location_label: location.label,
@@ -118,10 +128,11 @@ export function registerDepartmentsAndBranchesRoutes(app: Express, deps: Departm
       if (!branch_name) return res.status(400).json({ error: "Branch name is required" });
       const location = parseBranchLocation(req.body);
       if ("error" in location) return res.status(400).json({ error: location.error });
+      const branchType = parseBranchType(req.body);
 
       await queryDB(
-        "UPDATE branches SET branch_name = ?, location_lat = ?, location_lng = ?, location_label = ?, location_radius = ? WHERE id = ?",
-        [branch_name.trim(), location.lat, location.lng, location.label, location.radius, id]
+        "UPDATE branches SET branch_name = ?, branch_type = ?, location_lat = ?, location_lng = ?, location_label = ?, location_radius = ? WHERE id = ?",
+        [branch_name.trim(), branchType, location.lat, location.lng, location.label, location.radius, id]
       );
       res.json({ success: true });
     } catch (err: any) {

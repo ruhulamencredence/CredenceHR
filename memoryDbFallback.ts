@@ -58,6 +58,26 @@ export const memoryDb = {
   // than bespoke per-query handlers (see that function's own comment).
   exitRequests: [] as any[],
   exitClearanceItems: [] as any[],
+  // Branches (Admin Panel -> Branches) — never had ANY memory-fallback
+  // support before (the table itself had no self-healing migration either,
+  // until now — see the branches CREATE TABLE comment in server.ts).
+  branches: [] as any[],
+  // Holiday Calendar (Admin Panel -> Holidays) — head_office/project_site
+  // split, see holidayRoutes.ts. All routes there fetch the whole table and
+  // filter in JS rather than relying on WHERE/BETWEEN in SQL, so the plain
+  // generic-table handlers below (full SELECT *, id-based UPDATE/DELETE,
+  // fully-parameterized INSERT) are enough — no bespoke handler needed.
+  holidayCalendar: [] as any[],
+  // Pre-seeded the same way ensureExitOffboardingSchema's INSERT IGNORE does
+  // against real MySQL — the 4 fixed clearance departments, all starting
+  // unassigned, so ExitOffboardingPanel's "Clearance Approvers" dropdowns
+  // have something to render in dev/in-memory mode too.
+  exitClearanceApprovers: [
+    { id: 1, department: "IT", approver_user_id: null },
+    { id: 2, department: "Finance", approver_user_id: null },
+    { id: 3, department: "Admin", approver_user_id: null },
+    { id: 4, department: "HR", approver_user_id: null }
+  ] as any[],
   finalSettlements: [] as any[],
   performanceCycles: [] as any[],
   performanceGoals: [] as any[],
@@ -145,7 +165,10 @@ function simulateGenericTable(table: string, store: any[], sql: string, lowerSql
 // point) always takes priority.
 const GENERIC_TABLES: [string, any[]][] = [
   ["exit_clearance_items", memoryDb.exitClearanceItems],
+  ["exit_clearance_approvers", memoryDb.exitClearanceApprovers],
   ["exit_requests", memoryDb.exitRequests],
+  ["branches", memoryDb.branches],
+  ["holiday_calendar", memoryDb.holidayCalendar],
   ["final_settlements", memoryDb.finalSettlements],
   ["performance_cycles", memoryDb.performanceCycles],
   ["performance_goals", memoryDb.performanceGoals],

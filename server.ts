@@ -11,7 +11,7 @@ import { createServer as createViteServer } from "vite";
 import { syncAllZkDevices, syncZkDevice, startZkSyncSchedule } from "./zkSync";
 import { resolveMinLeadDays, addDaysToDateStr, DeliveryConditionType } from "./deliveryDateConditions";
 import { registerProfileRoutes } from "./profileRoutes";
-import { registerHolidayRoutes, ensureHolidayCalendarSchema, getHolidayMap } from "./holidayRoutes";
+import { registerHolidayRoutes, ensureHolidayCalendarSchema } from "./holidayRoutes";
 import { registerAlertRoutes, ensureAlertsSchema, createAlert } from "./Alerts";
 import { registerUserManagementRoutes } from "./UserManagement";
 import { registerConveyanceBillClaimRoutes } from "./ConveyanceBillClaimRoutes";
@@ -1261,6 +1261,49 @@ async function ensureSchemaMigrations() {
   } catch (err: any) {
     console.warn("⚠️ Could not ensure departments table exists: " + err.message);
   }
+  // Branches (Admin Panel -> Branches, its own AdminModuleKey/module
+  // permission — see DepartmentsAndBranches.ts) — a GPS-pinned site, kept
+  // separate from Projects since Projects also back MPR Entries, Bulk Add
+  // Users logins and Budget/Job reports. This table's own CREATE TABLE lived
+  // only in schema.sql (a static reference file, not auto-run) until now —
+  // no self-healing migration ever created it for a database that was
+  // bootstrapped purely from this file's own migrations, which would leave
+  // DepartmentsAndBranches.ts's /api/branches routes erroring against a
+  // table that never existed. Matches schema.sql's definition, plus
+  // branch_type below (new).
+  try {
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS branches (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        branch_name VARCHAR(150) UNIQUE NOT NULL,
+        created_by INT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        location_lat DECIMAL(10, 7) NULL,
+        location_lng DECIMAL(10, 7) NULL,
+        location_label VARCHAR(255) NULL,
+        location_radius INT NULL,
+        FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+      )
+    `);
+  } catch (err: any) {
+    console.warn("⚠️ Could not ensure branches table exists: " + err.message);
+  }
+  // branch_type — which Holiday Calendar (Admin Panel -> Holidays) applies to
+  // every Employee at this Branch: 'head_office' or 'project_site'. Added
+  // after the table itself so ER_DUP_FIELDNAME below just means "already
+  // has it" on a database that already had `branches` (from schema.sql)
+  // before this column existed. Defaults to 'project_site' — the old,
+  // single, undifferentiated calendar's dates get copied into BOTH groups
+  // (see the holiday_calendar migration further down), so which default a
+  // not-yet-classified Branch gets doesn't silently lose anyone's holidays;
+  // an Admin can reclassify any Branch afterwards.
+  try {
+    await dbPool.query(`ALTER TABLE branches ADD COLUMN branch_type ENUM('head_office', 'project_site') NOT NULL DEFAULT 'project_site'`);
+  } catch (err: any) {
+    if (err.code !== "ER_DUP_FIELDNAME") {
+      console.warn("⚠️ Could not add branches.branch_type column: " + err.message);
+    }
+  }
   // "Movement Claims" — a free-form (not tied to a fixed Project geofence) point A
   // -> point B travel record: a User checks in with a Purpose (why/where they're
   // heading out for office work) then later checks out once they get there/finish.
@@ -1984,6 +2027,46 @@ async function ensureSchemaMigrations() {
     console.warn("⚠️ Could not migrate free-text all_employees.department values into the departments table: " + err.message);
   }
 
+  // Links an Employee Directory row to its structured Branch (above) — same
+  // "self-healing FK column" pattern as department_id just above, and the
+  // same reason it's needed: which Holiday Calendar (head_office vs
+  // project_site) applies to this Employee is driven entirely by their
+  // Branch's branch_type (see getEmployeeBranchTypeMap in holidayRoutes.ts),
+  // so every Employee needs a real link to a Branch row, not just the old
+  // free-text all_employees.branch string.
+  try {
+    await dbPool.query(`ALTER TABLE all_employees ADD COLUMN branch_id INT NULL`);
+    await dbPool.query(`ALTER TABLE all_employees ADD FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE SET NULL`);
+  } catch (err: any) {
+    if (err.code !== "ER_DUP_FIELDNAME" && err.code !== "ER_DUP_KEYNAME" && err.code !== "ER_FK_DUP_NAME") {
+      console.warn("⚠️ Could not add all_employees.branch_id column: " + err.message);
+    }
+  }
+
+  // One-time-per-value migration: seed `branches` from any distinct legacy
+  // free-text all_employees.branch values that don't have a matching Branch
+  // row yet, then backfill branch_id for every directory row still missing
+  // it — same shape as the department_id backfill above. A branch created
+  // this way (rather than explicitly in Admin Panel -> Branches) has no GPS
+  // pin yet and defaults to branch_type='project_site' (the column default);
+  // an Admin can reclassify it or add a location afterwards.
+  try {
+    await dbPool.query(`
+      INSERT INTO branches (branch_name)
+      SELECT DISTINCT TRIM(e.branch) FROM all_employees e
+      WHERE e.branch IS NOT NULL AND TRIM(e.branch) <> ''
+        AND NOT EXISTS (SELECT 1 FROM branches b WHERE b.branch_name = TRIM(e.branch))
+    `);
+    await dbPool.query(`
+      UPDATE all_employees e
+      JOIN branches b ON b.branch_name = TRIM(e.branch)
+      SET e.branch_id = b.id
+      WHERE e.branch_id IS NULL AND e.branch IS NOT NULL AND TRIM(e.branch) <> ''
+    `);
+  } catch (err: any) {
+    console.warn("⚠️ Could not migrate free-text all_employees.branch values into the branches table: " + err.message);
+  }
+
   // Employee Info / Status / Contact tab columns (Admin Panel -> Employees ->
   // Edit) added after the original all_employees table — self-healing for any
   // database created before these existed, same ER_DUP_FIELDNAME-ignoring
@@ -2094,7 +2177,10 @@ const MODULE_LAYER_KEY_SETS: Record<string, readonly string[]> = {
 // is_foreigner, which is 0/1.
 const EMPLOYEE_TEXT_FIELDS = [
   "middle_name", "gender", "nid_ssn", "nationality", "marital_status", "blood_group", "religion",
-  "division", "branch", "unit", "job_status", "job_base", "review_month", "employment_category",
+  // "branch" pulled out — like "department" before it, it's now a
+  // structured column (branch/branch_id, resolved by resolveEmployeeBranch)
+  // instead of a generic free-text ext field. See that function's comment.
+  "division", "unit", "job_status", "job_base", "review_month", "employment_category",
   "mobile", "telephone", "personal_email",
   "present_address", "present_country", "present_state", "present_city", "present_zip",
   "permanent_address", "permanent_country", "permanent_state", "permanent_city", "permanent_zip"
@@ -2286,8 +2372,11 @@ async function resolveApprovalTemplate(employeeUserId: number, requestType: "con
     console.warn("⚠️ Could not resolve employee template assignment: " + err.message);
   }
   try {
-    const def = await queryDB("SELECT * FROM approval_templates WHERE request_type = ? AND is_default = 1 AND is_active = 1 LIMIT 1", [requestType]);
-    if (def.length > 0) return def[0];
+    const allTemplates = await queryDB("SELECT * FROM approval_templates");
+    const def = allTemplates.find(
+      (t: any) => t.request_type === requestType && Number(t.is_default) === 1 && Number(t.is_active) === 1
+    );
+    if (def) return def;
   } catch (err: any) {
     console.warn("⚠️ Could not resolve default template: " + err.message);
   }
@@ -2393,8 +2482,8 @@ async function createTemplateApprovalRequest(
   let template = await resolveApprovalTemplate(requestedBy, requestType);
   let templateSteps = 0;
   if (template) {
-    const stepCountRows = await queryDB("SELECT COUNT(*) AS cnt FROM approval_template_steps WHERE template_id = ?", [template.id]);
-    templateSteps = Number(stepCountRows[0]?.cnt || 0);
+    const allSteps = await queryDB("SELECT * FROM approval_template_steps");
+    templateSteps = allSteps.filter((s: any) => Number(s.template_id) === Number(template.id)).length;
     // A Template somehow has zero steps (Part 2's editor always requires at
     // least one, but defend against a row created some other way) — treat
     // this exactly like "no template at all" (the Supervisor gate above, if
@@ -3852,7 +3941,6 @@ async function startServer() {
     attachApprovalStatuses,
     attachAttendanceCorrectionApproval,
     getAdminModules,
-    getHolidayMap,
     getAttendanceReportDeptScope
   });
 
@@ -4599,6 +4687,11 @@ async function startServer() {
             // targeting, Attendance Reports, this panel's own search) that
             // never learned about department_id.
             department_id: e.department_id || null,
+            // Same "structured link, free-text `branch` above stays a plain
+            // mirror for existing readers" reasoning as department_id — see
+            // resolveEmployeeBranch's own comment.
+            branch: e.branch || null,
+            branch_id: e.branch_id || null,
             email: e.email || null,
             phone: e.phone || null,
             is_active: !!Number(e.is_active),
@@ -4659,6 +4752,23 @@ async function startServer() {
     return { department_id: null, department_name: legacyText };
   }
 
+  // Exact same shape as resolveEmployeeDepartment above, for Branch (Admin
+  // Panel -> Branches — which of an Employee's own Holiday Calendars, Head
+  // Office or Project site, applies to them is driven entirely by their
+  // Branch's branch_type, see getEmployeeBranchTypeMap in holidayRoutes.ts).
+  // `branch` is kept in sync with the resolved Branch's own name (mirrored,
+  // not dropped) for every existing reader that only ever knew the free-text
+  // column — same reasoning as department/department_id.
+  async function resolveEmployeeBranch(body: any): Promise<{ branch_id: number | null; branch_name: string | null }> {
+    const branchId = body.branch_id ? Number(body.branch_id) : null;
+    if (branchId) {
+      const rows = await queryDB("SELECT * FROM branches WHERE id = ?", [branchId]);
+      if (rows.length > 0) return { branch_id: Number(rows[0].id), branch_name: rows[0].branch_name };
+    }
+    const legacyText = body.branch && String(body.branch).trim() ? String(body.branch).trim() : null;
+    return { branch_id: null, branch_name: legacyText };
+  }
+
   // create_login (optional): when true, a users row is created in the SAME
   // request as the all_employees row and linked via all_employees.user_id —
   // this is how "adding an Employee" can also make them a User with their own
@@ -4684,6 +4794,7 @@ async function startServer() {
     try {
       const { employee_id, name, designation, department, department_id, email, phone, is_active, create_login, login_email, login_username, login_password, login_project_ids, login_module_keys } = req.body;
       if (!name || !String(name).trim()) return res.status(400).json({ error: "Name is required" });
+      const branch = await resolveEmployeeBranch(req.body);
 
       let newUserId: number | null = null;
       let grantedProjectIds: number[] = [];
@@ -4742,7 +4853,7 @@ async function startServer() {
       const extValues = extColumns.map((field) => normalizeEmployeeExtValue(field, req.body[field]));
       const dept = await resolveEmployeeDepartment(req.body);
 
-      const columns = ["employee_id", "name", "designation", "department", "department_id", "email", "phone", "is_active", "user_id", ...extColumns];
+      const columns = ["employee_id", "name", "designation", "department", "department_id", "branch", "branch_id", "email", "phone", "is_active", "user_id", ...extColumns];
       const placeholders = columns.map(() => "?").join(", ");
       const values = [
         employee_id && String(employee_id).trim() ? String(employee_id).trim() : null,
@@ -4750,6 +4861,8 @@ async function startServer() {
         designation && String(designation).trim() ? String(designation).trim() : null,
         dept.department_name,
         dept.department_id,
+        branch.branch_name,
+        branch.branch_id,
         email && String(email).trim() ? String(email).trim() : null,
         phone && String(phone).trim() ? String(phone).trim() : null,
         is_active === false ? 0 : 1,
@@ -4774,11 +4887,12 @@ async function startServer() {
 
       const { employee_id, name, designation, department, department_id, email, phone, is_active } = req.body;
       if (!name || !String(name).trim()) return res.status(400).json({ error: "Name is required" });
+      const branch = await resolveEmployeeBranch(req.body);
 
       const extColumns = EMPLOYEE_EXT_FIELDS;
       const extValues = extColumns.map((field) => normalizeEmployeeExtValue(field, req.body[field]));
       const dept = await resolveEmployeeDepartment(req.body);
-      const setClause = ["employee_id = ?", "name = ?", "designation = ?", "department = ?", "department_id = ?", "email = ?", "phone = ?", "is_active = ?", ...extColumns.map((c) => `${c} = ?`)].join(", ");
+      const setClause = ["employee_id = ?", "name = ?", "designation = ?", "department = ?", "department_id = ?", "branch = ?", "branch_id = ?", "email = ?", "phone = ?", "is_active = ?", ...extColumns.map((c) => `${c} = ?`)].join(", ");
 
       await queryDB(
         `UPDATE all_employees SET ${setClause} WHERE id = ?`,
@@ -4788,6 +4902,8 @@ async function startServer() {
           designation && String(designation).trim() ? String(designation).trim() : null,
           dept.department_name,
           dept.department_id,
+          branch.branch_name,
+          branch.branch_id,
           email && String(email).trim() ? String(email).trim() : null,
           phone && String(phone).trim() ? String(phone).trim() : null,
           is_active === false ? 0 : 1,

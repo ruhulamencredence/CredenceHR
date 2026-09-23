@@ -23,6 +23,11 @@
 // threaded through as deps rather than duplicated or re-imported directly.
 
 import type { Express } from "express";
+// Imported directly rather than threaded through AttendanceRouteDeps below
+// (like every other dependency in this file is) — same as PayrollRoutes.ts
+// already does for holidayRoutes.ts's getHolidayMap, since holidayRoutes.ts
+// has no dependency back on this file.
+import { getHolidayMapsByGroup, getEmployeeBranchTypeMap } from "./holidayRoutes";
 
 interface AttendanceRouteDeps {
   authenticateToken: any;
@@ -38,7 +43,6 @@ interface AttendanceRouteDeps {
   attachApprovalStatuses: (sourceType: "attendance" | "claim", rows: any[]) => Promise<any[]>;
   attachAttendanceCorrectionApproval: (rows: any[]) => Promise<any[]>;
   getAdminModules: (userId: number) => Promise<string[]>;
-  getHolidayMap: (...args: any[]) => any;
   // Department-wise scope for the 'attendance_reports' module only — see the
   // attendance_report_department_access table comment in server.ts's
   // initDB() for the full design. null = unrestricted (every Department
@@ -63,7 +67,6 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
     attachApprovalStatuses,
     attachAttendanceCorrectionApproval,
     getAdminModules,
-    getHolidayMap,
     getAttendanceReportDeptScope
   } = deps;
 
@@ -783,7 +786,14 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
       // whoever's been granted the "holidays" module) has marked Weekend or
       // Holiday here is excluded from absent_days below entirely, whether or
       // not the person actually checked in that day.
-      const holidayMap = await getHolidayMap(queryDB, monthStart, monthEnd);
+      // Head Office and Project-site Employees can each have their own
+      // Weekend/Holiday calendar (Admin Panel -> Holidays) — both fetched
+      // once up front, then picked per-user below via branchTypeByUserId
+      // (all_employees.branch_id -> branches.branch_type), same "resolve
+      // every user's own value once, look it up per-row" shape
+      // departmentByUserId above already uses.
+      const holidayMapsByGroup = await getHolidayMapsByGroup(queryDB, monthStart, monthEnd);
+      const branchTypeByUserId = await getEmployeeBranchTypeMap(queryDB);
 
       const byUser = new Map<number, Map<string, any>>();
       for (const r of rows) {
@@ -835,6 +845,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
 
       const result = relevantUsers.map((u: any) => {
         const dayMap = byUser.get(u.id) || new Map<string, any>();
+        const holidayMap = holidayMapsByGroup[branchTypeByUserId.get(u.id) || "head_office"];
         let presentDays = 0;
         let completeDays = 0;
         let holidayDays = 0;
@@ -1016,35 +1027,43 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
             source: "office"
           };
         });
-      // Global Calendar (Admin Panel -> Holidays) — if this date itself is a
-      // Weekend/Holiday, nobody who didn't check in is counted Absent for it;
-      // they're just reported separately as on_holiday.
-      const holidayMap = await getHolidayMap(queryDB, date, date);
-      const holidayToday = holidayMap.get(date) || null;
+      // Global Calendar (Admin Panel -> Holidays) — if this date is a
+      // Weekend/Holiday for a given Employee's own group (Head Office vs
+      // Project site — see branchTypeByUserId), they're not counted Absent
+      // for it; they're just reported separately as on_holiday. Two
+      // Employees can get a different answer for the exact same date.
+      const holidayMapsByGroupToday = await getHolidayMapsByGroup(queryDB, date, date);
+      const branchTypeByUserIdToday = await getEmployeeBranchTypeMap(queryDB);
+      const isHolidayForUser = (userId: number) =>
+        !!holidayMapsByGroupToday[branchTypeByUserIdToday.get(userId) || "head_office"].get(date);
 
       const presentIds = new Set(present.map((p: any) => p.user_id));
-      const absent = holidayToday
-        ? []
-        : relevantUsers
-            .filter((u: any) => !presentIds.has(u.id))
-            .map((u: any) => ({ user_id: u.id, user_name: u.name, department: departmentByUserId.get(u.id) || null }));
-      const onHoliday = holidayToday
-        ? relevantUsers
-            .filter((u: any) => !presentIds.has(u.id))
-            .map((u: any) => ({ user_id: u.id, user_name: u.name, department: departmentByUserId.get(u.id) || null }))
-        : [];
+      const absentOrHoliday = relevantUsers
+        .filter((u: any) => !presentIds.has(u.id))
+        .map((u: any) => ({ user_id: u.id, user_name: u.name, department: departmentByUserId.get(u.id) || null, on_holiday: isHolidayForUser(u.id) }));
+      const absent = absentOrHoliday.filter((u: any) => !u.on_holiday).map(({ on_holiday, ...rest }: any) => rest);
+      const onHoliday = absentOrHoliday.filter((u: any) => u.on_holiday).map(({ on_holiday, ...rest }: any) => rest);
 
       present.sort((a: any, b: any) => a.user_name.localeCompare(b.user_name));
       absent.sort((a: any, b: any) => a.user_name.localeCompare(b.user_name));
       onHoliday.sort((a: any, b: any) => a.user_name.localeCompare(b.user_name));
+
+      // Top-level day_type/holiday_title — best-effort "is today special at
+      // all" summary for the UI's tab label (see AdminPanel.tsx), not a
+      // per-user truth (that's what the on_holiday array's own on_holiday
+      // flag per row is for, now that Head Office and Project-site
+      // Employees can each have a different answer for the same date).
+      // Prefers whichever group actually has an entry for today.
+      const holidayTodayEitherGroup =
+        holidayMapsByGroupToday.head_office.get(date) || holidayMapsByGroupToday.project_site.get(date) || null;
 
       res.json({
         date,
         present,
         absent,
         on_holiday: onHoliday,
-        day_type: holidayToday?.day_type || null,
-        holiday_title: holidayToday?.title || null,
+        day_type: holidayTodayEitherGroup?.day_type || null,
+        holiday_title: holidayTodayEitherGroup?.title || null,
         total_users: relevantUsers.length
       });
     } catch (err: any) {
