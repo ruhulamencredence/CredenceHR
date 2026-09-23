@@ -31,7 +31,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   CalendarClock, CalendarDays, Clock3, Wallet, Banknote, Package, HandCoins,
   Bell, Users, ListChecks, Gift, Fingerprint, MapPinned, FileQuestion,
-  ImageIcon, ClipboardList, ShieldAlert, UserCog, Search, ChevronLeft, ChevronRight,
+  ImageIcon, ClipboardList, ShieldAlert, UserCog, Search, ChevronLeft, ChevronRight, X,
 } from 'lucide-react';
 import { User } from '../types';
 import { apiUrl } from '../lib/api';
@@ -144,6 +144,35 @@ interface StatTile {
   icon: React.ComponentType<{ className?: string }>;
   value: string | null; // null -> "—" (no data / no permission)
   comingSoon?: boolean; // true -> this app has no feature for it yet
+  onClick?: () => void; // set -> tile opens its Department-wise breakdown
+}
+
+// One person/application counted into a stat tile — used to build the
+// Department-wise breakdown a tile's click opens (On Leave Today/Tomorrow,
+// Pending Leave Application). `department` falls back to "Unassigned" for
+// an Employee record with no Department set, so nobody counted just vanishes
+// from the breakdown.
+interface BreakdownEntry {
+  user_id: number;
+  name: string;
+  department: string;
+}
+
+interface DepartmentGroup {
+  department: string;
+  entries: BreakdownEntry[];
+}
+
+function groupByDepartment(entries: BreakdownEntry[]): DepartmentGroup[] {
+  const map = new Map<string, BreakdownEntry[]>();
+  for (const e of entries) {
+    const list = map.get(e.department) || [];
+    list.push(e);
+    map.set(e.department, list);
+  }
+  return Array.from(map.entries())
+    .map(([department, list]) => ({ department, entries: list }))
+    .sort((a, b) => b.entries.length - a.entries.length);
 }
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user }) => {
@@ -208,29 +237,77 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user }) =
   const tomorrow = todayStr(1);
   const thisMonth = todayStr(0).slice(0, 7);
 
+  // "user_id" -> Department, from the same company-wide roster the Leave
+  // Balance table already reads (employees' Department mirror column —
+  // see resolveEmployeeDepartment in server.ts). Falls back to
+  // "Unassigned" in groupByDepartment for anyone with no Department set,
+  // rather than dropping them from a breakdown silently.
+  const deptByUserId = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const e of employees || []) {
+      if (e.user_id) map.set(Number(e.user_id), e.department || 'Unassigned');
+    }
+    return map;
+  }, [employees]);
+
   // --- On Leave Today / Tomorrow / Pending Leave Application ---
-  const onLeaveTodayCount = useMemo(() => {
+  // "On Leave" here means the application has cleared its first Approval
+  // Layer (supervisor_layer_approved, from GET /api/leave-applications — see
+  // that route's comment) — not necessarily the WHOLE chain yet. Once the
+  // first reviewer (the Department Supervisor auto-layer where configured)
+  // has signed off, the person is genuinely away starting that date, however
+  // many more Layers are still pending above it, so counting only a fully
+  // 'approved' chain understated who's actually out. The Leave Calendar
+  // below uses the same signal.
+  const onLeaveTodayEntries = useMemo(() => {
     if (!leaveApplications) return null;
-    const users = new Set<number>();
+    const seen = new Set<number>();
+    const out: BreakdownEntry[] = [];
     for (const a of leaveApplications) {
-      if (a.status === 'approved' && a.start_date <= today && a.end_date >= today) users.add(Number(a.user_id));
+      if (!a.supervisor_layer_approved || a.start_date > today || a.end_date < today) continue;
+      const uid = Number(a.user_id);
+      if (seen.has(uid)) continue;
+      seen.add(uid);
+      out.push({ user_id: uid, name: a.user_name || `User #${uid}`, department: deptByUserId.get(uid) || 'Unassigned' });
     }
-    return users.size;
-  }, [leaveApplications, today]);
+    return out;
+  }, [leaveApplications, today, deptByUserId]);
 
-  const onLeaveTomorrowCount = useMemo(() => {
+  const onLeaveTomorrowEntries = useMemo(() => {
     if (!leaveApplications) return null;
-    const users = new Set<number>();
+    const seen = new Set<number>();
+    const out: BreakdownEntry[] = [];
     for (const a of leaveApplications) {
-      if (a.status === 'approved' && a.start_date <= tomorrow && a.end_date >= tomorrow) users.add(Number(a.user_id));
+      if (!a.supervisor_layer_approved || a.start_date > tomorrow || a.end_date < tomorrow) continue;
+      const uid = Number(a.user_id);
+      if (seen.has(uid)) continue;
+      seen.add(uid);
+      out.push({ user_id: uid, name: a.user_name || `User #${uid}`, department: deptByUserId.get(uid) || 'Unassigned' });
     }
-    return users.size;
-  }, [leaveApplications, tomorrow]);
+    return out;
+  }, [leaveApplications, tomorrow, deptByUserId]);
 
-  const pendingLeaveCount = useMemo(() => {
+  // Every 'pending' Leave Application (one entry per application, not
+  // deduped by user — a person can have more than one pending request), for
+  // "Pending Leave Application"'s own Department-wise breakdown.
+  const pendingLeaveEntries = useMemo(() => {
     if (!leaveApplications) return null;
-    return leaveApplications.filter((a) => a.status === 'pending').length;
-  }, [leaveApplications]);
+    return leaveApplications
+      .filter((a) => a.status === 'pending')
+      .map((a) => ({
+        user_id: Number(a.user_id),
+        name: a.user_name || `User #${a.user_id}`,
+        department: deptByUserId.get(Number(a.user_id)) || 'Unassigned'
+      }));
+  }, [leaveApplications, deptByUserId]);
+
+  const onLeaveTodayCount = onLeaveTodayEntries?.length ?? null;
+  const onLeaveTomorrowCount = onLeaveTomorrowEntries?.length ?? null;
+  const pendingLeaveCount = pendingLeaveEntries?.length ?? null;
+
+  // Which stat tile's Department-wise breakdown is currently open (On Leave
+  // Today/Tomorrow, Pending Leave Application) — null when none is.
+  const [openBreakdown, setOpenBreakdown] = useState<{ title: string; entries: BreakdownEntry[] } | null>(null);
 
   // --- Monthly Claim Amount / Monthly Disburse Amount + last-3-months chart ---
   const last3Months = useMemo(() => {
@@ -325,13 +402,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user }) =
           isExtremeDelay,
         };
       });
-    // Cross-reference today's approved leave so someone on leave shows as
-    // "Leave" instead of "Absent" — same approved-leave set the "On Leave
-    // Today" stat tile above already computes.
-    const onLeaveUserIds = new Set<number>();
-    for (const a of leaveApplications || []) {
-      if (a.status === 'approved' && a.start_date <= today && a.end_date >= today) onLeaveUserIds.add(Number(a.user_id));
-    }
+    // Cross-reference today's Leave so someone on leave shows as "Leave"
+    // instead of "Absent" — same supervisor_layer_approved set the "On Leave
+    // Today" stat tile above already computes (see its comment).
+    const onLeaveUserIds = new Set<number>(onLeaveTodayEntries?.map((e) => e.user_id) || []);
     const withLeave = rows.map((r) => {
       const e = employees.find((emp) => emp.id === r.id);
       const onLeave = e?.user_id ? onLeaveUserIds.has(Number(e.user_id)) : false;
@@ -339,7 +413,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user }) =
     });
     const q = search.trim().toLowerCase();
     return q ? withLeave.filter((r) => r.name.toLowerCase().includes(q) || r.designation.toLowerCase().includes(q)) : withLeave;
-  }, [employees, attendanceReport, latePolicy, leaveApplications, today, search]);
+  }, [employees, attendanceReport, latePolicy, leaveApplications, today, search, onLeaveTodayEntries]);
 
   // Summary badges above the Quick View table — Total/Present/Absent/Leave/
   // Delay/Extreme Delay are all real counts from the data above.
@@ -393,9 +467,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user }) =
 
   // Who's on leave which day, built entirely from leaveApplications already
   // fetched above (no extra request). Both 'approved' and 'pending' are
-  // plotted — a pending one still occupies the roster, just shown lighter.
+  // plotted — an application still stuck on its first Approval Layer is
+  // shown lighter (isLeave: false), but one that's already
+  // supervisor_layer_approved shows solid, same as a fully 'approved' one —
+  // see the On Leave Today/Tomorrow comment above for why.
   const leaveByDate = useMemo(() => {
-    const map = new Map<string, { user_id: number; name: string; status: string }[]>();
+    const map = new Map<string, { user_id: number; name: string; isLeave: boolean }[]>();
     if (!leaveApplications) return map;
     for (const a of leaveApplications) {
       if (a.status !== 'approved' && a.status !== 'pending') continue;
@@ -406,7 +483,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user }) =
       for (const cell of calGridCells) {
         if (cell.dateStr < start || cell.dateStr > end) continue;
         const list = map.get(cell.dateStr) || [];
-        list.push({ user_id: Number(a.user_id), name: a.user_name || `User #${a.user_id}`, status: a.status });
+        list.push({ user_id: Number(a.user_id), name: a.user_name || `User #${a.user_id}`, isLeave: !!a.supervisor_layer_approved });
         map.set(cell.dateStr, list);
       }
     }
@@ -420,9 +497,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user }) =
   }, [holidays]);
 
   const statTiles: StatTile[] = [
-    { key: 'leave_today', label: 'On Leave Today', icon: CalendarClock, value: onLeaveTodayCount != null ? String(onLeaveTodayCount) : null },
-    { key: 'leave_tomorrow', label: 'On Leave Tomorrow', icon: CalendarDays, value: onLeaveTomorrowCount != null ? String(onLeaveTomorrowCount) : null },
-    { key: 'pending_leave', label: 'Pending Leave Application', icon: ListChecks, value: pendingLeaveCount != null ? String(pendingLeaveCount) : null },
+    {
+      key: 'leave_today', label: 'On Leave Today', icon: CalendarClock, value: onLeaveTodayCount != null ? String(onLeaveTodayCount) : null,
+      onClick: onLeaveTodayEntries && onLeaveTodayEntries.length > 0
+        ? () => setOpenBreakdown({ title: 'On Leave Today', entries: onLeaveTodayEntries })
+        : undefined
+    },
+    {
+      key: 'leave_tomorrow', label: 'On Leave Tomorrow', icon: CalendarDays, value: onLeaveTomorrowCount != null ? String(onLeaveTomorrowCount) : null,
+      onClick: onLeaveTomorrowEntries && onLeaveTomorrowEntries.length > 0
+        ? () => setOpenBreakdown({ title: 'On Leave Tomorrow', entries: onLeaveTomorrowEntries })
+        : undefined
+    },
+    {
+      key: 'pending_leave', label: 'Pending Leave Application', icon: ListChecks, value: pendingLeaveCount != null ? String(pendingLeaveCount) : null,
+      onClick: pendingLeaveEntries && pendingLeaveEntries.length > 0
+        ? () => setOpenBreakdown({ title: 'Pending Leave Application', entries: pendingLeaveEntries })
+        : undefined
+    },
     { key: 'break_recon', label: 'Pending Break Time Recon.', icon: Clock3, value: null, comingSoon: true },
     { key: 'birthdays', label: 'Upcoming Birthdays', icon: Gift, value: null, comingSoon: true },
     { key: 'attendance_approval', label: 'Pending Attendance Approval', icon: Fingerprint, value: null, comingSoon: true },
@@ -578,7 +670,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user }) =
                 return (
                   <div
                     key={tile.key}
-                    className={`relative overflow-hidden rounded-2xl p-3.5 flex flex-col gap-1.5 backdrop-blur-xl backdrop-saturate-150 transition-all hover:-translate-y-0.5 hover:shadow-lg ${tile.comingSoon ? 'opacity-60' : ''}`}
+                    onClick={tile.onClick}
+                    role={tile.onClick ? 'button' : undefined}
+                    tabIndex={tile.onClick ? 0 : undefined}
+                    className={`relative overflow-hidden rounded-2xl p-3.5 flex flex-col gap-1.5 backdrop-blur-xl backdrop-saturate-150 transition-all hover:-translate-y-0.5 hover:shadow-lg ${tile.comingSoon ? 'opacity-60' : ''} ${tile.onClick ? 'cursor-pointer' : ''}`}
                     style={{
                       background: 'linear-gradient(135deg, rgba(255,255,255,0.55), rgba(255,255,255,0.22))',
                       border: '1px solid rgba(255,255,255,0.65)',
@@ -904,7 +999,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user }) =
                                 <span
                                   key={`${p.user_id}-${i2}`}
                                   className="w-3.5 h-3.5 rounded-full flex items-center justify-center text-[7px] font-bold text-white shrink-0"
-                                  style={{ background: avatarColorFor(p.user_id), opacity: p.status === 'pending' ? 0.5 : 1 }}
+                                  style={{ background: avatarColorFor(p.user_id), opacity: p.isLeave ? 1 : 0.5 }}
                                 >
                                   {initialsOf(p.name)[0]}
                                 </span>
@@ -941,6 +1036,60 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user }) =
             </div>
           </div>
         </>
+      )}
+
+      {/* Department-wise breakdown — opened by clicking On Leave Today/
+          Tomorrow or Pending Leave Application above. */}
+      {openBreakdown && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4"
+          onClick={() => setOpenBreakdown(null)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-md max-h-[80vh] flex flex-col overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 shrink-0">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">{openBreakdown.title}</h3>
+                <p className="text-xs text-slate-400 mt-0.5">{openBreakdown.entries.length} total &middot; by Department</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setOpenBreakdown(null)}
+                className="w-7 h-7 rounded-full flex items-center justify-center text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors"
+                aria-label="Close"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="overflow-y-auto px-5 py-4 space-y-4">
+              {groupByDepartment(openBreakdown.entries).map((g) => (
+                <div key={g.department}>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-xs font-semibold text-slate-700">{g.department}</span>
+                    <span className="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full bg-blue-600 text-white text-[11px] font-bold">
+                      {g.entries.length}
+                    </span>
+                  </div>
+                  <div className="space-y-1">
+                    {g.entries.map((e, idx) => (
+                      <div key={`${e.user_id}-${idx}`} className="flex items-center gap-2 text-xs px-2.5 py-1.5 bg-slate-50 border border-slate-100 rounded-lg">
+                        <span
+                          className="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold text-white shrink-0"
+                          style={{ background: avatarColorFor(e.user_id) }}
+                        >
+                          {initialsOf(e.name)}
+                        </span>
+                        <span className="text-slate-700 font-medium truncate">{e.name}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

@@ -92,12 +92,18 @@ export const LEAVE_MANAGE_LAYERS: { key: LeaveManageLayerKey; label: string }[] 
 // never shows as "Absent"); only accounts granted the 'holidays' module may
 // add/edit/delete entries (POST/PUT/DELETE /api/holidays).
 export type HolidayDayType = 'holiday' | 'weekend';
+// Which Employee group this calendar entry applies to — Head Office and
+// Project-site Employees can have fully independent Weekend/Holiday
+// calendars (Admin Panel -> Holidays). Driven by branches.branch_type via
+// each Employee's all_employees.branch_id.
+export type HolidayAppliesTo = 'head_office' | 'project_site';
 
 export interface HolidayEntry {
   id: number;
   entry_date: string;
   day_type: HolidayDayType;
   title: string;
+  applies_to: HolidayAppliesTo;
   created_by: number | null;
   created_at: string;
 }
@@ -141,6 +147,11 @@ export interface Employee {
   // search/filter). null = no structured Department linked yet (a legacy row,
   // or `department` was hand-typed and never matched/created one).
   department_id?: number | null;
+  // Same structured-link/free-text-mirror shape as department_id, for Branch
+  // (Admin Panel -> Branches). Which Holiday Calendar (Head Office vs
+  // Project site) applies to this Employee is driven entirely by whichever
+  // Branch this points to — see branches.branch_type.
+  branch_id?: number | null;
   email: string | null;
   phone: string | null;
   is_active: boolean;
@@ -705,6 +716,10 @@ export interface Project {
 export interface Branch {
   id: number;
   branch_name: string;
+  // Which Holiday Calendar (Admin Panel -> Holidays) applies to every
+  // Employee assigned to this Branch — see all_employees.branch_id /
+  // getEmployeeBranchTypeMap in holidayRoutes.ts.
+  branch_type: 'head_office' | 'project_site';
   created_by?: number;
   created_at?: string;
   // Site location pin set from Admin Panel -> Branches -> "Set Location on Map"

@@ -1398,6 +1398,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // Branches. Kept as its own separate set of state (not reused from Projects)
   // since the two forms/pickers can't otherwise tell which one is open.
   const [newBranchName, setNewBranchName] = useState('');
+  // Which Holiday Calendar (Admin Panel -> Holidays) applies to every
+  // Employee at this Branch — see branches.branch_type / getEmployeeBranchTypeMap.
+  const [newBranchType, setNewBranchType] = useState<'head_office' | 'project_site'>('head_office');
   const [editingBranch, setEditingBranch] = useState<Branch | null>(null);
   const [branchListSearch, setBranchListSearch] = useState('');
   const [showAllBranches, setShowAllBranches] = useState(false);
@@ -1830,6 +1833,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           branch_name: newBranchName.trim(),
+          branch_type: newBranchType,
           location_lat: branchLocation.lat,
           location_lng: branchLocation.lng,
           location_label: branchLocation.label,
@@ -1840,6 +1844,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       if (!res.ok) throw new Error(data.error || 'Failed to save branch');
 
       setNewBranchName('');
+      setNewBranchType('head_office');
       setEditingBranch(null);
       setBranchLocation({ lat: null, lng: null, label: null, radius: null });
       fetchAllData();
@@ -4454,6 +4459,38 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 </div>
                 <div>
                   <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1">
+                    Holiday Calendar Group
+                  </label>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setNewBranchType('head_office')}
+                      className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold border transition-colors ${
+                        newBranchType === 'head_office'
+                          ? 'bg-blue-600 border-blue-600 text-white'
+                          : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                      }`}
+                    >
+                      Head Office
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNewBranchType('project_site')}
+                      className={`flex-1 py-2 px-3 rounded-xl text-xs font-semibold border transition-colors ${
+                        newBranchType === 'project_site'
+                          ? 'bg-blue-600 border-blue-600 text-white'
+                          : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100'
+                      }`}
+                    >
+                      Project Site
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    Every Employee assigned to this Branch follows this group's Weekend/Holiday calendar (Admin Panel -&gt; Holidays).
+                  </p>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1">
                     Branch Location
                   </label>
                   {branchLocation.lat != null && branchLocation.lng != null ? (
@@ -4504,7 +4541,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   {editingBranch && (
                     <button
                       type="button"
-                      onClick={() => { setEditingBranch(null); setNewBranchName(''); setBranchLocation({ lat: null, lng: null, label: null, radius: null }); }}
+                      onClick={() => { setEditingBranch(null); setNewBranchName(''); setNewBranchType('head_office'); setBranchLocation({ lat: null, lng: null, label: null, radius: null }); }}
                       className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold rounded-xl border border-slate-200"
                     >
                       Cancel
@@ -4549,7 +4586,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                           <Building2 className="w-5 h-5" />
                         </div>
                         <div>
-                          <span className="font-semibold text-slate-900 text-sm block">{b.branch_name}</span>
+                          <span className="font-semibold text-slate-900 text-sm inline-flex items-center gap-1.5">
+                            {b.branch_name}
+                            <span
+                              className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full border ${
+                                b.branch_type === 'project_site'
+                                  ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                  : 'bg-blue-50 text-blue-700 border-blue-200'
+                              }`}
+                            >
+                              {b.branch_type === 'project_site' ? 'Project' : 'Head Office'}
+                            </span>
+                          </span>
                           {b.location_lat != null && b.location_lng != null && (
                             <a
                               href={`https://www.openstreetmap.org/?mlat=${b.location_lat}&mlon=${b.location_lng}#map=17/${b.location_lat}/${b.location_lng}`}
@@ -4573,6 +4621,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                           onClick={() => {
                             setEditingBranch(b);
                             setNewBranchName(b.branch_name);
+                            setNewBranchType(b.branch_type === 'project_site' ? 'project_site' : 'head_office');
                             setBranchLocation({
                               lat: b.location_lat != null ? Number(b.location_lat) : null,
                               lng: b.location_lng != null ? Number(b.location_lng) : null,

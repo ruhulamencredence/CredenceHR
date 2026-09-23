@@ -3,7 +3,7 @@ import {
   Contact, Plus, Trash2, Edit2, X, Search, Eye, EyeOff, Mail, Phone, Briefcase, Building2, KeyRound, ShieldCheck,
   FolderKanban, LayoutGrid, UserCircle2, ClipboardList, MapPin, Users2, Star, Link2, ArrowLeftRight, History, ArrowRight
 } from 'lucide-react';
-import { Employee, EmployeeSupervisor, EmployeeTransfer, User, Project, Department, AdminModuleKey, ADMIN_MODULES } from '../types';
+import { Employee, EmployeeSupervisor, EmployeeTransfer, User, Project, Department, Branch, AdminModuleKey, ADMIN_MODULES } from '../types';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
 
@@ -33,6 +33,10 @@ interface EmployeeFormState {
   // linked to — the Department dropdown writes here; department (above)
   // stays only as the legacy free-text mirror the backend fills in from it.
   department_id: number | null;
+  // The structured Branch (Admin Panel -> Branches) this Employee is linked
+  // to — the Branch dropdown writes here; branch (below) stays only as the
+  // legacy free-text mirror kept in sync when a real Branch is picked.
+  branch_id: number | null;
   email: string;
   phone: string;
   is_active: boolean;
@@ -97,6 +101,7 @@ const emptyForm: EmployeeFormState = {
   designation: '',
   department: '',
   department_id: null,
+  branch_id: null,
   email: '',
   phone: '',
   is_active: true,
@@ -211,6 +216,9 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
   // open to any signed-in account, so this loads regardless of whether this
   // account has the separate "departments" module itself.
   const [departments, setDepartments] = useState<Department[]>([]);
+  // Branch dropdown (Admin Panel -> Branches) — GET /api/branches is open to
+  // any signed-in account, same reasoning as departments above.
+  const [branches, setBranches] = useState<Branch[]>([]);
   const isSuperAdmin = user?.role === 'superadmin';
 
   const [showForm, setShowForm] = useState(false);
@@ -300,14 +308,16 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [empRes, projRes, deptRes] = await Promise.all([
+      const [empRes, projRes, deptRes, branchRes] = await Promise.all([
         fetch(apiUrl('/api/employees'), { headers: authHeaders }),
         fetch(apiUrl('/api/projects'), { headers: authHeaders }),
-        fetch(apiUrl('/api/departments'), { headers: authHeaders })
+        fetch(apiUrl('/api/departments'), { headers: authHeaders }),
+        fetch(apiUrl('/api/branches'), { headers: authHeaders })
       ]);
       if (empRes.ok) setEmployees(await empRes.json());
       if (projRes.ok) setProjects(await projRes.json());
       if (deptRes.ok) setDepartments(await deptRes.json());
+      if (branchRes.ok) setBranches(await branchRes.json());
     } catch {
       setMessage({ type: 'error', text: "Couldn't reach the server. Please try again." });
     } finally {
@@ -348,6 +358,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
       designation: e.designation || '',
       department: e.department || '',
       department_id: e.department_id ?? null,
+      branch_id: e.branch_id ?? null,
       email: e.email || '',
       phone: e.phone || '',
       is_active: e.is_active,
@@ -508,6 +519,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
         name: form.name.trim(),
         designation: form.designation.trim() || null,
         department_id: form.department_id || null,
+        branch_id: form.branch_id || null,
         email: form.email.trim() || null,
         phone: form.phone.trim() || null,
         is_active: form.is_active,
@@ -523,7 +535,6 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
         is_foreigner: form.is_foreigner,
 
         division: form.division.trim() || null,
-        branch: form.branch.trim() || null,
         unit: form.unit.trim() || null,
         status_effective_date: form.status_effective_date || null,
         job_status: form.job_status || null,
@@ -1274,7 +1285,26 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                     <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2">Division, Department &amp; Branch</p>
                     <div className="grid sm:grid-cols-2 gap-4">
                       <TextField label="Division" value={form.division} onChange={(v) => setForm((f) => ({ ...f, division: v }))} placeholder="e.g. Corporate Office" />
-                      <TextField label="Branch" value={form.branch} onChange={(v) => setForm((f) => ({ ...f, branch: v }))} placeholder="e.g. Admin Office" />
+                      <div>
+                        <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">Branch</label>
+                        <select
+                          value={form.branch_id ?? ''}
+                          onChange={(e) => setForm((f) => ({ ...f, branch_id: e.target.value ? Number(e.target.value) : null }))}
+                          className="block w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                        >
+                          <option value="">— None —</option>
+                          {branches.map((b) => (
+                            <option key={b.id} value={b.id}>
+                              {b.branch_name} ({b.branch_type === 'project_site' ? 'Project' : 'Head Office'})
+                            </option>
+                          ))}
+                        </select>
+                        {branches.length === 0 && (
+                          <p className="mt-1 text-[11px] text-slate-400">
+                            No Branches set up yet — add one from Admin Panel -&gt; Branches.
+                          </p>
+                        )}
+                      </div>
                       <TextField label="Unit" value={form.unit} onChange={(v) => setForm((f) => ({ ...f, unit: v }))} placeholder="Unit" />
                       <DateField label="Effective Date" value={form.status_effective_date} onChange={(v) => setForm((f) => ({ ...f, status_effective_date: v }))} />
                     </div>

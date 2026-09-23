@@ -247,6 +247,11 @@ export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceP
 
   const loadData = async (cancelledRef?: { cancelled: boolean }) => {
     try {
+      // Which calendar (Head Office vs Project site) applies to THIS account
+      // — fetched first since the holidays call below needs it.
+      const groupRes = await fetch(apiUrl('/api/my-holiday-group'), { headers: { Authorization: `Bearer ${token}` } });
+      const appliesTo = groupRes.ok ? (await groupRes.json())?.applies_to === 'project_site' ? 'project_site' : 'head_office' : 'head_office';
+
       const [attRes, corrRes, projRes, holRes] = await Promise.all([
         fetch(apiUrl('/api/attendance/mine'), { headers: { Authorization: `Bearer ${token}` } }),
         fetch(apiUrl('/api/attendance/corrections/mine'), { headers: { Authorization: `Bearer ${token}` } }),
@@ -257,7 +262,7 @@ export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceP
         // past corrections' status) shouldn't be limited to Projects this
         // Employee happens to be explicitly granted.
         fetch(apiUrl('/api/projects/all'), { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(apiUrl('/api/holidays'), { headers: { Authorization: `Bearer ${token}` } })
+        fetch(apiUrl(`/api/holidays?applies_to=${appliesTo}`), { headers: { Authorization: `Bearer ${token}` } })
       ]);
       if (cancelledRef?.cancelled) return;
       if (attRes.ok) setRecords(await attRes.json());
@@ -321,6 +326,11 @@ export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceP
 
   const monthDates = useMemo(() => buildMonthDates(selYear, selMonth, today), [selYear, selMonth, today]);
   const rangeDates = useMemo(() => buildRangeDates(rangeFrom, rangeTo), [rangeFrom, rangeTo]);
+  // Newest-to-oldest for display (today/last date at top) — monthDates/
+  // rangeDates themselves stay oldest-to-newest since buildRangeDates'
+  // MAX_DAYS cap and the Present/Absent counts below don't care about order.
+  const monthDatesDesc = useMemo(() => [...monthDates].reverse(), [monthDates]);
+  const rangeDatesDesc = useMemo(() => [...rangeDates].reverse(), [rangeDates]);
 
   const monthPresentCount = monthDates.filter((d) => (byDate.get(d) || []).length > 0).length;
   const monthAbsentCount = monthDates.filter((d) => (byDate.get(d) || []).length === 0 && !holidayByDate.has(d)).length;
@@ -454,7 +464,7 @@ export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceP
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      {monthDates.map((d) => (
+                      {monthDatesDesc.map((d) => (
                         <DateCard key={d} dateStr={d} records={byDate.get(d) || []} correction={correctionsByDate.get(d)} holiday={holidayByDate.get(d)} onClick={() => openDateCard(d)} />
                       ))}
                     </div>
@@ -575,7 +585,7 @@ export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceP
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      {rangeDates.map((d) => (
+                      {rangeDatesDesc.map((d) => (
                         <DateCard key={d} dateStr={d} records={byDate.get(d) || []} correction={correctionsByDate.get(d)} holiday={holidayByDate.get(d)} onClick={() => openDateCard(d)} />
                       ))}
                     </div>

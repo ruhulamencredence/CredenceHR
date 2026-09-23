@@ -21,7 +21,7 @@ interface ApproveApplicationsProps {
 // original, narrower version of this same shape.
 interface MyApprovalItem {
   id: number;
-  source_type: 'attendance' | 'claim' | 'user_claim' | 'attendance_correction' | 'leave_application' | 'leave_reliever';
+  source_type: 'attendance' | 'claim' | 'user_claim' | 'attendance_correction' | 'leave_application' | 'leave_reliever' | 'exit_clearance';
   source_id: number;
   source_label: string;
   source_amount: number | null;
@@ -55,6 +55,8 @@ const sourceTitle = (t: MyApprovalItem['source_type']) =>
     ? 'Leave Application \u2014 Reliever Review'
     : t === 'attendance'
     ? 'Remote Attendance'
+    : t === 'exit_clearance'
+    ? 'Exit Clearance'
     : 'Movement Claim';
 
 // "Self Service" -> "Approve Application" — reachable from the Navbar/Sidebar
@@ -66,12 +68,14 @@ const sourceTitle = (t: MyApprovalItem['source_type']) =>
 // Reliever can be ANY account, role='user' included. Pulls every request
 // currently waiting on this account across every workflow (Remote Attendance,
 // Conveyance Bill Claim, Timesheet Correction, Leave Application, and Leave
-// Application Reliever review) from GET /api/my-approvals and lets them
-// Approve/Reject right here. A 'leave_reliever' item is routed to its own
-// POST /api/leave-applications/:id/reliever-decision instead of the generic
-// POST /api/my-approvals/:id/act every other source_type uses, since it isn't
-// an approval_requests row yet — see the design note on GET /api/my-approvals
-// server-side.
+// Application Reliever review, and Exit/Offboarding Clearance) from GET
+// /api/my-approvals and lets them Approve/Reject right here. A
+// 'leave_reliever' item is routed to its own POST
+// /api/leave-applications/:id/reliever-decision, and an 'exit_clearance' item
+// to its own POST /api/exit-clearance-items/:id/decision, instead of the
+// generic POST /api/my-approvals/:id/act every other source_type uses, since
+// neither is an approval_requests row — see the design note on GET
+// /api/my-approvals server-side.
 export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token, onBack }) => {
   // Same isNativeApp split as LeaveManagement.tsx / LeaveApprovals.tsx: the
   // web build keeps the module-path breadcrumb + Back button, the Android
@@ -144,6 +148,8 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
       const url =
         item.source_type === 'leave_reliever'
           ? apiUrl(`/api/leave-applications/${item.id}/reliever-decision`)
+          : item.source_type === 'exit_clearance'
+          ? apiUrl(`/api/exit-clearance-items/${item.id}/decision`)
           : apiUrl(`/api/my-approvals/${item.id}/act`);
       const res = await fetch(url, {
         method: 'POST',

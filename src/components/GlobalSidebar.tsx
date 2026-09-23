@@ -53,7 +53,7 @@ interface GlobalSidebarProps {
   onGoToUserClaims: (target: 'movementClaims' | 'conveyanceBill') => void;
   // Everyday employee self-service items — not Admin-gated, shown to every
   // account regardless of role/module access.
-  onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'myLeave' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory') => void;
+  onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'myLeave' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation') => void;
   // Admin Panel's own Movement Claims / Conveyance Bill Claim review tabs —
   // separate feature from onGoToUserClaims above, gated by module_permissions
   // like every other Admin Panel module.
@@ -309,6 +309,13 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // NOT Admin-gated — a Template Layer or a Leave Application's Reliever can
   // be ANY account, so every account gets this.
   selfServiceItems.push({ key: 'approveApplications', label: 'Approve Application', icon: ShieldCheck, onClick: () => onGoToSelfServiceTab('approveApplications') });
+  // My Resignation (MyResignation.tsx) — NOT Admin-gated either: every
+  // account can submit their own resignation (POST /api/exit-requests
+  // already allows a plain account to submit for themselves, see that
+  // route's own comment), regardless of whether they hold the
+  // exit_offboarding module grant used by the management-side
+  // ExitOffboardingPanel under Admin Panel -> HR Advanced.
+  selfServiceItems.push({ key: 'resignation', label: 'My Resignation', icon: LogOut, onClick: () => onGoToSelfServiceTab('resignation') });
 
   // "Admin Dashboard" — the new HR-overview landing page (stat tiles, quick
   // view, charts, notices, leave balances). Unlike every other Admin Panel

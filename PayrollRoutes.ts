@@ -38,7 +38,7 @@
 // (Admin Panel -> Users -> Module Access), exactly like every other module.
 
 import type { Express } from "express";
-import { getHolidayMap } from "./holidayRoutes";
+import { getHolidayMap, getHolidayMapsByGroup, getEmployeeBranchTypeMap, HolidayAppliesTo } from "./holidayRoutes";
 import { isMailerConfigured, sendMail } from "./mailer";
 
 interface PayrollRouteDeps {
@@ -1439,10 +1439,18 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
     employees: any[],
     monthStart: string,
     monthEnd: string,
-    holidayMap: Map<string, any>,
+    holidayMapsByGroup: Record<HolidayAppliesTo, Map<string, any>>,
+    branchTypeByUserId: Map<number, HolidayAppliesTo>,
     policy: any,
     excludeWaivers: boolean = true
   ): Promise<{ lateDatesByEmployee: Map<number, string[]>; extremeLateDatesByEmployee: Map<number, string[]> }> {
+    // Head Office and Project-site Employees can each have their own
+    // Weekend/Holiday calendar — a date late-marked for one group can be an
+    // ordinary working day for the other, so "is this date a holiday" is
+    // resolved per-user, never off one shared map.
+    const isHolidayForUser = (userId: number, dateStr: string) =>
+      !!holidayMapsByGroup[branchTypeByUserId.get(userId) || "head_office"].get(dateStr);
+
     const userIds = employees.filter((e: any) => e.user_id).map((e: any) => Number(e.user_id));
     const firstCheckInByUserDate = new Map<number, Map<string, Date>>();
 
@@ -1457,7 +1465,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       );
       for (const r of remoteRows) {
         const dateStr = String(r.attendance_date).slice(0, 10);
-        if (holidayMap.has(dateStr)) continue;
+        if (isHolidayForUser(Number(r.user_id), dateStr)) continue;
         if (!firstCheckInByUserDate.has(r.user_id)) firstCheckInByUserDate.set(r.user_id, new Map());
         firstCheckInByUserDate.get(r.user_id)!.set(dateStr, new Date(r.first_check_in));
       }
@@ -1477,9 +1485,9 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         );
         for (const r of officeRows) {
           const dateStr = String(r.attendance_date).slice(0, 10);
-          if (holidayMap.has(dateStr)) continue;
           const userId = pinToUserId.get(r.device_user_pin);
           if (!userId) continue;
+          if (isHolidayForUser(userId, dateStr)) continue;
           const punchTime = new Date(r.first_punch);
           if (!firstCheckInByUserDate.has(userId)) firstCheckInByUserDate.set(userId, new Map());
           const existing = firstCheckInByUserDate.get(userId)!.get(dateStr);
@@ -1616,7 +1624,8 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       );
       if (empRows.length === 0) return res.status(404).json({ error: "Employee not found." });
 
-      const holidayMap = await getHolidayMap(queryDB, monthStart, monthEnd);
+      const holidayMapsByGroup = await getHolidayMapsByGroup(queryDB, monthStart, monthEnd);
+      const branchTypeByUserId = await getEmployeeBranchTypeMap(queryDB);
       const policy = await getLatePolicyForMonth(monthYear);
 
       // Reuse the same computation but unwaived (pass no waivers) so this
@@ -1629,7 +1638,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       const waiverByDate = new Map<string, any>(allWaivers.map((w: any) => [String(w.waiver_date).slice(0, 10), w]));
 
       const { lateDatesByEmployee, extremeLateDatesByEmployee } = await computeLateDatesByEmployee(
-        [empRows[0]], monthStart, monthEnd, holidayMap, policy, false
+        [empRows[0]], monthStart, monthEnd, holidayMapsByGroup, branchTypeByUserId, policy, false
       );
       const rawLateDates: string[] = lateDatesByEmployee.get(employeeId) || [];
       const rawExtremeLateDates: string[] = extremeLateDatesByEmployee.get(employeeId) || [];
@@ -1706,7 +1715,9 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       if (empRows.length === 0) return res.json({ linked: false, month_year: monthYear });
       const employee = empRows[0];
 
-      const holidayMap = await getHolidayMap(queryDB, monthStart, monthEnd);
+      const branchTypeByUserId = await getEmployeeBranchTypeMap(queryDB);
+      const myGroup: HolidayAppliesTo = branchTypeByUserId.get(Number(employee.user_id)) || "head_office";
+      const holidayMap = await getHolidayMap(queryDB, monthStart, monthEnd, myGroup);
       const workingDays = Math.max(1, daysInMonth - holidayMap.size);
 
       // Present days — the same two sources the payroll wizard reads: Remote
@@ -1753,8 +1764,12 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       leaveDays = Math.min(workingDays, leaveDays);
 
       const policy = await getLatePolicyForMonth(monthYear);
+      // Single-employee call — both Record keys point at the same
+      // already-myGroup-scoped holidayMap above, since whichever one
+      // computeLateDatesByEmployee's internal per-user lookup picks for
+      // this one employee resolves to the correct map either way.
       const { lateDatesByEmployee, extremeLateDatesByEmployee } = await computeLateDatesByEmployee(
-        [employee], monthStart, monthEnd, holidayMap, policy
+        [employee], monthStart, monthEnd, { head_office: holidayMap, project_site: holidayMap }, branchTypeByUserId, policy
       );
       // Keyed by Number(e.id) inside computeLateDatesByEmployee, so look it up
       // the same way rather than with whatever type the driver handed back.
@@ -1782,6 +1797,14 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         workingDaysSoFar = Math.max(1, elapsed);
       }
 
+      // Absence — working days elapsed so far, minus days actually present
+      // and days on approved Leave. A Delay/Extreme Delay day still counts as
+      // present (it's a late check-in, not a missed day), so this is purely
+      // "didn't show up and wasn't on approved Leave," floored at 0 since a
+      // day recorded as both present and on Leave (edge case) shouldn't go
+      // negative.
+      const absentDays = Math.max(0, workingDaysSoFar - presentDays.size - leaveDays);
+
       res.json({
         linked: true,
         month_year: monthYear,
@@ -1789,6 +1812,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         working_days_so_far: workingDaysSoFar,
         present_days: presentDays.size,
         leave_days: leaveDays,
+        absent_days: absentDays,
         late_count: lateCount,
         late_deduction_days: Math.floor(lateCount / latesPerDay),
         extreme_late_count: extremeLateCount,
@@ -1864,12 +1888,34 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       const monthStart = `${monthYear}-01`;
       const monthEnd = `${monthYear}-${String(daysInMonth).padStart(2, "0")}`;
 
-      const holidayMap = await getHolidayMap(queryDB, monthStart, monthEnd);
-      const workingDays = Math.max(1, daysInMonth - holidayMap.size);
+      // Head Office and Project-site Employees can each have their own
+      // Weekend/Holiday calendar — every per-employee figure below (working
+      // days, present/absent, lates) is resolved against THEIR OWN group's
+      // calendar, not one shared one. branchTypeByUserId resolves via
+      // all_employees.branch_id -> branches.branch_type.
+      const holidayMapsByGroup = await getHolidayMapsByGroup(queryDB, monthStart, monthEnd);
+      const branchTypeByUserId = await getEmployeeBranchTypeMap(queryDB);
+      // Only used for the wizard's own month-level display figures (days_in_month/
+      // working_days at the bottom of this route) — every per-employee figure
+      // below uses that employee's own group instead. Head Office is the
+      // arbitrary but harmless default for a single summary number covering
+      // a mixed roster.
+      const workingDaysDisplay = Math.max(1, daysInMonth - holidayMapsByGroup.head_office.size);
 
       const employees = await queryDB(
         `SELECT id, employee_id AS employee_code, name, department, designation, user_id, zk_device_pin
          FROM all_employees WHERE is_active = 1 ORDER BY name ASC`
+      );
+      // Per-employee working days — this employee's OWN group's holiday
+      // count subtracted from the month, not the shared display figure
+      // above. Keyed by all_employees.id (not user_id — an employee with no
+      // login still needs a working-days figure for has_attendance_data:
+      // false rows below, which default to fully present).
+      const workingDaysByEmployeeId = new Map<number, number>(
+        employees.map((e: any) => {
+          const group = e.user_id ? branchTypeByUserId.get(Number(e.user_id)) || "head_office" : "head_office";
+          return [Number(e.id), Math.max(1, daysInMonth - holidayMapsByGroup[group].size)];
+        })
       );
 
       const existingRows = await queryDB("SELECT employee_id FROM payrolls WHERE month_year = ?", [monthYear]);
@@ -1902,7 +1948,8 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         );
         for (const r of remoteRows) {
           const dateStr = String(r.attendance_date).slice(0, 10);
-          if (holidayMap.has(dateStr)) continue;
+          const group = branchTypeByUserId.get(Number(r.user_id)) || "head_office";
+          if (holidayMapsByGroup[group].has(dateStr)) continue;
           if (!presentDaysByUser.has(r.user_id)) presentDaysByUser.set(r.user_id, new Set());
           presentDaysByUser.get(r.user_id)!.add(dateStr);
         }
@@ -1925,9 +1972,10 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         );
         for (const r of officeRows) {
           const dateStr = String(r.attendance_date).slice(0, 10);
-          if (holidayMap.has(dateStr)) continue;
           const userId = pinToUserId.get(r.device_user_pin);
           if (!userId) continue;
+          const group = branchTypeByUserId.get(userId) || "head_office";
+          if (holidayMapsByGroup[group].has(dateStr)) continue;
           if (!presentDaysByUser.has(userId)) presentDaysByUser.set(userId, new Set());
           presentDaysByUser.get(userId)!.add(dateStr);
         }
@@ -1970,7 +2018,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       // already had any waived day dropped inside computeLateDatesByEmployee.
       const latePolicy = await getLatePolicyForMonth(monthYear);
       const { lateDatesByEmployee, extremeLateDatesByEmployee } = await computeLateDatesByEmployee(
-        employees, monthStart, monthEnd, holidayMap, latePolicy
+        employees, monthStart, monthEnd, holidayMapsByGroup, branchTypeByUserId, latePolicy
       );
       const latesPerDay = Number(latePolicy.lates_per_deduction_day || 1);
       const extremeLatesPerDay = Number(latePolicy.extreme_lates_per_deduction_day || 1);
@@ -1981,6 +2029,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         // somewhere in the system" — pinToUserId.has(own pin) was always
         // true for anyone with a pin configured, even with zero punches on
         // file, which is what made the "Synced" badge show up falsely.
+        const workingDays = workingDaysByEmployeeId.get(Number(e.id)) || 1;
         const hasAttendanceData = !!(e.user_id && presentDaysByUser.has(Number(e.user_id)));
         const present = hasAttendanceData ? (presentDaysByUser.get(Number(e.user_id))?.size || 0) : workingDays;
         const leave = e.user_id ? Math.min(workingDays, leaveDaysByUser.get(Number(e.user_id)) || 0) : 0;
@@ -2015,7 +2064,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       res.json({
         month_year: monthYear,
         days_in_month: daysInMonth,
-        working_days: workingDays,
+        working_days: workingDaysDisplay,
         late_policy: {
           shift_start_time: latePolicy.shift_start_time,
           grace_minutes: latePolicy.grace_minutes,
