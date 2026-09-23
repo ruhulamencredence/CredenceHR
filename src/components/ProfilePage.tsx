@@ -6,6 +6,7 @@ import { ChangePasswordForm } from './ChangePasswordForm';
 import { ChangeUsernameForm } from './ChangeUsernameForm';
 import { AssetManagement } from './AssetManagement';
 import { useProfilePhoto } from '../lib/useProfilePhoto';
+import { BACKGROUND_THEMES, BackgroundThemeId, applyBackgroundTheme, getSavedBackgroundTheme } from '../lib/backgroundTheme';
 
 interface ProfilePageProps {
   user: User;
@@ -48,6 +49,11 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
   const [showChangeUsername, setShowChangeUsername] = useState(false);
   const [showAssetManagement, setShowAssetManagement] = useState(false);
   const [username, setUsername] = useState(user.username || '');
+  const [bgTheme, setBgTheme] = useState<BackgroundThemeId>(getSavedBackgroundTheme());
+  const handlePickBackgroundTheme = (id: BackgroundThemeId) => {
+    applyBackgroundTheme(id);
+    setBgTheme(id);
+  };
   const initial = (user.name || user.username || '?').trim().charAt(0).toUpperCase();
   const roleLabel = user.role.charAt(0).toUpperCase() + user.role.slice(1);
   const photoUrl = useProfilePhoto(token, photoVersion);
@@ -192,6 +198,15 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
 
           <div>
             <p className="text-[11px] font-medium uppercase tracking-wide mb-2 px-1" style={{ color: 'var(--g-text-muted)' }}>
+              Appearance
+            </p>
+            <section className="gemini-card overflow-hidden">
+              <BackgroundThemePicker selected={bgTheme} onPick={handlePickBackgroundTheme} />
+            </section>
+          </div>
+
+          <div>
+            <p className="text-[11px] font-medium uppercase tracking-wide mb-2 px-1" style={{ color: 'var(--g-text-muted)' }}>
               Settings
             </p>
             <section className="gemini-card overflow-hidden">
@@ -296,6 +311,12 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
             {/* pt-5, matching the p-5 on the cards beside it, so this heading
                 and theirs sit on the same line now that they're side by side. */}
             <p className="text-[11px] font-medium uppercase tracking-wide px-5 pt-5 pb-1" style={{ color: 'var(--g-text-muted)' }}>
+              Appearance
+            </p>
+            <div className="border-b" style={{ borderColor: 'var(--g-border)' }}>
+              <BackgroundThemePicker selected={bgTheme} onPick={handlePickBackgroundTheme} padded />
+            </div>
+            <p className="text-[11px] font-medium uppercase tracking-wide px-5 pt-4 pb-1" style={{ color: 'var(--g-text-muted)' }}>
               Settings
             </p>
             <ProfileRow icon={<Package className="w-4 h-4" />} label="Asset Management" onClick={() => setShowAssetManagement(true)} padded />
@@ -365,3 +386,44 @@ const ProfileRow: React.FC<{
     </div>
   );
 };
+
+// "Appearance" row — three tappable swatches for the app's own background
+// gradient (see backgroundTheme.ts). A per-device preference (localStorage),
+// applied immediately on tap; no save/cancel step needed for a one-tap choice
+// like this.
+const BackgroundThemePicker: React.FC<{
+  selected: BackgroundThemeId;
+  onPick: (id: BackgroundThemeId) => void;
+  padded?: boolean;
+}> = ({ selected, onPick, padded }) => (
+  <div className={`${padded ? 'px-5' : 'px-4'} py-3.5`}>
+    <div className="flex items-center gap-3">
+      {BACKGROUND_THEMES.map((theme) => {
+        const isSelected = theme.id === selected;
+        return (
+          <button
+            key={theme.id}
+            type="button"
+            onClick={() => onPick(theme.id)}
+            title={theme.label}
+            aria-label={`${theme.label} background`}
+            className="flex flex-col items-center gap-1.5"
+          >
+            <span
+              className="w-10 h-10 rounded-full flex items-center justify-center transition-shadow"
+              style={{
+                background: theme.swatch,
+                boxShadow: isSelected ? `0 0 0 2.5px var(--g-surface), 0 0 0 4.5px ${theme.swatch}` : 'none'
+              }}
+            >
+              {isSelected && <BadgeCheck className="w-4 h-4 text-white" />}
+            </span>
+            <span className="text-[11px]" style={{ color: isSelected ? 'var(--g-text)' : 'var(--g-text-muted)' }}>
+              {theme.label}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  </div>
+);

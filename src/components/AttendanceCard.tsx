@@ -195,11 +195,11 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
   // card and only its data (not the card itself) shows up a beat later.
   if (loading && projects.length === 0) {
     return (
-      <div className="relative rounded-[24px] overflow-hidden border border-white/70 p-3.5 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-blue-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl animate-pulse">
+      <div className="relative rounded-[24px] overflow-hidden border border-white/70 p-3.5 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-blue-100/70 via-white/50 to-indigo-50/40 animate-pulse">
         <div className="h-4 w-32 bg-white/60 rounded-md mb-3" />
         <div className="grid grid-cols-2 gap-2">
-          <div className="rounded-xl px-3 py-2 bg-white/40 border border-white/50 h-14" />
-          <div className="rounded-xl px-3 py-2 bg-white/40 border border-white/50 h-14" />
+          <div className="rounded-xl px-3 py-2 bg-white/70 border border-white/50 h-14" />
+          <div className="rounded-xl px-3 py-2 bg-white/70 border border-white/50 h-14" />
         </div>
       </div>
     );
@@ -217,7 +217,17 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
     // card sits in a grid beside plain-white ones (Today, This Month, My
     // Requests) and the tinted-glass treatment made that row read as three
     // unrelated designs pushed together.
-    <div className="relative rounded-[24px] overflow-hidden border border-white/70 p-4 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-blue-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white transition-all md:bg-white md:from-transparent md:via-transparent md:to-transparent md:backdrop-blur-none md:border-slate-200 md:rounded-2xl md:shadow-sm md:hover:shadow-sm md:hover:border-slate-200">
+    <div className="relative rounded-[24px] overflow-hidden border border-white/70 p-4 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-blue-100/70 via-white/50 to-indigo-50/40 hover:shadow-lg hover:border-white transition-all md:bg-white md:from-transparent md:via-transparent md:to-transparent md:border-slate-200 md:rounded-2xl md:shadow-sm md:hover:shadow-sm md:hover:border-slate-200">
+      {/* No backdrop-blur on this outer shell (there used to be one, split
+          onto its own absolutely-positioned -z-10 child layer to work
+          around an Android compositor gap) — confirmed on real hardware
+          that this device's WebView doesn't render backdrop-filter at all,
+          so that layer was dead weight, and the negative-z-index child was
+          the likely cause of a separate bug where the card's background
+          would render correctly on first paint and then disappear after a
+          reload. The inner tiles below don't depend on blur to read as a
+          distinct panel: their background opacity alone (bg-white/80,
+          bg-blue-100/80, etc.) does that job on every device, blur or not. */}
       <h3 className="text-sm font-bold text-slate-900 mb-2 flex items-center gap-2 min-w-0">
         <UserCheck className="w-4 h-4 text-blue-600 shrink-0" />
         <span className="truncate">My Attendance</span>
@@ -231,7 +241,7 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
           <select
             value={projectId}
             onChange={(e) => setProjectId(e.target.value)}
-            className="w-full text-sm px-3 py-2 bg-white/50 backdrop-blur border border-white/60 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none"
+            className="w-full text-sm px-3 py-2 bg-white/85 backdrop-blur border border-white/60 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none"
           >
             <option value="">Select a project…</option>
             {projects.map((p) => (
@@ -243,10 +253,12 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
 
       <div className="grid grid-cols-2 gap-2">
         {/* In Time — just the time itself, no "via Office/GPS" source line;
-            extra padding + a stronger blur than the card's own backdrop-blur
-            so the gradient behind genuinely shows through this tile instead
-            of the text crowding its rounded corners. */}
-        <div className={`rounded-xl px-4 py-3 backdrop-blur-lg border ${hasCheckedIn ? 'bg-blue-100/50 border-white/60' : 'bg-white/40 border-white/50'}`}>
+            extra padding so the text doesn't crowd its rounded corners.
+            bg-white/70 (not the flatter /40 this used to be) reads as its
+            own distinct tile even where backdrop-blur-lg doesn't render
+            (Android WebView — see the note above), while staying low
+            enough to keep some translucency instead of a flat opaque box. */}
+        <div className={`rounded-xl px-4 py-3 backdrop-blur-lg border ${hasCheckedIn ? 'bg-blue-100/70 border-white/60' : 'bg-white/70 border-white/50'}`}>
           <div className="text-xs font-medium text-slate-500">In Time</div>
           {hasCheckedIn && inParts ? (
             <div className="mt-0.5 font-bold text-blue-700">
@@ -268,7 +280,7 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
 
         {/* Out Time — same "time only" + extra padding/blur treatment as
             In Time above. */}
-        <div className={`rounded-xl px-4 py-3 backdrop-blur-lg border ${hasCheckedOut ? 'bg-blue-100/50 border-white/60' : 'bg-white/40 border-white/50'}`}>
+        <div className={`rounded-xl px-4 py-3 backdrop-blur-lg border ${hasCheckedOut ? 'bg-blue-100/70 border-white/60' : 'bg-white/70 border-white/50'}`}>
           <div className="text-xs font-medium text-slate-500">Out Time</div>
           {hasCheckedOut && outParts ? (
             <div className="mt-0.5 font-bold text-blue-700">
