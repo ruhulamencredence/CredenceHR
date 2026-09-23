@@ -29,6 +29,10 @@ export const memoryDb = {
   claims: [] as any[],
   approvalChainSteps: [] as any[],
   approvalRequests: [] as any[],
+  approvalTemplates: [] as any[],
+  approvalTemplateSteps: [] as any[],
+  approvalTemplateStepApprovers: [] as any[],
+  employeeTemplateAssignments: [] as any[],
   leaveBalances: [] as any[],
   leaveApplications: [] as any[],
   leaveCategories: [] as any[],
@@ -179,7 +183,10 @@ const GENERIC_TABLES: [string, any[]][] = [
   ["grievances", memoryDb.grievances],
   ["disciplinary_actions", memoryDb.disciplinaryActions],
   ["employee_documents", memoryDb.employeeDocuments],
-  ["document_signatures", memoryDb.documentSignatures]
+  ["document_signatures", memoryDb.documentSignatures],
+  ["approval_templates", memoryDb.approvalTemplates],
+  ["approval_template_step_approvers", memoryDb.approvalTemplateStepApprovers],
+  ["approval_template_steps", memoryDb.approvalTemplateSteps]
 ];
 memoryDb.leaveCategories = [{ id: 1, category_key: "custom_earn_leave", label: "Earn Leave", created_by: null, created_at: new Date() }];
 
@@ -1681,6 +1688,144 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
     return { affectedRows: row ? 1 : 0 };
   }
 
+  // Dynamic Approval Engine TEMPLATES (ApprovalRoutes.ts's Template CRUD +
+  // Employee<->Template Assignment, and server.ts's resolveApprovalTemplate/
+  // createTemplateApprovalRequest) — every JOIN/GROUP BY/non-id-WHERE query
+  // these use, handled by hand here; plain id-keyed SELECT/UPDATE/DELETE and
+  // fully-parameterized INSERTs on approval_templates/approval_template_steps/
+  // approval_template_step_approvers fall through to simulateGenericTable via
+  // GENERIC_TABLES below instead (those three are registered there).
+  if (lowerSql.startsWith("select * from approval_template_steps where template_id")) {
+    const templateId = Number(params[0]);
+    return memoryDb.approvalTemplateSteps
+      .filter((s: any) => Number(s.template_id) === templateId)
+      .sort((a: any, b: any) => a.step_order - b.step_order);
+  }
+  if (lowerSql.startsWith("select sa.*, u.name as user_name")) {
+    const templateId = Number(params[0]);
+    const stepIds = new Set(
+      memoryDb.approvalTemplateSteps.filter((s: any) => Number(s.template_id) === templateId).map((s: any) => Number(s.id))
+    );
+    return memoryDb.approvalTemplateStepApprovers
+      .filter((a: any) => stepIds.has(Number(a.step_id)))
+      .sort((a: any, b: any) => a.id - b.id)
+      .map((a: any) => {
+        const u = memoryDb.users.find((x: any) => Number(x.id) === Number(a.user_id));
+        return { id: a.id, step_id: a.step_id, user_id: a.user_id, user_name: u ? u.name : null };
+      });
+  }
+  if (lowerSql.startsWith("select * from approval_templates where request_type")) {
+    const requestType = params[0];
+    return [...memoryDb.approvalTemplates]
+      .filter((t: any) => t.request_type === requestType)
+      .sort((a: any, b: any) => String(a.name).localeCompare(String(b.name)));
+  }
+  if (lowerSql.startsWith("select template_id, count(*) as cnt from approval_template_steps group by template_id")) {
+    const counts = new Map<number, number>();
+    for (const s of memoryDb.approvalTemplateSteps) {
+      const tid = Number(s.template_id);
+      counts.set(tid, (counts.get(tid) || 0) + 1);
+    }
+    return Array.from(counts.entries()).map(([template_id, cnt]) => ({ template_id, cnt }));
+  }
+  if (lowerSql.startsWith("update approval_templates set is_default = 0 where request_type")) {
+    const requestType = params[0];
+    // Two callers share this prefix: POST/`/default` (just request_type) and
+    // PUT (request_type + "AND id <> ?" to exclude the template being saved).
+    const excludeId = lowerSql.includes("id <>") ? Number(params[1]) : null;
+    for (const t of memoryDb.approvalTemplates) {
+      if (t.request_type === requestType && (excludeId === null || Number(t.id) !== excludeId)) {
+        t.is_default = 0;
+      }
+    }
+    return { affectedRows: 1 };
+  }
+  if (lowerSql.startsWith("delete from approval_template_steps where template_id")) {
+    const templateId = Number(params[0]);
+    const stepIds = new Set(
+      memoryDb.approvalTemplateSteps.filter((s: any) => Number(s.template_id) === templateId).map((s: any) => Number(s.id))
+    );
+    // Mutate the arrays in place (length = 0 + push back the survivors)
+    // rather than reassigning memoryDb.approvalTemplateSteps/
+    // approvalTemplateStepApprovers to a new array — GENERIC_TABLES captured
+    // the ORIGINAL array objects by reference at module load, so a plain `=`
+    // here would silently orphan them: later INSERTs via simulateGenericTable
+    // would keep pushing into the abandoned array while every SELECT reads
+    // the (now permanently empty-of-new-rows) property instead.
+    const keptApprovers = memoryDb.approvalTemplateStepApprovers.filter((a: any) => !stepIds.has(Number(a.step_id)));
+    memoryDb.approvalTemplateStepApprovers.length = 0;
+    memoryDb.approvalTemplateStepApprovers.push(...keptApprovers);
+    const before = memoryDb.approvalTemplateSteps.length;
+    const keptSteps = memoryDb.approvalTemplateSteps.filter((s: any) => Number(s.template_id) !== templateId);
+    memoryDb.approvalTemplateSteps.length = 0;
+    memoryDb.approvalTemplateSteps.push(...keptSteps);
+    return { affectedRows: before - memoryDb.approvalTemplateSteps.length };
+  }
+  if (lowerSql.startsWith("select count(*) as cnt from employee_template_assignments where template_id")) {
+    const templateId = Number(params[0]);
+    const cnt = memoryDb.employeeTemplateAssignments.filter((a: any) => Number(a.template_id) === templateId).length;
+    return [{ cnt }];
+  }
+  if (lowerSql.startsWith("select eta.employee_user_id, eta.template_id, t.name as template_name")) {
+    const requestType = params[0];
+    return memoryDb.employeeTemplateAssignments
+      .filter((a: any) => a.request_type === requestType)
+      .map((a: any) => {
+        const t = memoryDb.approvalTemplates.find((x: any) => Number(x.id) === Number(a.template_id));
+        return { employee_user_id: a.employee_user_id, template_id: a.template_id, template_name: t ? t.name : null };
+      });
+  }
+  if (lowerSql.startsWith("select id, name from approval_templates where request_type")) {
+    const requestType = params[0];
+    const def = memoryDb.approvalTemplates.find((t: any) => t.request_type === requestType && Number(t.is_default) === 1);
+    return def ? [{ id: def.id, name: def.name }] : [];
+  }
+  if (lowerSql.startsWith("delete from employee_template_assignments where employee_user_id")) {
+    const [employeeUserId, requestType] = params;
+    const before = memoryDb.employeeTemplateAssignments.length;
+    memoryDb.employeeTemplateAssignments = memoryDb.employeeTemplateAssignments.filter(
+      (a: any) => !(Number(a.employee_user_id) === Number(employeeUserId) && a.request_type === requestType)
+    );
+    return { affectedRows: before - memoryDb.employeeTemplateAssignments.length };
+  }
+  if (lowerSql.startsWith("insert into employee_template_assignments")) {
+    const [employeeUserId, requestType, templateId, assignedBy] = params;
+    const existing = memoryDb.employeeTemplateAssignments.find(
+      (a: any) => Number(a.employee_user_id) === Number(employeeUserId) && a.request_type === requestType
+    );
+    if (existing) {
+      existing.template_id = Number(templateId);
+      existing.assigned_by = assignedBy === null || assignedBy === undefined ? null : Number(assignedBy);
+      existing.updated_at = new Date();
+      return { insertId: existing.id };
+    }
+    const newId = memoryDb.employeeTemplateAssignments.length
+      ? Math.max(...memoryDb.employeeTemplateAssignments.map((a: any) => Number(a.id))) + 1
+      : 1;
+    memoryDb.employeeTemplateAssignments.push({
+      id: newId,
+      employee_user_id: Number(employeeUserId),
+      request_type: requestType,
+      template_id: Number(templateId),
+      assigned_by: assignedBy === null || assignedBy === undefined ? null : Number(assignedBy),
+      created_at: new Date(),
+      updated_at: new Date()
+    });
+    return { insertId: newId };
+  }
+  // resolveApprovalTemplate's employee-assignment lookup (server.ts) —
+  // employee_template_assignments JOIN approval_templates, filtered down to
+  // this employee/request_type's currently-active template, if any.
+  if (lowerSql.startsWith("select t.* from employee_template_assignments eta")) {
+    const [employeeUserId, requestType] = params;
+    const assignment = memoryDb.employeeTemplateAssignments.find(
+      (a: any) => Number(a.employee_user_id) === Number(employeeUserId) && a.request_type === requestType
+    );
+    if (!assignment) return [];
+    const t = memoryDb.approvalTemplates.find((x: any) => Number(x.id) === Number(assignment.template_id) && Number(x.is_active) === 1);
+    return t ? [t] : [];
+  }
+
   // LEAVE BALANCES (Self Service -> Leave Management)
   if (lowerSql.startsWith("select id, name, role from users where role in")) {
     return memoryDb.users
@@ -2121,6 +2266,12 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
     lowerSql === "select id, name, email, role from users"
   ) {
     return [...memoryDb.users];
+  }
+  // Template Assignment screen's employee list (GET /api/template-assignments) —
+  // same "every user, filtered/joined in JS afterwards" shape as the fallback
+  // just above, just with its own exact column list + ORDER BY.
+  if (lowerSql === "select id, name, email, username, role from users order by name asc") {
+    return [...memoryDb.users].sort((a: any, b: any) => String(a.name).localeCompare(String(b.name)));
   }
 
   // Chat/Alerts push notification device tokens (see memoryDb.chatPushTokens

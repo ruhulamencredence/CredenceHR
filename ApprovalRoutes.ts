@@ -615,21 +615,25 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       ...template,
       is_default: !!Number(template.is_default),
       is_active: !!Number(template.is_active),
-      steps: steps.map((s: any) => ({ ...s, approvers: approversByStep.get(Number(s.id)) || [] }))
+      skip_auto_supervisor: !!Number(template.skip_auto_supervisor),
+      steps: steps.map((s: any) => ({ ...s, approver_type: s.approver_type === "admin" ? "admin" : "employee", approvers: approversByStep.get(Number(s.id)) || [] }))
     };
   }
 
   // Validates the `steps` array a Template create/update request sends:
-  // [{ approver_user_ids: number[] }, ...], step_order assigned by array
-  // position (index + 1). Returns a cleaned copy, or throws with a message
-  // safe to send straight back to the client.
-  async function validateTemplateSteps(steps: any): Promise<{ approver_user_ids: number[] }[]> {
+  // [{ approver_user_ids: number[], approver_type?: 'employee'|'admin' }, ...],
+  // step_order assigned by array position (index + 1). approver_type is a
+  // UI label/filter only (Part 6, "Approver Type" dropdown) — it doesn't
+  // change how a step is cleared, so it isn't cross-checked against the
+  // approver_user_ids' actual roles here. Returns a cleaned copy, or throws
+  // with a message safe to send straight back to the client.
+  async function validateTemplateSteps(steps: any): Promise<{ approver_user_ids: number[]; approver_type: "employee" | "admin" }[]> {
     if (!Array.isArray(steps) || steps.length === 0) {
       throw new Error("A template needs at least one Layer/Step.");
     }
     const allUsers = await queryDB("SELECT * FROM users");
     const validUserIds = new Set<number>(allUsers.map((u: any) => Number(u.id)));
-    const cleaned: { approver_user_ids: number[] }[] = [];
+    const cleaned: { approver_user_ids: number[]; approver_type: "employee" | "admin" }[] = [];
     steps.forEach((step: any, idx: number) => {
       const ids = Array.isArray(step?.approver_user_ids) ? step.approver_user_ids.map((v: any) => Number(v)).filter((v: number) => Number.isFinite(v)) : [];
       const uniqueIds = Array.from(new Set(ids));
@@ -639,7 +643,8 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       for (const uid of uniqueIds) {
         if (!validUserIds.has(uid)) throw new Error(`Layer ${idx + 1}: user #${uid} not found.`);
       }
-      cleaned.push({ approver_user_ids: uniqueIds });
+      const approverType = step?.approver_type === "admin" ? "admin" : "employee";
+      cleaned.push({ approver_user_ids: uniqueIds, approver_type: approverType });
     });
     return cleaned;
   }
@@ -690,6 +695,10 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       const requestType = req.body?.request_type;
       const isDefault = !!req.body?.is_default;
       const isActive = req.body?.is_active === false ? false : true;
+      // Approver Type override for Layer 1 (see server.ts's createTemplateApprovalRequest) —
+      // true only when the editor's Layer 1 was explicitly set to Employee/Admin
+      // instead of left as the default virtual Supervisor position.
+      const skipAutoSupervisor = !!req.body?.skip_auto_supervisor;
       if (!name) return res.status(400).json({ error: "Template name is required." });
       if (!["conveyance", "leave", "timesheet"].includes(requestType)) {
         return res.status(400).json({ error: "request_type must be one of conveyance, leave, timesheet." });
@@ -703,13 +712,17 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       }
 
       const result = await queryDB(
-        "INSERT INTO approval_templates (name, request_type, is_default, is_active, created_by) VALUES (?, ?, ?, ?, ?)",
-        [name, requestType, isDefault ? 1 : 0, isActive ? 1 : 0, req.user.id]
+        "INSERT INTO approval_templates (name, request_type, is_default, is_active, created_by, skip_auto_supervisor) VALUES (?, ?, ?, ?, ?, ?)",
+        [name, requestType, isDefault ? 1 : 0, isActive ? 1 : 0, req.user.id, skipAutoSupervisor ? 1 : 0]
       );
       const templateId = result.insertId;
 
       for (let i = 0; i < steps.length; i++) {
-        const stepResult = await queryDB("INSERT INTO approval_template_steps (template_id, step_order) VALUES (?, ?)", [templateId, i + 1]);
+        const stepResult = await queryDB("INSERT INTO approval_template_steps (template_id, step_order, approver_type) VALUES (?, ?, ?)", [
+          templateId,
+          i + 1,
+          steps[i].approver_type
+        ]);
         const stepId = stepResult.insertId;
         for (const uid of steps[i].approver_user_ids) {
           await queryDB("INSERT INTO approval_template_step_approvers (step_id, user_id) VALUES (?, ?)", [stepId, uid]);
@@ -739,6 +752,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       const requestType = req.body?.request_type;
       const isDefault = !!req.body?.is_default;
       const isActive = req.body?.is_active === false ? false : true;
+      const skipAutoSupervisor = !!req.body?.skip_auto_supervisor;
       if (!name) return res.status(400).json({ error: "Template name is required." });
       if (!["conveyance", "leave", "timesheet"].includes(requestType)) {
         return res.status(400).json({ error: "request_type must be one of conveyance, leave, timesheet." });
@@ -755,11 +769,12 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
         await queryDB("UPDATE approval_templates SET is_default = 0 WHERE request_type = ? AND id <> ?", [requestType, id]);
       }
 
-      await queryDB("UPDATE approval_templates SET name = ?, request_type = ?, is_default = ?, is_active = ? WHERE id = ?", [
+      await queryDB("UPDATE approval_templates SET name = ?, request_type = ?, is_default = ?, is_active = ?, skip_auto_supervisor = ? WHERE id = ?", [
         name,
         requestType,
         isDefault ? 1 : 0,
         isActive ? 1 : 0,
+        skipAutoSupervisor ? 1 : 0,
         id
       ]);
 
@@ -767,7 +782,11 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       // approval_template_step_approvers.step_id takes the approver rows with it.
       await queryDB("DELETE FROM approval_template_steps WHERE template_id = ?", [id]);
       for (let i = 0; i < steps.length; i++) {
-        const stepResult = await queryDB("INSERT INTO approval_template_steps (template_id, step_order) VALUES (?, ?)", [id, i + 1]);
+        const stepResult = await queryDB("INSERT INTO approval_template_steps (template_id, step_order, approver_type) VALUES (?, ?, ?)", [
+          id,
+          i + 1,
+          steps[i].approver_type
+        ]);
         const stepId = stepResult.insertId;
         for (const uid of steps[i].approver_user_ids) {
           await queryDB("INSERT INTO approval_template_step_approvers (step_id, user_id) VALUES (?, ?)", [stepId, uid]);
