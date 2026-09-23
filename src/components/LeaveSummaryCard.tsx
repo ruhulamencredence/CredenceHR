@@ -80,8 +80,17 @@ export const LeaveSummaryCard: React.FC<LeaveSummaryCardProps> = ({ token, onOpe
         // grid (see the same note on AttendanceCard). The violet header
         // inside stays either way — that's this card's own identity, not the
         // mobile surface treatment.
-        className="relative rounded-[28px] overflow-hidden border border-white/70 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-violet-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl text-left cursor-pointer hover:shadow-lg hover:border-white transition-all md:bg-white md:from-transparent md:via-transparent md:to-transparent md:backdrop-blur-none md:border-slate-200 md:rounded-2xl md:shadow-sm"
+        className="relative rounded-[28px] overflow-hidden border border-white/70 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-violet-100/70 via-white/50 to-indigo-50/40 text-left cursor-pointer hover:shadow-lg hover:border-white transition-all md:bg-white md:from-transparent md:via-transparent md:to-transparent md:border-slate-200 md:rounded-2xl md:shadow-sm"
       >
+      {/* No backdrop-blur on this outer shell (there used to be one, split
+          onto its own absolutely-positioned -z-10 child layer to work
+          around an Android compositor gap) — confirmed on real hardware
+          that this device's WebView doesn't render backdrop-filter at all,
+          so that layer was dead weight, and the negative-z-index child was
+          the likely cause of a separate bug where the card's background
+          would render correctly on first paint and then disappear after a
+          reload. The "Total Leave" strip below doesn't depend on blur to
+          read as a distinct panel — see the note on it further down. */}
       {/* Violet gradient header — same drop-notch corner treatment as the
           mobile Dashboard banner (rounded-b on this card's own top instead,
           since it sits inline among other cards rather than at the very top
@@ -105,15 +114,19 @@ export const LeaveSummaryCard: React.FC<LeaveSummaryCardProps> = ({ token, onOpe
 
       {/* Total Leave strip — overlaps the header the same way AttendanceCard
           overlaps the Dashboard banner, so this reads as one connected card.
-          Same liquid-glass treatment as the outer card (translucent white +
-          backdrop-blur instead of a flat white box), so the violet header
-          shows softly through it. backdrop-blur-lg to match My Attendance's
-          own tiles (that card's outer shell is blur-xl, its inner tiles are
-          blur-lg — this strip is the same kind of inner tile). Shorter
-          (py-2.5, tighter gaps) than the last pass so the card doesn't run
-          as tall.  */}
+          backdrop-blur-lg is kept for desktop browsers, which render it —
+          but confirmed on real hardware that Android System WebView doesn't
+          render backdrop-filter at all here, so on that device this strip's
+          look comes from opacity alone. bg-white/50 read as a washed-out
+          purple smear (no separation from the header at all); bg-white/95
+          swung the other way — flat opaque white with no glass feel.
+          bg-white/75 is the middle ground: still clearly a lighter panel
+          against the violet header, but translucent enough that a soft
+          violet undertone shows through instead of reading as a solid
+          block. Shorter (py-2.5, tighter gaps) than the last pass so the
+          card doesn't run as tall.  */}
       <div className="px-5 sm:px-6 -mt-4 pb-5">
-        <div className="bg-white/50 backdrop-blur-lg border border-white/60 rounded-2xl px-5 py-2.5 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)]">
+        <div className="bg-white/75 backdrop-blur-lg border border-white/60 rounded-2xl px-5 py-2.5 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)]">
           <p className="text-xs font-bold text-slate-900">Total Leave</p>
           <p className="text-[11px] text-slate-500 mt-0.5">Period 1 Jan {year} – 31 Dec {year}</p>
           <div className="mt-1.5 flex items-center gap-6">
