@@ -627,7 +627,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
     if (!Array.isArray(steps) || steps.length === 0) {
       throw new Error("A template needs at least one Layer/Step.");
     }
-    const allUsers = await queryDB("SELECT id FROM users");
+    const allUsers = await queryDB("SELECT * FROM users");
     const validUserIds = new Set<number>(allUsers.map((u: any) => Number(u.id)));
     const cleaned: { approver_user_ids: number[] }[] = [];
     steps.forEach((step: any, idx: number) => {
