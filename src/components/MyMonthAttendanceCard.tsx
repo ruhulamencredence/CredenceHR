@@ -23,6 +23,7 @@ interface MonthSummary {
   working_days_so_far: number;
   present_days: number;
   leave_days: number;
+  absent_days: number;
   late_count: number;
   late_deduction_days: number;
   extreme_late_count: number;
@@ -125,9 +126,15 @@ export const MyMonthAttendanceCard: React.FC<MyMonthAttendanceCardProps> = ({ to
         </p>
       </div>
 
-      <div className="p-5 sm:px-6 grid grid-cols-2 xl:grid-cols-4 gap-2.5">
+      <div className="p-5 sm:px-6 grid grid-cols-2 xl:grid-cols-5 gap-2.5">
         <Tile label="Present" value={summary.present_days} note={`of ${summary.working_days_so_far} so far`} />
         <Tile label="On Leave" value={summary.leave_days} note="approved" />
+        <Tile
+          label="Absent"
+          value={summary.absent_days}
+          note={summary.absent_days > 0 ? 'unexplained' : null}
+          tone={summary.absent_days > 0 ? 'alert' : 'plain'}
+        />
         <Tile
           label="Delay"
           value={summary.late_count}

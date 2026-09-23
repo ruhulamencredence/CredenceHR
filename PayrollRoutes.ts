@@ -1797,6 +1797,14 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         workingDaysSoFar = Math.max(1, elapsed);
       }
 
+      // Absence — working days elapsed so far, minus days actually present
+      // and days on approved Leave. A Delay/Extreme Delay day still counts as
+      // present (it's a late check-in, not a missed day), so this is purely
+      // "didn't show up and wasn't on approved Leave," floored at 0 since a
+      // day recorded as both present and on Leave (edge case) shouldn't go
+      // negative.
+      const absentDays = Math.max(0, workingDaysSoFar - presentDays.size - leaveDays);
+
       res.json({
         linked: true,
         month_year: monthYear,
@@ -1804,6 +1812,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         working_days_so_far: workingDaysSoFar,
         present_days: presentDays.size,
         leave_days: leaveDays,
+        absent_days: absentDays,
         late_count: lateCount,
         late_deduction_days: Math.floor(lateCount / latesPerDay),
         extreme_late_count: extremeLateCount,
