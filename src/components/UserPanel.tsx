@@ -1030,13 +1030,13 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // that card's "tap to open" target IS this same page. Previously ungated
   // (every account saw "Leave" in the bottom bar regardless of permission);
   // now an account without it falls back to "Directory" instead — see
-  // BottomNav.tsx. ALSO true for can_view_leave_application — GlobalSidebar's
-  // "Leave Application" item now opens this exact page too (see
-  // leaveNavRequest below), and that item is gated by can_view_leave_application
-  // (a separate, older grant from before LeaveReviewPage/the Leave Summary
-  // card existed) — OR'd together so an account already granted the older
-  // flag doesn't lose access to the page its own sidebar item points at.
-  const canSeeLeave = user.role === 'superadmin' || !!user.can_view_leave_summary || !!user.can_view_leave_application;
+  // BottomNav.tsx. ALSO true for can_view_leave_application/can_view_my_leave
+  // — GlobalSidebar's single "Leave Application" item now opens this exact
+  // page too (see leaveNavRequest below), merging in what the old separate
+  // "My Leave" page (can_view_my_leave) used to show; OR'd together so an
+  // account already granted either older flag doesn't lose access to the
+  // page its own sidebar item points at.
+  const canSeeLeave = user.role === 'superadmin' || !!user.can_view_leave_summary || !!user.can_view_leave_application || !!user.can_view_my_leave;
   // Guards a section restored from localStorage (see the lazy initializer above,
   // which runs before these grants are known) or a permission the Superadmin
   // revokes mid-session — bounces back to the tile menu instead of leaving a

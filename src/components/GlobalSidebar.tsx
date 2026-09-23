@@ -53,7 +53,7 @@ interface GlobalSidebarProps {
   onGoToUserClaims: (target: 'movementClaims' | 'conveyanceBill') => void;
   // Everyday employee self-service items — not Admin-gated, shown to every
   // account regardless of role/module access.
-  onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'myLeave' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation') => void;
+  onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation') => void;
   // Admin Panel's own Movement Claims / Conveyance Bill Claim review tabs —
   // separate feature from onGoToUserClaims above, gated by module_permissions
   // like every other Admin Panel module.
@@ -209,14 +209,12 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     onClose();
   };
 
-  // "Job Entry" — User Panel's own MPR workflow, now a collapsible sub-group
-  // inside "Self Service" instead of its own top-level "MAIN" section (which
-  // otherwise never actually collapsed anything — every account either saw
-  // all of it or none of it). Named "Job Entry", not "PEPM Manage" — Admin
-  // Panel already has its own group with that exact label (reportsGroup
-  // below) for something unrelated (Reports/MPR Nos/Data Import/Job Recycle/
-  // MPR Edit Log); reusing the name here would show two different "PEPM
-  // Manage" groups in the same sidebar.
+  // "PEPM Operation" (label; internal name kept as jobEntryGroup/jobEntryOpen
+  // to minimize diff) — User Panel's own MPR workflow, a collapsible
+  // sub-group inside "Self Service". Distinct label from Admin Panel's own
+  // "PEPM Management" group (reportsGroup below, Reports/MPR Nos/Data
+  // Import/Job Recycle/MPR Edit Log) so the two don't read as the same
+  // group in the same sidebar.
   const jobEntryGroup: NavItem[] = [];
   if (hasUserPanel) {
     if (canSeeBudgetModule) {
@@ -259,42 +257,29 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   if (canSeeTimesheet) {
     hrmAttendanceGroup.push({ key: 'timesheet', label: 'Timesheet', icon: Clock, onClick: () => onGoToSelfServiceTab('timesheet') });
   }
+  // "Leave Application" — the merged submit/review + own-balance interface
+  // (LeaveReviewPage.tsx now shows both, see its own comment) — one single
+  // menu item instead of the old separate "Leave Application" and "My
+  // Leave" items, living inside "Leave Manage" alongside Leave Manage/Leave
+  // Approvals. Gated by EITHER of the two old separate grants (an account
+  // already holding just one of them keeps access to the merged page).
   const hrmLeaveGroup: NavItem[] = [];
+  if (canSeeLeaveApplication || canSeeMyLeave) {
+    hrmLeaveGroup.push({ key: 'leaveApplication', label: 'Leave Application', icon: CalendarClock, onClick: () => onGoToSelfServiceTab('leaveApplication') });
+  }
   if (canManageLeave) {
     hrmLeaveGroup.push({ key: 'leaveManagement', label: 'Leave Manage', icon: ListChecks, onClick: () => onGoToSelfServiceTab('leaveManagement') });
   }
   if (user.role === 'admin' || user.role === 'superadmin') {
     hrmLeaveGroup.push({ key: 'leaveApprovals', label: 'Leave Approvals', icon: CheckSquare, onClick: () => onGoToSelfServiceTab('leaveApprovals') });
   }
-  // "Payroll" — Coming Soon placeholder (PayrollModule.tsx/PayrollRoutes.ts),
-  // but permission-gated like every other module from the start: a
-  // Superadmin always sees it (canSeeModule), everyone else only once
-  // explicitly granted the 'payroll' module via Admin Panel -> Users ->
-  // Module Access. GET /api/payroll/status enforces the same gate
-  // server-side (requireModule('payroll')), so this is real access control,
-  // not just a hidden menu item. Moved into HRM as its own sub-group.
-  const hrmPayrollGroup: NavItem[] = [];
-  if (canSeeModule('payroll')) {
-    hrmPayrollGroup.push({ key: 'payroll', label: 'Payroll', icon: Banknote, onClick: () => onGoToSelfServiceTab('payroll') });
-  }
   const hrmSubGroups: { key: string; label: string; icon: React.ComponentType<{ className?: string }>; items: NavItem[] }[] = [
     { key: 'my_claim_bill', label: 'My Claim/Bill', icon: Wallet, items: hrmClaimGroup },
     { key: 'hrm_attendance', label: 'Attendance', icon: Clock, items: hrmAttendanceGroup },
     { key: 'hrm_leave_manage', label: 'Leave Manage', icon: ListChecks, items: hrmLeaveGroup },
-    { key: 'hrm_payroll', label: 'Payroll', icon: Banknote, items: hrmPayrollGroup },
   ].filter((g) => g.items.length > 0);
 
   const selfServiceItems: NavItem[] = [];
-  if (canSeeLeaveApplication) {
-    selfServiceItems.push({ key: 'leaveApplication', label: 'Leave Application', icon: CalendarClock, onClick: () => onGoToSelfServiceTab('leaveApplication') });
-  }
-  // Always visible to every account — only ever shows THIS account's own
-  // Leave balance, read-only (see MyLeave.tsx). Distinct from "Leave
-  // Manage" (now under HRM below), which is gated and shows/edits every
-  // account's balance.
-  if (canSeeMyLeave) {
-    selfServiceItems.push({ key: 'myLeave', label: 'My Leave', icon: ListChecks, onClick: () => onGoToSelfServiceTab('myLeave') });
-  }
   // Chat (Direct/Group/Community messaging, ChatPanel.tsx) — NOT gated,
   // every signed-in account gets it, same as Employee Directory just below.
   selfServiceItems.push({ key: 'chat', label: 'Chat', icon: MessageSquare, onClick: onOpenChat });
@@ -329,10 +314,10 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     ? { key: 'admin_dashboard', label: 'Admin Dashboard', icon: LayoutDashboard, onClick: () => onGoToAdminModule('dashboard') }
     : null;
 
-  // "Admin Panel" — PEPM Manage group (expandable) + flat items, same grouping
-  // the old AdminSidebar used, each filtered by canSeeModule. (Group label
-  // shown to the user is "PEPM Manage"; internal names kept as reportsGroup/
-  // reportsOpen to minimize diff.)
+  // "Admin Panel" — PEPM Management group (expandable) + flat items, same
+  // grouping the old AdminSidebar used, each filtered by canSeeModule.
+  // (Group label shown to the user is "PEPM Management"; internal names
+  // kept as reportsGroup/reportsOpen to minimize diff.)
   const reportsGroup: NavItem[] = [
     { key: 'reports', label: 'Reports', icon: BarChart3, onClick: () => onGoToAdminModule('reports') },
     { key: 'mprs', label: 'MPR Nos', icon: FileText, onClick: () => onGoToAdminModule('mprs') },
@@ -396,7 +381,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // (from the dissolved Organization group) and every item from the
   // dissolved Claims/Attendance groups.
   const hrGroup: NavItem[] = [
-    { key: 'approvals', label: 'Approvals', icon: ShieldCheck, onClick: () => onGoToAdminModule('approvals') },
+    { key: 'approvals', label: 'Approval Chain', icon: ShieldCheck, onClick: () => onGoToAdminModule('approvals') },
     { key: 'notices', label: 'Notices', icon: Bell, onClick: () => onGoToAdminModule('notices') },
     { key: 'holidays', label: 'Holidays', icon: Calendar, onClick: () => onGoToAdminModule('holidays') },
     // Read-only "who applied for Leave" report, gated by its own
@@ -426,10 +411,24 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     { key: 'document_vault', label: 'Document Vault', icon: FolderLock, onClick: () => onGoToAdminModule('document_vault') },
   ].filter((i) => canSeeModule(i.key as AdminModuleKey));
 
+  // "Payroll" — moved here from Self Service's "My HR" group: same
+  // permission-gated PayrollModule.tsx/PayrollRoutes.ts feature (a
+  // Superadmin always sees it via canSeeModule, everyone else only once
+  // granted the 'payroll' module via Admin Panel -> Users -> Module
+  // Access), just reached from Admin Panel -> HRM now instead of Self
+  // Service. Still routes through onGoToSelfServiceTab('payroll') — the
+  // page itself (App.tsx's selfServiceView === 'payroll') isn't part of
+  // AdminPanel's own tab system, so this is only a menu-location change.
+  const hrPayrollGroup: NavItem[] = [];
+  if (canSeeModule('payroll')) {
+    hrPayrollGroup.push({ key: 'payroll', label: 'Payroll', icon: Banknote, onClick: () => onGoToSelfServiceTab('payroll') });
+  }
+
   const hrSubGroups: { key: string; label: string; icon: React.ComponentType<{ className?: string }>; items: NavItem[] }[] = [
     { key: 'hr_attendance', label: 'Attendance', icon: Fingerprint, items: attendanceItems },
     { key: 'hr_claims_bill', label: 'Claims/Bill/Disbursement', icon: CreditCard, items: claimsItems },
     { key: 'hr_employee', label: 'Employee', icon: Contact, items: employeeItems },
+    { key: 'hr_payroll', label: 'Payroll', icon: Banknote, items: hrPayrollGroup },
     { key: 'hr_advanced', label: 'HR Advanced', icon: Sparkles, items: hrAdvancedItems },
   ].filter((g) => g.items.length > 0);
 
@@ -890,8 +889,8 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
           )}
           {(collapsed || selfServiceOpen) && (
             <>
-              {renderGroup(jobEntryGroup, 'Job Entry', Briefcase, jobEntryOpen, setJobEntryOpen)}
-              {renderNestedGroup(hrmSubGroups, 'HRM', Users2, hrmOpen, setHrmOpen, hrmSubOpenKeys, toggleHrmSub)}
+              {renderGroup(jobEntryGroup, 'PEPM Operation', Briefcase, jobEntryOpen, setJobEntryOpen)}
+              {renderNestedGroup(hrmSubGroups, 'My HR', Users2, hrmOpen, setHrmOpen, hrmSubOpenKeys, toggleHrmSub)}
               {selfServiceItems.map(renderItem)}
             </>
           )}
@@ -913,8 +912,8 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
                 <>
               {adminDashboardItem && renderItem(adminDashboardItem)}
 
-              {renderGroup(reportsGroup, 'PEPM Manage', BarChart3, reportsOpen, setReportsOpen)}
-              {renderNestedGroup(hrSubGroups, 'HR', ShieldCheck, hrOpen, setHrOpen, hrSubOpenKeys, toggleHrSub, hrGroup)}
+              {renderGroup(reportsGroup, 'PEPM Management', BarChart3, reportsOpen, setReportsOpen)}
+              {renderNestedGroup(hrSubGroups, 'HRM', ShieldCheck, hrOpen, setHrOpen, hrSubOpenKeys, toggleHrSub, hrGroup)}
               {renderGroup(misGroup, 'MIS', Server, misOpen, setMisOpen)}
 
               {adminFlatItems.map(renderItem)}
