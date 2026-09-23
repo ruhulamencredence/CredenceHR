@@ -5,7 +5,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { ArrowLeft, CalendarDays, CheckCircle2, XCircle, Clock, Inbox, Plus } from 'lucide-react';
-import { LeaveApplication } from '../types';
+import { LeaveApplication, LeaveBalance } from '../types';
 import { apiUrl } from '../lib/api';
 import { formatDate } from '../lib/formatDate';
 import { NewLeaveApplicationModal } from './NewLeaveApplicationModal';
@@ -34,17 +34,31 @@ const TABS: { key: ReviewTab; label: string }[] = [
   { key: 'rejected', label: 'Rejected' }
 ];
 
-// Dashboard -> Leave Summary card -> (tap the card) -> this page. Holds the
-// Review/Approved/Rejected tabs + list that used to sit inline on
-// LeaveSummaryCard itself — same data (GET /api/leave-applications/mine),
-// just moved to its own dedicated page so the Dashboard card can stay to
-// just "Leave Summary" / "Submit Leave" / Total Leave. Not Admin-gated, same
-// as the card — every account can apply for and review its own Leave.
+// Dashboard -> Leave Summary card -> (tap the card) -> this page, and also
+// GlobalSidebar's single "Leave Application" item (Self Service -> My HR ->
+// Leave Manage). Holds the Review/Approved/Rejected tabs + list that used to
+// sit inline on LeaveSummaryCard itself — same data (GET
+// /api/leave-applications/mine), just moved to its own dedicated page so the
+// Dashboard card can stay to just "Leave Summary" / "Submit Leave" / Total
+// Leave. Not Admin-gated, same as the card — every account can apply for and
+// review its own Leave. Also shows this account's own Leave balance (Casual/
+// Sick/Leave-without-Pay + custom categories) — merged in from the old
+// separate "My Leave" page (MyLeave.tsx, now deleted) so there's one
+// "Leave Application" interface instead of two.
 export const LeaveReviewPage: React.FC<LeaveReviewPageProps> = ({ token, onBack }) => {
   const [applications, setApplications] = useState<LeaveApplication[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<ReviewTab>('pending');
   const [showNewModal, setShowNewModal] = useState(false);
+
+  // Own Leave balance (Casual/Sick/Leave-without-Pay + any custom Leave
+  // Categories) — merged in from the old standalone "My Leave" page/menu
+  // item (MyLeave.tsx, now deleted), so this one "Leave Application" page
+  // covers both applying/reviewing AND checking your own balance, read-only.
+  // Same /api/leave-balances/mine endpoint (always this account's own single
+  // row, even for a Leave Manager/Superadmin) MyLeave.tsx used.
+  const [balance, setBalance] = useState<LeaveBalance | null>(null);
+  const [balanceLoading, setBalanceLoading] = useState(true);
 
   const load = async () => {
     setLoading(true);
@@ -59,8 +73,25 @@ export const LeaveReviewPage: React.FC<LeaveReviewPageProps> = ({ token, onBack 
     }
   };
 
+  const loadBalance = async () => {
+    setBalanceLoading(true);
+    try {
+      const res = await fetch(apiUrl('/api/leave-balances/mine'), { headers: { Authorization: `Bearer ${token}` } });
+      if (res.ok) {
+        const rows: LeaveBalance[] = await res.json();
+        setBalance(Array.isArray(rows) ? rows[0] || null : null);
+      }
+    } catch {
+      // Offline/unreachable — balance strip just stays empty; the rest of
+      // the page (submit/review) still works.
+    } finally {
+      setBalanceLoading(false);
+    }
+  };
+
   useEffect(() => {
     load();
+    loadBalance();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
@@ -111,6 +142,31 @@ export const LeaveReviewPage: React.FC<LeaveReviewPageProps> = ({ token, onBack 
         </h3>
         <p className="text-xs text-slate-500 mt-0.5">Review, Approved and Rejected — every Leave Application you've submitted</p>
       </div>
+
+      {/* Own Leave balance — merged in from the old standalone "My Leave"
+          page (see the balance state/loadBalance above). Shown on both
+          mobile and desktop, ahead of the Review/Approved/Rejected switcher,
+          so "how much do I have left" is the first thing this page answers
+          before "what have I already submitted". Read-only, no per-account
+          table, no editing — same scope MyLeave.tsx always had. */}
+      {!balanceLoading && balance && (
+        <div className="px-4 sm:px-6 pt-4 flex flex-wrap gap-2">
+          <div className="flex items-center gap-1.5 text-[11px] font-semibold px-3 py-1.5 rounded-full bg-blue-50 text-blue-700 border border-blue-100">
+            Casual <span className="font-bold">{balance.casual_leave}</span>
+          </div>
+          <div className="flex items-center gap-1.5 text-[11px] font-semibold px-3 py-1.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100">
+            Sick <span className="font-bold">{balance.sick_leave}</span>
+          </div>
+          <div className="flex items-center gap-1.5 text-[11px] font-semibold px-3 py-1.5 rounded-full bg-amber-50 text-amber-700 border border-amber-100">
+            Without Pay <span className="font-bold">{balance.leave_without_pay}</span>
+          </div>
+          {balance.custom_leaves?.map((c) => (
+            <div key={c.key} className="flex items-center gap-1.5 text-[11px] font-semibold px-3 py-1.5 rounded-full bg-violet-50 text-violet-700 border border-violet-100">
+              {c.label} <span className="font-bold">{c.balance}</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Review / Approved / Rejected — mobile only now (see the desktop
           table below, which shows every status at once via its own Status
@@ -306,6 +362,7 @@ export const LeaveReviewPage: React.FC<LeaveReviewPageProps> = ({ token, onBack 
           onSubmitted={() => {
             setShowNewModal(false);
             load();
+            loadBalance();
           }}
         />
       )}
