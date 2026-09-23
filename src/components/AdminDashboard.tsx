@@ -200,7 +200,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user }) =
       const [
         leaveApps, balances, advances, assetReqs, claims, bills, activeNotices, empDir, monthlyReport, holidayRows, latePolicyRows,
       ] = await Promise.all([
-        safeGet<any[]>('/api/leave-applications', authHeaders),
+        // /api/leave-applications/report, not the older /api/leave-applications
+        // (a real-role-only "Self Service -> Leave Approvals" queue, hard-gated
+        // to role admin/superadmin regardless of module_permissions) — this
+        // report is the one already gated by the grantable 'leave_applications'
+        // module, so an account granted Admin Dashboard + Monthly Leave
+        // Application sees real figures here too, not just a Superadmin.
+        safeGet<any[]>('/api/leave-applications/report', authHeaders),
         safeGet<any[]>('/api/leave-balances', authHeaders),
         safeGet<any[]>('/api/payroll/advance-requests?status=pending', authHeaders),
         safeGet<any[]>('/api/assets/requisitions?status=pending', authHeaders),
