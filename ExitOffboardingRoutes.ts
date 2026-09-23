@@ -76,12 +76,57 @@ export async function ensureExitOffboardingSchema(dbPool: any): Promise<void> {
         cleared_by INT NULL,
         cleared_at TIMESTAMP NULL,
         remarks VARCHAR(500) NULL,
+        -- Snapshotted from exit_clearance_approvers at the moment this exit
+        -- request was created (see POST /api/exit-requests) — the same
+        -- "snapshot, not live lookup" reasoning approval_requests.total_steps
+        -- already uses elsewhere: changing who's assigned to a department
+        -- later must never retroactively change who owns an
+        -- already-in-flight clearance item.
+        approver_user_id INT NULL,
         FOREIGN KEY (exit_id) REFERENCES exit_requests(id) ON DELETE CASCADE,
-        FOREIGN KEY (cleared_by) REFERENCES users(id) ON DELETE SET NULL
+        FOREIGN KEY (cleared_by) REFERENCES users(id) ON DELETE SET NULL,
+        FOREIGN KEY (approver_user_id) REFERENCES users(id) ON DELETE SET NULL
       )
     `);
   } catch (err: any) {
     console.warn("⚠️ Could not ensure exit_clearance_items table exists: " + err.message);
+  }
+  // Existing DBs from before approver_user_id existed — additive, so this is
+  // a no-op everywhere else (fresh installs already get the column from the
+  // CREATE TABLE above).
+  try {
+    await dbPool.query(`ALTER TABLE exit_clearance_items ADD COLUMN approver_user_id INT NULL`);
+    await dbPool.query(`ALTER TABLE exit_clearance_items ADD FOREIGN KEY (approver_user_id) REFERENCES users(id) ON DELETE SET NULL`);
+  } catch {
+    // Column already exists — expected on every run after the first.
+  }
+  // Which login account is responsible for clearing each of the 4 fixed
+  // clearance departments (Admin Panel -> Exit/Offboarding -> Clearance
+  // Approvers) — deliberately its OWN small mapping, independent of the
+  // Departments module's Supervisor (Admin Panel -> Departments): that
+  // module's Department rows are free-form org-chart data an org may not
+  // have named "IT"/"Finance"/"Admin"/"HR" at all, so this stays a simple,
+  // always-applicable settings table instead of requiring an exact-name
+  // match against Departments. NULL approver_user_id means "unassigned" —
+  // that department's clearance items just never appear in anyone's
+  // Approve Application queue until an Admin picks someone here (Admin can
+  // still tick them by hand in ExitOffboardingPanel in the meantime).
+  try {
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS exit_clearance_approvers (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        department VARCHAR(100) NOT NULL UNIQUE,
+        approver_user_id INT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (approver_user_id) REFERENCES users(id) ON DELETE SET NULL
+      )
+    `);
+    for (const { department } of CLEARANCE_DEPARTMENTS) {
+      await dbPool.query(`INSERT IGNORE INTO exit_clearance_approvers (department) VALUES (?)`, [department]);
+    }
+  } catch (err: any) {
+    console.warn("⚠️ Could not ensure exit_clearance_approvers table exists: " + err.message);
   }
   try {
     await dbPool.query(`
@@ -153,7 +198,9 @@ export function registerExitOffboardingRoutes(app: Express, deps: ExitOffboardin
           department: it.department,
           item_label: it.item_label,
           is_cleared: !!Number(it.is_cleared),
-          remarks: it.remarks
+          remarks: it.remarks,
+          approver_user_id: it.approver_user_id != null ? Number(it.approver_user_id) : null,
+          approver_name: it.approver_user_id != null ? (userById.get(Number(it.approver_user_id)) as any)?.name || null : null
         })),
       settlement: (() => {
         const s = settlements.find((row: any) => Number(row.exit_id) === Number(exitRow.id));
@@ -211,12 +258,20 @@ export function registerExitOffboardingRoutes(app: Express, deps: ExitOffboardin
         [targetUserId, exitType, reason, noticeDate, lastWorkingDay, "pending", req.user.id]
       );
       const exitId = Number(result.insertId);
+      // Snapshot each department's currently-configured approver onto its
+      // clearance item now (see the approver_user_id column comment) — a
+      // department with no one assigned yet (approver_user_id stays NULL)
+      // just never shows up in anyone's Approve Application queue; Admin can
+      // still tick it by hand in ExitOffboardingPanel.
+      const approverRows: any = await queryDB("SELECT * FROM exit_clearance_approvers");
+      const approverByDept = new Map<string, number | null>(
+        approverRows.map((r: any) => [r.department, r.approver_user_id != null ? Number(r.approver_user_id) : null])
+      );
       for (const item of CLEARANCE_DEPARTMENTS) {
-        await queryDB("INSERT INTO exit_clearance_items (exit_id, department, item_label) VALUES (?, ?, ?)", [
-          exitId,
-          item.department,
-          item.item_label
-        ]);
+        await queryDB(
+          "INSERT INTO exit_clearance_items (exit_id, department, item_label, approver_user_id) VALUES (?, ?, ?, ?)",
+          [exitId, item.department, item.item_label, approverByDept.get(item.department) ?? null]
+        );
       }
       const rows: any = await queryDB("SELECT * FROM exit_requests WHERE id = ?", [exitId]);
       res.status(201).json(await serializeExit(rows[0]));
@@ -256,6 +311,90 @@ export function registerExitOffboardingRoutes(app: Express, deps: ExitOffboardin
       const rows: any = await queryDB("SELECT * FROM exit_clearance_items WHERE id = ?", [id]);
       if (rows.length === 0) return res.status(404).json({ error: "Clearance item not found." });
       const r = rows[0];
+      res.json({ id: Number(r.id), department: r.department, item_label: r.item_label, is_cleared: !!Number(r.is_cleared), remarks: r.remarks });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET: the 4 department -> approver assignments (Admin Panel -> Exit/
+  // Offboarding -> Clearance Approvers settings) — module-gated, same as
+  // every other management-side route here.
+  app.get("/api/exit-clearance-approvers", authenticateToken, requireAdmin, requireModule("exit_offboarding"), async (req: any, res) => {
+    try {
+      const [rows, users]: [any, any] = await Promise.all([
+        queryDB("SELECT * FROM exit_clearance_approvers ORDER BY id ASC"),
+        queryDB("SELECT id, name FROM users")
+      ]);
+      const userById = new Map(users.map((u: any) => [Number(u.id), u]));
+      res.json(
+        rows.map((r: any) => ({
+          department: r.department,
+          approver_user_id: r.approver_user_id != null ? Number(r.approver_user_id) : null,
+          approver_name: r.approver_user_id != null ? (userById.get(Number(r.approver_user_id)) as any)?.name || null : null
+        }))
+      );
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // PUT: (re)assign who's responsible for one department's clearance —
+  // approver_user_id: null clears the assignment (that department's future
+  // clearance items just won't route to anyone's Approve Application queue
+  // until reassigned). Only affects clearance items created AFTER this
+  // change — see the snapshot comment on exit_clearance_items.approver_user_id.
+  app.put("/api/exit-clearance-approvers/:department", authenticateToken, requireAdmin, requireModule("exit_offboarding"), async (req: any, res) => {
+    try {
+      const department = req.params.department;
+      const approverUserId = req.body?.approver_user_id != null ? Number(req.body.approver_user_id) : null;
+      // Filtered/updated-by-id in JS rather than `WHERE department = ?` —
+      // this file's own top comment already establishes that every write
+      // route here only ever does `WHERE id = ?` in SQL, everything else
+      // filtered in JS after a full-table SELECT.
+      const all: any = await queryDB("SELECT * FROM exit_clearance_approvers");
+      const existing = all.find((r: any) => r.department === department);
+      if (!existing) return res.status(404).json({ error: "Unknown clearance department." });
+      await queryDB("UPDATE exit_clearance_approvers SET approver_user_id = ? WHERE id = ?", [approverUserId, Number(existing.id)]);
+      const users: any = approverUserId != null ? await queryDB("SELECT id, name FROM users WHERE id = ?", [approverUserId]) : [];
+      res.json({ department, approver_user_id: approverUserId, approver_name: users[0]?.name || null });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST: the department approver's own Approve/Reject decision on their
+  // clearance item — reached from the Approve Application inbox
+  // (source_type 'exit_clearance', see GET /api/my-approvals), NOT
+  // module-gated like the PUT above: this is deliberately reachable by
+  // whichever plain account is currently assigned as a department's
+  // approver, same "any account can be an approver" philosophy the
+  // Department Supervisor / Approval Template steps already use elsewhere.
+  // 'rejected' just leaves the item unticked with the approver's remarks
+  // attached (there's no real "permanently reject a clearance" concept —
+  // it only ever means "not cleared yet", the department can act again
+  // later once whatever's blocking it is resolved).
+  app.post("/api/exit-clearance-items/:id/decision", authenticateToken, async (req: any, res) => {
+    try {
+      const id = Number(req.params.id);
+      const action = req.body?.action;
+      if (action !== "approved" && action !== "rejected") {
+        return res.status(400).json({ error: "action must be 'approved' or 'rejected'." });
+      }
+      const remarks = typeof req.body?.remarks === "string" ? req.body.remarks.trim().slice(0, 500) : null;
+      const rows: any = await queryDB("SELECT * FROM exit_clearance_items WHERE id = ?", [id]);
+      if (rows.length === 0) return res.status(404).json({ error: "Clearance item not found." });
+      const item = rows[0];
+      if (item.approver_user_id == null || Number(item.approver_user_id) !== Number(req.user.id)) {
+        return res.status(403).json({ error: "This clearance item isn't assigned to you." });
+      }
+      const isCleared = action === "approved";
+      await queryDB(
+        "UPDATE exit_clearance_items SET is_cleared = ?, cleared_by = ?, cleared_at = ?, remarks = ? WHERE id = ?",
+        [isCleared ? 1 : 0, isCleared ? req.user.id : null, isCleared ? new Date() : null, remarks, id]
+      );
+      const updated: any = await queryDB("SELECT * FROM exit_clearance_items WHERE id = ?", [id]);
+      const r = updated[0];
       res.json({ id: Number(r.id), department: r.department, item_label: r.item_label, is_cleared: !!Number(r.is_cleared), remarks: r.remarks });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
