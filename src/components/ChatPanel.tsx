@@ -661,7 +661,11 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
         });
         if (res.ok) {
           const message: ChatMessage = await res.json();
-          setMessages((prev) => [...prev, message]);
+          // The server also broadcasts this new message over the socket's
+          // 'receive_message' event (see the onReceive handler above) to
+          // every room member, sender included — whichever of the two
+          // arrives second needs to no-op instead of adding a duplicate.
+          setMessages((prev) => (prev.some((m) => m.id === message.id) ? prev : [...prev, message]));
         }
       } catch {
         alert('Could not send — check your connection and try again.');
