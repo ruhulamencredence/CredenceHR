@@ -235,7 +235,7 @@ export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ toke
       )}
 
       {!openCategory ? (
-        <div className="p-5 sm:px-6 grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+        <div className="p-5 sm:px-6 flex flex-col sm:grid sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
           {categories.map((cat) => {
             const list = byCategory.get(cat) || [];
             return (
