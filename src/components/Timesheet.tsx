@@ -326,6 +326,11 @@ export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceP
 
   const monthDates = useMemo(() => buildMonthDates(selYear, selMonth, today), [selYear, selMonth, today]);
   const rangeDates = useMemo(() => buildRangeDates(rangeFrom, rangeTo), [rangeFrom, rangeTo]);
+  // Newest-to-oldest for display (today/last date at top) — monthDates/
+  // rangeDates themselves stay oldest-to-newest since buildRangeDates'
+  // MAX_DAYS cap and the Present/Absent counts below don't care about order.
+  const monthDatesDesc = useMemo(() => [...monthDates].reverse(), [monthDates]);
+  const rangeDatesDesc = useMemo(() => [...rangeDates].reverse(), [rangeDates]);
 
   const monthPresentCount = monthDates.filter((d) => (byDate.get(d) || []).length > 0).length;
   const monthAbsentCount = monthDates.filter((d) => (byDate.get(d) || []).length === 0 && !holidayByDate.has(d)).length;
@@ -459,7 +464,7 @@ export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceP
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      {monthDates.map((d) => (
+                      {monthDatesDesc.map((d) => (
                         <DateCard key={d} dateStr={d} records={byDate.get(d) || []} correction={correctionsByDate.get(d)} holiday={holidayByDate.get(d)} onClick={() => openDateCard(d)} />
                       ))}
                     </div>
@@ -580,7 +585,7 @@ export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceP
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      {rangeDates.map((d) => (
+                      {rangeDatesDesc.map((d) => (
                         <DateCard key={d} dateStr={d} records={byDate.get(d) || []} correction={correctionsByDate.get(d)} holiday={holidayByDate.get(d)} onClick={() => openDateCard(d)} />
                       ))}
                     </div>
