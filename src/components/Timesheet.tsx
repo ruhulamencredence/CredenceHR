@@ -247,6 +247,11 @@ export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceP
 
   const loadData = async (cancelledRef?: { cancelled: boolean }) => {
     try {
+      // Which calendar (Head Office vs Project site) applies to THIS account
+      // — fetched first since the holidays call below needs it.
+      const groupRes = await fetch(apiUrl('/api/my-holiday-group'), { headers: { Authorization: `Bearer ${token}` } });
+      const appliesTo = groupRes.ok ? (await groupRes.json())?.applies_to === 'project_site' ? 'project_site' : 'head_office' : 'head_office';
+
       const [attRes, corrRes, projRes, holRes] = await Promise.all([
         fetch(apiUrl('/api/attendance/mine'), { headers: { Authorization: `Bearer ${token}` } }),
         fetch(apiUrl('/api/attendance/corrections/mine'), { headers: { Authorization: `Bearer ${token}` } }),
@@ -257,7 +262,7 @@ export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceP
         // past corrections' status) shouldn't be limited to Projects this
         // Employee happens to be explicitly granted.
         fetch(apiUrl('/api/projects/all'), { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(apiUrl('/api/holidays'), { headers: { Authorization: `Bearer ${token}` } })
+        fetch(apiUrl(`/api/holidays?applies_to=${appliesTo}`), { headers: { Authorization: `Bearer ${token}` } })
       ]);
       if (cancelledRef?.cancelled) return;
       if (attRes.ok) setRecords(await attRes.json());

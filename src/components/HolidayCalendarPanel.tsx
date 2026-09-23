@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { CalendarDays, Plus, Trash2, Edit2, X, Sun, CalendarClock, ChevronLeft, ChevronRight } from 'lucide-react';
-import { HolidayEntry, HolidayDayType } from '../types';
+import { HolidayEntry, HolidayDayType, HolidayAppliesTo } from '../types';
 import { apiUrl } from '../lib/api';
 import { formatDate } from '../lib/formatDate';
 import { Spinner } from './Spinner';
@@ -90,6 +90,13 @@ export const HolidayCalendarPanel: React.FC<HolidayCalendarPanelProps> = ({ toke
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
+  // Head Office and Project-site Employees can have fully independent
+  // calendars — this tab picks which one the grid/list/Add form below
+  // operate on. GET /api/holidays is fetched once for BOTH groups (small
+  // table), filtered client-side per tab so switching tabs is instant.
+  const [group, setGroup] = useState<HolidayAppliesTo>('head_office');
+  const entriesForGroup = useMemo(() => entries.filter((e) => e.applies_to === group), [entries, group]);
+
   // The month grid below — shows every Weekend/Holiday date at a glance,
   // colored on the calendar itself, instead of only as a text list.
   const now = new Date();
@@ -157,10 +164,13 @@ export const HolidayCalendarPanel: React.FC<HolidayCalendarPanelProps> = ({ toke
     try {
       const url = editingId ? apiUrl(`/api/holidays/${editingId}`) : apiUrl('/api/holidays');
       const method = editingId ? 'PUT' : 'POST';
+      // applies_to is only meaningful (and only accepted server-side) on
+      // create — it's immutable afterward, same as entry_date.
+      const body = editingId ? form : { ...form, applies_to: group };
       const res = await fetch(url, {
         method,
         headers: { ...authHeaders, 'Content-Type': 'application/json' },
-        body: JSON.stringify(form)
+        body: JSON.stringify(body)
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -208,7 +218,7 @@ export const HolidayCalendarPanel: React.FC<HolidayCalendarPanelProps> = ({ toke
       const res = await fetch(apiUrl('/api/holidays/bulk-weekly'), {
         method: 'POST',
         headers: { ...authHeaders, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ from: bulkFrom, to: bulkTo, weekday: bulkWeekday, title: bulkTitle })
+        body: JSON.stringify({ from: bulkFrom, to: bulkTo, weekday: bulkWeekday, title: bulkTitle, applies_to: group })
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -228,15 +238,16 @@ export const HolidayCalendarPanel: React.FC<HolidayCalendarPanelProps> = ({ toke
   // Only future-or-today entries surface first, past entries trail below —
   // makes the upcoming Holidays/Weekends the first thing an Admin sees.
   const today = new Date().toISOString().slice(0, 10);
-  const upcoming = entries.filter((e) => e.entry_date >= today);
-  const past = entries.filter((e) => e.entry_date < today).slice().reverse();
+  const upcoming = entriesForGroup.filter((e) => e.entry_date >= today);
+  const past = entriesForGroup.filter((e) => e.entry_date < today).slice().reverse();
 
-  // "YYYY-MM-DD" -> its calendar entry, for O(1) lookup while painting the grid.
+  // "YYYY-MM-DD" -> its calendar entry, for O(1) lookup while painting the
+  // grid — scoped to the active group's tab.
   const entryByDate = useMemo(() => {
     const map = new Map<string, HolidayEntry>();
-    for (const e of entries) map.set(e.entry_date, e);
+    for (const e of entriesForGroup) map.set(e.entry_date, e);
     return map;
-  }, [entries]);
+  }, [entriesForGroup]);
 
   const gridCells = useMemo(() => buildGrid(calYear, calMonth), [calYear, calMonth]);
 
@@ -318,11 +329,11 @@ export const HolidayCalendarPanel: React.FC<HolidayCalendarPanelProps> = ({ toke
       <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
         <div>
           <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
-            <CalendarDays className="w-5 h-5 text-blue-600" /> Global Calendar
+            <CalendarDays className="w-5 h-5 text-blue-600" /> Holiday Calendar
           </h3>
           <p className="text-xs text-slate-500 mt-0.5">
-            Dates set here are excluded from Absent in Attendance Reports and everyone's Timesheet — for
-            everyone, automatically.
+            Dates set here are excluded from Absent in Attendance Reports and Timesheet, for every Employee
+            in this group — Head Office and Project site each have their own independent calendar.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -341,6 +352,25 @@ export const HolidayCalendarPanel: React.FC<HolidayCalendarPanelProps> = ({ toke
             <Plus className="w-3.5 h-3.5" /> Add Date
           </button>
         </div>
+      </div>
+
+      {/* Group tabs — Head Office and Project site are fully independent
+          calendars, not a shared one with exceptions. Switching tabs just
+          re-filters entriesForGroup client-side (both groups are already
+          loaded), so it's instant. */}
+      <div className="flex gap-2 mb-5 border-b border-slate-200">
+        {(['head_office', 'project_site'] as HolidayAppliesTo[]).map((g) => (
+          <button
+            key={g}
+            type="button"
+            onClick={() => setGroup(g)}
+            className={`px-4 py-2.5 text-sm font-semibold border-b-2 -mb-px transition-colors ${
+              group === g ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            {g === 'head_office' ? 'Head Office' : 'Project Site'}
+          </button>
+        ))}
       </div>
 
       {message && (
@@ -422,7 +452,7 @@ export const HolidayCalendarPanel: React.FC<HolidayCalendarPanelProps> = ({ toke
         <div className="flex justify-center py-16">
           <Spinner />
         </div>
-      ) : entries.length === 0 ? (
+      ) : entriesForGroup.length === 0 ? (
         <div className="text-center py-16 text-slate-400">
           <CalendarDays className="w-10 h-10 mx-auto mb-2 opacity-40" />
           <p className="text-sm">No Weekend or Holiday dates set yet.</p>

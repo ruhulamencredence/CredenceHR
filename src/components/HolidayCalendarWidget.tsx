@@ -84,7 +84,9 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
       // This widget mounts twice on every Dashboard load (compact mobile +
       // large desktop copies, see UserPanel.tsx) — dedupedFetchJson means
       // only one of the two actually hits the network.
-      const rows = await dedupedFetchJson(apiUrl('/api/holidays'), token);
+      const myGroup = await dedupedFetchJson(apiUrl('/api/my-holiday-group'), token);
+      const appliesTo = myGroup?.applies_to === 'project_site' ? 'project_site' : 'head_office';
+      const rows = await dedupedFetchJson(apiUrl(`/api/holidays?applies_to=${appliesTo}`), token);
       if (rows) setEntries(rows);
     } catch {
       // Offline/unreachable — the widget just shows a blank calendar; no
