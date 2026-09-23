@@ -2041,6 +2041,34 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
   if (lowerSql.startsWith("select id, name, role from users") && !lowerSql.includes("where")) {
     return memoryDb.users.map((u: any) => ({ id: u.id, name: u.name, role: u.role }));
   }
+  // finalizeLeaveApplicationApproval / rejectLeaveApplicationRecord in
+  // server.ts hardcode the target status as a literal ('approved'/'rejected')
+  // rather than a `?` placeholder, so they only ever pass 3 params (remarks,
+  // decided_by, id) — checked before the older 4-param "status = ?" decision
+  // route below (same startsWith prefix otherwise, so the more specific
+  // literal match must win first).
+  if (lowerSql.startsWith("update leave_applications set status = 'approved'")) {
+    const [remarks, decidedBy, id] = params;
+    const row = memoryDb.leaveApplications.find((a: any) => a.id === Number(id));
+    if (row) {
+      row.status = "approved";
+      row.remarks = remarks;
+      row.decided_by = decidedBy != null ? Number(decidedBy) : null;
+      row.decided_at = new Date();
+    }
+    return { affectedRows: row ? 1 : 0 };
+  }
+  if (lowerSql.startsWith("update leave_applications set status = 'rejected'")) {
+    const [remarks, decidedBy, id] = params;
+    const row = memoryDb.leaveApplications.find((a: any) => a.id === Number(id));
+    if (row) {
+      row.status = "rejected";
+      row.remarks = remarks;
+      row.decided_by = decidedBy != null ? Number(decidedBy) : null;
+      row.decided_at = new Date();
+    }
+    return { affectedRows: row ? 1 : 0 };
+  }
   if (lowerSql.startsWith("update leave_applications set status")) {
     const [status, remarks, decidedBy, id] = params;
     const row = memoryDb.leaveApplications.find((a: any) => a.id === Number(id));
