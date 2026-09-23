@@ -1659,6 +1659,33 @@ async function ensureSchemaMigrations() {
       console.warn("⚠️ Could not add approval_requests.supervisor_step_user_id column: " + err.message);
     }
   }
+  // Approver Type override (Template editor's "Layer 1" card) — when a
+  // Template is built with its first Layer explicitly set to something other
+  // than the default virtual "Supervisor" position (i.e. an Employee or Admin
+  // picked by hand), skip_auto_supervisor is set true so
+  // createTemplateApprovalRequest skips resolveSupervisorApprover entirely
+  // and that Template's own step_order 1 becomes the request's real first
+  // step. Defaults to 0/false for every existing template, so this is a
+  // zero-behavior-change addition until a Superadmin opts a template into it.
+  try {
+    await dbPool.query(`ALTER TABLE approval_templates ADD COLUMN skip_auto_supervisor TINYINT(1) NOT NULL DEFAULT 0`);
+  } catch (err: any) {
+    if (err.code !== "ER_DUP_FIELDNAME") {
+      console.warn("⚠️ Could not add approval_templates.skip_auto_supervisor column: " + err.message);
+    }
+  }
+  // Per-step Approver Type — 'employee' (the existing pick-any-user behavior,
+  // unchanged) or 'admin' (the same picker, filtered to Admin/Superadmin
+  // accounts). Purely a UI label/filter on top of the existing
+  // approval_template_step_approvers mechanism; defaults to 'employee' so
+  // every pre-existing step keeps behaving exactly as before.
+  try {
+    await dbPool.query(`ALTER TABLE approval_template_steps ADD COLUMN approver_type ENUM('employee','admin') NOT NULL DEFAULT 'employee'`);
+  } catch (err: any) {
+    if (err.code !== "ER_DUP_FIELDNAME") {
+      console.warn("⚠️ Could not add approval_template_steps.approver_type column: " + err.message);
+    }
+  }
   // Timesheet -> click any date's row to manually fix that day's In/Out Time
   // (typically a day with no attendance at all, but any day can be corrected).
   // Submitting one NEVER touches the `attendance` table directly — it only
@@ -2477,8 +2504,6 @@ async function createTemplateApprovalRequest(
   sourceId: number,
   requestedBy: number
 ): Promise<{ autoApproved: boolean; template: any | null }> {
-  const supervisorId = await resolveSupervisorApprover(requestedBy);
-
   let template = await resolveApprovalTemplate(requestedBy, requestType);
   let templateSteps = 0;
   if (template) {
@@ -2490,6 +2515,13 @@ async function createTemplateApprovalRequest(
     // any, still applies on its own).
     if (templateSteps === 0) template = null;
   }
+
+  // Approver Type override: a Template whose Layer 1 was explicitly set to
+  // Employee/Admin (skip_auto_supervisor) skips the automatic Supervisor gate
+  // below entirely — that Template's own step_order 1 becomes this request's
+  // real first step instead. Every pre-existing template defaults to
+  // skip_auto_supervisor = false, so this is a no-op for them.
+  const supervisorId = template?.skip_auto_supervisor ? null : await resolveSupervisorApprover(requestedBy);
 
   const totalSteps = (supervisorId ? 1 : 0) + templateSteps;
   if (totalSteps === 0) return { autoApproved: true, template: null };
