@@ -231,12 +231,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     ? ADMIN_MODULES.map((m) => m.key)
     : (user.module_permissions || []);
   const canSee = (key: AdminModuleKey) => visibleModules.includes(key);
-  // The new Admin Dashboard tab isn't a grantable module (see GlobalSidebar's
-  // adminDashboardItem) — it's this account's own home screen, so it's
-  // visible whenever the real role is admin/superadmin, regardless of
-  // module_permissions (and never for a plain 'user' role account, even one
-  // holding module_permissions).
+  // The Admin Dashboard tab is this account's own home screen whenever the
+  // real role is admin/superadmin — no module grant needed for that case.
+  // A plain 'user' role account only gets it once explicitly granted the
+  // 'admin_dashboard' module (see GlobalSidebar's adminDashboardItem, and
+  // canSee below).
   const isAdminRole = user.role === 'admin' || user.role === 'superadmin';
+  const canSeeDashboard = isAdminRole || canSee('admin_dashboard');
   // Whether THIS logged-in Admin/Superadmin can see the "Last Login Location"
   // column. Always true for a Superadmin; a plain Admin needs the Superadmin to
   // have explicitly granted user.can_view_login_location.
@@ -263,7 +264,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         // never granted via module_permissions (see ServerProfileRoutes.ts and
         // GET /api/entries/permanent-delete-log respectively).
         const savedVisible =
-          saved === 'dashboard' ? isAdminRole :
+          saved === 'dashboard' ? canSeeDashboard :
           saved === 'my_conveyance' ? isSuperAdmin || visibleModules.includes('conveyance') :
           saved === 'servers' || saved === 'permanent_delete_log' ? isSuperAdmin :
           isSuperAdmin || visibleModules.includes(saved as AdminModuleKey);
@@ -271,7 +272,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       } catch {
         // ignore — falls through to the normal default below
       }
-      return isAdminRole ? 'dashboard' : ((visibleModules[0] as any) || 'reports');
+      return canSeeDashboard ? 'dashboard' : ((visibleModules[0] as any) || 'reports');
     }
   );
 
@@ -307,7 +308,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   useEffect(() => {
     if (!adminNavRequest) return;
     if (adminNavRequest.target === 'dashboard') {
-      if (isAdminRole) setActiveTab('dashboard');
+      if (canSeeDashboard) setActiveTab('dashboard');
       return;
     }
     // 'servers'/'permanent_delete_log' aren't AdminModuleKey/module_permissions
@@ -329,7 +330,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // forbidden panel.
   useEffect(() => {
     const activeTabStillVisible =
-      activeTab === 'dashboard' ? isAdminRole :
+      activeTab === 'dashboard' ? canSeeDashboard :
       activeTab === 'servers' || activeTab === 'permanent_delete_log' ? isSuperAdmin :
       activeTab === 'my_conveyance' ? canSee('conveyance') : canSee(activeTab);
     if (!activeTabStillVisible && visibleModules.length > 0) {
@@ -2901,8 +2902,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         </div>
       )}
 
-      {/* TAB 0: DASHBOARD — role admin/superadmin only (see isAdminRole above) */}
-      {activeTab === 'dashboard' && isAdminRole && (
+      {/* TAB 0: DASHBOARD — role admin/superadmin, or a granted 'admin_dashboard' module (see canSeeDashboard above) */}
+      {activeTab === 'dashboard' && canSeeDashboard && (
         <AdminDashboard token={token} user={user} />
       )}
 

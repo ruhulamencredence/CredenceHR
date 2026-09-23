@@ -317,14 +317,15 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // ExitOffboardingPanel under Admin Panel -> HR Advanced.
   selfServiceItems.push({ key: 'resignation', label: 'My Resignation', icon: LogOut, onClick: () => onGoToSelfServiceTab('resignation') });
 
-  // "Admin Dashboard" — the new HR-overview landing page (stat tiles, quick
-  // view, charts, notices, leave balances). Unlike every other Admin Panel
-  // item below, this is NOT module_permissions-gated — it's not a grantable
-  // module, it's the Admin/Superadmin's own home screen — so a plain 'user'
-  // role account (even one holding module_permissions) never sees it, only
-  // real role === 'admin' | 'superadmin' accounts do.
+  // "Admin Dashboard" — the HR-overview landing page (stat tiles, quick
+  // view, charts, notices, leave balances). Every real role === 'admin' |
+  // 'superadmin' account gets it automatically (their own home screen); a
+  // plain 'user' role account only sees it once granted the 'admin_dashboard'
+  // module (Admin Panel -> Users -> Module Access), same "Role
+  // Permissiveness" pattern every other Admin Panel tab already follows —
+  // see canSeeModule above.
   const isAdminRole = user.role === 'admin' || user.role === 'superadmin';
-  const adminDashboardItem: NavItem | null = isAdminRole
+  const adminDashboardItem: NavItem | null = isAdminRole || canSeeModule('admin_dashboard')
     ? { key: 'admin_dashboard', label: 'Admin Dashboard', icon: LayoutDashboard, onClick: () => onGoToAdminModule('dashboard') }
     : null;
 
