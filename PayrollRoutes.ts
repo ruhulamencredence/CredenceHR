@@ -1324,6 +1324,29 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
     }
   });
 
+  // GET current policy + full change history (newest first) for the Settings
+  // screen — one call gives the form its defaults and the table its rows.
+  // Registered BEFORE /api/payroll/:id below: Express matches GET routes in
+  // registration order, and :id matches any single path segment — including
+  // the literal string "late-policy" — so this route must come first or
+  // every call here 404s as "Payroll record not found" (the :id handler's
+  // own not-found message), which is exactly what happened until this was
+  // moved: AdminDashboard.tsx's safeGet swallowed the 404 silently, so
+  // Quick View's Delay/Extreme Delay badges silently stayed "—" for
+  // everyone, Superadmin included, not just a module-granted account.
+  app.get("/api/payroll/late-policy", authenticateToken, requireAdmin, requireModule("payroll"), async (req: any, res) => {
+    try {
+      const rows = await queryDB(
+        `SELECT lp.*, u.name AS changed_by_name
+         FROM late_policy_settings lp LEFT JOIN users u ON u.id = lp.created_by
+         ORDER BY lp.effective_date DESC, lp.id DESC`
+      );
+      res.json(rows);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to load late policy history." });
+    }
+  });
+
   app.get("/api/payroll/:id", authenticateToken, requireAdmin, requireModule("payroll"), async (req: any, res) => {
     try {
       const rows = await queryDB(
@@ -1540,21 +1563,6 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
     for (const dates of extremeLateDatesByEmployee.values()) dates.sort();
     return { lateDatesByEmployee, extremeLateDatesByEmployee };
   }
-
-  // GET current policy + full change history (newest first) for the Settings
-  // screen — one call gives the form its defaults and the table its rows.
-  app.get("/api/payroll/late-policy", authenticateToken, requireAdmin, requireModule("payroll"), async (req: any, res) => {
-    try {
-      const rows = await queryDB(
-        `SELECT lp.*, u.name AS changed_by_name
-         FROM late_policy_settings lp LEFT JOIN users u ON u.id = lp.created_by
-         ORDER BY lp.effective_date DESC, lp.id DESC`
-      );
-      res.json(rows);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || "Failed to load late policy history." });
-    }
-  });
 
   // POST always INSERTs a new row (history preserved) rather than updating
   // the existing one in place — identical reasoning to salary_structures: a

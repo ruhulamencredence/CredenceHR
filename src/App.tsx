@@ -31,7 +31,6 @@ import { Spinner } from './components/Spinner';
 import { ApkModal } from './components/ApkModal';
 import { FloatingChatButton } from './components/FloatingChatButton';
 import { LeaveManage } from './components/LeaveManage';
-import { MyLeave } from './components/MyLeave';
 import { LeaveApprovals } from './components/LeaveApprovals';
 import { ApproveApplications } from './components/ApproveApplications';
 import { Timesheet } from './components/Timesheet';
@@ -92,10 +91,10 @@ export default function App() {
   // this account was actually looking at, instead of resetting to the
   // Admin/User Panel default every time.
   const selfServiceViewStorageKey = user ? `mpr_self_service_view_${user.id}` : null;
-  const [selfServiceView, setSelfServiceView] = useState<'leaveApplication' | 'leaveManagement' | 'myLeave' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | null>(() => {
+  const [selfServiceView, setSelfServiceView] = useState<'leaveApplication' | 'leaveManagement' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | null>(() => {
     try {
       const saved = selfServiceViewStorageKey ? localStorage.getItem(selfServiceViewStorageKey) : null;
-      if (saved === 'leaveApplication' || saved === 'leaveManagement' || saved === 'myLeave' || saved === 'leaveApprovals' || saved === 'timesheet' || saved === 'approveApplications' || saved === 'employeeDirectory' || saved === 'resignation') {
+      if (saved === 'leaveApplication' || saved === 'leaveManagement' || saved === 'leaveApprovals' || saved === 'timesheet' || saved === 'approveApplications' || saved === 'employeeDirectory' || saved === 'resignation') {
         return saved;
       }
     } catch {
@@ -686,7 +685,7 @@ export default function App() {
       setViewMode('admin');
       setAdminNavRequest({ target, ts: Date.now() });
     },
-    onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'myLeave' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation') => {
+    onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation') => {
       setShowProfilePage(false);
           setShowChat(false);
           setShowAlertsPage(false);
@@ -910,8 +909,6 @@ export default function App() {
               });
             }}
           />
-        ) : selfServiceView === 'myLeave' ? (
-          <MyLeave token={token} user={user} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'leaveManagement' ? (
           <LeaveManage token={token} user={user} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'leaveApprovals' ? (
