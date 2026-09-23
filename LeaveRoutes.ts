@@ -743,7 +743,7 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
     if (!req.user) return res.status(401).json({ error: "Access token required" });
     if (req.user.role === "superadmin") return next();
     try {
-      const rows: any = await queryDB("SELECT can_view_leave_application FROM users WHERE id = ?", [req.user.id]);
+      const rows: any = await queryDB("SELECT * FROM users WHERE id = ?", [req.user.id]);
       if (rows.length > 0 && !!Number(rows[0].can_view_leave_application)) return next();
       return res.status(403).json({ error: "You don't have access to Leave Application. Ask your Superadmin to grant it." });
     } catch (err: any) {
@@ -1065,6 +1065,17 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
               approverName = approvers.length > 0 ? approvers.map((x: any) => x.user_name || `User #${x.user_id}`).join(" or ") : null;
             }
           }
+          // Passed its first Approval Layer (the Department Supervisor
+          // auto-layer when the applicant's Department has one configured,
+          // otherwise the Template's own first Layer) — true once current_step
+          // has moved past step 1, or the whole chain is already fully
+          // 'approved' (a superset of "passed step 1"). Used by the Admin
+          // Dashboard's On Leave Today/Tomorrow counts and Leave Calendar so
+          // an application already cleared by the first reviewer shows as a
+          // real Leave instead of staying "Pending" for however many more
+          // Layers are left above it — see AdminDashboard.tsx.
+          const supervisorLayerApproved =
+            a.status === "approved" || (!!ar && ar.status === "pending" && currentStep != null && currentStep > 1);
           return {
             ...a,
             day_count: Number(a.day_count),
@@ -1079,6 +1090,7 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
             decided_by_name: a.decided_by ? (userMap.get(Number(a.decided_by))?.name || null) : null,
             current_step: currentStep,
             total_steps: totalSteps,
+            supervisor_layer_approved: supervisorLayerApproved,
             reliever_name: a.reliever_id ? (userMap.get(Number(a.reliever_id))?.name || null) : null,
             reliever_status: a.reliever_status || null,
             leave_type_label: leaveTypeLabelFor(a.leave_type)

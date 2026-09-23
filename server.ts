@@ -2372,8 +2372,11 @@ async function resolveApprovalTemplate(employeeUserId: number, requestType: "con
     console.warn("⚠️ Could not resolve employee template assignment: " + err.message);
   }
   try {
-    const def = await queryDB("SELECT * FROM approval_templates WHERE request_type = ? AND is_default = 1 AND is_active = 1 LIMIT 1", [requestType]);
-    if (def.length > 0) return def[0];
+    const allTemplates = await queryDB("SELECT * FROM approval_templates");
+    const def = allTemplates.find(
+      (t: any) => t.request_type === requestType && Number(t.is_default) === 1 && Number(t.is_active) === 1
+    );
+    if (def) return def;
   } catch (err: any) {
     console.warn("⚠️ Could not resolve default template: " + err.message);
   }
@@ -2479,8 +2482,8 @@ async function createTemplateApprovalRequest(
   let template = await resolveApprovalTemplate(requestedBy, requestType);
   let templateSteps = 0;
   if (template) {
-    const stepCountRows = await queryDB("SELECT COUNT(*) AS cnt FROM approval_template_steps WHERE template_id = ?", [template.id]);
-    templateSteps = Number(stepCountRows[0]?.cnt || 0);
+    const allSteps = await queryDB("SELECT * FROM approval_template_steps");
+    templateSteps = allSteps.filter((s: any) => Number(s.template_id) === Number(template.id)).length;
     // A Template somehow has zero steps (Part 2's editor always requires at
     // least one, but defend against a row created some other way) — treat
     // this exactly like "no template at all" (the Supervisor gate above, if
