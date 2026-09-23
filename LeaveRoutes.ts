@@ -1198,6 +1198,15 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
               approverName = approvers.length > 0 ? approvers.map((x: any) => x.user_name || `User #${x.user_id}`).join(" or ") : null;
             }
           }
+          // Passed its first Approval Layer — same signal GET
+          // /api/leave-applications computes, see that route's comment. The
+          // Admin Dashboard (a module-gated account can see it too, unlike
+          // GET /api/leave-applications above which is real-role-only) reads
+          // this report as its data source specifically so a granted account
+          // gets the same On Leave Today/Tomorrow/Leave Calendar figures a
+          // Superadmin sees.
+          const supervisorLayerApproved =
+            a.status === "approved" || (!!ar && ar.status === "pending" && currentStep != null && currentStep > 1);
           return {
             ...a,
             day_count: Number(a.day_count),
@@ -1213,6 +1222,7 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
             decided_by_name: a.decided_by ? (userMap.get(Number(a.decided_by))?.name || null) : null,
             current_step: currentStep,
             total_steps: totalSteps,
+            supervisor_layer_approved: supervisorLayerApproved,
             reliever_name: a.reliever_id ? (userMap.get(Number(a.reliever_id))?.name || null) : null,
             reliever_status: a.reliever_status || null,
             leave_type_label: leaveTypeLabelFor(a.leave_type)
