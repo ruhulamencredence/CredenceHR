@@ -5,7 +5,7 @@ import {
   BarChart3, Upload, History, Recycle, Navigation, Bell, ShieldCheck,
   Contact, Calendar, Clock, Fingerprint, Banknote, Package, LayoutDashboard, Server, MessageSquare,
   ChevronsLeft, ChevronsRight, ShieldAlert, Search,
-  Target, UserPlus, Gavel, FolderLock, Sparkles,
+  Target, UserPlus, Gavel, FolderLock, Sparkles, ExternalLink,
 } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { User, AdminModuleKey } from '../types';
@@ -76,6 +76,10 @@ interface GlobalSidebarProps {
   // "Alerts" item (self-service list below) opens AlertsPage.tsx — same
   // destination the Navbar AlertsBell dropdown's "View all" link opens.
   onOpenAlerts: () => void;
+  // "360 ERP" item (self-service list below) — calls POST /api/sso/erp360/
+  // initiate and opens the returned forward_url in a new tab (SSO hand-off
+  // into the separate 360 ERP site). No page of its own here.
+  onOpenErp360: () => void;
   // Which item's key currently matches what's actually on screen (see
   // App.tsx's computeSidebarActiveKey) — highlighted so this drawer/column
   // shows a "you are here" mark instead of every item looking the same
@@ -94,7 +98,7 @@ interface GlobalSidebarProps {
 // drawer) carried over from the old AdminSidebar.
 export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   open, onClose, variant = 'overlay', user, token, photoVersion, onLogout, onGoToDashboard, onGoToJobsTab, onGoToUserClaims,
-  onGoToSelfServiceTab, onGoToAdminClaims, onGoToAdminModule, onOpenProfile, onOpenChat, onOpenAlerts, activeKey,
+  onGoToSelfServiceTab, onGoToAdminClaims, onGoToAdminModule, onOpenProfile, onOpenChat, onOpenAlerts, onOpenErp360, activeKey,
 }) => {
   const isPersistent = variant === 'persistent';
   // Closed by default — a group only opens when the user explicitly taps its
@@ -286,6 +290,11 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // Alerts (AlertsPage.tsx) — same visibility as Chat above: every
   // signed-in account, not gated behind any module grant.
   selfServiceItems.push({ key: 'alerts', label: 'Alerts', icon: Bell, onClick: onOpenAlerts });
+  // 360 ERP SSO hand-off (Erp360SsoRoutes.ts) — same visibility as Chat/
+  // Alerts above: every signed-in account, no module grant needed. No page
+  // of its own; clicking it opens a new tab (or shows an error banner if
+  // the server isn't configured / 360 ERP rejects the request).
+  selfServiceItems.push({ key: 'erp360', label: '360 ERP', icon: ExternalLink, onClick: onOpenErp360 });
   // Company-wide roster, browsable by every account regardless of role or
   // Admin Panel module access (unlike Admin Panel -> Employees, which is
   // the HR-editing view gated behind the 'employees' module) — see

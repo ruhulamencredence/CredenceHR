@@ -163,6 +163,33 @@ export default function App() {
   // reload reasoning as showChat above.
   const [showAlertsPage, setShowAlertsPage] = useState(false);
 
+  // GlobalSidebar's "360 ERP" item — no page of its own; clicking it calls
+  // POST /api/sso/erp360/initiate and opens the returned forward_url in a
+  // new tab. `erp360Error` surfaces a failed attempt (server not configured,
+  // 360 ERP rejected the request, etc.) as a small dismissible banner —
+  // there's no toast system in this app yet, so this is deliberately
+  // self-contained rather than introducing one for a single caller.
+  const [erp360Loading, setErp360Loading] = useState(false);
+  const [erp360Error, setErp360Error] = useState<string | null>(null);
+  async function openErp360() {
+    if (!token) return;
+    setErp360Loading(true);
+    setErp360Error(null);
+    try {
+      const res = await fetch(apiUrl('/api/sso/erp360/initiate'), {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not start the 360 ERP login.');
+      window.open(data.forward_url, '_blank', 'noopener,noreferrer');
+    } catch (err: any) {
+      setErp360Error(err.message || 'Could not start the 360 ERP login.');
+    } finally {
+      setErp360Loading(false);
+    }
+  }
+
   // Bumped right after a Personal Data photo upload succeeds (see
   // ProfilePage's onPhotoUpdated below) — passed to every avatar spot
   // (Navbar, GlobalSidebar, ProfilePage itself) as a dependency so
@@ -718,6 +745,7 @@ export default function App() {
       setShowChat(false);
       setShowAlertsPage(true);
     },
+    onOpenErp360: openErp360,
   };
 
   return (
@@ -728,6 +756,19 @@ export default function App() {
       {pullToRefreshIndicator}
       {pullToRefreshFullscreenLoader}
       {backToServerBadge}
+      {erp360Error && (
+        <div className="fixed top-3 right-3 z-[100] max-w-sm rounded-xl bg-rose-600 text-white text-sm px-4 py-3 shadow-lg flex items-start gap-3">
+          <span className="flex-1">{erp360Error}</span>
+          <button type="button" onClick={() => setErp360Error(null)} className="shrink-0 opacity-80 hover:opacity-100" aria-label="Dismiss">
+            ✕
+          </button>
+        </div>
+      )}
+      {erp360Loading && (
+        <div className="fixed top-3 right-3 z-[100] max-w-sm rounded-xl bg-slate-800 text-white text-sm px-4 py-3 shadow-lg">
+          Opening 360 ERP…
+        </div>
+      )}
       <Navbar
         user={user}
         token={token || ''}
