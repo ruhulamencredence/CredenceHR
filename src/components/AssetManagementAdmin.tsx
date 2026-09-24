@@ -46,6 +46,10 @@ interface Requisition {
   manager_name: string | null;
   created_at: string;
   items: RequisitionItem[];
+  // Who the Approval Workflow is currently waiting on (comma-joined —
+  // ANY ONE of them clears the step) — null once it's past 'pending', or
+  // for a legacy requisition with no approval_requests row at all.
+  pending_with: string | null;
 }
 
 // Flowchart's "গরমিল/ড্যামেজ -> অ্যাডজাস্টমেন্ট/ক্লেইম রিকোয়েস্ট -> ইনভেন্টরি
@@ -228,6 +232,11 @@ export function AssetManagementAdmin() {
                 <span className="text-xs font-medium px-2 py-1 rounded bg-gray-100 text-gray-700">{r.status}</span>
               </div>
               <div className="text-xs text-gray-500 mt-1">Requested: {r.created_at} • Urgency: {r.urgency}</div>
+              {r.status === 'pending' && (
+                <div className="text-xs text-amber-700 mt-1">
+                  Waiting on: <span className="font-medium">{r.pending_with || 'no approver configured for this Layer'}</span>
+                </div>
+              )}
               <div className="mt-2 space-y-1">
                 {(r.items || []).map((it, idx) => (
                   <div key={idx} className="text-sm text-gray-600 flex items-baseline justify-between gap-2">

@@ -66,6 +66,9 @@ interface Requisition {
   asset_tag: string | null;
   created_at: string;
   items: RequisitionItem[];
+  // Who the Approval Workflow is currently waiting on (comma-joined — ANY
+  // ONE of them clears the step) — null once it's past 'pending'.
+  pending_with: string | null;
 }
 
 const emptyItem = (): RequisitionItem => ({ item_name: '', purpose: '', unit: 'pcs', quantity: 1 });
@@ -510,6 +513,11 @@ export function AssetManagement() {
                 <span className={`text-xs font-medium px-2 py-1 rounded ${STATUS_COLOR[r.status]}`}>{STATUS_LABEL[r.status]}</span>
               </div>
               <div className="text-xs text-gray-500 mt-1">Requested: {r.created_at} • Urgency: {r.urgency}</div>
+              {r.status === 'pending' && r.pending_with && (
+                <div className="text-xs text-amber-700 mt-1">
+                  Waiting on: <span className="font-medium">{r.pending_with}</span>
+                </div>
+              )}
               <div className="mt-2 space-y-1">
                 {(r.items || []).map((it, idx) => (
                   <div key={idx} className="text-sm text-gray-600 flex items-baseline justify-between gap-2">
