@@ -22,6 +22,7 @@ import { OfficeAttendancePanel } from './OfficeAttendancePanel';
 import { DeliveryDateConditionsPanel } from './DeliveryDateConditionsPanel';
 import { HolidayCalendarPanel } from './HolidayCalendarPanel';
 import { AssetManagementAdmin } from './AssetManagementAdmin';
+import { VehicleManagementAdmin } from './VehicleManagementAdmin';
 import { ExitOffboardingPanel } from './ExitOffboardingPanel';
 import { PerformanceManagementPanel } from './PerformanceManagementPanel';
 import { RecruitmentPanel } from './RecruitmentPanel';
@@ -50,7 +51,7 @@ const MODULE_ACCESS_GROUPS: { label: string; keys: AdminModuleKey[] }[] = [
   { label: 'HR', keys: ['approvals', 'notices', 'holidays', 'leave_applications', 'departments'] },
   { label: 'HR - Attendance', keys: ['attendance', 'attendance_reports', 'office_attendance'] },
   { label: 'HR - Claims/Bill/Disbursement', keys: ['claims', 'conveyance', 'disbursement'] },
-  { label: 'HR - Employee', keys: ['employees', 'tracking', 'asset_management'] },
+  { label: 'HR - Employee', keys: ['employees', 'tracking', 'asset_management', 'vehicle_management'] },
   { label: 'MIS', keys: ['users', 'projects', 'branches'] },
   { label: 'Payroll', keys: ['payroll'] },
   {
@@ -61,7 +62,7 @@ const MODULE_ACCESS_GROUPS: { label: string; keys: AdminModuleKey[] }[] = [
         'approvals', 'notices', 'holidays', 'leave_applications', 'departments',
         'attendance', 'attendance_reports', 'office_attendance',
         'claims', 'conveyance', 'disbursement',
-        'employees', 'tracking', 'asset_management',
+        'employees', 'tracking', 'asset_management', 'vehicle_management',
         'users', 'projects', 'branches',
         'payroll',
       ].includes(key)
@@ -250,7 +251,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // PUT /api/users/:id/module-permissions).
   const canGrantModuleAccess = isSuperAdmin || !!user.can_grant_module_access;
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'my_conveyance' | 'disbursement' | 'holidays' | 'asset_management' | 'servers' | 'permanent_delete_log' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault'>(
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'my_conveyance' | 'disbursement' | 'holidays' | 'asset_management' | 'vehicle_management' | 'servers' | 'permanent_delete_log' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault'>(
     () => {
       // Restores whichever tab this Admin was last looking at — see the
       // "pull down to reload" note in App.tsx: since a reload now has to be
@@ -3882,6 +3883,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       {activeTab === 'asset_management' && (
         <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6">
           <AssetManagementAdmin />
+        </div>
+      )}
+
+      {/* TAB: VEHICLE MANAGEMENT — IT/Admin side: vehicle inventory, ride
+          request review/approval (vehicle + driver assignment), and
+          return/lateness tracking. Gated behind the 'vehicle_management'
+          AdminModuleKey like every other tab here. */}
+      {activeTab === 'vehicle_management' && (
+        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6">
+          <VehicleManagementAdmin />
         </div>
       )}
 

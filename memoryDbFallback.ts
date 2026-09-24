@@ -100,6 +100,13 @@ export const memoryDb = {
   disciplinaryActions: [] as any[],
   employeeDocuments: [] as any[],
   documentSignatures: [] as any[],
+  // Vehicle Requisition & Management (VehicleManagementRoutes.ts) — same
+  // "simple CRUD, generic table" convention as the block above: every query
+  // there is either a full-table SELECT (filtered/joined in JS) or an
+  // id-scoped INSERT/UPDATE, so simulateGenericTable() below covers it with
+  // zero bespoke handlers.
+  vehicles: [] as any[],
+  vehicleRequisitions: [] as any[],
   // Chat/Alerts push notification device tokens (ChatRoutes.ts's POST/DELETE
   // /api/chat/push-token, PushNotificationService.ts's sendPushToUserIds/
   // sendPushToRoomMembers) — was missing a handler entirely, so in
@@ -193,7 +200,9 @@ const GENERIC_TABLES: [string, any[]][] = [
   ["document_signatures", memoryDb.documentSignatures],
   ["approval_templates", memoryDb.approvalTemplates],
   ["approval_template_step_approvers", memoryDb.approvalTemplateStepApprovers],
-  ["approval_template_steps", memoryDb.approvalTemplateSteps]
+  ["approval_template_steps", memoryDb.approvalTemplateSteps],
+  ["vehicles", memoryDb.vehicles],
+  ["vehicle_requisitions", memoryDb.vehicleRequisitions]
 ];
 memoryDb.leaveCategories = [{ id: 1, category_key: "custom_earn_leave", label: "Earn Leave", created_by: null, created_at: new Date() }];
 
