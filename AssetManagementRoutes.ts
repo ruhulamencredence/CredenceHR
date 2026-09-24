@@ -16,31 +16,35 @@
 //   assets              — the company's asset inventory (one row per
 //                          physical item: a specific laptop, monitor, etc.).
 //   asset_requisitions  — an Employee's request for a new/replacement asset.
-//                          Status timeline: pending -> manager_approved ->
-//                          approved -> dispatched -> fulfilled, or rejected
-//                          at either approval step.
+//                          Status timeline: pending -> approved -> dispatched
+//                          -> fulfilled, or rejected at any approval step.
+//                          ('manager_approved' is a legacy status kept in the
+//                          ENUM only so pre-existing rows from before this
+//                          Approval Workflow migration still render — new
+//                          requisitions never enter it.)
 //   asset_assignments   — who has which asset right now, and the full
 //                          handover/return history for a given asset.
 //                          returned_date IS NULL means still in use.
 //
-// Two distinct approval layers on a requisition, matching the workflow the
-// module was speced against (Submitted -> Line Manager Approved -> IT/Admin
-// Approved -> Asset Handed Over):
-//   1) Line Manager — resolved from employee_supervisors (the same
-//      Employee Directory "Supervisor" tab every other module already
-//      reads), NOT gated behind the 'asset_management' AdminModuleKey. Any
-//      account that is somebody's direct supervisor can act on that
-//      person's request, whether or not they're an Admin.
-//   2) IT/Admin — gated behind the 'asset_management' AdminModuleKey like
-//      every other Admin Panel module (requireModule('asset_management')),
-//      same convention as 'payroll', 'conveyance', etc. This is also where
-//      the inventory itself (the `assets` table) is managed and where an
-//      approved requisition is actually fulfilled (an asset is picked from
-//      inventory and handed over).
-//
-// A requisition with no resolvable Line Manager (no Supervisor on file for
-// that Employee) simply skips step 1 — IT/Admin can decide it directly from
-// 'pending' — so a missing org-chart entry never blocks the request outright.
+// Approval routing (matching the Asset Management flowchart — Supervisor
+// Approval, then HR/IT Department Review) now goes entirely through the same
+// Dynamic Approval Engine every other module uses (see
+// createTemplateApprovalRequest/performApprovalAction in server.ts,
+// request_type 'asset'): Layer 1 defaults to the requester's own Supervisor
+// (Direct Supervisor, falling back to Department Supervisor) exactly like
+// Conveyance/Leave/Timesheet, unless a Superadmin builds an 'asset' Template
+// whose own Layer 1 overrides it; every Layer after that is that Template's
+// hand-picked approvers, changeable from Admin Panel -> Approvals ->
+// Templates the same way as any other module's chain. This REPLACES the
+// hardcoded two-step Line-Manager-then-IT/Admin flow this file used to
+// implement itself — approving/rejecting a requisition now happens from the
+// generic Admin Panel -> Approvals queue / "My Approvals" (POST
+// /api/approvals/:id/act, /api/my-approvals/:id/act), not from a route in
+// this file. Once the LAST step approves, the requisition flips to
+// 'approved' (finalizeAssetRequisitionApproval, server.ts) — IT/Admin then
+// still has to actually hand over a specific inventory item via POST
+// /api/assets/requisitions/:id/fulfill below, which remains this file's own
+// concern (not part of the Approval Workflow).
 
 import type { Express } from "express";
 import type { AlertType } from "./Alerts";
@@ -57,6 +61,20 @@ interface AssetManagementRouteDeps {
     queryDB: (sql: string, params?: any[]) => Promise<any>,
     params: { userId: number; type: AlertType; title: string; message: string; relatedType?: string; relatedId?: number }
   ) => Promise<void>;
+  // Dynamic Approval Engine (server.ts) — routes a submitted requisition
+  // through request_type 'asset' the same way Conveyance/Leave/Timesheet
+  // already do. See the design note above registerAssetManagementRoutes.
+  createTemplateApprovalRequest: (
+    requestType: "conveyance" | "leave" | "timesheet" | "asset",
+    sourceType: "user_claim" | "attendance_correction" | "leave_application" | "asset_requisition",
+    sourceId: number,
+    requestedBy: number
+  ) => Promise<{ autoApproved: boolean; template: any | null }>;
+  getCurrentStepApprovers: (request: any) => Promise<{ user_id: number; user_name: string | null }[]>;
+  // Auto-approve path (no Supervisor and no Template resolved at all) — same
+  // finalize function performApprovalAction's 'asset_requisition' branch
+  // calls once the Approval Workflow's LAST step signs off.
+  finalizeAssetRequisitionApproval: (requisitionId: number, approvedBy: number, remarks: string | null) => Promise<void>;
 }
 
 const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
@@ -157,27 +175,16 @@ export async function ensureAssetManagementSchema(dbPool: any): Promise<void> {
 }
 
 export function registerAssetManagementRoutes(app: Express, deps: AssetManagementRouteDeps) {
-  const { authenticateToken, requireAdmin, requireModule, queryDB, createAlert } = deps;
-
-  // Resolves the logged-in Employee's direct Line Manager, the same way
-  // Payroll/Employees already read the org chart: users.id -> all_employees
-  // (by user_id) -> employee_supervisors (is_direct = 1) -> supervisor's
-  // all_employees row -> that row's user_id (null if the supervisor has no
-  // login account, or no direct supervisor is on file at all).
-  async function getDirectManagerUserId(employeeUserId: number): Promise<number | null> {
-    const empRows = await queryDB("SELECT id FROM all_employees WHERE user_id = ? LIMIT 1", [employeeUserId]);
-    if (empRows.length === 0) return null;
-    const supRows = await queryDB(
-      `SELECT s.supervisor_id
-         FROM employee_supervisors s
-        WHERE s.employee_id = ? AND s.is_direct = 1
-        ORDER BY s.id DESC LIMIT 1`,
-      [empRows[0].id]
-    );
-    if (supRows.length === 0) return null;
-    const supEmpRows = await queryDB("SELECT user_id FROM all_employees WHERE id = ? LIMIT 1", [supRows[0].supervisor_id]);
-    return supEmpRows[0]?.user_id ?? null;
-  }
+  const {
+    authenticateToken,
+    requireAdmin,
+    requireModule,
+    queryDB,
+    createAlert,
+    createTemplateApprovalRequest,
+    getCurrentStepApprovers,
+    finalizeAssetRequisitionApproval
+  } = deps;
 
   const requisitionSelectBase = `
     SELECT r.*, u.name AS employee_name, m.name AS manager_name, a.name AS asset_name, a.asset_tag AS asset_tag
@@ -291,9 +298,8 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
   // LONGBLOB pattern already used for Conveyance Bill Claim attachments and
   // the Profile photo upload (profileRoutes.ts) — no multipart/multer
   // anywhere else in this app, so this doesn't introduce a second upload
-  // mechanism. The Line Manager (if one is on file) is resolved and stamped
-  // on the request immediately, so the approval queue below doesn't have to
-  // re-resolve the org chart on every read.
+  // mechanism. Routing (who has to approve it) is entirely the Dynamic
+  // Approval Engine's job from here — see createTemplateApprovalRequest.
   app.post("/api/assets/requisitions", authenticateToken, async (req: any, res) => {
     try {
       const { items, urgency, target_date, attachment_base64, attachment_filename, attachment_mimetype } = req.body || {};
@@ -331,14 +337,12 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
         }
       }
 
-      const managerId = await getDirectManagerUserId(req.user.id);
-
       const result = await queryDB(
         `INSERT INTO asset_requisitions
            (employee_user_id, asset_category, reason, urgency, target_date,
-            attachment_filename, attachment_mimetype, attachment_data, manager_id, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
-        [req.user.id, category, reason, urgencyLevel, target_date || null, filename, mimetype, attachmentBuffer, managerId]
+            attachment_filename, attachment_mimetype, attachment_data, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+        [req.user.id, category, reason, urgencyLevel, target_date || null, filename, mimetype, attachmentBuffer]
       );
 
       for (const it of cleanItems) {
@@ -349,15 +353,41 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
         );
       }
 
-      if (managerId) {
-        await createAlert(queryDB, {
-          userId: managerId,
-          type: "asset_requisition" as AlertType,
-          title: "New Asset Requisition",
-          message: `${req.user.name || "An employee"} requested ${category}. Please review.`,
-          relatedType: "asset_requisition",
-          relatedId: result.insertId
-        });
+      // Dynamic Approval Engine — routed through this Employee's assigned
+      // Template for request_type 'asset' (Layer 1 defaults to their own
+      // Supervisor per the flowchart's "Supervisor Approval" step unless a
+      // Template overrides it; Layer 2+ is HR/IT's hand-picked approvers).
+      // Falls back to a straight auto-approve if neither a Supervisor nor a
+      // Template resolve at all.
+      const { autoApproved } = await createTemplateApprovalRequest("asset", "asset_requisition", result.insertId, req.user.id);
+      if (autoApproved) {
+        try {
+          await finalizeAssetRequisitionApproval(result.insertId, req.user.id, null);
+        } catch (finalizeErr: any) {
+          console.warn("⚠️ Could not auto-process Asset Requisition #" + result.insertId + ": " + finalizeErr.message);
+        }
+      } else {
+        // Notify whoever the request is actually sitting with first — same
+        // idea as Conveyance Bill Claim's own submit route.
+        try {
+          const requestRows = await queryDB("SELECT * FROM approval_requests WHERE source_type = ?", ["asset_requisition"]);
+          const createdRequest = requestRows.find((r: any) => Number(r.source_id) === Number(result.insertId));
+          if (createdRequest) {
+            const approvers = await getCurrentStepApprovers(createdRequest);
+            for (const approver of approvers) {
+              await createAlert(queryDB, {
+                userId: approver.user_id,
+                type: "asset_requisition" as AlertType,
+                title: "New Asset Requisition Awaiting Your Approval",
+                message: `${req.user.name || "An employee"} requested ${category}. Please review.`,
+                relatedType: "asset_requisition",
+                relatedId: result.insertId
+              });
+            }
+          }
+        } catch (alertErr: any) {
+          console.warn("⚠️ Could not notify the current-step approver for Asset Requisition #" + result.insertId + ": " + alertErr.message);
+        }
       }
 
       res.json({ success: true, id: result.insertId });
@@ -381,75 +411,13 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
   });
 
   // ---------------------------------------------------------------------
-  // Line Manager approval — resolved from employee_supervisors, NOT gated
-  // behind the 'asset_management' module (any account that is somebody's
-  // direct supervisor can act on that person's requests).
-  // ---------------------------------------------------------------------
-
-  // GET /api/assets/requisitions/for-manager-approval — pending requests
-  // where the logged-in account is the requester's direct Line Manager.
-  app.get("/api/assets/requisitions/for-manager-approval", authenticateToken, async (req: any, res) => {
-    try {
-      const rows = await queryDB(
-        `${requisitionSelectBase} WHERE r.manager_id = ? AND r.status = 'pending' ORDER BY r.created_at ASC`,
-        [req.user.id]
-      );
-      res.json(await attachItems(rows));
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // PUT /api/assets/requisitions/:id/manager-decision — Line Manager
-  // approves or rejects. Only the requisition's own resolved manager_id (or
-  // a Superadmin, who can stand in for any missing approver) may decide it.
-  app.put("/api/assets/requisitions/:id/manager-decision", authenticateToken, async (req: any, res) => {
-    try {
-      const { decision, remarks } = req.body || {};
-      if (decision !== "approve" && decision !== "reject") {
-        return res.status(400).json({ error: "decision must be 'approve' or 'reject'." });
-      }
-      const rows = await queryDB("SELECT * FROM asset_requisitions WHERE id = ?", [req.params.id]);
-      const requisition = rows[0];
-      if (!requisition) return res.status(404).json({ error: "Requisition not found." });
-      if (requisition.status !== "pending") {
-        return res.status(400).json({ error: "This requisition already moved past the Line Manager step." });
-      }
-      if (requisition.manager_id !== req.user.id && req.user.role !== "superadmin") {
-        return res.status(403).json({ error: "Not authorized." });
-      }
-
-      const newStatus = decision === "approve" ? "manager_approved" : "rejected";
-      await queryDB(
-        `UPDATE asset_requisitions
-            SET status = ?, manager_decided_at = NOW(), manager_remarks = ?,
-                rejection_reason = ?
-          WHERE id = ?`,
-        [newStatus, remarks || null, decision === "reject" ? String(remarks || "Rejected by Line Manager") : null, requisition.id]
-      );
-
-      await createAlert(queryDB, {
-        userId: requisition.employee_user_id,
-        type: "asset_requisition" as AlertType,
-        title: decision === "approve" ? "Requisition Approved by Manager" : "Requisition Rejected",
-        message:
-          decision === "approve"
-            ? `Your ${requisition.asset_category} request was approved by your Line Manager and is now with IT/Admin.`
-            : `Your ${requisition.asset_category} request was rejected by your Line Manager.`,
-        relatedType: "asset_requisition",
-        relatedId: requisition.id
-      });
-
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // ---------------------------------------------------------------------
   // IT/Admin (Admin Panel -> Asset Management) — gated behind the
   // 'asset_management' AdminModuleKey, same convention as every other
   // Admin Panel module (a Superadmin always passes requireModule).
+  // Approve/Reject itself now happens through the generic Approval Workflow
+  // queue (Admin Panel -> Approvals / "My Approvals") — see the design note
+  // above registerAssetManagementRoutes. What's left here is inventory
+  // management plus fulfilling an already-approved requisition.
   // ---------------------------------------------------------------------
 
   // GET /api/assets — inventory list, optional ?status=&category= filters.
@@ -544,8 +512,8 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
   });
 
   // GET /api/assets/requisitions — full requisition list for IT/Admin,
-  // optional ?status= filter. Distinct from /for-manager-approval above,
-  // which only shows a given manager's own pending queue.
+  // optional ?status= filter. Approve/Reject itself is done from the generic
+  // Approval Workflow queue (Admin Panel -> Approvals), not from here.
   app.get("/api/assets/requisitions", authenticateToken, requireAdmin, requireModule("asset_management"), async (req: any, res) => {
     try {
       const clauses: string[] = [];
@@ -561,56 +529,6 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
       res.status(500).json({ error: err.message });
     }
   });
-
-  // PUT /api/assets/requisitions/:id/admin-decision — IT/Admin approves or
-  // rejects. Valid from 'pending' (no Line Manager on file — step 1 was
-  // skipped) or 'manager_approved'. Approving here does NOT hand over an
-  // asset yet — that's the separate POST .../fulfill below, which is where
-  // a specific inventory item actually gets picked and assigned.
-  app.put(
-    "/api/assets/requisitions/:id/admin-decision",
-    authenticateToken,
-    requireAdmin,
-    requireModule("asset_management"),
-    async (req: any, res) => {
-      try {
-        const { decision, rejection_reason } = req.body || {};
-        if (decision !== "approve" && decision !== "reject") {
-          return res.status(400).json({ error: "decision must be 'approve' or 'reject'." });
-        }
-        const rows = await queryDB("SELECT * FROM asset_requisitions WHERE id = ?", [req.params.id]);
-        const requisition = rows[0];
-        if (!requisition) return res.status(404).json({ error: "Requisition not found." });
-        if (!["pending", "manager_approved"].includes(requisition.status)) {
-          return res.status(400).json({ error: "This requisition is not awaiting an IT/Admin decision." });
-        }
-
-        const newStatus = decision === "approve" ? "approved" : "rejected";
-        await queryDB(
-          `UPDATE asset_requisitions
-              SET status = ?, admin_decided_by = ?, admin_decided_at = NOW(), rejection_reason = ?
-            WHERE id = ?`,
-          [newStatus, req.user.id, decision === "reject" ? String(rejection_reason || "Rejected by IT/Admin") : null, requisition.id]
-        );
-
-        await createAlert(queryDB, {
-          userId: requisition.employee_user_id,
-          type: "asset_requisition" as AlertType,
-          title: decision === "approve" ? "Requisition Approved" : "Requisition Rejected",
-          message:
-            decision === "approve"
-              ? `Your ${requisition.asset_category} request was approved by IT/Admin and will be dispatched shortly.`
-              : `Your ${requisition.asset_category} request was rejected by IT/Admin.`,
-          relatedType: "asset_requisition",
-          relatedId: requisition.id
-        });
-
-        res.json({ success: true });
-      } catch (err: any) {
-        res.status(500).json({ error: err.message });
-      }
-    }
-  );
 
   // POST /api/assets/requisitions/:id/fulfill — Digital Handover: IT/Admin
   // picks a specific 'available' asset from inventory and hands it over.

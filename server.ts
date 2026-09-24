@@ -1558,10 +1558,10 @@ async function ensureSchemaMigrations() {
       )
     `);
     // Widen the ENUMs for existing databases created before Conveyance Bill Claims /
-    // Attendance Correction requests routed through this same Approval Workflow engine.
+    // Attendance Correction / Asset Requisition requests routed through this same Approval Workflow engine.
     await dbPool.query(`
       ALTER TABLE approval_requests
-        MODIFY COLUMN source_type ENUM('attendance','claim','user_claim','attendance_correction','leave_application') NOT NULL,
+        MODIFY COLUMN source_type ENUM('attendance','claim','user_claim','attendance_correction','leave_application','asset_requisition') NOT NULL,
         MODIFY COLUMN event_type ENUM('check_in','check_out','submit') NOT NULL
     `);
     // GET /api/my-approvals (PendingApprovalsCard — hit on every Dashboard
@@ -1717,6 +1717,17 @@ async function ensureSchemaMigrations() {
     if (err.code !== "ER_DUP_FIELDNAME") {
       console.warn("⚠️ Could not add approval_template_steps.approver_type column: " + err.message);
     }
+  }
+  // Widen request_type to add 'asset' (Asset Requisition, routed through this
+  // same Dynamic Approval Engine — see createTemplateApprovalRequest) onto
+  // the original ENUM('conveyance','leave','timesheet'). MODIFY COLUMN is
+  // safe to re-run every startup (no-op once already widened), unlike ADD
+  // COLUMN's ER_DUP_FIELDNAME pattern above.
+  try {
+    await dbPool.query(`ALTER TABLE approval_templates MODIFY COLUMN request_type ENUM('conveyance','leave','timesheet','asset') NOT NULL`);
+    await dbPool.query(`ALTER TABLE employee_template_assignments MODIFY COLUMN request_type ENUM('conveyance','leave','timesheet','asset') NOT NULL`);
+  } catch (err: any) {
+    console.warn("⚠️ Could not widen request_type ENUM to include 'asset': " + err.message);
   }
   // Timesheet -> click any date's row to manually fix that day's In/Out Time
   // (typically a day with no attendance at all, but any day can be corrected).
@@ -2418,7 +2429,7 @@ async function createApprovalRequest(
 // Employee-specific assignment first (must point at an ACTIVE template — a
 // deactivated assignment is treated the same as no assignment at all, not an
 // error), else that request_type's active default, else null.
-async function resolveApprovalTemplate(employeeUserId: number, requestType: "conveyance" | "leave" | "timesheet"): Promise<any | null> {
+async function resolveApprovalTemplate(employeeUserId: number, requestType: "conveyance" | "leave" | "timesheet" | "asset"): Promise<any | null> {
   try {
     const assigned = await queryDB(
       `SELECT t.* FROM employee_template_assignments eta
@@ -2531,8 +2542,8 @@ async function resolveSupervisorApprover(employeeUserId: number): Promise<number
 // Employee's own Direct Supervisor (employee_supervisors) when set and
 // usable, otherwise the Department Supervisor as a fallback.
 async function createTemplateApprovalRequest(
-  requestType: "conveyance" | "leave" | "timesheet",
-  sourceType: "user_claim" | "attendance_correction" | "leave_application",
+  requestType: "conveyance" | "leave" | "timesheet" | "asset",
+  sourceType: "user_claim" | "attendance_correction" | "leave_application" | "asset_requisition",
   sourceId: number,
   requestedBy: number
 ): Promise<{ autoApproved: boolean; template: any | null }> {
@@ -2739,6 +2750,16 @@ async function performApprovalAction(
     } catch (finalizeErr: any) {
       throw new ApprovalActionError(400, finalizeErr.message || "Approved, but could not finalize this Leave Application.");
     }
+  } else if (request.source_type === "asset_requisition") {
+    try {
+      if (newStatus === "approved") {
+        await finalizeAssetRequisitionApproval(Number(request.source_id), actorUser.id, remarks);
+      } else if (newStatus === "rejected") {
+        await rejectAssetRequisitionRecord(Number(request.source_id), actorUser.id, remarks);
+      }
+    } catch (finalizeErr: any) {
+      throw new ApprovalActionError(400, finalizeErr.message || "Approved, but could not finalize this Asset Requisition.");
+    }
   }
 
   return { status: newStatus, current_step: newStep, billInfo };
@@ -2907,6 +2928,55 @@ async function rejectAttendanceCorrection(correctionId: number, rejectedBy: numb
     rejectedBy,
     correctionId
   ]);
+}
+
+// Sets an Asset Requisition to 'approved' once every step of its Approval
+// Workflow has signed off (Layer 1 defaults to the requester's own
+// Supervisor per the Asset Management flowchart, Layer 2+ is whatever
+// Template a Superadmin built for request_type 'asset' — see
+// createTemplateApprovalRequest), or immediately on submit when neither a
+// Supervisor nor a Template resolve (autoApproved). Approving here does NOT
+// hand over an asset yet — IT/Admin still has to pick a specific inventory
+// item via POST /api/assets/requisitions/:id/fulfill. Shared by
+// performApprovalAction's 'asset_requisition' branch and the auto-approve
+// path on POST /api/assets/requisitions.
+async function finalizeAssetRequisitionApproval(requisitionId: number, approvedBy: number, remarks: string | null) {
+  const rows = await queryDB("SELECT * FROM asset_requisitions WHERE id = ?", [requisitionId]);
+  if (rows.length === 0) throw new Error("Requisition not found");
+  const r = rows[0];
+  if (r.status !== "pending") throw new Error("This requisition has already been reviewed.");
+  await queryDB(
+    "UPDATE asset_requisitions SET status = 'approved', admin_decided_by = ?, admin_decided_at = NOW() WHERE id = ?",
+    [approvedBy, requisitionId]
+  );
+  await createAlert(queryDB, {
+    userId: r.employee_user_id,
+    type: "asset_requisition",
+    title: "Requisition Approved",
+    message: `Your ${r.asset_category} request was approved and will be dispatched shortly.`,
+    relatedType: "asset_requisition",
+    relatedId: requisitionId
+  });
+}
+
+// Rejects an Asset Requisition at ANY step — never touches inventory.
+// Shared by the same two callers as finalizeAssetRequisitionApproval above.
+async function rejectAssetRequisitionRecord(requisitionId: number, rejectedBy: number, remarks: string | null) {
+  const rows = await queryDB("SELECT * FROM asset_requisitions WHERE id = ?", [requisitionId]);
+  if (rows.length === 0) throw new Error("Requisition not found");
+  const r = rows[0];
+  await queryDB(
+    "UPDATE asset_requisitions SET status = 'rejected', admin_decided_by = ?, admin_decided_at = NOW(), rejection_reason = ? WHERE id = ?",
+    [rejectedBy, remarks || "Rejected", requisitionId]
+  );
+  await createAlert(queryDB, {
+    userId: r.employee_user_id,
+    type: "asset_requisition",
+    title: "Requisition Rejected",
+    message: `Your ${r.asset_category} request was rejected.${remarks ? " Reason: " + remarks : ""}`,
+    relatedType: "asset_requisition",
+    relatedId: requisitionId
+  });
 }
 
 // Actually attaches an Approved User Claim onto a Conveyance Bill as a line item
@@ -4477,7 +4547,10 @@ async function startServer() {
     requireAdmin,
     requireModule,
     queryDB,
-    createAlert
+    createAlert,
+    createTemplateApprovalRequest,
+    getCurrentStepApprovers,
+    finalizeAssetRequisitionApproval
   });
 
   // Employee Transfer (Admin Panel -> Employees -> "Transfer / Change Role")
