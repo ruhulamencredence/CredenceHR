@@ -306,7 +306,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // -> Settings. NOT Admin-gated, same as Chat/Employee Directory/My
   // Resignation just above: any signed-in account can raise an asset
   // requisition for themselves, regardless of module_permissions.
-  selfServiceItems.push({ key: 'assetManagement', label: 'Asset Management', icon: Package, onClick: () => onGoToSelfServiceTab('assetManagement') });
+  selfServiceItems.push({ key: 'assetManagement', label: 'My Asset', icon: Package, onClick: () => onGoToSelfServiceTab('assetManagement') });
 
   // "Admin Dashboard" — the HR-overview landing page (stat tiles, quick
   // view, charts, notices, leave balances). Every real role === 'admin' |

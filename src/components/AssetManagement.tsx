@@ -3,15 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// Employee Profile -> "Asset Management" — self-service tab for the logged-in
-// account: what they currently hold (My Assets), requesting something new
-// (New Requisition), and tracking where each request stands (Requisition
+// Self Service -> "My Asset" — self-service tab for the logged-in account:
+// what they currently hold (My Assets), requesting something new (New
+// Requisition), and tracking where each request stands (Requisition
 // Status). Talks to AssetManagementRoutes.ts (server.ts registers it via
 // registerAssetManagementRoutes). Mirrors the read/write split and
 // fetch-with-Bearer-token pattern already used throughout App.tsx.
-//
-// NOT wired into ProfilePage.tsx yet — that file wasn't part of this export.
-// See CHANGES_asset_management.md for the exact snippet to drop into it.
 
 import React, { useEffect, useState } from 'react';
 import { apiUrl } from '../lib/api';

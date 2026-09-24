@@ -338,9 +338,16 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
     return memoryDb.users.map(({ password_hash, ...u }) => u);
   }
   if (lowerSql.startsWith("insert into users (name, email, username, password_hash, role)")) {
-    const [name, username, password_hash] = params;
+    // POST /api/employees' create_login path (server.ts) — 4 params, in this
+    // order. This previously destructured as [name, username, password_hash]
+    // (missing `email` entirely), which silently shifted every field one
+    // slot left: `username` got the real email, `password_hash` got the real
+    // username, and the real password_hash was dropped — corrupting the
+    // account so it could never log in (bcrypt.compare throws on the
+    // resulting garbage). Fixed to match the actual param order.
+    const [name, email, username, password_hash] = params;
     const newId = memoryDb.users.length + 1;
-    const newUser = { id: newId, name, email: null, username, password_hash, role: 'user', created_at: new Date(), can_edit_delivery_date: true, can_job_edit: false, can_view_login_location: false, can_access_user_panel: false, can_view_budget_module: true };
+    const newUser = { id: newId, name, email: email || null, username, password_hash, role: 'user', created_at: new Date(), can_edit_delivery_date: true, can_job_edit: false, can_view_login_location: false, can_access_user_panel: false, can_view_budget_module: true };
     memoryDb.users.push(newUser);
     return { insertId: newId };
   }
@@ -1467,6 +1474,29 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
     });
     return { insertId: newId };
   }
+  // resolveEmployeeDirectSupervisor (server.ts) — the Dynamic Approval
+  // Engine's Layer 1 auto-Supervisor gate (createTemplateApprovalRequest,
+  // used by Conveyance/Leave/Timesheet/Asset alike): resolves a submitting
+  // Employee's own Direct Supervisor to a login user_id. This JOIN query had
+  // NO handler at all before, so it silently fell through to the generic
+  // fallback's `[]` — meaning the auto-Supervisor layer never actually
+  // gated anything under the in-memory DB (the request skipped straight to
+  // the Template's own steps), for every module, not just Asset.
+  if (lowerSql.startsWith("select sup.user_id as supervisor_user_id")) {
+    const employeeUserId = Number(params[0]);
+    const emp = memoryDb.employees.find((e: any) => Number(e.user_id) === employeeUserId);
+    if (!emp) return [];
+    const links = memoryDb.employeeSupervisors
+      .filter((es: any) => Number(es.employee_id) === Number(emp.id) && Number(es.is_direct) === 1)
+      .sort((a: any, b: any) => b.id - a.id);
+    for (const link of links) {
+      const sup = memoryDb.employees.find((e: any) => Number(e.id) === Number(link.supervisor_id));
+      if (sup && sup.user_id !== null && sup.user_id !== undefined) {
+        return [{ supervisor_user_id: sup.user_id }];
+      }
+    }
+    return [];
+  }
   if (lowerSql.startsWith("select id from employee_supervisors")) {
     const rowId = Number(params[0]);
     const employeeId = Number(params[1]);
@@ -1787,6 +1817,15 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
     const source_type = params[0];
     return memoryDb.approvalRequests.filter((r: any) => r.source_type === source_type);
   }
+  // GET /api/my-approvals' own pending-requests fetch (ApprovalRoutes.ts) —
+  // this had NO handler at all before, so it silently fell through to the
+  // generic fallback's `[]`, meaning the personal "waiting on me" queue
+  // (the only approval surface a non-Admin approver — a Supervisor, or any
+  // Template step approver who isn't otherwise an Admin — actually sees)
+  // was permanently empty under the in-memory DB, for every module.
+  if (lowerSql.startsWith("select * from approval_requests where status = 'pending' order by id asc")) {
+    return memoryDb.approvalRequests.filter((r: any) => r.status === "pending").sort((a: any, b: any) => a.id - b.id);
+  }
   if (lowerSql.startsWith("select id from approval_requests where source_type = 'user_claim' and source_id = ?")) {
     const sourceId = Number(params[0]);
     return memoryDb.approvalRequests
@@ -1845,6 +1884,16 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
         user_id: a.user_id,
         user_name: u ? u.name : null
       };
+    });
+  }
+  // GET /api/my-approvals' own version of the fetch above — no u.name column
+  // (a newline sits right after sa.user_id in this one, so it never matches
+  // the ", u.name as user_name" check above — this must stay AFTER that
+  // check since its prefix is otherwise a literal substring of it).
+  if (lowerSql.startsWith("select s.template_id, s.step_order, sa.user_id")) {
+    return memoryDb.approvalTemplateStepApprovers.map((a: any) => {
+      const s = memoryDb.approvalTemplateSteps.find((x: any) => Number(x.id) === Number(a.step_id));
+      return { template_id: s ? s.template_id : null, step_order: s ? s.step_order : null, user_id: a.user_id };
     });
   }
   // getCurrentStepApprovers (server.ts) — the authorization-critical lookup
