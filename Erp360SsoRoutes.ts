@@ -49,7 +49,7 @@ export function registerErp360SsoRoutes(app: Express, deps: Erp360SsoRouteDeps) 
       const forwardedFor = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim();
       const requestIp = forwardedFor || req.socket?.remoteAddress || req.ip || "";
 
-      const initiateUrl = `${baseUrl.replace(/\/+$/, "")}/v1/service/sso/initiate`;
+      const initiateUrl = `${baseUrl.replace(/\/+$/, "")}/api/v1/service/sso/initiate`;
       let upstream: Response;
       try {
         upstream = await fetch(initiateUrl, {
