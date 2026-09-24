@@ -674,6 +674,10 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
     const id = Number(params[0]);
     return memoryDb.mpr_numbers.filter(m => m.id === id).map(m => ({ id: m.id, mpr_no: m.mpr_no }));
   }
+  if (lowerSql.startsWith("select mpr_no from mpr_numbers where id")) {
+    const id = Number(params[0]);
+    return memoryDb.mpr_numbers.filter(m => m.id === id).map(m => ({ mpr_no: m.mpr_no }));
+  }
   if (lowerSql.startsWith("select id from mpr_numbers where lower(mpr_no)")) {
     const name = String(params[0]).toLowerCase();
     return memoryDb.mpr_numbers.filter(m => m.mpr_no.toLowerCase() === name).map(m => ({ id: m.id }));
@@ -863,6 +867,34 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
     const budget_id = Number(params[0]);
     return memoryDb.budget_items.filter(it => it.budget_id === budget_id);
   }
+  // GET /api/budgets/:id/items (server.ts) — the User Entry Form / Admin
+  // budget-rows view's own query, with each row's requisitioned_by_me
+  // (how much of it THIS user has already put into active entries) as a
+  // correlated subquery. Distinct shape from the plain "select * from
+  // budget_items where budget_id" above (this one starts "select bi.*").
+  // POST/PUT /api/entries' own "every item must point at a REAL imported row"
+  // validation (EntriesRoutes.ts) — a narrower column list than "select bi.*"
+  // above and with no requisitioned_by_me subquery, so it needs its own
+  // handler rather than falling through to the generic `[]`.
+  if (lowerSql.startsWith("select id, mrf_no, description, req_qty from budget_items where budget_id")) {
+    const budgetId = Number(params[0]);
+    return memoryDb.budget_items
+      .filter((it: any) => Number(it.budget_id) === budgetId)
+      .map((it: any) => ({ id: it.id, mrf_no: it.mrf_no, description: it.description, req_qty: it.req_qty }));
+  }
+  if (lowerSql.startsWith("select bi.*")) {
+    const userId = Number(params[0]);
+    const budgetId = Number(params[1]);
+    return memoryDb.budget_items
+      .filter((it: any) => Number(it.budget_id) === budgetId)
+      .sort((a: any, b: any) => a.id - b.id)
+      .map((it: any) => {
+        const requisitioned_by_me = memoryDb.entries
+          .filter((e: any) => Number(e.budget_item_id) === Number(it.id) && Number(e.created_by) === userId && !e.deleted_at)
+          .reduce((sum: number, e: any) => sum + Number(e.requisitioned_qty || 0), 0);
+        return { ...it, requisitioned_by_me };
+      });
+  }
   // Entry edit validation: confirm an Item Name (or a Project Name, for the MPR-No
   // scope check) belongs to the imported row for a given Budget + MRF No — used by
   // both PUT /api/entries/:id and the create-entry MPR-scope check.
@@ -891,7 +923,13 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
       budget_id, sl_no, project_name, req_no, mrf_no, item_date, description, unit, specification,
       req_qty, po_qty, received_qty, balance_qty, entry_user, approved_date, app_user, site_sup_date
     ] = params;
-    const newId = memoryDb.budget_items.length + 1;
+    // Math.max(...ids)+1, not length+1 — "Delete Budget" now removes
+    // individual rows (see the id-scoped DELETE handler below) rather than
+    // always wiping every row for a budget_id at once, so the array length
+    // no longer tracks the highest id ever issued; length+1 would start
+    // colliding with existing ids from other budgets as soon as any row,
+    // anywhere, had been deleted.
+    const newId = memoryDb.budget_items.length > 0 ? Math.max(...memoryDb.budget_items.map((it: any) => it.id)) + 1 : 1;
     const item = {
       id: newId, budget_id, sl_no, project_name, req_no, mrf_no, item_date, description, unit, specification,
       req_qty, po_qty, received_qty, balance_qty, entry_user, approved_date, app_user, site_sup_date,
@@ -899,6 +937,33 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
     };
     memoryDb.budget_items.push(item);
     return { insertId: newId };
+  }
+  // Re-import merge-on-match (POST /api/budgets/:id/import, server.ts) —
+  // UPDATEs an existing row in place (same id, so entries.budget_item_id
+  // pointing at it stays valid) instead of inserting a duplicate.
+  if (lowerSql.startsWith("update budget_items") && lowerSql.includes("set sl_no")) {
+    const [
+      sl_no, project_name, req_no, mrf_no, item_date, description, unit, specification,
+      req_qty, po_qty, received_qty, balance_qty, entry_user, approved_date, app_user, site_sup_date, id
+    ] = params;
+    const item = memoryDb.budget_items.find((it: any) => it.id === Number(id));
+    if (item) {
+      Object.assign(item, {
+        sl_no, project_name, req_no, mrf_no, item_date, description, unit, specification,
+        req_qty, po_qty, received_qty, balance_qty, entry_user, approved_date, app_user, site_sup_date
+      });
+    }
+    return { affectedRows: item ? 1 : 0 };
+  }
+  // "Delete Budget" (server.ts) now removes one unused row at a time
+  // (WHERE id = ?) rather than every row for a budget_id at once — must be
+  // checked before the budget_id-scoped handler further down, since both
+  // start with "delete from budget_items".
+  if (lowerSql.startsWith("delete from budget_items where id")) {
+    const id = Number(params[0]);
+    const before = memoryDb.budget_items.length;
+    memoryDb.budget_items = memoryDb.budget_items.filter((it: any) => it.id !== id);
+    return { affectedRows: before - memoryDb.budget_items.length };
   }
   if (lowerSql.startsWith("delete from budget_items")) {
     const budget_id = Number(params[0]);
@@ -1137,11 +1202,43 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
     return [{ cnt: memoryDb.jobs.length }];
   }
   if (lowerSql.startsWith("insert into entries")) {
-    const [entry_date, job_name, budget_id, project_id, job_id, mpr_id, item_name, delivery_date, created_by] = params;
-    const newId = memoryDb.entries.length + 1;
-    const ent = { id: newId, entry_date, job_name, budget_id, project_id, job_id, mpr_id, item_name, delivery_date, created_by, created_at: new Date() };
+    // (entry_date, job_name, budget_id, project_id, job_id, mpr_id,
+    //  budget_item_id, item_name, requisitioned_qty, delivery_date,
+    //  created_by) — EntriesRoutes.ts's one consistent INSERT shape (5 call
+    // sites, all identical). This previously destructured only 9 of these
+    // 11 params (missing budget_item_id/requisitioned_qty entirely), which
+    // silently shifted every field after mpr_id one slot left: item_name
+    // got budget_item_id's value, delivery_date got requisitioned_qty's,
+    // and created_by got delivery_date's — corrupting every entry's
+    // item_name/delivery_date/created_by, and leaving budget_item_id/
+    // requisitioned_qty unset, under the in-memory DB.
+    const [entry_date, job_name, budget_id, project_id, job_id, mpr_id, budget_item_id, item_name, requisitioned_qty, delivery_date, created_by] =
+      params;
+    const newId = memoryDb.entries.length > 0 ? Math.max(...memoryDb.entries.map((e: any) => e.id)) + 1 : 1;
+    const ent = {
+      id: newId,
+      entry_date,
+      job_name,
+      budget_id,
+      project_id,
+      job_id,
+      mpr_id,
+      budget_item_id: budget_item_id === null || budget_item_id === undefined ? null : Number(budget_item_id),
+      item_name,
+      requisitioned_qty,
+      delivery_date,
+      created_by,
+      created_at: new Date(),
+      deleted_at: null,
+      deleted_by: null
+    };
     memoryDb.entries.push(ent);
     return { insertId: newId };
+  }
+  if (lowerSql.startsWith("select count(*) as cnt from entries where budget_item_id")) {
+    const budgetItemId = Number(params[0]);
+    const cnt = memoryDb.entries.filter((e: any) => Number(e.budget_item_id) === budgetItemId && !e.deleted_at).length;
+    return [{ cnt }];
   }
   if (lowerSql.startsWith("delete from entries")) {
     const id = Number(params[0]);
