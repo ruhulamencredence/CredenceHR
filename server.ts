@@ -22,6 +22,7 @@ import { registerApprovalRoutes } from "./ApprovalRoutes";
 import { registerLeaveRoutes } from "./LeaveRoutes";
 import { registerPayrollRoutes, ensurePayrollSchema } from "./PayrollRoutes";
 import { registerAssetManagementRoutes, ensureAssetManagementSchema } from "./AssetManagementRoutes";
+import { registerVehicleManagementRoutes, ensureVehicleManagementSchema } from "./VehicleManagementRoutes";
 import { registerEntriesRoutes } from "./EntriesRoutes";
 import { registerEmployeeTransferRoutes, ensureEmployeeTransferSchema, applyDueEmployeeTransfers, recordEmployeeEditHistory } from "./EmployeeTransferRoutes";
 import { registerEmployeeDirectoryRoutes } from "./EmployeeDirectoryRoutes";
@@ -203,6 +204,11 @@ async function ensureSchemaMigrations() {
   // schema owned by AssetManagementRoutes.ts, only the call site lives here,
   // same as every other self-healing migration in this function.
   await ensureAssetManagementSchema(dbPool);
+
+  // Vehicle Requisition & Management (Self Service -> Book a Ride / Ride
+  // Status, plus Admin Panel -> Vehicle Management) — table + schema owned
+  // by VehicleManagementRoutes.ts, only the call site lives here.
+  await ensureVehicleManagementSchema(dbPool);
 
   // Employee Transfer (Admin Panel -> Employees -> "Transfer / Change Role")
   // — table + schema owned by EmployeeTransferRoutes.ts, only the call site
@@ -2206,7 +2212,7 @@ async function ensureSchemaMigrations() {
 // of truth here and mirrored in src/types.ts (ADMIN_MODULES) for the UI.
 const USER_CLAIM_CATEGORIES = ["Transport", "Fuel", "Toll", "Parking", "Others"] as const;
 
-const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports", "users", "attendance", "attendance_reports", "leave_applications", "recycle", "editlog", "notices", "claims", "approvals", "conveyance", "disbursement", "employees", "departments", "tracking", "office_attendance", "holidays", "payroll", "asset_management", "exit_offboarding", "performance_management", "recruitment", "grievance_disciplinary", "hr_analytics", "document_vault", "admin_dashboard"] as const;
+const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports", "users", "attendance", "attendance_reports", "leave_applications", "recycle", "editlog", "notices", "claims", "approvals", "conveyance", "disbursement", "employees", "departments", "tracking", "office_attendance", "holidays", "payroll", "asset_management", "vehicle_management", "exit_offboarding", "performance_management", "recruitment", "grievance_disciplinary", "hr_analytics", "document_vault", "admin_dashboard"] as const;
 
 // Granular per-module action layers — mirrors PermissionLayerKey/
 // PERMISSION_LAYERS in src/types.ts (single source of truth is duplicated
@@ -4552,6 +4558,20 @@ async function startServer() {
     createTemplateApprovalRequest,
     getCurrentStepApprovers,
     finalizeAssetRequisitionApproval
+  });
+
+  // Vehicle Requisition & Management (Self Service -> Book a Ride / Ride
+  // Status, plus Admin Panel -> Vehicle Management) — kept in its own file,
+  // same reasoning as AssetManagementRoutes.ts above. Unlike Asset
+  // Requisition, deliberately NOT routed through the Dynamic Approval
+  // Engine — see the design note at the top of VehicleManagementRoutes.ts.
+  registerVehicleManagementRoutes(app, {
+    authenticateToken,
+    requireAdmin,
+    requireModule,
+    queryDB,
+    getAdminModules,
+    createAlert
   });
 
   // 360 ERP SSO (Sidebar -> "360 ERP") — kept in its own file, same reasoning

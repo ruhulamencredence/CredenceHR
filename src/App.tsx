@@ -38,6 +38,7 @@ import { PayrollModule } from './components/PayrollModule';
 import { EmployeeDirectory } from './components/EmployeeDirectory';
 import { MyResignation } from './components/MyResignation';
 import { AssetManagement } from './components/AssetManagement';
+import { VehicleManagement } from './components/VehicleManagement';
 import { NoticePopup } from './components/NoticePopup';
 import { useBackButtonClose } from './lib/useBackButtonClose';
 import { closeTopmostOrReturnFalse } from './lib/backButtonStack';
@@ -92,7 +93,7 @@ export default function App() {
   // this account was actually looking at, instead of resetting to the
   // Admin/User Panel default every time.
   const selfServiceViewStorageKey = user ? `mpr_self_service_view_${user.id}` : null;
-  const [selfServiceView, setSelfServiceView] = useState<'leaveApplication' | 'leaveManagement' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | null>(() => {
+  const [selfServiceView, setSelfServiceView] = useState<'leaveApplication' | 'leaveManagement' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | null>(() => {
     try {
       const saved = selfServiceViewStorageKey ? localStorage.getItem(selfServiceViewStorageKey) : null;
       if (saved === 'leaveApplication' || saved === 'leaveManagement' || saved === 'leaveApprovals' || saved === 'timesheet' || saved === 'approveApplications' || saved === 'employeeDirectory' || saved === 'resignation') {
@@ -713,7 +714,7 @@ export default function App() {
       setViewMode('admin');
       setAdminNavRequest({ target, ts: Date.now() });
     },
-    onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement') => {
+    onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement') => {
       setShowProfilePage(false);
           setShowChat(false);
           setShowAlertsPage(false);
@@ -986,6 +987,26 @@ export default function App() {
                 <h1 className="text-base font-bold">My Asset</h1>
               </div>
               <AssetManagement />
+            </div>
+          </div>
+        ) : selfServiceView === 'vehicleManagement' ? (
+          // VehicleManagement.tsx (Book a Ride/Ride Status) — same header-
+          // less wrapper pattern as My Asset just above.
+          <div className="w-full min-h-[calc(100vh-4rem)]" style={{ background: 'var(--g-surface-muted)' }}>
+            <div className="max-w-3xl mx-auto px-4 pt-3 pb-28">
+              <div className="flex items-center gap-2 mb-3">
+                <button
+                  type="button"
+                  onClick={() => setSelfServiceView(null)}
+                  className="w-9 h-9 rounded-full flex items-center justify-center hover:bg-black/5 transition-colors"
+                  style={{ color: 'var(--g-text-muted)' }}
+                  aria-label="Back"
+                >
+                  <ArrowLeft className="w-5 h-5" />
+                </button>
+                <h1 className="text-base font-bold">Book a Ride</h1>
+              </div>
+              <VehicleManagement />
             </div>
           </div>
         ) : isAdminView ? (

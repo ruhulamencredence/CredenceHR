@@ -5,7 +5,7 @@ import {
   BarChart3, Upload, History, Recycle, Navigation, Bell, ShieldCheck,
   Contact, Calendar, Clock, Fingerprint, Banknote, Package, LayoutDashboard, Server, MessageSquare,
   ChevronsLeft, ChevronsRight, ShieldAlert, Search,
-  Target, UserPlus, Gavel, FolderLock, Sparkles, ExternalLink,
+  Target, UserPlus, Gavel, FolderLock, Sparkles, ExternalLink, Car,
 } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { User, AdminModuleKey } from '../types';
@@ -53,7 +53,7 @@ interface GlobalSidebarProps {
   onGoToUserClaims: (target: 'movementClaims' | 'conveyanceBill') => void;
   // Everyday employee self-service items — not Admin-gated, shown to every
   // account regardless of role/module access.
-  onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement') => void;
+  onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement') => void;
   // Admin Panel's own Movement Claims / Conveyance Bill Claim review tabs —
   // separate feature from onGoToUserClaims above, gated by module_permissions
   // like every other Admin Panel module.
@@ -316,6 +316,10 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // Resignation just above: any signed-in account can raise an asset
   // requisition for themselves, regardless of module_permissions.
   selfServiceItems.push({ key: 'assetManagement', label: 'My Asset', icon: Package, onClick: () => onGoToSelfServiceTab('assetManagement') });
+  // Vehicle Requisition (VehicleManagement.tsx) — self-service "Book a
+  // Ride"/Ride Status, same reasoning as My Asset just above: NOT
+  // Admin-gated, any signed-in account can request a ride for themselves.
+  selfServiceItems.push({ key: 'vehicleManagement', label: 'Book a Ride', icon: Car, onClick: () => onGoToSelfServiceTab('vehicleManagement') });
 
   // "Admin Dashboard" — the HR-overview landing page (stat tiles, quick
   // view, charts, notices, leave balances). Every real role === 'admin' |
@@ -390,6 +394,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     { key: 'employees', label: 'Employees', icon: Contact, onClick: () => onGoToAdminModule('employees') },
     { key: 'tracking', label: 'Employee Tracking', icon: Navigation, onClick: () => onGoToAdminModule('tracking') },
     { key: 'asset_management', label: 'Asset Management', icon: Package, onClick: () => onGoToAdminModule('asset_management') },
+    { key: 'vehicle_management', label: 'Vehicle Management', icon: Car, onClick: () => onGoToAdminModule('vehicle_management') },
   ].filter((i) => canSeeModule(i.key as AdminModuleKey));
 
   // "HR" — approvals, notices, holidays, leave reporting, plus Departments
