@@ -1226,6 +1226,38 @@ async function ensureSchemaMigrations() {
   } catch (err: any) {
     console.warn("⚠️ Could not ensure employee_supervisors table exists: " + err.message);
   }
+  // Multi-account Payroll disbursement split (Admin Panel -> Employees ->
+  // Edit -> Payment tab) — an Employee's Net Salary can be paid out split
+  // across any number of Bank accounts and/or MFS (bKash/Nagad/Rocket)
+  // accounts, each carrying a percentage of Net Salary rather than a single
+  // account. No row here at all (the common case) means unchanged legacy
+  // behavior — Run Payroll's single global Payment Method dropdown decides
+  // how that employee gets paid, exactly as before this feature existed.
+  // percentage is validated at the API layer to sum to at most 100 across an
+  // employee's active rows, not enforced by the DB — same reasoning as
+  // approval_templates.is_default's "at most one default" comment above.
+  try {
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS employee_payment_accounts (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        employee_id INT NOT NULL,
+        account_type ENUM('bank', 'mfs') NOT NULL DEFAULT 'bank',
+        account_label VARCHAR(100) NOT NULL,
+        bank_name VARCHAR(150) NULL,
+        branch_name VARCHAR(150) NULL,
+        provider VARCHAR(50) NULL,
+        account_number VARCHAR(100) NOT NULL,
+        percentage DECIMAL(5, 2) NOT NULL DEFAULT 0.00,
+        is_active TINYINT(1) NOT NULL DEFAULT 1,
+        sort_order INT NOT NULL DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (employee_id) REFERENCES all_employees(id) ON DELETE CASCADE
+      )
+    `);
+  } catch (err: any) {
+    console.warn("⚠️ Could not ensure employee_payment_accounts table exists: " + err.message);
+  }
   // Departments (Admin Panel -> Departments, its own AdminModuleKey/module
   // permission) — real org-structure master data: every Employee Directory
   // row optionally belongs to exactly one Department (all_employees.
@@ -5044,6 +5076,130 @@ async function startServer() {
       const existing = await queryDB("SELECT id FROM employee_supervisors WHERE id = ? AND employee_id = ?", [rowId, id]);
       if (existing.length === 0) return res.status(404).json({ error: "Supervisor record not found" });
       await queryDB("DELETE FROM employee_supervisors WHERE id = ?", [rowId]);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ==========================================================================
+  // Payment Accounts (Admin Panel -> Employees -> Edit -> Payment tab) — an
+  // Employee's Net Salary payroll disbursement split across any number of
+  // Bank/MFS accounts, each carrying a percentage. Read by Run Payroll's
+  // Preview & Calculate + Submit steps (PayrollRoutes.ts) to build each
+  // employee's payment_split; a payroll row's own split is a SNAPSHOT taken
+  // at generation time (payroll_payment_splits), so editing an employee's
+  // accounts here never rewrites a past, already-generated payroll.
+  // ==========================================================================
+  app.get("/api/employees/:id/payment-accounts", authenticateToken, requireAdmin, requireModule("employees"), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const rows = await queryDB(
+        "SELECT * FROM employee_payment_accounts WHERE employee_id = ? ORDER BY sort_order ASC, id ASC",
+        [id]
+      );
+      res.json(
+        rows.map((r: any) => ({
+          id: r.id,
+          employee_id: r.employee_id,
+          account_type: r.account_type,
+          account_label: r.account_label,
+          bank_name: r.bank_name,
+          branch_name: r.branch_name,
+          provider: r.provider,
+          account_number: r.account_number,
+          percentage: Number(r.percentage),
+          is_active: !!Number(r.is_active),
+          sort_order: Number(r.sort_order)
+        }))
+      );
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Shared validation for POST/PUT below — throws with a message safe to
+  // send straight back to the client.
+  function validatePaymentAccountBody(body: any) {
+    const accountType = body?.account_type === "mfs" ? "mfs" : "bank";
+    const accountLabel = typeof body?.account_label === "string" ? body.account_label.trim().slice(0, 100) : "";
+    if (!accountLabel) throw new Error(accountType === "mfs" ? "Give this MFS account a label (e.g. bKash 1)." : "Give this Bank account a label (e.g. Bank 1).");
+    const accountNumber = typeof body?.account_number === "string" ? body.account_number.trim().slice(0, 100) : "";
+    if (!accountNumber) throw new Error(accountType === "mfs" ? "Mobile/Wallet number is required." : "Account number is required.");
+    const percentage = Number(body?.percentage);
+    if (!Number.isFinite(percentage) || percentage <= 0 || percentage > 100) throw new Error("Percentage must be greater than 0 and at most 100.");
+    return {
+      accountType,
+      accountLabel,
+      bankName: accountType === "bank" && typeof body?.bank_name === "string" ? body.bank_name.trim().slice(0, 150) || null : null,
+      branchName: accountType === "bank" && typeof body?.branch_name === "string" ? body.branch_name.trim().slice(0, 150) || null : null,
+      provider: accountType === "mfs" && typeof body?.provider === "string" ? body.provider.trim().slice(0, 50) || null : null,
+      accountNumber,
+      percentage: Math.round(percentage * 100) / 100
+    };
+  }
+
+  app.post("/api/employees/:id/payment-accounts", authenticateToken, requireAdmin, requireModule("employees"), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const employeeExists = await queryDB("SELECT id FROM all_employees WHERE id = ?", [id]);
+      if (employeeExists.length === 0) return res.status(404).json({ error: "Employee not found" });
+
+      const v = validatePaymentAccountBody(req.body);
+      const existingActive = await queryDB("SELECT percentage FROM employee_payment_accounts WHERE employee_id = ? AND is_active = 1", [id]);
+      const currentTotal = existingActive.reduce((sum: number, r: any) => sum + Number(r.percentage), 0);
+      if (currentTotal + v.percentage > 100.001) {
+        return res.status(400).json({ error: `Total percentage across this employee's active accounts would be ${(currentTotal + v.percentage).toFixed(2)}% — it can't exceed 100%.` });
+      }
+
+      const result = await queryDB(
+        `INSERT INTO employee_payment_accounts
+           (employee_id, account_type, account_label, bank_name, branch_name, provider, account_number, percentage, is_active, sort_order)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
+        [id, v.accountType, v.accountLabel, v.bankName, v.branchName, v.provider, v.accountNumber, v.percentage, existingActive.length]
+      );
+      res.status(201).json({ id: result.insertId });
+    } catch (err: any) {
+      res.status(err.message?.includes("required") || err.message?.includes("Percentage") || err.message?.includes("label") ? 400 : 500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/employees/:id/payment-accounts/:rowId", authenticateToken, requireAdmin, requireModule("employees"), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const rowId = Number(req.params.rowId);
+      const existing = await queryDB("SELECT * FROM employee_payment_accounts WHERE id = ? AND employee_id = ?", [rowId, id]);
+      if (existing.length === 0) return res.status(404).json({ error: "Payment account not found" });
+
+      const v = validatePaymentAccountBody(req.body);
+      const isActive = req.body?.is_active === false ? false : true;
+      if (isActive) {
+        const otherActive = await queryDB("SELECT id, percentage FROM employee_payment_accounts WHERE employee_id = ? AND is_active = 1 AND id <> ?", [id, rowId]);
+        const otherTotal = otherActive.reduce((sum: number, r: any) => sum + Number(r.percentage), 0);
+        if (otherTotal + v.percentage > 100.001) {
+          return res.status(400).json({ error: `Total percentage across this employee's active accounts would be ${(otherTotal + v.percentage).toFixed(2)}% — it can't exceed 100%.` });
+        }
+      }
+
+      await queryDB(
+        `UPDATE employee_payment_accounts
+         SET account_type = ?, account_label = ?, bank_name = ?, branch_name = ?, provider = ?, account_number = ?, percentage = ?, is_active = ?
+         WHERE id = ?`,
+        [v.accountType, v.accountLabel, v.bankName, v.branchName, v.provider, v.accountNumber, v.percentage, isActive ? 1 : 0, rowId]
+      );
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(err.message?.includes("required") || err.message?.includes("Percentage") || err.message?.includes("label") ? 400 : 500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/employees/:id/payment-accounts/:rowId", authenticateToken, requireAdmin, requireModule("employees"), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const rowId = Number(req.params.rowId);
+      const existing = await queryDB("SELECT id FROM employee_payment_accounts WHERE id = ? AND employee_id = ?", [rowId, id]);
+      if (existing.length === 0) return res.status(404).json({ error: "Payment account not found" });
+      await queryDB("DELETE FROM employee_payment_accounts WHERE id = ?", [rowId]);
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });

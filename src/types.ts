@@ -247,6 +247,25 @@ export interface EmployeeSupervisor {
   is_direct: boolean;
 }
 
+// One Bank or MFS (bKash/Nagad/Rocket) disbursement account on Admin Panel ->
+// Employees -> Edit -> Payment tab (GET/POST/PUT/DELETE
+// /api/employees/:id/payment-accounts). percentage is this account's share
+// of the employee's Net Salary each payroll run — see Run Payroll's Preview &
+// Calculate step for how several of these combine into one employee's split.
+export interface EmployeePaymentAccount {
+  id: number;
+  employee_id: number;
+  account_type: 'bank' | 'mfs';
+  account_label: string;
+  bank_name: string | null;
+  branch_name: string | null;
+  provider: string | null;
+  account_number: string;
+  percentage: number;
+  is_active: boolean;
+  sort_order: number;
+}
+
 // One row of Admin Panel -> Employees -> "Transfer / Change Role" history
 // (GET /api/employees/:id/transfers). Keeps the FROM and TO value of
 // Department/Designation/Supervisor for a given change, so an Employee's job
