@@ -331,8 +331,8 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // items into "HR" below.
   const claimsItems: NavItem[] = [
     { key: 'claims', label: 'Movement Claims', icon: Route, onClick: () => onGoToAdminClaims('claims') },
-    { key: 'conveyance', label: 'Conveyance Bill Claim', icon: CreditCard, onClick: () => onGoToAdminClaims('conveyance') },
-    { key: 'disbursement', label: 'Conveyance Disbursement', icon: Banknote, onClick: () => onGoToAdminModule('disbursement') },
+    { key: 'conveyance', label: 'Bill Claim', icon: CreditCard, onClick: () => onGoToAdminClaims('conveyance') },
+    { key: 'disbursement', label: 'Bill Disbursement', icon: Banknote, onClick: () => onGoToAdminModule('disbursement') },
   ].filter((i) => canSeeModule(i.key as AdminModuleKey));
   // "My Conveyance Bill Claim" — an Admin's own Bills/Claims, read-only. Not
   // a separately-grantable module: shown to anyone who already has the

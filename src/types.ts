@@ -287,7 +287,35 @@ export interface EmployeeTransfer {
   reason: string | null;
   action_by: number | null;
   action_by_name?: string | null;
+  // Whether this row's TO values have already been written to the Employee's
+  // live record. False means the Effective Date is still in the future — the
+  // employee's CURRENT Department/Designation/Supervisor is unchanged until
+  // that date arrives (see EmployeeTransferRoutes.ts).
+  applied?: boolean;
   created_at?: string;
+  // Only set by the all-employees Change History list
+  // (GET /api/employee-change-history), which joins the employee in.
+  employee_name?: string | null;
+  employee_code?: string | null;
+}
+
+// One field-level change made by a plain "Edit Employee" save
+// (GET /api/employees/:id/change-log) — everything except Department/
+// Designation, which are recorded as EmployeeTransfer rows instead. Values
+// are stored as text: dates as 'YYYY-MM-DD', booleans as "0"/"1". Rows from
+// the same save share created_at and action_by.
+export interface EmployeeChangeLogEntry {
+  id: number;
+  employee_id: number;
+  field_name: string;
+  old_value: string | null;
+  new_value: string | null;
+  action_by: number | null;
+  action_by_name?: string | null;
+  created_at: string;
+  // Only set by the all-employees Change History list.
+  employee_name?: string | null;
+  employee_code?: string | null;
 }
 
 // Admin Panel -> Departments (its own 'departments' AdminModuleKey) — real

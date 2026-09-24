@@ -23,7 +23,7 @@ import { registerLeaveRoutes } from "./LeaveRoutes";
 import { registerPayrollRoutes, ensurePayrollSchema } from "./PayrollRoutes";
 import { registerAssetManagementRoutes, ensureAssetManagementSchema } from "./AssetManagementRoutes";
 import { registerEntriesRoutes } from "./EntriesRoutes";
-import { registerEmployeeTransferRoutes, ensureEmployeeTransferSchema } from "./EmployeeTransferRoutes";
+import { registerEmployeeTransferRoutes, ensureEmployeeTransferSchema, applyDueEmployeeTransfers, recordEmployeeEditHistory } from "./EmployeeTransferRoutes";
 import { registerEmployeeDirectoryRoutes } from "./EmployeeDirectoryRoutes";
 import { registerExitOffboardingRoutes, ensureExitOffboardingSchema } from "./ExitOffboardingRoutes";
 import { registerPerformanceRoutes, ensurePerformanceSchema } from "./PerformanceRoutes";
@@ -49,7 +49,7 @@ const PORT = Number(process.env.PORT) || 3000;
 // the first 6 hours of every Bangladesh calendar day (00:00–05:59 BD = 18:00–23:59 UTC
 // the previous day), which is exactly the kind of "date shown one day behind" bug this
 // app has been chasing.
-function todayInDhaka(): string {
+export function todayInDhaka(): string {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Dhaka",
     year: "numeric",
@@ -4488,7 +4488,8 @@ async function startServer() {
     authenticateToken,
     requireAdmin,
     requireModule,
-    queryDB
+    queryDB,
+    todayInDhaka
   });
 
   // World-class HRM extension modules (Exit/Offboarding, Performance
@@ -4735,6 +4736,13 @@ async function startServer() {
   // accounts (User rows) — most listed employees never get one.
   app.get("/api/employees", authenticateToken, requireAdmin, requireModule("employees"), async (req, res) => {
     try {
+      // Promote any future-dated Transfer whose Effective Date has now
+      // arrived before the list is read — see EmployeeTransferRoutes.ts.
+      // No cron exists in this codebase, so this list (the most common way
+      // an Employee's current Department/Designation gets read) is where
+      // that lazily happens for everyone, not just whoever next opens the
+      // Transfer modal for that one employee.
+      await applyDueEmployeeTransfers(queryDB, todayInDhaka());
       const rows = await queryDB("SELECT * FROM all_employees");
       const sorted = [...rows].sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""));
       res.json(
@@ -4945,6 +4953,12 @@ async function startServer() {
 
   app.put("/api/employees/:id", authenticateToken, requireAdmin, requireModule("employees"), async (req: any, res) => {
     try {
+      // Catch up any future-dated Transfer whose Effective Date has arrived
+      // BEFORE reading `existing`, so the history's FROM values are the true
+      // current state (and a due-but-unapplied Transfer can't land later and
+      // silently overwrite this edit) — same reasoning as POST /transfer.
+      await applyDueEmployeeTransfers(queryDB, todayInDhaka());
+
       const id = Number(req.params.id);
       const existing = await queryDB("SELECT * FROM all_employees WHERE id = ?", [id]);
       if (existing.length === 0) return res.status(404).json({ error: "Employee not found" });
@@ -4958,19 +4972,53 @@ async function startServer() {
       const dept = await resolveEmployeeDepartment(req.body);
       const setClause = ["employee_id = ?", "name = ?", "designation = ?", "department = ?", "department_id = ?", "branch = ?", "branch_id = ?", "email = ?", "phone = ?", "is_active = ?", ...extColumns.map((c) => `${c} = ?`)].join(", ");
 
+      const newEmployeeCode = employee_id && String(employee_id).trim() ? String(employee_id).trim() : null;
+      const newName = String(name).trim();
+      const newDesignation = designation && String(designation).trim() ? String(designation).trim() : null;
+      const newEmail = email && String(email).trim() ? String(email).trim() : null;
+      const newPhone = phone && String(phone).trim() ? String(phone).trim() : null;
+      const newIsActive = is_active === false ? 0 : 1;
+
+      // Audit trail — Department/Designation changes go to employee_transfers
+      // (so they appear in the same Transfer History as a Transfer-modal
+      // change), every other changed field to employee_change_log. Recorded
+      // before the UPDATE, same order as POST /transfer. See
+      // recordEmployeeEditHistory in EmployeeTransferRoutes.ts.
+      const after: Record<string, any> = {
+        employee_id: newEmployeeCode,
+        name: newName,
+        email: newEmail,
+        phone: newPhone,
+        is_active: newIsActive,
+        branch: branch.branch_name,
+        branch_id: branch.branch_id,
+        department_id: dept.department_id,
+        department: dept.department_name,
+        designation: newDesignation
+      };
+      extColumns.forEach((c, i) => { after[c] = extValues[i]; });
+      await recordEmployeeEditHistory(queryDB, {
+        employeeId: id,
+        before: existing[0],
+        after,
+        trackedFields: ["employee_id", "name", "email", "phone", "is_active", "branch", "branch_id", ...extColumns],
+        actionBy: req.user?.id ?? null,
+        today: todayInDhaka()
+      });
+
       await queryDB(
         `UPDATE all_employees SET ${setClause} WHERE id = ?`,
         [
-          employee_id && String(employee_id).trim() ? String(employee_id).trim() : null,
-          String(name).trim(),
-          designation && String(designation).trim() ? String(designation).trim() : null,
+          newEmployeeCode,
+          newName,
+          newDesignation,
           dept.department_name,
           dept.department_id,
           branch.branch_name,
           branch.branch_id,
-          email && String(email).trim() ? String(email).trim() : null,
-          phone && String(phone).trim() ? String(phone).trim() : null,
-          is_active === false ? 0 : 1,
+          newEmail,
+          newPhone,
+          newIsActive,
           ...extValues,
           id
         ]
