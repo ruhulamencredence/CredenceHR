@@ -101,7 +101,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
             >
               <ChevronLeft className="w-5 h-5" />
             </button>
-            <h1 className="text-base font-bold">Asset Management</h1>
+            <h1 className="text-base font-bold">My Asset</h1>
           </div>
           <AssetManagement />
         </div>
@@ -189,7 +189,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
               />
               <ProfileRow
                 icon={<Package className="w-4 h-4" />}
-                label="Asset Management"
+                label="My Asset"
                 onClick={() => setShowAssetManagement(true)}
               />
               <ProfileRow icon={<Building2 className="w-4 h-4" />} label="Organization" value="Credence Housing Limited" last />
@@ -319,7 +319,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
             <p className="text-[11px] font-medium uppercase tracking-wide px-5 pt-4 pb-1" style={{ color: 'var(--g-text-muted)' }}>
               Settings
             </p>
-            <ProfileRow icon={<Package className="w-4 h-4" />} label="Asset Management" onClick={() => setShowAssetManagement(true)} padded />
+            <ProfileRow icon={<Package className="w-4 h-4" />} label="My Asset" onClick={() => setShowAssetManagement(true)} padded />
             <ProfileRow icon={<Lock className="w-4 h-4" />} label="Change Password" onClick={() => setShowChangePassword(true)} padded />
             {!!username && (
               <ProfileRow icon={<UserCircle2 className="w-4 h-4" />} label="Change Username" onClick={() => setShowChangeUsername(true)} padded />

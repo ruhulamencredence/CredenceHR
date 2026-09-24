@@ -942,7 +942,7 @@ export default function App() {
                 >
                   <ArrowLeft className="w-5 h-5" />
                 </button>
-                <h1 className="text-base font-bold">Asset Management</h1>
+                <h1 className="text-base font-bold">My Asset</h1>
               </div>
               <AssetManagement />
             </div>
