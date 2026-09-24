@@ -251,6 +251,43 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
     }));
   }
 
+  // Attaches r.pending_with — who this requisition's Approval Workflow is
+  // CURRENTLY waiting on, for every row with status 'pending' (undefined/
+  // null on any other status, or if no approval_requests row is found —
+  // e.g. a legacy pre-Approval-Workflow requisition). Resolved the same way
+  // GET /api/approvals does: the request's current step's approver(s), via
+  // getCurrentStepApprovers (the Supervisor auto-layer when it's step 1, or
+  // the Template's own step otherwise) — ANY ONE of them clears the step,
+  // so all are shown, not just one.
+  // Plain any[] in/out (not generic over T) — chaining this with attachItems
+  // (which has its own, differently-shaped generic) defeats TS's inference
+  // either order; every caller already treats these rows as loosely-typed
+  // DB result objects anyway.
+  async function attachPendingApprover(rows: any[]): Promise<any[]> {
+    const pendingIds = new Set(rows.filter((r) => r.status === "pending").map((r) => r.id));
+    if (pendingIds.size === 0) return rows.map((r) => ({ ...r, pending_with: null }));
+
+    const requestRows = await queryDB("SELECT * FROM approval_requests WHERE source_type = ?", ["asset_requisition"]);
+    const requestByRequisitionId = new Map<number, any>(
+      requestRows
+        .filter((rr: any) => rr.status === "pending" && pendingIds.has(Number(rr.source_id)))
+        .map((rr: any) => [Number(rr.source_id), rr])
+    );
+
+    const result: any[] = [];
+    for (const r of rows) {
+      const request = requestByRequisitionId.get(r.id);
+      if (!request) {
+        result.push({ ...r, pending_with: null });
+        continue;
+      }
+      const approvers = await getCurrentStepApprovers(request);
+      const names = approvers.map((a) => a.user_name).filter((n): n is string => !!n);
+      result.push({ ...r, pending_with: names.length > 0 ? names.join(", ") : null });
+    }
+    return result;
+  }
+
   // ---------------------------------------------------------------------
   // Employee self-service (Employee Profile -> Asset Management)
   // ---------------------------------------------------------------------
@@ -494,7 +531,7 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
         `${requisitionSelectBase} WHERE r.employee_user_id = ? ORDER BY r.created_at DESC`,
         [req.user.id]
       );
-      res.json(await attachItems(rows));
+      res.json(await attachItems(await attachPendingApprover(rows)));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -614,7 +651,7 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
       }
       const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
       const rows = await queryDB(`${requisitionSelectBase} ${where} ORDER BY r.created_at DESC`, params);
-      res.json(await attachItems(rows));
+      res.json(await attachItems(await attachPendingApprover(rows)));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
