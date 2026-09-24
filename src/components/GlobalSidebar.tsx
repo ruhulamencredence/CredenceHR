@@ -53,7 +53,7 @@ interface GlobalSidebarProps {
   onGoToUserClaims: (target: 'movementClaims' | 'conveyanceBill') => void;
   // Everyday employee self-service items — not Admin-gated, shown to every
   // account regardless of role/module access.
-  onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation') => void;
+  onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement') => void;
   // Admin Panel's own Movement Claims / Conveyance Bill Claim review tabs —
   // separate feature from onGoToUserClaims above, gated by module_permissions
   // like every other Admin Panel module.
@@ -301,6 +301,12 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // exit_offboarding module grant used by the management-side
   // ExitOffboardingPanel under Admin Panel -> HR Advanced.
   selfServiceItems.push({ key: 'resignation', label: 'My Resignation', icon: LogOut, onClick: () => onGoToSelfServiceTab('resignation') });
+  // Asset Management (AssetManagement.tsx) — self-service My Assets/New
+  // Requisition/Requisition Status, previously reachable only from Profile
+  // -> Settings. NOT Admin-gated, same as Chat/Employee Directory/My
+  // Resignation just above: any signed-in account can raise an asset
+  // requisition for themselves, regardless of module_permissions.
+  selfServiceItems.push({ key: 'assetManagement', label: 'Asset Management', icon: Package, onClick: () => onGoToSelfServiceTab('assetManagement') });
 
   // "Admin Dashboard" — the HR-overview landing page (stat tiles, quick
   // view, charts, notices, leave balances). Every real role === 'admin' |

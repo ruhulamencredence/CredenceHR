@@ -29,6 +29,17 @@ interface AssignedAsset {
   return_requested_at: string | null;
 }
 
+// One line of a requisition — what's being asked for (item name), why
+// (purpose), and how much (unit + quantity). "New Requisition" lets an
+// Employee add as many of these as they need in a single submission
+// instead of filing one request per item.
+interface RequisitionItem {
+  item_name: string;
+  purpose: string;
+  unit: string;
+  quantity: number;
+}
+
 interface Requisition {
   id: number;
   asset_category: string;
@@ -42,7 +53,10 @@ interface Requisition {
   asset_name: string | null;
   asset_tag: string | null;
   created_at: string;
+  items: RequisitionItem[];
 }
+
+const emptyItem = (): RequisitionItem => ({ item_name: '', purpose: '', unit: 'pcs', quantity: 1 });
 
 const STATUS_LABEL: Record<Requisition['status'], string> = {
   pending: 'Pending (Line Manager)',
@@ -74,7 +88,8 @@ export function AssetManagement() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [form, setForm] = useState({ asset_category: '', reason: '', urgency: 'medium', target_date: '' });
+  const [items, setItems] = useState<RequisitionItem[]>([emptyItem()]);
+  const [meta, setMeta] = useState({ urgency: 'medium', target_date: '' });
   const [submitting, setSubmitting] = useState(false);
   const [submitMessage, setSubmitMessage] = useState<string | null>(null);
 
@@ -141,20 +156,46 @@ export function AssetManagement() {
     }
   }
 
+  function updateItem(index: number, patch: Partial<RequisitionItem>) {
+    setItems((prev) => prev.map((it, i) => (i === index ? { ...it, ...patch } : it)));
+  }
+
+  function addItem() {
+    setItems((prev) => [...prev, emptyItem()]);
+  }
+
+  function removeItem(index: number) {
+    setItems((prev) => (prev.length === 1 ? prev : prev.filter((_, i) => i !== index)));
+  }
+
   async function submitRequisition(e: React.FormEvent) {
     e.preventDefault();
     setSubmitting(true);
     setSubmitMessage(null);
     try {
+      // Drop any fully-empty row (e.g. a trailing "+ Add Item" the person
+      // never filled in) rather than failing the whole submission on it.
+      const cleanItems = items
+        .map((it) => ({ ...it, item_name: it.item_name.trim(), purpose: it.purpose.trim(), unit: it.unit.trim() }))
+        .filter((it) => it.item_name || it.purpose);
+      if (cleanItems.length === 0) throw new Error('Add at least one item.');
+      for (const it of cleanItems) {
+        if (!it.item_name) throw new Error('Every item needs a name.');
+        if (!it.purpose) throw new Error('Every item needs a purpose.');
+        if (!it.unit) throw new Error('Every item needs a unit.');
+        if (!it.quantity || it.quantity <= 0) throw new Error('Every item needs a quantity greater than 0.');
+      }
+
       const res = await fetch(apiUrl('/api/assets/requisitions'), {
         method: 'POST',
         headers: authHeaders(),
-        body: JSON.stringify(form)
+        body: JSON.stringify({ items: cleanItems, ...meta })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Could not submit request.');
       setSubmitMessage('Request submitted successfully.');
-      setForm({ asset_category: '', reason: '', urgency: 'medium', target_date: '' });
+      setItems([emptyItem()]);
+      setMeta({ urgency: 'medium', target_date: '' });
     } catch (err: any) {
       setSubmitMessage(err.message);
     } finally {
@@ -227,33 +268,96 @@ export function AssetManagement() {
       )}
 
       {tab === 'requisition' && (
-        <form onSubmit={submitRequisition} className="space-y-4 max-w-xl">
+        <form onSubmit={submitRequisition} className="space-y-4 max-w-3xl">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Asset Type</label>
-            <input
-              required
-              value={form.asset_category}
-              onChange={(e) => setForm({ ...form, asset_category: e.target.value })}
-              placeholder="e.g. Laptop, Monitor, Headset"
-              className="w-full border rounded px-3 py-2 text-sm"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Reason for Request</label>
-            <textarea
-              required
-              value={form.reason}
-              onChange={(e) => setForm({ ...form, reason: e.target.value })}
-              rows={3}
-              className="w-full border rounded px-3 py-2 text-sm"
-            />
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-sm font-medium text-gray-700">Items</label>
+              <button
+                type="button"
+                onClick={addItem}
+                className="text-xs font-medium text-blue-600 hover:text-blue-800"
+              >
+                + Add Item
+              </button>
+            </div>
+            <div className="space-y-3">
+              {items.map((it, idx) => (
+                <div key={idx} className="border rounded-lg p-3">
+                  <div className="grid grid-cols-12 gap-2">
+                    <div className="col-span-12 sm:col-span-4">
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Item Name</label>
+                      <input
+                        required
+                        value={it.item_name}
+                        onChange={(e) => updateItem(idx, { item_name: e.target.value })}
+                        placeholder="e.g. Laptop, A4 Paper"
+                        className="w-full border rounded px-2 py-1.5 text-sm"
+                      />
+                    </div>
+                    <div className="col-span-12 sm:col-span-4">
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Purpose</label>
+                      <input
+                        required
+                        value={it.purpose}
+                        onChange={(e) => updateItem(idx, { purpose: e.target.value })}
+                        placeholder="Why this item is needed"
+                        className="w-full border rounded px-2 py-1.5 text-sm"
+                      />
+                    </div>
+                    <div className="col-span-6 sm:col-span-2">
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Unit</label>
+                      <input
+                        required
+                        value={it.unit}
+                        onChange={(e) => updateItem(idx, { unit: e.target.value })}
+                        placeholder="pcs, box, set"
+                        list="asset-req-units"
+                        className="w-full border rounded px-2 py-1.5 text-sm"
+                      />
+                    </div>
+                    <div className="col-span-5 sm:col-span-1">
+                      <label className="block text-xs font-medium text-gray-500 mb-1">Qty</label>
+                      <input
+                        required
+                        type="number"
+                        min={0.01}
+                        step="any"
+                        value={it.quantity}
+                        onChange={(e) => updateItem(idx, { quantity: Number(e.target.value) })}
+                        className="w-full border rounded px-2 py-1.5 text-sm"
+                      />
+                    </div>
+                    <div className="col-span-1 flex items-end justify-end">
+                      {items.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => removeItem(idx)}
+                          aria-label="Remove item"
+                          className="w-7 h-7 rounded text-red-500 hover:bg-red-50 text-sm font-medium"
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <datalist id="asset-req-units">
+              <option value="pcs" />
+              <option value="box" />
+              <option value="set" />
+              <option value="ream" />
+              <option value="packet" />
+              <option value="unit" />
+            </datalist>
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Urgency</label>
               <select
-                value={form.urgency}
-                onChange={(e) => setForm({ ...form, urgency: e.target.value })}
+                value={meta.urgency}
+                onChange={(e) => setMeta({ ...meta, urgency: e.target.value })}
                 className="w-full border rounded px-3 py-2 text-sm"
               >
                 <option value="low">Low</option>
@@ -265,8 +369,8 @@ export function AssetManagement() {
               <label className="block text-sm font-medium text-gray-700 mb-1">Target Date</label>
               <input
                 type="date"
-                value={form.target_date}
-                onChange={(e) => setForm({ ...form, target_date: e.target.value })}
+                value={meta.target_date}
+                onChange={(e) => setMeta({ ...meta, target_date: e.target.value })}
                 className="w-full border rounded px-3 py-2 text-sm"
               />
             </div>
@@ -293,7 +397,18 @@ export function AssetManagement() {
                 <span className={`text-xs font-medium px-2 py-1 rounded ${STATUS_COLOR[r.status]}`}>{STATUS_LABEL[r.status]}</span>
               </div>
               <div className="text-xs text-gray-500 mt-1">Requested: {r.created_at} • Urgency: {r.urgency}</div>
-              <div className="text-sm text-gray-600 mt-2">{r.reason}</div>
+              <div className="mt-2 space-y-1">
+                {(r.items || []).map((it, idx) => (
+                  <div key={idx} className="text-sm text-gray-600 flex items-baseline justify-between gap-2">
+                    <span>
+                      <span className="font-medium text-gray-800">{it.item_name}</span> — {it.purpose}
+                    </span>
+                    <span className="text-xs text-gray-500 shrink-0">
+                      {it.quantity} {it.unit}
+                    </span>
+                  </div>
+                ))}
+              </div>
               {r.status === 'rejected' && r.rejection_reason && (
                 <div className="text-xs text-red-600 mt-2">Reason: {r.rejection_reason}</div>
               )}

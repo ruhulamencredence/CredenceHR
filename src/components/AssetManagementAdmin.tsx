@@ -28,6 +28,13 @@ interface Asset {
   condition_note: string | null;
 }
 
+interface RequisitionItem {
+  item_name: string;
+  purpose: string;
+  unit: string;
+  quantity: number;
+}
+
 interface Requisition {
   id: number;
   employee_name: string;
@@ -37,6 +44,7 @@ interface Requisition {
   status: 'pending' | 'manager_approved' | 'approved' | 'rejected' | 'dispatched' | 'fulfilled';
   manager_name: string | null;
   created_at: string;
+  items: RequisitionItem[];
 }
 
 function authHeaders(): HeadersInit {
@@ -167,7 +175,18 @@ export function AssetManagementAdmin() {
                 Requested: {r.created_at} • Urgency: {r.urgency}
                 {r.manager_name ? ` • Line Manager: ${r.manager_name}` : ' • No Line Manager on file'}
               </div>
-              <div className="text-sm text-gray-600 mt-2">{r.reason}</div>
+              <div className="mt-2 space-y-1">
+                {(r.items || []).map((it, idx) => (
+                  <div key={idx} className="text-sm text-gray-600 flex items-baseline justify-between gap-2">
+                    <span>
+                      <span className="font-medium text-gray-800">{it.item_name}</span> — {it.purpose}
+                    </span>
+                    <span className="text-xs text-gray-500 shrink-0">
+                      {it.quantity} {it.unit}
+                    </span>
+                  </div>
+                ))}
+              </div>
 
               {(r.status === 'pending' || r.status === 'manager_approved') && (
                 <div className="flex gap-2 mt-3">
@@ -192,13 +211,34 @@ export function AssetManagementAdmin() {
                     <div className="flex items-center gap-2">
                       <select value={fulfillAssetId} onChange={(e) => setFulfillAssetId(e.target.value)} className="border rounded px-2 py-1 text-xs">
                         <option value="">Pick an item…</option>
-                        {availableAssets
-                          .filter((a) => a.category.toLowerCase() === r.asset_category.toLowerCase())
-                          .map((a) => (
-                            <option key={a.id} value={a.id}>
-                              {a.name} ({a.asset_tag})
-                            </option>
-                          ))}
+                        {(() => {
+                          // A requisition can now list several items, so
+                          // there's no single category to match inventory
+                          // against — offer anything in stock whose
+                          // category matches ANY requested item name first
+                          // (most likely picks up top), then every other
+                          // available item below, so IT/Admin can still
+                          // hand over an asset that doesn't neatly match
+                          // one of the item names as typed.
+                          const requestedNames = (r.items || []).map((it) => it.item_name.toLowerCase());
+                          const matching = availableAssets.filter((a) => requestedNames.includes(a.category.toLowerCase()));
+                          const rest = availableAssets.filter((a) => !requestedNames.includes(a.category.toLowerCase()));
+                          return (
+                            <>
+                              {matching.map((a) => (
+                                <option key={a.id} value={a.id}>
+                                  {a.name} ({a.asset_tag})
+                                </option>
+                              ))}
+                              {rest.length > 0 && matching.length > 0 && <option disabled>──────────</option>}
+                              {rest.map((a) => (
+                                <option key={a.id} value={a.id}>
+                                  {a.name} ({a.asset_tag})
+                                </option>
+                              ))}
+                            </>
+                          );
+                        })()}
                       </select>
                       <button onClick={() => fulfill(r.id)} className="px-3 py-1.5 text-xs font-medium rounded bg-blue-600 text-white">
                         Dispatch

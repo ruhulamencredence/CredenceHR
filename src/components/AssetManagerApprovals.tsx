@@ -16,6 +16,13 @@
 import React, { useEffect, useState } from 'react';
 import { apiUrl } from '../lib/api';
 
+interface RequisitionItem {
+  item_name: string;
+  purpose: string;
+  unit: string;
+  quantity: number;
+}
+
 interface Requisition {
   id: number;
   employee_name: string;
@@ -23,6 +30,7 @@ interface Requisition {
   reason: string;
   urgency: 'low' | 'medium' | 'high';
   created_at: string;
+  items: RequisitionItem[];
 }
 
 function authHeaders(): HeadersInit {
@@ -81,7 +89,18 @@ export function AssetManagerApprovals() {
               <span className="text-xs font-medium px-2 py-1 rounded bg-yellow-100 text-yellow-800">{r.urgency}</span>
             </div>
             <div className="text-xs text-gray-500 mt-1">Requested: {r.created_at}</div>
-            <div className="text-sm text-gray-600 mt-2">{r.reason}</div>
+            <div className="mt-2 space-y-1">
+              {(r.items || []).map((it, idx) => (
+                <div key={idx} className="text-sm text-gray-600 flex items-baseline justify-between gap-2">
+                  <span>
+                    <span className="font-medium text-gray-800">{it.item_name}</span> — {it.purpose}
+                  </span>
+                  <span className="text-xs text-gray-500 shrink-0">
+                    {it.quantity} {it.unit}
+                  </span>
+                </div>
+              ))}
+            </div>
             <div className="flex gap-2 mt-3">
               <button onClick={() => decide(r.id, 'approve')} className="px-3 py-1.5 text-xs font-medium rounded bg-green-600 text-white hover:bg-green-700">
                 Approve
