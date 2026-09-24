@@ -15,11 +15,29 @@
 // same Dynamic Approval Engine every other module uses (Admin Panel ->
 // Approvals, or "My Approvals" for whoever the Template's Layer 1 names),
 // configurable from Admin Panel -> Approvals -> Templates (request type
-// "Vehicle Requisition", Layer 1 = "HR/Admin Review"). See the design note
-// above registerVehicleManagementRoutes in VehicleManagementRoutes.ts.
+// "Vehicle Requisition", Layer 1 = "Supervisor Approval", Layer 2 =
+// "HR/Admin Review"). See the design note above
+// registerVehicleManagementRoutes in VehicleManagementRoutes.ts.
+//
+// Also has the flowchart's "জরুরি/HR Direct" initiator path ("Emergency
+// Requisition" tab below) — HR/Admin manually files a request on someone
+// else's behalf, optionally naming a specific Supervisor-Layer approver
+// instead of relying on that employee's own auto-resolved Direct/Department
+// Supervisor (POST /api/vehicles/requisitions/admin-create).
 
 import React, { useEffect, useState } from 'react';
 import { apiUrl } from '../lib/api';
+import { User } from '../types';
+
+interface VehicleManagementAdminProps {
+  // Same `users` list AdminPanel already fetches for ApprovalTemplateManager
+  // (GET /api/users, gated behind the 'users' module) — reused here purely
+  // client-side for the Emergency Requisition tab's Employee/Supervisor
+  // pickers, no extra fetch needed. Empty for an admin who only holds
+  // 'vehicle_management' and not 'users' — same limitation
+  // ApprovalTemplateManager's own approver picker already has.
+  users: User[];
+}
 
 interface Vehicle {
   id: number;
@@ -63,8 +81,19 @@ function authHeaders(): HeadersInit {
   return { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
 }
 
-export function VehicleManagementAdmin() {
-  const [tab, setTab] = useState<'requests' | 'inventory'>('requests');
+const emptyEmergencyForm = () => ({
+  employee_user_id: '',
+  supervisor_user_id: '',
+  purpose: '',
+  pickup_location: '',
+  destination: '',
+  ride_date: '',
+  start_time: '',
+  estimated_duration_hours: 1
+});
+
+export function VehicleManagementAdmin({ users }: VehicleManagementAdminProps) {
+  const [tab, setTab] = useState<'requests' | 'emergency' | 'inventory'>('requests');
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [requisitions, setRequisitions] = useState<Requisition[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -76,6 +105,10 @@ export function VehicleManagementAdmin() {
 
   const [noticeFor, setNoticeFor] = useState<number | null>(null);
   const [noticeNote, setNoticeNote] = useState('');
+
+  const [emergencyForm, setEmergencyForm] = useState(emptyEmergencyForm());
+  const [emergencySubmitting, setEmergencySubmitting] = useState(false);
+  const [emergencyMessage, setEmergencyMessage] = useState<string | null>(null);
 
   async function loadVehicles() {
     try {
@@ -115,6 +148,33 @@ export function VehicleManagementAdmin() {
       loadVehicles();
     } catch (err: any) {
       setError(err.message);
+    }
+  }
+
+  async function submitEmergencyRequisition(e: React.FormEvent) {
+    e.preventDefault();
+    setEmergencySubmitting(true);
+    setEmergencyMessage(null);
+    try {
+      if (!emergencyForm.employee_user_id) throw new Error('Pick who this ride is for.');
+      const res = await fetch(apiUrl('/api/vehicles/requisitions/admin-create'), {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({
+          ...emergencyForm,
+          employee_user_id: Number(emergencyForm.employee_user_id),
+          supervisor_user_id: emergencyForm.supervisor_user_id ? Number(emergencyForm.supervisor_user_id) : undefined
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not submit this requisition.');
+      setEmergencyMessage('Requisition submitted successfully.');
+      setEmergencyForm(emptyEmergencyForm());
+      loadRequisitions();
+    } catch (err: any) {
+      setEmergencyMessage(err.message);
+    } finally {
+      setEmergencySubmitting(false);
     }
   }
 
@@ -191,6 +251,7 @@ export function VehicleManagementAdmin() {
               awaitingAssignCount > 0 ? ` • ${awaitingAssignCount} to assign` : ''
             }${noticeCount > 0 ? ` • ${noticeCount} flagged` : ''}`
           ],
+          ['emergency', 'Emergency Requisition'],
           ['inventory', 'Vehicle Inventory']
         ] as const).map(([key, label]) => (
           <button
@@ -370,6 +431,125 @@ export function VehicleManagementAdmin() {
               )}
             </div>
           ))}
+        </div>
+      )}
+
+      {tab === 'emergency' && (
+        <div className="space-y-4 max-w-xl">
+          <div className="rounded bg-blue-50 text-blue-800 text-xs px-3 py-2">
+            Flowchart's "জরুরি/HR Direct" path — file a ride request on someone else's behalf (an emergency, or they can't do it
+            themselves). Optionally name a specific Supervisor-Layer approver instead of that employee's own auto-resolved
+            Supervisor; the "HR/Admin Review" Layer after it works the same as any other request.
+          </div>
+          <form onSubmit={submitEmergencyRequisition} className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Requesting For</label>
+                <select
+                  required
+                  value={emergencyForm.employee_user_id}
+                  onChange={(e) => setEmergencyForm({ ...emergencyForm, employee_user_id: e.target.value })}
+                  className="w-full border rounded px-3 py-2 text-sm"
+                >
+                  <option value="">Select an employee…</option>
+                  {users.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Supervisor Approver <span className="text-gray-400 font-normal">(optional override)</span>
+                </label>
+                <select
+                  value={emergencyForm.supervisor_user_id}
+                  onChange={(e) => setEmergencyForm({ ...emergencyForm, supervisor_user_id: e.target.value })}
+                  className="w-full border rounded px-3 py-2 text-sm"
+                >
+                  <option value="">Use their own Supervisor (default)</option>
+                  {users.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Purpose</label>
+              <textarea
+                required
+                value={emergencyForm.purpose}
+                onChange={(e) => setEmergencyForm({ ...emergencyForm, purpose: e.target.value })}
+                rows={2}
+                className="w-full border rounded px-3 py-2 text-sm"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Pickup Location</label>
+                <input
+                  required
+                  value={emergencyForm.pickup_location}
+                  onChange={(e) => setEmergencyForm({ ...emergencyForm, pickup_location: e.target.value })}
+                  className="w-full border rounded px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Destination</label>
+                <input
+                  required
+                  value={emergencyForm.destination}
+                  onChange={(e) => setEmergencyForm({ ...emergencyForm, destination: e.target.value })}
+                  className="w-full border rounded px-3 py-2 text-sm"
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Ride Date</label>
+                <input
+                  required
+                  type="date"
+                  value={emergencyForm.ride_date}
+                  onChange={(e) => setEmergencyForm({ ...emergencyForm, ride_date: e.target.value })}
+                  className="w-full border rounded px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Start Time</label>
+                <input
+                  required
+                  type="time"
+                  value={emergencyForm.start_time}
+                  onChange={(e) => setEmergencyForm({ ...emergencyForm, start_time: e.target.value })}
+                  className="w-full border rounded px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Est. Duration (hrs)</label>
+                <input
+                  required
+                  type="number"
+                  min={0.5}
+                  step="0.5"
+                  value={emergencyForm.estimated_duration_hours}
+                  onChange={(e) => setEmergencyForm({ ...emergencyForm, estimated_duration_hours: Number(e.target.value) })}
+                  className="w-full border rounded px-3 py-2 text-sm"
+                />
+              </div>
+            </div>
+            {emergencyMessage && <div className="text-sm text-gray-700">{emergencyMessage}</div>}
+            <button
+              type="submit"
+              disabled={emergencySubmitting}
+              className="px-4 py-2 text-sm font-medium rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+            >
+              {emergencySubmitting ? 'Submitting…' : 'Submit Requisition'}
+            </button>
+          </form>
         </div>
       )}
 
