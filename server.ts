@@ -6031,49 +6031,70 @@ async function startServer() {
     }
   });
 
-  // Deleting a Budget wipes out EVERYTHING created under it — not just the imported
-  // Budget Excel rows (budget_items) but every MPR Entry and Job a User submitted
-  // against it too. Without this, those entries/jobs used to survive with budget_id
-  // set to NULL (orphaned but still visible in Job Entry Details / Admin reports) —
-  // deleting the Budget is meant to be a full, permanent wipe of that relation.
+  // "Delete Budget" no longer wipes the Budget itself, or any row a User has
+  // already submitted an MPR Entry against — it only removes this Budget's
+  // UNUSED imported Excel rows (budget_items with zero entries pointing at
+  // them). This used to be a full, permanent wipe of the Budget + every Job/
+  // Entry ever submitted under it, which meant an Admin could accidentally
+  // destroy real work just to clear out rows nobody ever touched. Now: a row
+  // is "used" iff at least one still-active (not soft-deleted, Job Recycle)
+  // entries row has budget_item_id pointing at it — every entry created
+  // since budget_item_id existed sets this (EntriesRoutes.ts), so this is an
+  // exact per-row check, not a heuristic. Used rows, the Budget row itself,
+  // and budget_submissions (the per-user Final Submit lock) are all left
+  // untouched; an Admin can always come back and "Import more rows into this
+  // budget" again later — see POST /api/budgets/:id/import's merge-on-match
+  // logic for how a re-import avoids creating duplicates of what's kept here.
   //
-  // The Approved MPR Numbers List (mpr_numbers) is NOT simply wiped alongside it,
-  // though — that table has no budget_id column at all: mpr_no is GLOBALLY unique,
-  // and the same MRF No can legitimately be imported into more than one Budget's
-  // Excel (re-used across periods). So after the cascade above, we only remove the
-  // MPR Numbers that came in from THIS Budget's import AND are not referenced by any
-  // other Budget's imported rows or any other entry left in the system — an MRF No
-  // still in use elsewhere is left alone.
+  // The Approved MPR Numbers List (mpr_numbers) is NOT touched for an MRF No
+  // that's still on a kept (used) row, or still imported into ANY other
+  // Budget, or still referenced by any entry anywhere in the system — mpr_no
+  // is globally unique and legitimately reused across Budgets/periods.
   app.delete("/api/budgets/:id", authenticateToken, requireAdmin, requireModule("imports"), async (req, res) => {
     try {
       const budgetId = req.params.id;
       const budgets = await queryDB("SELECT id FROM budgets WHERE id = ?", [budgetId]);
       if (budgets.length === 0) return res.status(404).json({ error: "Budget not found" });
 
-      // Snapshot which MPR Numbers this Budget's imported Excel rows touch, BEFORE
-      // those budget_items rows are deleted below — this is the candidate list to
-      // clean up afterwards (only the ones that turn out to be orphaned).
-      const mrfRows = await queryDB(
-        "SELECT mrf_no FROM budget_items WHERE budget_id = ? AND mrf_no IS NOT NULL AND mrf_no <> ''",
-        [budgetId]
+      const items = await queryDB("SELECT * FROM budget_items WHERE budget_id = ?", [budgetId]);
+
+      const deletedIds: number[] = [];
+      const keptIds: number[] = [];
+      for (const item of items) {
+        const usageRows = await queryDB(
+          "SELECT COUNT(*) as cnt FROM entries WHERE budget_item_id = ? AND deleted_at IS NULL",
+          [item.id]
+        );
+        if ((usageRows[0]?.cnt || 0) > 0) {
+          keptIds.push(item.id);
+        } else {
+          deletedIds.push(item.id);
+        }
+      }
+
+      // Snapshot which MPR Numbers the rows actually being removed touch,
+      // BEFORE those budget_items rows are deleted — this is the candidate
+      // list to clean up afterwards (only the ones that turn out orphaned).
+      // An MRF No that also appears on a KEPT row is never a candidate.
+      const keptMrfNos = new Set(
+        items.filter((it: any) => keptIds.includes(it.id) && it.mrf_no).map((it: any) => String(it.mrf_no).trim().toLowerCase())
       );
       const candidateMrfNos = Array.from(
-        new Set(mrfRows.map((r: any) => String(r.mrf_no).trim().toLowerCase()).filter(Boolean))
-      );
+        new Set(
+          items
+            .filter((it: any) => deletedIds.includes(it.id) && it.mrf_no)
+            .map((it: any) => String(it.mrf_no).trim().toLowerCase())
+        )
+      ).filter((mrfNo) => !keptMrfNos.has(mrfNo));
 
-      // Order matters: entries reference jobs/budget_items/budgets, so entries go
-      // first, then jobs, then the imported Excel rows, then the submission locks,
-      // and finally the Budget itself.
-      await queryDB("DELETE FROM entries WHERE budget_id = ?", [budgetId]);
-      await queryDB("DELETE FROM jobs WHERE budget_id = ?", [budgetId]);
-      await queryDB("DELETE FROM budget_items WHERE budget_id = ?", [budgetId]);
-      await queryDB("DELETE FROM budget_submissions WHERE budget_id = ?", [budgetId]);
-      await queryDB("DELETE FROM budgets WHERE id = ?", [budgetId]);
+      for (const id of deletedIds) {
+        await queryDB("DELETE FROM budget_items WHERE id = ?", [id]);
+      }
 
-      // Now that this Budget's own rows are gone, remove each candidate MPR No from
-      // the Approved list ONLY if nothing else in the system still points to it —
-      // another Budget's budget_items, or an entry (active or still sitting in the
-      // Job Recycle bin) under a different Budget.
+      // Remove each candidate MPR No from the Approved list ONLY if nothing
+      // else in the system still points to it — another Budget's
+      // budget_items, or an entry (active or still sitting in the Job
+      // Recycle bin) under any Budget.
       for (const mrfNo of candidateMrfNos) {
         const stillInBudgetItems = await queryDB(
           "SELECT COUNT(*) as cnt FROM budget_items WHERE LOWER(mrf_no) = LOWER(?)",
@@ -6091,7 +6112,7 @@ async function startServer() {
         await queryDB("DELETE FROM mpr_numbers WHERE id = ?", [mprId]);
       }
 
-      res.json({ success: true });
+      res.json({ success: true, deleted_count: deletedIds.length, kept_count: keptIds.length });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -6357,10 +6378,31 @@ async function startServer() {
       }
 
       let itemsInserted = 0;
+      let itemsReplaced = 0;
       let mprAdded = 0;
       let mprAlreadyExisting = 0;
       let projectsAdded = 0;
       let projectsAlreadyExisting = 0;
+
+      // Re-importing into an already-Published Budget (the "Import more rows
+      // into this budget" button — this route has no is_published guard) must
+      // not create duplicate rows for the same real-world line item, and must
+      // not orphan any MPR Entry already submitted against an existing row.
+      // So: match each incoming row against this Budget's EXISTING rows on
+      // (Project Name, MRF No, Description of Materials, Specification) —
+      // case/whitespace-insensitive — and UPDATE that row IN PLACE (same id,
+      // so entries.budget_item_id pointing at it stays valid) instead of
+      // inserting a second copy. Only a row with no match on all four fields
+      // is a genuinely new line item and gets INSERTed.
+      const matchKey = (project_name: string, mrf_no: string, description: string, specification: string) =>
+        `${project_name.toLowerCase()}|${mrf_no.toLowerCase()}|${description.toLowerCase()}|${specification.toLowerCase()}`;
+      const existingItems = await queryDB("SELECT * FROM budget_items WHERE budget_id = ?", [budgetId]);
+      const existingByKey = new Map<string, any>(
+        existingItems.map((it: any) => [
+          matchKey(String(it.project_name || ""), String(it.mrf_no || ""), String(it.description || ""), String(it.specification || "")),
+          it
+        ])
+      );
 
       for (const r of rows) {
         const field = (v: any) => (v != null ? String(v).trim() : "");
@@ -6384,17 +6426,39 @@ async function startServer() {
         // Skip fully blank rows
         if (!project_name && !req_no && !mrf_no && !description) continue;
 
-        await queryDB(
-          `INSERT INTO budget_items
-           (budget_id, sl_no, project_name, req_no, mrf_no, item_date, description, unit, specification,
-            req_qty, po_qty, received_qty, balance_qty, entry_user, approved_date, app_user, site_sup_date)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            budgetId, sl_no, project_name, req_no, mrf_no, item_date, description, unit, specification,
-            req_qty, po_qty, received_qty, balance_qty, entry_user, approved_date, app_user, site_sup_date
-          ]
-        );
-        itemsInserted++;
+        const key = matchKey(project_name, mrf_no, description, specification);
+        const existing = existingByKey.get(key);
+        if (existing) {
+          await queryDB(
+            `UPDATE budget_items
+                SET sl_no = ?, project_name = ?, req_no = ?, mrf_no = ?, item_date = ?, description = ?, unit = ?, specification = ?,
+                    req_qty = ?, po_qty = ?, received_qty = ?, balance_qty = ?, entry_user = ?, approved_date = ?, app_user = ?, site_sup_date = ?
+              WHERE id = ?`,
+            [
+              sl_no, project_name, req_no, mrf_no, item_date, description, unit, specification,
+              req_qty, po_qty, received_qty, balance_qty, entry_user, approved_date, app_user, site_sup_date,
+              existing.id
+            ]
+          );
+          itemsReplaced++;
+        } else {
+          const result = await queryDB(
+            `INSERT INTO budget_items
+             (budget_id, sl_no, project_name, req_no, mrf_no, item_date, description, unit, specification,
+              req_qty, po_qty, received_qty, balance_qty, entry_user, approved_date, app_user, site_sup_date)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              budgetId, sl_no, project_name, req_no, mrf_no, item_date, description, unit, specification,
+              req_qty, po_qty, received_qty, balance_qty, entry_user, approved_date, app_user, site_sup_date
+            ]
+          );
+          itemsInserted++;
+          // Same file can list the same line item twice (or a later row can
+          // match an earlier row just inserted this batch) — keep the map
+          // current so later rows in THIS import still match it instead of
+          // creating a second duplicate.
+          existingByKey.set(key, { id: result.insertId });
+        }
 
         if (project_name) {
           const pr = await findOrCreateProject(project_name, req.user.id);
@@ -6411,6 +6475,7 @@ async function startServer() {
       res.json({
         success: true,
         items_inserted: itemsInserted,
+        items_replaced: itemsReplaced,
         mpr_added: mprAdded,
         mpr_already_existing: mprAlreadyExisting,
         projects_added: projectsAdded,

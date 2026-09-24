@@ -2008,19 +2008,31 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   };
 
   const handleDeleteBudget = async (id: number) => {
-    if (!confirm('Delete this budget and all its imported rows? This cannot be undone.')) return;
+    // This no longer deletes the Budget itself or any row a User has already
+    // submitted an MPR Entry against — only rows with zero entries against
+    // them are removed. See the DELETE /api/budgets/:id route's own comment
+    // for the exact "used" check. The Budget stays, so activeBudgetId/
+    // activeBudgetName are left alone even when it's the one being cleaned up.
+    if (!confirm("Remove this budget's unused rows? Rows a User has already submitted an entry against will be kept. This cannot be undone.")) return;
     try {
       const res = await fetch(apiUrl(`/api/budgets/${id}`), {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` }
       });
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
-        if (activeBudgetId === id) {
-          setActiveBudgetId(null);
-          setActiveBudgetName('');
-        }
         fetchAllData();
-        setMessage({ type: 'success', text: 'Budget deleted.' });
+        setMessage({
+          type: 'success',
+          text:
+            data.deleted_count > 0
+              ? `Removed ${data.deleted_count} unused row${data.deleted_count === 1 ? '' : 's'}.${
+                  data.kept_count > 0 ? ` ${data.kept_count} row${data.kept_count === 1 ? '' : 's'} with entries were kept.` : ''
+                }`
+              : 'Nothing to remove — every row in this budget already has an entry against it.'
+        });
+      } else {
+        setMessage({ type: 'error', text: data.error || 'Could not remove unused rows.' });
       }
     } catch (err) {
       console.error(err);
@@ -2137,7 +2149,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
 
       setMessage({
         type: 'success',
-        text: `Imported ${data.items_inserted} row(s). MPR No added: ${data.mpr_added} (already existed: ${data.mpr_already_existing}). Projects added: ${data.projects_added} (already existed: ${data.projects_already_existing}).`
+        text: `Imported ${data.items_inserted} new row(s)${
+          data.items_replaced > 0 ? `, replaced ${data.items_replaced} existing row(s) matched by Project/MRF No/Description/Specification` : ''
+        }. MPR No added: ${data.mpr_added} (already existed: ${data.mpr_already_existing}). Projects added: ${data.projects_added} (already existed: ${data.projects_already_existing}).`
       });
       fetchAllData();
     } catch (err: any) {
@@ -4964,7 +4978,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                             <button
                               onClick={() => handleDeleteBudget(b.id)}
                               className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
-                              title="Delete budget"
+                              title="Remove unused rows (rows with entries already submitted are kept)"
                             >
                               <Trash2 className="w-4 h-4" />
                             </button>
