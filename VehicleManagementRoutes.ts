@@ -17,16 +17,29 @@
 //   এসেছে? হ্যাঁ -> রাইড ক্লোজড (End). না (Late) -> ইউজার পূর্বে সিস্টেমে
 //   ইনফর্ম করেছে? হ্যাঁ -> টাইম এক্সটেনশন রিকোয়েস্ট HR/Admin অনুমোদন করবে ->
 //   End. না -> HR ম্যানুয়ালি এন্ট্রি ও নোটিশ ফ্ল্যাগ প্রদান করবে -> End.
-// Deliberately NOT routed through the Dynamic Approval Engine (unlike Asset
-// Requisition) — the flowchart itself only has one review step (HR/Admin),
-// no Supervisor layer, so a plain direct approve/reject here matches it
-// exactly and keeps this module self-contained.
 //
-// Same convention as GrievanceRoutes.ts/ExitOffboardingRoutes.ts: every
-// write route only ever does `WHERE id = ?`, filtering/joins happen in JS
-// after a full-table SELECT, and every INSERT/UPDATE is all-`?`-placeholders
-// so the in-memory dev fallback's generic positional simulator (see
-// simulateGenericTable in memoryDbFallback.ts) stays correct with zero
+// The "HR/Admin রিভিউ" diamond routes through the SAME Dynamic Approval
+// Engine every other module uses (request_type 'vehicle', source_type
+// 'vehicle_requisition' — see createTemplateApprovalRequest/
+// performApprovalAction/finalizeVehicleRequisitionApproval in server.ts): a
+// Superadmin builds a Template for it from Admin Panel -> Approvals ->
+// Templates (Layer 1 is named "HR/Admin Review" — see LAYER_NAMES in
+// ApprovalTemplateManager.tsx — with its Approver Type set to Employee/Admin
+// and specific people picked, since this flowchart has no separate
+// Supervisor step to default Layer 1 to). Approve/Reject itself therefore
+// happens from Admin Panel -> Approvals / "My Approvals" like every other
+// module, NOT from a route in this file. Once the Approval Workflow
+// approves, the requisition flips to 'approved' (workflow cleared) — IT/
+// Admin then still has to do the flowchart's own "গাড়ি ও ড্রাইভার
+// অ্যাসাইনমেন্ট" step via PUT /api/vehicles/requisitions/:id/assign below
+// (status 'approved' -> 'ongoing'), same two-step shape as Asset
+// Requisition's own POST /api/assets/requisitions/:id/fulfill.
+//
+// Same convention as GrievanceRoutes.ts/ExitOffboardingRoutes.ts otherwise:
+// every write route only ever does `WHERE id = ?`, filtering/joins happen in
+// JS after a full-table SELECT, and every INSERT/UPDATE is all-`?`-
+// placeholders so the in-memory dev fallback's generic positional simulator
+// (see simulateGenericTable in memoryDbFallback.ts) stays correct with zero
 // bespoke handlers needed.
 
 import type { Express } from "express";
@@ -42,6 +55,20 @@ interface VehicleManagementRouteDeps {
     queryDB: (sql: string, params?: any[]) => Promise<any>,
     params: { userId: number; type: AlertType; title: string; message: string; relatedType?: string; relatedId?: number }
   ) => Promise<void>;
+  // Dynamic Approval Engine (server.ts) — routes a submitted requisition
+  // through request_type 'vehicle' the same way Asset Requisition does. See
+  // the design note above registerVehicleManagementRoutes.
+  createTemplateApprovalRequest: (
+    requestType: "conveyance" | "leave" | "timesheet" | "asset" | "vehicle",
+    sourceType: "user_claim" | "attendance_correction" | "leave_application" | "asset_requisition" | "vehicle_requisition",
+    sourceId: number,
+    requestedBy: number
+  ) => Promise<{ autoApproved: boolean; template: any | null }>;
+  getCurrentStepApprovers: (request: any) => Promise<{ user_id: number; user_name: string | null }[]>;
+  // Auto-approve path (no Template resolved at all for this employee/type) —
+  // same finalize function performApprovalAction's 'vehicle_requisition'
+  // branch calls once the Approval Workflow's LAST step signs off.
+  finalizeVehicleRequisitionApproval: (requisitionId: number, approvedBy: number, remarks: string | null) => Promise<void>;
 }
 
 export async function ensureVehicleManagementSchema(dbPool: any): Promise<void> {
@@ -74,7 +101,7 @@ export async function ensureVehicleManagementSchema(dbPool: any): Promise<void> 
         start_time VARCHAR(10) NOT NULL,
         estimated_duration_hours DECIMAL(5,2) NOT NULL,
         expected_return_at DATETIME NULL,
-        status ENUM('pending','approved','rejected','cancelled','completed') NOT NULL DEFAULT 'pending',
+        status ENUM('pending','approved','ongoing','rejected','cancelled','completed') NOT NULL DEFAULT 'pending',
         decided_by INT NULL,
         decided_at TIMESTAMP NULL DEFAULT NULL,
         rejection_reason TEXT NULL,
@@ -99,10 +126,32 @@ export async function ensureVehicleManagementSchema(dbPool: any): Promise<void> 
   } catch (err: any) {
     console.warn("⚠️ Could not ensure vehicle_requisitions table exists: " + err.message);
   }
+  // Widen status for installs created before the Dynamic Approval Engine
+  // integration added the 'ongoing' status (workflow-approved but not yet
+  // vehicle+driver assigned is 'approved'; assigned and the ride actually
+  // underway is 'ongoing' — previously 'approved' meant what 'ongoing' means
+  // now, back when this file did its own direct approve+assign in one step).
+  try {
+    await dbPool.query(
+      `ALTER TABLE vehicle_requisitions MODIFY COLUMN status ENUM('pending','approved','ongoing','rejected','cancelled','completed') NOT NULL DEFAULT 'pending'`
+    );
+  } catch (err: any) {
+    console.warn("⚠️ Could not widen vehicle_requisitions.status to include 'ongoing': " + err.message);
+  }
 }
 
 export function registerVehicleManagementRoutes(app: Express, deps: VehicleManagementRouteDeps) {
-  const { authenticateToken, requireAdmin, requireModule, queryDB, getAdminModules, createAlert } = deps;
+  const {
+    authenticateToken,
+    requireAdmin,
+    requireModule,
+    queryDB,
+    getAdminModules,
+    createAlert,
+    createTemplateApprovalRequest,
+    getCurrentStepApprovers,
+    finalizeVehicleRequisitionApproval
+  } = deps;
   const adminGate = [authenticateToken, requireAdmin, requireModule("vehicle_management")];
 
   async function canManage(userId: number, role: string): Promise<boolean> {
@@ -117,7 +166,37 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
     return new Date(start.getTime() + durationHours * 60 * 60 * 1000);
   }
 
-  async function serialize(r: any, userById: Map<number, any>, vehicleById: Map<number, any>) {
+  // Resolves who a 'pending' requisition's Approval Workflow is CURRENTLY
+  // waiting on — same idea as AssetManagementRoutes.ts's own
+  // attachPendingApprover, kept a plain any[]-in/out helper for the same
+  // reason (avoids fighting TS generic inference when chained with other
+  // per-row enrichment).
+  async function attachPendingApprover(rows: any[]): Promise<any[]> {
+    const pendingIds = new Set(rows.filter((r) => r.status === "pending").map((r) => r.id));
+    if (pendingIds.size === 0) return rows.map((r) => ({ ...r, pending_with: null }));
+
+    const requestRows = await queryDB("SELECT * FROM approval_requests WHERE source_type = ?", ["vehicle_requisition"]);
+    const requestByRequisitionId = new Map<number, any>(
+      requestRows
+        .filter((rr: any) => rr.status === "pending" && pendingIds.has(Number(rr.source_id)))
+        .map((rr: any) => [Number(rr.source_id), rr])
+    );
+
+    const result: any[] = [];
+    for (const r of rows) {
+      const request = requestByRequisitionId.get(r.id);
+      if (!request) {
+        result.push({ ...r, pending_with: null });
+        continue;
+      }
+      const approvers = await getCurrentStepApprovers(request);
+      const names = approvers.map((a) => a.user_name).filter((n): n is string => !!n);
+      result.push({ ...r, pending_with: names.length > 0 ? names.join(", ") : null });
+    }
+    return result;
+  }
+
+  function serialize(r: any, userById: Map<number, any>, vehicleById: Map<number, any>) {
     const vehicle = r.assigned_vehicle_id ? vehicleById.get(Number(r.assigned_vehicle_id)) : null;
     return {
       id: Number(r.id),
@@ -131,6 +210,9 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
       estimated_duration_hours: Number(r.estimated_duration_hours),
       expected_return_at: r.expected_return_at,
       status: r.status,
+      // Who the Approval Workflow is currently waiting on (comma-joined —
+      // ANY ONE of them clears the step) — null once past 'pending'.
+      pending_with: r.pending_with ?? null,
       decided_by_name: r.decided_by ? userById.get(Number(r.decided_by))?.name || null : null,
       decided_at: r.decided_at,
       rejection_reason: r.rejection_reason,
@@ -174,13 +256,16 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
       const { rows, userById, vehicleById } = await loadContext();
       const scoped = manage ? rows : rows.filter((r: any) => Number(r.employee_user_id) === Number(req.user.id));
       const sorted = scoped.sort((a: any, b: any) => Number(b.id) - Number(a.id));
-      res.json(await Promise.all(sorted.map((r: any) => serialize(r, userById, vehicleById))));
+      const withPending = await attachPendingApprover(sorted);
+      res.json(withPending.map((r: any) => serialize(r, userById, vehicleById)));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
   });
 
   // POST /api/vehicles/requisitions — "Book a Ride": submit a new request.
+  // Routing (who has to approve it) is entirely the Dynamic Approval
+  // Engine's job from here — see createTemplateApprovalRequest.
   app.post("/api/vehicles/requisitions", authenticateToken, async (req: any, res: any) => {
     try {
       const body = req.body || {};
@@ -217,16 +302,53 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
         [req.user.id, purpose, pickup, destination, rideDate, startTime, duration, expectedReturn, "pending", "none", 0]
       );
 
+      // Dynamic Approval Engine — routed through this Employee's assigned
+      // Template for request_type 'vehicle' (the flowchart's single
+      // "HR/Admin Review" Layer). Falls back to a straight auto-approve if
+      // no Template resolves at all.
+      const { autoApproved } = await createTemplateApprovalRequest("vehicle", "vehicle_requisition", result.insertId, req.user.id);
+      if (autoApproved) {
+        try {
+          await finalizeVehicleRequisitionApproval(result.insertId, req.user.id, null);
+        } catch (finalizeErr: any) {
+          console.warn("⚠️ Could not auto-process Vehicle Requisition #" + result.insertId + ": " + finalizeErr.message);
+        }
+      } else {
+        try {
+          const requestRows = await queryDB("SELECT * FROM approval_requests WHERE source_type = ?", ["vehicle_requisition"]);
+          const createdRequest = requestRows.find((r: any) => Number(r.source_id) === Number(result.insertId));
+          if (createdRequest) {
+            const approvers = await getCurrentStepApprovers(createdRequest);
+            for (const approver of approvers) {
+              await createAlert(queryDB, {
+                userId: approver.user_id,
+                type: "vehicle_requisition" as AlertType,
+                title: "New Ride Request Awaiting Your Approval",
+                message: `${req.user.name || "An employee"} requested a ride (${pickup} → ${destination}). Please review.`,
+                relatedType: "vehicle_requisition",
+                relatedId: result.insertId
+              });
+            }
+          }
+        } catch (alertErr: any) {
+          console.warn("⚠️ Could not notify the current-step approver for Vehicle Requisition #" + result.insertId + ": " + alertErr.message);
+        }
+      }
+
       const { rows, userById, vehicleById } = await loadContext();
       const created = rows.find((r: any) => Number(r.id) === Number(result.insertId));
-      res.status(201).json(await serialize(created, userById, vehicleById));
+      const [withPending] = await attachPendingApprover([created]);
+      res.status(201).json(serialize(withPending, userById, vehicleById));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
   });
 
   // POST /api/vehicles/requisitions/:id/cancel — the requester cancels
-  // their own still-pending request (flowchart's "ক্যানসেল" branch).
+  // their own still-pending request (flowchart's "ক্যানসেল" branch, self-
+  // initiated). Also clears the matching pending Approval Workflow request
+  // (if one was created) so it stops showing up in an approver's queue for
+  // a ride nobody is waiting on anymore.
   app.post("/api/vehicles/requisitions/:id/cancel", authenticateToken, async (req: any, res: any) => {
     try {
       const id = Number(req.params.id);
@@ -237,6 +359,13 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
       if (requisition.status !== "pending") return res.status(400).json({ error: "Only a pending request can be cancelled." });
 
       await queryDB("UPDATE vehicle_requisitions SET status = ?, decided_at = ? WHERE id = ?", ["cancelled", new Date(), id]);
+
+      const requestRows: any = await queryDB("SELECT * FROM approval_requests WHERE source_type = ?", ["vehicle_requisition"]);
+      const pendingRequest = requestRows.find((r: any) => Number(r.source_id) === id && r.status === "pending");
+      if (pendingRequest) {
+        await queryDB("UPDATE approval_requests SET status = ? WHERE id = ?", ["rejected", pendingRequest.id]);
+      }
+
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -244,10 +373,10 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
   });
 
   // POST /api/vehicles/requisitions/:id/request-extension — flowchart's
-  // "ইউজার পূর্বে সিস্টেমে ইনফর্ম করেছে?" branch: while the ride is still
-  // Approved/ongoing, the requester flags they'll be late so HR/Admin can
-  // approve the extension — this is what later tells the on-time check the
-  // requester DID inform the system beforehand.
+  // "ইউজার পূর্বে সিস্টেমে ইনফর্ম করেছে?" branch: while the ride is Ongoing
+  // (vehicle+driver already assigned), the requester flags they'll be late
+  // so HR/Admin can approve the extension — this is what later tells the
+  // on-time check the requester DID inform the system beforehand.
   app.post("/api/vehicles/requisitions/:id/request-extension", authenticateToken, async (req: any, res: any) => {
     try {
       const id = Number(req.params.id);
@@ -256,7 +385,7 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
       const requisition = rows[0];
       if (!requisition) return res.status(404).json({ error: "Requisition not found." });
       if (Number(requisition.employee_user_id) !== Number(req.user.id)) return res.status(403).json({ error: "Not authorized." });
-      if (requisition.status !== "approved") return res.status(400).json({ error: "Only an ongoing (Approved) ride can request a time extension." });
+      if (requisition.status !== "ongoing") return res.status(400).json({ error: "Only an ongoing ride can request a time extension." });
 
       await queryDB(
         "UPDATE vehicle_requisitions SET time_extension_status = ?, time_extension_note = ?, time_extension_decided_by = ? WHERE id = ?",
@@ -295,7 +424,7 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
       if (!requisition) return res.status(404).json({ error: "Requisition not found." });
       const manage = await canManage(req.user.id, req.user.role);
       if (!manage && Number(requisition.employee_user_id) !== Number(req.user.id)) return res.status(403).json({ error: "Not authorized." });
-      if (requisition.status !== "approved") return res.status(400).json({ error: "Only an ongoing (Approved) ride can be marked completed." });
+      if (requisition.status !== "ongoing") return res.status(400).json({ error: "Only an ongoing ride can be marked completed." });
 
       const now = new Date();
       const expected = requisition.expected_return_at ? new Date(requisition.expected_return_at) : null;
@@ -341,7 +470,9 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
 
   // ---------------------------------------------------------------------
   // Admin Panel -> Vehicle Management — gated behind the
-  // 'vehicle_management' AdminModuleKey.
+  // 'vehicle_management' AdminModuleKey. Approve/Reject itself is done from
+  // the generic Approval Workflow queue (Admin Panel -> Approvals), not from
+  // here — see the design note above registerVehicleManagementRoutes.
   // ---------------------------------------------------------------------
 
   app.get("/api/vehicles", ...adminGate, async (_req: any, res: any) => {
@@ -394,12 +525,13 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
     }
   });
 
-  // PUT /api/vehicles/requisitions/:id/approve — flowchart's "HR/Admin
-  // রিভিউ -> অ্যাপ্রুভড -> গাড়ি ও ড্রাইভার অ্যাসাইনমেন্ট" in one step: picks
-  // an available vehicle and records the driver's name/mobile, then
-  // notifies the requester (flowchart's "ইউজারকে কনফার্মেশন ও ড্রাইভার
-  // ডিটেইলস নোটিফিকেশন প্রেরণ").
-  app.put("/api/vehicles/requisitions/:id/approve", ...adminGate, async (req: any, res: any) => {
+  // PUT /api/vehicles/requisitions/:id/assign — flowchart's "গাড়ি ও
+  // ড্রাইভার অ্যাসাইনমেন্ট" step, done once the Approval Workflow has
+  // already cleared this requisition (status 'approved'): IT/Admin picks an
+  // available vehicle and records the driver's name/mobile, then notifies
+  // the requester (flowchart's "ইউজারকে কনফার্মেশন ও ড্রাইভার ডিটেইলস
+  // নোটিফিকেশন প্রেরণ"). Moves the ride into 'ongoing'.
+  app.put("/api/vehicles/requisitions/:id/assign", ...adminGate, async (req: any, res: any) => {
     try {
       const id = Number(req.params.id);
       const body = req.body || {};
@@ -413,7 +545,9 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
       const reqRows: any = await queryDB("SELECT * FROM vehicle_requisitions WHERE id = ?", [id]);
       const requisition = reqRows[0];
       if (!requisition) return res.status(404).json({ error: "Requisition not found." });
-      if (requisition.status !== "pending") return res.status(400).json({ error: "This requisition was already decided." });
+      if (requisition.status !== "approved") {
+        return res.status(400).json({ error: "This requisition must be Approved (by the Approval Workflow) before a vehicle can be assigned." });
+      }
 
       const vehicleRows: any = await queryDB("SELECT * FROM vehicles WHERE id = ?", [vehicleId]);
       const vehicle = vehicleRows[0];
@@ -421,50 +555,16 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
       if (vehicle.status !== "available") return res.status(400).json({ error: "That vehicle is not currently available." });
 
       await queryDB(
-        "UPDATE vehicle_requisitions SET status = ?, decided_by = ?, decided_at = ?, assigned_vehicle_id = ?, driver_name = ?, driver_mobile = ? WHERE id = ?",
-        ["approved", req.user.id, new Date(), vehicleId, driverName, driverMobile, id]
+        "UPDATE vehicle_requisitions SET status = ?, assigned_vehicle_id = ?, driver_name = ?, driver_mobile = ? WHERE id = ?",
+        ["ongoing", vehicleId, driverName, driverMobile, id]
       );
       await queryDB("UPDATE vehicles SET status = ? WHERE id = ?", ["on_ride", vehicleId]);
 
       await createAlert(queryDB, {
         userId: Number(requisition.employee_user_id),
         type: "vehicle_requisition" as AlertType,
-        title: "Ride Approved",
+        title: "Vehicle Assigned",
         message: `Your ride (${requisition.pickup_location} → ${requisition.destination}) is confirmed. Driver: ${driverName} (${driverMobile}), Vehicle: ${vehicle.vehicle_no}.`,
-        relatedType: "vehicle_requisition",
-        relatedId: id
-      });
-
-      res.json({ success: true });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // PUT /api/vehicles/requisitions/:id/reject — flowchart's "ক্যানসেল ->
-  // রিকুইজিশন ক্যানসেলড" branch off HR/Admin Review (e.g. no vehicle
-  // available).
-  app.put("/api/vehicles/requisitions/:id/reject", ...adminGate, async (req: any, res: any) => {
-    try {
-      const id = Number(req.params.id);
-      const reason = typeof (req.body || {}).rejection_reason === "string" ? req.body.rejection_reason.trim().slice(0, 1000) : "";
-      if (!reason) return res.status(400).json({ error: "Add a reason for rejecting this request." });
-
-      const reqRows: any = await queryDB("SELECT * FROM vehicle_requisitions WHERE id = ?", [id]);
-      const requisition = reqRows[0];
-      if (!requisition) return res.status(404).json({ error: "Requisition not found." });
-      if (requisition.status !== "pending") return res.status(400).json({ error: "This requisition was already decided." });
-
-      await queryDB(
-        "UPDATE vehicle_requisitions SET status = ?, decided_by = ?, decided_at = ?, rejection_reason = ? WHERE id = ?",
-        ["rejected", req.user.id, new Date(), reason, id]
-      );
-
-      await createAlert(queryDB, {
-        userId: Number(requisition.employee_user_id),
-        type: "vehicle_requisition" as AlertType,
-        title: "Ride Request Rejected",
-        message: `Your ride request (${requisition.pickup_location} → ${requisition.destination}) was rejected: ${reason}`,
         relatedType: "vehicle_requisition",
         relatedId: id
       });

@@ -4,11 +4,19 @@
  */
 
 // Admin Panel -> Vehicle Management — HR/Admin side: vehicle inventory
-// (add/edit), reviewing ride requests (approve with vehicle+driver
-// assignment, or reject), deciding time-extension requests, and clearing
-// the "late return with no advance notice" flag with a manual note.
-// Gated behind the 'vehicle_management' AdminModuleKey the same way every
-// other Admin Panel tab is (Admin Panel -> Users -> Module Access).
+// (add/edit), a read-only ride-request status board, assigning a vehicle +
+// driver once a request has cleared the Approval Workflow, deciding
+// time-extension requests, and clearing the "late return with no advance
+// notice" flag with a manual note. Gated behind the 'vehicle_management'
+// AdminModuleKey the same way every other Admin Panel tab is (Admin Panel ->
+// Users -> Module Access).
+//
+// Approve/Reject itself is NOT done here — a ride request routes through the
+// same Dynamic Approval Engine every other module uses (Admin Panel ->
+// Approvals, or "My Approvals" for whoever the Template's Layer 1 names),
+// configurable from Admin Panel -> Approvals -> Templates (request type
+// "Vehicle Requisition", Layer 1 = "HR/Admin Review"). See the design note
+// above registerVehicleManagementRoutes in VehicleManagementRoutes.ts.
 
 import React, { useEffect, useState } from 'react';
 import { apiUrl } from '../lib/api';
@@ -31,7 +39,11 @@ interface Requisition {
   start_time: string;
   estimated_duration_hours: number;
   expected_return_at: string | null;
-  status: 'pending' | 'approved' | 'rejected' | 'cancelled' | 'completed';
+  status: 'pending' | 'approved' | 'ongoing' | 'rejected' | 'cancelled' | 'completed';
+  // Who the Approval Workflow is currently waiting on (comma-joined — ANY
+  // ONE of them clears the step) — null once past 'pending', or for a
+  // legacy requisition with no approval_requests row at all.
+  pending_with: string | null;
   rejection_reason: string | null;
   vehicle_no: string | null;
   vehicle_model: string | null;
@@ -59,11 +71,8 @@ export function VehicleManagementAdmin() {
 
   const [newVehicle, setNewVehicle] = useState({ vehicle_no: '', model: '', vehicle_type: '' });
 
-  const [approvingFor, setApprovingFor] = useState<number | null>(null);
-  const [approveForm, setApproveForm] = useState({ vehicle_id: '', driver_name: '', driver_mobile: '' });
-
-  const [rejectingFor, setRejectingFor] = useState<number | null>(null);
-  const [rejectReason, setRejectReason] = useState('');
+  const [assigningFor, setAssigningFor] = useState<number | null>(null);
+  const [assignForm, setAssignForm] = useState({ vehicle_id: '', driver_name: '', driver_mobile: '' });
 
   const [noticeFor, setNoticeFor] = useState<number | null>(null);
   const [noticeNote, setNoticeNote] = useState('');
@@ -109,44 +118,23 @@ export function VehicleManagementAdmin() {
     }
   }
 
-  async function approve(id: number) {
-    if (!approveForm.vehicle_id || !approveForm.driver_name.trim() || !approveForm.driver_mobile.trim()) {
+  async function assign(id: number) {
+    if (!assignForm.vehicle_id || !assignForm.driver_name.trim() || !assignForm.driver_mobile.trim()) {
       setError('Pick a vehicle and fill in the driver name & mobile number.');
       return;
     }
     try {
-      const res = await fetch(apiUrl(`/api/vehicles/requisitions/${id}/approve`), {
+      const res = await fetch(apiUrl(`/api/vehicles/requisitions/${id}/assign`), {
         method: 'PUT',
         headers: authHeaders(),
-        body: JSON.stringify({ ...approveForm, vehicle_id: Number(approveForm.vehicle_id) })
+        body: JSON.stringify({ ...assignForm, vehicle_id: Number(assignForm.vehicle_id) })
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Could not approve this request.');
-      setApprovingFor(null);
-      setApproveForm({ vehicle_id: '', driver_name: '', driver_mobile: '' });
+      if (!res.ok) throw new Error(data.error || 'Could not assign a vehicle to this request.');
+      setAssigningFor(null);
+      setAssignForm({ vehicle_id: '', driver_name: '', driver_mobile: '' });
       loadRequisitions();
       loadVehicles();
-    } catch (err: any) {
-      setError(err.message);
-    }
-  }
-
-  async function reject(id: number) {
-    if (!rejectReason.trim()) {
-      setError('Add a reason for rejecting this request.');
-      return;
-    }
-    try {
-      const res = await fetch(apiUrl(`/api/vehicles/requisitions/${id}/reject`), {
-        method: 'PUT',
-        headers: authHeaders(),
-        body: JSON.stringify({ rejection_reason: rejectReason })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Could not reject this request.');
-      setRejectingFor(null);
-      setRejectReason('');
-      loadRequisitions();
     } catch (err: any) {
       setError(err.message);
     }
@@ -190,13 +178,19 @@ export function VehicleManagementAdmin() {
 
   const availableVehicles = vehicles.filter((v) => v.status === 'available');
   const pendingCount = requisitions.filter((r) => r.status === 'pending').length;
+  const awaitingAssignCount = requisitions.filter((r) => r.status === 'approved').length;
   const noticeCount = requisitions.filter((r) => r.hr_notice_flag).length;
 
   return (
     <div className="w-full">
       <div className="flex gap-1 border-b border-gray-200 mb-4">
         {([
-          ['requests', `Ride Requests${pendingCount > 0 ? ` (${pendingCount})` : ''}${noticeCount > 0 ? ` • ${noticeCount} flagged` : ''}`],
+          [
+            'requests',
+            `Ride Requests${pendingCount > 0 ? ` (${pendingCount} pending)` : ''}${
+              awaitingAssignCount > 0 ? ` • ${awaitingAssignCount} to assign` : ''
+            }${noticeCount > 0 ? ` • ${noticeCount} flagged` : ''}`
+          ],
           ['inventory', 'Vehicle Inventory']
         ] as const).map(([key, label]) => (
           <button
@@ -215,6 +209,11 @@ export function VehicleManagementAdmin() {
 
       {tab === 'requests' && (
         <div className="space-y-3">
+          <div className="rounded bg-blue-50 text-blue-800 text-xs px-3 py-2">
+            Approve/Reject a ride request from Admin Panel → Approvals (or "My Approvals" if you're its Layer 1 approver) — this board
+            is read-only status + Assign Vehicle &amp; Driver once a request is Approved. Who approves the "HR/Admin Review" Layer is
+            set from Admin Panel → Approvals → Templates (request type "Vehicle Requisition").
+          </div>
           {requisitions.length === 0 && <div className="text-sm text-gray-500">No ride requests yet.</div>}
           {requisitions.map((r) => (
             <div key={r.id} className="border rounded-lg p-4">
@@ -229,7 +228,13 @@ export function VehicleManagementAdmin() {
               </div>
               <div className="text-sm text-gray-600 mt-2">{r.purpose}</div>
 
-              {r.status === 'approved' && (
+              {r.status === 'pending' && (
+                <div className="text-xs text-amber-700 mt-1">
+                  Waiting on: <span className="font-medium">{r.pending_with || 'no approver configured for this Layer'}</span>
+                </div>
+              )}
+
+              {(r.status === 'ongoing' || r.status === 'completed') && r.vehicle_no && (
                 <div className="mt-2 rounded bg-green-50 text-green-800 text-xs px-3 py-2 space-y-0.5">
                   <div>Vehicle: {r.vehicle_model} ({r.vehicle_no})</div>
                   <div>Driver: {r.driver_name} — {r.driver_mobile}</div>
@@ -312,13 +317,13 @@ export function VehicleManagementAdmin() {
                 <div className="text-xs text-gray-500 mt-2">HR note: {r.hr_manual_note}</div>
               )}
 
-              {r.status === 'pending' && (
-                <div className="mt-3 space-y-2">
-                  {approvingFor === r.id ? (
+              {r.status === 'approved' && (
+                <div className="mt-3">
+                  {assigningFor === r.id ? (
                     <div className="flex flex-wrap items-center gap-2">
                       <select
-                        value={approveForm.vehicle_id}
-                        onChange={(e) => setApproveForm({ ...approveForm, vehicle_id: e.target.value })}
+                        value={assignForm.vehicle_id}
+                        onChange={(e) => setAssignForm({ ...assignForm, vehicle_id: e.target.value })}
                         className="border rounded px-2 py-1 text-xs"
                       >
                         <option value="">Pick a vehicle…</option>
@@ -330,65 +335,36 @@ export function VehicleManagementAdmin() {
                       </select>
                       <input
                         placeholder="Driver name"
-                        value={approveForm.driver_name}
-                        onChange={(e) => setApproveForm({ ...approveForm, driver_name: e.target.value })}
+                        value={assignForm.driver_name}
+                        onChange={(e) => setAssignForm({ ...assignForm, driver_name: e.target.value })}
                         className="border rounded px-2 py-1 text-xs"
                       />
                       <input
                         placeholder="Driver mobile"
-                        value={approveForm.driver_mobile}
-                        onChange={(e) => setApproveForm({ ...approveForm, driver_mobile: e.target.value })}
+                        value={assignForm.driver_mobile}
+                        onChange={(e) => setAssignForm({ ...assignForm, driver_mobile: e.target.value })}
                         className="border rounded px-2 py-1 text-xs"
                       />
-                      <button onClick={() => approve(r.id)} className="px-3 py-1.5 text-xs font-medium rounded bg-green-600 text-white">
-                        Confirm Approval
+                      <button onClick={() => assign(r.id)} className="px-3 py-1.5 text-xs font-medium rounded bg-blue-600 text-white">
+                        Confirm Assignment
                       </button>
                       <button
-                        onClick={() => setApprovingFor(null)}
-                        className="px-3 py-1.5 text-xs font-medium rounded border border-gray-300 text-gray-600"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  ) : rejectingFor === r.id ? (
-                    <div className="flex flex-wrap items-center gap-2">
-                      <input
-                        placeholder="Rejection reason"
-                        value={rejectReason}
-                        onChange={(e) => setRejectReason(e.target.value)}
-                        className="border rounded px-2 py-1 text-xs flex-1 min-w-[200px]"
-                      />
-                      <button onClick={() => reject(r.id)} className="px-3 py-1.5 text-xs font-medium rounded bg-red-600 text-white">
-                        Confirm Rejection
-                      </button>
-                      <button
-                        onClick={() => setRejectingFor(null)}
+                        onClick={() => setAssigningFor(null)}
                         className="px-3 py-1.5 text-xs font-medium rounded border border-gray-300 text-gray-600"
                       >
                         Cancel
                       </button>
                     </div>
                   ) : (
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => {
-                          setApprovingFor(r.id);
-                          setApproveForm({ vehicle_id: '', driver_name: '', driver_mobile: '' });
-                        }}
-                        className="px-3 py-1.5 text-xs font-medium rounded bg-blue-600 text-white hover:bg-blue-700"
-                      >
-                        Approve — Assign Vehicle &amp; Driver
-                      </button>
-                      <button
-                        onClick={() => {
-                          setRejectingFor(r.id);
-                          setRejectReason('');
-                        }}
-                        className="px-3 py-1.5 text-xs font-medium rounded border border-red-300 text-red-700 hover:bg-red-50"
-                      >
-                        Reject
-                      </button>
-                    </div>
+                    <button
+                      onClick={() => {
+                        setAssigningFor(r.id);
+                        setAssignForm({ vehicle_id: '', driver_name: '', driver_mobile: '' });
+                      }}
+                      className="px-3 py-1.5 text-xs font-medium rounded bg-blue-600 text-white hover:bg-blue-700"
+                    >
+                      Assign Vehicle &amp; Driver
+                    </button>
                   )}
                 </div>
               )}

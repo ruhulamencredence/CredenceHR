@@ -23,7 +23,10 @@ interface Requisition {
   start_time: string;
   estimated_duration_hours: number;
   expected_return_at: string | null;
-  status: 'pending' | 'approved' | 'rejected' | 'cancelled' | 'completed';
+  status: 'pending' | 'approved' | 'ongoing' | 'rejected' | 'cancelled' | 'completed';
+  // Who the Approval Workflow is currently waiting on (comma-joined — ANY
+  // ONE of them clears the step) — null once past 'pending'.
+  pending_with: string | null;
   decided_by_name: string | null;
   rejection_reason: string | null;
   vehicle_no: string | null;
@@ -39,7 +42,8 @@ interface Requisition {
 
 const STATUS_LABEL: Record<Requisition['status'], string> = {
   pending: 'Pending HR/Admin Review',
-  approved: 'Approved — Ride Ongoing',
+  approved: 'Approved — Awaiting Vehicle Assignment',
+  ongoing: 'Vehicle Assigned — Ride Ongoing',
   rejected: 'Rejected',
   cancelled: 'Cancelled',
   completed: 'Completed'
@@ -47,7 +51,8 @@ const STATUS_LABEL: Record<Requisition['status'], string> = {
 
 const STATUS_COLOR: Record<Requisition['status'], string> = {
   pending: 'bg-yellow-100 text-yellow-800',
-  approved: 'bg-green-100 text-green-800',
+  approved: 'bg-teal-100 text-teal-800',
+  ongoing: 'bg-green-100 text-green-800',
   rejected: 'bg-red-100 text-red-800',
   cancelled: 'bg-gray-100 text-gray-700',
   completed: 'bg-blue-100 text-blue-800'
@@ -275,11 +280,17 @@ export function VehicleManagement() {
               </div>
               <div className="text-sm text-gray-600 mt-2">{r.purpose}</div>
 
+              {r.status === 'pending' && r.pending_with && (
+                <div className="text-xs text-amber-700 mt-1">
+                  Waiting on: <span className="font-medium">{r.pending_with}</span>
+                </div>
+              )}
+
               {r.status === 'rejected' && r.rejection_reason && (
                 <div className="text-xs text-red-600 mt-2">Reason: {r.rejection_reason}</div>
               )}
 
-              {r.status === 'approved' && (
+              {(r.status === 'ongoing' || r.status === 'completed') && r.vehicle_no && (
                 <div className="mt-2 rounded bg-green-50 text-green-800 text-xs px-3 py-2 space-y-0.5">
                   <div>Vehicle: {r.vehicle_model} ({r.vehicle_no})</div>
                   <div>Driver: {r.driver_name} — {r.driver_mobile}</div>
@@ -287,7 +298,7 @@ export function VehicleManagement() {
                 </div>
               )}
 
-              {r.status === 'approved' && r.time_extension_status !== 'none' && (
+              {r.status === 'ongoing' && r.time_extension_status !== 'none' && (
                 <div className="text-xs text-amber-700 mt-1">
                   Time extension {r.time_extension_status}
                   {r.time_extension_note ? `: ${r.time_extension_note}` : ''}
@@ -310,7 +321,7 @@ export function VehicleManagement() {
                 </button>
               )}
 
-              {r.status === 'approved' && (
+              {r.status === 'ongoing' && (
                 <div className="mt-3 flex flex-wrap gap-2">
                   <button
                     onClick={() => completeRide(r.id)}

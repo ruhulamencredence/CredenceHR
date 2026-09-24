@@ -1938,6 +1938,22 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
       .filter((r: any) => r.source_type === "user_claim" && Number(r.source_id) === sourceId)
       .map((r: any) => ({ id: r.id }));
   }
+  // VehicleManagementRoutes.ts's POST .../cancel — clears a still-pending
+  // approval_requests row when the requester cancels their own requisition
+  // before anyone acts on it. A 2-param variant of the 4-param handler right
+  // below (same "update approval_requests set status" prefix), so this MUST
+  // be checked first or it silently falls into that handler instead and
+  // destructures [status, current_step, actions_json, id] from a 2-element
+  // params array (current_step/actions_json end up undefined, id too).
+  if (lowerSql === "update approval_requests set status = ? where id = ?") {
+    const [status, id] = params;
+    const row = memoryDb.approvalRequests.find((r: any) => r.id === Number(id));
+    if (row) {
+      row.status = status;
+      row.updated_at = new Date();
+    }
+    return { affectedRows: row ? 1 : 0 };
+  }
   if (lowerSql.startsWith("update approval_requests set status")) {
     const [status, current_step, actions_json, id] = params;
     const row = memoryDb.approvalRequests.find((r: any) => r.id === Number(id));

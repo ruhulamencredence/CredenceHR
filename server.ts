@@ -1568,7 +1568,7 @@ async function ensureSchemaMigrations() {
     // Attendance Correction / Asset Requisition requests routed through this same Approval Workflow engine.
     await dbPool.query(`
       ALTER TABLE approval_requests
-        MODIFY COLUMN source_type ENUM('attendance','claim','user_claim','attendance_correction','leave_application','asset_requisition') NOT NULL,
+        MODIFY COLUMN source_type ENUM('attendance','claim','user_claim','attendance_correction','leave_application','asset_requisition','vehicle_requisition') NOT NULL,
         MODIFY COLUMN event_type ENUM('check_in','check_out','submit') NOT NULL
     `);
     // GET /api/my-approvals (PendingApprovalsCard — hit on every Dashboard
@@ -1735,6 +1735,16 @@ async function ensureSchemaMigrations() {
     await dbPool.query(`ALTER TABLE employee_template_assignments MODIFY COLUMN request_type ENUM('conveyance','leave','timesheet','asset') NOT NULL`);
   } catch (err: any) {
     console.warn("⚠️ Could not widen request_type ENUM to include 'asset': " + err.message);
+  }
+  // Widen request_type to add 'vehicle' (Vehicle Requisition, routed through
+  // this same Dynamic Approval Engine — see the Vehicle Requisition
+  // Flowchart's single "HR/Admin Review" layer, LAYER_NAMES in
+  // ApprovalTemplateManager.tsx).
+  try {
+    await dbPool.query(`ALTER TABLE approval_templates MODIFY COLUMN request_type ENUM('conveyance','leave','timesheet','asset','vehicle') NOT NULL`);
+    await dbPool.query(`ALTER TABLE employee_template_assignments MODIFY COLUMN request_type ENUM('conveyance','leave','timesheet','asset','vehicle') NOT NULL`);
+  } catch (err: any) {
+    console.warn("⚠️ Could not widen request_type ENUM to include 'vehicle': " + err.message);
   }
   // Timesheet -> click any date's row to manually fix that day's In/Out Time
   // (typically a day with no attendance at all, but any day can be corrected).
@@ -2436,7 +2446,7 @@ async function createApprovalRequest(
 // Employee-specific assignment first (must point at an ACTIVE template — a
 // deactivated assignment is treated the same as no assignment at all, not an
 // error), else that request_type's active default, else null.
-async function resolveApprovalTemplate(employeeUserId: number, requestType: "conveyance" | "leave" | "timesheet" | "asset"): Promise<any | null> {
+async function resolveApprovalTemplate(employeeUserId: number, requestType: "conveyance" | "leave" | "timesheet" | "asset" | "vehicle"): Promise<any | null> {
   try {
     const assigned = await queryDB(
       `SELECT t.* FROM employee_template_assignments eta
@@ -2549,8 +2559,8 @@ async function resolveSupervisorApprover(employeeUserId: number): Promise<number
 // Employee's own Direct Supervisor (employee_supervisors) when set and
 // usable, otherwise the Department Supervisor as a fallback.
 async function createTemplateApprovalRequest(
-  requestType: "conveyance" | "leave" | "timesheet" | "asset",
-  sourceType: "user_claim" | "attendance_correction" | "leave_application" | "asset_requisition",
+  requestType: "conveyance" | "leave" | "timesheet" | "asset" | "vehicle",
+  sourceType: "user_claim" | "attendance_correction" | "leave_application" | "asset_requisition" | "vehicle_requisition",
   sourceId: number,
   requestedBy: number
 ): Promise<{ autoApproved: boolean; template: any | null }> {
@@ -2767,6 +2777,16 @@ async function performApprovalAction(
     } catch (finalizeErr: any) {
       throw new ApprovalActionError(400, finalizeErr.message || "Approved, but could not finalize this Asset Requisition.");
     }
+  } else if (request.source_type === "vehicle_requisition") {
+    try {
+      if (newStatus === "approved") {
+        await finalizeVehicleRequisitionApproval(Number(request.source_id), actorUser.id, remarks);
+      } else if (newStatus === "rejected") {
+        await rejectVehicleRequisitionRecord(Number(request.source_id), actorUser.id, remarks);
+      }
+    } catch (finalizeErr: any) {
+      throw new ApprovalActionError(400, finalizeErr.message || "Approved, but could not finalize this Vehicle Requisition.");
+    }
   }
 
   return { status: newStatus, current_step: newStep, billInfo };
@@ -2982,6 +3002,66 @@ async function rejectAssetRequisitionRecord(requisitionId: number, rejectedBy: n
     title: "Requisition Rejected",
     message: `Your ${r.asset_category} request was rejected.${remarks ? " Reason: " + remarks : ""}`,
     relatedType: "asset_requisition",
+    relatedId: requisitionId
+  });
+}
+
+// Sets a Vehicle Requisition to 'approved' once its Approval Workflow's
+// single "HR/Admin Review" layer (the flowchart's only decision diamond —
+// see LAYER_NAMES in ApprovalTemplateManager.tsx / request_type 'vehicle')
+// signs off, or immediately on submit when no Template/Supervisor resolves
+// at all (autoApproved). Approving here does NOT assign a vehicle+driver
+// yet — IT/Admin still has to do that via PUT
+// /api/vehicles/requisitions/:id/assign (VehicleManagementRoutes.ts), same
+// two-step shape as finalizeAssetRequisitionApproval/POST .../fulfill above.
+// Shared by performApprovalAction's 'vehicle_requisition' branch and the
+// auto-approve path on POST /api/vehicles/requisitions.
+async function finalizeVehicleRequisitionApproval(requisitionId: number, approvedBy: number, remarks: string | null) {
+  const rows = await queryDB("SELECT * FROM vehicle_requisitions WHERE id = ?", [requisitionId]);
+  if (rows.length === 0) throw new Error("Requisition not found");
+  const r = rows[0];
+  if (r.status !== "pending") throw new Error("This requisition has already been reviewed.");
+  // Every SET value is its own `?` placeholder (no NOW()/literal mixed in) —
+  // vehicle_requisitions is registered as a GENERIC_TABLES entry in
+  // memoryDbFallback.ts (see VehicleManagementRoutes.ts's own top comment),
+  // whose UPDATE simulator maps SET columns to params positionally; a
+  // literal value in the SET clause desyncs that mapping for every column
+  // after it (caught by the in-memory smoke test — see this function's
+  // commit message).
+  await queryDB("UPDATE vehicle_requisitions SET status = ?, decided_by = ?, decided_at = ? WHERE id = ?", [
+    "approved",
+    approvedBy,
+    new Date(),
+    requisitionId
+  ]);
+  await createAlert(queryDB, {
+    userId: r.employee_user_id,
+    type: "vehicle_requisition",
+    title: "Ride Request Approved",
+    message: `Your ride request (${r.pickup_location} → ${r.destination}) was approved — a vehicle and driver will be assigned shortly.`,
+    relatedType: "vehicle_requisition",
+    relatedId: requisitionId
+  });
+}
+
+// Rejects a Vehicle Requisition at ANY step (the flowchart's "গাড়ির
+// অ্যাভেইলেবিলিটি চেক -> না -> ক্যানসেল" branch) — never touches vehicle
+// inventory. Shared by the same two callers as
+// finalizeVehicleRequisitionApproval above.
+async function rejectVehicleRequisitionRecord(requisitionId: number, rejectedBy: number, remarks: string | null) {
+  const rows = await queryDB("SELECT * FROM vehicle_requisitions WHERE id = ?", [requisitionId]);
+  if (rows.length === 0) throw new Error("Requisition not found");
+  const r = rows[0];
+  await queryDB(
+    "UPDATE vehicle_requisitions SET status = ?, decided_by = ?, decided_at = ?, rejection_reason = ? WHERE id = ?",
+    ["rejected", rejectedBy, new Date(), remarks || "Rejected", requisitionId]
+  );
+  await createAlert(queryDB, {
+    userId: r.employee_user_id,
+    type: "vehicle_requisition",
+    title: "Ride Request Rejected",
+    message: `Your ride request (${r.pickup_location} → ${r.destination}) was rejected.${remarks ? " Reason: " + remarks : ""}`,
+    relatedType: "vehicle_requisition",
     relatedId: requisitionId
   });
 }
@@ -4562,16 +4642,23 @@ async function startServer() {
 
   // Vehicle Requisition & Management (Self Service -> Book a Ride / Ride
   // Status, plus Admin Panel -> Vehicle Management) — kept in its own file,
-  // same reasoning as AssetManagementRoutes.ts above. Unlike Asset
-  // Requisition, deliberately NOT routed through the Dynamic Approval
-  // Engine — see the design note at the top of VehicleManagementRoutes.ts.
+  // same reasoning as AssetManagementRoutes.ts above. Routed through the
+  // same Dynamic Approval Engine as Asset Requisition (request_type
+  // 'vehicle', a single "HR/Admin Review" Layer per the flowchart — see
+  // LAYER_NAMES in ApprovalTemplateManager.tsx); approve/reject happens from
+  // Admin Panel -> Approvals / "My Approvals" like every other module, and
+  // this file's own PUT .../assign is only the post-approval "assign a
+  // vehicle + driver" step (mirrors POST /api/assets/requisitions/:id/fulfill).
   registerVehicleManagementRoutes(app, {
     authenticateToken,
     requireAdmin,
     requireModule,
     queryDB,
     getAdminModules,
-    createAlert
+    createAlert,
+    createTemplateApprovalRequest,
+    getCurrentStepApprovers,
+    finalizeVehicleRequisitionApproval
   });
 
   // 360 ERP SSO (Sidebar -> "360 ERP") — kept in its own file, same reasoning
