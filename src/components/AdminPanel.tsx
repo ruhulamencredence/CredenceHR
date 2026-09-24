@@ -6,7 +6,7 @@ import credenceLogo from '../assets/credence-logo.png';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
 import { savePdfCrossPlatform } from '../lib/saveFile';
 import { Project, Branch, MprNumber, Entry, User, Budget, BudgetItem, BudgetSubmission, UserProjectPermission, EntryEditHistory, EntryPermanentDeleteLog, BulkUserRow, BulkUserResultItem, AdminModuleKey, ADMIN_MODULES, PermissionLayerKey, PERMISSION_LAYERS, PERMISSION_LAYER_MODULES, LeaveManageLayerKey, LEAVE_MANAGE_LAYERS, AttendanceRecord, ClaimsNavRequest, AdminNavRequest, Department, LeaveApplication, PendingJobEdit } from '../types';
-import { Building2, FileText, Users, Users2, BarChart3, Plus, Trash2, Edit2, Search, Filter, UserCheck, Calendar, CalendarClock, Download, Upload, FolderPlus, X, Eye, FileSpreadsheet, KeyRound, History, RotateCcw, Recycle, ListChecks, FileDown, MapPin, LayoutGrid, Navigation, LogIn, LogOut, Bell, Route, ShieldCheck, Wallet, Contact, Lock, Unlock, Mail, CheckCircle2, XCircle, Clock3, ShieldAlert, Copy } from 'lucide-react';
+import { Building2, FileText, Users, Users2, BarChart3, Plus, Trash2, Edit2, Search, Filter, UserCheck, Calendar, CalendarClock, Download, Upload, FolderPlus, X, Eye, FileSpreadsheet, KeyRound, History, RotateCcw, Recycle, ListChecks, FileDown, MapPin, LayoutGrid, Navigation, LogIn, LogOut, Bell, Route, ShieldCheck, Wallet, Contact, Lock, Unlock, Mail, CheckCircle2, XCircle, Clock3, ShieldAlert, Copy, Eraser } from 'lucide-react';
 import LocationMapPicker from './LocationMapPicker';
 import { NoticeManager } from './NoticeManager';
 import { EmployeesPanel } from './EmployeesPanel';
@@ -2007,16 +2007,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     }
   };
 
-  const handleDeleteBudget = async (id: number) => {
-    // This no longer deletes the Budget itself or any row a User has already
-    // submitted an MPR Entry against — only rows with zero entries against
-    // them are removed. See the DELETE /api/budgets/:id route's own comment
-    // for the exact "used" check. The Budget stays, so activeBudgetId/
-    // activeBudgetName are left alone even when it's the one being cleaned up.
+  // Non-destructive cleanup — only budget_items rows with zero entries
+  // against them are removed; the Budget itself, and any row a User has
+  // already submitted an entry against, are left untouched. See POST
+  // /api/budgets/:id/remove-unused-items's own comment for the exact "used"
+  // check. Separate action from the real Delete Budget below.
+  const handleRemoveUnusedItems = async (id: number) => {
     if (!confirm("Remove this budget's unused rows? Rows a User has already submitted an entry against will be kept. This cannot be undone.")) return;
     try {
-      const res = await fetch(apiUrl(`/api/budgets/${id}`), {
-        method: 'DELETE',
+      const res = await fetch(apiUrl(`/api/budgets/${id}/remove-unused-items`), {
+        method: 'POST',
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await res.json().catch(() => ({}));
@@ -2033,6 +2033,32 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         });
       } else {
         setMessage({ type: 'error', text: data.error || 'Could not remove unused rows.' });
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  // The real, permanent delete — wipes the Budget itself and every Job/Entry
+  // ever submitted under it, not just its imported Excel rows. Separate
+  // button from "Remove unused rows" above; this one has no going back.
+  const handleDeleteBudget = async (id: number) => {
+    if (!confirm('Delete this budget and all its imported rows, Jobs and Entries? This cannot be undone.')) return;
+    try {
+      const res = await fetch(apiUrl(`/api/budgets/${id}`), {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        if (activeBudgetId === id) {
+          setActiveBudgetId(null);
+          setActiveBudgetName('');
+        }
+        fetchAllData();
+        setMessage({ type: 'success', text: 'Budget deleted.' });
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setMessage({ type: 'error', text: data.error || 'Could not delete this budget.' });
       }
     } catch (err) {
       console.error(err);
@@ -4976,9 +5002,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                               <Upload className="w-4 h-4" />
                             </button>
                             <button
+                              onClick={() => handleRemoveUnusedItems(b.id)}
+                              className="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors"
+                              title="Remove unused rows (rows with entries already submitted are kept)"
+                            >
+                              <Eraser className="w-4 h-4" />
+                            </button>
+                            <button
                               onClick={() => handleDeleteBudget(b.id)}
                               className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
-                              title="Remove unused rows (rows with entries already submitted are kept)"
+                              title="Delete budget (permanently deletes the budget and every Job/Entry under it)"
                             >
                               <Trash2 className="w-4 h-4" />
                             </button>
