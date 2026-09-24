@@ -1,26 +1,30 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Contact, Plus, Trash2, Edit2, X, Search, Eye, EyeOff, Mail, Phone, Briefcase, Building2, KeyRound, ShieldCheck,
   FolderKanban, LayoutGrid, UserCircle2, ClipboardList, MapPin, Users2, Star, Link2, ArrowLeftRight, History, ArrowRight,
   Landmark
 } from 'lucide-react';
-import { Employee, EmployeeSupervisor, EmployeePaymentAccount, EmployeeTransfer, User, Project, Department, Branch, AdminModuleKey, ADMIN_MODULES } from '../types';
+import { Employee, EmployeeSupervisor, EmployeePaymentAccount, EmployeeTransfer, EmployeeChangeLogEntry, User, Project, Department, Branch, AdminModuleKey, ADMIN_MODULES } from '../types';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
+import { EmployeeChangeHistory, HistoryEntryCard, buildHistoryTimeline, HISTORY_FILTERS, HistoryFilter } from './EmployeeChangeHistory';
 
 // Add/Edit Employee modal tabs — Basic + Employee Info fields live under
 // "info", the rest mirror the reference HR system's own tab split (Status /
 // Contact / Supervisor), just restyled to this app's own design. "payment"
 // (Bank/MFS payroll disbursement split) is this app's own addition, not part
 // of that reference split.
-type EmployeeFormTab = 'info' | 'status' | 'contact' | 'supervisor' | 'payment';
+type EmployeeFormTab = 'info' | 'status' | 'contact' | 'supervisor' | 'payment' | 'history';
 
 const FORM_TABS: { key: EmployeeFormTab; label: string; icon: React.ReactNode }[] = [
   { key: 'info', label: 'Employee Info', icon: <UserCircle2 className="w-3.5 h-3.5" /> },
   { key: 'status', label: 'Status', icon: <ClipboardList className="w-3.5 h-3.5" /> },
   { key: 'contact', label: 'Contact', icon: <MapPin className="w-3.5 h-3.5" /> },
   { key: 'supervisor', label: 'Supervisor', icon: <Users2 className="w-3.5 h-3.5" /> },
-  { key: 'payment', label: 'Payment', icon: <Landmark className="w-3.5 h-3.5" /> }
+  { key: 'payment', label: 'Payment', icon: <Landmark className="w-3.5 h-3.5" /> },
+  // Read-only audit trail: Department/Designation changes (employee_transfers)
+  // merged with every other field changed by an Edit save (employee_change_log).
+  { key: 'history', label: 'History', icon: <History className="w-3.5 h-3.5" /> }
 ];
 
 interface EmployeesPanelProps {
@@ -237,6 +241,8 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [search, setSearch] = useState('');
+  // Directory (the employee table) vs. all-employees Change History.
+  const [view, setView] = useState<'directory' | 'history'>('directory');
 
   // Project list for the Project Access checklist offered alongside "create a
   // login" — same source Admin Panel -> Users' own Project Access modal uses.
@@ -304,6 +310,13 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
   const [savingTransfer, setSavingTransfer] = useState(false);
   const [transferHistory, setTransferHistory] = useState<EmployeeTransfer[]>([]);
   const [loadingTransferHistory, setLoadingTransferHistory] = useState(false);
+
+  // Edit modal -> History tab (GET /transfers + GET /change-log, merged).
+  const [formTransfers, setFormTransfers] = useState<EmployeeTransfer[]>([]);
+  const [formChangeLog, setFormChangeLog] = useState<EmployeeChangeLogEntry[]>([]);
+  const [loadingFormHistory, setLoadingFormHistory] = useState(false);
+  const [formHistoryError, setFormHistoryError] = useState<string | null>(null);
+  const [historyFilter, setHistoryFilter] = useState<HistoryFilter>('all');
 
   const authHeaders = { Authorization: `Bearer ${token}` };
 
@@ -378,6 +391,36 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
   // driver — trim to the plain 'YYYY-MM-DD' an <input type="date"> expects.
   const toDateInput = (v: string | null | undefined) => (v ? String(v).slice(0, 10) : '');
 
+  // Loads both halves of an Employee's edit history. Unlike the Transfer
+  // modal's list this one surfaces a failure, since the tab has nothing else
+  // to show — an empty list would read as "no history" when it's really an
+  // error.
+  const fetchFormHistory = useCallback(async (employeeId: number) => {
+    setLoadingFormHistory(true);
+    setFormHistoryError(null);
+    try {
+      const [tRes, cRes] = await Promise.all([
+        fetch(apiUrl(`/api/employees/${employeeId}/transfers`), { headers: { Authorization: `Bearer ${token}` } }),
+        fetch(apiUrl(`/api/employees/${employeeId}/change-log`), { headers: { Authorization: `Bearer ${token}` } })
+      ]);
+      if (!tRes.ok || !cRes.ok) throw new Error('Could not load history');
+      setFormTransfers(await tRes.json());
+      setFormChangeLog(await cRes.json());
+    } catch (err: any) {
+      setFormHistoryError(err.message || 'Could not load history');
+    } finally {
+      setLoadingFormHistory(false);
+    }
+  }, [token]);
+
+  // Refetch every time the History tab is opened, so it's never stale.
+  useEffect(() => {
+    if (showForm && editingId && formTab === 'history') fetchFormHistory(editingId);
+  }, [showForm, editingId, formTab, fetchFormHistory]);
+
+  // Newest-first merge of both sources — see buildHistoryTimeline.
+  const historyTimeline = useMemo(() => buildHistoryTimeline(formTransfers, formChangeLog), [formTransfers, formChangeLog]);
+
   const openCreateForm = () => {
     setEditingId(null);
     setForm(emptyForm);
@@ -389,6 +432,10 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
     setPaymentAccountForm(emptyPaymentAccountForm);
     setEditingPaymentAccountRowId(null);
     setPaymentAccountError(null);
+    setFormTransfers([]);
+    setFormChangeLog([]);
+    setFormHistoryError(null);
+    setHistoryFilter('all');
     setShowForm(true);
   };
 
@@ -453,6 +500,10 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
     setPaymentAccountForm(emptyPaymentAccountForm);
     setEditingPaymentAccountRowId(null);
     setPaymentAccountError(null);
+    setFormTransfers([]);
+    setFormChangeLog([]);
+    setFormHistoryError(null);
+    setHistoryFilter('all');
     setShowForm(true);
     fetchSupervisors(e.id);
     fetchPaymentAccounts(e.id);
@@ -816,7 +867,15 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to transfer employee');
-      setMessage({ type: 'success', text: `${transferringFor.name} transferred successfully.` });
+      // A future-dated Effective Date is recorded but not applied yet (see
+      // EmployeeTransferRoutes.ts) — the employee's current position stays
+      // as-is until that date arrives, so the message here shouldn't imply
+      // it already happened.
+      setMessage(
+        data.applied
+          ? { type: 'success', text: `${transferringFor.name} transferred successfully.` }
+          : { type: 'success', text: `Transfer for ${transferringFor.name} scheduled for ${transferForm.effective_date}. Current position stays unchanged until then.` }
+      );
       await fetchAll();
       await fetchTransferHistory(transferringFor.id);
       setTransferForm((f) => ({ ...f, to_supervisor_id: '', effective_date: '', reason: '' }));
@@ -1003,18 +1062,40 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
         </div>
       )}
 
-      <div className="relative">
-        <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-        <input
-          type="text"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search by name, ID, designation, department, email, phone…"
-          className="block w-full pl-9 pr-3 py-2.5 bg-white border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
-        />
+      <div className="inline-flex p-1 bg-slate-100 rounded-xl gap-1">
+        {([
+          ['directory', 'Directory', <Contact key="d" className="w-3.5 h-3.5" />],
+          ['history', 'Change History', <History key="h" className="w-3.5 h-3.5" />]
+        ] as [typeof view, string, React.ReactNode][]).map(([k, label, icon]) => (
+          <button
+            key={k}
+            type="button"
+            onClick={() => setView(k)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+              view === k ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            {icon} {label}
+          </button>
+        ))}
       </div>
 
-      {loading ? (
+      {view === 'directory' && (
+        <div className="relative">
+          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by name, ID, designation, department, email, phone…"
+            className="block w-full pl-9 pr-3 py-2.5 bg-white border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
+          />
+        </div>
+      )}
+
+      {view === 'history' ? (
+        <EmployeeChangeHistory token={token} />
+      ) : loading ? (
         <div className="flex items-center justify-center py-16 text-slate-400 gap-2 text-sm">
           <Spinner size={16} /> Loading employees…
         </div>
@@ -1169,7 +1250,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                 saved once (it needs a real employee id to attach rows to). */}
             <div className="flex items-center gap-1 px-5 pt-3 border-b border-slate-200 overflow-x-auto sticky top-[65px] bg-white z-10">
               {FORM_TABS.map((t) => {
-                const disabled = (t.key === 'supervisor' || t.key === 'payment') && !editingId;
+                const disabled = (t.key === 'supervisor' || t.key === 'payment' || t.key === 'history') && !editingId;
                 const active = formTab === t.key;
                 return (
                   <button
@@ -1517,6 +1598,58 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                 </div>
               )}
 
+              {formTab === 'history' && editingId && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
+                      <History className="w-3.5 h-3.5 text-slate-400" /> Change History
+                    </p>
+                    <div className="flex items-center gap-1">
+                      {HISTORY_FILTERS.map(([k, label]) => (
+                        <button
+                          key={k}
+                          type="button"
+                          onClick={() => setHistoryFilter(k)}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors ${
+                            historyFilter === k ? 'bg-slate-800 text-white' : 'text-slate-500 hover:bg-slate-100'
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {loadingFormHistory && historyTimeline.length === 0 ? (
+                    <p className="text-xs text-slate-400">Loading…</p>
+                  ) : formHistoryError ? (
+                    <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700 flex items-center justify-between gap-2">
+                      <span>{formHistoryError}</span>
+                      <button type="button" onClick={() => fetchFormHistory(editingId)} className="font-semibold underline">Retry</button>
+                    </div>
+                  ) : (
+                    (() => {
+                      const visible = historyTimeline.filter((h) => historyFilter === 'all' || h.kind === historyFilter);
+                      if (visible.length === 0) {
+                        return (
+                          <p className="text-xs text-slate-400">
+                            Nothing recorded yet. Changes saved from now on will appear here; edits made before this
+                            history existed were not captured.
+                          </p>
+                        );
+                      }
+                      return (
+                        <ol className="space-y-2">
+                          {visible.map((h) => (
+                            <HistoryEntryCard key={h.key} entry={h} />
+                          ))}
+                        </ol>
+                      );
+                    })()
+                  )}
+                </div>
+              )}
+
               {formTab === 'supervisor' && editingId && (
                 <div className="space-y-4">
                   <div className="rounded-xl border border-slate-200 p-3.5 space-y-3">
@@ -1798,9 +1931,9 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                   onClick={closeForm}
                   className="px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors"
                 >
-                  {formTab === 'supervisor' || formTab === 'payment' ? 'Close' : 'Cancel'}
+                  {formTab === 'supervisor' || formTab === 'payment' || formTab === 'history' ? 'Close' : 'Cancel'}
                 </button>
-                {formTab !== 'supervisor' && formTab !== 'payment' && (
+                {formTab !== 'supervisor' && formTab !== 'payment' && formTab !== 'history' && (
                   <button
                     type="submit"
                     disabled={saving}
@@ -1908,7 +2041,14 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                     {transferHistory.map((t) => (
                       <div key={t.id} className="rounded-xl border border-slate-200 p-3 text-xs text-slate-600 space-y-1">
                         <div className="flex items-center justify-between">
-                          <span className="font-semibold text-slate-700">{toDateInput(t.effective_date) || '—'}</span>
+                          <span className="flex items-center gap-1.5">
+                            <span className="font-semibold text-slate-700">{toDateInput(t.effective_date) || '—'}</span>
+                            {t.applied === false && (
+                              <span className="px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-600 text-[10px] font-semibold uppercase tracking-wide">
+                                Scheduled
+                              </span>
+                            )}
+                          </span>
                           {t.action_by_name && <span className="text-slate-400">by {t.action_by_name}</span>}
                         </div>
                         {(t.from_department_name || t.to_department_name) && (
