@@ -19,6 +19,20 @@ const REQUEST_TYPES: { key: ApprovalRequestType; label: string }[] = [
   { key: 'asset', label: 'Asset Requisition' }
 ];
 
+// Per-Request-Type Layer names — shown instead of the generic "Layer N" so
+// the editor reads like the workflow it was actually speced against (e.g.
+// Asset Requisition's flowchart: Layer 1 = Supervisor Approval, Layer 2 =
+// HR/IT Department Review). A Request Type/index not listed here just falls
+// back to "Layer N", so this is purely additive — every existing template
+// (conveyance/leave/timesheet) keeps its current generic labels.
+const LAYER_NAMES: Partial<Record<ApprovalRequestType, Record<number, string>>> = {
+  asset: { 1: 'Supervisor Approval', 2: 'HR/IT Department Review' }
+};
+function layerLabel(requestType: ApprovalRequestType, idx: number): string {
+  const named = LAYER_NAMES[requestType]?.[idx + 1];
+  return named || `Layer ${idx + 1}`;
+}
+
 // A step still being edited in the Template modal — approvers kept as plain
 // user_ids here; resolved to names via the `users` prop at render time.
 // approver_type is the "Approver Type" dropdown per Layer: index 0 (Layer 1)
@@ -608,7 +622,7 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
                         <span className="w-5 h-5 rounded-full bg-blue-600 text-white text-[10px] font-bold flex items-center justify-center shrink-0">
                           {idx + 1}
                         </span>
-                        <span className="text-xs font-semibold text-slate-700">Layer {idx + 1}</span>
+                        <span className="text-xs font-semibold text-slate-700">{layerLabel(typeDraft, idx)}</span>
                         <select
                           value={step.approver_type}
                           onChange={(e) => setStepApproverType(idx, e.target.value as any)}

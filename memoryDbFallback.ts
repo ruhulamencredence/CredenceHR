@@ -32,6 +32,7 @@ export const memoryDb = {
   assetRequisitions: [] as any[],
   assetRequisitionItems: [] as any[],
   assetAssignments: [] as any[],
+  assetAssignmentClaims: [] as any[],
   claims: [] as any[],
   approvalChainSteps: [] as any[],
   approvalRequests: [] as any[],
@@ -2561,6 +2562,82 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
       });
       return { insertId: newId };
     }
+    if (lowerSql.startsWith("update asset_assignments set asset_id")) {
+      const [asset_id, id] = params;
+      const row = memoryDb.assetAssignments.find((asg: any) => asg.id === Number(id));
+      if (row) row.asset_id = Number(asset_id);
+      return { affectedRows: row ? 1 : 0 };
+    }
+
+    // Flowchart's "গরমিল/ড্যামেজ -> অ্যাডজাস্টমেন্ট/ক্লেইম রিকোয়েস্ট -> ইনভেন্টরি
+    // কর্তৃক সমস্যার সমাধান" branch — see AssetManagementRoutes.ts's
+    // report-issue/resolve routes.
+    if (lowerSql.startsWith("select id from asset_assignment_claims where assignment_id")) {
+      const assignmentId = Number(params[0]);
+      return memoryDb.assetAssignmentClaims
+        .filter((c: any) => Number(c.assignment_id) === assignmentId && c.status === "pending")
+        .map((c: any) => ({ id: c.id }));
+    }
+    if (lowerSql.startsWith("select * from asset_assignment_claims where assignment_id in")) {
+      const ids = params.map((p: any) => Number(p));
+      return memoryDb.assetAssignmentClaims.filter((c: any) => ids.includes(Number(c.assignment_id)) && c.status === "pending");
+    }
+    if (lowerSql.startsWith("select * from asset_assignment_claims where id")) {
+      const id = Number(params[0]);
+      return memoryDb.assetAssignmentClaims.filter((c: any) => c.id === id);
+    }
+    if (lowerSql.startsWith("select ac.*, u.name as employee_name")) {
+      let rows = [...memoryDb.assetAssignmentClaims];
+      if (lowerSql.includes("where ac.status")) {
+        const status = params[0];
+        rows = rows.filter((c: any) => c.status === status);
+      }
+      rows.sort((a: any, b: any) => (a.created_at < b.created_at ? 1 : -1));
+      return rows.map((c: any) => {
+        const u = memoryDb.users.find((x: any) => x.id === c.employee_user_id);
+        const asg = memoryDb.assetAssignments.find((a: any) => a.id === c.assignment_id);
+        const asset = asg ? memoryDb.assets.find((a: any) => a.id === asg.asset_id) : null;
+        return {
+          ...c,
+          employee_name: u ? u.name : null,
+          asset_id: asg ? asg.asset_id : null,
+          asset_name: asset ? asset.name : null,
+          asset_tag: asset ? asset.asset_tag : null
+        };
+      });
+    }
+    if (lowerSql.startsWith("insert into asset_assignment_claims")) {
+      const [assignment_id, employee_user_id, issue_type, description] = params;
+      const newId = memoryDb.assetAssignmentClaims.length > 0 ? Math.max(...memoryDb.assetAssignmentClaims.map((c: any) => c.id)) + 1 : 1;
+      memoryDb.assetAssignmentClaims.push({
+        id: newId,
+        assignment_id: Number(assignment_id),
+        employee_user_id: Number(employee_user_id),
+        issue_type,
+        description,
+        status: "pending",
+        resolution_note: null,
+        resolved_by: null,
+        resolved_at: null,
+        created_at: new Date()
+      });
+      return { insertId: newId };
+    }
+    // "UPDATE asset_assignment_claims\n    SET status = 'resolved', ..." — a
+    // newline sits between the table name and SET here too (see the
+    // "update assets ... coalesce" note above for why .startsWith() stops at
+    // the table name instead of crossing it).
+    if (lowerSql.startsWith("update asset_assignment_claims")) {
+      const [resolution_note, resolved_by, id] = params;
+      const row = memoryDb.assetAssignmentClaims.find((c: any) => c.id === Number(id));
+      if (row) {
+        row.status = "resolved";
+        row.resolution_note = resolution_note;
+        row.resolved_by = Number(resolved_by);
+        row.resolved_at = new Date();
+      }
+      return { affectedRows: row ? 1 : 0 };
+    }
 
     if (lowerSql.startsWith("insert into asset_requisitions")) {
       const [employee_user_id, asset_category, reason, urgency, target_date, attachment_filename, attachment_mimetype, attachment_data] = params;
@@ -2746,6 +2823,21 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
       const id = Number(params[0]);
       const row = memoryDb.assets.find((a: any) => a.id === id);
       if (row) row.status = "assigned";
+      return { affectedRows: row ? 1 : 0 };
+    }
+    if (lowerSql.startsWith("update assets set status = 'maintenance'")) {
+      const id = Number(params[0]);
+      const row = memoryDb.assets.find((a: any) => a.id === id);
+      if (row) row.status = "maintenance";
+      return { affectedRows: row ? 1 : 0 };
+    }
+    if (lowerSql.startsWith("update asset_requisitions set assigned_asset_id")) {
+      const [assigned_asset_id, id] = params;
+      const row = memoryDb.assetRequisitions.find((r: any) => r.id === Number(id));
+      if (row) {
+        row.assigned_asset_id = Number(assigned_asset_id);
+        row.updated_at = new Date();
+      }
       return { affectedRows: row ? 1 : 0 };
     }
     if (lowerSql.startsWith("update assets set status = ? where id")) {

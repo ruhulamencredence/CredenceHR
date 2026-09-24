@@ -16,6 +16,13 @@
 import React, { useEffect, useState } from 'react';
 import { apiUrl } from '../lib/api';
 
+interface PendingClaim {
+  id: number;
+  issue_type: 'mismatch' | 'damaged' | 'missing' | 'other';
+  description: string;
+  status: 'pending' | 'resolved';
+}
+
 interface AssignedAsset {
   assignment_id: number;
   asset_id: number;
@@ -27,7 +34,15 @@ interface AssignedAsset {
   condition_on_assign: 'new' | 'good';
   acknowledged_at: string | null;
   return_requested_at: string | null;
+  pending_claim: PendingClaim | null;
 }
+
+const ISSUE_TYPE_LABEL: Record<PendingClaim['issue_type'], string> = {
+  mismatch: 'Wrong item (doesn’t match requisition)',
+  damaged: 'Damaged',
+  missing: 'Missing part/accessory',
+  other: 'Other'
+};
 
 // One line of a requisition — what's being asked for (item name), why
 // (purpose), and how much (unit + quantity). "New Requisition" lets an
@@ -93,6 +108,16 @@ export function AssetManagement() {
   const [submitting, setSubmitting] = useState(false);
   const [submitMessage, setSubmitMessage] = useState<string | null>(null);
 
+  // "Report Issue" — flowchart's "মালামাল কি ঠিক আছে? -> না (গরমিল/ড্যামেজ)"
+  // branch: an inline form on the assignment being reported (assignmentId
+  // null = no form open), instead of a separate modal.
+  const [reportingFor, setReportingFor] = useState<number | null>(null);
+  const [issueForm, setIssueForm] = useState<{ issue_type: PendingClaim['issue_type']; description: string }>({
+    issue_type: 'mismatch',
+    description: ''
+  });
+  const [reportingSubmitting, setReportingSubmitting] = useState(false);
+
   async function loadMyAssets() {
     setLoading(true);
     setError(null);
@@ -153,6 +178,30 @@ export function AssetManagement() {
       loadMyAssets();
     } catch (err: any) {
       setError(err.message);
+    }
+  }
+
+  async function submitIssue(assignmentId: number) {
+    if (!issueForm.description.trim()) {
+      setError('Describe the issue.');
+      return;
+    }
+    setReportingSubmitting(true);
+    try {
+      const res = await fetch(apiUrl(`/api/assets/assignments/${assignmentId}/report-issue`), {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify(issueForm)
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not report the issue.');
+      setReportingFor(null);
+      setIssueForm({ issue_type: 'mismatch', description: '' });
+      loadMyAssets();
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setReportingSubmitting(false);
     }
   }
 
@@ -232,7 +281,8 @@ export function AssetManagement() {
             <div className="text-sm text-gray-500">You don't have any assets assigned right now.</div>
           )}
           {myAssets.map((a) => (
-            <div key={a.assignment_id} className="border rounded-lg p-4 flex items-start justify-between gap-3">
+            <div key={a.assignment_id} className="border rounded-lg p-4">
+            <div className="flex items-start justify-between gap-3">
               <div>
                 <div className="font-semibold text-gray-800">{a.name}</div>
                 <div className="text-xs text-gray-500">
@@ -243,13 +293,28 @@ export function AssetManagement() {
                 {a.return_requested_at && <div className="text-xs text-amber-600 mt-1">Return requested — awaiting IT/Admin.</div>}
               </div>
               <div className="flex flex-col gap-2 items-end shrink-0">
-                {!a.acknowledged_at ? (
-                  <button
-                    onClick={() => acknowledge(a.assignment_id)}
-                    className="px-3 py-1.5 text-xs font-medium rounded bg-blue-600 text-white hover:bg-blue-700"
-                  >
-                    Accept &amp; Acknowledge
-                  </button>
+                {a.pending_claim ? (
+                  <span className="px-3 py-1.5 text-xs font-medium rounded bg-amber-100 text-amber-800">
+                    Issue Reported — Awaiting Resolution
+                  </span>
+                ) : !a.acknowledged_at ? (
+                  <>
+                    <button
+                      onClick={() => acknowledge(a.assignment_id)}
+                      className="px-3 py-1.5 text-xs font-medium rounded bg-blue-600 text-white hover:bg-blue-700"
+                    >
+                      Accept &amp; Acknowledge
+                    </button>
+                    <button
+                      onClick={() => {
+                        setReportingFor(reportingFor === a.assignment_id ? null : a.assignment_id);
+                        setIssueForm({ issue_type: 'mismatch', description: '' });
+                      }}
+                      className="px-3 py-1.5 text-xs font-medium rounded border border-amber-300 text-amber-700 hover:bg-amber-50"
+                    >
+                      Report Issue
+                    </button>
+                  </>
                 ) : (
                   <span className="px-3 py-1.5 text-xs font-medium rounded bg-green-100 text-green-800">Acknowledged</span>
                 )}
@@ -262,6 +327,57 @@ export function AssetManagement() {
                   </button>
                 )}
               </div>
+            </div>
+
+            {a.pending_claim && (
+              <div className="mt-3 rounded bg-amber-50 text-amber-800 text-xs px-3 py-2">
+                <span className="font-medium">{ISSUE_TYPE_LABEL[a.pending_claim.issue_type]}:</span> {a.pending_claim.description}
+              </div>
+            )}
+
+            {reportingFor === a.assignment_id && (
+              <div className="mt-3 border-t pt-3 space-y-2">
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">What's wrong?</label>
+                  <select
+                    value={issueForm.issue_type}
+                    onChange={(e) => setIssueForm((f) => ({ ...f, issue_type: e.target.value as PendingClaim['issue_type'] }))}
+                    className="w-full border rounded px-2 py-1.5 text-sm"
+                  >
+                    {(Object.keys(ISSUE_TYPE_LABEL) as PendingClaim['issue_type'][]).map((k) => (
+                      <option key={k} value={k}>
+                        {ISSUE_TYPE_LABEL[k]}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">Describe the issue</label>
+                  <textarea
+                    value={issueForm.description}
+                    onChange={(e) => setIssueForm((f) => ({ ...f, description: e.target.value }))}
+                    rows={2}
+                    placeholder="e.g. Requested a laptop but received a monitor / screen is cracked"
+                    className="w-full border rounded px-2 py-1.5 text-sm"
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => submitIssue(a.assignment_id)}
+                    disabled={reportingSubmitting}
+                    className="px-3 py-1.5 text-xs font-medium rounded bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50"
+                  >
+                    {reportingSubmitting ? 'Submitting…' : 'Submit Report'}
+                  </button>
+                  <button
+                    onClick={() => setReportingFor(null)}
+                    className="px-3 py-1.5 text-xs font-medium rounded border border-gray-300 text-gray-600 hover:bg-gray-50"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
             </div>
           ))}
         </div>
