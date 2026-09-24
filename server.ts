@@ -2562,7 +2562,19 @@ async function createTemplateApprovalRequest(
   requestType: "conveyance" | "leave" | "timesheet" | "asset" | "vehicle",
   sourceType: "user_claim" | "attendance_correction" | "leave_application" | "asset_requisition" | "vehicle_requisition",
   sourceId: number,
-  requestedBy: number
+  requestedBy: number,
+  // Vehicle Requisition Flowchart v2.0's "জরুরি/HR Direct" initiator path —
+  // HR/Admin manually files a requisition on someone else's behalf and may
+  // not want (or trust) that person's auto-resolved employee_supervisors row
+  // to be the Layer 1 approver (e.g. an emergency, or the requester has no
+  // Direct Supervisor set). When provided (any value other than undefined,
+  // including null to explicitly force NO Supervisor gate), this REPLACES
+  // resolveSupervisorApprover's own lookup instead of running it. Every
+  // existing caller omits this (stays undefined), so this is a zero-
+  // behavior-change addition for Conveyance/Leave/Timesheet/Asset — see
+  // VehicleManagementRoutes.ts's POST .../admin-create for the one caller
+  // that passes it.
+  overrideSupervisorId?: number | null
 ): Promise<{ autoApproved: boolean; template: any | null }> {
   let template = await resolveApprovalTemplate(requestedBy, requestType);
   let templateSteps = 0;
@@ -2581,7 +2593,11 @@ async function createTemplateApprovalRequest(
   // below entirely — that Template's own step_order 1 becomes this request's
   // real first step instead. Every pre-existing template defaults to
   // skip_auto_supervisor = false, so this is a no-op for them.
-  const supervisorId = template?.skip_auto_supervisor ? null : await resolveSupervisorApprover(requestedBy);
+  const supervisorId = template?.skip_auto_supervisor
+    ? null
+    : overrideSupervisorId !== undefined
+    ? overrideSupervisorId
+    : await resolveSupervisorApprover(requestedBy);
 
   const totalSteps = (supervisorId ? 1 : 0) + templateSteps;
   if (totalSteps === 0) return { autoApproved: true, template: null };

@@ -62,7 +62,8 @@ interface VehicleManagementRouteDeps {
     requestType: "conveyance" | "leave" | "timesheet" | "asset" | "vehicle",
     sourceType: "user_claim" | "attendance_correction" | "leave_application" | "asset_requisition" | "vehicle_requisition",
     sourceId: number,
-    requestedBy: number
+    requestedBy: number,
+    overrideSupervisorId?: number | null
   ) => Promise<{ autoApproved: boolean; template: any | null }>;
   getCurrentStepApprovers: (request: any) => Promise<{ user_id: number; user_name: string | null }[]>;
   // Auto-approve path (no Template resolved at all for this employee/type) —
@@ -263,84 +264,136 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
     }
   });
 
-  // POST /api/vehicles/requisitions — "Book a Ride": submit a new request.
-  // Routing (who has to approve it) is entirely the Dynamic Approval
-  // Engine's job from here — see createTemplateApprovalRequest.
+  // Shared by POST /api/vehicles/requisitions (self-service "Book a Ride")
+  // and POST /api/vehicles/requisitions/admin-create (flowchart's "জরুরি/HR
+  // Direct" initiator path) — validates the ride form, inserts the row, and
+  // routes it through the Dynamic Approval Engine (request_type 'vehicle':
+  // Layer 1 the requester's own Supervisor unless overridden, Layer 2+
+  // "HR/Admin Review"), notifying whoever it lands on first. Throws a plain
+  // Error with a message safe to send straight back to the client on bad
+  // input; the caller is responsible for the try/catch + response.
+  async function submitRequisition(
+    body: any,
+    employeeUserId: number,
+    actor: { id: number; name?: string },
+    overrideSupervisorId?: number | null
+  ) {
+    const purpose = typeof body.purpose === "string" ? body.purpose.trim().slice(0, 2000) : "";
+    const pickup = typeof body.pickup_location === "string" ? body.pickup_location.trim().slice(0, 255) : "";
+    const destination = typeof body.destination === "string" ? body.destination.trim().slice(0, 255) : "";
+    const rideDate = typeof body.ride_date === "string" ? body.ride_date : "";
+    const startTime = typeof body.start_time === "string" ? body.start_time : "";
+    const duration = Number(body.estimated_duration_hours);
+
+    if (!purpose) throw new Error("Purpose is required.");
+    if (!pickup) throw new Error("Pickup location is required.");
+    if (!destination) throw new Error("Destination is required.");
+    if (!rideDate) throw new Error("Ride date is required.");
+    if (!startTime) throw new Error("Start time is required.");
+    if (!Number.isFinite(duration) || duration <= 0) {
+      throw new Error("Estimated duration must be greater than 0 hours.");
+    }
+
+    const expectedReturn = computeExpectedReturn(rideDate, startTime, duration);
+
+    // time_extension_status/hr_notice_flag are explicitly listed here
+    // (rather than relying on the columns' own SQL DEFAULT) because the
+    // in-memory dev fallback's generic INSERT simulator only ever sets
+    // whatever's in this column list — leaving them out would leave the
+    // in-memory row's time_extension_status literally `undefined`, and
+    // `undefined !== "none"` reads as "an extension WAS requested" in the
+    // late-return check inside POST .../complete below.
+    const result: any = await queryDB(
+      `INSERT INTO vehicle_requisitions
+         (employee_user_id, purpose, pickup_location, destination, ride_date, start_time,
+          estimated_duration_hours, expected_return_at, status, time_extension_status, hr_notice_flag)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [employeeUserId, purpose, pickup, destination, rideDate, startTime, duration, expectedReturn, "pending", "none", 0]
+    );
+
+    // Dynamic Approval Engine — routed through this Employee's assigned
+    // Template for request_type 'vehicle'. Falls back to a straight
+    // auto-approve if neither a Supervisor nor a Template resolve at all.
+    const { autoApproved } = await createTemplateApprovalRequest(
+      "vehicle",
+      "vehicle_requisition",
+      result.insertId,
+      employeeUserId,
+      overrideSupervisorId
+    );
+    if (autoApproved) {
+      try {
+        await finalizeVehicleRequisitionApproval(result.insertId, actor.id, null);
+      } catch (finalizeErr: any) {
+        console.warn("⚠️ Could not auto-process Vehicle Requisition #" + result.insertId + ": " + finalizeErr.message);
+      }
+    } else {
+      try {
+        const requestRows = await queryDB("SELECT * FROM approval_requests WHERE source_type = ?", ["vehicle_requisition"]);
+        const createdRequest = requestRows.find((r: any) => Number(r.source_id) === Number(result.insertId));
+        if (createdRequest) {
+          const approvers = await getCurrentStepApprovers(createdRequest);
+          for (const approver of approvers) {
+            await createAlert(queryDB, {
+              userId: approver.user_id,
+              type: "vehicle_requisition" as AlertType,
+              title: "New Ride Request Awaiting Your Approval",
+              message: `${actor.name || "An employee"} requested a ride (${pickup} → ${destination}). Please review.`,
+              relatedType: "vehicle_requisition",
+              relatedId: result.insertId
+            });
+          }
+        }
+      } catch (alertErr: any) {
+        console.warn("⚠️ Could not notify the current-step approver for Vehicle Requisition #" + result.insertId + ": " + alertErr.message);
+      }
+    }
+
+    const { rows, userById, vehicleById } = await loadContext();
+    const created = rows.find((r: any) => Number(r.id) === Number(result.insertId));
+    const [withPending] = await attachPendingApprover([created]);
+    return serialize(withPending, userById, vehicleById);
+  }
+
+  // POST /api/vehicles/requisitions — "Book a Ride": the requester submits
+  // their own request (flowchart's "সাধারণ ইউজার" path).
   app.post("/api/vehicles/requisitions", authenticateToken, async (req: any, res: any) => {
     try {
-      const body = req.body || {};
-      const purpose = typeof body.purpose === "string" ? body.purpose.trim().slice(0, 2000) : "";
-      const pickup = typeof body.pickup_location === "string" ? body.pickup_location.trim().slice(0, 255) : "";
-      const destination = typeof body.destination === "string" ? body.destination.trim().slice(0, 255) : "";
-      const rideDate = typeof body.ride_date === "string" ? body.ride_date : "";
-      const startTime = typeof body.start_time === "string" ? body.start_time : "";
-      const duration = Number(body.estimated_duration_hours);
-
-      if (!purpose) return res.status(400).json({ error: "Purpose is required." });
-      if (!pickup) return res.status(400).json({ error: "Pickup location is required." });
-      if (!destination) return res.status(400).json({ error: "Destination is required." });
-      if (!rideDate) return res.status(400).json({ error: "Ride date is required." });
-      if (!startTime) return res.status(400).json({ error: "Start time is required." });
-      if (!Number.isFinite(duration) || duration <= 0) {
-        return res.status(400).json({ error: "Estimated duration must be greater than 0 hours." });
-      }
-
-      const expectedReturn = computeExpectedReturn(rideDate, startTime, duration);
-
-      // time_extension_status/hr_notice_flag are explicitly listed here
-      // (rather than relying on the columns' own SQL DEFAULT) because the
-      // in-memory dev fallback's generic INSERT simulator only ever sets
-      // whatever's in this column list — leaving them out would leave the
-      // in-memory row's time_extension_status literally `undefined`, and
-      // `undefined !== "none"` reads as "an extension WAS requested" in the
-      // late-return check inside POST .../complete below.
-      const result: any = await queryDB(
-        `INSERT INTO vehicle_requisitions
-           (employee_user_id, purpose, pickup_location, destination, ride_date, start_time,
-            estimated_duration_hours, expected_return_at, status, time_extension_status, hr_notice_flag)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [req.user.id, purpose, pickup, destination, rideDate, startTime, duration, expectedReturn, "pending", "none", 0]
-      );
-
-      // Dynamic Approval Engine — routed through this Employee's assigned
-      // Template for request_type 'vehicle' (the flowchart's single
-      // "HR/Admin Review" Layer). Falls back to a straight auto-approve if
-      // no Template resolves at all.
-      const { autoApproved } = await createTemplateApprovalRequest("vehicle", "vehicle_requisition", result.insertId, req.user.id);
-      if (autoApproved) {
-        try {
-          await finalizeVehicleRequisitionApproval(result.insertId, req.user.id, null);
-        } catch (finalizeErr: any) {
-          console.warn("⚠️ Could not auto-process Vehicle Requisition #" + result.insertId + ": " + finalizeErr.message);
-        }
-      } else {
-        try {
-          const requestRows = await queryDB("SELECT * FROM approval_requests WHERE source_type = ?", ["vehicle_requisition"]);
-          const createdRequest = requestRows.find((r: any) => Number(r.source_id) === Number(result.insertId));
-          if (createdRequest) {
-            const approvers = await getCurrentStepApprovers(createdRequest);
-            for (const approver of approvers) {
-              await createAlert(queryDB, {
-                userId: approver.user_id,
-                type: "vehicle_requisition" as AlertType,
-                title: "New Ride Request Awaiting Your Approval",
-                message: `${req.user.name || "An employee"} requested a ride (${pickup} → ${destination}). Please review.`,
-                relatedType: "vehicle_requisition",
-                relatedId: result.insertId
-              });
-            }
-          }
-        } catch (alertErr: any) {
-          console.warn("⚠️ Could not notify the current-step approver for Vehicle Requisition #" + result.insertId + ": " + alertErr.message);
-        }
-      }
-
-      const { rows, userById, vehicleById } = await loadContext();
-      const created = rows.find((r: any) => Number(r.id) === Number(result.insertId));
-      const [withPending] = await attachPendingApprover([created]);
-      res.status(201).json(serialize(withPending, userById, vehicleById));
+      const result = await submitRequisition(req.body, req.user.id, req.user);
+      res.status(201).json(result);
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      res.status(err.message?.endsWith(".") ? 400 : 500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/vehicles/requisitions/admin-create — flowchart's "জরুরি/HR
+  // Direct" initiator path: HR/Admin manually files a requisition on
+  // someone else's behalf (emergency, or the requester can't do it
+  // themselves) — "ইনিশিয়েটর কে/ধরন?" -> "HR/Admin ম্যানুয়ালি ইউজার সিলেক্ট
+  // করবেন" in the flowchart. Optionally names a specific approver for the
+  // Supervisor Layer (supervisor_user_id) instead of relying on that
+  // employee's own auto-resolved Direct/Department Supervisor — useful when
+  // there isn't one set, or HR wants a specific person to review this one
+  // emergency request. Still routes through the same Approval Workflow
+  // (Layer 2+ "HR/Admin Review") otherwise.
+  app.post("/api/vehicles/requisitions/admin-create", ...adminGate, async (req: any, res: any) => {
+    try {
+      const employeeUserId = Number(req.body?.employee_user_id);
+      if (!Number.isFinite(employeeUserId)) return res.status(400).json({ error: "Pick who this ride is for." });
+      const employeeRows: any = await queryDB("SELECT id FROM users WHERE id = ?", [employeeUserId]);
+      if (employeeRows.length === 0) return res.status(404).json({ error: "That account was not found." });
+
+      let overrideSupervisorId: number | null | undefined;
+      if (req.body?.supervisor_user_id !== undefined && req.body?.supervisor_user_id !== null && req.body?.supervisor_user_id !== "") {
+        overrideSupervisorId = Number(req.body.supervisor_user_id);
+        const supRows: any = await queryDB("SELECT id FROM users WHERE id = ?", [overrideSupervisorId]);
+        if (supRows.length === 0) return res.status(404).json({ error: "That Supervisor approver account was not found." });
+      }
+
+      const result = await submitRequisition(req.body, employeeUserId, req.user, overrideSupervisorId);
+      res.status(201).json(result);
+    } catch (err: any) {
+      res.status(err.message?.endsWith(".") ? 400 : 500).json({ error: err.message });
     }
   });
 

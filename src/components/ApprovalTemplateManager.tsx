@@ -28,9 +28,11 @@ const REQUEST_TYPES: { key: ApprovalRequestType; label: string }[] = [
 // (conveyance/leave/timesheet) keeps its current generic labels.
 const LAYER_NAMES: Partial<Record<ApprovalRequestType, Record<number, string>>> = {
   asset: { 1: 'Supervisor Approval', 2: 'HR/IT Department Review' },
-  // Vehicle Requisition Flowchart v1.0 — a single review diamond ("HR/Admin
-  // রিভিউ — গাড়ির অ্যাভেইলেবিলিটি চেক"), no separate Supervisor step.
-  vehicle: { 1: 'HR/Admin Review' }
+  // Vehicle Requisition Flowchart v2.0 — "সুপারভাইজার অনুমোদন করেছেন?" then
+  // "HR/Admin রিভিউ (গাড়ির অ্যাভেইলেবিলিটি চেক)": Layer 1 defaults to the
+  // requester's own Supervisor (same auto-gate as Asset), Layer 2 is HR/
+  // Admin's own picked approvers.
+  vehicle: { 1: 'Supervisor Approval', 2: 'HR/Admin Review' }
 };
 function layerLabel(requestType: ApprovalRequestType, idx: number): string {
   const named = LAYER_NAMES[requestType]?.[idx + 1];

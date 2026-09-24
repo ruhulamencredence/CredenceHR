@@ -3892,7 +3892,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           AdminModuleKey like every other tab here. */}
       {activeTab === 'vehicle_management' && (
         <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6">
-          <VehicleManagementAdmin />
+          <VehicleManagementAdmin users={users} />
         </div>
       )}
 
