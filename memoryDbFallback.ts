@@ -28,6 +28,10 @@ export const memoryDb = {
   employeeSupervisors: [] as any[],
   employeePaymentAccounts: [] as any[],
   payrollPaymentSplits: [] as any[],
+  assets: [] as any[],
+  assetRequisitions: [] as any[],
+  assetRequisitionItems: [] as any[],
+  assetAssignments: [] as any[],
   claims: [] as any[],
   approvalChainSteps: [] as any[],
   approvalRequests: [] as any[],
@@ -1826,6 +1830,40 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
         return { id: a.id, step_id: a.step_id, user_id: a.user_id, user_name: u ? u.name : null };
       });
   }
+  // GET /api/approvals' own templateStepApproversMap fetch (ApprovalRoutes.ts)
+  // — every step-approver row, system-wide, joined up to its template_id/
+  // step_order (no WHERE at all, unlike the two handlers above/below it that
+  // scope to one template or one step).
+  if (lowerSql.startsWith("select s.template_id, s.step_order, sa.user_id, u.name as user_name")) {
+    return memoryDb.approvalTemplateStepApprovers.map((a: any) => {
+      const s = memoryDb.approvalTemplateSteps.find((x: any) => Number(x.id) === Number(a.step_id));
+      const u = memoryDb.users.find((x: any) => Number(x.id) === Number(a.user_id));
+      return {
+        template_id: s ? s.template_id : null,
+        step_order: s ? s.step_order : null,
+        user_id: a.user_id,
+        user_name: u ? u.name : null
+      };
+    });
+  }
+  // getCurrentStepApprovers (server.ts) — the authorization-critical lookup
+  // performApprovalAction uses to decide who may act on a Template-driven
+  // request's CURRENT step. WHERE-scoped to one (template_id, step_order),
+  // unlike the two handlers above.
+  if (lowerSql.startsWith("select sa.user_id, u.name as user_name")) {
+    const [templateId, stepOrder] = params.map((p: any) => Number(p));
+    const stepIds = new Set(
+      memoryDb.approvalTemplateSteps
+        .filter((s: any) => Number(s.template_id) === templateId && Number(s.step_order) === stepOrder)
+        .map((s: any) => Number(s.id))
+    );
+    return memoryDb.approvalTemplateStepApprovers
+      .filter((a: any) => stepIds.has(Number(a.step_id)))
+      .map((a: any) => {
+        const u = memoryDb.users.find((x: any) => Number(x.id) === Number(a.user_id));
+        return { user_id: a.user_id, user_name: u ? u.name : null };
+      });
+  }
   if (lowerSql.startsWith("select * from approval_templates where request_type")) {
     const requestType = params[0];
     return [...memoryDb.approvalTemplates]
@@ -2423,6 +2461,298 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
       // for chat_rooms/chat_room_members yet, so this always reads back
       // empty (pre-existing gap, unrelated to Alerts push).
       return [];
+    }
+  }
+
+  // Asset Management (AssetManagementRoutes.ts) — bespoke, not GENERIC_TABLES,
+  // since almost every query here filters on a non-id column, JOINs, or uses
+  // a literal (not `?`) value inside SET/WHERE (e.g. "status = 'assigned'"),
+  // none of which simulateGenericTable's 4 shapes understand. Matched on a
+  // short prefix that stays on the SQL's own first line (never a substring
+  // that could cross the newline before SET/WHERE in these multi-line
+  // template literals — see employee_payment_accounts above for why that
+  // matters).
+  if (lowerSql.includes("asset")) {
+    const buildRequisitionRow = (r: any) => {
+      const employee = memoryDb.users.find((u: any) => u.id === r.employee_user_id);
+      const manager = r.manager_id ? memoryDb.users.find((u: any) => u.id === r.manager_id) : null;
+      const asset = r.assigned_asset_id ? memoryDb.assets.find((a: any) => a.id === r.assigned_asset_id) : null;
+      return {
+        ...r,
+        employee_name: employee ? employee.name : null,
+        manager_name: manager ? manager.name : null,
+        asset_name: asset ? asset.name : null,
+        asset_tag: asset ? asset.asset_tag : null
+      };
+    };
+
+    if (lowerSql.startsWith("select asg.id as assignment_id")) {
+      const employeeUserId = Number(params[0]);
+      return memoryDb.assetAssignments
+        .filter((asg: any) => Number(asg.employee_user_id) === employeeUserId && !asg.returned_date)
+        .sort((a: any, b: any) => (a.assigned_date < b.assigned_date ? 1 : -1))
+        .map((asg: any) => {
+          const asset = memoryDb.assets.find((a: any) => a.id === asg.asset_id);
+          return {
+            assignment_id: asg.id,
+            assigned_date: asg.assigned_date,
+            condition_on_assign: asg.condition_on_assign,
+            acknowledged_at: asg.acknowledged_at,
+            return_requested_at: asg.return_requested_at,
+            asset_id: asset ? asset.id : null,
+            asset_tag: asset ? asset.asset_tag : null,
+            name: asset ? asset.name : null,
+            category: asset ? asset.category : null,
+            serial_number: asset ? asset.serial_number : null
+          };
+        });
+    }
+    if (lowerSql.startsWith("select asg.*, u.name as employee_name")) {
+      const assetId = Number(params[0]);
+      return memoryDb.assetAssignments
+        .filter((asg: any) => Number(asg.asset_id) === assetId)
+        .sort((a: any, b: any) => (a.assigned_date < b.assigned_date ? 1 : -1))
+        .map((asg: any) => {
+          const u = memoryDb.users.find((x: any) => x.id === asg.employee_user_id);
+          return { ...asg, employee_name: u ? u.name : null };
+        });
+    }
+    if (lowerSql.startsWith("select * from asset_assignments where id")) {
+      const id = Number(params[0]);
+      return memoryDb.assetAssignments.filter((asg: any) => asg.id === id);
+    }
+    if (lowerSql.startsWith("update asset_assignments set acknowledged_at")) {
+      const id = Number(params[0]);
+      const row = memoryDb.assetAssignments.find((asg: any) => asg.id === id);
+      if (row) row.acknowledged_at = new Date();
+      return { affectedRows: row ? 1 : 0 };
+    }
+    if (lowerSql.startsWith("update asset_assignments set return_requested_at")) {
+      const id = Number(params[0]);
+      const row = memoryDb.assetAssignments.find((asg: any) => asg.id === id);
+      if (row) row.return_requested_at = new Date();
+      return { affectedRows: row ? 1 : 0 };
+    }
+    if (lowerSql.startsWith("update asset_assignments set returned_date")) {
+      const [condition_on_return, id] = params;
+      const row = memoryDb.assetAssignments.find((asg: any) => asg.id === Number(id));
+      if (row) {
+        row.returned_date = new Date();
+        row.condition_on_return = condition_on_return;
+      }
+      return { affectedRows: row ? 1 : 0 };
+    }
+    if (lowerSql.startsWith("insert into asset_assignments")) {
+      const [asset_id, employee_user_id, requisition_id, condition_on_assign, assigned_by] = params;
+      const newId = memoryDb.assetAssignments.length > 0 ? Math.max(...memoryDb.assetAssignments.map((a: any) => a.id)) + 1 : 1;
+      memoryDb.assetAssignments.push({
+        id: newId,
+        asset_id: Number(asset_id),
+        employee_user_id: Number(employee_user_id),
+        requisition_id: requisition_id === null || requisition_id === undefined ? null : Number(requisition_id),
+        assigned_date: new Date(),
+        returned_date: null,
+        condition_on_assign,
+        condition_on_return: null,
+        assigned_by: Number(assigned_by),
+        acknowledged_at: null,
+        return_requested_at: null,
+        created_at: new Date()
+      });
+      return { insertId: newId };
+    }
+
+    if (lowerSql.startsWith("insert into asset_requisitions")) {
+      const [employee_user_id, asset_category, reason, urgency, target_date, attachment_filename, attachment_mimetype, attachment_data] = params;
+      const newId = memoryDb.assetRequisitions.length > 0 ? Math.max(...memoryDb.assetRequisitions.map((r: any) => r.id)) + 1 : 1;
+      memoryDb.assetRequisitions.push({
+        id: newId,
+        employee_user_id: Number(employee_user_id),
+        asset_category,
+        reason,
+        urgency,
+        target_date: target_date || null,
+        attachment_filename: attachment_filename || null,
+        attachment_mimetype: attachment_mimetype || null,
+        attachment_data: attachment_data || null,
+        status: "pending",
+        manager_id: null,
+        manager_decided_at: null,
+        manager_remarks: null,
+        admin_decided_by: null,
+        admin_decided_at: null,
+        rejection_reason: null,
+        assigned_asset_id: null,
+        created_at: new Date(),
+        updated_at: new Date()
+      });
+      return { insertId: newId };
+    }
+    if (lowerSql.startsWith("insert into asset_requisition_items")) {
+      const [requisition_id, item_name, purpose, unit, quantity] = params;
+      const newId = memoryDb.assetRequisitionItems.length > 0 ? Math.max(...memoryDb.assetRequisitionItems.map((it: any) => it.id)) + 1 : 1;
+      memoryDb.assetRequisitionItems.push({
+        id: newId,
+        requisition_id: Number(requisition_id),
+        item_name,
+        purpose,
+        unit,
+        quantity: Number(quantity),
+        created_at: new Date()
+      });
+      return { insertId: newId };
+    }
+    if (lowerSql.startsWith("select * from asset_requisition_items where requisition_id in")) {
+      const ids = params.map((p: any) => Number(p));
+      return memoryDb.assetRequisitionItems
+        .filter((it: any) => ids.includes(Number(it.requisition_id)))
+        .sort((a: any, b: any) => a.id - b.id);
+    }
+    if (lowerSql.startsWith("select r.*, u.name as employee_name, m.name as manager_name")) {
+      let rows = [...memoryDb.assetRequisitions];
+      if (lowerSql.includes("where r.employee_user_id")) {
+        const employeeUserId = Number(params[0]);
+        rows = rows.filter((r: any) => Number(r.employee_user_id) === employeeUserId);
+      } else if (lowerSql.includes("where r.status")) {
+        const status = params[0];
+        rows = rows.filter((r: any) => r.status === status);
+      }
+      rows.sort((a: any, b: any) => (a.created_at < b.created_at ? 1 : -1));
+      return rows.map(buildRequisitionRow);
+    }
+    if (lowerSql.startsWith("select * from asset_requisitions where id in")) {
+      // fetchByIds("asset_requisitions", ids) — GET /api/my-approvals's
+      // narrowed-by-ids lookup, distinct from the single "= ?" case below
+      // (both start with "where id", so this has to be checked first).
+      const ids = params.map((p: any) => Number(p));
+      return memoryDb.assetRequisitions.filter((r: any) => ids.includes(Number(r.id)));
+    }
+    if (lowerSql.startsWith("select * from asset_requisitions where id")) {
+      const id = Number(params[0]);
+      return memoryDb.assetRequisitions.filter((r: any) => r.id === id);
+    }
+    if (lowerSql.startsWith("select * from asset_requisitions")) {
+      // Plain, unfiltered fetch — GET /api/approvals (ApprovalRoutes.ts)
+      // pulls every requisition once to build its source_label map.
+      return [...memoryDb.assetRequisitions];
+    }
+    if (lowerSql.startsWith("update asset_requisitions set status = 'dispatched'")) {
+      const [assigned_asset_id, id] = params;
+      const row = memoryDb.assetRequisitions.find((r: any) => r.id === Number(id));
+      if (row) {
+        row.status = "dispatched";
+        row.assigned_asset_id = Number(assigned_asset_id);
+        row.updated_at = new Date();
+      }
+      return { affectedRows: row ? 1 : 0 };
+    }
+    if (lowerSql.startsWith("update asset_requisitions set status = 'fulfilled'")) {
+      const id = Number(params[0]);
+      const row = memoryDb.assetRequisitions.find((r: any) => r.id === id && r.status === "dispatched");
+      if (row) {
+        row.status = "fulfilled";
+        row.updated_at = new Date();
+      }
+      return { affectedRows: row ? 1 : 0 };
+    }
+    if (lowerSql.startsWith("update asset_requisitions set status = 'approved'")) {
+      const [admin_decided_by, id] = params;
+      const row = memoryDb.assetRequisitions.find((r: any) => r.id === Number(id));
+      if (row) {
+        row.status = "approved";
+        row.admin_decided_by = Number(admin_decided_by);
+        row.admin_decided_at = new Date();
+        row.updated_at = new Date();
+      }
+      return { affectedRows: row ? 1 : 0 };
+    }
+    if (lowerSql.startsWith("update asset_requisitions set status = 'rejected'")) {
+      const [admin_decided_by, rejection_reason, id] = params;
+      const row = memoryDb.assetRequisitions.find((r: any) => r.id === Number(id));
+      if (row) {
+        row.status = "rejected";
+        row.admin_decided_by = Number(admin_decided_by);
+        row.admin_decided_at = new Date();
+        row.rejection_reason = rejection_reason;
+        row.updated_at = new Date();
+      }
+      return { affectedRows: row ? 1 : 0 };
+    }
+
+    if (lowerSql.startsWith("select id from assets where asset_tag")) {
+      const tag = params[0];
+      return memoryDb.assets.filter((a: any) => a.asset_tag === tag).map((a: any) => ({ id: a.id }));
+    }
+    if (lowerSql.startsWith("select id from assets where id")) {
+      const id = Number(params[0]);
+      return memoryDb.assets.filter((a: any) => a.id === id).map((a: any) => ({ id: a.id }));
+    }
+    if (lowerSql.startsWith("select * from assets where id")) {
+      const id = Number(params[0]);
+      return memoryDb.assets.filter((a: any) => a.id === id);
+    }
+    if (lowerSql.startsWith("select * from assets")) {
+      let rows = [...memoryDb.assets];
+      let paramIdx = 0;
+      if (lowerSql.includes("status = ?")) {
+        const status = params[paramIdx++];
+        rows = rows.filter((a: any) => a.status === status);
+      }
+      if (lowerSql.includes("category = ?")) {
+        const category = params[paramIdx++];
+        rows = rows.filter((a: any) => a.category === category);
+      }
+      rows.sort((a: any, b: any) => (a.created_at < b.created_at ? 1 : -1));
+      return rows;
+    }
+    if (lowerSql.startsWith("insert into assets")) {
+      const [asset_tag, name, category, serial_number, purchase_date, condition_note, created_by] = params;
+      const newId = memoryDb.assets.length > 0 ? Math.max(...memoryDb.assets.map((a: any) => a.id)) + 1 : 1;
+      memoryDb.assets.push({
+        id: newId,
+        asset_tag,
+        name,
+        category,
+        serial_number: serial_number || null,
+        purchase_date: purchase_date || null,
+        status: "available",
+        condition_note: condition_note || null,
+        created_by: created_by === null || created_by === undefined ? null : Number(created_by),
+        created_at: new Date(),
+        updated_at: new Date()
+      });
+      return { insertId: newId };
+    }
+    // "UPDATE assets\n    SET name = COALESCE(?, name), ..." — a newline sits
+    // between the table name and SET in this one (a multi-line template
+    // literal), so this is matched by .includes("coalesce") rather than a
+    // .startsWith() that would need to cross that newline (see the design
+    // note at the top of this Asset Management block).
+    if (lowerSql.startsWith("update assets") && lowerSql.includes("coalesce")) {
+      const [name, category, serial_number, purchase_date, status, condition_note, id] = params;
+      const row = memoryDb.assets.find((a: any) => a.id === Number(id));
+      if (row) {
+        if (name !== null && name !== undefined) row.name = name;
+        if (category !== null && category !== undefined) row.category = category;
+        row.serial_number = serial_number || null;
+        row.purchase_date = purchase_date || null;
+        if (status !== null && status !== undefined) row.status = status;
+        row.condition_note = condition_note || null;
+        row.updated_at = new Date();
+      }
+      return { affectedRows: row ? 1 : 0 };
+    }
+    if (lowerSql.startsWith("update assets set status = 'assigned'")) {
+      const id = Number(params[0]);
+      const row = memoryDb.assets.find((a: any) => a.id === id);
+      if (row) row.status = "assigned";
+      return { affectedRows: row ? 1 : 0 };
+    }
+    if (lowerSql.startsWith("update assets set status = ? where id")) {
+      const [status, id] = params;
+      const row = memoryDb.assets.find((a: any) => a.id === Number(id));
+      if (row) row.status = status;
+      return { affectedRows: row ? 1 : 0 };
     }
   }
 

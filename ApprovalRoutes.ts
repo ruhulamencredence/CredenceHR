@@ -169,7 +169,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
   // details + who's up next) for the Admin Panel -> Approvals queue/history.
   app.get("/api/approvals", authenticateToken, requireAdmin, requireModule("approvals"), async (req: any, res) => {
     try {
-      const [requests, chain, templateStepApproverRows, attendanceRows, claimRows, userClaimRows, attendanceCorrectionRows, leaveApplicationRows, projects, users] = await Promise.all([
+      const [requests, chain, templateStepApproverRows, attendanceRows, claimRows, userClaimRows, attendanceCorrectionRows, leaveApplicationRows, assetRequisitionRows, projects, users] = await Promise.all([
         queryDB("SELECT ar.*, u.name AS requested_by_name FROM approval_requests ar LEFT JOIN users u ON u.id = ar.requested_by ORDER BY ar.id DESC"),
         getApprovalChain(),
         queryDB(
@@ -183,6 +183,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
         queryDB("SELECT * FROM user_claims"),
         queryDB("SELECT * FROM attendance_corrections"),
         queryDB("SELECT * FROM leave_applications"),
+        queryDB("SELECT * FROM asset_requisitions"),
         queryDB("SELECT * FROM projects"),
         queryDB("SELECT id, name, email, role, created_at FROM users")
       ]);
@@ -191,6 +192,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       const userClaimMap = new Map<number, any>(userClaimRows.map((c: any) => [Number(c.id), c]));
       const attendanceCorrectionMap = new Map<number, any>(attendanceCorrectionRows.map((c: any) => [Number(c.id), c]));
       const leaveApplicationMap = new Map<number, any>(leaveApplicationRows.map((l: any) => [Number(l.id), l]));
+      const assetRequisitionMap = new Map<number, any>(assetRequisitionRows.map((r: any) => [Number(r.id), r]));
       const projectMap = new Map<number, any>(projects.map((p: any) => [Number(p.id), p]));
       const userMap = new Map<number, any>(users.map((u: any) => [Number(u.id), u]));
       const chainByStep = new Map<number, any>(chain.map((s: any) => [Number(s.step_order), s]));
@@ -235,6 +237,9 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
             sourceLabel = la
               ? `${leaveTypeLabel} \u2014 ${toDateOnlyString(la.start_date)} to ${toDateOnlyString(la.end_date)} (${Number(la.day_count)} day${Number(la.day_count) === 1 ? "" : "s"})`
               : "(application removed)";
+          } else if (r.source_type === "asset_requisition") {
+            const ar = assetRequisitionMap.get(Number(r.source_id));
+            sourceLabel = ar ? `Asset Requisition \u2014 ${ar.asset_category}` : "(requisition removed)";
           } else {
             const c = claimMap.get(Number(r.source_id));
             sourceLabel = c ? c.purpose : "(claim removed)";
@@ -437,6 +442,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
         .filter((r: any) => r.source_type === "attendance_correction")
         .map((r: any) => Number(r.source_id));
       const leaveApplicationIds = mine.filter((r: any) => r.source_type === "leave_application").map((r: any) => Number(r.source_id));
+      const assetRequisitionIds = mine.filter((r: any) => r.source_type === "asset_requisition").map((r: any) => Number(r.source_id));
       const requestedByIds = Array.from(
         new Set([
           ...mine.map((r: any) => Number(r.requested_by)),
@@ -448,10 +454,11 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       const fetchByIds = (table: string, ids: number[], columns = "*") =>
         ids.length === 0 ? Promise.resolve([]) : queryDB(`SELECT ${columns} FROM ${table} WHERE id IN (${ids.map(() => "?").join(",")})`, ids);
 
-      const [userClaimRows, attendanceCorrectionRows, leaveApplicationRows, requesterRows] = await Promise.all([
+      const [userClaimRows, attendanceCorrectionRows, leaveApplicationRows, assetRequisitionRows, requesterRows] = await Promise.all([
         fetchByIds("user_claims", userClaimIds),
         fetchByIds("attendance_corrections", attendanceCorrectionIds),
         fetchByIds("leave_applications", leaveApplicationIds),
+        fetchByIds("asset_requisitions", assetRequisitionIds),
         fetchByIds("users", requestedByIds, "id, name")
       ]);
       // attendance_corrections' project_name comes from a second lookup —
@@ -465,6 +472,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       const userClaimMap = new Map<number, any>(userClaimRows.map((c: any) => [Number(c.id), c]));
       const attendanceCorrectionMap = new Map<number, any>(attendanceCorrectionRows.map((c: any) => [Number(c.id), c]));
       const leaveApplicationMap = new Map<number, any>(leaveApplicationRows.map((l: any) => [Number(l.id), l]));
+      const assetRequisitionMap = new Map<number, any>(assetRequisitionRows.map((r: any) => [Number(r.id), r]));
       const projectMap = new Map<number, any>(projects.map((p: any) => [Number(p.id), p]));
       const requesterMap = new Map<number, any>(requesterRows.map((u: any) => [Number(u.id), u]));
 
@@ -495,6 +503,9 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
             sourceLabel = la
               ? `${leaveTypeLabel} \u2014 ${toDateOnlyString(la.start_date)} to ${toDateOnlyString(la.end_date)} (${Number(la.day_count)} day${Number(la.day_count) === 1 ? "" : "s"})`
               : "(application removed)";
+          } else if (r.source_type === "asset_requisition") {
+            const ar = assetRequisitionMap.get(Number(r.source_id));
+            sourceLabel = ar ? `Asset Requisition \u2014 ${ar.asset_category}` : "(requisition removed)";
           }
           return {
             id: r.id,
@@ -700,8 +711,8 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       // instead of left as the default virtual Supervisor position.
       const skipAutoSupervisor = !!req.body?.skip_auto_supervisor;
       if (!name) return res.status(400).json({ error: "Template name is required." });
-      if (!["conveyance", "leave", "timesheet"].includes(requestType)) {
-        return res.status(400).json({ error: "request_type must be one of conveyance, leave, timesheet." });
+      if (!["conveyance", "leave", "timesheet", "asset"].includes(requestType)) {
+        return res.status(400).json({ error: "request_type must be one of conveyance, leave, timesheet, asset." });
       }
       const steps = await validateTemplateSteps(req.body?.steps);
 
@@ -754,8 +765,8 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       const isActive = req.body?.is_active === false ? false : true;
       const skipAutoSupervisor = !!req.body?.skip_auto_supervisor;
       if (!name) return res.status(400).json({ error: "Template name is required." });
-      if (!["conveyance", "leave", "timesheet"].includes(requestType)) {
-        return res.status(400).json({ error: "request_type must be one of conveyance, leave, timesheet." });
+      if (!["conveyance", "leave", "timesheet", "asset"].includes(requestType)) {
+        return res.status(400).json({ error: "request_type must be one of conveyance, leave, timesheet, asset." });
       }
       if (requestType !== existing.request_type) {
         const assignedCount = await queryDB("SELECT COUNT(*) AS cnt FROM employee_template_assignments WHERE template_id = ?", [id]);
@@ -878,8 +889,8 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
   app.get("/api/template-assignments", authenticateToken, requireAdmin, requireModule("approvals"), async (req: any, res) => {
     try {
       const requestType = req.query?.request_type ? String(req.query.request_type) : null;
-      if (!requestType || !["conveyance", "leave", "timesheet"].includes(requestType)) {
-        return res.status(400).json({ error: "?request_type= is required (conveyance, leave, or timesheet)." });
+      if (!requestType || !["conveyance", "leave", "timesheet", "asset"].includes(requestType)) {
+        return res.status(400).json({ error: "?request_type= is required (conveyance, leave, timesheet, or asset)." });
       }
       const users = await queryDB("SELECT id, name, email, username, role FROM users ORDER BY name ASC");
       const assignments = await queryDB(
@@ -923,8 +934,8 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       const requestType = req.body?.request_type;
       const templateId = req.body?.template_id === null || req.body?.template_id === undefined ? null : Number(req.body.template_id);
       if (!Number.isFinite(employeeUserId)) return res.status(400).json({ error: "employee_user_id is required." });
-      if (!["conveyance", "leave", "timesheet"].includes(requestType)) {
-        return res.status(400).json({ error: "request_type must be one of conveyance, leave, timesheet." });
+      if (!["conveyance", "leave", "timesheet", "asset"].includes(requestType)) {
+        return res.status(400).json({ error: "request_type must be one of conveyance, leave, timesheet, asset." });
       }
       const userRows = await queryDB("SELECT id FROM users WHERE id = ?", [employeeUserId]);
       if (userRows.length === 0) return res.status(404).json({ error: "Employee account not found." });

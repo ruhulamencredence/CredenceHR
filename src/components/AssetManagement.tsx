@@ -59,8 +59,8 @@ interface Requisition {
 const emptyItem = (): RequisitionItem => ({ item_name: '', purpose: '', unit: 'pcs', quantity: 1 });
 
 const STATUS_LABEL: Record<Requisition['status'], string> = {
-  pending: 'Pending (Line Manager)',
-  manager_approved: 'Pending (IT/Admin)',
+  pending: 'Pending Approval',
+  manager_approved: 'Pending Approval',
   approved: 'Approved — awaiting dispatch',
   rejected: 'Rejected',
   dispatched: 'Dispatched — please acknowledge',

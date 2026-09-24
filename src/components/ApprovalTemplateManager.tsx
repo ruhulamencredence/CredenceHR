@@ -15,7 +15,8 @@ interface ApprovalTemplateManagerProps {
 const REQUEST_TYPES: { key: ApprovalRequestType; label: string }[] = [
   { key: 'conveyance', label: 'Conveyance Bill Claim' },
   { key: 'leave', label: 'Leave Application' },
-  { key: 'timesheet', label: 'Timesheet (Attendance Correction)' }
+  { key: 'timesheet', label: 'Timesheet (Attendance Correction)' },
+  { key: 'asset', label: 'Asset Requisition' }
 ];
 
 // A step still being edited in the Template modal — approvers kept as plain

@@ -4,16 +4,17 @@
  */
 
 // Admin Panel -> Asset Management — IT/Admin side: inventory (add/edit
-// assets), the final approval queue (after a request clears the Line
-// Manager step, or immediately if no manager is on file), and fulfilling an
-// approved request by handing over a specific in-stock item. Gated behind
-// the 'asset_management' AdminModuleKey the same way every other Admin
-// Panel tab is (Admin Panel -> Users -> Module Access).
+// assets), a read-only requisition status board, and fulfilling an approved
+// request by handing over a specific in-stock item. Gated behind the
+// 'asset_management' AdminModuleKey the same way every other Admin Panel tab
+// is (Admin Panel -> Users -> Module Access).
 //
-// NOT wired into AdminPanel.tsx yet — that file wasn't part of this export.
-// See CHANGES_asset_management.md for the exact snippet to drop into it
-// (a new tab entry + adding 'asset_management' to the AdminModuleKey union
-// in types.ts).
+// Approve/Reject itself is NOT done here — a requisition now routes through
+// the same Dynamic Approval Engine every other module uses (Admin Panel ->
+// Approvals, or "My Approvals" for a Supervisor who isn't otherwise an
+// Admin), configurable per Layer from Admin Panel -> Approvals -> Templates
+// (request_type 'asset') exactly like Conveyance/Leave/Timesheet. See the
+// design note above registerAssetManagementRoutes in AssetManagementRoutes.ts.
 
 import React, { useEffect, useState } from 'react';
 import { apiUrl } from '../lib/api';
@@ -102,22 +103,6 @@ export function AssetManagementAdmin() {
     }
   }
 
-  async function decide(id: number, decision: 'approve' | 'reject') {
-    const rejection_reason = decision === 'reject' ? window.prompt('Reason for rejection?') || '' : undefined;
-    try {
-      const res = await fetch(apiUrl(`/api/assets/requisitions/${id}/admin-decision`), {
-        method: 'PUT',
-        headers: authHeaders(),
-        body: JSON.stringify({ decision, rejection_reason })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Could not record decision.');
-      loadRequisitions();
-    } catch (err: any) {
-      setError(err.message);
-    }
-  }
-
   async function fulfill(id: number) {
     if (!fulfillAssetId) return;
     try {
@@ -162,6 +147,9 @@ export function AssetManagementAdmin() {
 
       {tab === 'approvals' && (
         <div className="space-y-3">
+          <div className="rounded bg-blue-50 text-blue-800 text-xs px-3 py-2">
+            Approve/Reject a requisition from Admin Panel → Approvals (or "My Approvals" if you're its Supervisor) — this board is read-only status + Fulfill/Hand Over once a request is Approved. Who approves which Layer is set from Admin Panel → Approvals → Templates (request type "Asset Requisition").
+          </div>
           {requisitions.length === 0 && <div className="text-sm text-gray-500">No requisitions yet.</div>}
           {requisitions.map((r) => (
             <div key={r.id} className="border rounded-lg p-4">
@@ -171,10 +159,7 @@ export function AssetManagementAdmin() {
                 </div>
                 <span className="text-xs font-medium px-2 py-1 rounded bg-gray-100 text-gray-700">{r.status}</span>
               </div>
-              <div className="text-xs text-gray-500 mt-1">
-                Requested: {r.created_at} • Urgency: {r.urgency}
-                {r.manager_name ? ` • Line Manager: ${r.manager_name}` : ' • No Line Manager on file'}
-              </div>
+              <div className="text-xs text-gray-500 mt-1">Requested: {r.created_at} • Urgency: {r.urgency}</div>
               <div className="mt-2 space-y-1">
                 {(r.items || []).map((it, idx) => (
                   <div key={idx} className="text-sm text-gray-600 flex items-baseline justify-between gap-2">
@@ -187,23 +172,6 @@ export function AssetManagementAdmin() {
                   </div>
                 ))}
               </div>
-
-              {(r.status === 'pending' || r.status === 'manager_approved') && (
-                <div className="flex gap-2 mt-3">
-                  <button
-                    onClick={() => decide(r.id, 'approve')}
-                    className="px-3 py-1.5 text-xs font-medium rounded bg-green-600 text-white hover:bg-green-700"
-                  >
-                    Approve
-                  </button>
-                  <button
-                    onClick={() => decide(r.id, 'reject')}
-                    className="px-3 py-1.5 text-xs font-medium rounded bg-red-600 text-white hover:bg-red-700"
-                  >
-                    Reject
-                  </button>
-                </div>
-              )}
 
               {r.status === 'approved' && (
                 <div className="mt-3">

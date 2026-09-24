@@ -959,7 +959,7 @@ CREATE TABLE IF NOT EXISTS user_claim_references (
 CREATE TABLE IF NOT EXISTS approval_templates (
   id INT AUTO_INCREMENT PRIMARY KEY,
   name VARCHAR(150) NOT NULL,
-  request_type ENUM('conveyance','leave','timesheet') NOT NULL,
+  request_type ENUM('conveyance','leave','timesheet','asset') NOT NULL,
   -- Company-wide fallback for this request_type — used whenever a submitting
   -- Employee has no row in employee_template_assignments for this
   -- request_type. "At most one default per request_type" is enforced in the
@@ -1010,7 +1010,7 @@ CREATE TABLE IF NOT EXISTS approval_template_step_approvers (
 CREATE TABLE IF NOT EXISTS employee_template_assignments (
   id INT AUTO_INCREMENT PRIMARY KEY,
   employee_user_id INT NOT NULL,
-  request_type ENUM('conveyance','leave','timesheet') NOT NULL,
+  request_type ENUM('conveyance','leave','timesheet','asset') NOT NULL,
   template_id INT NOT NULL,
   assigned_by INT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
