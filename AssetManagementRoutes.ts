@@ -57,6 +57,12 @@ interface AssetManagementRouteDeps {
   // 'asset_management' key granted via Admin Panel -> Users -> Module Access.
   requireModule: (moduleKey: "asset_management") => any;
   queryDB: (sql: string, params?: any[]) => Promise<any>;
+  // Same helper GrievanceRoutes.ts/VehicleManagementRoutes.ts use for their
+  // own canManage() — lets POST .../fulfill recognize a plain 'user' role
+  // account that holds the 'asset_management' Module Access grant, same as
+  // requireModule's own role-permissiveness (see wasFinalApprover's own
+  // callers below for the OTHER way in, no grant needed at all).
+  getAdminModules: (userId: number) => Promise<string[]>;
   createAlert: (
     queryDB: (sql: string, params?: any[]) => Promise<any>,
     params: { userId: number; type: AlertType; title: string; message: string; relatedType?: string; relatedId?: number }
@@ -203,11 +209,19 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
     requireAdmin,
     requireModule,
     queryDB,
+    getAdminModules,
     createAlert,
     createTemplateApprovalRequest,
     getCurrentStepApprovers,
     finalizeAssetRequisitionApproval
   } = deps;
+
+  async function canManage(userId: number, role: string): Promise<boolean> {
+    if (role === "superadmin") return true;
+    if (role !== "admin" && role !== "user") return false;
+    const modules = await getAdminModules(userId);
+    return modules.includes("asset_management");
+  }
 
   const requisitionSelectBase = `
     SELECT r.*, u.name AS employee_name, m.name AS manager_name, a.name AS asset_name, a.asset_tag AS asset_tag
@@ -286,6 +300,28 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
       result.push({ ...r, pending_with: names.length > 0 ? names.join(", ") : null });
     }
     return result;
+  }
+
+  // Was this account the one who cast the FINAL 'approved' action that
+  // actually cleared a requisition's Approval Workflow (the last entry in
+  // approval_requests.actions_json)? Answers "the person who approved this
+  // may want to also finish the job (dispatch a specific inventory item)
+  // without needing a SEPARATE 'asset_management' Module Access grant on
+  // top of already being trusted as a Template approver" — see POST
+  // .../requisitions/:id/fulfill and GET .../awaiting-my-fulfillment below.
+  // Same pattern as VehicleManagementRoutes.ts's own wasFinalApprover.
+  async function wasFinalApprover(requisitionId: number, userId: number): Promise<boolean> {
+    const requestRows: any = await queryDB("SELECT * FROM approval_requests WHERE source_type = ?", ["asset_requisition"]);
+    const request = requestRows.find((r: any) => Number(r.source_id) === requisitionId);
+    if (!request) return false;
+    let actions: any[] = [];
+    try {
+      actions = JSON.parse(request.actions_json || "[]");
+    } catch {
+      actions = [];
+    }
+    const last = actions[actions.length - 1];
+    return !!last && last.action === "approved" && Number(last.approver_id) === Number(userId);
   }
 
   // ---------------------------------------------------------------------
@@ -537,6 +573,43 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
     }
   });
 
+  // GET /api/assets/requisitions/awaiting-my-fulfillment — the OTHER half
+  // of "who does the Fulfill/Hand Over step": an account named as a
+  // Template approver (Admin Panel -> Approvals -> Templates) may hold NO
+  // 'asset_management' Module Access at all, so it has no Admin Panel page
+  // to go finish the job on once it approves. This is that page's
+  // self-service equivalent — no module gate, just "did I approve this"
+  // (wasFinalApprover) — so the exact same account that cleared the
+  // Approval Workflow can see and act on its own approved-but-undispatched
+  // requisitions without a Superadmin having to grant it Admin Panel access
+  // on top of already being trusted as an approver.
+  app.get("/api/assets/requisitions/awaiting-my-fulfillment", authenticateToken, async (req: any, res) => {
+    try {
+      const rows = await queryDB(`${requisitionSelectBase} WHERE r.status = ? ORDER BY r.created_at DESC`, ["approved"]);
+      const mine: any[] = [];
+      for (const r of rows) {
+        if (await wasFinalApprover(Number((r as any).id), req.user.id)) mine.push(r);
+      }
+      res.json(await attachItems(mine));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/assets/available — no module gate, just enough (id/name/
+  // asset_tag/category) for the asset picker on POST .../fulfill below, so
+  // an approver acting via the self-service route above can still pick an
+  // item without 'asset_management' Module Access. GET /api/assets (the
+  // full inventory record, Admin Panel's own list) stays module-gated.
+  app.get("/api/assets/available", authenticateToken, async (_req: any, res) => {
+    try {
+      const rows = await queryDB("SELECT * FROM assets WHERE status = ?", ["available"]);
+      res.json(rows.map((a: any) => ({ id: Number(a.id), asset_tag: a.asset_tag, name: a.name, category: a.category })));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ---------------------------------------------------------------------
   // IT/Admin (Admin Panel -> Asset Management) — gated behind the
   // 'asset_management' AdminModuleKey, same convention as every other
@@ -756,13 +829,22 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
   // Creates the asset_assignments row (the Employee then confirms receipt
   // via POST .../acknowledge above), flips the asset to 'assigned', and
   // moves the requisition to 'dispatched'.
-  app.post(
-    "/api/assets/requisitions/:id/fulfill",
-    authenticateToken,
-    requireAdmin,
-    requireModule("asset_management"),
-    async (req: any, res) => {
+  //
+  // NOT module-gated the way every other Admin Panel route in this file is —
+  // a plain 'asset_management' Module Access grant is one way in, but the
+  // account that just cleared THIS SPECIFIC requisition's Approval Workflow
+  // (wasFinalApprover) is also allowed to finish the job — see GET
+  // .../awaiting-my-fulfillment above for where that account finds this
+  // action without any Admin Panel access at all.
+  app.post("/api/assets/requisitions/:id/fulfill", authenticateToken, async (req: any, res) => {
       try {
+        const id = Number(req.params.id);
+        const manage = await canManage(req.user.id, req.user.role);
+        if (!manage && !(await wasFinalApprover(id, req.user.id))) {
+          return res
+            .status(403)
+            .json({ error: "You need Asset Management access, or to be this request's approver, to fulfill it." });
+        }
         const { asset_id, condition_on_assign } = req.body || {};
         if (!asset_id) return res.status(400).json({ error: "asset_id is required." });
 
@@ -801,8 +883,7 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
       } catch (err: any) {
         res.status(500).json({ error: err.message });
       }
-    }
-  );
+    });
 
   // PUT /api/assets/assignments/:id/return — Asset Return & Clearance:
   // IT/Admin actions an Employee's returned item (or a forced recall). Frees

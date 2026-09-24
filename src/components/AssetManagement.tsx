@@ -91,17 +91,34 @@ const STATUS_COLOR: Record<Requisition['status'], string> = {
   fulfilled: 'bg-gray-100 text-gray-700'
 };
 
+interface AvailableAsset {
+  id: number;
+  asset_tag: string;
+  name: string;
+  category: string;
+}
+
 function authHeaders(): HeadersInit {
   const token = localStorage.getItem('mpr_token');
   return { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
 }
 
 export function AssetManagement() {
-  const [tab, setTab] = useState<'my-assets' | 'requisition' | 'status'>('my-assets');
+  const [tab, setTab] = useState<'my-assets' | 'requisition' | 'status' | 'fulfill'>('my-assets');
   const [myAssets, setMyAssets] = useState<AssignedAsset[]>([]);
   const [requisitions, setRequisitions] = useState<Requisition[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // "Approved by Me — Fulfill" — flowchart's "ইনভেন্টরির ইউজারকে মালামাল
+  // প্রদান (Disburse)" step, reachable here (no Admin Panel/Module Access
+  // needed) by whoever's own approval action was the one that cleared a
+  // requisition's Approval Workflow. See GET
+  // /api/assets/requisitions/awaiting-my-fulfillment.
+  const [awaitingFulfillment, setAwaitingFulfillment] = useState<Requisition[]>([]);
+  const [availableAssets, setAvailableAssets] = useState<AvailableAsset[]>([]);
+  const [fulfillingFor, setFulfillingFor] = useState<number | null>(null);
+  const [fulfillAssetId, setFulfillAssetId] = useState('');
 
   const [items, setItems] = useState<RequisitionItem[]>([emptyItem()]);
   const [meta, setMeta] = useState({ urgency: 'medium', target_date: '' });
@@ -148,9 +165,31 @@ export function AssetManagement() {
     }
   }
 
+  async function loadAwaitingFulfillment() {
+    setLoading(true);
+    setError(null);
+    try {
+      const [reqRes, assetRes] = await Promise.all([
+        fetch(apiUrl('/api/assets/requisitions/awaiting-my-fulfillment'), { headers: authHeaders() }),
+        fetch(apiUrl('/api/assets/available'), { headers: authHeaders() })
+      ]);
+      const reqData = await reqRes.json();
+      const assetData = await assetRes.json();
+      if (!reqRes.ok) throw new Error(reqData.error || 'Failed to load requests awaiting fulfillment.');
+      if (!assetRes.ok) throw new Error(assetData.error || 'Failed to load available assets.');
+      setAwaitingFulfillment(reqData);
+      setAvailableAssets(assetData);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
   useEffect(() => {
     if (tab === 'my-assets') loadMyAssets();
     if (tab === 'status') loadRequisitions();
+    if (tab === 'fulfill') loadAwaitingFulfillment();
   }, [tab]);
 
   async function acknowledge(assignmentId: number) {
@@ -252,13 +291,32 @@ export function AssetManagement() {
     }
   }
 
+  async function fulfillRequisition(id: number) {
+    if (!fulfillAssetId) return;
+    try {
+      const res = await fetch(apiUrl(`/api/assets/requisitions/${id}/fulfill`), {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ asset_id: Number(fulfillAssetId) })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not fulfill this request.');
+      setFulfillingFor(null);
+      setFulfillAssetId('');
+      loadAwaitingFulfillment();
+    } catch (err: any) {
+      setError(err.message);
+    }
+  }
+
   return (
     <div className="w-full">
       <div className="flex gap-1 border-b border-gray-200 mb-4">
         {([
           ['my-assets', 'My Assets'],
           ['requisition', 'New Requisition'],
-          ['status', 'Requisition Status']
+          ['status', 'Requisition Status'],
+          ['fulfill', `Approved by Me${awaitingFulfillment.length > 0 ? ` (${awaitingFulfillment.length})` : ''}`]
         ] as const).map(([key, label]) => (
           <button
             key={key}
@@ -540,6 +598,80 @@ export function AssetManagement() {
               )}
             </div>
           ))}
+        </div>
+      )}
+
+      {tab === 'fulfill' && (
+        <div className="space-y-3">
+          <div className="rounded bg-blue-50 text-blue-800 text-xs px-3 py-2">
+            Requisitions you approved that are still waiting for a specific item to be handed over — no Asset Management Module
+            Access needed.
+          </div>
+          {loading && <div className="text-sm text-gray-500">Loading…</div>}
+          {!loading && awaitingFulfillment.length === 0 && (
+            <div className="text-sm text-gray-500">Nothing waiting on you right now.</div>
+          )}
+          {awaitingFulfillment.map((r) => {
+            const requestedNames = (r.items || []).map((it) => it.item_name.toLowerCase());
+            const matching = availableAssets.filter((a) => requestedNames.includes(a.category.toLowerCase()));
+            const rest = availableAssets.filter((a) => !requestedNames.includes(a.category.toLowerCase()));
+            return (
+              <div key={r.id} className="border rounded-lg p-4">
+                <div className="font-semibold text-gray-800">{r.asset_category}</div>
+                <div className="mt-2 space-y-1">
+                  {(r.items || []).map((it, idx) => (
+                    <div key={idx} className="text-sm text-gray-600 flex items-baseline justify-between gap-2">
+                      <span>
+                        <span className="font-medium text-gray-800">{it.item_name}</span> — {it.purpose}
+                      </span>
+                      <span className="text-xs text-gray-500 shrink-0">
+                        {it.quantity} {it.unit}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-3">
+                  {fulfillingFor === r.id ? (
+                    <div className="flex items-center gap-2">
+                      <select value={fulfillAssetId} onChange={(e) => setFulfillAssetId(e.target.value)} className="border rounded px-2 py-1 text-xs">
+                        <option value="">Pick an item…</option>
+                        {matching.map((a) => (
+                          <option key={a.id} value={a.id}>
+                            {a.name} ({a.asset_tag})
+                          </option>
+                        ))}
+                        {rest.length > 0 && matching.length > 0 && <option disabled>──────────</option>}
+                        {rest.map((a) => (
+                          <option key={a.id} value={a.id}>
+                            {a.name} ({a.asset_tag})
+                          </option>
+                        ))}
+                      </select>
+                      <button onClick={() => fulfillRequisition(r.id)} className="px-3 py-1.5 text-xs font-medium rounded bg-blue-600 text-white">
+                        Dispatch
+                      </button>
+                      <button
+                        onClick={() => setFulfillingFor(null)}
+                        className="px-3 py-1.5 text-xs font-medium rounded border border-gray-300 text-gray-600"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        setFulfillingFor(r.id);
+                        setFulfillAssetId('');
+                      }}
+                      className="px-3 py-1.5 text-xs font-medium rounded bg-blue-600 text-white hover:bg-blue-700"
+                    >
+                      Fulfill / Hand Over
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
