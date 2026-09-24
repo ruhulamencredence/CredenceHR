@@ -130,6 +130,32 @@ export async function ensurePayrollSchema(dbPool: any): Promise<void> {
         UNIQUE KEY unique_employee_month (employee_id, month_year)
       )
     `);
+    // Snapshot of the employee's Payment (Bank/MFS split) accounts AT THE
+    // MOMENT a payroll row was generated — a copy of the relevant
+    // employee_payment_accounts rows plus each one's actual disbursed amount
+    // for this run (net_salary * percentage / 100), never a live reference.
+    // Same "snapshot at creation time" convention as payrolls.basic_amount
+    // etc. themselves: if the employee's split is edited next month, every
+    // past payroll's disbursement record stays exactly as it was actually
+    // paid out. A payroll row with no rows here at all just means that
+    // employee had no split configured — paid out via payrolls.payment_method
+    // as a single disbursement, unchanged legacy behavior.
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS payroll_payment_splits (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        payroll_id INT NOT NULL,
+        account_type ENUM('bank', 'mfs') NOT NULL DEFAULT 'bank',
+        account_label VARCHAR(100) NOT NULL,
+        bank_name VARCHAR(150) NULL,
+        branch_name VARCHAR(150) NULL,
+        provider VARCHAR(50) NULL,
+        account_number VARCHAR(100) NOT NULL,
+        percentage DECIMAL(5, 2) NOT NULL DEFAULT 0.00,
+        amount DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (payroll_id) REFERENCES payrolls(id) ON DELETE CASCADE
+      )
+    `);
     // ---- Salary Structure Setup: Components & Pay Grades ------------------
     // salary_components — the reusable catalogue of Earning/Deduction line
     // items shown on the "Salary Templates / Components Setup" page (Basic,
@@ -397,6 +423,33 @@ function buildPayslipEmailHtml(record: any): string {
 
 export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
   const { authenticateToken, requireAdmin, requireModule, queryDB } = deps;
+
+  // Builds one employee's payroll disbursement split for a given Net Salary,
+  // from that employee's active employee_payment_accounts rows (Admin Panel
+  // -> Employees -> Edit -> Payment tab). Returns [] when the employee has no
+  // accounts configured — the caller falls back to the run's single global
+  // Payment Method for that employee, unchanged legacy behavior. Each
+  // account's amount is net_salary * percentage / 100, rounded the same way
+  // every other money figure here is (money()); if the accounts don't add up
+  // to exactly 100%, the remainder is simply undistributed (not an error) —
+  // the same "informational, not enforced by generation" spirit as
+  // payment_method itself.
+  async function buildPaymentSplit(employeeId: number, netSalary: number) {
+    const accounts = await queryDB(
+      "SELECT * FROM employee_payment_accounts WHERE employee_id = ? AND is_active = 1 ORDER BY sort_order ASC, id ASC",
+      [employeeId]
+    );
+    return accounts.map((a: any) => ({
+      account_type: a.account_type,
+      account_label: a.account_label,
+      bank_name: a.bank_name,
+      branch_name: a.branch_name,
+      provider: a.provider,
+      account_number: a.account_number,
+      percentage: Number(a.percentage),
+      amount: money(netSalary * (Number(a.percentage) / 100))
+    }));
+  }
 
   // Self Service -> Payroll landing ping. Kept for the existing frontend
   // call (PayrollModule.tsx) that confirms the module is wired end-to-end;
@@ -1357,7 +1410,11 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         [req.params.id]
       );
       if (rows.length === 0) return res.status(404).json({ error: "Payroll record not found." });
-      res.json(rows[0]);
+      // The Bank/MFS split snapshot taken when this row was generated (see
+      // buildPaymentSplit/generate-bulk) — [] for a run predating this
+      // feature, or one where the employee had no split configured.
+      const splitRows = await queryDB("SELECT * FROM payroll_payment_splits WHERE payroll_id = ?", [req.params.id]);
+      res.json({ ...rows[0], payment_split: splitRows.map((s: any) => ({ ...s, percentage: Number(s.percentage), amount: Number(s.amount) })) });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -2163,6 +2220,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
 
         const totalDeduction = money(absentDeduction + taxDeduction + pfDeduction + advanceDeduction + otherDed);
         const netSalary = money(grossEarned - taxDeduction - pfDeduction - advanceDeduction - otherDed);
+        const paymentSplit = await buildPaymentSplit(employeeId, netSalary);
 
         results.push({
           employee_id: employeeId,
@@ -2180,7 +2238,8 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
           advance_deduction: advanceDeduction,
           other_deduction: otherDed,
           total_deduction: totalDeduction,
-          net_salary: netSalary
+          net_salary: netSalary,
+          payment_split: paymentSplit
         });
       }
 
@@ -2271,6 +2330,12 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
 
           const totalDeduction = money(absentDeduction + taxDeduction + pfDeduction + advanceDeduction + otherDed);
           const netSalary = money(grossEarned - taxDeduction - pfDeduction - advanceDeduction - otherDed);
+          const paymentSplit = await buildPaymentSplit(employeeId, netSalary);
+          // An employee with a configured Bank/MFS split is paid out that
+          // way regardless of the run's single global Payment Method
+          // dropdown — that dropdown only applies as the fallback for
+          // employees with no split configured (see buildPaymentSplit).
+          const effectiveMethod = paymentSplit.length > 0 ? "Split (Bank/MFS)" : method;
 
           const result = await queryDB(
             `INSERT INTO payrolls
@@ -2285,13 +2350,24 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
               basicAmount, allowancesEarned, otAmount, bonus, grossEarned,
               absentDeduction, lateCount, lateDeductionDays, lateDeductionAmount,
               taxDeduction, pfDeduction, advanceDeduction, otherDed, totalDeduction,
-              netSalary, method, note, req.user.id
+              netSalary, effectiveMethod, note, req.user.id
             ]
           );
+          for (const split of paymentSplit) {
+            await queryDB(
+              `INSERT INTO payroll_payment_splits
+                 (payroll_id, account_type, account_label, bank_name, branch_name, provider, account_number, percentage, amount)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              [
+                result.insertId, split.account_type, split.account_label, split.bank_name, split.branch_name,
+                split.provider, split.account_number, split.percentage, split.amount
+              ]
+            );
+          }
           // Consume any staged bonus for this employee/month now that a
           // real run exists — prevents it from being offered/applied again.
           await queryDB("DELETE FROM pending_bonuses WHERE employee_id = ? AND month_year = ?", [employeeId, monthYear]);
-          results.push({ employee_id: employeeId, success: true, id: result.insertId, net_salary: netSalary });
+          results.push({ employee_id: employeeId, success: true, id: result.insertId, net_salary: netSalary, payment_split: paymentSplit });
         } catch (rowErr: any) {
           results.push({ employee_id: employeeId, success: false, error: rowErr?.code === "ER_DUP_ENTRY" ? "Payroll for this employee/month has already been generated." : (rowErr?.message || "Failed to generate payroll.") });
         }

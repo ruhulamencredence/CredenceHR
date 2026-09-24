@@ -26,6 +26,8 @@ export const memoryDb = {
   noticeDismissals: [] as any[],
   employees: [] as any[],
   employeeSupervisors: [] as any[],
+  employeePaymentAccounts: [] as any[],
+  payrollPaymentSplits: [] as any[],
   claims: [] as any[],
   approvalChainSteps: [] as any[],
   approvalRequests: [] as any[],
@@ -1479,6 +1481,116 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
     const rowId = Number(params[0]);
     memoryDb.employeeSupervisors = memoryDb.employeeSupervisors.filter((s: any) => s.id !== rowId);
     return { affectedRows: 1 };
+  }
+
+  // EMPLOYEE PAYMENT ACCOUNTS (Admin Panel -> Employees -> Edit -> Payment
+  // tab) — Bank/MFS disbursement split, read by Run Payroll's
+  // buildPaymentSplit (PayrollRoutes.ts) via the same "WHERE employee_id"
+  // shape with an extra "AND is_active = 1" it adds itself, distinguished
+  // below by lowerSql.includes rather than a second handler.
+  if (lowerSql.startsWith("select * from employee_payment_accounts where employee_id")) {
+    const employeeId = Number(params[0]);
+    let rows = memoryDb.employeePaymentAccounts.filter((r: any) => Number(r.employee_id) === employeeId);
+    if (lowerSql.includes("is_active = 1")) rows = rows.filter((r: any) => Number(r.is_active) === 1);
+    return [...rows].sort((a: any, b: any) => Number(a.sort_order) - Number(b.sort_order) || a.id - b.id);
+  }
+  if (lowerSql.startsWith("select percentage from employee_payment_accounts where employee_id")) {
+    const employeeId = Number(params[0]);
+    return memoryDb.employeePaymentAccounts
+      .filter((r: any) => Number(r.employee_id) === employeeId && Number(r.is_active) === 1)
+      .map((r: any) => ({ percentage: r.percentage }));
+  }
+  if (lowerSql.startsWith("select id, percentage from employee_payment_accounts where employee_id")) {
+    const employeeId = Number(params[0]);
+    const excludeId = Number(params[1]);
+    return memoryDb.employeePaymentAccounts
+      .filter((r: any) => Number(r.employee_id) === employeeId && Number(r.is_active) === 1 && Number(r.id) !== excludeId)
+      .map((r: any) => ({ id: r.id, percentage: r.percentage }));
+  }
+  if (lowerSql.startsWith("select * from employee_payment_accounts where id")) {
+    const rowId = Number(params[0]);
+    const employeeId = Number(params[1]);
+    return memoryDb.employeePaymentAccounts.filter((r: any) => Number(r.id) === rowId && Number(r.employee_id) === employeeId);
+  }
+  if (lowerSql.startsWith("select id from employee_payment_accounts where id")) {
+    const rowId = Number(params[0]);
+    const employeeId = Number(params[1]);
+    return memoryDb.employeePaymentAccounts
+      .filter((r: any) => Number(r.id) === rowId && Number(r.employee_id) === employeeId)
+      .map((r: any) => ({ id: r.id }));
+  }
+  if (lowerSql.startsWith("insert into employee_payment_accounts")) {
+    // is_active is a literal `1` in this INSERT's SQL text (not a `?`
+    // placeholder — see the route comment), so it's deliberately NOT among
+    // the destructured params below; sort_order is the 9th and last one.
+    const [employeeId, accountType, accountLabel, bankName, branchName, provider, accountNumber, percentage, sortOrder] = params;
+    const newId = memoryDb.employeePaymentAccounts.length ? Math.max(...memoryDb.employeePaymentAccounts.map((r: any) => r.id)) + 1 : 1;
+    memoryDb.employeePaymentAccounts.push({
+      id: newId,
+      employee_id: Number(employeeId),
+      account_type: accountType,
+      account_label: accountLabel,
+      bank_name: bankName ?? null,
+      branch_name: branchName ?? null,
+      provider: provider ?? null,
+      account_number: accountNumber,
+      percentage: Number(percentage),
+      is_active: 1,
+      sort_order: Number(sortOrder),
+      created_at: new Date()
+    });
+    return { insertId: newId };
+  }
+  // NOT "...accounts set" — the route's UPDATE is a multi-line template
+  // literal with a newline between the table name and SET, so lowerSql
+  // never actually contains that exact substring (see memoryDbFallback.ts's
+  // approval_template_step_approvers handler for this same pitfall).
+  if (lowerSql.startsWith("update employee_payment_accounts")) {
+    const [accountType, accountLabel, bankName, branchName, provider, accountNumber, percentage, isActive, rowId] = params;
+    const row = memoryDb.employeePaymentAccounts.find((r: any) => Number(r.id) === Number(rowId));
+    if (row) {
+      row.account_type = accountType;
+      row.account_label = accountLabel;
+      row.bank_name = bankName ?? null;
+      row.branch_name = branchName ?? null;
+      row.provider = provider ?? null;
+      row.account_number = accountNumber;
+      row.percentage = Number(percentage);
+      row.is_active = isActive ? 1 : 0;
+      row.updated_at = new Date();
+    }
+    return { affectedRows: row ? 1 : 0 };
+  }
+  if (lowerSql.startsWith("delete from employee_payment_accounts")) {
+    const rowId = Number(params[0]);
+    const before = memoryDb.employeePaymentAccounts.length;
+    memoryDb.employeePaymentAccounts = memoryDb.employeePaymentAccounts.filter((r: any) => Number(r.id) !== rowId);
+    return { affectedRows: before - memoryDb.employeePaymentAccounts.length };
+  }
+
+  // PAYROLL PAYMENT SPLITS — the per-payroll-row snapshot of the accounts
+  // above, taken at generation time (see PayrollRoutes.ts's generate-bulk).
+  if (lowerSql.startsWith("insert into payroll_payment_splits")) {
+    const [payrollId, accountType, accountLabel, bankName, branchName, provider, accountNumber, percentage, amount] = params;
+    const newId = memoryDb.payrollPaymentSplits.length ? Math.max(...memoryDb.payrollPaymentSplits.map((r: any) => r.id)) + 1 : 1;
+    memoryDb.payrollPaymentSplits.push({
+      id: newId,
+      payroll_id: Number(payrollId),
+      account_type: accountType,
+      account_label: accountLabel,
+      bank_name: bankName ?? null,
+      branch_name: branchName ?? null,
+      provider: provider ?? null,
+      account_number: accountNumber,
+      percentage: Number(percentage),
+      amount: Number(amount),
+      created_at: new Date()
+    });
+    return { insertId: newId };
+  }
+  if (lowerSql.startsWith("select * from payroll_payment_splits where payroll_id")) {
+    const payrollId = Number(params[0]);
+    return memoryDb.payrollPaymentSplits.filter((r: any) => Number(r.payroll_id) === payrollId);
   }
 
   // NOTICE TARGETS ("specific" users a notice is aimed at)
