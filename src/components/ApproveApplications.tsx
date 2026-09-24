@@ -21,7 +21,7 @@ interface ApproveApplicationsProps {
 // original, narrower version of this same shape.
 interface MyApprovalItem {
   id: number;
-  source_type: 'attendance' | 'claim' | 'user_claim' | 'attendance_correction' | 'leave_application' | 'leave_reliever' | 'exit_clearance' | 'asset_requisition';
+  source_type: 'attendance' | 'claim' | 'user_claim' | 'attendance_correction' | 'leave_application' | 'leave_reliever' | 'exit_clearance' | 'asset_requisition' | 'vehicle_requisition';
   source_id: number;
   source_label: string;
   source_amount: number | null;
@@ -59,6 +59,8 @@ const sourceTitle = (t: MyApprovalItem['source_type']) =>
     ? 'Exit Clearance'
     : t === 'asset_requisition'
     ? 'Asset Requisition'
+    : t === 'vehicle_requisition'
+    ? 'Vehicle Requisition'
     : 'Movement Claim';
 
 // "Self Service" -> "Approve Application" — reachable from the Navbar/Sidebar

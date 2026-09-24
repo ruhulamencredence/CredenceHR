@@ -16,7 +16,8 @@ const REQUEST_TYPES: { key: ApprovalRequestType; label: string }[] = [
   { key: 'conveyance', label: 'Conveyance Bill Claim' },
   { key: 'leave', label: 'Leave Application' },
   { key: 'timesheet', label: 'Timesheet (Attendance Correction)' },
-  { key: 'asset', label: 'Asset Requisition' }
+  { key: 'asset', label: 'Asset Requisition' },
+  { key: 'vehicle', label: 'Vehicle Requisition' }
 ];
 
 // Per-Request-Type Layer names — shown instead of the generic "Layer N" so
@@ -26,7 +27,10 @@ const REQUEST_TYPES: { key: ApprovalRequestType; label: string }[] = [
 // back to "Layer N", so this is purely additive — every existing template
 // (conveyance/leave/timesheet) keeps its current generic labels.
 const LAYER_NAMES: Partial<Record<ApprovalRequestType, Record<number, string>>> = {
-  asset: { 1: 'Supervisor Approval', 2: 'HR/IT Department Review' }
+  asset: { 1: 'Supervisor Approval', 2: 'HR/IT Department Review' },
+  // Vehicle Requisition Flowchart v1.0 — a single review diamond ("HR/Admin
+  // রিভিউ — গাড়ির অ্যাভেইলেবিলিটি চেক"), no separate Supervisor step.
+  vehicle: { 1: 'HR/Admin Review' }
 };
 function layerLabel(requestType: ApprovalRequestType, idx: number): string {
   const named = LAYER_NAMES[requestType]?.[idx + 1];
