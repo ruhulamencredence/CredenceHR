@@ -48,19 +48,48 @@ interface Requisition {
   items: RequisitionItem[];
 }
 
+// Flowchart's "গরমিল/ড্যামেজ -> অ্যাডজাস্টমেন্ট/ক্লেইম রিকোয়েস্ট -> ইনভেন্টরি
+// কর্তৃক সমস্যার সমাধান" branch — an Employee's report that a dispatched item
+// doesn't match what they requested (or arrived damaged/missing), filed
+// instead of Accept & Acknowledge (see AssetManagement.tsx).
+interface AssignmentClaim {
+  id: number;
+  assignment_id: number;
+  employee_name: string;
+  asset_id: number | null;
+  asset_name: string | null;
+  asset_tag: string | null;
+  issue_type: 'mismatch' | 'damaged' | 'missing' | 'other';
+  description: string;
+  status: 'pending' | 'resolved';
+  resolution_note: string | null;
+  created_at: string;
+}
+
+const ISSUE_TYPE_LABEL: Record<AssignmentClaim['issue_type'], string> = {
+  mismatch: 'Wrong item',
+  damaged: 'Damaged',
+  missing: 'Missing part/accessory',
+  other: 'Other'
+};
+
 function authHeaders(): HeadersInit {
   const token = localStorage.getItem('mpr_token');
   return { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
 }
 
 export function AssetManagementAdmin() {
-  const [tab, setTab] = useState<'inventory' | 'approvals'>('approvals');
+  const [tab, setTab] = useState<'inventory' | 'approvals' | 'claims'>('approvals');
   const [assets, setAssets] = useState<Asset[]>([]);
   const [requisitions, setRequisitions] = useState<Requisition[]>([]);
+  const [claims, setClaims] = useState<AssignmentClaim[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [newAsset, setNewAsset] = useState({ asset_tag: '', name: '', category: '', serial_number: '' });
   const [fulfillFor, setFulfillFor] = useState<number | null>(null);
   const [fulfillAssetId, setFulfillAssetId] = useState<string>('');
+  const [resolvingFor, setResolvingFor] = useState<number | null>(null);
+  const [resolveNote, setResolveNote] = useState('');
+  const [resolveReplacementId, setResolveReplacementId] = useState('');
 
   async function loadAssets() {
     try {
@@ -84,10 +113,48 @@ export function AssetManagementAdmin() {
     }
   }
 
+  async function loadClaims() {
+    try {
+      const res = await fetch(apiUrl('/api/assets/assignment-claims'), { headers: authHeaders() });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to load issue reports.');
+      setClaims(data);
+    } catch (err: any) {
+      setError(err.message);
+    }
+  }
+
   useEffect(() => {
     loadAssets();
     loadRequisitions();
+    loadClaims();
   }, []);
+
+  async function resolveClaim(id: number) {
+    if (!resolveNote.trim()) {
+      setError('Add a note on how this was resolved.');
+      return;
+    }
+    try {
+      const res = await fetch(apiUrl(`/api/assets/assignment-claims/${id}/resolve`), {
+        method: 'PUT',
+        headers: authHeaders(),
+        body: JSON.stringify({
+          resolution_note: resolveNote,
+          replacement_asset_id: resolveReplacementId ? Number(resolveReplacementId) : undefined
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not resolve this issue.');
+      setResolvingFor(null);
+      setResolveNote('');
+      setResolveReplacementId('');
+      loadClaims();
+      loadAssets();
+    } catch (err: any) {
+      setError(err.message);
+    }
+  }
 
   async function addAsset(e: React.FormEvent) {
     e.preventDefault();
@@ -129,6 +196,7 @@ export function AssetManagementAdmin() {
       <div className="flex gap-1 border-b border-gray-200 mb-4">
         {([
           ['approvals', 'Requisition Approvals'],
+          ['claims', `Issue Reports${claims.filter((c) => c.status === 'pending').length > 0 ? ` (${claims.filter((c) => c.status === 'pending').length})` : ''}`],
           ['inventory', 'Inventory']
         ] as const).map(([key, label]) => (
           <button
@@ -218,6 +286,90 @@ export function AssetManagementAdmin() {
                       className="px-3 py-1.5 text-xs font-medium rounded bg-blue-600 text-white hover:bg-blue-700"
                     >
                       Fulfill / Hand Over
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {tab === 'claims' && (
+        <div className="space-y-3">
+          <div className="rounded bg-blue-50 text-blue-800 text-xs px-3 py-2">
+            An Employee reported this instead of Accept &amp; Acknowledge — resolve it here (optionally swapping in a different in-stock
+            item) so they can go back and acknowledge normally.
+          </div>
+          {claims.length === 0 && <div className="text-sm text-gray-500">No issue reports.</div>}
+          {claims.map((c) => (
+            <div key={c.id} className="border rounded-lg p-4">
+              <div className="flex items-center justify-between">
+                <div className="font-semibold text-gray-800">
+                  {c.employee_name} — {c.asset_name || '(asset removed)'} {c.asset_tag ? `(${c.asset_tag})` : ''}
+                </div>
+                <span
+                  className={`text-xs font-medium px-2 py-1 rounded ${
+                    c.status === 'pending' ? 'bg-amber-100 text-amber-800' : 'bg-gray-100 text-gray-700'
+                  }`}
+                >
+                  {c.status === 'pending' ? 'Pending' : 'Resolved'}
+                </span>
+              </div>
+              <div className="text-xs text-gray-500 mt-1">Reported: {c.created_at} • {ISSUE_TYPE_LABEL[c.issue_type]}</div>
+              <div className="text-sm text-gray-700 mt-2">{c.description}</div>
+              {c.status === 'resolved' && c.resolution_note && (
+                <div className="text-xs text-green-700 mt-2">Resolution: {c.resolution_note}</div>
+              )}
+
+              {c.status === 'pending' && (
+                <div className="mt-3">
+                  {resolvingFor === c.id ? (
+                    <div className="space-y-2 max-w-lg">
+                      <textarea
+                        value={resolveNote}
+                        onChange={(e) => setResolveNote(e.target.value)}
+                        rows={2}
+                        placeholder="How was this resolved?"
+                        className="w-full border rounded px-2 py-1.5 text-xs"
+                      />
+                      <select
+                        value={resolveReplacementId}
+                        onChange={(e) => setResolveReplacementId(e.target.value)}
+                        className="w-full border rounded px-2 py-1.5 text-xs"
+                      >
+                        <option value="">No replacement needed (same item stays)</option>
+                        {availableAssets.map((a) => (
+                          <option key={a.id} value={a.id}>
+                            Replace with: {a.name} ({a.asset_tag})
+                          </option>
+                        ))}
+                      </select>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => resolveClaim(c.id)}
+                          className="px-3 py-1.5 text-xs font-medium rounded bg-green-600 text-white hover:bg-green-700"
+                        >
+                          Mark Resolved
+                        </button>
+                        <button
+                          onClick={() => setResolvingFor(null)}
+                          className="px-3 py-1.5 text-xs font-medium rounded border border-gray-300 text-gray-600 hover:bg-gray-50"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        setResolvingFor(c.id);
+                        setResolveNote('');
+                        setResolveReplacementId('');
+                      }}
+                      className="px-3 py-1.5 text-xs font-medium rounded bg-blue-600 text-white hover:bg-blue-700"
+                    >
+                      Resolve
                     </button>
                   )}
                 </div>

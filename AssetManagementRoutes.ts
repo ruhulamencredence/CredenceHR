@@ -169,6 +169,29 @@ export async function ensureAssetManagementSchema(dbPool: any): Promise<void> {
         FOREIGN KEY (assigned_by) REFERENCES users(id) ON DELETE CASCADE
       )
     `);
+    // Flowchart's "মালামাল কি ঠিক আছে? — না (গরমিল/ড্যামেজ) -> অ্যাডজাস্টমেন্ট/
+    // ক্লেইম রিকোয়েস্ট -> ইনভেন্টরি কর্তৃক সমস্যার সমাধান" branch: instead of
+    // Accept & Acknowledge, an Employee can report the handed-over item
+    // doesn't match the requisition (wrong item) or arrived damaged/missing.
+    // One row per report; resolving it (optionally swapping in a different
+    // asset) is what lets the Employee go back to a normal Acknowledge.
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS asset_assignment_claims (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        assignment_id INT NOT NULL,
+        employee_user_id INT NOT NULL,
+        issue_type ENUM('mismatch','damaged','missing','other') NOT NULL DEFAULT 'other',
+        description TEXT NOT NULL,
+        status ENUM('pending','resolved') NOT NULL DEFAULT 'pending',
+        resolution_note TEXT NULL,
+        resolved_by INT NULL,
+        resolved_at TIMESTAMP NULL DEFAULT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (assignment_id) REFERENCES asset_assignments(id) ON DELETE CASCADE,
+        FOREIGN KEY (employee_user_id) REFERENCES users(id) ON DELETE CASCADE,
+        FOREIGN KEY (resolved_by) REFERENCES users(id) ON DELETE SET NULL
+      )
+    `);
   } catch (err: any) {
     console.warn("⚠️ Could not ensure Asset Management tables exist: " + err.message);
   }
@@ -233,6 +256,9 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
   // ---------------------------------------------------------------------
 
   // GET /api/assets/my — assets currently assigned to me (My Assets tab).
+  // Each row also carries pending_claim (null once none/resolved) so the
+  // Employee sees "Issue Reported — Awaiting Resolution" instead of the
+  // Accept & Acknowledge button while IT/Admin is still working it.
   app.get("/api/assets/my", authenticateToken, async (req: any, res) => {
     try {
       const rows = await queryDB(
@@ -245,7 +271,14 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
           ORDER BY asg.assigned_date DESC`,
         [req.user.id]
       );
-      res.json(rows);
+      if (rows.length === 0) return res.json(rows);
+      const ids = rows.map((r: any) => r.assignment_id);
+      const claims = await queryDB(
+        `SELECT * FROM asset_assignment_claims WHERE assignment_id IN (${ids.map(() => "?").join(",")}) AND status = 'pending'`,
+        ids
+      );
+      const pendingByAssignment = new Map<number, any>(claims.map((c: any) => [Number(c.assignment_id), c]));
+      res.json(rows.map((r: any) => ({ ...r, pending_claim: pendingByAssignment.get(Number(r.assignment_id)) || null })));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -265,8 +298,65 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
       if (assignment.acknowledged_at) {
         return res.status(400).json({ error: "Already acknowledged." });
       }
+      const pendingClaims = await queryDB("SELECT id FROM asset_assignment_claims WHERE assignment_id = ? AND status = 'pending'", [
+        assignment.id
+      ]);
+      if (pendingClaims.length > 0) {
+        return res.status(400).json({ error: "You've already reported an issue on this item — wait for IT/Admin to resolve it first." });
+      }
       await queryDB("UPDATE asset_assignments SET acknowledged_at = NOW() WHERE id = ?", [assignment.id]);
       res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/assets/assignments/:id/report-issue — flowchart's "রিকুইজিশন
+  // অনুযায়ী মালামাল কি ঠিক আছে? -> না (গরমিল/ড্যামেজ) -> অ্যাডজাস্টমেন্ট/ক্লেইম
+  // রিকোয়েস্ট" branch: instead of Accept & Acknowledge, the Employee reports
+  // the handed-over item is wrong/damaged/missing. Blocks Acknowledge until
+  // IT/Admin resolves it (PUT .../resolve below).
+  app.post("/api/assets/assignments/:id/report-issue", authenticateToken, async (req: any, res) => {
+    try {
+      const { issue_type, description } = req.body || {};
+      const issueType = ["mismatch", "damaged", "missing", "other"].includes(issue_type) ? issue_type : "other";
+      const desc = String(description || "").trim();
+      if (!desc) return res.status(400).json({ error: "Describe the issue." });
+
+      const rows = await queryDB("SELECT * FROM asset_assignments WHERE id = ?", [req.params.id]);
+      const assignment = rows[0];
+      if (!assignment) return res.status(404).json({ error: "Assignment not found." });
+      if (assignment.employee_user_id !== req.user.id) {
+        return res.status(403).json({ error: "Not authorized." });
+      }
+      if (assignment.acknowledged_at) {
+        return res.status(400).json({ error: "This item was already acknowledged — use Request Return / Replace instead." });
+      }
+      const existing = await queryDB("SELECT id FROM asset_assignment_claims WHERE assignment_id = ? AND status = 'pending'", [
+        assignment.id
+      ]);
+      if (existing.length > 0) return res.status(400).json({ error: "An issue is already reported on this item and awaiting resolution." });
+
+      const result = await queryDB(
+        `INSERT INTO asset_assignment_claims (assignment_id, employee_user_id, issue_type, description)
+         VALUES (?, ?, ?, ?)`,
+        [assignment.id, req.user.id, issueType, desc]
+      );
+
+      const assetRows = await queryDB("SELECT * FROM assets WHERE id = ?", [assignment.asset_id]);
+      const asset = assetRows[0];
+      await createAlert(queryDB, {
+        userId: assignment.assigned_by,
+        type: "asset_requisition" as AlertType,
+        title: "Asset Issue Reported",
+        message: `${req.user.name || "An employee"} reported a problem with ${asset ? asset.name : "an asset"}${
+          asset ? ` (${asset.asset_tag})` : ""
+        }: ${desc}`,
+        relatedType: "asset_assignment_claim",
+        relatedId: result.insertId
+      });
+
+      res.json({ success: true, id: result.insertId });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -529,6 +619,100 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
       res.status(500).json({ error: err.message });
     }
   });
+
+  // GET /api/assets/assignment-claims — IT/Admin's queue for the flowchart's
+  // "গরমিল/ড্যামেজ" branch (POST .../report-issue above), optional ?status=
+  // filter (defaults to showing everything, newest first).
+  app.get("/api/assets/assignment-claims", authenticateToken, requireAdmin, requireModule("asset_management"), async (req: any, res) => {
+    try {
+      const clauses: string[] = [];
+      const params: any[] = [];
+      if (req.query.status) {
+        clauses.push("ac.status = ?");
+        params.push(req.query.status);
+      }
+      const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+      const rows = await queryDB(
+        `SELECT ac.*, u.name AS employee_name, asg.asset_id, a.name AS asset_name, a.asset_tag AS asset_tag
+           FROM asset_assignment_claims ac
+           JOIN asset_assignments asg ON asg.id = ac.assignment_id
+           JOIN users u ON u.id = ac.employee_user_id
+           LEFT JOIN assets a ON a.id = asg.asset_id
+          ${where}
+          ORDER BY ac.created_at DESC`,
+        params
+      );
+      res.json(rows);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // PUT /api/assets/assignment-claims/:id/resolve — flowchart's "ইনভেন্টরি
+  // কর্তৃক সমস্যার সমাধান": IT/Admin closes out a reported issue, optionally
+  // swapping in a different in-stock item (replacement_asset_id) when the
+  // original one was actually wrong/damaged — the Employee still has to
+  // Acknowledge afterwards either way (flowchart routes back to "ইউজার কর্তৃক
+  // সিস্টেমে প্রাপ্তি স্বীকার", not straight to closed).
+  app.put(
+    "/api/assets/assignment-claims/:id/resolve",
+    authenticateToken,
+    requireAdmin,
+    requireModule("asset_management"),
+    async (req: any, res) => {
+      try {
+        const { resolution_note, replacement_asset_id } = req.body || {};
+        const note = String(resolution_note || "").trim();
+        if (!note) return res.status(400).json({ error: "Add a note on how this was resolved." });
+
+        const claimRows = await queryDB("SELECT * FROM asset_assignment_claims WHERE id = ?", [req.params.id]);
+        const claim = claimRows[0];
+        if (!claim) return res.status(404).json({ error: "Claim not found." });
+        if (claim.status !== "pending") return res.status(400).json({ error: "This claim was already resolved." });
+
+        const assignmentRows = await queryDB("SELECT * FROM asset_assignments WHERE id = ?", [claim.assignment_id]);
+        const assignment = assignmentRows[0];
+        if (!assignment) return res.status(404).json({ error: "Assignment not found." });
+
+        if (replacement_asset_id) {
+          const newAssetRows = await queryDB("SELECT * FROM assets WHERE id = ?", [replacement_asset_id]);
+          const newAsset = newAssetRows[0];
+          if (!newAsset) return res.status(404).json({ error: "Replacement asset not found." });
+          if (newAsset.status !== "available") return res.status(400).json({ error: "That replacement asset is not currently available." });
+
+          // The original item goes to Maintenance rather than back to
+          // Available — it was reported wrong/damaged/missing, so it isn't
+          // safe to hand to the next requester untouched.
+          await queryDB("UPDATE assets SET status = 'maintenance' WHERE id = ?", [assignment.asset_id]);
+          await queryDB("UPDATE assets SET status = 'assigned' WHERE id = ?", [newAsset.id]);
+          await queryDB("UPDATE asset_assignments SET asset_id = ? WHERE id = ?", [newAsset.id, assignment.id]);
+          if (assignment.requisition_id) {
+            await queryDB("UPDATE asset_requisitions SET assigned_asset_id = ? WHERE id = ?", [newAsset.id, assignment.requisition_id]);
+          }
+        }
+
+        await queryDB(
+          `UPDATE asset_assignment_claims
+              SET status = 'resolved', resolution_note = ?, resolved_by = ?, resolved_at = NOW()
+            WHERE id = ?`,
+          [note, req.user.id, claim.id]
+        );
+
+        await createAlert(queryDB, {
+          userId: claim.employee_user_id,
+          type: "asset_requisition" as AlertType,
+          title: "Asset Issue Resolved",
+          message: `Your reported issue was resolved: ${note}${replacement_asset_id ? " A replacement item was assigned." : ""} Please Accept & Acknowledge in My Assets.`,
+          relatedType: "asset_assignment_claim",
+          relatedId: claim.id
+        });
+
+        res.json({ success: true });
+      } catch (err: any) {
+        res.status(500).json({ error: err.message });
+      }
+    }
+  );
 
   // POST /api/assets/requisitions/:id/fulfill — Digital Handover: IT/Admin
   // picks a specific 'available' asset from inventory and hands it over.
