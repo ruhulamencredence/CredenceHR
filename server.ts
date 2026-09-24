@@ -4650,6 +4650,7 @@ async function startServer() {
     requireAdmin,
     requireModule,
     queryDB,
+    getAdminModules,
     createAlert,
     createTemplateApprovalRequest,
     getCurrentStepApprovers,

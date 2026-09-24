@@ -197,6 +197,30 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
     return result;
   }
 
+  // Was this account the one who cast the FINAL 'approved' action that
+  // actually cleared a requisition's Approval Workflow (the last entry in
+  // approval_requests.actions_json)? Answers "the person who approved this
+  // may want to also finish the job (assign a vehicle+driver) without
+  // needing a SEPARATE 'vehicle_management' Module Access grant on top of
+  // already being trusted as a Template approver" — see PUT
+  // .../requisitions/:id/assign and GET .../awaiting-my-assignment below.
+  // Deliberately only the LAST action (not any earlier Layer, e.g. the
+  // Supervisor auto-layer) — the flowchart's "গাড়ি ও ড্রাইভার অ্যাসাইনমেন্ট"
+  // step is specifically HR/Admin's job, the Layer that actually cleared it.
+  async function wasFinalApprover(requisitionId: number, userId: number): Promise<boolean> {
+    const requestRows: any = await queryDB("SELECT * FROM approval_requests WHERE source_type = ?", ["vehicle_requisition"]);
+    const request = requestRows.find((r: any) => Number(r.source_id) === requisitionId);
+    if (!request) return false;
+    let actions: any[] = [];
+    try {
+      actions = JSON.parse(request.actions_json || "[]");
+    } catch {
+      actions = [];
+    }
+    const last = actions[actions.length - 1];
+    return !!last && last.action === "approved" && Number(last.approver_id) === Number(userId);
+  }
+
   function serialize(r: any, userById: Map<number, any>, vehicleById: Map<number, any>) {
     const vehicle = r.assigned_vehicle_id ? vehicleById.get(Number(r.assigned_vehicle_id)) : null;
     return {
@@ -259,6 +283,49 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
       const sorted = scoped.sort((a: any, b: any) => Number(b.id) - Number(a.id));
       const withPending = await attachPendingApprover(sorted);
       res.json(withPending.map((r: any) => serialize(r, userById, vehicleById)));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/vehicles/requisitions/awaiting-my-assignment — the OTHER half
+  // of the "who does the Assign Vehicle & Driver step" problem: an account
+  // named as a Template approver (Admin Panel -> Approvals -> Templates)
+  // may hold NO 'vehicle_management' Module Access at all, so it has no
+  // Admin Panel page to go finish the job on once it approves. This is that
+  // page's self-service equivalent — no module gate, just "did I approve
+  // this" (wasFinalApprover) — so the exact same account that cleared the
+  // Approval Workflow can see and act on its own approved-but-unassigned
+  // requisitions without a Superadmin having to grant it Admin Panel access
+  // on top of already being trusted as an approver.
+  app.get("/api/vehicles/requisitions/awaiting-my-assignment", authenticateToken, async (req: any, res: any) => {
+    try {
+      const { rows, userById, vehicleById } = await loadContext();
+      const approved = rows.filter((r: any) => r.status === "approved");
+      const mine: any[] = [];
+      for (const r of approved) {
+        if (await wasFinalApprover(Number(r.id), req.user.id)) mine.push(r);
+      }
+      const sorted = mine.sort((a: any, b: any) => Number(b.id) - Number(a.id));
+      res.json(sorted.map((r: any) => serialize(r, userById, vehicleById)));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/vehicles/available — no module gate, just enough (id/vehicle_no/
+  // model/vehicle_type) for the vehicle picker on PUT .../assign below, so an
+  // approver acting via the self-service route above can still pick a
+  // vehicle without 'vehicle_management' Module Access. GET /api/vehicles
+  // (the full inventory record, Admin Panel's own list) stays module-gated.
+  app.get("/api/vehicles/available", authenticateToken, async (_req: any, res: any) => {
+    try {
+      const rows: any = await queryDB("SELECT * FROM vehicles");
+      res.json(
+        rows
+          .filter((v: any) => v.status === "available")
+          .map((v: any) => ({ id: Number(v.id), vehicle_no: v.vehicle_no, model: v.model, vehicle_type: v.vehicle_type }))
+      );
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -584,9 +651,23 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
   // available vehicle and records the driver's name/mobile, then notifies
   // the requester (flowchart's "ইউজারকে কনফার্মেশন ও ড্রাইভার ডিটেইলস
   // নোটিফিকেশন প্রেরণ"). Moves the ride into 'ongoing'.
-  app.put("/api/vehicles/requisitions/:id/assign", ...adminGate, async (req: any, res: any) => {
+  //
+  // NOT module-gated the way every other Admin Panel route in this file is —
+  // a plain 'vehicle_management' Module Access grant is one way in, but the
+  // account that just cleared this SPECIFIC requisition's Approval Workflow
+  // (wasFinalApprover) is also allowed to finish the job, since the
+  // flowchart's HR/Admin actor is expected to review AND assign in one go —
+  // see GET .../awaiting-my-assignment above for where that account finds
+  // this action without any Admin Panel access at all.
+  app.put("/api/vehicles/requisitions/:id/assign", authenticateToken, async (req: any, res: any) => {
     try {
       const id = Number(req.params.id);
+      const manage = await canManage(req.user.id, req.user.role);
+      if (!manage && !(await wasFinalApprover(id, req.user.id))) {
+        return res
+          .status(403)
+          .json({ error: "You need Vehicle Management access, or to be this request's approver, to assign a vehicle." });
+      }
       const body = req.body || {};
       const vehicleId = Number(body.vehicle_id);
       const driverName = typeof body.driver_name === "string" ? body.driver_name.trim().slice(0, 150) : "";

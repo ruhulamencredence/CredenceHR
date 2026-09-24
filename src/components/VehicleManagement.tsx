@@ -58,6 +58,13 @@ const STATUS_COLOR: Record<Requisition['status'], string> = {
   completed: 'bg-blue-100 text-blue-800'
 };
 
+interface AvailableVehicle {
+  id: number;
+  vehicle_no: string;
+  model: string;
+  vehicle_type: string | null;
+}
+
 function authHeaders(): HeadersInit {
   const token = localStorage.getItem('mpr_token');
   return { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
@@ -73,7 +80,7 @@ const emptyForm = () => ({
 });
 
 export function VehicleManagement() {
-  const [tab, setTab] = useState<'book' | 'status'>('book');
+  const [tab, setTab] = useState<'book' | 'status' | 'assign'>('book');
   const [requisitions, setRequisitions] = useState<Requisition[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -84,6 +91,16 @@ export function VehicleManagement() {
 
   const [extendingFor, setExtendingFor] = useState<number | null>(null);
   const [extendNote, setExtendNote] = useState('');
+
+  // "Approved by Me — Assign Vehicle" — flowchart's "গাড়ি ও ড্রাইভার
+  // অ্যাসাইনমেন্ট" step, reachable here (no Admin Panel/Module Access
+  // needed) by whoever's own approval action was the one that cleared a
+  // requisition's Approval Workflow. See GET
+  // /api/vehicles/requisitions/awaiting-my-assignment.
+  const [awaitingAssignment, setAwaitingAssignment] = useState<Requisition[]>([]);
+  const [availableVehicles, setAvailableVehicles] = useState<AvailableVehicle[]>([]);
+  const [assigningFor, setAssigningFor] = useState<number | null>(null);
+  const [assignForm, setAssignForm] = useState({ vehicle_id: '', driver_name: '', driver_mobile: '' });
 
   async function loadRequisitions() {
     setLoading(true);
@@ -100,8 +117,30 @@ export function VehicleManagement() {
     }
   }
 
+  async function loadAwaitingAssignment() {
+    setLoading(true);
+    setError(null);
+    try {
+      const [reqRes, vehRes] = await Promise.all([
+        fetch(apiUrl('/api/vehicles/requisitions/awaiting-my-assignment'), { headers: authHeaders() }),
+        fetch(apiUrl('/api/vehicles/available'), { headers: authHeaders() })
+      ]);
+      const reqData = await reqRes.json();
+      const vehData = await vehRes.json();
+      if (!reqRes.ok) throw new Error(reqData.error || 'Failed to load requests awaiting assignment.');
+      if (!vehRes.ok) throw new Error(vehData.error || 'Failed to load available vehicles.');
+      setAwaitingAssignment(reqData);
+      setAvailableVehicles(vehData);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
   useEffect(() => {
     if (tab === 'status') loadRequisitions();
+    if (tab === 'assign') loadAwaitingAssignment();
   }, [tab]);
 
   async function submitRequisition(e: React.FormEvent) {
@@ -164,12 +203,34 @@ export function VehicleManagement() {
     }
   }
 
+  async function assignVehicle(id: number) {
+    if (!assignForm.vehicle_id || !assignForm.driver_name.trim() || !assignForm.driver_mobile.trim()) {
+      setError('Pick a vehicle and fill in the driver name & mobile number.');
+      return;
+    }
+    try {
+      const res = await fetch(apiUrl(`/api/vehicles/requisitions/${id}/assign`), {
+        method: 'PUT',
+        headers: authHeaders(),
+        body: JSON.stringify({ ...assignForm, vehicle_id: Number(assignForm.vehicle_id) })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not assign a vehicle to this request.');
+      setAssigningFor(null);
+      setAssignForm({ vehicle_id: '', driver_name: '', driver_mobile: '' });
+      loadAwaitingAssignment();
+    } catch (err: any) {
+      setError(err.message);
+    }
+  }
+
   return (
     <div className="w-full">
       <div className="flex gap-1 border-b border-gray-200 mb-4">
         {([
           ['book', 'Book a Ride'],
-          ['status', 'Ride Status']
+          ['status', 'Ride Status'],
+          ['assign', `Approved by Me${awaitingAssignment.length > 0 ? ` (${awaitingAssignment.length})` : ''}`]
         ] as const).map(([key, label]) => (
           <button
             key={key}
@@ -368,6 +429,80 @@ export function VehicleManagement() {
                   </div>
                 </div>
               )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {tab === 'assign' && (
+        <div className="space-y-3">
+          <div className="rounded bg-blue-50 text-blue-800 text-xs px-3 py-2">
+            Ride requests you approved that are still waiting for a vehicle + driver — the flowchart's own "গাড়ি ও ড্রাইভার
+            অ্যাসাইনমেন্ট" step, no Vehicle Management Module Access needed.
+          </div>
+          {loading && <div className="text-sm text-gray-500">Loading…</div>}
+          {!loading && awaitingAssignment.length === 0 && (
+            <div className="text-sm text-gray-500">Nothing waiting on you right now.</div>
+          )}
+          {awaitingAssignment.map((r) => (
+            <div key={r.id} className="border rounded-lg p-4">
+              <div className="font-semibold text-gray-800">
+                {r.pickup_location} → {r.destination}
+              </div>
+              <div className="text-xs text-gray-500 mt-1">
+                {r.ride_date} at {r.start_time} • Est. {r.estimated_duration_hours} hr{r.estimated_duration_hours === 1 ? '' : 's'}
+              </div>
+              <div className="text-sm text-gray-600 mt-2">{r.purpose}</div>
+
+              <div className="mt-3">
+                {assigningFor === r.id ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <select
+                      value={assignForm.vehicle_id}
+                      onChange={(e) => setAssignForm({ ...assignForm, vehicle_id: e.target.value })}
+                      className="border rounded px-2 py-1 text-xs"
+                    >
+                      <option value="">Pick a vehicle…</option>
+                      {availableVehicles.map((v) => (
+                        <option key={v.id} value={v.id}>
+                          {v.model} ({v.vehicle_no})
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      placeholder="Driver name"
+                      value={assignForm.driver_name}
+                      onChange={(e) => setAssignForm({ ...assignForm, driver_name: e.target.value })}
+                      className="border rounded px-2 py-1 text-xs"
+                    />
+                    <input
+                      placeholder="Driver mobile"
+                      value={assignForm.driver_mobile}
+                      onChange={(e) => setAssignForm({ ...assignForm, driver_mobile: e.target.value })}
+                      className="border rounded px-2 py-1 text-xs"
+                    />
+                    <button onClick={() => assignVehicle(r.id)} className="px-3 py-1.5 text-xs font-medium rounded bg-blue-600 text-white">
+                      Confirm Assignment
+                    </button>
+                    <button
+                      onClick={() => setAssigningFor(null)}
+                      className="px-3 py-1.5 text-xs font-medium rounded border border-gray-300 text-gray-600"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => {
+                      setAssigningFor(r.id);
+                      setAssignForm({ vehicle_id: '', driver_name: '', driver_mobile: '' });
+                    }}
+                    className="px-3 py-1.5 text-xs font-medium rounded bg-blue-600 text-white hover:bg-blue-700"
+                  >
+                    Assign Vehicle &amp; Driver
+                  </button>
+                )}
+              </div>
             </div>
           ))}
         </div>
