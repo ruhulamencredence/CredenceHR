@@ -498,6 +498,21 @@ CREATE TABLE IF NOT EXISTS asset_requisitions (
   FOREIGN KEY (assigned_asset_id) REFERENCES assets(id) ON DELETE SET NULL
 );
 
+-- Line items on a requisition (New Requisition can ask for several things
+-- at once — e.g. "Stapler x2" + "A4 Paper x5 reams" — each with its own
+-- purpose/unit/quantity). asset_requisitions.asset_category/reason still
+-- hold a one-line summary of these for anything that only needs a label.
+CREATE TABLE IF NOT EXISTS asset_requisition_items (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  requisition_id INT NOT NULL,
+  item_name VARCHAR(150) NOT NULL,
+  purpose TEXT NOT NULL,
+  unit VARCHAR(50) NOT NULL,
+  quantity DECIMAL(10,2) NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (requisition_id) REFERENCES asset_requisitions(id) ON DELETE CASCADE
+);
+
 CREATE TABLE IF NOT EXISTS asset_assignments (
   id INT AUTO_INCREMENT PRIMARY KEY,
   asset_id INT NOT NULL,

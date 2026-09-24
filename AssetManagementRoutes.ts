@@ -112,6 +112,25 @@ export async function ensureAssetManagementSchema(dbPool: any): Promise<void> {
         FOREIGN KEY (assigned_asset_id) REFERENCES assets(id) ON DELETE SET NULL
       )
     `);
+    // Line items on a requisition — an Employee's "New Requisition" can now
+    // ask for several things at once (e.g. "Stapler x2" + "A4 Paper x5
+    // reams"), each with its own purpose/unit/quantity. asset_requisitions
+    // itself still holds ONE summarized asset_category/reason (see
+    // summarizeItems() below) purely so every existing column/alert/message
+    // that reads requisition.asset_category or .reason keeps working
+    // unchanged — the itemized breakdown always lives here instead.
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS asset_requisition_items (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        requisition_id INT NOT NULL,
+        item_name VARCHAR(150) NOT NULL,
+        purpose TEXT NOT NULL,
+        unit VARCHAR(50) NOT NULL,
+        quantity DECIMAL(10,2) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (requisition_id) REFERENCES asset_requisitions(id) ON DELETE CASCADE
+      )
+    `);
     await dbPool.query(`
       CREATE TABLE IF NOT EXISTS asset_assignments (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -167,6 +186,40 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
       LEFT JOIN users m ON m.id = r.manager_id
       LEFT JOIN assets a ON a.id = r.assigned_asset_id
   `;
+
+  // A validated, non-empty items[] from the New Requisition form -> the
+  // single asset_category/reason string asset_requisitions itself stores
+  // (so Alerts messages and every other place that reads those two columns
+  // don't need to know about multi-item requisitions at all).
+  function summarizeItems(items: { item_name: string; purpose: string }[]): { category: string; reason: string } {
+    const category =
+      items.length === 1 ? items[0].item_name : `${items[0].item_name} +${items.length - 1} more`;
+    const reason = items.map((it) => `${it.item_name}: ${it.purpose}`).join(" | ");
+    return { category, reason };
+  }
+
+  // Attaches each requisition's line items (asset_requisition_items) as
+  // r.items. A requisition submitted before this feature existed has no
+  // child rows, so it falls back to a single synthetic item built from its
+  // own asset_category/reason/quantity-less legacy shape — old requests
+  // still render fine in the itemized UI without a data migration.
+  async function attachItems<T extends { id: number; asset_category: string; reason: string }>(rows: T[]): Promise<(T & { items: any[] })[]> {
+    if (rows.length === 0) return rows as (T & { items: any[] })[];
+    const ids = rows.map((r) => r.id);
+    const itemRows = await queryDB(
+      `SELECT * FROM asset_requisition_items WHERE requisition_id IN (${ids.map(() => "?").join(",")}) ORDER BY id ASC`,
+      ids
+    );
+    const byRequisition = new Map<number, any[]>();
+    for (const it of itemRows) {
+      if (!byRequisition.has(it.requisition_id)) byRequisition.set(it.requisition_id, []);
+      byRequisition.get(it.requisition_id)!.push(it);
+    }
+    return rows.map((r) => ({
+      ...r,
+      items: byRequisition.get(r.id) || [{ item_name: r.asset_category, purpose: r.reason, unit: "pcs", quantity: 1 }]
+    }));
+  }
 
   // ---------------------------------------------------------------------
   // Employee self-service (Employee Profile -> Asset Management)
@@ -243,13 +296,28 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
   // re-resolve the org chart on every read.
   app.post("/api/assets/requisitions", authenticateToken, async (req: any, res) => {
     try {
-      const { asset_category, reason, urgency, target_date, attachment_base64, attachment_filename, attachment_mimetype } = req.body || {};
+      const { items, urgency, target_date, attachment_base64, attachment_filename, attachment_mimetype } = req.body || {};
 
-      const category = String(asset_category || "").trim();
-      const reasonText = String(reason || "").trim();
-      if (!category) return res.status(400).json({ error: "Asset Type is required." });
-      if (!reasonText) return res.status(400).json({ error: "Reason for Request is required." });
+      if (!Array.isArray(items) || items.length === 0) {
+        return res.status(400).json({ error: "Add at least one item to the requisition." });
+      }
+      // Trim/validate every row up front — one bad row fails the whole
+      // request rather than silently dropping it (same "fail loud" pattern
+      // every other form-submit route in this app already follows).
+      const cleanItems = items.map((raw: any, idx: number) => {
+        const item_name = String(raw?.item_name || "").trim();
+        const purpose = String(raw?.purpose || "").trim();
+        const unit = String(raw?.unit || "").trim();
+        const quantity = Number(raw?.quantity);
+        if (!item_name) throw new Error(`Item #${idx + 1}: item name is required.`);
+        if (!purpose) throw new Error(`Item #${idx + 1}: purpose is required.`);
+        if (!unit) throw new Error(`Item #${idx + 1}: unit is required.`);
+        if (!Number.isFinite(quantity) || quantity <= 0) throw new Error(`Item #${idx + 1}: quantity must be greater than 0.`);
+        return { item_name, purpose, unit, quantity };
+      });
+
       const urgencyLevel = ["low", "medium", "high"].includes(urgency) ? urgency : "medium";
+      const { category, reason } = summarizeItems(cleanItems);
 
       let attachmentBuffer: Buffer | null = null;
       let mimetype: string | null = null;
@@ -270,15 +338,23 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
            (employee_user_id, asset_category, reason, urgency, target_date,
             attachment_filename, attachment_mimetype, attachment_data, manager_id, status)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
-        [req.user.id, category, reasonText, urgencyLevel, target_date || null, filename, mimetype, attachmentBuffer, managerId]
+        [req.user.id, category, reason, urgencyLevel, target_date || null, filename, mimetype, attachmentBuffer, managerId]
       );
+
+      for (const it of cleanItems) {
+        await queryDB(
+          `INSERT INTO asset_requisition_items (requisition_id, item_name, purpose, unit, quantity)
+           VALUES (?, ?, ?, ?, ?)`,
+          [result.insertId, it.item_name, it.purpose, it.unit, it.quantity]
+        );
+      }
 
       if (managerId) {
         await createAlert(queryDB, {
           userId: managerId,
           type: "asset_requisition" as AlertType,
           title: "New Asset Requisition",
-          message: `${req.user.name || "An employee"} requested a ${category}. Please review.`,
+          message: `${req.user.name || "An employee"} requested ${category}. Please review.`,
           relatedType: "asset_requisition",
           relatedId: result.insertId
         });
@@ -286,7 +362,7 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
 
       res.json({ success: true, id: result.insertId });
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      res.status(err.message?.startsWith("Item #") ? 400 : 500).json({ error: err.message });
     }
   });
 
@@ -298,7 +374,7 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
         `${requisitionSelectBase} WHERE r.employee_user_id = ? ORDER BY r.created_at DESC`,
         [req.user.id]
       );
-      res.json(rows);
+      res.json(await attachItems(rows));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -318,7 +394,7 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
         `${requisitionSelectBase} WHERE r.manager_id = ? AND r.status = 'pending' ORDER BY r.created_at ASC`,
         [req.user.id]
       );
-      res.json(rows);
+      res.json(await attachItems(rows));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -480,7 +556,7 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
       }
       const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
       const rows = await queryDB(`${requisitionSelectBase} ${where} ORDER BY r.created_at DESC`, params);
-      res.json(rows);
+      res.json(await attachItems(rows));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
