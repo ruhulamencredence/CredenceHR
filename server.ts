@@ -4759,7 +4759,9 @@ async function startServer() {
     getApprovalChain,
     performApprovalAction,
     toDateOnlyString,
-    attachApprovalStatuses
+    attachApprovalStatuses,
+    getCurrentStepApprovers,
+    createAlert
   });
 
   // 2d. Notices — Superadmin/Admin composes a popup (title + text/HTML + an

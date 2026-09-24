@@ -324,6 +324,60 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
     return !!last && last.action === "approved" && Number(last.approver_id) === Number(userId);
   }
 
+  // This requisition's "HR/Admin Review" layer approvers (ApprovalTemplate
+  // Manager.tsx's LAYER_NAMES step 2 — the Template's OWN step_order 1,
+  // always, regardless of whether the auto Supervisor gate is also active as
+  // a virtual step in front of it — a Template's own steps are always
+  // HR-first: normally Supervisor(auto) -> HR(step_order 1) -> Inventory
+  // (step_order 2), or, when skip_auto_supervisor's "জরুরি/HR Direct" path
+  // is used (VehicleManagementRoutes.ts's POST .../admin-create equivalent
+  // idea), HR/Admin's own step_order 1 IS the first real decision with no
+  // Supervisor layer at all — either way HR is step_order 1). Used to CC HR
+  // on every downstream operation (dispatch, issue reported/resolved,
+  // employee's final Acknowledge) even once their own approval step is long
+  // past and the request has moved on to Inventory/Store or fully cleared —
+  // so HR keeps full visibility over where every requisition/asset stands
+  // without having to be the one physically handling it (the user's
+  // "admin/superadmin won't be doing the hand-over work, but still needs to
+  // see it happen" requirement). Returns [] for a requisition with no
+  // Template at all (Supervisor-only or auto-approved) — there's no
+  // configured "HR layer" to notify in that case.
+  async function getHrLayerApprovers(requisitionId: number): Promise<{ user_id: number; user_name: string | null }[]> {
+    const requestRows: any = await queryDB("SELECT * FROM approval_requests WHERE source_type = ?", ["asset_requisition"]);
+    const request = requestRows.find((r: any) => Number(r.source_id) === requisitionId);
+    if (!request || !request.template_id) return [];
+    const rows = await queryDB(
+      `SELECT sa.user_id, u.name AS user_name
+       FROM approval_template_step_approvers sa
+       JOIN approval_template_steps s ON s.id = sa.step_id
+       LEFT JOIN users u ON u.id = sa.user_id
+       WHERE s.template_id = ? AND s.step_order = ?`,
+      [request.template_id, 1]
+    );
+    return rows.map((r: any) => ({ user_id: Number(r.user_id), user_name: r.user_name }));
+  }
+
+  // Alerts every HR/Admin-layer approver on this requisition — see
+  // getHrLayerApprovers above. Never throws — a notification failure
+  // shouldn't fail the actual operation it's reporting on.
+  async function notifyHrLayer(requisitionId: number, title: string, message: string) {
+    try {
+      const approvers = await getHrLayerApprovers(requisitionId);
+      for (const approver of approvers) {
+        await createAlert(queryDB, {
+          userId: approver.user_id,
+          type: "asset_requisition" as AlertType,
+          title,
+          message,
+          relatedType: "asset_requisition",
+          relatedId: requisitionId
+        });
+      }
+    } catch (err: any) {
+      console.warn("⚠️ Could not notify HR layer for Asset Requisition #" + requisitionId + ": " + err.message);
+    }
+  }
+
   // ---------------------------------------------------------------------
   // Employee self-service (Employee Profile -> Asset Management)
   // ---------------------------------------------------------------------
@@ -359,7 +413,12 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
 
   // POST /api/assets/assignments/:id/acknowledge — the "Accept & Acknowledge"
   // digital handover button: the Employee confirms they've received the
-  // asset. Only the assignment's own Employee may acknowledge it.
+  // asset 100% as requisitioned. Only the assignment's own Employee may
+  // acknowledge it. This is what closes out the REQUISITION as successful
+  // (status -> 'fulfilled') — the asset's own later physical return (if any,
+  // e.g. on resignation or no longer needing it) is a separate, unrelated
+  // asset_assignments lifecycle event (see PUT .../return below) and no
+  // longer what used to flip this status.
   app.post("/api/assets/assignments/:id/acknowledge", authenticateToken, async (req: any, res) => {
     try {
       const rows = await queryDB("SELECT * FROM asset_assignments WHERE id = ?", [req.params.id]);
@@ -378,6 +437,14 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
         return res.status(400).json({ error: "You've already reported an issue on this item — wait for IT/Admin to resolve it first." });
       }
       await queryDB("UPDATE asset_assignments SET acknowledged_at = NOW() WHERE id = ?", [assignment.id]);
+      if (assignment.requisition_id) {
+        await queryDB("UPDATE asset_requisitions SET status = 'fulfilled' WHERE id = ? AND status = 'dispatched'", [assignment.requisition_id]);
+        await notifyHrLayer(
+          Number(assignment.requisition_id),
+          "Asset Requisition Completed",
+          `${req.user.name || "The employee"} confirmed receipt — requisition #${assignment.requisition_id} is now successfully fulfilled.`
+        );
+      }
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -428,6 +495,13 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
         relatedType: "asset_assignment_claim",
         relatedId: result.insertId
       });
+      if (assignment.requisition_id) {
+        await notifyHrLayer(
+          Number(assignment.requisition_id),
+          "Asset Issue Reported",
+          `${req.user.name || "An employee"} reported a problem on requisition #${assignment.requisition_id}: ${desc}`
+        );
+      }
 
       res.json({ success: true, id: result.insertId });
     } catch (err: any) {
@@ -552,6 +626,15 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
           console.warn("⚠️ Could not notify the current-step approver for Asset Requisition #" + result.insertId + ": " + alertErr.message);
         }
       }
+
+      // HR/Admin layer stays CC'd from the very start, even on a step they
+      // aren't currently waiting on (e.g. still sitting with the requester's
+      // Supervisor) — see notifyHrLayer's own comment.
+      await notifyHrLayer(
+        Number(result.insertId),
+        "New Asset Requisition Submitted",
+        `${req.user.name || "An employee"} submitted a request for ${category}.`
+      );
 
       res.json({ success: true, id: result.insertId });
     } catch (err: any) {
@@ -816,6 +899,13 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
           relatedType: "asset_assignment_claim",
           relatedId: claim.id
         });
+        if (assignment.requisition_id) {
+          await notifyHrLayer(
+            Number(assignment.requisition_id),
+            "Asset Issue Resolved",
+            `The reported issue on requisition #${assignment.requisition_id} was resolved: ${note}`
+          );
+        }
 
         res.json({ success: true });
       } catch (err: any) {
@@ -878,6 +968,11 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
           relatedType: "asset_requisition",
           relatedId: requisition.id
         });
+        await notifyHrLayer(
+          Number(requisition.id),
+          "Asset Dispatched",
+          `${asset.name} (${asset.asset_tag}) was dispatched for requisition #${requisition.id}.`
+        );
 
         res.json({ success: true, assignment_id: result.insertId });
       } catch (err: any) {
@@ -888,8 +983,14 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
   // PUT /api/assets/assignments/:id/return — Asset Return & Clearance:
   // IT/Admin actions an Employee's returned item (or a forced recall). Frees
   // the asset back to 'available' unless it came back damaged/lost, in which
-  // case it's routed to 'maintenance'/'disposed' instead. Also marks the
-  // originating requisition (if any) 'fulfilled', closing its lifecycle.
+  // case it's routed to 'maintenance'/'disposed' instead. The originating
+  // requisition (if any) was already marked 'fulfilled' the moment the
+  // Employee Accept & Acknowledged it (POST .../acknowledge above) — a
+  // later physical return is a separate, unrelated asset_assignments event
+  // (resignation, no longer needed, etc.) and no longer re-touches
+  // asset_requisitions.status; the UPDATE below is a harmless no-op on the
+  // normal path (status is already 'fulfilled', not 'dispatched') and only
+  // still matters for a pre-existing row acknowledged before this change.
   app.put(
     "/api/assets/assignments/:id/return",
     authenticateToken,
