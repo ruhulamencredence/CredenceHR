@@ -27,7 +27,17 @@ const REQUEST_TYPES: { key: ApprovalRequestType; label: string }[] = [
 // back to "Layer N", so this is purely additive — every existing template
 // (conveyance/leave/timesheet) keeps its current generic labels.
 const LAYER_NAMES: Partial<Record<ApprovalRequestType, Record<number, string>>> = {
-  asset: { 1: 'Supervisor Approval', 2: 'HR/IT Department Review' },
+  // Layer 1 = requester's own Supervisor (auto-gate, skipped entirely when
+  // the requester IS their own Supervisor). Layer 2 = HR/Admin's own picked
+  // approvers, who review + decide. Layer 3 = the Store/Inventory
+  // Department's own picked approvers — approving THIS layer is what makes
+  // the requisition 'approved' and hands that same account the actual
+  // hand-over step (Employee Profile -> Asset Management -> "Approved by
+  // Me" — no separate Admin Panel access needed, see wasFinalApprover in
+  // AssetManagementRoutes.ts). A Template only needs Layer 3 configured if
+  // Inventory should also formally sign off before dispatch; a 2-layer
+  // Template still works exactly as before (HR/Admin fulfills directly).
+  asset: { 1: 'Supervisor Approval', 2: 'HR/Admin Review', 3: 'Inventory/Store Disbursement' },
   // Vehicle Requisition Flowchart v2.0 — "সুপারভাইজার অনুমোদন করেছেন?" then
   // "HR/Admin রিভিউ (গাড়ির অ্যাভেইলেবিলিটি চেক)": Layer 1 defaults to the
   // requester's own Supervisor (same auto-gate as Asset), Layer 2 is HR/

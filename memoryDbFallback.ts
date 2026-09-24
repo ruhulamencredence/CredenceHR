@@ -116,7 +116,19 @@ export const memoryDb = {
   // explicit handlers below (not simulateGenericTable — this table's INSERT
   // is an upsert with ON DUPLICATE KEY UPDATE, and its SELECTs use IN(...)/
   // a JOIN, neither of which the generic simulator understands).
-  chatPushTokens: [] as any[]
+  chatPushTokens: [] as any[],
+  // Alerts inbox (Alerts.ts's createAlert + GET/POST/DELETE /api/alerts*) —
+  // same "was missing a handler entirely" gap as chatPushTokens above: every
+  // createAlert() INSERT silently no-opped (no bespoke handler AND not in
+  // GENERIC_TABLES), so every notification this whole app sends — Approval
+  // Workflow step advances, Asset/Vehicle Requisition's HR-layer CC, Leave
+  // decisions, everything — read back as an empty inbox under memory
+  // fallback, with no error anywhere to reveal it. Not GENERIC_TABLES:
+  // its UPDATE/DELETE both filter on id AND user_id together (the generic
+  // simulator only ever matches a trailing `id`), and its SELECTs filter on
+  // user_id (never id) plus ORDER BY/LIMIT or a second is_read condition —
+  // see the explicit handlers below instead.
+  alerts: [] as any[]
 };
 
 // Generic simple-table CRUD simulator, used by every module below that has
@@ -2633,6 +2645,63 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
       // for chat_rooms/chat_room_members yet, so this always reads back
       // empty (pre-existing gap, unrelated to Alerts push).
       return [];
+    }
+  }
+
+  // Alerts inbox (see memoryDb.alerts above for why this needs its own
+  // handler instead of the generic one) — the exact 6 queries Alerts.ts
+  // issues, nothing else.
+  if (lowerSql.includes("from alerts") || lowerSql.includes("into alerts") || lowerSql.startsWith("update alerts")) {
+    if (lowerSql.startsWith("insert into alerts")) {
+      const [userId, type, title, message, relatedType, relatedId] = params;
+      const newId = memoryDb.alerts.length ? Math.max(...memoryDb.alerts.map((a: any) => Number(a.id))) + 1 : 1;
+      memoryDb.alerts.push({
+        id: newId,
+        user_id: Number(userId),
+        type,
+        title,
+        message,
+        related_type: relatedType,
+        related_id: relatedId,
+        is_read: 0,
+        created_at: new Date()
+      });
+      return { insertId: newId };
+    }
+    if (lowerSql.startsWith("select * from alerts where user_id")) {
+      const userId = Number(params[0]);
+      return memoryDb.alerts
+        .filter((a: any) => Number(a.user_id) === userId)
+        .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+        .slice(0, 50);
+    }
+    if (lowerSql.startsWith("select count(*) as cnt from alerts")) {
+      const userId = Number(params[0]);
+      const cnt = memoryDb.alerts.filter((a: any) => Number(a.user_id) === userId && !a.is_read).length;
+      return [{ cnt }];
+    }
+    if (lowerSql.startsWith("update alerts set is_read = 1 where id")) {
+      const [id, userId] = params;
+      const row = memoryDb.alerts.find((a: any) => Number(a.id) === Number(id) && Number(a.user_id) === Number(userId));
+      if (row) row.is_read = 1;
+      return { affectedRows: row ? 1 : 0 };
+    }
+    if (lowerSql.startsWith("update alerts set is_read = 1 where user_id")) {
+      const userId = Number(params[0]);
+      let affected = 0;
+      for (const a of memoryDb.alerts) {
+        if (Number(a.user_id) === userId && !a.is_read) {
+          a.is_read = 1;
+          affected++;
+        }
+      }
+      return { affectedRows: affected };
+    }
+    if (lowerSql.startsWith("delete from alerts where id")) {
+      const [id, userId] = params;
+      const before = memoryDb.alerts.length;
+      memoryDb.alerts = memoryDb.alerts.filter((a: any) => !(Number(a.id) === Number(id) && Number(a.user_id) === Number(userId)));
+      return { affectedRows: before - memoryDb.alerts.length };
     }
   }
 

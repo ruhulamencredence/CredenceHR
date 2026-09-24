@@ -29,6 +29,7 @@
 // rather than duplicated or re-imported directly.
 
 import type { Express } from "express";
+import type { AlertType } from "./Alerts";
 
 interface ApprovalRouteDeps {
   authenticateToken: any;
@@ -52,6 +53,19 @@ interface ApprovalRouteDeps {
   // 'user_claim' item, so an approver can open its location on a map without
   // a second permission-gated lookup.
   attachApprovalStatuses: (sourceType: "attendance" | "claim", rows: any[]) => Promise<any[]>;
+  // Who's authorized to act on a request's CURRENT step (server.ts) — reused
+  // here, AFTER performApprovalAction advances a multi-step chain to its next
+  // layer, to notify whoever that next layer's approver(s) now are (e.g. an
+  // Asset/Vehicle Requisition's Supervisor layer clearing hands the request
+  // to the HR/Admin layer, which otherwise would only find out by refreshing
+  // My Approvals). Only fires when the request stayed 'pending' past a real
+  // step advance — a final approve/reject already sends its own notification
+  // from inside performApprovalAction's per-source finalize/reject call.
+  getCurrentStepApprovers: (request: any) => Promise<{ user_id: number; user_name: string | null }[]>;
+  createAlert: (
+    queryDB: (sql: string, params?: any[]) => Promise<any>,
+    params: { userId: number; type: AlertType; title: string; message: string; relatedType?: string; relatedId?: number }
+  ) => Promise<void>;
 }
 
 export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
@@ -65,8 +79,50 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
     getApprovalChain,
     performApprovalAction,
     toDateOnlyString,
-    attachApprovalStatuses
+    attachApprovalStatuses,
+    getCurrentStepApprovers,
+    createAlert
   } = deps;
+
+  // Alert type + a friendly "waiting on you" label per source_type — used
+  // only by notifyNextStepApprovers below, so a step advance's notification
+  // reads naturally regardless of which module the request belongs to.
+  const SOURCE_TYPE_ALERT: Partial<Record<string, { type: AlertType; label: string }>> = {
+    user_claim: { type: "conveyance_claim", label: "Movement/Conveyance Claim" },
+    asset_requisition: { type: "asset_requisition", label: "Asset Requisition" },
+    vehicle_requisition: { type: "vehicle_requisition", label: "Vehicle Requisition" }
+  };
+
+  // Fires right after performApprovalAction advances a request to its NEXT
+  // step (status still 'pending', current_step already moved on) — tells
+  // that next step's approver(s) it's now waiting on them, instead of them
+  // only finding out by happening to open My Approvals. A no-op for source
+  // types with no alert mapping above (Attendance/Leave keep their existing
+  // reliever-style notifications) or a request whose new step has nobody
+  // assigned yet.
+  async function notifyNextStepApprovers(requestId: number, newStatus: string, actorName: string) {
+    if (newStatus !== "pending") return;
+    try {
+      const rows = await queryDB("SELECT * FROM approval_requests WHERE id = ?", [requestId]);
+      const request = rows[0];
+      if (!request) return;
+      const mapping = SOURCE_TYPE_ALERT[request.source_type];
+      if (!mapping) return;
+      const approvers = await getCurrentStepApprovers(request);
+      for (const approver of approvers) {
+        await createAlert(queryDB, {
+          userId: approver.user_id,
+          type: mapping.type,
+          title: `${mapping.label} Awaiting Your Approval`,
+          message: `${actorName || "A previous approver"} approved this ${mapping.label.toLowerCase()} — it's now waiting on your review.`,
+          relatedType: request.source_type,
+          relatedId: Number(request.source_id)
+        });
+      }
+    } catch (err: any) {
+      console.warn("⚠️ Could not notify next-step approver(s) for approval request #" + requestId + ": " + err.message);
+    }
+  }
 
   // Attaches a `claim_refs: [{ claim_id, amount, purpose, check_in_at,
   // check_out_at, distance_km, check_in_lat/lng, check_out_lat/lng, ... }]`
@@ -321,6 +377,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       const approvedAmount = req.body?.approved_amount != null && req.body.approved_amount !== "" ? Number(req.body.approved_amount) : null;
 
       const { status, current_step, billInfo } = await performApprovalAction(Number(id), req.user, action, remarks, billId, approvedAmount);
+      if (action === "approved") await notifyNextStepApprovers(Number(id), status, req.user.name);
       res.json({ success: true, status, current_step, ...billInfo });
     } catch (err: any) {
       res.status(err instanceof ApprovalActionError ? err.statusCode : 500).json({ error: err.message });
@@ -589,6 +646,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       const approvedAmount = req.body?.approved_amount != null && req.body.approved_amount !== "" ? Number(req.body.approved_amount) : null;
 
       const { status, current_step, billInfo } = await performApprovalAction(Number(id), req.user, action, remarks, billId, approvedAmount);
+      if (action === "approved") await notifyNextStepApprovers(Number(id), status, req.user.name);
       res.json({ success: true, status, current_step, ...billInfo });
     } catch (err: any) {
       res.status(err instanceof ApprovalActionError ? err.statusCode : 500).json({ error: err.message });
