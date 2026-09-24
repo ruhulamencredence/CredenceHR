@@ -1,22 +1,26 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Contact, Plus, Trash2, Edit2, X, Search, Eye, EyeOff, Mail, Phone, Briefcase, Building2, KeyRound, ShieldCheck,
-  FolderKanban, LayoutGrid, UserCircle2, ClipboardList, MapPin, Users2, Star, Link2, ArrowLeftRight, History, ArrowRight
+  FolderKanban, LayoutGrid, UserCircle2, ClipboardList, MapPin, Users2, Star, Link2, ArrowLeftRight, History, ArrowRight,
+  Landmark
 } from 'lucide-react';
-import { Employee, EmployeeSupervisor, EmployeeTransfer, User, Project, Department, Branch, AdminModuleKey, ADMIN_MODULES } from '../types';
+import { Employee, EmployeeSupervisor, EmployeePaymentAccount, EmployeeTransfer, User, Project, Department, Branch, AdminModuleKey, ADMIN_MODULES } from '../types';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
 
 // Add/Edit Employee modal tabs — Basic + Employee Info fields live under
 // "info", the rest mirror the reference HR system's own tab split (Status /
-// Contact / Supervisor), just restyled to this app's own design.
-type EmployeeFormTab = 'info' | 'status' | 'contact' | 'supervisor';
+// Contact / Supervisor), just restyled to this app's own design. "payment"
+// (Bank/MFS payroll disbursement split) is this app's own addition, not part
+// of that reference split.
+type EmployeeFormTab = 'info' | 'status' | 'contact' | 'supervisor' | 'payment';
 
 const FORM_TABS: { key: EmployeeFormTab; label: string; icon: React.ReactNode }[] = [
   { key: 'info', label: 'Employee Info', icon: <UserCircle2 className="w-3.5 h-3.5" /> },
   { key: 'status', label: 'Status', icon: <ClipboardList className="w-3.5 h-3.5" /> },
   { key: 'contact', label: 'Contact', icon: <MapPin className="w-3.5 h-3.5" /> },
-  { key: 'supervisor', label: 'Supervisor', icon: <Users2 className="w-3.5 h-3.5" /> }
+  { key: 'supervisor', label: 'Supervisor', icon: <Users2 className="w-3.5 h-3.5" /> },
+  { key: 'payment', label: 'Payment', icon: <Landmark className="w-3.5 h-3.5" /> }
 ];
 
 interface EmployeesPanelProps {
@@ -182,6 +186,31 @@ interface SupervisorFormState {
 
 const emptySupervisorForm: SupervisorFormState = { supervisor_id: '', effective_date: '', is_direct: false };
 
+// Payment tab's own small "add/edit one row" form — see
+// /api/employees/:id/payment-accounts. bank_name/branch_name apply to
+// account_type 'bank'; provider applies to 'mfs' (bKash/Nagad/Rocket/…).
+interface PaymentAccountFormState {
+  account_type: 'bank' | 'mfs';
+  account_label: string;
+  bank_name: string;
+  branch_name: string;
+  provider: string;
+  account_number: string;
+  percentage: string;
+}
+
+const emptyPaymentAccountForm: PaymentAccountFormState = {
+  account_type: 'bank',
+  account_label: '',
+  bank_name: '',
+  branch_name: '',
+  provider: '',
+  account_number: '',
+  percentage: ''
+};
+
+const MFS_PROVIDERS = ['bKash', 'Nagad', 'Rocket', 'Upay', 'SureCash'];
+
 // "Transfer / Change Role" modal form (Admin Panel -> Employees -> row
 // action) — POST /api/employees/:id/transfer. New Department/New Supervisor
 // left blank means "keep as-is"; only New Designation and Effective Date are
@@ -236,6 +265,15 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
   const [supervisorForm, setSupervisorForm] = useState<SupervisorFormState>(emptySupervisorForm);
   const [editingSupervisorRowId, setEditingSupervisorRowId] = useState<number | null>(null);
   const [savingSupervisor, setSavingSupervisor] = useState(false);
+
+  // Payment tab — same "loaded on demand for the employee currently being
+  // edited" shape as Supervisor above.
+  const [paymentAccounts, setPaymentAccounts] = useState<EmployeePaymentAccount[]>([]);
+  const [loadingPaymentAccounts, setLoadingPaymentAccounts] = useState(false);
+  const [paymentAccountForm, setPaymentAccountForm] = useState<PaymentAccountFormState>(emptyPaymentAccountForm);
+  const [editingPaymentAccountRowId, setEditingPaymentAccountRowId] = useState<number | null>(null);
+  const [savingPaymentAccount, setSavingPaymentAccount] = useState(false);
+  const [paymentAccountError, setPaymentAccountError] = useState<string | null>(null);
 
   // "Create Login" modal — for an existing Employee row that has no linked
   // user_id yet. Separate from the New Employee form's own create_login
@@ -347,6 +385,10 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
     setSupervisors([]);
     setSupervisorForm(emptySupervisorForm);
     setEditingSupervisorRowId(null);
+    setPaymentAccounts([]);
+    setPaymentAccountForm(emptyPaymentAccountForm);
+    setEditingPaymentAccountRowId(null);
+    setPaymentAccountError(null);
     setShowForm(true);
   };
 
@@ -408,8 +450,12 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
     setFormTab('info');
     setSupervisorForm(emptySupervisorForm);
     setEditingSupervisorRowId(null);
+    setPaymentAccountForm(emptyPaymentAccountForm);
+    setEditingPaymentAccountRowId(null);
+    setPaymentAccountError(null);
     setShowForm(true);
     fetchSupervisors(e.id);
+    fetchPaymentAccounts(e.id);
   };
 
   const closeForm = () => {
@@ -419,6 +465,10 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
     setSupervisors([]);
     setSupervisorForm(emptySupervisorForm);
     setEditingSupervisorRowId(null);
+    setPaymentAccounts([]);
+    setPaymentAccountForm(emptyPaymentAccountForm);
+    setEditingPaymentAccountRowId(null);
+    setPaymentAccountError(null);
   };
 
   // --- Supervisor tab ---
@@ -494,6 +544,106 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
       if (editingSupervisorRowId === rowId) {
         setEditingSupervisorRowId(null);
         setSupervisorForm(emptySupervisorForm);
+      }
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message || 'Something went wrong' });
+    }
+  };
+
+  // --- Payment tab (Bank/MFS payroll disbursement split) ---
+
+  const fetchPaymentAccounts = useCallback(async (employeeId: number) => {
+    setLoadingPaymentAccounts(true);
+    try {
+      const res = await fetch(apiUrl(`/api/employees/${employeeId}/payment-accounts`), { headers: authHeaders });
+      if (res.ok) setPaymentAccounts(await res.json());
+    } catch {
+      // Leave the previous list up rather than blanking it on a blip.
+    } finally {
+      setLoadingPaymentAccounts(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
+  const openAddPaymentAccount = () => {
+    setEditingPaymentAccountRowId(null);
+    setPaymentAccountForm(emptyPaymentAccountForm);
+    setPaymentAccountError(null);
+  };
+
+  const openEditPaymentAccount = (row: EmployeePaymentAccount) => {
+    setEditingPaymentAccountRowId(row.id);
+    setPaymentAccountForm({
+      account_type: row.account_type,
+      account_label: row.account_label,
+      bank_name: row.bank_name || '',
+      branch_name: row.branch_name || '',
+      provider: row.provider || '',
+      account_number: row.account_number,
+      percentage: String(row.percentage)
+    });
+    setPaymentAccountError(null);
+  };
+
+  const activePaymentAccountsTotal = paymentAccounts
+    .filter((a) => a.is_active && a.id !== editingPaymentAccountRowId)
+    .reduce((sum, a) => sum + a.percentage, 0);
+
+  // Same "plain click handler inside the Employee modal's own <form>" reason
+  // as handleSaveSupervisor above — no nested <form>.
+  const handleSavePaymentAccount = async () => {
+    if (!editingId) return;
+    setPaymentAccountError(null);
+    if (!paymentAccountForm.account_label.trim()) {
+      return setPaymentAccountError(paymentAccountForm.account_type === 'mfs' ? 'Give this MFS account a label (e.g. bKash 1).' : 'Give this Bank account a label (e.g. Bank 1).');
+    }
+    if (!paymentAccountForm.account_number.trim()) {
+      return setPaymentAccountError(paymentAccountForm.account_type === 'mfs' ? 'Mobile/Wallet number is required.' : 'Account number is required.');
+    }
+    const pct = Number(paymentAccountForm.percentage);
+    if (!Number.isFinite(pct) || pct <= 0 || pct > 100) {
+      return setPaymentAccountError('Percentage must be greater than 0 and at most 100.');
+    }
+    setSavingPaymentAccount(true);
+    try {
+      const url = editingPaymentAccountRowId
+        ? apiUrl(`/api/employees/${editingId}/payment-accounts/${editingPaymentAccountRowId}`)
+        : apiUrl(`/api/employees/${editingId}/payment-accounts`);
+      const res = await fetch(url, {
+        method: editingPaymentAccountRowId ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        body: JSON.stringify({
+          account_type: paymentAccountForm.account_type,
+          account_label: paymentAccountForm.account_label.trim(),
+          bank_name: paymentAccountForm.bank_name.trim() || null,
+          branch_name: paymentAccountForm.branch_name.trim() || null,
+          provider: paymentAccountForm.provider.trim() || null,
+          account_number: paymentAccountForm.account_number.trim(),
+          percentage: pct
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to save this payment account');
+      setPaymentAccountForm(emptyPaymentAccountForm);
+      setEditingPaymentAccountRowId(null);
+      fetchPaymentAccounts(editingId);
+    } catch (err: any) {
+      setPaymentAccountError(err.message || 'Something went wrong');
+    } finally {
+      setSavingPaymentAccount(false);
+    }
+  };
+
+  const handleDeletePaymentAccount = async (rowId: number) => {
+    if (!editingId) return;
+    if (!confirm('Remove this payment account?')) return;
+    try {
+      const res = await fetch(apiUrl(`/api/employees/${editingId}/payment-accounts/${rowId}`), { method: 'DELETE', headers: authHeaders });
+      if (!res.ok) throw new Error((await res.json()).error || 'Failed to remove');
+      fetchPaymentAccounts(editingId);
+      if (editingPaymentAccountRowId === rowId) {
+        setEditingPaymentAccountRowId(null);
+        setPaymentAccountForm(emptyPaymentAccountForm);
       }
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message || 'Something went wrong' });
@@ -1019,7 +1169,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                 saved once (it needs a real employee id to attach rows to). */}
             <div className="flex items-center gap-1 px-5 pt-3 border-b border-slate-200 overflow-x-auto sticky top-[65px] bg-white z-10">
               {FORM_TABS.map((t) => {
-                const disabled = t.key === 'supervisor' && !editingId;
+                const disabled = (t.key === 'supervisor' || t.key === 'payment') && !editingId;
                 const active = formTab === t.key;
                 return (
                   <button
@@ -1027,7 +1177,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                     type="button"
                     disabled={disabled}
                     onClick={() => setFormTab(t.key)}
-                    title={disabled ? 'Save the employee first to manage Supervisors' : undefined}
+                    title={disabled ? `Save the employee first to manage ${t.label}` : undefined}
                     className={`flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-t-lg border-b-2 whitespace-nowrap transition-colors ${
                       active
                         ? 'border-blue-600 text-blue-700'
@@ -1462,15 +1612,195 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                 </div>
               )}
 
+              {formTab === 'payment' && editingId && (
+                <div className="space-y-4">
+                  <div className="rounded-xl border border-slate-200 p-3.5 space-y-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
+                      <Landmark className="w-3.5 h-3.5 text-slate-400" /> {editingPaymentAccountRowId ? 'Edit Account' : 'Add Bank / MFS Account'}
+                    </p>
+                    <div className="flex items-center gap-4">
+                      {(['bank', 'mfs'] as const).map((t) => (
+                        <label key={t} className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer">
+                          <input
+                            type="radio"
+                            checked={paymentAccountForm.account_type === t}
+                            onChange={() => setPaymentAccountForm((f) => ({ ...f, account_type: t, provider: t === 'mfs' ? f.provider : '', bank_name: t === 'bank' ? f.bank_name : '' }))}
+                            className="w-3.5 h-3.5 text-blue-600 focus:ring-blue-600 cursor-pointer"
+                          />
+                          {t === 'bank' ? 'Bank' : 'MFS (bKash/Nagad/Rocket)'}
+                        </label>
+                      ))}
+                    </div>
+                    <div className="grid sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">Label *</label>
+                        <input
+                          type="text"
+                          value={paymentAccountForm.account_label}
+                          onChange={(e) => setPaymentAccountForm((f) => ({ ...f, account_label: e.target.value }))}
+                          placeholder={paymentAccountForm.account_type === 'mfs' ? 'e.g. bKash 1' : 'e.g. Bank 1'}
+                          className="block w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">Percentage of Net Salary *</label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={100}
+                          step="0.01"
+                          value={paymentAccountForm.percentage}
+                          onChange={(e) => setPaymentAccountForm((f) => ({ ...f, percentage: e.target.value }))}
+                          placeholder="e.g. 70"
+                          className="block w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                        />
+                      </div>
+                    </div>
+                    {paymentAccountForm.account_type === 'bank' ? (
+                      <div className="grid sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">Bank Name</label>
+                          <input
+                            type="text"
+                            value={paymentAccountForm.bank_name}
+                            onChange={(e) => setPaymentAccountForm((f) => ({ ...f, bank_name: e.target.value }))}
+                            placeholder="e.g. Dutch-Bangla Bank"
+                            className="block w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">Branch</label>
+                          <input
+                            type="text"
+                            value={paymentAccountForm.branch_name}
+                            onChange={(e) => setPaymentAccountForm((f) => ({ ...f, branch_name: e.target.value }))}
+                            placeholder="e.g. Gulshan Branch"
+                            className="block w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                          />
+                        </div>
+                      </div>
+                    ) : (
+                      <div>
+                        <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">Provider</label>
+                        <select
+                          value={paymentAccountForm.provider}
+                          onChange={(e) => setPaymentAccountForm((f) => ({ ...f, provider: e.target.value }))}
+                          className="block w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                        >
+                          <option value="">Select provider…</option>
+                          {MFS_PROVIDERS.map((p) => (
+                            <option key={p} value={p}>{p}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                    <div>
+                      <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">
+                        {paymentAccountForm.account_type === 'mfs' ? 'Mobile / Wallet Number *' : 'Account Number *'}
+                      </label>
+                      <input
+                        type="text"
+                        value={paymentAccountForm.account_number}
+                        onChange={(e) => setPaymentAccountForm((f) => ({ ...f, account_number: e.target.value }))}
+                        placeholder={paymentAccountForm.account_type === 'mfs' ? 'e.g. 01XXXXXXXXX' : 'e.g. 1234567890123'}
+                        className="block w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                      />
+                    </div>
+                    {paymentAccountError && <p className="text-xs text-rose-600">{paymentAccountError}</p>}
+                    <p className="text-[11px] text-slate-500">
+                      Active accounts so far total <span className="font-semibold">{activePaymentAccountsTotal}%</span>
+                      {paymentAccountForm.percentage && Number.isFinite(Number(paymentAccountForm.percentage))
+                        ? ` — adding this one makes ${(Math.round((activePaymentAccountsTotal + Number(paymentAccountForm.percentage)) * 100) / 100)}%.`
+                        : ' of Net Salary.'}
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleSavePaymentAccount}
+                        disabled={savingPaymentAccount}
+                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl shadow-sm transition-all disabled:opacity-50"
+                      >
+                        {savingPaymentAccount ? 'Saving…' : editingPaymentAccountRowId ? 'Save Changes' : 'Add Account'}
+                      </button>
+                      {editingPaymentAccountRowId && (
+                        <button type="button" onClick={openAddPaymentAccount} className="px-3 py-2 text-xs font-semibold text-slate-500 hover:bg-slate-100 rounded-xl transition-colors">
+                          Cancel Edit
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-slate-200 overflow-hidden">
+                    {loadingPaymentAccounts ? (
+                      <div className="flex items-center justify-center py-8 text-slate-400 gap-2 text-xs">
+                        <Spinner size={14} /> Loading payment accounts…
+                      </div>
+                    ) : paymentAccounts.length === 0 ? (
+                      <p className="text-xs text-slate-400 text-center py-8">
+                        No Bank/MFS account set up yet — Payroll will use the Run Payroll wizard's single Payment Method for this employee.
+                      </p>
+                    ) : (
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="bg-slate-50 border-b border-slate-200">
+                            <th className="px-3 py-2 text-left font-semibold uppercase tracking-wider text-slate-500">Account</th>
+                            <th className="px-3 py-2 text-left font-semibold uppercase tracking-wider text-slate-500">Details</th>
+                            <th className="px-3 py-2 text-right font-semibold uppercase tracking-wider text-slate-500">%</th>
+                            <th className="px-3 py-2 text-left font-semibold uppercase tracking-wider text-slate-500">Status</th>
+                            <th className="px-3 py-2 text-right font-semibold uppercase tracking-wider text-slate-500">Action</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {paymentAccounts.map((a) => (
+                            <tr key={a.id} className="hover:bg-slate-50/80 transition-colors">
+                              <td className="px-3 py-2.5 font-semibold text-slate-900">
+                                {a.account_label}
+                                <span className="ml-1.5 inline-flex items-center text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500">
+                                  {a.account_type === 'mfs' ? (a.provider || 'MFS') : 'Bank'}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2.5 text-slate-500">
+                                {a.account_type === 'bank' ? [a.bank_name, a.branch_name].filter(Boolean).join(' — ') || '—' : a.provider || '—'}
+                                <span className="ml-1.5 font-mono text-slate-400">{a.account_number}</span>
+                              </td>
+                              <td className="px-3 py-2.5 text-right font-semibold text-slate-700">{a.percentage}%</td>
+                              <td className="px-3 py-2.5">
+                                <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${a.is_active ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                                  {a.is_active ? 'Active' : 'Inactive'}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2.5 text-right">
+                                <div className="flex items-center justify-end gap-1">
+                                  <button type="button" onClick={() => openEditPaymentAccount(a)} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Edit">
+                                    <Edit2 className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button type="button" onClick={() => handleDeletePaymentAccount(a.id)} className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors" title="Remove">
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-slate-400">
+                    Net Salary is split across these active accounts by percentage each payroll run. Leave this empty to keep paying this
+                    employee via Run Payroll's single Payment Method instead.
+                  </p>
+                </div>
+              )}
+
               <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
                 <button
                   type="button"
                   onClick={closeForm}
                   className="px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors"
                 >
-                  {formTab === 'supervisor' ? 'Close' : 'Cancel'}
+                  {formTab === 'supervisor' || formTab === 'payment' ? 'Close' : 'Cancel'}
                 </button>
-                {formTab !== 'supervisor' && (
+                {formTab !== 'supervisor' && formTab !== 'payment' && (
                   <button
                     type="submit"
                     disabled={saving}

@@ -57,6 +57,22 @@ interface WizardRow {
   pending_bonus_amount?: number;
 }
 
+// One Bank/MFS disbursement line of an employee's Payment split (Admin Panel
+// -> Employees -> Edit -> Payment tab), pre-computed server-side against this
+// employee's Net Salary for this run — see buildPaymentSplit in
+// PayrollRoutes.ts. Empty/absent for an employee with no split configured,
+// who's paid via this wizard's single Payment Method dropdown instead.
+interface PaymentSplitLine {
+  account_type: 'bank' | 'mfs';
+  account_label: string;
+  bank_name: string | null;
+  branch_name: string | null;
+  provider: string | null;
+  account_number: string;
+  percentage: number;
+  amount: number;
+}
+
 interface PreviewResult {
   employee_id: number;
   error?: string;
@@ -75,6 +91,7 @@ interface PreviewResult {
   other_deduction?: number;
   total_deduction?: number;
   net_salary?: number;
+  payment_split?: PaymentSplitLine[];
 }
 
 interface SubmitResult {
@@ -550,7 +567,22 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
                           const p = previewResults.get(r.employee_id);
                           return (
                             <tr key={r.employee_id}>
-                              <td className="px-3 py-2 whitespace-nowrap font-medium text-slate-800">{r.employee_name}</td>
+                              <td className="px-3 py-2 whitespace-nowrap font-medium text-slate-800">
+                                {r.employee_name}
+                                {p && !p.error && p.payment_split && p.payment_split.length > 0 && (
+                                  <div className="mt-0.5 flex flex-wrap gap-1">
+                                    {p.payment_split.map((s, i) => (
+                                      <span
+                                        key={i}
+                                        title={`${s.account_type === 'mfs' ? s.provider || 'MFS' : [s.bank_name, s.branch_name].filter(Boolean).join(' — ')} · ${s.account_number} · ${money(s.amount)}`}
+                                        className="inline-flex items-center text-[10px] font-normal px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-700"
+                                      >
+                                        {s.account_label} {s.percentage}%
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                              </td>
                               <td className="px-3 py-2 text-right">{p && !p.error ? money(p.gross_earned) : '—'}</td>
                               <td className="px-3 py-2 text-right text-rose-600">{p && !p.error ? money(p.total_deduction) : '—'}</td>
                               <td className="px-3 py-2 text-right font-semibold text-slate-900">{p && !p.error ? money(p.net_salary) : '—'}</td>
@@ -579,7 +611,7 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
                     </table>
                   </div>
                   <div className="flex items-center gap-2 mt-3">
-                    <label className="text-[11px] text-slate-500">Payment Method</label>
+                    <label className="text-[11px] text-slate-500">Payment Method (for employees with no Bank/MFS split set up)</label>
                     <select
                       value={paymentMethod}
                       onChange={(e) => setPaymentMethod(e.target.value)}
@@ -591,6 +623,10 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
                       <option>Cheque</option>
                     </select>
                   </div>
+                  <p className="text-[10px] text-slate-400 mt-1">
+                    An employee with Bank/MFS accounts set up (Admin Panel → Employees → Edit → Payment tab) is always paid out by that
+                    split instead — the badges above show each account's share of Net Salary.
+                  </p>
                 </>
               )}
             </div>
