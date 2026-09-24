@@ -31,6 +31,7 @@ import { registerRecruitmentRoutes, ensureRecruitmentSchema } from "./Recruitmen
 import { registerGrievanceRoutes, ensureGrievanceSchema } from "./GrievanceRoutes";
 import { registerHRAnalyticsRoutes } from "./HRAnalyticsRoutes";
 import { registerDocumentVaultRoutes, ensureDocumentVaultSchema } from "./DocumentVaultRoutes";
+import { registerErp360SsoRoutes } from "./Erp360SsoRoutes";
 import { Server as SocketIOServer } from "socket.io";
 import { ensureChatSchema, registerChatRoutes, setupChatSocket } from "./ChatRoutes";
 import { memoryDb, queryMemoryDb, EMPLOYEE_BOOL_FIELDS } from "./memoryDbFallback";
@@ -4551,6 +4552,13 @@ async function startServer() {
     createTemplateApprovalRequest,
     getCurrentStepApprovers,
     finalizeAssetRequisitionApproval
+  });
+
+  // 360 ERP SSO (Sidebar -> "360 ERP") — kept in its own file, same reasoning
+  // as AssetManagementRoutes.ts/PayrollRoutes.ts above.
+  registerErp360SsoRoutes(app, {
+    authenticateToken,
+    queryDB
   });
 
   // Employee Transfer (Admin Panel -> Employees -> "Transfer / Change Role")
