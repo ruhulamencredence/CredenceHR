@@ -360,7 +360,7 @@ export interface ApprovalChainStep {
 // which layer it's waiting on right now while status is 'pending'.
 export interface ApprovalRequest {
   id: number;
-  source_type: 'attendance' | 'claim' | 'user_claim' | 'attendance_correction';
+  source_type: 'attendance' | 'claim' | 'user_claim' | 'attendance_correction' | 'leave_application' | 'asset_requisition';
   event_type: 'check_in' | 'check_out' | 'submit';
   source_id: number;
   requested_by: number;
