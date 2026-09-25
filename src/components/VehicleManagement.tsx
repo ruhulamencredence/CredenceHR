@@ -117,9 +117,17 @@ export function VehicleManagement() {
     }
   }
 
-  async function loadAwaitingAssignment() {
-    setLoading(true);
-    setError(null);
+  // silent = true skips the page-wide loading/error state — used for the
+  // on-mount call below so the "Approved by Me" tab's count badge is
+  // accurate the moment this screen opens (Book a Ride is the default tab),
+  // instead of only refreshing once the person happens to click that tab —
+  // without flashing a loading spinner over whichever tab they're actually
+  // looking at.
+  async function loadAwaitingAssignment(silent = false) {
+    if (!silent) {
+      setLoading(true);
+      setError(null);
+    }
     try {
       const [reqRes, vehRes] = await Promise.all([
         fetch(apiUrl('/api/vehicles/requisitions/awaiting-my-assignment'), { headers: authHeaders() }),
@@ -132,9 +140,9 @@ export function VehicleManagement() {
       setAwaitingAssignment(reqData);
       setAvailableVehicles(vehData);
     } catch (err: any) {
-      setError(err.message);
+      if (!silent) setError(err.message);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }
 
@@ -142,6 +150,12 @@ export function VehicleManagement() {
     if (tab === 'status') loadRequisitions();
     if (tab === 'assign') loadAwaitingAssignment();
   }, [tab]);
+
+  // Runs once on mount, regardless of which tab is active, purely so the
+  // "Approved by Me" tab shows its real count right away.
+  useEffect(() => {
+    loadAwaitingAssignment(true);
+  }, []);
 
   async function submitRequisition(e: React.FormEvent) {
     e.preventDefault();
