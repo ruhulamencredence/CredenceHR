@@ -165,9 +165,17 @@ export function AssetManagement() {
     }
   }
 
-  async function loadAwaitingFulfillment() {
-    setLoading(true);
-    setError(null);
+  // silent = true skips the page-wide loading/error state — used for the
+  // on-mount call below so the "Approved by Me" tab's count badge is
+  // accurate the moment this screen opens (My Assets is the default tab),
+  // instead of only refreshing once the person happens to click that tab —
+  // without flashing a loading spinner over whichever tab they're actually
+  // looking at.
+  async function loadAwaitingFulfillment(silent = false) {
+    if (!silent) {
+      setLoading(true);
+      setError(null);
+    }
     try {
       const [reqRes, assetRes] = await Promise.all([
         fetch(apiUrl('/api/assets/requisitions/awaiting-my-fulfillment'), { headers: authHeaders() }),
@@ -180,9 +188,9 @@ export function AssetManagement() {
       setAwaitingFulfillment(reqData);
       setAvailableAssets(assetData);
     } catch (err: any) {
-      setError(err.message);
+      if (!silent) setError(err.message);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }
 
@@ -191,6 +199,12 @@ export function AssetManagement() {
     if (tab === 'status') loadRequisitions();
     if (tab === 'fulfill') loadAwaitingFulfillment();
   }, [tab]);
+
+  // Runs once on mount, regardless of which tab is active, purely so the
+  // "Approved by Me" tab shows its real count right away.
+  useEffect(() => {
+    loadAwaitingFulfillment(true);
+  }, []);
 
   async function acknowledge(assignmentId: number) {
     try {
