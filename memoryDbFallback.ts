@@ -233,6 +233,14 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
     const email = params[0];
     return memoryDb.users.filter(u => u.email === email);
   }
+  // GET /api/debug/supervisor-resolution (server.ts) — case-insensitive
+  // email lookup.
+  if (lowerSql.startsWith("select id, name, email, role from users where lower(email)")) {
+    const email = String(params[0] || "").toLowerCase();
+    return memoryDb.users
+      .filter((u: any) => String(u.email || "").toLowerCase() === email)
+      .map((u: any) => ({ id: u.id, name: u.name, email: u.email, role: u.role }));
+  }
   if (lowerSql.startsWith("select * from users where id")) {
     const id = params[0];
     return memoryDb.users.filter(u => u.id === id);
@@ -1513,6 +1521,12 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
   if (lowerSql.startsWith("select * from all_employees where id")) {
     const id = Number(params[0]);
     return memoryDb.employees.filter((e: any) => e.id === id);
+  }
+  // GET /api/debug/supervisor-resolution (server.ts) — the one place this
+  // needs a user_id-scoped lookup instead of the id-scoped one above.
+  if (lowerSql.startsWith("select * from all_employees where user_id")) {
+    const userId = Number(params[0]);
+    return memoryDb.employees.filter((e: any) => Number(e.user_id) === userId);
   }
   if (lowerSql.startsWith("select * from all_employees")) {
     return [...memoryDb.employees];
