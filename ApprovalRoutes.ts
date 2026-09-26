@@ -517,11 +517,20 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       const fetchByIds = (table: string, ids: number[], columns = "*") =>
         ids.length === 0 ? Promise.resolve([]) : queryDB(`SELECT ${columns} FROM ${table} WHERE id IN (${ids.map(() => "?").join(",")})`, ids);
 
-      const [userClaimRows, attendanceCorrectionRows, leaveApplicationRows, assetRequisitionRows, vehicleRequisitionRows, requesterRows] = await Promise.all([
+      const [userClaimRows, attendanceCorrectionRows, leaveApplicationRows, assetRequisitionRows, assetRequisitionItemRows, vehicleRequisitionRows, requesterRows] = await Promise.all([
         fetchByIds("user_claims", userClaimIds),
         fetchByIds("attendance_corrections", attendanceCorrectionIds),
         fetchByIds("leave_applications", leaveApplicationIds),
         fetchByIds("asset_requisitions", assetRequisitionIds),
+        // Line items (item_name/purpose/unit/quantity) — needed so the
+        // approver's card can show the full itemized requisition, not just
+        // the one-line asset_category summary sourceLabel already carries.
+        assetRequisitionIds.length === 0
+          ? Promise.resolve([])
+          : queryDB(
+              `SELECT * FROM asset_requisition_items WHERE requisition_id IN (${assetRequisitionIds.map(() => "?").join(",")})`,
+              assetRequisitionIds
+            ),
         fetchByIds("vehicle_requisitions", vehicleRequisitionIds),
         fetchByIds("users", requestedByIds, "id, name")
       ]);
@@ -537,6 +546,17 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       const attendanceCorrectionMap = new Map<number, any>(attendanceCorrectionRows.map((c: any) => [Number(c.id), c]));
       const leaveApplicationMap = new Map<number, any>(leaveApplicationRows.map((l: any) => [Number(l.id), l]));
       const assetRequisitionMap = new Map<number, any>(assetRequisitionRows.map((r: any) => [Number(r.id), r]));
+      const assetRequisitionItemsMap = new Map<number, any[]>();
+      for (const it of assetRequisitionItemRows) {
+        const reqId = Number(it.requisition_id);
+        if (!assetRequisitionItemsMap.has(reqId)) assetRequisitionItemsMap.set(reqId, []);
+        assetRequisitionItemsMap.get(reqId)!.push({
+          item_name: it.item_name,
+          purpose: it.purpose,
+          unit: it.unit,
+          quantity: Number(it.quantity)
+        });
+      }
       const vehicleRequisitionMap = new Map<number, any>(vehicleRequisitionRows.map((r: any) => [Number(r.id), r]));
       const projectMap = new Map<number, any>(projects.map((p: any) => [Number(p.id), p]));
       const requesterMap = new Map<number, any>(requesterRows.map((u: any) => [Number(u.id), u]));
@@ -575,6 +595,25 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
             const vr = vehicleRequisitionMap.get(Number(r.source_id));
             sourceLabel = vr ? `Vehicle Requisition \u2014 ${vr.pickup_location} \u2192 ${vr.destination}` : "(requisition removed)";
           }
+          // Full requisition details for the card's "click to expand" view \u2014
+          // only populated for asset_requisition (see AssetRequisitionDetails
+          // in ApproveApplications.tsx); source_label above stays the
+          // one-line summary every other list/notification already reads.
+          let assetRequisitionDetails: any = null;
+          if (r.source_type === "asset_requisition") {
+            const ar = assetRequisitionMap.get(Number(r.source_id));
+            if (ar) {
+              assetRequisitionDetails = {
+                asset_category: ar.asset_category,
+                reason: ar.reason,
+                urgency: ar.urgency,
+                target_date: ar.target_date ? toDateOnlyString(ar.target_date) : null,
+                has_attachment: !!ar.attachment_filename,
+                attachment_filename: ar.attachment_filename || null,
+                items: assetRequisitionItemsMap.get(Number(r.source_id)) || []
+              };
+            }
+          }
           return {
             id: r.id,
             source_type: r.source_type,
@@ -586,7 +625,8 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
             requested_by_name: requesterMap.get(Number(r.requested_by))?.name || null,
             current_step: r.current_step,
             total_steps: r.total_steps,
-            created_at: r.created_at
+            created_at: r.created_at,
+            asset_requisition_details: assetRequisitionDetails
           };
         }),
         ...relieverItems.map((la: any) => {
