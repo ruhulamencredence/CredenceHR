@@ -88,9 +88,10 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
   }
 
   if (showAssetManagement) {
-    // AssetManagement.tsx owns its full page chrome (background, ModulePath,
-    // Back button, header card) — same self-contained pattern as
-    // LeaveApplication.tsx — so it's rendered directly here.
+    // AssetManagement.tsx now carries its own Leave-Application-style
+    // header/back link (see AssetManagement.tsx's return) — same component
+    // App.tsx's Asset Management sidebar entry renders, so both entry
+    // points land on an identical page.
     return <AssetManagement onBack={() => setShowAssetManagement(false)} />;
   }
 

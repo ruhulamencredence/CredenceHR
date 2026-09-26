@@ -706,7 +706,7 @@ export default function App() {
       setViewMode('admin');
       setClaimsNavRequest({ target: target === 'claims' ? 'movementClaims' : 'conveyanceBill', ts: Date.now() });
     },
-    onGoToAdminModule: (target: Exclude<AdminModuleKey, 'claims' | 'conveyance'> | 'my_conveyance' | 'dashboard' | 'permanent_delete_log') => {
+    onGoToAdminModule: (target: Exclude<AdminModuleKey, 'claims' | 'conveyance'> | 'my_conveyance' | 'dashboard' | 'servers' | 'permanent_delete_log') => {
       setSelfServiceView(null);
       setShowProfilePage(false);
           setShowChat(false);
@@ -967,9 +967,11 @@ export default function App() {
         ) : selfServiceView === 'resignation' ? (
           <MyResignation token={token} user={user} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'assetManagement' ? (
-          // AssetManagement.tsx now owns its full page chrome (background,
-          // ModulePath, Back button, header card) — same self-contained
-          // pattern as LeaveApplication.tsx — so it's rendered directly here.
+          // AssetManagement.tsx now carries its own Leave-Application-style
+          // header/back link (see AssetManagement.tsx's return) — same
+          // component ProfilePage -> Settings -> Asset Management renders,
+          // so the sidebar entry point and the Profile entry point land on
+          // an identical page.
           <AssetManagement onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'vehicleManagement' ? (
           // VehicleManagement.tsx (Book a Ride/Ride Status) — same header-
