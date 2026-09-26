@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
-  LayoutTemplate, Users2, Plus, Trash2, X, GripVertical, Star, StarOff, Power, AlertCircle, CheckCircle2, Pencil
+  LayoutTemplate, Users2, Plus, Trash2, X, GripVertical, Star, StarOff, Power, AlertCircle, CheckCircle2, Pencil, ChevronUp, ChevronDown
 } from 'lucide-react';
 import { ApprovalTemplate, ApprovalTemplateStep, ApprovalRequestType, User } from '../types';
 import { apiUrl } from '../lib/api';
@@ -634,7 +634,36 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
                       className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2"
                     >
                       <div className="flex items-center gap-2">
-                        <GripVertical className={`w-4 h-4 shrink-0 ${idx > 0 ? 'text-slate-300 cursor-move' : 'text-slate-200'}`} />
+                        <GripVertical className={`w-4 h-4 shrink-0 hidden sm:block ${idx > 0 ? 'text-slate-300 cursor-move' : 'text-slate-200'}`} />
+                        {/* Up/Down move buttons — the drag handle above only
+                            works with a mouse (native HTML5 drag-and-drop
+                            doesn't fire on touch), so this is the reliable way
+                            to reorder Layers on mobile; kept visible on
+                            desktop too as a precise alternative to dragging. */}
+                        {idx > 0 && (
+                          <div className="flex flex-col shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => moveStep(idx, idx - 1)}
+                              disabled={idx === 1}
+                              title="Move up"
+                              aria-label="Move layer up"
+                              className="p-0.5 text-slate-400 hover:text-blue-600 disabled:opacity-30 disabled:hover:text-slate-400 transition-colors"
+                            >
+                              <ChevronUp className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => moveStep(idx, idx + 1)}
+                              disabled={idx === stepsDraft.length - 1}
+                              title="Move down"
+                              aria-label="Move layer down"
+                              className="p-0.5 text-slate-400 hover:text-blue-600 disabled:opacity-30 disabled:hover:text-slate-400 transition-colors"
+                            >
+                              <ChevronDown className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        )}
                         <span className="w-5 h-5 rounded-full bg-blue-600 text-white text-[10px] font-bold flex items-center justify-center shrink-0">
                           {idx + 1}
                         </span>
