@@ -4,6 +4,7 @@
  */
 
 import React, { useEffect, useState } from 'react';
+import { Capacitor } from '@capacitor/core';
 import { CalendarDays } from 'lucide-react';
 import { Lottie } from 'lottie-react';
 import { LeaveApplication, LeaveBalance } from '../types';
@@ -30,6 +31,15 @@ interface LeaveSummaryCardProps {
 // live in LeaveReviewPage — mirrors how the Conveyance Bill Claim tile
 // summarizes on the Dashboard and opens its own dedicated page for the rest.
 export const LeaveSummaryCard: React.FC<LeaveSummaryCardProps> = ({ token, onOpen }) => {
+  // backdrop-filter is real bug material on the Android system WebView
+  // (small GPU raster budget, every blur layer fights for it) — that's why
+  // this strip could render blurred on one reload and flat on the next. A
+  // JS-side repaint nudge was tried first and didn't hold up, because the
+  // failure is hardware/driver-level, not something JS can force. Dropping
+  // backdrop-blur-xl for the native app build removes the failure mode
+  // instead of chasing it, and costs nothing visually — see the note further
+  // down on what actually sells "glass" here.
+  const isNativeApp = Capacitor.isNativePlatform();
   const [applications, setApplications] = useState<LeaveApplication[]>([]);
   const [balance, setBalance] = useState<LeaveBalance | null>(null);
 
@@ -80,7 +90,7 @@ export const LeaveSummaryCard: React.FC<LeaveSummaryCardProps> = ({ token, onOpe
         // grid (see the same note on AttendanceCard). The violet header
         // inside stays either way — that's this card's own identity, not the
         // mobile surface treatment.
-        className="relative rounded-[28px] overflow-hidden border border-white/70 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-violet-100/70 via-white/50 to-indigo-50/40 text-left cursor-pointer hover:shadow-lg hover:border-white transition-all md:bg-white md:from-transparent md:via-transparent md:to-transparent md:border-slate-200 md:rounded-2xl md:shadow-sm"
+        className="glass-mask-fix relative rounded-[28px] overflow-hidden border border-white/70 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-violet-100/70 via-white/50 to-indigo-50/40 text-left cursor-pointer hover:shadow-lg hover:border-white transition-all md:bg-white md:from-transparent md:via-transparent md:to-transparent md:border-slate-200 md:rounded-2xl md:shadow-sm"
       >
       {/* No backdrop-blur on this outer shell (there used to be one, split
           onto its own absolutely-positioned -z-10 child layer to work
@@ -89,8 +99,15 @@ export const LeaveSummaryCard: React.FC<LeaveSummaryCardProps> = ({ token, onOpe
           so that layer was dead weight, and the negative-z-index child was
           the likely cause of a separate bug where the card's background
           would render correctly on first paint and then disappear after a
-          reload. The "Total Leave" strip below doesn't depend on blur to
-          read as a distinct panel — see the note on it further down. */}
+          reload.
+          That reload bug, it turns out, wasn't really about the -z-10 child
+          at all — it's a broader Android/WebKit rounded-corner +
+          translucent-background compositor bug (see glass-mask-fix in
+          index.css), and it can hit this shell's own rounded gradient
+          background too, blur or no blur, hence glass-mask-fix being
+          applied here as well now. The "Total Leave" strip below doesn't
+          depend on blur to read as a distinct panel — see the note on it
+          further down. */}
       {/* Violet gradient header — same drop-notch corner treatment as the
           mobile Dashboard banner (rounded-b on this card's own top instead,
           since it sits inline among other cards rather than at the very top
@@ -114,19 +131,23 @@ export const LeaveSummaryCard: React.FC<LeaveSummaryCardProps> = ({ token, onOpe
 
       {/* Total Leave strip — overlaps the header the same way AttendanceCard
           overlaps the Dashboard banner, so this reads as one connected card.
-          backdrop-blur-xl IS rendering correctly — confirmed not a build/
-          cache/compositor issue. It's just close to invisible here because
-          the violet header right behind this strip is a flat gradient with
-          no texture to blur, so blur radius alone barely registers. The
-          bright inset top-edge highlight below (same trick the floating
-          action buttons use) is what actually sells "glass" on this screen,
-          not the blur amount. bg-white/75: /50 read as a washed-out purple
-          smear (no separation from the header); /95 swung the other way —
-          flat opaque white, no glass feel. /75 is the middle ground. */}
+          backdrop-blur-xl is close to invisible here on its own, since the
+          violet header right behind this strip is a flat gradient with no
+          texture to blur — the bright inset top-edge highlight below (same
+          trick the floating action buttons use) is what mainly sells
+          "glass" on this screen. bg-white/75: /50 read as a washed-out
+          purple smear (no separation from the header); /95 swung the other
+          way — flat opaque white, no glass feel. /75 is the middle ground.
+          Which is why it's dropped outright for the native app below: it
+          wasn't buying much visually, but real Android hardware could
+          render it on one reload and silently lose it on the next.
+          glass-mask-fix (index.css) covers the broader version of that same
+          bug for this strip's own rounded translucent background,
+          independent of whether blur is present at all. */}
       <div className="px-5 sm:px-6 -mt-4 pb-5">
         <div
           style={{ transform: 'translateZ(0)', WebkitTransform: 'translateZ(0)' }}
-          className="bg-white/75 backdrop-blur-xl border border-white/60 rounded-2xl px-5 py-2.5 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15),inset_0_1px_0_rgba(255,255,255,0.6)]"
+          className={`glass-mask-fix bg-white/75 border border-white/60 rounded-2xl px-5 py-2.5 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15),inset_0_1px_0_rgba(255,255,255,0.6)] ${isNativeApp ? '' : 'backdrop-blur-xl'}`}
         >
           <p className="text-xs font-bold text-slate-900">Total Leave</p>
           <p className="text-[11px] text-slate-500 mt-0.5">Period 1 Jan {year} – 31 Dec {year}</p>

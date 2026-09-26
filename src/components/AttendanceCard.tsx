@@ -77,6 +77,17 @@ async function getCurrentCoords(): Promise<{ latitude: number; longitude: number
 // visible (not tied to the mobile Budget/Jobs/Entries tile menu) since
 // marking attendance is a quick, separate daily action.
 export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects, loading }) => {
+  // backdrop-filter is real bug material on the Android system WebView, not
+  // just an expensive nice-to-have: its GPU raster budget is much smaller
+  // than desktop Chrome's, and every backdrop-blur layer on screen fights
+  // for that same budget. That's why this could render blurred on one
+  // reload and flat on the next — it's a hardware-dependent failure, not
+  // something a JS-side repaint nudge can reliably force (confirmed: it
+  // didn't). Cutting backdrop-blur for the native app build removes the
+  // failure mode entirely instead of papering over it, and costs nothing
+  // visually here — the inset highlight + gradient + border already do
+  // the actual "glass" work (see the comment further down).
+  const isNativeApp = Capacitor.isNativePlatform();
   const [projectId, setProjectId] = useState<string>('');
   const [status, setStatus] = useState<AttendanceRecord | null>(null);
   const [loadingStatus, setLoadingStatus] = useState(false);
@@ -218,22 +229,30 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
     // Requests) and the tinted-glass treatment made that row read as three
     // unrelated designs pushed together.
     //
-    // backdrop-blur-xl IS applied and IS rendering correctly (confirmed —
-    // this isn't a caching/build/compositor issue). It's just invisible here
-    // because the page background behind this card is a smooth, textureless
-    // gradient — blurring a flat gradient still looks like the same flat
-    // gradient, so blur radius alone can't sell "glass" on this screen. The
+    // backdrop-blur-xl is close to invisible here anyway, since the page
+    // background behind this card is a smooth, textureless gradient — the
     // inset highlight in the shadow below (a bright top edge, same trick the
-    // floating action buttons use) is what actually reads as glass/frosted
-    // material here, not the blur.
+    // floating action buttons use) is what mainly sells the frosted look on
+    // this screen. Which is exactly why it's dropped outright on the native
+    // app build below: it wasn't buying much visually, but it WAS a real bug
+    // there — Android's WebView compositor could render it on one reload and
+    // silently drop it on the next (a GPU-budget/driver issue, not something
+    // fixable from JS — a repaint-nudge hack was tried and didn't hold up).
+    //
+    // Separately (see glass-mask-fix in index.css for the full story): this
+    // card's own rounded gradient background was ALSO capable of losing
+    // itself the same way on reload, blur or no blur — a much broader
+    // Android/WebKit rounded-corner + translucent-background compositor bug,
+    // not specific to backdrop-filter at all. glass-mask-fix below is the
+    // actual fix for that.
     <div
       style={{ transform: 'translateZ(0)', WebkitTransform: 'translateZ(0)' }}
-      className="relative rounded-[24px] overflow-hidden border border-white/70 p-4 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15),inset_0_1px_0_rgba(255,255,255,0.7)] bg-gradient-to-br from-blue-200/80 via-white/40 to-indigo-100/60 backdrop-blur-xl hover:shadow-lg hover:border-white transition-all md:bg-white md:from-transparent md:via-transparent md:to-transparent md:backdrop-blur-none md:border-slate-200 md:rounded-2xl md:shadow-sm md:hover:shadow-sm md:hover:border-slate-200"
+      className={`glass-mask-fix relative rounded-[24px] overflow-hidden border border-white/70 p-4 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15),inset_0_1px_0_rgba(255,255,255,0.7)] bg-gradient-to-br from-blue-200/80 via-white/40 to-indigo-100/60 hover:shadow-lg hover:border-white transition-all md:bg-white md:from-transparent md:via-transparent md:to-transparent md:border-slate-200 md:rounded-2xl md:shadow-sm md:hover:shadow-sm md:hover:border-slate-200 ${isNativeApp ? '' : 'backdrop-blur-xl md:backdrop-blur-none'}`}
     >
-      {/* The inner tiles below (In Time/Out Time) keep their own
-          bg-white/70 + backdrop-blur-lg — their opacity alone already reads
-          as a distinct panel, blur or not, so they're unaffected either way
-          by whether the outer shell's blur renders on a given device. */}
+      {/* The inner tiles below (In Time/Out Time) keep their own bg-white/70
+          — that opacity alone already reads as a distinct panel with or
+          without blur, so backdrop-blur-lg is dropped for the native app
+          right alongside the outer shell's, for the same reason. */}
       <h3 className="text-sm font-bold text-slate-900 mb-2 flex items-center gap-2 min-w-0">
         <UserCheck className="w-4 h-4 text-blue-600 shrink-0" />
         <span className="truncate">My Attendance</span>
@@ -247,7 +266,7 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
           <select
             value={projectId}
             onChange={(e) => setProjectId(e.target.value)}
-            className="w-full text-sm px-3 py-2 bg-white/85 backdrop-blur border border-white/60 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none"
+            className={`w-full text-sm px-3 py-2 bg-white/85 border border-white/60 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none ${isNativeApp ? '' : 'backdrop-blur'}`}
           >
             <option value="">Select a project…</option>
             {projects.map((p) => (
@@ -264,7 +283,7 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
             own distinct tile even where backdrop-blur-lg doesn't render
             (Android WebView — see the note above), while staying low
             enough to keep some translucency instead of a flat opaque box. */}
-        <div className={`rounded-xl px-4 py-3 backdrop-blur-lg border ${hasCheckedIn ? 'bg-blue-100/70 border-white/60' : 'bg-white/70 border-white/50'}`}>
+        <div className={`rounded-xl px-4 py-3 border ${isNativeApp ? '' : 'backdrop-blur-lg'} ${hasCheckedIn ? 'bg-blue-100/70 border-white/60' : 'bg-white/70 border-white/50'}`}>
           <div className="text-xs font-medium text-slate-500">In Time</div>
           {hasCheckedIn && inParts ? (
             <div className="mt-0.5 font-bold text-blue-700">
@@ -286,7 +305,7 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
 
         {/* Out Time — same "time only" + extra padding/blur treatment as
             In Time above. */}
-        <div className={`rounded-xl px-4 py-3 backdrop-blur-lg border ${hasCheckedOut ? 'bg-blue-100/70 border-white/60' : 'bg-white/70 border-white/50'}`}>
+        <div className={`rounded-xl px-4 py-3 border ${isNativeApp ? '' : 'backdrop-blur-lg'} ${hasCheckedOut ? 'bg-blue-100/70 border-white/60' : 'bg-white/70 border-white/50'}`}>
           <div className="text-xs font-medium text-slate-500">Out Time</div>
           {hasCheckedOut && outParts ? (
             <div className="mt-0.5 font-bold text-blue-700">
