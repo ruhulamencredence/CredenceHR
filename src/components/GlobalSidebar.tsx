@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   X, LogOut, Home, Wallet, Briefcase, FileText, Edit2, Route, CreditCard,
   CalendarClock, ListChecks, CheckSquare, ChevronDown, Building2, Users, Users2,
@@ -536,7 +536,40 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   const searchResults = searchQuery ? allSearchableItems.filter((i) => i.label.toLowerCase().includes(searchQuery)) : [];
   const selectSearchResult = (fn: () => void) => {
     setSidebarSearch('');
+    setSearchActiveIndex(-1);
     selectAndClose(fn);
+  };
+
+  // Keyboard nav for the search results dropdown: Up/Down moves a highlighted
+  // row (wrapping at each end), Enter opens whichever row is highlighted
+  // (falling back to the first result if the user hasn't pressed an arrow
+  // key yet), Escape clears the search. Reset back to "nothing highlighted"
+  // any time the query itself changes, since the old index may no longer
+  // point at a matching row.
+  const [searchActiveIndex, setSearchActiveIndex] = useState(-1);
+  const searchActiveItemRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    setSearchActiveIndex(-1);
+  }, [searchQuery]);
+  useEffect(() => {
+    searchActiveItemRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [searchActiveIndex]);
+  const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!searchQuery || searchResults.length === 0) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setSearchActiveIndex((i) => (i + 1) % searchResults.length);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setSearchActiveIndex((i) => (i <= 0 ? searchResults.length - 1 : i - 1));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const item = searchResults[searchActiveIndex >= 0 ? searchActiveIndex : 0];
+      if (item) selectSearchResult(item.onClick);
+    } else if (e.key === 'Escape') {
+      setSidebarSearch('');
+      setSearchActiveIndex(-1);
+    }
   };
 
   const renderItem = (item: NavItem) => {
@@ -830,6 +863,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
                     type="text"
                     value={sidebarSearch}
                     onChange={(e) => setSidebarSearch(e.target.value)}
+                    onKeyDown={handleSearchKeyDown}
                     placeholder="Search menu…"
                     className="w-full pl-8 pr-7 py-2 rounded-xl bg-white/10 text-white text-[13px] placeholder-white/40 focus:outline-none focus:bg-white/15 transition-colors"
                   />
@@ -848,12 +882,16 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
                 {searchQuery && (
                   <div className="absolute left-0 right-0 mt-1 max-h-72 overflow-y-auto rounded-xl bg-[#3a0d70] border border-white/15 shadow-xl z-20 py-1">
                     {searchResults.length > 0 ? (
-                      searchResults.map((item) => (
+                      searchResults.map((item, idx) => (
                         <button
                           key={item.key}
                           type="button"
+                          ref={idx === searchActiveIndex ? searchActiveItemRef : undefined}
                           onClick={() => selectSearchResult(item.onClick)}
-                          className="w-full flex items-center gap-2.5 px-3 py-2 text-left text-white/85 hover:bg-white/10 transition-colors"
+                          onMouseEnter={() => setSearchActiveIndex(idx)}
+                          className={`w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors ${
+                            idx === searchActiveIndex ? 'bg-white/15 text-white' : 'text-white/85 hover:bg-white/10'
+                          }`}
                         >
                           <item.icon className="w-4 h-4 shrink-0" />
                           <span className="text-[13px] truncate">{item.label}</span>
