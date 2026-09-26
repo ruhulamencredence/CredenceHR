@@ -114,19 +114,20 @@ export const LeaveSummaryCard: React.FC<LeaveSummaryCardProps> = ({ token, onOpe
 
       {/* Total Leave strip — overlaps the header the same way AttendanceCard
           overlaps the Dashboard banner, so this reads as one connected card.
-          backdrop-blur-lg is kept for desktop browsers, which render it —
-          but confirmed on real hardware that Android System WebView doesn't
-          render backdrop-filter at all here, so on that device this strip's
-          look comes from opacity alone. bg-white/50 read as a washed-out
-          purple smear (no separation from the header at all); bg-white/95
-          swung the other way — flat opaque white with no glass feel.
-          bg-white/75 is the middle ground: still clearly a lighter panel
-          against the violet header, but translucent enough that a soft
-          violet undertone shows through instead of reading as a solid
-          block. Shorter (py-2.5, tighter gaps) than the last pass so the
-          card doesn't run as tall.  */}
+          backdrop-blur-xl IS rendering correctly — confirmed not a build/
+          cache/compositor issue. It's just close to invisible here because
+          the violet header right behind this strip is a flat gradient with
+          no texture to blur, so blur radius alone barely registers. The
+          bright inset top-edge highlight below (same trick the floating
+          action buttons use) is what actually sells "glass" on this screen,
+          not the blur amount. bg-white/75: /50 read as a washed-out purple
+          smear (no separation from the header); /95 swung the other way —
+          flat opaque white, no glass feel. /75 is the middle ground. */}
       <div className="px-5 sm:px-6 -mt-4 pb-5">
-        <div className="bg-white/75 backdrop-blur-lg border border-white/60 rounded-2xl px-5 py-2.5 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)]">
+        <div
+          style={{ transform: 'translateZ(0)', WebkitTransform: 'translateZ(0)' }}
+          className="bg-white/75 backdrop-blur-xl border border-white/60 rounded-2xl px-5 py-2.5 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15),inset_0_1px_0_rgba(255,255,255,0.6)]"
+        >
           <p className="text-xs font-bold text-slate-900">Total Leave</p>
           <p className="text-[11px] text-slate-500 mt-0.5">Period 1 Jan {year} – 31 Dec {year}</p>
           <div className="mt-1.5 flex items-center gap-6">
