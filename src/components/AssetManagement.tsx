@@ -341,7 +341,11 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
           </>
         )}
 
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+        {/* Liquid glass on mobile (soft blue-tint gradient + backdrop-blur +
+            big rounded corners) — same mobile treatment as Leave
+            Application's (LeaveReviewPage.tsx) card. Desktop's md: overrides
+            keep the original plain white panel untouched. */}
+        <div className="bg-gradient-to-br from-sky-100/70 via-white/50 to-blue-50/40 backdrop-blur-xl border border-white/70 rounded-[28px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] overflow-hidden md:bg-white md:from-transparent md:via-transparent md:to-transparent md:backdrop-blur-none md:border-slate-200 md:rounded-2xl md:shadow-sm">
           <div className="flex items-center justify-between gap-3 px-6 py-5 border-b border-slate-100">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center shrink-0">
@@ -352,21 +356,24 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
                 <p className="text-xs text-slate-500">What you hold, what you've requested, and what's waiting on you.</p>
               </div>
             </div>
-            {/* "+ New Requisition" — same popup-button treatment as Leave
-                Application's "+ Add New", opening NewAssetRequisitionModal
-                instead of what used to be an in-page tab. */}
+            {/* "+ New Requisition" — desktop only here now. Mobile/APK moves
+                this to the floating bottom-right button below, same
+                design/position as Leave Application's (LeaveReviewPage.tsx)
+                floating "Submit Leave" button. */}
             <button
               type="button"
               onClick={() => setShowNewRequisitionModal(true)}
-              className="flex items-center gap-1.5 text-sm px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold transition-colors shrink-0"
+              className="hidden md:flex items-center gap-1.5 text-sm px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold transition-colors shrink-0"
             >
               <Plus className="w-4 h-4" /> New Requisition
             </button>
           </div>
 
-          {/* Segmented control — same rounded-full/bg-slate-100 pattern as
-              Leave Application's Review/Approved/Rejected tabs. */}
-          <div className="mx-4 mt-4 flex items-center gap-1.5 rounded-full bg-slate-100 p-1.5 text-xs font-semibold overflow-x-auto">
+          {/* Segmented control — same rounded-full track as Leave
+              Application's Review/Approved/Rejected tabs; mobile gets the
+              same translucent bg-white/50 + blur glass treatment as the
+              outer card, desktop keeps the solid slate-100 track. */}
+          <div className="mx-4 mt-4 flex items-center gap-1.5 rounded-full bg-white/50 backdrop-blur p-1.5 text-xs font-semibold overflow-x-auto md:bg-slate-100 md:backdrop-blur-none">
             {TABS.map((t) => {
               const active = tab === t.key;
               return (
@@ -678,6 +685,19 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
           </div>
         </div>
       </div>
+
+      {/* Floating "+ New Requisition" — mobile/APK only, same liquid-glass
+          pill design/position as Leave Application's floating "Submit Leave"
+          button (LeaveReviewPage.tsx): bottom-right, above BottomNav's fixed
+          bar, offset by the native safe-area inset. */}
+      <button
+        type="button"
+        onClick={() => setShowNewRequisitionModal(true)}
+        className="md:hidden fixed right-4 z-50 flex items-center gap-1.5 pl-3.5 pr-4 py-2.5 rounded-full text-white text-xs font-semibold backdrop-blur-xl border border-white/40 bg-gradient-to-br from-blue-400/90 via-blue-600/90 to-indigo-700/90 shadow-[0_10px_28px_-6px_rgba(37,99,235,0.55),inset_0_1px_0_rgba(255,255,255,0.45)] active:scale-95 active:shadow-[0_4px_14px_-4px_rgba(37,99,235,0.5),inset_0_1px_0_rgba(255,255,255,0.3)] transition-all"
+        style={{ bottom: 'calc(6.5rem + var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)))' }}
+      >
+        <Plus className="w-3.5 h-3.5" /> New Requisition
+      </button>
 
       {showNewRequisitionModal && (
         <NewAssetRequisitionModal
