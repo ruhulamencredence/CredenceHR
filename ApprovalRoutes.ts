@@ -747,13 +747,13 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
   // change how a step is cleared, so it isn't cross-checked against the
   // approver_user_ids' actual roles here. Returns a cleaned copy, or throws
   // with a message safe to send straight back to the client.
-  async function validateTemplateSteps(steps: any): Promise<{ approver_user_ids: number[]; approver_type: "employee" | "admin" }[]> {
+  async function validateTemplateSteps(steps: any): Promise<{ approver_user_ids: number[]; approver_type: "employee" | "admin"; label: string | null }[]> {
     if (!Array.isArray(steps) || steps.length === 0) {
       throw new Error("A template needs at least one Layer/Step.");
     }
     const allUsers = await queryDB("SELECT * FROM users");
     const validUserIds = new Set<number>(allUsers.map((u: any) => Number(u.id)));
-    const cleaned: { approver_user_ids: number[]; approver_type: "employee" | "admin" }[] = [];
+    const cleaned: { approver_user_ids: number[]; approver_type: "employee" | "admin"; label: string | null }[] = [];
     steps.forEach((step: any, idx: number) => {
       const ids = Array.isArray(step?.approver_user_ids) ? step.approver_user_ids.map((v: any) => Number(v)).filter((v: number) => Number.isFinite(v)) : [];
       const uniqueIds = Array.from(new Set(ids));
@@ -764,7 +764,13 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
         if (!validUserIds.has(uid)) throw new Error(`Layer ${idx + 1}: user #${uid} not found.`);
       }
       const approverType = step?.approver_type === "admin" ? "admin" : "employee";
-      cleaned.push({ approver_user_ids: uniqueIds, approver_type: approverType });
+      // Custom Layer name — travels with THIS step's approvers regardless of
+      // where it ends up after a drag/reorder, instead of the position-based
+      // fallback name (see server.ts's approval_template_steps.label
+      // migration comment). Empty/whitespace-only clears back to the
+      // fallback, same as leaving it blank on create.
+      const label = step?.label != null && String(step.label).trim() ? String(step.label).trim().slice(0, 100) : null;
+      cleaned.push({ approver_user_ids: uniqueIds, approver_type: approverType, label });
     });
     return cleaned;
   }
@@ -838,10 +844,11 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       const templateId = result.insertId;
 
       for (let i = 0; i < steps.length; i++) {
-        const stepResult = await queryDB("INSERT INTO approval_template_steps (template_id, step_order, approver_type) VALUES (?, ?, ?)", [
+        const stepResult = await queryDB("INSERT INTO approval_template_steps (template_id, step_order, approver_type, label) VALUES (?, ?, ?, ?)", [
           templateId,
           i + 1,
-          steps[i].approver_type
+          steps[i].approver_type,
+          steps[i].label
         ]);
         const stepId = stepResult.insertId;
         for (const uid of steps[i].approver_user_ids) {
@@ -902,10 +909,11 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       // approval_template_step_approvers.step_id takes the approver rows with it.
       await queryDB("DELETE FROM approval_template_steps WHERE template_id = ?", [id]);
       for (let i = 0; i < steps.length; i++) {
-        const stepResult = await queryDB("INSERT INTO approval_template_steps (template_id, step_order, approver_type) VALUES (?, ?, ?)", [
+        const stepResult = await queryDB("INSERT INTO approval_template_steps (template_id, step_order, approver_type, label) VALUES (?, ?, ?, ?)", [
           id,
           i + 1,
-          steps[i].approver_type
+          steps[i].approver_type,
+          steps[i].label
         ]);
         const stepId = stepResult.insertId;
         for (const uid of steps[i].approver_user_ids) {
