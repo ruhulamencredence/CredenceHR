@@ -9,9 +9,22 @@
 // Status). Talks to AssetManagementRoutes.ts (server.ts registers it via
 // registerAssetManagementRoutes). Mirrors the read/write split and
 // fetch-with-Bearer-token pattern already used throughout App.tsx.
+//
+// Page chrome (blue-tinted background, white rounded-2xl card, icon/title
+// header, ModulePath + Back) mirrors LeaveApplication.tsx's design exactly,
+// so "My Asset" feels like the same product as "Leave Application" instead
+// of an older, plainer screen. Tabs use the same rounded-full segmented
+// control as Leave Application's Review/Approved/Rejected tabs, and every
+// list below uses the same bordered-rounded-xl card + pill status badge
+// pattern as Leave Application's card list.
 
 import React, { useEffect, useState } from 'react';
+import {
+  ArrowLeft, Package, Inbox, Clock, CheckCircle2, XCircle, AlertTriangle, X
+} from 'lucide-react';
 import { apiUrl } from '../lib/api';
+import { ModulePath } from './ModulePath';
+import { Spinner } from './Spinner';
 
 interface PendingClaim {
   id: number;
@@ -82,13 +95,27 @@ const STATUS_LABEL: Record<Requisition['status'], string> = {
   fulfilled: 'Fulfilled'
 };
 
-const STATUS_COLOR: Record<Requisition['status'], string> = {
-  pending: 'bg-yellow-100 text-yellow-800',
-  manager_approved: 'bg-yellow-100 text-yellow-800',
-  approved: 'bg-green-100 text-green-800',
-  rejected: 'bg-red-100 text-red-800',
-  dispatched: 'bg-blue-100 text-blue-800',
-  fulfilled: 'bg-gray-100 text-gray-700'
+// Pill status badge — same shape/size as Leave Application's StatusBadge
+// (rounded-full, 10px bold text, tinted bg + border + icon), just extended
+// to cover a Requisition's extra in-between states.
+const RequisitionStatusBadge: React.FC<{ status: Requisition['status'] }> = ({ status }) => {
+  const theme: Record<Requisition['status'], string> = {
+    pending: 'bg-amber-50 text-amber-700 border-amber-200',
+    manager_approved: 'bg-amber-50 text-amber-700 border-amber-200',
+    approved: 'bg-blue-50 text-blue-700 border-blue-200',
+    rejected: 'bg-rose-50 text-rose-700 border-rose-200',
+    dispatched: 'bg-blue-50 text-blue-700 border-blue-200',
+    fulfilled: 'bg-emerald-50 text-emerald-700 border-emerald-200'
+  };
+  const Icon =
+    status === 'rejected' ? XCircle :
+    status === 'fulfilled' ? CheckCircle2 :
+    status === 'approved' || status === 'dispatched' ? CheckCircle2 : Clock;
+  return (
+    <span className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border shrink-0 ${theme[status]}`}>
+      <Icon className="w-2.5 h-2.5" /> {STATUS_LABEL[status]}
+    </span>
+  );
 };
 
 interface AvailableAsset {
@@ -103,8 +130,14 @@ function authHeaders(): HeadersInit {
   return { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
 }
 
-export function AssetManagement() {
-  const [tab, setTab] = useState<'my-assets' | 'requisition' | 'status' | 'fulfill'>('my-assets');
+type AssetTab = 'my-assets' | 'requisition' | 'status' | 'fulfill';
+
+interface AssetManagementProps {
+  onBack: () => void;
+}
+
+export function AssetManagement({ onBack }: AssetManagementProps) {
+  const [tab, setTab] = useState<AssetTab>('my-assets');
   const [myAssets, setMyAssets] = useState<AssignedAsset[]>([]);
   const [requisitions, setRequisitions] = useState<Requisition[]>([]);
   const [loading, setLoading] = useState(false);
@@ -323,371 +356,481 @@ export function AssetManagement() {
     }
   }
 
+  const TABS: { key: AssetTab; label: string; count?: number }[] = [
+    { key: 'my-assets', label: 'My Assets' },
+    { key: 'requisition', label: 'New Requisition' },
+    { key: 'status', label: 'Status' },
+    { key: 'fulfill', label: 'Approved by Me', count: awaitingFulfillment.length }
+  ];
+
   return (
-    <div className="w-full">
-      <div className="flex gap-1 border-b border-gray-200 mb-4">
-        {([
-          ['my-assets', 'My Assets'],
-          ['requisition', 'New Requisition'],
-          ['status', 'Requisition Status'],
-          ['fulfill', `Approved by Me${awaitingFulfillment.length > 0 ? ` (${awaitingFulfillment.length})` : ''}`]
-        ] as const).map(([key, label]) => (
-          <button
-            key={key}
-            onClick={() => setTab(key)}
-            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
-              tab === key ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-800'
-            }`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+    <div className="w-full min-h-[calc(100vh-4rem)] bg-[#dceeff] text-slate-900">
+      <div className="w-full px-4 sm:px-6 lg:px-8 pt-3 pb-8">
+        <ModulePath path={['Self Service', 'My Asset']} />
+        <button
+          type="button"
+          onClick={onBack}
+          className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-blue-600 mb-3 transition-colors"
+        >
+          <ArrowLeft className="w-3.5 h-3.5" /> Back
+        </button>
 
-      {error && <div className="mb-3 rounded bg-red-50 text-red-700 text-sm px-3 py-2">{error}</div>}
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+          <div className="flex items-center gap-3 px-6 py-5 border-b border-slate-100">
+            <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center shrink-0">
+              <Package className="w-5 h-5 text-blue-600" />
+            </div>
+            <div>
+              <h1 className="text-base font-bold text-slate-900">My Asset</h1>
+              <p className="text-xs text-slate-500">What you hold, what you've requested, and what's waiting on you.</p>
+            </div>
+          </div>
 
-      {tab === 'my-assets' && (
-        <div className="space-y-3">
-          {loading && <div className="text-sm text-gray-500">Loading…</div>}
-          {!loading && myAssets.length === 0 && (
-            <div className="text-sm text-gray-500">You don't have any assets assigned right now.</div>
+          {/* Segmented control — same rounded-full/bg-slate-100 pattern as
+              Leave Application's Review/Approved/Rejected tabs. */}
+          <div className="mx-4 mt-4 flex items-center gap-1.5 rounded-full bg-slate-100 p-1.5 text-xs font-semibold overflow-x-auto">
+            {TABS.map((t) => {
+              const active = tab === t.key;
+              return (
+                <button
+                  key={t.key}
+                  type="button"
+                  onClick={() => setTab(t.key)}
+                  className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-2 rounded-full whitespace-nowrap transition-colors ${
+                    active ? 'text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                  }`}
+                  style={active ? { background: 'var(--g-accent)' } : undefined}
+                >
+                  {t.label}
+                  {typeof t.count === 'number' && t.count > 0 && (
+                    <span
+                      className={`inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold ${
+                        active ? 'bg-white/25 text-white' : 'bg-slate-200 text-slate-500'
+                      }`}
+                    >
+                      {t.count}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          {error && (
+            <div className="mx-4 mt-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs px-3.5 py-2.5">
+              {error}
+            </div>
           )}
-          {myAssets.map((a) => (
-            <div key={a.assignment_id} className="border rounded-lg p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <div className="font-semibold text-gray-800">{a.name}</div>
-                <div className="text-xs text-gray-500">
-                  Tag: {a.asset_tag} • Category: {a.category}
-                  {a.serial_number ? ` • S/N: ${a.serial_number}` : ''}
-                </div>
-                <div className="text-xs text-gray-500">Handed over: {a.assigned_date} • Condition: {a.condition_on_assign}</div>
-                {a.return_requested_at && <div className="text-xs text-amber-600 mt-1">Return requested — awaiting IT/Admin.</div>}
-              </div>
-              <div className="flex flex-col gap-2 items-end shrink-0">
-                {a.pending_claim ? (
-                  <span className="px-3 py-1.5 text-xs font-medium rounded bg-amber-100 text-amber-800">
-                    Issue Reported — Awaiting Resolution
-                  </span>
-                ) : !a.acknowledged_at ? (
-                  <>
-                    <button
-                      onClick={() => acknowledge(a.assignment_id)}
-                      className="px-3 py-1.5 text-xs font-medium rounded bg-blue-600 text-white hover:bg-blue-700"
-                    >
-                      Accept &amp; Acknowledge
-                    </button>
-                    <button
-                      onClick={() => {
-                        setReportingFor(reportingFor === a.assignment_id ? null : a.assignment_id);
-                        setIssueForm({ issue_type: 'mismatch', description: '' });
-                      }}
-                      className="px-3 py-1.5 text-xs font-medium rounded border border-amber-300 text-amber-700 hover:bg-amber-50"
-                    >
-                      Report Issue
-                    </button>
-                  </>
-                ) : (
-                  <span className="px-3 py-1.5 text-xs font-medium rounded bg-green-100 text-green-800">Acknowledged</span>
-                )}
-                {!a.return_requested_at && (
-                  <button
-                    onClick={() => requestReturn(a.assignment_id)}
-                    className="px-3 py-1.5 text-xs font-medium rounded border border-gray-300 text-gray-600 hover:bg-gray-50"
-                  >
-                    Request Return / Replace
-                  </button>
-                )}
-              </div>
-            </div>
 
-            {a.pending_claim && (
-              <div className="mt-3 rounded bg-amber-50 text-amber-800 text-xs px-3 py-2">
-                <span className="font-medium">{ISSUE_TYPE_LABEL[a.pending_claim.issue_type]}:</span> {a.pending_claim.description}
-              </div>
-            )}
+          <div className="p-4">
+            {tab === 'my-assets' && (
+              loading ? (
+                <div className="flex justify-center py-14">
+                  <Spinner size={20} className="text-slate-400" />
+                </div>
+              ) : myAssets.length === 0 ? (
+                <div className="flex flex-col items-center gap-1.5 text-center py-10 text-slate-400">
+                  <Inbox className="w-6 h-6 text-slate-300" />
+                  <p className="text-xs font-semibold text-slate-500">You don't have any assets assigned right now.</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {myAssets.map((a) => (
+                    <div key={a.assignment_id} className="border border-slate-200 rounded-xl p-3.5">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="text-xs font-bold text-slate-900">{a.name}</div>
+                          <p className="text-[10px] uppercase tracking-wide text-slate-400 mt-1">
+                            Tag: {a.asset_tag} • Category: {a.category}
+                            {a.serial_number ? ` • S/N: ${a.serial_number}` : ''}
+                          </p>
+                          <p className="text-[11px] text-slate-500 mt-0.5">
+                            Handed over: {a.assigned_date} • Condition: {a.condition_on_assign}
+                          </p>
+                          {a.return_requested_at && (
+                            <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-amber-700">
+                              <Clock className="w-3 h-3" /> Return requested — awaiting IT/Admin.
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex flex-col gap-2 items-end shrink-0">
+                          {a.pending_claim ? (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+                              <AlertTriangle className="w-2.5 h-2.5" /> Issue Reported
+                            </span>
+                          ) : !a.acknowledged_at ? (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+                              <Clock className="w-2.5 h-2.5" /> Awaiting your Ack
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                              <CheckCircle2 className="w-2.5 h-2.5" /> Acknowledged
+                            </span>
+                          )}
+                        </div>
+                      </div>
 
-            {reportingFor === a.assignment_id && (
-              <div className="mt-3 border-t pt-3 space-y-2">
-                <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">What's wrong?</label>
-                  <select
-                    value={issueForm.issue_type}
-                    onChange={(e) => setIssueForm((f) => ({ ...f, issue_type: e.target.value as PendingClaim['issue_type'] }))}
-                    className="w-full border rounded px-2 py-1.5 text-sm"
-                  >
-                    {(Object.keys(ISSUE_TYPE_LABEL) as PendingClaim['issue_type'][]).map((k) => (
-                      <option key={k} value={k}>
-                        {ISSUE_TYPE_LABEL[k]}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">Describe the issue</label>
-                  <textarea
-                    value={issueForm.description}
-                    onChange={(e) => setIssueForm((f) => ({ ...f, description: e.target.value }))}
-                    rows={2}
-                    placeholder="e.g. Requested a laptop but received a monitor / screen is cracked"
-                    className="w-full border rounded px-2 py-1.5 text-sm"
-                  />
-                </div>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => submitIssue(a.assignment_id)}
-                    disabled={reportingSubmitting}
-                    className="px-3 py-1.5 text-xs font-medium rounded bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50"
-                  >
-                    {reportingSubmitting ? 'Submitting…' : 'Submit Report'}
-                  </button>
-                  <button
-                    onClick={() => setReportingFor(null)}
-                    className="px-3 py-1.5 text-xs font-medium rounded border border-gray-300 text-gray-600 hover:bg-gray-50"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            )}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {tab === 'requisition' && (
-        <form onSubmit={submitRequisition} className="space-y-4 max-w-3xl">
-          <div>
-            <div className="flex items-center justify-between mb-1">
-              <label className="block text-sm font-medium text-gray-700">Items</label>
-              <button
-                type="button"
-                onClick={addItem}
-                className="text-xs font-medium text-blue-600 hover:text-blue-800"
-              >
-                + Add Item
-              </button>
-            </div>
-            <div className="space-y-3">
-              {items.map((it, idx) => (
-                <div key={idx} className="border rounded-lg p-3">
-                  <div className="grid grid-cols-12 gap-2">
-                    <div className="col-span-12 sm:col-span-4">
-                      <label className="block text-xs font-medium text-gray-500 mb-1">Item Name</label>
-                      <input
-                        required
-                        value={it.item_name}
-                        onChange={(e) => updateItem(idx, { item_name: e.target.value })}
-                        placeholder="e.g. Laptop, A4 Paper"
-                        className="w-full border rounded px-2 py-1.5 text-sm"
-                      />
-                    </div>
-                    <div className="col-span-12 sm:col-span-4">
-                      <label className="block text-xs font-medium text-gray-500 mb-1">Purpose</label>
-                      <input
-                        required
-                        value={it.purpose}
-                        onChange={(e) => updateItem(idx, { purpose: e.target.value })}
-                        placeholder="Why this item is needed"
-                        className="w-full border rounded px-2 py-1.5 text-sm"
-                      />
-                    </div>
-                    <div className="col-span-6 sm:col-span-2">
-                      <label className="block text-xs font-medium text-gray-500 mb-1">Unit</label>
-                      <input
-                        required
-                        value={it.unit}
-                        onChange={(e) => updateItem(idx, { unit: e.target.value })}
-                        placeholder="pcs, box, set"
-                        list="asset-req-units"
-                        className="w-full border rounded px-2 py-1.5 text-sm"
-                      />
-                    </div>
-                    <div className="col-span-5 sm:col-span-1">
-                      <label className="block text-xs font-medium text-gray-500 mb-1">Qty</label>
-                      <input
-                        required
-                        type="number"
-                        min={0.01}
-                        step="any"
-                        value={it.quantity}
-                        onChange={(e) => updateItem(idx, { quantity: Number(e.target.value) })}
-                        className="w-full border rounded px-2 py-1.5 text-sm"
-                      />
-                    </div>
-                    <div className="col-span-1 flex items-end justify-end">
-                      {items.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => removeItem(idx)}
-                          aria-label="Remove item"
-                          className="w-7 h-7 rounded text-red-500 hover:bg-red-50 text-sm font-medium"
-                        >
-                          ✕
-                        </button>
+                      {a.pending_claim && (
+                        <div className="mt-2.5 pt-2.5 border-t border-slate-100 text-[11px] text-amber-700">
+                          <span className="font-semibold">{ISSUE_TYPE_LABEL[a.pending_claim.issue_type]}:</span> {a.pending_claim.description}
+                        </div>
                       )}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-            <datalist id="asset-req-units">
-              <option value="pcs" />
-              <option value="box" />
-              <option value="set" />
-              <option value="ream" />
-              <option value="packet" />
-              <option value="unit" />
-            </datalist>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Urgency</label>
-              <select
-                value={meta.urgency}
-                onChange={(e) => setMeta({ ...meta, urgency: e.target.value })}
-                className="w-full border rounded px-3 py-2 text-sm"
-              >
-                <option value="low">Low</option>
-                <option value="medium">Medium</option>
-                <option value="high">High</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Target Date</label>
-              <input
-                type="date"
-                value={meta.target_date}
-                onChange={(e) => setMeta({ ...meta, target_date: e.target.value })}
-                className="w-full border rounded px-3 py-2 text-sm"
-              />
-            </div>
-          </div>
-          {submitMessage && <div className="text-sm text-gray-700">{submitMessage}</div>}
-          <button
-            type="submit"
-            disabled={submitting}
-            className="px-4 py-2 text-sm font-medium rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
-          >
-            {submitting ? 'Submitting…' : 'Submit Request'}
-          </button>
-        </form>
-      )}
 
-      {tab === 'status' && (
-        <div className="space-y-3">
-          {loading && <div className="text-sm text-gray-500">Loading…</div>}
-          {!loading && requisitions.length === 0 && <div className="text-sm text-gray-500">No requisitions yet.</div>}
-          {requisitions.map((r) => (
-            <div key={r.id} className="border rounded-lg p-4">
-              <div className="flex items-center justify-between">
-                <div className="font-semibold text-gray-800">{r.asset_category}</div>
-                <span className={`text-xs font-medium px-2 py-1 rounded ${STATUS_COLOR[r.status]}`}>{STATUS_LABEL[r.status]}</span>
-              </div>
-              <div className="text-xs text-gray-500 mt-1">Requested: {r.created_at} • Urgency: {r.urgency}</div>
-              {r.status === 'pending' && r.pending_with && (
-                <div className="text-xs text-amber-700 mt-1">
-                  Waiting on: <span className="font-medium">{r.pending_with}</span>
-                </div>
-              )}
-              <div className="mt-2 space-y-1">
-                {(r.items || []).map((it, idx) => (
-                  <div key={idx} className="text-sm text-gray-600 flex items-baseline justify-between gap-2">
-                    <span>
-                      <span className="font-medium text-gray-800">{it.item_name}</span> — {it.purpose}
-                    </span>
-                    <span className="text-xs text-gray-500 shrink-0">
-                      {it.quantity} {it.unit}
-                    </span>
-                  </div>
-                ))}
-              </div>
-              {r.status === 'rejected' && r.rejection_reason && (
-                <div className="text-xs text-red-600 mt-2">Reason: {r.rejection_reason}</div>
-              )}
-              {r.asset_name && (
-                <div className="text-xs text-gray-500 mt-2">
-                  Assigned item: {r.asset_name} ({r.asset_tag})
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
+                      {!a.pending_claim && (
+                        <div className="mt-2.5 pt-2.5 border-t border-slate-100 flex flex-wrap items-center gap-2">
+                          {!a.acknowledged_at && (
+                            <>
+                              <button
+                                onClick={() => acknowledge(a.assignment_id)}
+                                className="px-3 py-1.5 text-[11px] font-semibold rounded-lg text-white transition-colors"
+                                style={{ background: 'var(--g-accent)' }}
+                              >
+                                Accept &amp; Acknowledge
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setReportingFor(reportingFor === a.assignment_id ? null : a.assignment_id);
+                                  setIssueForm({ issue_type: 'mismatch', description: '' });
+                                }}
+                                className="px-3 py-1.5 text-[11px] font-semibold rounded-lg border border-amber-200 text-amber-700 hover:bg-amber-50 transition-colors"
+                              >
+                                Report Issue
+                              </button>
+                            </>
+                          )}
+                          {!a.return_requested_at && (
+                            <button
+                              onClick={() => requestReturn(a.assignment_id)}
+                              className="px-3 py-1.5 text-[11px] font-semibold rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors"
+                            >
+                              Request Return / Replace
+                            </button>
+                          )}
+                        </div>
+                      )}
 
-      {tab === 'fulfill' && (
-        <div className="space-y-3">
-          <div className="rounded bg-blue-50 text-blue-800 text-xs px-3 py-2">
-            Requisitions you approved that are still waiting for a specific item to be handed over — no Asset Management Module
-            Access needed.
-          </div>
-          {loading && <div className="text-sm text-gray-500">Loading…</div>}
-          {!loading && awaitingFulfillment.length === 0 && (
-            <div className="text-sm text-gray-500">Nothing waiting on you right now.</div>
-          )}
-          {awaitingFulfillment.map((r) => {
-            const requestedNames = (r.items || []).map((it) => it.item_name.toLowerCase());
-            const matching = availableAssets.filter((a) => requestedNames.includes(a.category.toLowerCase()));
-            const rest = availableAssets.filter((a) => !requestedNames.includes(a.category.toLowerCase()));
-            return (
-              <div key={r.id} className="border rounded-lg p-4">
-                <div className="font-semibold text-gray-800">{r.asset_category}</div>
-                <div className="mt-2 space-y-1">
-                  {(r.items || []).map((it, idx) => (
-                    <div key={idx} className="text-sm text-gray-600 flex items-baseline justify-between gap-2">
-                      <span>
-                        <span className="font-medium text-gray-800">{it.item_name}</span> — {it.purpose}
-                      </span>
-                      <span className="text-xs text-gray-500 shrink-0">
-                        {it.quantity} {it.unit}
-                      </span>
+                      {reportingFor === a.assignment_id && (
+                        <div className="mt-3 pt-3 border-t border-slate-100 space-y-2.5">
+                          <div>
+                            <label className="block text-[10px] uppercase tracking-wide text-slate-400 mb-1">What's wrong?</label>
+                            <select
+                              value={issueForm.issue_type}
+                              onChange={(e) => setIssueForm((f) => ({ ...f, issue_type: e.target.value as PendingClaim['issue_type'] }))}
+                              className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400"
+                            >
+                              {(Object.keys(ISSUE_TYPE_LABEL) as PendingClaim['issue_type'][]).map((k) => (
+                                <option key={k} value={k}>
+                                  {ISSUE_TYPE_LABEL[k]}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-[10px] uppercase tracking-wide text-slate-400 mb-1">Describe the issue</label>
+                            <textarea
+                              value={issueForm.description}
+                              onChange={(e) => setIssueForm((f) => ({ ...f, description: e.target.value }))}
+                              rows={2}
+                              placeholder="e.g. Requested a laptop but received a monitor / screen is cracked"
+                              className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400"
+                            />
+                          </div>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => submitIssue(a.assignment_id)}
+                              disabled={reportingSubmitting}
+                              className="px-3 py-1.5 text-[11px] font-semibold rounded-lg bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 transition-colors"
+                            >
+                              {reportingSubmitting ? 'Submitting…' : 'Submit Report'}
+                            </button>
+                            <button
+                              onClick={() => setReportingFor(null)}
+                              className="px-3 py-1.5 text-[11px] font-semibold rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
-                <div className="mt-3">
-                  {fulfillingFor === r.id ? (
-                    <div className="flex items-center gap-2">
-                      <select value={fulfillAssetId} onChange={(e) => setFulfillAssetId(e.target.value)} className="border rounded px-2 py-1 text-xs">
-                        <option value="">Pick an item…</option>
-                        {matching.map((a) => (
-                          <option key={a.id} value={a.id}>
-                            {a.name} ({a.asset_tag})
-                          </option>
-                        ))}
-                        {rest.length > 0 && matching.length > 0 && <option disabled>──────────</option>}
-                        {rest.map((a) => (
-                          <option key={a.id} value={a.id}>
-                            {a.name} ({a.asset_tag})
-                          </option>
-                        ))}
-                      </select>
-                      <button onClick={() => fulfillRequisition(r.id)} className="px-3 py-1.5 text-xs font-medium rounded bg-blue-600 text-white">
-                        Dispatch
-                      </button>
-                      <button
-                        onClick={() => setFulfillingFor(null)}
-                        className="px-3 py-1.5 text-xs font-medium rounded border border-gray-300 text-gray-600"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  ) : (
+              )
+            )}
+
+            {tab === 'requisition' && (
+              <form onSubmit={submitRequisition} className="space-y-4">
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="text-[10px] uppercase tracking-wide text-slate-400 font-semibold">Items</label>
                     <button
-                      onClick={() => {
-                        setFulfillingFor(r.id);
-                        setFulfillAssetId('');
-                      }}
-                      className="px-3 py-1.5 text-xs font-medium rounded bg-blue-600 text-white hover:bg-blue-700"
+                      type="button"
+                      onClick={addItem}
+                      className="text-xs font-semibold text-blue-600 hover:text-blue-700"
                     >
-                      Fulfill / Hand Over
+                      + Add Item
                     </button>
-                  )}
+                  </div>
+                  <div className="border border-slate-200 rounded-xl divide-y divide-slate-100">
+                    {/* Column header — shown once, only where the grid
+                        actually lays out side-by-side (sm+). Below that,
+                        columns stack full-width, so each row keeps its own
+                        compact label instead (see the sm:hidden labels
+                        below). */}
+                    <div className="hidden sm:grid grid-cols-12 gap-2.5 px-3.5 pt-3 pb-1.5">
+                      <div className="col-span-4 text-[10px] uppercase tracking-wide text-slate-400 font-semibold">Item Name</div>
+                      <div className="col-span-4 text-[10px] uppercase tracking-wide text-slate-400 font-semibold">Purpose</div>
+                      <div className="col-span-2 text-[10px] uppercase tracking-wide text-slate-400 font-semibold">Unit</div>
+                      <div className="col-span-1 text-[10px] uppercase tracking-wide text-slate-400 font-semibold">Qty</div>
+                      <div className="col-span-1" />
+                    </div>
+                    {items.map((it, idx) => (
+                      <div key={idx} className="p-3.5">
+                        <div className="grid grid-cols-12 gap-2.5">
+                          <div className="col-span-12 sm:col-span-4">
+                            <label className="block text-[10px] uppercase tracking-wide text-slate-400 mb-1 sm:hidden">Item Name</label>
+                            <input
+                              required
+                              value={it.item_name}
+                              onChange={(e) => updateItem(idx, { item_name: e.target.value })}
+                              placeholder="e.g. Laptop, A4 Paper"
+                              className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400"
+                            />
+                          </div>
+                          <div className="col-span-12 sm:col-span-4">
+                            <label className="block text-[10px] uppercase tracking-wide text-slate-400 mb-1 sm:hidden">Purpose</label>
+                            <input
+                              required
+                              value={it.purpose}
+                              onChange={(e) => updateItem(idx, { purpose: e.target.value })}
+                              placeholder="Why this item is needed"
+                              className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400"
+                            />
+                          </div>
+                          <div className="col-span-6 sm:col-span-2">
+                            <label className="block text-[10px] uppercase tracking-wide text-slate-400 mb-1 sm:hidden">Unit</label>
+                            <input
+                              required
+                              value={it.unit}
+                              onChange={(e) => updateItem(idx, { unit: e.target.value })}
+                              placeholder="pcs, box, set"
+                              list="asset-req-units"
+                              className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400"
+                            />
+                          </div>
+                          <div className="col-span-5 sm:col-span-1">
+                            <label className="block text-[10px] uppercase tracking-wide text-slate-400 mb-1 sm:hidden">Qty</label>
+                            <input
+                              required
+                              type="number"
+                              min={0.01}
+                              step="any"
+                              value={it.quantity}
+                              onChange={(e) => updateItem(idx, { quantity: Number(e.target.value) })}
+                              className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400"
+                            />
+                          </div>
+                          <div className="col-span-1 flex items-end justify-end">
+                            {items.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => removeItem(idx)}
+                                aria-label="Remove item"
+                                className="w-7 h-7 rounded-lg text-rose-500 hover:bg-rose-50 flex items-center justify-center transition-colors"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <datalist id="asset-req-units">
+                    <option value="pcs" />
+                    <option value="box" />
+                    <option value="set" />
+                    <option value="ream" />
+                    <option value="packet" />
+                    <option value="unit" />
+                  </datalist>
                 </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[10px] uppercase tracking-wide text-slate-400 font-semibold mb-1">Urgency</label>
+                    <select
+                      value={meta.urgency}
+                      onChange={(e) => setMeta({ ...meta, urgency: e.target.value })}
+                      className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400"
+                    >
+                      <option value="low">Low</option>
+                      <option value="medium">Medium</option>
+                      <option value="high">High</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase tracking-wide text-slate-400 font-semibold mb-1">Target Date</label>
+                    <input
+                      type="date"
+                      value={meta.target_date}
+                      onChange={(e) => setMeta({ ...meta, target_date: e.target.value })}
+                      className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400"
+                    />
+                  </div>
+                </div>
+                {submitMessage && <div className="text-xs text-slate-600">{submitMessage}</div>}
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="flex items-center gap-1.5 text-sm px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold transition-colors disabled:opacity-50"
+                >
+                  {submitting ? 'Submitting…' : 'Submit Request'}
+                </button>
+              </form>
+            )}
+
+            {tab === 'status' && (
+              loading ? (
+                <div className="flex justify-center py-14">
+                  <Spinner size={20} className="text-slate-400" />
+                </div>
+              ) : requisitions.length === 0 ? (
+                <div className="flex flex-col items-center gap-1.5 text-center py-10 text-slate-400">
+                  <Inbox className="w-6 h-6 text-slate-300" />
+                  <p className="text-xs font-semibold text-slate-500">No requisitions yet.</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {requisitions.map((r) => (
+                    <div key={r.id} className="border border-slate-200 rounded-xl p-3.5">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="text-xs font-bold text-slate-900">{r.asset_category}</div>
+                        <RequisitionStatusBadge status={r.status} />
+                      </div>
+                      <p className="text-[11px] text-slate-500 mt-1">Requested: {r.created_at} • Urgency: {r.urgency}</p>
+                      {r.status === 'pending' && r.pending_with && (
+                        <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-amber-700">
+                          <Clock className="w-3 h-3" /> Waiting on: <span className="font-semibold">{r.pending_with}</span>
+                        </div>
+                      )}
+                      <div className="mt-2.5 pt-2.5 border-t border-slate-100 space-y-1">
+                        {(r.items || []).map((it, idx) => (
+                          <div key={idx} className="text-xs text-slate-600 flex items-baseline justify-between gap-2">
+                            <span>
+                              <span className="font-semibold text-slate-800">{it.item_name}</span> — {it.purpose}
+                            </span>
+                            <span className="text-[11px] text-slate-500 shrink-0">
+                              {it.quantity} {it.unit}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                      {r.status === 'rejected' && r.rejection_reason && (
+                        <div className="mt-2 text-[11px] text-rose-600">
+                          <span className="font-semibold">Reason:</span> {r.rejection_reason}
+                        </div>
+                      )}
+                      {r.asset_name && (
+                        <div className="mt-2 text-[11px] text-slate-500">
+                          Assigned item: {r.asset_name} ({r.asset_tag})
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )
+            )}
+
+            {tab === 'fulfill' && (
+              <div className="space-y-3">
+                <div className="rounded-xl bg-blue-50 border border-blue-200 text-blue-800 text-xs px-3.5 py-2.5">
+                  Requisitions you approved that are still waiting for a specific item to be handed over — no Asset
+                  Management Module Access needed.
+                </div>
+                {loading ? (
+                  <div className="flex justify-center py-14">
+                    <Spinner size={20} className="text-slate-400" />
+                  </div>
+                ) : awaitingFulfillment.length === 0 ? (
+                  <div className="flex flex-col items-center gap-1.5 text-center py-10 text-slate-400">
+                    <Inbox className="w-6 h-6 text-slate-300" />
+                    <p className="text-xs font-semibold text-slate-500">Nothing waiting on you right now.</p>
+                  </div>
+                ) : (
+                  awaitingFulfillment.map((r) => {
+                    const requestedNames = (r.items || []).map((it) => it.item_name.toLowerCase());
+                    const matching = availableAssets.filter((a) => requestedNames.includes(a.category.toLowerCase()));
+                    const rest = availableAssets.filter((a) => !requestedNames.includes(a.category.toLowerCase()));
+                    return (
+                      <div key={r.id} className="border border-slate-200 rounded-xl p-3.5">
+                        <div className="text-xs font-bold text-slate-900">{r.asset_category}</div>
+                        <div className="mt-2.5 pt-2.5 border-t border-slate-100 space-y-1">
+                          {(r.items || []).map((it, idx) => (
+                            <div key={idx} className="text-xs text-slate-600 flex items-baseline justify-between gap-2">
+                              <span>
+                                <span className="font-semibold text-slate-800">{it.item_name}</span> — {it.purpose}
+                              </span>
+                              <span className="text-[11px] text-slate-500 shrink-0">
+                                {it.quantity} {it.unit}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="mt-3">
+                          {fulfillingFor === r.id ? (
+                            <div className="flex flex-wrap items-center gap-2">
+                              <select
+                                value={fulfillAssetId}
+                                onChange={(e) => setFulfillAssetId(e.target.value)}
+                                className="border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400"
+                              >
+                                <option value="">Pick an item…</option>
+                                {matching.map((a) => (
+                                  <option key={a.id} value={a.id}>
+                                    {a.name} ({a.asset_tag})
+                                  </option>
+                                ))}
+                                {rest.length > 0 && matching.length > 0 && <option disabled>──────────</option>}
+                                {rest.map((a) => (
+                                  <option key={a.id} value={a.id}>
+                                    {a.name} ({a.asset_tag})
+                                  </option>
+                                ))}
+                              </select>
+                              <button
+                                onClick={() => fulfillRequisition(r.id)}
+                                className="px-3 py-1.5 text-[11px] font-semibold rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors"
+                              >
+                                Dispatch
+                              </button>
+                              <button
+                                onClick={() => setFulfillingFor(null)}
+                                className="px-3 py-1.5 text-[11px] font-semibold rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => {
+                                setFulfillingFor(r.id);
+                                setFulfillAssetId('');
+                              }}
+                              className="px-3 py-1.5 text-[11px] font-semibold rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors"
+                            >
+                              Fulfill / Hand Over
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
               </div>
-            );
-          })}
+            )}
+          </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }

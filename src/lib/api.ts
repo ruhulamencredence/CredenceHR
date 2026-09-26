@@ -13,16 +13,6 @@
 // origin it was loaded from, on both platforms, with zero base-URL
 // bookkeeping needed here.
 //
-// Switching an Android device to a DIFFERENT deployment (see GlobalSidebar's
-// "Set Server" -> ServerSwitcherModal.tsx, fed by the catalog a Superadmin
-// manages from the WEB Admin Panel -> Servers / ServerProfileRoutes.ts) is a
-// full page navigation (window.location.href = thatServer'sUrl) — the
-// WebView just loads that other server's app fresh, exactly like opening a
-// different website, rather than this file quietly redirecting only SOME
-// fetch() calls to a different origin than the one the page (and everything
-// on it — login, assets, everything) actually came from. That split — UI
-// from server A, API calls from server B — was the earlier design here and
-// is exactly what caused "switching doesn't actually switch" confusion.
 export function apiUrl(path: string): string {
   return path;
 }

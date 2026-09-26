@@ -893,7 +893,7 @@ export interface EntryEditHistory {
 }
 
 // GET /api/entries/permanent-delete-log — Superadmin-only (see AdminPanel.tsx's
-// "servers"-style gating). One row per entry ever erased via DELETE
+// isSuperAdmin-only gating). One row per entry ever erased via DELETE
 // /api/entries/:id/permanent; every field here is a snapshot taken right before
 // that entry row was hard-deleted, not a live join, since the entry itself is
 // gone by the time this log is read.
@@ -1509,12 +1509,10 @@ export interface AdminNavRequest {
   // the "My Conveyance Bill Claim" sub-view (an Admin's own Bills/Claims,
   // read-only), shown alongside the 'conveyance' tab to anyone who already
   // has that module, not a separately-grantable permission of its own.
-  // 'servers' is likewise NOT an AdminModuleKey/module_permissions entry —
-  // it's the Superadmin-only "Servers" catalog tab (see ServerProfileRoutes.ts),
-  // never grantable to an Admin/User the way every other Admin Panel module is.
-  // 'permanent_delete_log' is the same — Superadmin-only, see
-  // GET /api/entries/permanent-delete-log in EntriesRoutes.ts.
-  target: 'dashboard' | 'reports' | 'mprs' | 'imports' | 'editlog' | 'recycle' | 'projects' | 'branches' | 'users' | 'notices' | 'approvals' | 'attendance' | 'attendance_reports' | 'employees' | 'departments' | 'tracking' | 'holidays' | 'disbursement' | 'my_conveyance' | 'asset_management' | 'servers' | 'permanent_delete_log' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault';
+  // 'permanent_delete_log' is likewise NOT an AdminModuleKey/module_permissions
+  // entry — Superadmin-only, see GET /api/entries/permanent-delete-log in
+  // EntriesRoutes.ts.
+  target: 'dashboard' | 'reports' | 'mprs' | 'imports' | 'editlog' | 'recycle' | 'projects' | 'branches' | 'users' | 'notices' | 'approvals' | 'attendance' | 'attendance_reports' | 'employees' | 'departments' | 'tracking' | 'holidays' | 'disbursement' | 'my_conveyance' | 'asset_management' | 'permanent_delete_log' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault';
   ts: number;
 }
 

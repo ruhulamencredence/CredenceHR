@@ -103,7 +103,11 @@ export function BottomNav({ active, onChange, canViewMovementClaim = true, canVi
           preserveAspectRatio="none"
           className="absolute inset-0 w-full h-full drop-shadow-[0_-8px_24px_rgba(127,0,255,0.25)]"
         >
-          <path d={pathD} fill="var(--g-accent)" />
+          <path
+            d={pathD}
+            fill="var(--g-accent)"
+            style={{ transition: 'd 280ms cubic-bezier(0.4, 0, 0.2, 1)' }}
+          />
         </svg>
 
         <div
@@ -112,12 +116,21 @@ export function BottomNav({ active, onChange, canViewMovementClaim = true, canVi
         >
           {items.map(({ key, label, icon: Icon }, index) => {
             const isActive = index === activeIndex;
+            // Push effect: buttons next to the active dip nudge sideways,
+            // like they're making room for the blob passing through. Decays
+            // to 0px by the time you're 2+ columns away from active.
+            const distance = activeIndex >= 0 ? index - activeIndex : 0;
+            const pushPx = distance === 0 ? 0 : Math.sign(distance) * Math.max(0, 9 - Math.abs(distance) * 5);
             return (
               <button
                 key={label}
                 type="button"
                 onClick={() => onChange(key)}
-                className="relative flex-1 min-w-0 flex flex-col items-center justify-end gap-1 pt-1.5 pb-1 active:scale-95 transition-transform"
+                className="relative flex-1 min-w-0 flex flex-col items-center justify-end gap-1 pt-1.5 pb-1"
+                style={{
+                  transform: `translateX(${pushPx}px)`,
+                  transition: 'transform 280ms cubic-bezier(0.4, 0, 0.2, 1)'
+                }}
               >
                 {/* Circle raised less far above the bar (-top-6 -> -top-4) to
                     match the shallower 36px-deep dip above, so it sits nested

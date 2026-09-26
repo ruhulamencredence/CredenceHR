@@ -16,7 +16,6 @@ import { registerAlertRoutes, ensureAlertsSchema, createAlert } from "./Alerts";
 import { registerUserManagementRoutes } from "./UserManagement";
 import { registerConveyanceBillClaimRoutes } from "./ConveyanceBillClaimRoutes";
 import { registerDepartmentsAndBranchesRoutes } from "./DepartmentsAndBranches";
-import { registerServerProfileRoutes, ensureServerProfilesSchema } from "./ServerProfileRoutes";
 import { registerAttendanceRoutes } from "./AttendanceRoutes";
 import { registerApprovalRoutes } from "./ApprovalRoutes";
 import { registerLeaveRoutes } from "./LeaveRoutes";
@@ -225,11 +224,6 @@ async function ensureSchemaMigrations() {
   await ensureRecruitmentSchema(dbPool);
   await ensureGrievanceSchema(dbPool);
   await ensureDocumentVaultSchema(dbPool);
-
-  // Server Profiles (Admin Panel -> Servers, Superadmin-only) — table +
-  // schema owned by ServerProfileRoutes.ts, only the call site lives here,
-  // same as every other self-healing migration in this function.
-  await ensureServerProfilesSchema(dbPool);
 
   // Chat (Direct/Group/Community messaging) — table + schema owned by
   // ChatRoutes.ts, only the call site lives here, same as every other
@@ -3743,13 +3737,6 @@ async function startServer() {
   // reasoning as profileRoutes.ts/holidayRoutes.ts/Alerts.ts/UserManagement.ts
   // above.
   registerDepartmentsAndBranchesRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, queryDB });
-
-  // Server Profiles (Admin Panel -> Servers) — kept in their own file
-  // (ServerProfileRoutes.ts), same reasoning as profileRoutes.ts/
-  // holidayRoutes.ts/Alerts.ts/UserManagement.ts above. Superadmin-only
-  // (requireSuperAdmin), not module-gated — this isn't a grantable Admin
-  // Panel module, same convention as User Management's promote/demote.
-  registerServerProfileRoutes(app, { authenticateToken, requireSuperAdmin, queryDB });
 
   // Self Service -> Leave Management: true for a Superadmin (implicit, every
   // account), or for an Admin/User the Superadmin has explicitly granted

@@ -88,25 +88,10 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
   }
 
   if (showAssetManagement) {
-    return (
-      <div className="w-full min-h-[calc(100vh-4rem)]" style={{ background: 'var(--g-surface-muted)' }}>
-        <div className="max-w-3xl mx-auto px-4 pt-3 pb-28">
-          <div className="flex items-center gap-2 mb-3">
-            <button
-              type="button"
-              onClick={() => setShowAssetManagement(false)}
-              className="w-9 h-9 rounded-full flex items-center justify-center hover:bg-black/5 transition-colors"
-              style={{ color: 'var(--g-text-muted)' }}
-              aria-label="Back"
-            >
-              <ChevronLeft className="w-5 h-5" />
-            </button>
-            <h1 className="text-base font-bold">My Asset</h1>
-          </div>
-          <AssetManagement />
-        </div>
-      </div>
-    );
+    // AssetManagement.tsx owns its full page chrome (background, ModulePath,
+    // Back button, header card) — same self-contained pattern as
+    // LeaveApplication.tsx — so it's rendered directly here.
+    return <AssetManagement onBack={() => setShowAssetManagement(false)} />;
   }
 
   return (
