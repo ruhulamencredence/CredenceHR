@@ -1725,6 +1725,22 @@ async function ensureSchemaMigrations() {
       console.warn("⚠️ Could not add approval_template_steps.approver_type column: " + err.message);
     }
   }
+  // Custom per-step Layer name (Template editor) — NULL means "use the
+  // generic/position-based name" (ApprovalTemplateManager.tsx's LAYER_NAMES,
+  // e.g. Asset Requisition's Layer 3 = "Inventory/Store Disbursement"). That
+  // position-based fallback is exactly right for a template built in the
+  // original fixed order, but once a Superadmin freely drags Layers around
+  // (adding one, or moving an existing one like Inventory earlier), the
+  // label needs to travel WITH the step's own approvers instead of jumping
+  // to whichever generic name that position happens to carry — this column
+  // lets a Layer keep its intended identity across any reorder.
+  try {
+    await dbPool.query(`ALTER TABLE approval_template_steps ADD COLUMN label VARCHAR(100) NULL`);
+  } catch (err: any) {
+    if (err.code !== "ER_DUP_FIELDNAME") {
+      console.warn("⚠️ Could not add approval_template_steps.label column: " + err.message);
+    }
+  }
   // Widen request_type to add 'asset' (Asset Requisition, routed through this
   // same Dynamic Approval Engine — see createTemplateApprovalRequest) onto
   // the original ENUM('conveyance','leave','timesheet'). MODIFY COLUMN is

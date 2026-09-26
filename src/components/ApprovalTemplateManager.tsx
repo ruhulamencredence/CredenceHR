@@ -60,6 +60,12 @@ function layerLabel(requestType: ApprovalRequestType, idx: number): string {
 interface StepDraft {
   approver_user_ids: number[];
   approver_type: 'supervisor' | 'employee' | 'admin';
+  // Custom Layer name — empty means "fall back to the generic/position-based
+  // name" (layerLabel() below). Travels WITH this step's own approvers when
+  // dragged/moved, unlike the position-based fallback, so e.g. an Asset
+  // Requisition's "Inventory/Store Disbursement" Layer keeps reading as
+  // Inventory even after being moved earlier in the order.
+  label: string;
 }
 
 const isAdminRole = (role: string) => role === 'admin' || role === 'superadmin';
@@ -86,7 +92,7 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
   const [typeDraft, setTypeDraft] = useState<ApprovalRequestType>('conveyance');
   const [isDefaultDraft, setIsDefaultDraft] = useState(false);
   const [isActiveDraft, setIsActiveDraft] = useState(true);
-  const [stepsDraft, setStepsDraft] = useState<StepDraft[]>([{ approver_user_ids: [], approver_type: 'supervisor' }]);
+  const [stepsDraft, setStepsDraft] = useState<StepDraft[]>([{ approver_user_ids: [], approver_type: 'supervisor', label: '' }]);
   const [approverSearch, setApproverSearch] = useState<Record<number, string>>({});
   const [openApproverDropdown, setOpenApproverDropdown] = useState<number | null>(null);
   const [dragStepIndex, setDragStepIndex] = useState<number | null>(null);
@@ -145,7 +151,7 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
     setTypeDraft(requestType);
     setIsDefaultDraft(false);
     setIsActiveDraft(true);
-    setStepsDraft([{ approver_user_ids: [], approver_type: 'supervisor' }]);
+    setStepsDraft([{ approver_user_ids: [], approver_type: 'supervisor', label: '' }]);
     setApproverSearch({});
     setOpenApproverDropdown(null);
     setEditorError(null);
@@ -170,14 +176,15 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
       // index 0 always represents Layer 1 in the editor, exactly like create.
       const persistedSteps: StepDraft[] = (data.steps || []).map((s: ApprovalTemplateStep) => ({
         approver_user_ids: s.approvers.map((a) => a.user_id),
-        approver_type: (s as any).approver_type === 'admin' ? 'admin' : 'employee'
+        approver_type: (s as any).approver_type === 'admin' ? 'admin' : 'employee',
+        label: (s as any).label || ''
       }));
       setStepsDraft(
         data.skip_auto_supervisor
           ? persistedSteps.length
             ? persistedSteps
-            : [{ approver_user_ids: [], approver_type: 'employee' }]
-          : [{ approver_user_ids: [], approver_type: 'supervisor' }, ...persistedSteps]
+            : [{ approver_user_ids: [], approver_type: 'employee', label: '' }]
+          : [{ approver_user_ids: [], approver_type: 'supervisor', label: '' }, ...persistedSteps]
       );
       setApproverSearch({});
       setOpenApproverDropdown(null);
@@ -187,7 +194,9 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
     }
   };
 
-  const addStep = () => setStepsDraft((prev) => [...prev, { approver_user_ids: [], approver_type: 'employee' }]);
+  const addStep = () => setStepsDraft((prev) => [...prev, { approver_user_ids: [], approver_type: 'employee', label: '' }]);
+  const setStepLabel = (stepIdx: number, label: string) =>
+    setStepsDraft((prev) => prev.map((s, i) => (i === stepIdx ? { ...s, label } : s)));
   const removeStep = (idx: number) => setStepsDraft((prev) => prev.filter((_, i) => i !== idx));
   const moveStep = (from: number, to: number) => {
     if (from === 0 || to === 0 || to < 0 || to >= stepsDraft.length) return;
@@ -239,7 +248,7 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
         is_default: isDefaultDraft,
         is_active: isActiveDraft,
         skip_auto_supervisor: skipAutoSupervisor,
-        steps: realSteps.map((s) => ({ approver_user_ids: s.approver_user_ids, approver_type: s.approver_type === 'admin' ? 'admin' : 'employee' }))
+        steps: realSteps.map((s) => ({ approver_user_ids: s.approver_user_ids, approver_type: s.approver_type === 'admin' ? 'admin' : 'employee', label: s.label.trim() || undefined }))
       };
       const url = editingId ? apiUrl(`/api/approval-templates/${editingId}`) : apiUrl('/api/approval-templates');
       const res = await fetch(url, {
@@ -667,7 +676,18 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
                         <span className="w-5 h-5 rounded-full bg-blue-600 text-white text-[10px] font-bold flex items-center justify-center shrink-0">
                           {idx + 1}
                         </span>
-                        <span className="text-xs font-semibold text-slate-700">{layerLabel(typeDraft, idx)}</span>
+                        {isVirtualSupervisor ? (
+                          <span className="text-xs font-semibold text-slate-700">{layerLabel(typeDraft, idx)}</span>
+                        ) : (
+                          <input
+                            type="text"
+                            value={step.label}
+                            onChange={(e) => setStepLabel(idx, e.target.value)}
+                            placeholder={layerLabel(typeDraft, idx)}
+                            title="Custom Layer name — stays with this Layer's approvers even after it's moved/reordered"
+                            className="text-xs font-semibold text-slate-700 bg-transparent border-b border-dashed border-slate-300 focus:border-blue-500 focus:outline-none px-0.5 w-40"
+                          />
+                        )}
                         <select
                           value={step.approver_type}
                           onChange={(e) => setStepApproverType(idx, e.target.value as any)}
