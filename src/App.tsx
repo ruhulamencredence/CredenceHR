@@ -1031,7 +1031,7 @@ export default function App() {
           build so mobile app users never see it, while the website keeps
           showing it exactly as before. */}
       {!Capacitor.isNativePlatform() && (
-        <footer className="py-6 text-center text-xs" style={{ background: 'var(--g-text)', color: '#9aa0a6' }}>
+        <footer className="py-6 text-center text-xs" style={{ background: 'var(--g-gradient)', color: 'rgba(255,255,255,0.85)' }}>
           <p>CredenceHR — an in-house application of Credence Housing Limited</p>
           <p className="mt-1">&copy; 2026 Credence Housing Limited. All rights reserved.</p>
         </footer>

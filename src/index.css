@@ -58,6 +58,37 @@
   }
 }
 
+/* Real bug, found the hard way across two Dashboard cards (AttendanceCard,
+   LeaveSummaryCard): an element that combines rounded corners
+   (border-radius) with a translucent or gradient background — especially
+   once it's promoted to its own GPU layer via `transform: translateZ(0)`,
+   which several of the Dashboard's "glass" cards use to try to help
+   backdrop-filter — can rasterize wrong on a cold reload in the Android
+   system WebView: it paints as a flat opaque color (usually plain white)
+   instead of correctly blending its own alpha/gradient with what's behind
+   it, and nothing short of a fresh reload fixes it (interacting with the
+   page doesn't help). This is a long-documented Chromium/WebKit compositor
+   issue, not something specific to this app — the same failure mode shows
+   up for plain background colors on tall rounded Views in Android WebViews
+   generally (e.g. facebook/react-native#15826) and for
+   border-radius + overflow:hidden specifically on WebKit
+   (bugs.webkit.org #30475). Trying to force a GPU layer with `transform`
+   alone doesn't reliably prevent it — this app's cards already had that and
+   still lost their background on reload.
+   The fix that's actually held up across these bug reports: take the
+   rounded-rect clip off Skia's normal raster path and put it on the CSS
+   mask raster path instead, which doesn't share the same bug. A mask that's
+   fully opaque white end-to-end (a radial gradient from white to white)
+   does this with zero visible effect of its own — it's not actually
+   masking anything out, just changing which renderer draws the corners.
+   Apply this class to any card that pairs rounded corners with a
+   translucent/gradient fill, alongside its existing rounded-*/overflow
+   classes. */
+.glass-mask-fix {
+  -webkit-mask-image: -webkit-radial-gradient(white, white);
+  mask-image: radial-gradient(white, white);
+}
+
 /*
   Design system - modeled on the Gemini app's visual language:
   a quiet, near-white surface; a single colorful brand gradient reserved for the

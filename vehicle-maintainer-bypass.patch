@@ -1,0 +1,725 @@
+diff --git a/VehicleManagementRoutes.ts b/VehicleManagementRoutes.ts
+index a03e834..6b5580f 100644
+--- a/VehicleManagementRoutes.ts
++++ b/VehicleManagementRoutes.ts
+@@ -48,7 +48,10 @@ import type { AlertType } from "./Alerts";
+ interface VehicleManagementRouteDeps {
+   authenticateToken: any;
+   requireAdmin: any;
+-  requireModule: (moduleKey: "vehicle_management") => any;
++  // 'vehicle_maintainer' is a separate AdminModuleKey from 'vehicle_management'
++  // (see server.ts's ADMIN_MODULE_KEYS comment) — it only gates the direct-
++  // book/direct-assign bypass routes below, not the full Admin Panel tab.
++  requireModule: (moduleKey: "vehicle_management" | "vehicle_maintainer") => any;
+   queryDB: (sql: string, params?: any[]) => Promise<any>;
+   getAdminModules: (userId: number) => Promise<string[]>;
+   createAlert: (
+@@ -154,6 +157,15 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
+     finalizeVehicleRequisitionApproval
+   } = deps;
+   const adminGate = [authenticateToken, requireAdmin, requireModule("vehicle_management")];
++  // Vehicle Requisition Flowchart v3.0's bypass path: whoever actually keeps
++  // the vehicles running day to day (Superadmin-granted 'vehicle_maintainer',
++  // deliberately separate from 'vehicle_management' — see server.ts) can skip
++  // the Approval Workflow entirely and book+confirm a ride directly, or push
++  // an already-submitted request straight to Assigned, for whenever the
++  // normal Supervisor -> HR/Admin Review -> Assign chain has nobody free to
++  // act on it in time. See POST .../direct-book and PUT .../:id/direct-assign
++  // below.
++  const maintainerGate = [authenticateToken, requireAdmin, requireModule("vehicle_maintainer")];
+ 
+   async function canManage(userId: number, role: string): Promise<boolean> {
+     if (role === "superadmin") return true;
+@@ -167,6 +179,52 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
+     return new Date(start.getTime() + durationHours * 60 * 60 * 1000);
+   }
+ 
++  // Shared by submitRequisition below AND the Vehicle Maintainer's direct-book
++  // route — the same "purpose/pickup/destination/date/time/duration" form
++  // validation regardless of whether the result goes through the Approval
++  // Workflow or is booked+confirmed directly. Throws a plain Error with a
++  // message safe to send straight back to the client on bad input.
++  function validateRideFields(body: any) {
++    const purpose = typeof body.purpose === "string" ? body.purpose.trim().slice(0, 2000) : "";
++    const pickup = typeof body.pickup_location === "string" ? body.pickup_location.trim().slice(0, 255) : "";
++    const destination = typeof body.destination === "string" ? body.destination.trim().slice(0, 255) : "";
++    const rideDate = typeof body.ride_date === "string" ? body.ride_date : "";
++    const startTime = typeof body.start_time === "string" ? body.start_time : "";
++    const duration = Number(body.estimated_duration_hours);
++
++    if (!purpose) throw new Error("Purpose is required.");
++    if (!pickup) throw new Error("Pickup location is required.");
++    if (!destination) throw new Error("Destination is required.");
++    if (!rideDate) throw new Error("Ride date is required.");
++    if (!startTime) throw new Error("Start time is required.");
++    if (!Number.isFinite(duration) || duration <= 0) {
++      throw new Error("Estimated duration must be greater than 0 hours.");
++    }
++
++    const expectedReturn = computeExpectedReturn(rideDate, startTime, duration);
++    return { purpose, pickup, destination, rideDate, startTime, duration, expectedReturn };
++  }
++
++  // Shared by PUT .../:id/assign AND the Vehicle Maintainer's direct-book /
++  // direct-assign routes — validates the vehicle+driver half of the form and
++  // confirms the vehicle is actually free. Throws a plain Error with a
++  // message safe to send straight back to the client on bad input.
++  async function validateVehicleAssignment(body: any) {
++    const vehicleId = Number(body.vehicle_id);
++    const driverName = typeof body.driver_name === "string" ? body.driver_name.trim().slice(0, 150) : "";
++    const driverMobile = typeof body.driver_mobile === "string" ? body.driver_mobile.trim().slice(0, 30) : "";
++    if (!vehicleId) throw new Error("Pick a vehicle.");
++    if (!driverName) throw new Error("Driver name is required.");
++    if (!driverMobile) throw new Error("Driver mobile number is required.");
++
++    const vehicleRows: any = await queryDB("SELECT * FROM vehicles WHERE id = ?", [vehicleId]);
++    const vehicle = vehicleRows[0];
++    if (!vehicle) throw new Error("Vehicle not found.");
++    if (vehicle.status !== "available") throw new Error("That vehicle is not currently available.");
++
++    return { vehicleId, driverName, driverMobile, vehicle };
++  }
++
+   // Resolves who a 'pending' requisition's Approval Workflow is CURRENTLY
+   // waiting on — same idea as AssetManagementRoutes.ts's own
+   // attachPendingApprover, kept a plain any[]-in/out helper for the same
+@@ -345,23 +403,7 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
+     actor: { id: number; name?: string },
+     overrideSupervisorId?: number | null
+   ) {
+-    const purpose = typeof body.purpose === "string" ? body.purpose.trim().slice(0, 2000) : "";
+-    const pickup = typeof body.pickup_location === "string" ? body.pickup_location.trim().slice(0, 255) : "";
+-    const destination = typeof body.destination === "string" ? body.destination.trim().slice(0, 255) : "";
+-    const rideDate = typeof body.ride_date === "string" ? body.ride_date : "";
+-    const startTime = typeof body.start_time === "string" ? body.start_time : "";
+-    const duration = Number(body.estimated_duration_hours);
+-
+-    if (!purpose) throw new Error("Purpose is required.");
+-    if (!pickup) throw new Error("Pickup location is required.");
+-    if (!destination) throw new Error("Destination is required.");
+-    if (!rideDate) throw new Error("Ride date is required.");
+-    if (!startTime) throw new Error("Start time is required.");
+-    if (!Number.isFinite(duration) || duration <= 0) {
+-      throw new Error("Estimated duration must be greater than 0 hours.");
+-    }
+-
+-    const expectedReturn = computeExpectedReturn(rideDate, startTime, duration);
++    const { purpose, pickup, destination, rideDate, startTime, duration, expectedReturn } = validateRideFields(body);
+ 
+     // time_extension_status/hr_notice_flag are explicitly listed here
+     // (rather than relying on the columns' own SQL DEFAULT) because the
+@@ -709,6 +751,130 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
+     }
+   });
+ 
++  // ---------------------------------------------------------------------
++  // Vehicle Maintainer bypass — Flowchart v3.0's "গাড়ি রক্ষণাবেক্ষণকারী
++  // সরাসরি রাইড কনফার্ম করবেন" path, gated behind 'vehicle_maintainer'
++  // (maintainerGate), a SEPARATE grant from 'vehicle_management' — see
++  // server.ts's ADMIN_MODULE_KEYS comment. Neither route below touches or
++  // requires the normal Supervisor -> HR/Admin Review -> Assign chain.
++  // ---------------------------------------------------------------------
++
++  // GET /api/vehicles/requisitions/bypass-candidates — every requisition
++  // (any employee's, not just the Vehicle Maintainer's own) still stuck in
++  // 'pending' or 'approved', for the direct-assign bypass picker below. Kept
++  // separate from GET /api/vehicles/requisitions above, which only shows
++  // every employee's requests to a 'vehicle_management' account — a
++  // 'vehicle_maintainer'-only account has no reason to hold that broader
++  // module too.
++  app.get("/api/vehicles/requisitions/bypass-candidates", ...maintainerGate, async (_req: any, res: any) => {
++    try {
++      const { rows, userById, vehicleById } = await loadContext();
++      const candidates = rows.filter((r: any) => r.status === "pending" || r.status === "approved");
++      const sorted = candidates.sort((a: any, b: any) => Number(b.id) - Number(a.id));
++      res.json(sorted.map((r: any) => serialize({ ...r, pending_with: null }, userById, vehicleById)));
++    } catch (err: any) {
++      res.status(500).json({ error: err.message });
++    }
++  });
++
++  // POST /api/vehicles/requisitions/direct-book — the Vehicle Maintainer
++  // books AND confirms a ride on behalf of any employee in one step: no
++  // Supervisor layer, no HR/Admin Review, no separate Assign step. Inserts
++  // the requisition straight into 'ongoing' with the vehicle+driver already
++  // set, and skips createTemplateApprovalRequest entirely (no
++  // approval_requests row is ever created for this one) so it never shows up
++  // waiting in anyone's Approvals queue.
++  app.post("/api/vehicles/requisitions/direct-book", ...maintainerGate, async (req: any, res: any) => {
++    try {
++      const employeeUserId = Number(req.body?.employee_user_id);
++      if (!Number.isFinite(employeeUserId)) return res.status(400).json({ error: "Pick who this ride is for." });
++      const employeeRows: any = await queryDB("SELECT id FROM users WHERE id = ?", [employeeUserId]);
++      if (employeeRows.length === 0) return res.status(404).json({ error: "That account was not found." });
++
++      const { purpose, pickup, destination, rideDate, startTime, duration, expectedReturn } = validateRideFields(req.body || {});
++      const { vehicleId, driverName, driverMobile, vehicle } = await validateVehicleAssignment(req.body || {});
++
++      const now = new Date();
++      const result: any = await queryDB(
++        `INSERT INTO vehicle_requisitions
++           (employee_user_id, purpose, pickup_location, destination, ride_date, start_time,
++            estimated_duration_hours, expected_return_at, status, decided_by, decided_at,
++            assigned_vehicle_id, driver_name, driver_mobile, time_extension_status, hr_notice_flag)
++         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
++        [
++          employeeUserId, purpose, pickup, destination, rideDate, startTime, duration, expectedReturn,
++          "ongoing", req.user.id, now, vehicleId, driverName, driverMobile, "none", 0
++        ]
++      );
++      await queryDB("UPDATE vehicles SET status = ? WHERE id = ?", ["on_ride", vehicleId]);
++
++      await createAlert(queryDB, {
++        userId: employeeUserId,
++        type: "vehicle_requisition" as AlertType,
++        title: "Ride Booked & Confirmed",
++        message: `${req.user.name || "The Vehicle Maintainer"} booked and confirmed a ride for you (${pickup} → ${destination}). Driver: ${driverName} (${driverMobile}), Vehicle: ${vehicle.vehicle_no}.`,
++        relatedType: "vehicle_requisition",
++        relatedId: Number(result.insertId)
++      });
++
++      const { rows, userById, vehicleById } = await loadContext();
++      const created = rows.find((r: any) => Number(r.id) === Number(result.insertId));
++      res.status(201).json(serialize({ ...created, pending_with: null }, userById, vehicleById));
++    } catch (err: any) {
++      res.status(err.message?.endsWith(".") ? 400 : 500).json({ error: err.message });
++    }
++  });
++
++  // PUT /api/vehicles/requisitions/:id/direct-assign — the Vehicle
++  // Maintainer's bypass for a requisition that ALREADY exists (self-
++  // submitted or HR-Direct-created) but is stuck — still 'pending' on a
++  // Supervisor/HR-Admin Review layer, or 'approved' but the account that
++  // would normally do the Assign step has no time. Cancels any open
++  // approval_requests row for it (so it stops showing up in anyone's
++  // Approvals queue for a ride that's already been decided outside that
++  // workflow — same convention as POST .../:id/cancel above) and moves it
++  // straight to 'ongoing' with the vehicle+driver set.
++  app.put("/api/vehicles/requisitions/:id/direct-assign", ...maintainerGate, async (req: any, res: any) => {
++    try {
++      const id = Number(req.params.id);
++      const reqRows: any = await queryDB("SELECT * FROM vehicle_requisitions WHERE id = ?", [id]);
++      const requisition = reqRows[0];
++      if (!requisition) return res.status(404).json({ error: "Requisition not found." });
++      if (!["pending", "approved"].includes(requisition.status)) {
++        return res.status(400).json({ error: "Only a pending or approved requisition can be bypassed like this." });
++      }
++
++      const { vehicleId, driverName, driverMobile, vehicle } = await validateVehicleAssignment(req.body || {});
++
++      if (requisition.status === "pending") {
++        const requestRows: any = await queryDB("SELECT * FROM approval_requests WHERE source_type = ?", ["vehicle_requisition"]);
++        const pendingRequest = requestRows.find((r: any) => Number(r.source_id) === id && r.status === "pending");
++        if (pendingRequest) {
++          await queryDB("UPDATE approval_requests SET status = ? WHERE id = ?", ["rejected", pendingRequest.id]);
++        }
++      }
++
++      await queryDB(
++        "UPDATE vehicle_requisitions SET status = ?, decided_by = ?, decided_at = ?, assigned_vehicle_id = ?, driver_name = ?, driver_mobile = ? WHERE id = ?",
++        ["ongoing", req.user.id, requisition.decided_at || new Date(), vehicleId, driverName, driverMobile, id]
++      );
++      await queryDB("UPDATE vehicles SET status = ? WHERE id = ?", ["on_ride", vehicleId]);
++
++      await createAlert(queryDB, {
++        userId: Number(requisition.employee_user_id),
++        type: "vehicle_requisition" as AlertType,
++        title: "Ride Confirmed (Direct)",
++        message: `${req.user.name || "The Vehicle Maintainer"} confirmed your ride (${requisition.pickup_location} → ${requisition.destination}) directly. Driver: ${driverName} (${driverMobile}), Vehicle: ${vehicle.vehicle_no}.`,
++        relatedType: "vehicle_requisition",
++        relatedId: id
++      });
++
++      res.json({ success: true });
++    } catch (err: any) {
++      res.status(err.message?.endsWith(".") ? 400 : 500).json({ error: err.message });
++    }
++  });
++
+   // PUT /api/vehicles/requisitions/:id/extension-decision — HR/Admin
+   // approves or rejects a still-open time extension request while the ride
+   // is ongoing.
+diff --git a/server.ts b/server.ts
+index d071af0..8059116 100644
+--- a/server.ts
++++ b/server.ts
+@@ -2232,7 +2232,14 @@ async function ensureSchemaMigrations() {
+ // of truth here and mirrored in src/types.ts (ADMIN_MODULES) for the UI.
+ const USER_CLAIM_CATEGORIES = ["Transport", "Fuel", "Toll", "Parking", "Others"] as const;
+ 
+-const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports", "users", "attendance", "attendance_reports", "leave_applications", "recycle", "editlog", "notices", "claims", "approvals", "conveyance", "disbursement", "employees", "departments", "tracking", "office_attendance", "holidays", "payroll", "asset_management", "vehicle_management", "exit_offboarding", "performance_management", "recruitment", "grievance_disciplinary", "hr_analytics", "document_vault", "admin_dashboard"] as const;
++// 'vehicle_maintainer' — deliberately separate from 'vehicle_management':
++// grants ONLY the Vehicle Requisition bypass actions in
++// VehicleManagementRoutes.ts (POST .../direct-book, PUT .../:id/direct-assign)
++// so a Superadmin can hand this out to whoever actually keeps the vehicles
++// running day-to-day without also giving them the full Admin Panel ->
++// Vehicle Management tab (fleet CRUD, the Approval Workflow's own queue,
++// etc.). See the two routes' own comments for what the bypass does.
++const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports", "users", "attendance", "attendance_reports", "leave_applications", "recycle", "editlog", "notices", "claims", "approvals", "conveyance", "disbursement", "employees", "departments", "tracking", "office_attendance", "holidays", "payroll", "asset_management", "vehicle_management", "vehicle_maintainer", "exit_offboarding", "performance_management", "recruitment", "grievance_disciplinary", "hr_analytics", "document_vault", "admin_dashboard"] as const;
+ 
+ // Granular per-module action layers — mirrors PermissionLayerKey/
+ // PERMISSION_LAYERS in src/types.ts (single source of truth is duplicated
+diff --git a/src/App.tsx b/src/App.tsx
+index 008bb2a..6425a64 100644
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -990,7 +990,7 @@ export default function App() {
+                 </button>
+                 <h1 className="text-base font-bold">Book a Ride</h1>
+               </div>
+-              <VehicleManagement />
++              <VehicleManagement user={user} />
+             </div>
+           </div>
+         ) : isAdminView ? (
+diff --git a/src/components/AdminPanel.tsx b/src/components/AdminPanel.tsx
+index 1e1efe1..ca59ca5 100644
+--- a/src/components/AdminPanel.tsx
++++ b/src/components/AdminPanel.tsx
+@@ -50,7 +50,7 @@ const MODULE_ACCESS_GROUPS: { label: string; keys: AdminModuleKey[] }[] = [
+   { label: 'HR', keys: ['approvals', 'notices', 'holidays', 'leave_applications', 'departments'] },
+   { label: 'HR - Attendance', keys: ['attendance', 'attendance_reports', 'office_attendance'] },
+   { label: 'HR - Claims/Bill/Disbursement', keys: ['claims', 'conveyance', 'disbursement'] },
+-  { label: 'HR - Employee', keys: ['employees', 'tracking', 'asset_management', 'vehicle_management'] },
++  { label: 'HR - Employee', keys: ['employees', 'tracking', 'asset_management', 'vehicle_management', 'vehicle_maintainer'] },
+   { label: 'MIS', keys: ['users', 'projects', 'branches'] },
+   { label: 'Payroll', keys: ['payroll'] },
+   {
+@@ -61,7 +61,7 @@ const MODULE_ACCESS_GROUPS: { label: string; keys: AdminModuleKey[] }[] = [
+         'approvals', 'notices', 'holidays', 'leave_applications', 'departments',
+         'attendance', 'attendance_reports', 'office_attendance',
+         'claims', 'conveyance', 'disbursement',
+-        'employees', 'tracking', 'asset_management', 'vehicle_management',
++        'employees', 'tracking', 'asset_management', 'vehicle_management', 'vehicle_maintainer',
+         'users', 'projects', 'branches',
+         'payroll',
+       ].includes(key)
+diff --git a/src/components/VehicleManagement.tsx b/src/components/VehicleManagement.tsx
+index eea330e..5bf28e8 100644
+--- a/src/components/VehicleManagement.tsx
++++ b/src/components/VehicleManagement.tsx
+@@ -65,6 +65,17 @@ interface AvailableVehicle {
+   vehicle_type: string | null;
+ }
+ 
++// A directory row this component actually needs for the Vehicle Maintainer's
++// employee picker — only ones with a login account (user_id) can be booked
++// for, since vehicle_requisitions.employee_user_id is a users.id FK. See
++// GET /api/employee-directory (EmployeeDirectoryRoutes.ts) for the full shape.
++interface DirectoryEmployee {
++  id: number;
++  name: string;
++  designation: string | null;
++  user_id: number | null;
++}
++
+ function authHeaders(): HeadersInit {
+   const token = localStorage.getItem('mpr_token');
+   return { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+@@ -79,8 +90,29 @@ const emptyForm = () => ({
+   estimated_duration_hours: 1
+ });
+ 
+-export function VehicleManagement() {
+-  const [tab, setTab] = useState<'book' | 'status' | 'assign'>('book');
++const emptyDirectBookForm = () => ({
++  employee_user_id: '',
++  purpose: '',
++  pickup_location: '',
++  destination: '',
++  ride_date: '',
++  start_time: '',
++  estimated_duration_hours: 1,
++  vehicle_id: '',
++  driver_name: '',
++  driver_mobile: ''
++});
++
++interface VehicleManagementProps {
++  // The logged-in account — only used here to decide whether the "Direct
++  // Book" tab (the Vehicle Maintainer bypass) shows at all. A Superadmin
++  // implicitly has every module, same convention as requireModule server-side.
++  user?: { role?: string; module_permissions?: string[] } | null;
++}
++
++export function VehicleManagement({ user }: VehicleManagementProps) {
++  const isVehicleMaintainer = user?.role === 'superadmin' || !!(user?.module_permissions || []).includes('vehicle_maintainer');
++  const [tab, setTab] = useState<'book' | 'status' | 'assign' | 'maintainer'>('book');
+   const [requisitions, setRequisitions] = useState<Requisition[]>([]);
+   const [loading, setLoading] = useState(false);
+   const [error, setError] = useState<string | null>(null);
+@@ -102,6 +134,91 @@ export function VehicleManagement() {
+   const [assigningFor, setAssigningFor] = useState<number | null>(null);
+   const [assignForm, setAssignForm] = useState({ vehicle_id: '', driver_name: '', driver_mobile: '' });
+ 
++  // Vehicle Maintainer bypass (see VehicleManagementRoutes.ts's
++  // POST .../direct-book and PUT .../:id/direct-assign) — books+confirms a
++  // ride for any employee, or pushes an already-submitted one straight to
++  // Assigned, skipping the Approval Workflow entirely.
++  const [directoryEmployees, setDirectoryEmployees] = useState<DirectoryEmployee[]>([]);
++  const [bypassCandidates, setBypassCandidates] = useState<Requisition[]>([]);
++  const [directBookMode, setDirectBookMode] = useState<'new' | 'existing'>('new');
++  const [directBookForm, setDirectBookForm] = useState(emptyDirectBookForm());
++  const [directBookSubmitting, setDirectBookSubmitting] = useState(false);
++  const [directBookMessage, setDirectBookMessage] = useState<string | null>(null);
++  const [bypassingFor, setBypassingFor] = useState<number | null>(null);
++  const [bypassForm, setBypassForm] = useState({ vehicle_id: '', driver_name: '', driver_mobile: '' });
++
++  async function loadMaintainerData() {
++    setLoading(true);
++    setError(null);
++    try {
++      const [dirRes, candRes, vehRes] = await Promise.all([
++        fetch(apiUrl('/api/employee-directory'), { headers: authHeaders() }),
++        fetch(apiUrl('/api/vehicles/requisitions/bypass-candidates'), { headers: authHeaders() }),
++        fetch(apiUrl('/api/vehicles/available'), { headers: authHeaders() })
++      ]);
++      const dirData = await dirRes.json();
++      const candData = await candRes.json();
++      const vehData = await vehRes.json();
++      if (!dirRes.ok) throw new Error(dirData.error || 'Failed to load the employee directory.');
++      if (!candRes.ok) throw new Error(candData.error || 'Failed to load pending ride requests.');
++      if (!vehRes.ok) throw new Error(vehData.error || 'Failed to load available vehicles.');
++      setDirectoryEmployees((dirData as DirectoryEmployee[]).filter((e) => e.user_id));
++      setBypassCandidates(candData);
++      setAvailableVehicles(vehData);
++    } catch (err: any) {
++      setError(err.message);
++    } finally {
++      setLoading(false);
++    }
++  }
++
++  async function submitDirectBook(e: React.FormEvent) {
++    e.preventDefault();
++    setDirectBookSubmitting(true);
++    setDirectBookMessage(null);
++    try {
++      const res = await fetch(apiUrl('/api/vehicles/requisitions/direct-book'), {
++        method: 'POST',
++        headers: authHeaders(),
++        body: JSON.stringify({
++          ...directBookForm,
++          employee_user_id: Number(directBookForm.employee_user_id),
++          vehicle_id: Number(directBookForm.vehicle_id)
++        })
++      });
++      const data = await res.json();
++      if (!res.ok) throw new Error(data.error || 'Could not book this ride.');
++      setDirectBookMessage('Ride booked and confirmed directly.');
++      setDirectBookForm(emptyDirectBookForm());
++      loadMaintainerData();
++    } catch (err: any) {
++      setDirectBookMessage(err.message);
++    } finally {
++      setDirectBookSubmitting(false);
++    }
++  }
++
++  async function bypassAssign(id: number) {
++    if (!bypassForm.vehicle_id || !bypassForm.driver_name.trim() || !bypassForm.driver_mobile.trim()) {
++      setError('Pick a vehicle and fill in the driver name & mobile number.');
++      return;
++    }
++    try {
++      const res = await fetch(apiUrl(`/api/vehicles/requisitions/${id}/direct-assign`), {
++        method: 'PUT',
++        headers: authHeaders(),
++        body: JSON.stringify({ ...bypassForm, vehicle_id: Number(bypassForm.vehicle_id) })
++      });
++      const data = await res.json();
++      if (!res.ok) throw new Error(data.error || 'Could not confirm this ride.');
++      setBypassingFor(null);
++      setBypassForm({ vehicle_id: '', driver_name: '', driver_mobile: '' });
++      loadMaintainerData();
++    } catch (err: any) {
++      setError(err.message);
++    }
++  }
++
+   async function loadRequisitions() {
+     setLoading(true);
+     setError(null);
+@@ -149,6 +266,7 @@ export function VehicleManagement() {
+   useEffect(() => {
+     if (tab === 'status') loadRequisitions();
+     if (tab === 'assign') loadAwaitingAssignment();
++    if (tab === 'maintainer') loadMaintainerData();
+   }, [tab]);
+ 
+   // Runs once on mount, regardless of which tab is active, purely so the
+@@ -244,7 +362,8 @@ export function VehicleManagement() {
+         {([
+           ['book', 'Book a Ride'],
+           ['status', 'Ride Status'],
+-          ['assign', `Approved by Me${awaitingAssignment.length > 0 ? ` (${awaitingAssignment.length})` : ''}`]
++          ['assign', `Approved by Me${awaitingAssignment.length > 0 ? ` (${awaitingAssignment.length})` : ''}`],
++          ...(isVehicleMaintainer ? [['maintainer', 'Direct Book'] as const] : [])
+         ] as const).map(([key, label]) => (
+           <button
+             key={key}
+@@ -521,6 +640,236 @@ export function VehicleManagement() {
+           ))}
+         </div>
+       )}
++
++      {tab === 'maintainer' && isVehicleMaintainer && (
++        <div className="space-y-4">
++          <div className="rounded bg-purple-50 text-purple-800 text-xs px-3 py-2">
++            Vehicle Maintainer bypass — books/confirms a ride without going through the Supervisor / HR-Admin
++            Approval Workflow. Use "Book New" for a ride nobody has submitted yet, or "Bypass Existing" to push an
++            already-submitted request straight to Assigned.
++          </div>
++
++          <div className="flex gap-1 border-b border-gray-100">
++            {([
++              ['new', 'Book New'],
++              ['existing', `Bypass Existing${bypassCandidates.length > 0 ? ` (${bypassCandidates.length})` : ''}`]
++            ] as const).map(([key, label]) => (
++              <button
++                key={key}
++                onClick={() => setDirectBookMode(key)}
++                className={`px-3 py-1.5 text-xs font-medium border-b-2 -mb-px transition-colors ${
++                  directBookMode === key ? 'border-purple-600 text-purple-600' : 'border-transparent text-gray-500 hover:text-gray-800'
++                }`}
++              >
++                {label}
++              </button>
++            ))}
++          </div>
++
++          {loading && <div className="text-sm text-gray-500">Loading…</div>}
++
++          {directBookMode === 'new' && (
++            <form onSubmit={submitDirectBook} className="space-y-3 max-w-xl">
++              <div>
++                <label className="block text-sm font-medium text-gray-700 mb-1">Employee</label>
++                <select
++                  required
++                  value={directBookForm.employee_user_id}
++                  onChange={(e) => setDirectBookForm({ ...directBookForm, employee_user_id: e.target.value })}
++                  className="w-full border rounded px-3 py-2 text-sm"
++                >
++                  <option value="">Select an employee…</option>
++                  {directoryEmployees.map((e) => (
++                    <option key={e.user_id} value={e.user_id as number}>
++                      {e.name}{e.designation ? ` — ${e.designation}` : ''}
++                    </option>
++                  ))}
++                </select>
++              </div>
++              <div>
++                <label className="block text-sm font-medium text-gray-700 mb-1">Purpose</label>
++                <textarea
++                  required
++                  value={directBookForm.purpose}
++                  onChange={(e) => setDirectBookForm({ ...directBookForm, purpose: e.target.value })}
++                  rows={2}
++                  className="w-full border rounded px-3 py-2 text-sm"
++                />
++              </div>
++              <div className="grid grid-cols-2 gap-3">
++                <div>
++                  <label className="block text-sm font-medium text-gray-700 mb-1">Pickup Location</label>
++                  <input
++                    required
++                    value={directBookForm.pickup_location}
++                    onChange={(e) => setDirectBookForm({ ...directBookForm, pickup_location: e.target.value })}
++                    className="w-full border rounded px-3 py-2 text-sm"
++                  />
++                </div>
++                <div>
++                  <label className="block text-sm font-medium text-gray-700 mb-1">Destination</label>
++                  <input
++                    required
++                    value={directBookForm.destination}
++                    onChange={(e) => setDirectBookForm({ ...directBookForm, destination: e.target.value })}
++                    className="w-full border rounded px-3 py-2 text-sm"
++                  />
++                </div>
++              </div>
++              <div className="grid grid-cols-3 gap-3">
++                <div>
++                  <label className="block text-sm font-medium text-gray-700 mb-1">Ride Date</label>
++                  <input
++                    required
++                    type="date"
++                    value={directBookForm.ride_date}
++                    onChange={(e) => setDirectBookForm({ ...directBookForm, ride_date: e.target.value })}
++                    className="w-full border rounded px-3 py-2 text-sm"
++                  />
++                </div>
++                <div>
++                  <label className="block text-sm font-medium text-gray-700 mb-1">Start Time</label>
++                  <input
++                    required
++                    type="time"
++                    value={directBookForm.start_time}
++                    onChange={(e) => setDirectBookForm({ ...directBookForm, start_time: e.target.value })}
++                    className="w-full border rounded px-3 py-2 text-sm"
++                  />
++                </div>
++                <div>
++                  <label className="block text-sm font-medium text-gray-700 mb-1">Est. Duration (hrs)</label>
++                  <input
++                    required
++                    type="number"
++                    min={0.5}
++                    step="0.5"
++                    value={directBookForm.estimated_duration_hours}
++                    onChange={(e) => setDirectBookForm({ ...directBookForm, estimated_duration_hours: Number(e.target.value) })}
++                    className="w-full border rounded px-3 py-2 text-sm"
++                  />
++                </div>
++              </div>
++              <div className="grid grid-cols-3 gap-3">
++                <div>
++                  <label className="block text-sm font-medium text-gray-700 mb-1">Vehicle</label>
++                  <select
++                    required
++                    value={directBookForm.vehicle_id}
++                    onChange={(e) => setDirectBookForm({ ...directBookForm, vehicle_id: e.target.value })}
++                    className="w-full border rounded px-3 py-2 text-sm"
++                  >
++                    <option value="">Pick a vehicle…</option>
++                    {availableVehicles.map((v) => (
++                      <option key={v.id} value={v.id}>
++                        {v.model} ({v.vehicle_no})
++                      </option>
++                    ))}
++                  </select>
++                </div>
++                <div>
++                  <label className="block text-sm font-medium text-gray-700 mb-1">Driver Name</label>
++                  <input
++                    required
++                    value={directBookForm.driver_name}
++                    onChange={(e) => setDirectBookForm({ ...directBookForm, driver_name: e.target.value })}
++                    className="w-full border rounded px-3 py-2 text-sm"
++                  />
++                </div>
++                <div>
++                  <label className="block text-sm font-medium text-gray-700 mb-1">Driver Mobile</label>
++                  <input
++                    required
++                    value={directBookForm.driver_mobile}
++                    onChange={(e) => setDirectBookForm({ ...directBookForm, driver_mobile: e.target.value })}
++                    className="w-full border rounded px-3 py-2 text-sm"
++                  />
++                </div>
++              </div>
++              {directBookMessage && <div className="text-sm text-gray-700">{directBookMessage}</div>}
++              <button
++                type="submit"
++                disabled={directBookSubmitting}
++                className="px-4 py-2 text-sm font-medium rounded bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50"
++              >
++                {directBookSubmitting ? 'Booking…' : 'Book & Confirm Directly'}
++              </button>
++            </form>
++          )}
++
++          {directBookMode === 'existing' && (
++            <div className="space-y-3">
++              {!loading && bypassCandidates.length === 0 && (
++                <div className="text-sm text-gray-500">Nothing pending or approved right now.</div>
++              )}
++              {bypassCandidates.map((r) => (
++                <div key={r.id} className="border rounded-lg p-4">
++                  <div className="flex items-center justify-between">
++                    <div className="font-semibold text-gray-800">
++                      {r.pickup_location} → {r.destination}
++                    </div>
++                    <span className={`text-xs font-medium px-2 py-1 rounded ${STATUS_COLOR[r.status]}`}>{STATUS_LABEL[r.status]}</span>
++                  </div>
++                  <div className="text-xs text-gray-500 mt-1">
++                    {r.ride_date} at {r.start_time} • Est. {r.estimated_duration_hours} hr{r.estimated_duration_hours === 1 ? '' : 's'}
++                  </div>
++                  <div className="text-sm text-gray-600 mt-2">{r.purpose}</div>
++
++                  <div className="mt-3">
++                    {bypassingFor === r.id ? (
++                      <div className="flex flex-wrap items-center gap-2">
++                        <select
++                          value={bypassForm.vehicle_id}
++                          onChange={(e) => setBypassForm({ ...bypassForm, vehicle_id: e.target.value })}
++                          className="border rounded px-2 py-1 text-xs"
++                        >
++                          <option value="">Pick a vehicle…</option>
++                          {availableVehicles.map((v) => (
++                            <option key={v.id} value={v.id}>
++                              {v.model} ({v.vehicle_no})
++                            </option>
++                          ))}
++                        </select>
++                        <input
++                          placeholder="Driver name"
++                          value={bypassForm.driver_name}
++                          onChange={(e) => setBypassForm({ ...bypassForm, driver_name: e.target.value })}
++                          className="border rounded px-2 py-1 text-xs"
++                        />
++                        <input
++                          placeholder="Driver mobile"
++                          value={bypassForm.driver_mobile}
++                          onChange={(e) => setBypassForm({ ...bypassForm, driver_mobile: e.target.value })}
++                          className="border rounded px-2 py-1 text-xs"
++                        />
++                        <button onClick={() => bypassAssign(r.id)} className="px-3 py-1.5 text-xs font-medium rounded bg-purple-600 text-white">
++                          Confirm Directly
++                        </button>
++                        <button
++                          onClick={() => setBypassingFor(null)}
++                          className="px-3 py-1.5 text-xs font-medium rounded border border-gray-300 text-gray-600"
++                        >
++                          Cancel
++                        </button>
++                      </div>
++                    ) : (
++                      <button
++                        onClick={() => {
++                          setBypassingFor(r.id);
++                          setBypassForm({ vehicle_id: '', driver_name: '', driver_mobile: '' });
++                        }}
++                        className="px-3 py-1.5 text-xs font-medium rounded bg-purple-600 text-white hover:bg-purple-700"
++                      >
++                        Bypass & Assign Vehicle
++                      </button>
++                    )}
++                  </div>
++                </div>
++              ))}
++            </div>
++          )}
++        </div>
++      )}
+     </div>
+   );
+ }
+diff --git a/src/types.ts b/src/types.ts
+index cd2cc4d..3ac4632 100644
+--- a/src/types.ts
++++ b/src/types.ts
+@@ -3,7 +3,7 @@ export type UserRole = 'superadmin' | 'admin' | 'user';
+ // Every Admin Panel tab. A Superadmin implicitly has all of these; a plain Admin
+ // only sees/uses the ones the Superadmin has explicitly granted via
+ // PUT /api/users/:id/module-permissions. Mirrors ADMIN_MODULE_KEYS in server.ts.
+-export type AdminModuleKey = 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'recycle' | 'editlog' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'disbursement' | 'employees' | 'departments' | 'tracking' | 'office_attendance' | 'holidays' | 'payroll' | 'asset_management' | 'vehicle_management' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'admin_dashboard';
++export type AdminModuleKey = 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'recycle' | 'editlog' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'disbursement' | 'employees' | 'departments' | 'tracking' | 'office_attendance' | 'holidays' | 'payroll' | 'asset_management' | 'vehicle_management' | 'vehicle_maintainer' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'admin_dashboard';
+ 
+ export const ADMIN_MODULES: { key: AdminModuleKey; label: string }[] = [
+   // Every role==='admin'|'superadmin' account already gets this as their own
+@@ -40,6 +40,14 @@ export const ADMIN_MODULES: { key: AdminModuleKey; label: string }[] = [
+   { key: 'payroll', label: 'Payroll' },
+   { key: 'asset_management', label: 'Asset Management' },
+   { key: 'vehicle_management', label: 'Vehicle Management' },
++  // Separate from 'vehicle_management' above — only unlocks Book a Ride's
++  // "Direct Book" bypass tab (VehicleManagement.tsx): book+confirm a ride for
++  // any employee, or push an existing request straight to Assigned, without
++  // going through the Approval Workflow. Meant for whoever actually keeps
++  // the vehicles running day to day, even if they don't hold full Vehicle
++  // Management Admin Panel access. See VehicleManagementRoutes.ts's
++  // POST .../direct-book / PUT .../:id/direct-assign.
++  { key: 'vehicle_maintainer', label: 'Vehicle Maintainer (Ride Bypass)' },
+   { key: 'recycle', label: 'Job Recycle' },
+   { key: 'editlog', label: 'MPR Edit Log' },
+   { key: 'exit_offboarding', label: 'Exit / Offboarding' },
