@@ -227,6 +227,24 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
   // returned/stored, just denormalized from that account rather than typed in.
   // Throws a plain Error with a message safe to send straight back to the
   // client on bad input.
+  // Atomic compare-and-set: two concurrent bookings can both pass
+  // validateVehicleAssignment's "available" check, but only one UPDATE
+  // can match status = 'available', so only one claim succeeds.
+  async function claimVehicle(vehicleId: number) {
+    const result: any = await queryDB("UPDATE vehicles SET status = ? WHERE id = ? AND status = ?", [
+      "on_ride",
+      vehicleId,
+      "available"
+    ]);
+    if (!result || Number(result.affectedRows) === 0) {
+      throw new Error("That vehicle was just booked by someone else. Pick another vehicle.");
+    }
+  }
+
+  async function releaseVehicle(vehicleId: number) {
+    await queryDB("UPDATE vehicles SET status = ? WHERE id = ?", ["available", vehicleId]);
+  }
+
   async function validateVehicleAssignment(body: any) {
     const vehicleId = Number(body.vehicle_id);
     const driverUserId = Number(body.driver_user_id);
@@ -750,11 +768,16 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
 
       const { vehicleId, driverUserId, driverName, driverMobile, vehicle } = await validateVehicleAssignment(req.body || {});
 
-      await queryDB(
-        "UPDATE vehicle_requisitions SET status = ?, assigned_vehicle_id = ?, driver_user_id = ?, driver_name = ?, driver_mobile = ? WHERE id = ?",
-        ["ongoing", vehicleId, driverUserId, driverName, driverMobile, id]
-      );
-      await queryDB("UPDATE vehicles SET status = ? WHERE id = ?", ["on_ride", vehicleId]);
+      await claimVehicle(vehicleId);
+      try {
+        await queryDB(
+          "UPDATE vehicle_requisitions SET status = ?, assigned_vehicle_id = ?, driver_user_id = ?, driver_name = ?, driver_mobile = ? WHERE id = ?",
+          ["ongoing", vehicleId, driverUserId, driverName, driverMobile, id]
+        );
+      } catch (err) {
+        await releaseVehicle(vehicleId);
+        throw err;
+      }
 
       await createAlert(queryDB, {
         userId: Number(requisition.employee_user_id),
@@ -815,18 +838,24 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
       const { vehicleId, driverUserId, driverName, driverMobile, vehicle } = await validateVehicleAssignment(req.body || {});
 
       const now = new Date();
-      const result: any = await queryDB(
-        `INSERT INTO vehicle_requisitions
-           (employee_user_id, purpose, pickup_location, destination, ride_date, start_time,
-            estimated_duration_hours, expected_return_at, status, decided_by, decided_at,
-            assigned_vehicle_id, driver_user_id, driver_name, driver_mobile, time_extension_status, hr_notice_flag)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [
-          employeeUserId, purpose, pickup, destination, rideDate, startTime, duration, expectedReturn,
-          "ongoing", req.user.id, now, vehicleId, driverUserId, driverName, driverMobile, "none", 0
-        ]
-      );
-      await queryDB("UPDATE vehicles SET status = ? WHERE id = ?", ["on_ride", vehicleId]);
+      await claimVehicle(vehicleId);
+      let result: any;
+      try {
+        result = await queryDB(
+          `INSERT INTO vehicle_requisitions
+             (employee_user_id, purpose, pickup_location, destination, ride_date, start_time,
+              estimated_duration_hours, expected_return_at, status, decided_by, decided_at,
+              assigned_vehicle_id, driver_user_id, driver_name, driver_mobile, time_extension_status, hr_notice_flag)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            employeeUserId, purpose, pickup, destination, rideDate, startTime, duration, expectedReturn,
+            "ongoing", req.user.id, now, vehicleId, driverUserId, driverName, driverMobile, "none", 0
+          ]
+        );
+      } catch (err) {
+        await releaseVehicle(vehicleId);
+        throw err;
+      }
 
       await createAlert(queryDB, {
         userId: employeeUserId,
@@ -866,6 +895,17 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
 
       const { vehicleId, driverUserId, driverName, driverMobile, vehicle } = await validateVehicleAssignment(req.body || {});
 
+      await claimVehicle(vehicleId);
+      try {
+        await queryDB(
+          "UPDATE vehicle_requisitions SET status = ?, decided_by = ?, decided_at = ?, assigned_vehicle_id = ?, driver_user_id = ?, driver_name = ?, driver_mobile = ? WHERE id = ?",
+          ["ongoing", req.user.id, requisition.decided_at || new Date(), vehicleId, driverUserId, driverName, driverMobile, id]
+        );
+      } catch (err) {
+        await releaseVehicle(vehicleId);
+        throw err;
+      }
+
       if (requisition.status === "pending") {
         const requestRows: any = await queryDB("SELECT * FROM approval_requests WHERE source_type = ?", ["vehicle_requisition"]);
         const pendingRequest = requestRows.find((r: any) => Number(r.source_id) === id && r.status === "pending");
@@ -873,12 +913,6 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
           await queryDB("UPDATE approval_requests SET status = ? WHERE id = ?", ["rejected", pendingRequest.id]);
         }
       }
-
-      await queryDB(
-        "UPDATE vehicle_requisitions SET status = ?, decided_by = ?, decided_at = ?, assigned_vehicle_id = ?, driver_user_id = ?, driver_name = ?, driver_mobile = ? WHERE id = ?",
-        ["ongoing", req.user.id, requisition.decided_at || new Date(), vehicleId, driverUserId, driverName, driverMobile, id]
-      );
-      await queryDB("UPDATE vehicles SET status = ? WHERE id = ?", ["on_ride", vehicleId]);
 
       await createAlert(queryDB, {
         userId: Number(requisition.employee_user_id),

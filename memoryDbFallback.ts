@@ -160,8 +160,17 @@ function simulateGenericTable(table: string, store: any[], sql: string, lowerSql
     // zero columns instead of throwing, which is much harder to notice.
     const setMatch = sql.match(/set\s+(.+?)\s+where/is);
     const cols = setMatch ? setMatch[1].split(",").map((c) => c.trim().split("=")[0].trim()) : [];
-    const id = Number(params[params.length - 1]);
-    const row = store.find((r: any) => Number(r.id) === id);
+    // Compare-and-set support: "WHERE id = ? AND status = ?" must only match
+    // when every condition holds, so atomic claims report affectedRows 0.
+    const whereMatch = sql.match(/where\s+(.+)$/is);
+    const whereCols = whereMatch
+      ? whereMatch[1].split(/\s+and\s+/i).map((c) => c.trim().match(/^(\w+)\s*=\s*\?$/)?.[1])
+      : [];
+    const row = whereCols.length > 1 && whereCols.every(Boolean)
+      ? store.find((r: any) =>
+          whereCols.every((col, i) => String(r[col as string]) === String(params[cols.length + i]))
+        )
+      : store.find((r: any) => Number(r.id) === Number(params[params.length - 1]));
     if (row) {
       cols.forEach((col, i) => {
         row[col] = params[i] !== undefined ? params[i] : null;
