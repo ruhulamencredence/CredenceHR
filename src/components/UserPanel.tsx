@@ -23,6 +23,9 @@ import { MyRequestsCard } from './MyRequestsCard';
 import { MyMonthAttendanceCard } from './MyMonthAttendanceCard';
 import { TodayOverviewCard } from './TodayOverviewCard';
 import { BookRideCard } from './BookRideCard';
+import { MyAssetCard } from './MyAssetCard';
+import { MobileQuickAccess } from './MobileQuickAccess';
+import { BookRideTarget, MyAssetTarget } from '../lib/quickAccess';
 import { NoticePreviewCard } from './NoticePreviewCard';
 import { HolidayCalendarWidget } from './HolidayCalendarWidget';
 import { LeaveReviewPage } from './LeaveReviewPage';
@@ -66,7 +69,9 @@ interface UserPanelProps {
   onActiveSectionChange?: (info: { desktop: string; mobile: string | null }) => void;
   // Web Dashboard's Book a Ride quick access card -> Self Service -> Book a
   // Ride (App.tsx), opened on the given tab.
-  onOpenBookRide?: (tab: 'book' | 'status') => void;
+  onOpenBookRide?: (tab: BookRideTarget) => void;
+  // Dashboard's My Asset quick access card/tile -> Self Service -> My Asset.
+  onOpenMyAsset?: (target: MyAssetTarget) => void;
 }
 
 // Unique id for one Item entry within an MPR row's itemNames list — see the uid field
@@ -852,7 +857,7 @@ const EntryCard = React.memo(function EntryCard({
   );
 });
 
-export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequest, jobsNavRequest, dashboardNavRequest, leaveNavRequest, onActiveSectionChange, onOpenBookRide }) => {
+export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequest, jobsNavRequest, dashboardNavRequest, leaveNavRequest, onActiveSectionChange, onOpenBookRide, onOpenMyAsset }) => {
   const [projects, setProjects] = useState<Project[]>([]);
   // True once the initial Project list fetch (fetchMasterData below) has
   // resolved (success or failure) — lets AttendanceCard tell "still loading"
@@ -2773,6 +2778,18 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           </div>
         )}
 
+        {/* Book a Ride + My Asset quick access tiles (mobile Dashboard, app
+            and mobile web alike). */}
+        {onOpenBookRide && onOpenMyAsset && (
+          <div
+            className={`relative z-10 px-2 pb-3 ${
+              user.can_view_leave_summary ? '' : user.can_use_attendance ? '-mt-1' : '-mt-6'
+            }`}
+          >
+            <MobileQuickAccess token={token} userId={user.id} onOpenBookRide={onOpenBookRide} onOpenMyAsset={onOpenMyAsset} />
+          </div>
+        )}
+
         {/* Pending Approvals (Part 4 — Role Permissiveness) — every account,
             not just Admins, can be named an approver on a Template step now
             (see Admin Panel -> Approvals -> Templates). Renders nothing at
@@ -2831,8 +2848,10 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
             sits at the bottom of the Dashboard for browsing actual dates. */}
         <TodayOverviewCard token={token} />
 
-        {/* Book a Ride quick access — web only; the app has its own menu. */}
+        {/* Book a Ride + My Asset quick access — web only; the app's own
+            Dashboard has the mobile tiles above. */}
         {!Capacitor.isNativePlatform() && onOpenBookRide && <BookRideCard token={token} userId={user.id} onOpen={onOpenBookRide} />}
+        {!Capacitor.isNativePlatform() && onOpenMyAsset && <MyAssetCard token={token} onOpen={onOpenMyAsset} />}
 
         {/* Takes the full row at md, where there are only two columns to
             share — it's an actionable list (remarks input + Approve/Reject

@@ -39,6 +39,7 @@ import { EmployeeDirectory } from './components/EmployeeDirectory';
 import { MyResignation } from './components/MyResignation';
 import { AssetManagement } from './components/AssetManagement';
 import { VehicleManagement } from './components/VehicleManagement';
+import { requestQuickAccessTab } from './lib/quickAccess';
 import { NoticePopup } from './components/NoticePopup';
 import { useBackButtonClose } from './lib/useBackButtonClose';
 import { closeTopmostOrReturnFalse } from './lib/backButtonStack';
@@ -1029,12 +1030,12 @@ export default function App() {
               leaveNavRequest={leaveNavRequest}
               onActiveSectionChange={setUserActiveSection}
               onOpenBookRide={(tab) => {
-                try {
-                  sessionStorage.setItem('credence.bookRideTab', tab);
-                } catch {
-                  // Storage blocked — Book a Ride just opens on its default tab.
-                }
+                requestQuickAccessTab('bookRide', tab);
                 sidebarNavProps.onGoToSelfServiceTab('vehicleManagement');
+              }}
+              onOpenMyAsset={(target) => {
+                requestQuickAccessTab('myAsset', target);
+                sidebarNavProps.onGoToSelfServiceTab('assetManagement');
               }}
             />
             {/* Superadmin/Admin-authored Notice popup — only shown on the plain

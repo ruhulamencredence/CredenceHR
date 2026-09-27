@@ -17,6 +17,7 @@ import { LiveRideMap } from './LiveRideMap';
 import { RideDetails } from './RideDetails';
 import { RideBookingMap } from './RideBookingMap';
 import { useWideWeb } from '../lib/useWideWeb';
+import { takeQuickAccessTab } from '../lib/quickAccess';
 import { RideDestinationPicker, RidePlaces } from './RideDestinationPicker';
 
 interface Requisition {
@@ -130,15 +131,8 @@ interface VehicleManagementProps {
 export function VehicleManagement({ user }: VehicleManagementProps) {
   const isVehicleMaintainer = user?.role === 'superadmin' || !!(user?.module_permissions || []).includes('vehicle_maintainer');
   const [tab, setTab] = useState<'book' | 'status' | 'assign' | 'maintainer'>(() => {
-    // One-shot tab request from the web Dashboard's Book a Ride card.
-    try {
-      const requested = sessionStorage.getItem('credence.bookRideTab');
-      sessionStorage.removeItem('credence.bookRideTab');
-      if (requested === 'status') return 'status';
-    } catch {
-      // Storage blocked — default tab.
-    }
-    return 'book';
+    // One-shot tab request from the Dashboard's Book a Ride quick access.
+    return takeQuickAccessTab('bookRide') === 'status' ? 'status' : 'book';
   });
   const [requisitions, setRequisitions] = useState<Requisition[]>([]);
   const [loading, setLoading] = useState(false);

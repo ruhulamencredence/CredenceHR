@@ -32,6 +32,7 @@ import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
 import { NewAssetRequisitionModal } from './NewAssetRequisitionModal';
 import { useWideWeb } from '../lib/useWideWeb';
+import { takeQuickAccessTab } from '../lib/quickAccess';
 
 interface PendingClaim {
   id: number;
@@ -152,7 +153,10 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
   // Desktop web browser only: My Assets / Status as table-style lists, same
   // as Book a Ride's Ride Status list (VehicleManagement.tsx).
   const wideWeb = useWideWeb();
-  const [tab, setTab] = useState<AssetTab>('my-assets');
+  // One-shot request from the Dashboard's My Asset quick access: a tab, or
+  // 'new' to open the New Requisition popup straight away.
+  const [quickAccess] = useState(() => takeQuickAccessTab('myAsset'));
+  const [tab, setTab] = useState<AssetTab>(quickAccess === 'status' ? 'status' : 'my-assets');
   const [myAssets, setMyAssets] = useState<AssignedAsset[]>([]);
   const [requisitions, setRequisitions] = useState<Requisition[]>([]);
   const [loading, setLoading] = useState(false);
@@ -173,7 +177,7 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
   // NewAssetRequisitionModal instead of the old in-page "New Requisition"
   // tab. onSubmitted below refreshes Status and jumps to it so the new
   // request is visible right away.
-  const [showNewRequisitionModal, setShowNewRequisitionModal] = useState(false);
+  const [showNewRequisitionModal, setShowNewRequisitionModal] = useState(quickAccess === 'new');
 
   // "Report Issue" — flowchart's "মালামাল কি ঠিক আছে? -> না (গরমিল/ড্যামেজ)"
   // branch: an inline form on the assignment being reported (assignmentId
