@@ -71,10 +71,9 @@ interface AvailableVehicle {
   model: string;
 }
 
-interface DirectoryEmployee {
+interface DriverCandidate {
   id: number;
   name: string;
-  user_id: number | null;
 }
 
 const sourceTitle = (t: MyApprovalItem['source_type']) =>
@@ -150,11 +149,14 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
 
   // Vehicle + driver picker data for a vehicle_maintainer_bypass item's
   // "Assign Vehicle & Driver" form below — same source VehicleManagement.tsx's
-  // own Assign form uses. Fetched unconditionally on mount (cheap, and most
-  // accounts here have no admin gate to check first) rather than only once a
-  // vehicle_maintainer_bypass item is actually seen.
+  // own Assign form uses. Driver candidates come from GET
+  // /api/vehicles/driver-candidates (every login account), NOT the Employee
+  // Directory — a driver only needs a real users.id, and an account created
+  // straight as a login is never linked to an all_employees row. Fetched
+  // unconditionally on mount (cheap, and most accounts here have no admin
+  // gate to check first) rather than only once such an item is actually seen.
   const [availableVehicles, setAvailableVehicles] = useState<AvailableVehicle[]>([]);
-  const [directoryEmployees, setDirectoryEmployees] = useState<DirectoryEmployee[]>([]);
+  const [driverCandidates, setDriverCandidates] = useState<DriverCandidate[]>([]);
   const [assignForm, setAssignForm] = useState<Record<string, { vehicle_id: string; driver_user_id: string }>>({});
 
   useEffect(() => {
@@ -162,9 +164,9 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
       .then((r) => r.json())
       .then((rows) => setAvailableVehicles(Array.isArray(rows) ? rows : []))
       .catch(() => {});
-    fetch(apiUrl('/api/employee-directory'), { headers: authHeaders })
+    fetch(apiUrl('/api/vehicles/driver-candidates'), { headers: authHeaders })
       .then((r) => r.json())
-      .then((rows) => setDirectoryEmployees((Array.isArray(rows) ? rows : []).filter((e: DirectoryEmployee) => e.user_id)))
+      .then((rows) => setDriverCandidates(Array.isArray(rows) ? rows : []))
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
@@ -480,9 +482,9 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
                             className="text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
                           >
                             <option value="">Pick a driver…</option>
-                            {directoryEmployees.map((e) => (
-                              <option key={e.user_id} value={e.user_id as number}>
-                                {e.name}
+                            {driverCandidates.map((d) => (
+                              <option key={d.id} value={d.id}>
+                                {d.name}
                               </option>
                             ))}
                           </select>
