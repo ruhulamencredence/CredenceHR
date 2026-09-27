@@ -10,8 +10,10 @@
 // registerAssetManagementRoutes). Mirrors the read/write split and
 // fetch-with-Bearer-token pattern already used throughout App.tsx.
 //
-// Page chrome (blue-tinted background, white rounded-2xl card, icon/title
-// header, ModulePath + Back, isNativeApp split) mirrors LeaveApplication.tsx's
+// Web: same page design as Book a Ride (VehicleManagement.tsx) — round back
+// arrow + title, underline tabs, full width, table-style lists on desktop.
+// Native app: page chrome (blue-tinted background, white rounded-2xl card,
+// icon/title header) mirrors LeaveApplication.tsx's
 // design exactly, so "My Asset" feels like the same product as "Leave
 // Application" instead of an older, plainer screen. Tabs use the same
 // rounded-full segmented control as Leave Application's Review/Approved/
@@ -27,9 +29,9 @@ import {
   ArrowLeft, Package, Inbox, Clock, CheckCircle2, XCircle, AlertTriangle, Plus
 } from 'lucide-react';
 import { apiUrl } from '../lib/api';
-import { ModulePath } from './ModulePath';
 import { Spinner } from './Spinner';
 import { NewAssetRequisitionModal } from './NewAssetRequisitionModal';
+import { useWideWeb } from '../lib/useWideWeb';
 
 interface PendingClaim {
   id: number;
@@ -135,16 +137,21 @@ function authHeaders(): HeadersInit {
 
 type AssetTab = 'my-assets' | 'status' | 'fulfill';
 
+// Web list columns (same table-style rows as Book a Ride's Ride Status).
+const ASSET_LIST_COLS = 'grid-cols-[minmax(0,2fr)_minmax(0,1.3fr)_minmax(0,1.2fr)_minmax(0,1.6fr)_260px]';
+const REQ_LIST_COLS = 'grid-cols-[minmax(0,1.5fr)_minmax(0,2fr)_minmax(0,1fr)_minmax(0,1.6fr)_minmax(0,1.4fr)]';
+
 interface AssetManagementProps {
   onBack: () => void;
 }
 
 export function AssetManagement({ onBack }: AssetManagementProps) {
-  // Same isNativeApp split as Leave Application (LeaveApplication.tsx): the
-  // web build keeps the ModulePath breadcrumb + "Back" link, the Android APK
-  // build drops that web-only chrome so the card underneath reads as one
-  // native screen instead of a webpage embedded in the app.
+  // Web gets Book a Ride's page design; the Android APK keeps the card
+  // design so it reads as one native screen.
   const isNativeApp = Capacitor.isNativePlatform();
+  // Desktop web browser only: My Assets / Status as table-style lists, same
+  // as Book a Ride's Ride Status list (VehicleManagement.tsx).
+  const wideWeb = useWideWeb();
   const [tab, setTab] = useState<AssetTab>('my-assets');
   const [myAssets, setMyAssets] = useState<AssignedAsset[]>([]);
   const [requisitions, setRequisitions] = useState<Requisition[]>([]);
@@ -319,6 +326,51 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
     }
   }
 
+  const renderReportForm = (a: AssignedAsset) =>
+    reportingFor === a.assignment_id && (
+      <div className="mt-3 pt-3 border-t border-slate-100 space-y-2.5">
+        <div>
+          <label className="block text-[10px] uppercase tracking-wide text-slate-400 mb-1">What's wrong?</label>
+          <select
+            value={issueForm.issue_type}
+            onChange={(e) => setIssueForm((f) => ({ ...f, issue_type: e.target.value as PendingClaim['issue_type'] }))}
+            className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400"
+          >
+            {(Object.keys(ISSUE_TYPE_LABEL) as PendingClaim['issue_type'][]).map((k) => (
+              <option key={k} value={k}>
+                {ISSUE_TYPE_LABEL[k]}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="block text-[10px] uppercase tracking-wide text-slate-400 mb-1">Describe the issue</label>
+          <textarea
+            value={issueForm.description}
+            onChange={(e) => setIssueForm((f) => ({ ...f, description: e.target.value }))}
+            rows={2}
+            placeholder="e.g. Requested a laptop but received a monitor / screen is cracked"
+            className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400"
+          />
+        </div>
+        <div className="flex gap-2">
+          <button
+            onClick={() => submitIssue(a.assignment_id)}
+            disabled={reportingSubmitting}
+            className="px-3 py-1.5 text-[11px] font-semibold rounded-lg bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 transition-colors"
+          >
+            {reportingSubmitting ? 'Submitting…' : 'Submit Report'}
+          </button>
+          <button
+            onClick={() => setReportingFor(null)}
+            className="px-3 py-1.5 text-[11px] font-semibold rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    );
+
   const TABS: { key: AssetTab; label: string; count?: number }[] = [
     { key: 'my-assets', label: 'My Assets' },
     { key: 'status', label: 'Status' },
@@ -326,26 +378,51 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
   ];
 
   return (
-    <div className="w-full min-h-[calc(100vh-4rem)] bg-[#dceeff] text-slate-900">
-      <div className="w-full px-4 sm:px-6 lg:px-8 pt-3 pb-8">
+    // Web: same page design as Book a Ride (App.tsx's vehicleManagement
+    // wrapper + VehicleManagement.tsx) — round back arrow + title, underline
+    // tabs, full width, table-style lists. The native app keeps the card
+    // design below.
+    <div
+      className={`w-full min-h-[calc(100vh-4rem)] text-slate-900 ${isNativeApp ? 'bg-[#dceeff]' : ''}`}
+      style={isNativeApp ? undefined : { background: 'var(--g-surface-muted)' }}
+    >
+      <div className={isNativeApp ? 'w-full px-4 sm:px-6 lg:px-8 pt-3 pb-8' : 'w-full px-4 lg:px-8 pt-3 pb-28 md:pb-8'}>
         {!isNativeApp && (
-          <>
-            <ModulePath path={['Self Service', 'My Asset']} />
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={onBack}
+                className="w-9 h-9 rounded-full flex items-center justify-center hover:bg-black/5 transition-colors"
+                style={{ color: 'var(--g-text-muted)' }}
+                aria-label="Back"
+              >
+                <ArrowLeft className="w-5 h-5" />
+              </button>
+              <h1 className="text-base font-bold">My Asset</h1>
+            </div>
             <button
               type="button"
-              onClick={onBack}
-              className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-blue-600 mb-3 transition-colors"
+              onClick={() => setShowNewRequisitionModal(true)}
+              className="hidden md:flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded bg-blue-600 text-white hover:bg-blue-700 transition-colors shrink-0"
             >
-              <ArrowLeft className="w-3.5 h-3.5" /> Back
+              <Plus className="w-4 h-4" /> New Requisition
             </button>
-          </>
+          </div>
         )}
 
         {/* Liquid glass on mobile (soft blue-tint gradient + backdrop-blur +
             big rounded corners) — same mobile treatment as Leave
             Application's (LeaveReviewPage.tsx) card. Desktop's md: overrides
             keep the original plain white panel untouched. */}
-        <div className="bg-gradient-to-br from-sky-100/70 via-white/50 to-blue-50/40 backdrop-blur-xl border border-white/70 rounded-[28px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] overflow-hidden md:bg-white md:from-transparent md:via-transparent md:to-transparent md:backdrop-blur-none md:border-slate-200 md:rounded-2xl md:shadow-sm">
+        <div
+          className={
+            isNativeApp
+              ? 'bg-gradient-to-br from-sky-100/70 via-white/50 to-blue-50/40 backdrop-blur-xl border border-white/70 rounded-[28px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] overflow-hidden md:bg-white md:from-transparent md:via-transparent md:to-transparent md:backdrop-blur-none md:border-slate-200 md:rounded-2xl md:shadow-sm'
+              : 'w-full'
+          }
+        >
+          {isNativeApp && (
           <div className="flex items-center justify-between gap-3 px-6 py-5 border-b border-slate-100">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center shrink-0">
@@ -368,11 +445,31 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
               <Plus className="w-4 h-4" /> New Requisition
             </button>
           </div>
+          )}
 
-          {/* Segmented control — same rounded-full track as Leave
+          {!isNativeApp && (
+            <div className="flex gap-1 border-b border-gray-200 mb-4">
+              {TABS.map((t) => (
+                <button
+                  key={t.key}
+                  type="button"
+                  onClick={() => setTab(t.key)}
+                  className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                    tab === t.key ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-800'
+                  }`}
+                >
+                  {t.label}
+                  {typeof t.count === 'number' && t.count > 0 ? ` (${t.count})` : ''}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {isNativeApp && (
+          /* Segmented control — same rounded-full track as Leave
               Application's Review/Approved/Rejected tabs; mobile gets the
               same translucent bg-white/50 + blur glass treatment as the
-              outer card, desktop keeps the solid slate-100 track. */}
+              outer card, desktop keeps the solid slate-100 track. */
           <div className="mx-4 mt-4 flex items-center gap-1.5 rounded-full bg-white/50 backdrop-blur p-1.5 text-xs font-semibold overflow-x-auto md:bg-slate-100 md:backdrop-blur-none">
             {TABS.map((t) => {
               const active = tab === t.key;
@@ -400,15 +497,104 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
               );
             })}
           </div>
+          )}
 
           {error && (
-            <div className="mx-4 mt-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs px-3.5 py-2.5">
+            <div className={`${isNativeApp ? 'mx-4 mt-4' : 'mb-3'} rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs px-3.5 py-2.5`}>
               {error}
             </div>
           )}
 
-          <div className="p-4">
-            {tab === 'my-assets' && (
+          <div className={isNativeApp ? 'p-4' : ''}>
+            {tab === 'my-assets' && wideWeb && (
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                <div className={`grid ${ASSET_LIST_COLS} gap-4 px-5 py-2.5 bg-slate-50 border-b border-slate-200 text-[11px] font-semibold uppercase tracking-wide text-slate-500`}>
+                  <div>Asset</div>
+                  <div>Tag / Serial</div>
+                  <div>Handed Over</div>
+                  <div>Status</div>
+                  <div className="text-right">Actions</div>
+                </div>
+                {loading && <div className="px-5 py-4 text-sm text-gray-500">Loading…</div>}
+                {!loading && myAssets.length === 0 && (
+                  <div className="px-5 py-4 text-sm text-gray-500">You don't have any assets assigned right now.</div>
+                )}
+                {!loading &&
+                  myAssets.map((a) => (
+                    <div key={a.assignment_id} className="px-5 py-3.5 border-b border-slate-100 last:border-b-0 hover:bg-slate-50/60">
+                      <div className={`grid ${ASSET_LIST_COLS} gap-4 items-start`}>
+                        <div className="min-w-0">
+                          <div className="font-semibold text-slate-800 truncate" title={a.name}>
+                            {a.name}
+                          </div>
+                          <div className="text-xs text-slate-500 truncate">{a.category}</div>
+                        </div>
+                        <div className="min-w-0 text-sm text-slate-700">
+                          <div className="truncate">{a.asset_tag}</div>
+                          <div className="text-xs text-slate-500 truncate">{a.serial_number ? `S/N: ${a.serial_number}` : '—'}</div>
+                        </div>
+                        <div className="text-sm text-slate-700">
+                          {a.assigned_date}
+                          <div className="text-xs text-slate-500 capitalize">Condition: {a.condition_on_assign}</div>
+                        </div>
+                        <div className="min-w-0 space-y-1">
+                          {a.pending_claim ? (
+                            <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded bg-amber-100 text-amber-800">
+                              <AlertTriangle className="w-3 h-3" /> Issue Reported
+                            </span>
+                          ) : !a.acknowledged_at ? (
+                            <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded bg-yellow-100 text-yellow-800">
+                              <Clock className="w-3 h-3" /> Awaiting your Ack
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded bg-green-100 text-green-800">
+                              <CheckCircle2 className="w-3 h-3" /> Acknowledged
+                            </span>
+                          )}
+                          {a.pending_claim && (
+                            <div className="text-xs text-amber-700">
+                              {ISSUE_TYPE_LABEL[a.pending_claim.issue_type]}: {a.pending_claim.description}
+                            </div>
+                          )}
+                          {a.return_requested_at && <div className="text-xs text-amber-700">Return requested — awaiting IT/Admin.</div>}
+                        </div>
+                        <div className="flex flex-wrap justify-end gap-1.5">
+                          {!a.pending_claim && !a.acknowledged_at && (
+                            <>
+                              <button
+                                onClick={() => acknowledge(a.assignment_id)}
+                                className="px-2.5 py-1 text-xs font-medium rounded bg-blue-600 text-white hover:bg-blue-700"
+                              >
+                                Accept
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setReportingFor(reportingFor === a.assignment_id ? null : a.assignment_id);
+                                  setIssueForm({ issue_type: 'mismatch', description: '' });
+                                }}
+                                className="px-2.5 py-1 text-xs font-medium rounded border border-amber-300 text-amber-700 hover:bg-amber-50"
+                              >
+                                Report Issue
+                              </button>
+                            </>
+                          )}
+                          {!a.pending_claim && !a.return_requested_at && (
+                            <button
+                              onClick={() => requestReturn(a.assignment_id)}
+                              className="px-2.5 py-1 text-xs font-medium rounded border border-gray-300 text-gray-600 hover:bg-gray-50"
+                            >
+                              Return / Replace
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      {renderReportForm(a)}
+                    </div>
+                  ))}
+              </div>
+            )}
+
+            {tab === 'my-assets' && !wideWeb && (
               loading ? (
                 <div className="flex justify-center py-14">
                   <Spinner size={20} className="text-slate-400" />
@@ -494,56 +680,60 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
                         </div>
                       )}
 
-                      {reportingFor === a.assignment_id && (
-                        <div className="mt-3 pt-3 border-t border-slate-100 space-y-2.5">
-                          <div>
-                            <label className="block text-[10px] uppercase tracking-wide text-slate-400 mb-1">What's wrong?</label>
-                            <select
-                              value={issueForm.issue_type}
-                              onChange={(e) => setIssueForm((f) => ({ ...f, issue_type: e.target.value as PendingClaim['issue_type'] }))}
-                              className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400"
-                            >
-                              {(Object.keys(ISSUE_TYPE_LABEL) as PendingClaim['issue_type'][]).map((k) => (
-                                <option key={k} value={k}>
-                                  {ISSUE_TYPE_LABEL[k]}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                          <div>
-                            <label className="block text-[10px] uppercase tracking-wide text-slate-400 mb-1">Describe the issue</label>
-                            <textarea
-                              value={issueForm.description}
-                              onChange={(e) => setIssueForm((f) => ({ ...f, description: e.target.value }))}
-                              rows={2}
-                              placeholder="e.g. Requested a laptop but received a monitor / screen is cracked"
-                              className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400"
-                            />
-                          </div>
-                          <div className="flex gap-2">
-                            <button
-                              onClick={() => submitIssue(a.assignment_id)}
-                              disabled={reportingSubmitting}
-                              className="px-3 py-1.5 text-[11px] font-semibold rounded-lg bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50 transition-colors"
-                            >
-                              {reportingSubmitting ? 'Submitting…' : 'Submit Report'}
-                            </button>
-                            <button
-                              onClick={() => setReportingFor(null)}
-                              className="px-3 py-1.5 text-[11px] font-semibold rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors"
-                            >
-                              Cancel
-                            </button>
-                          </div>
-                        </div>
-                      )}
+                      {renderReportForm(a)}
                     </div>
                   ))}
                 </div>
               )
             )}
 
-            {tab === 'status' && (
+            {tab === 'status' && wideWeb && (
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                <div className={`grid ${REQ_LIST_COLS} gap-4 px-5 py-2.5 bg-slate-50 border-b border-slate-200 text-[11px] font-semibold uppercase tracking-wide text-slate-500`}>
+                  <div>Requisition</div>
+                  <div>Items</div>
+                  <div>Requested</div>
+                  <div>Status</div>
+                  <div>Assigned Item</div>
+                </div>
+                {loading && <div className="px-5 py-4 text-sm text-gray-500">Loading…</div>}
+                {!loading && requisitions.length === 0 && <div className="px-5 py-4 text-sm text-gray-500">No requisitions yet.</div>}
+                {!loading &&
+                  requisitions.map((r) => (
+                    <div key={r.id} className={`grid ${REQ_LIST_COLS} gap-4 items-start px-5 py-3.5 border-b border-slate-100 last:border-b-0 hover:bg-slate-50/60`}>
+                      <div className="min-w-0">
+                        <div className="font-semibold text-slate-800 truncate">{r.asset_category}</div>
+                        <div className="text-xs text-slate-500 capitalize">Urgency: {r.urgency}</div>
+                      </div>
+                      <div className="min-w-0 space-y-0.5">
+                        {(r.items || []).map((it, idx) => (
+                          <div key={idx} className="text-sm text-slate-700 truncate" title={`${it.item_name} — ${it.purpose}`}>
+                            <span className="font-medium text-slate-800">{it.item_name}</span>{' '}
+                            <span className="text-xs text-slate-500">
+                              × {it.quantity} {it.unit}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="text-sm text-slate-700">{r.created_at}</div>
+                      <div className="min-w-0 space-y-1">
+                        <RequisitionStatusBadge status={r.status} />
+                        {r.status === 'pending' && r.pending_with && (
+                          <div className="text-xs text-amber-700 truncate" title={r.pending_with}>
+                            Waiting on: <span className="font-medium">{r.pending_with}</span>
+                          </div>
+                        )}
+                        {r.status === 'rejected' && r.rejection_reason && <div className="text-xs text-red-600">Reason: {r.rejection_reason}</div>}
+                      </div>
+                      <div className="min-w-0 text-sm text-slate-700 truncate">
+                        {r.asset_name ? `${r.asset_name} (${r.asset_tag})` : <span className="text-slate-400">—</span>}
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            )}
+
+            {tab === 'status' && !wideWeb && (
               loading ? (
                 <div className="flex justify-center py-14">
                   <Spinner size={20} className="text-slate-400" />
