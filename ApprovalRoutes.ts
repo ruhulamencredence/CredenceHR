@@ -574,11 +574,17 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       for (const it of assetRequisitionItemRows) {
         const reqId = Number(it.requisition_id);
         if (!assetRequisitionItemsMap.has(reqId)) assetRequisitionItemsMap.set(reqId, []);
+        // Items the Supervisor removed stay in the table for history but
+        // aren't part of the requisition any more.
+        if (it.removed_at) continue;
         assetRequisitionItemsMap.get(reqId)!.push({
+          id: Number(it.id),
           item_name: it.item_name,
           purpose: it.purpose,
           unit: it.unit,
-          quantity: Number(it.quantity)
+          quantity: Number(it.quantity),
+          source: it.source || "requested",
+          original_quantity: it.original_quantity != null ? Number(it.original_quantity) : null
         });
       }
       const vehicleRequisitionMap = new Map<number, any>(vehicleRequisitionRows.map((r: any) => [Number(r.id), r]));
@@ -670,6 +676,11 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
             total_steps: r.total_steps,
             vehicle_maintainer_bypass: vehicleMaintainerBypass,
             asset_fulfiller_bypass: assetFulfillerBypass,
+            // The requester's Supervisor (auto Layer 1) may add/delete items
+            // and change quantities before approving — PUT
+            // /api/assets/requisitions/:id/items (AssetManagementRoutes.ts).
+            can_edit_asset_items:
+              r.source_type === "asset_requisition" && !!r.supervisor_step_user_id && Number(r.current_step) === 1,
             created_at: r.created_at,
             asset_requisition_details: assetRequisitionDetails
           };

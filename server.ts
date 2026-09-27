@@ -20,7 +20,7 @@ import { registerAttendanceRoutes } from "./AttendanceRoutes";
 import { registerApprovalRoutes } from "./ApprovalRoutes";
 import { registerLeaveRoutes } from "./LeaveRoutes";
 import { registerPayrollRoutes, ensurePayrollSchema } from "./PayrollRoutes";
-import { registerAssetManagementRoutes, ensureAssetManagementSchema } from "./AssetManagementRoutes";
+import { registerAssetManagementRoutes, ensureAssetManagementSchema, logAssetRequisitionEvent } from "./AssetManagementRoutes";
 import { registerVehicleManagementRoutes, ensureVehicleManagementSchema } from "./VehicleManagementRoutes";
 import { registerEntriesRoutes } from "./EntriesRoutes";
 import { registerEmployeeTransferRoutes, ensureEmployeeTransferSchema, applyDueEmployeeTransfers, recordEmployeeEditHistory } from "./EmployeeTransferRoutes";
@@ -2849,6 +2849,22 @@ async function performApprovalAction(
     } catch (finalizeErr: any) {
       throw new ApprovalActionError(400, finalizeErr.message || "Approved, but could not finalize this Asset Requisition.");
     }
+    // Requisition history — the final approve/reject already alert the
+    // requester above, so only an intermediate Layer's approval notifies.
+    const layerLabel = `Layer ${actions[actions.length - 1].step_order} of ${request.total_steps}`;
+    await logAssetRequisitionEvent(queryDB, createAlert, {
+      requisitionId: Number(request.source_id),
+      actor: actorUser,
+      action: action === "rejected" ? "rejected" : newStatus === "approved" ? "approved" : "approved_step",
+      message:
+        action === "rejected"
+          ? `${actorUser.name} rejected the requisition (${layerLabel})${remarks ? `: ${remarks}` : "."}`
+          : newStatus === "approved"
+            ? `${actorUser.name} gave the final approval (${layerLabel})${remarks ? `: ${remarks}` : "."}`
+            : `${actorUser.name} approved ${layerLabel}${remarks ? `: ${remarks}` : ""} — now with the next approver.`,
+      details: remarks ? { remarks } : undefined,
+      notify: newStatus === "pending"
+    });
   } else if (request.source_type === "vehicle_requisition") {
     try {
       if (newStatus === "approved") {

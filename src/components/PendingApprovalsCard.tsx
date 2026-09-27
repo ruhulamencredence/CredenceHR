@@ -3,6 +3,7 @@ import { ShieldCheck, CheckCircle2, XCircle, AlertCircle, MapPin, ChevronRight, 
 import { apiUrl, dedupedFetchJson } from '../lib/api';
 import { Spinner } from './Spinner';
 import { AssetFulfillModal } from './AssetFulfillModal';
+import { AssetRequisitionEditItemsModal } from './AssetRequisitionEditItemsModal';
 import { UserClaimReference, ClaimRecord } from '../types';
 import ClaimLocationMap from './ClaimLocationMap';
 
@@ -34,7 +35,7 @@ interface MyApprovalItem {
     target_date: string | null;
     has_attachment: boolean;
     attachment_filename: string | null;
-    items: { item_name: string; purpose: string; unit: string; quantity: number }[];
+    items: { id?: number; item_name: string; purpose: string; unit: string; quantity: number; source?: string; original_quantity?: number | null }[];
   } | null;
   // See ApproveApplications.tsx's identical field — true only for a
   // vehicle_requisition item on its Template's FINAL Layer, when that
@@ -43,6 +44,8 @@ interface MyApprovalItem {
   // Asset Requisition on its Template's 'asset_fulfiller' Layer — this
   // approver gets Fulfill & Hand Over instead of Approve/Reject.
   asset_fulfiller_bypass?: boolean;
+  // Requester's Supervisor Layer — may edit the items before approving.
+  can_edit_asset_items?: boolean;
 }
 
 interface AvailableVehicle {
@@ -114,6 +117,8 @@ export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ toke
   const [viewingAssetRequisition, setViewingAssetRequisition] = useState<MyApprovalItem | null>(null);
   // asset_fulfiller_bypass item whose Fulfill & Hand Over form is open.
   const [fulfilling, setFulfilling] = useState<MyApprovalItem | null>(null);
+  // Supervisor editing a requisition's items (AssetRequisitionEditItemsModal).
+  const [editingItems, setEditingItems] = useState<MyApprovalItem | null>(null);
 
   // Vehicle + driver picker data for a vehicle_maintainer_bypass item's
   // "Assign Vehicle & Driver" form below — see ApproveApplications.tsx's
@@ -509,6 +514,15 @@ export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ toke
                     </div>
                   ) : (
                     <div onClick={(e) => e.stopPropagation()}>
+                      {item.can_edit_asset_items && item.asset_requisition_details && (
+                        <button
+                          type="button"
+                          onClick={() => setEditingItems(item)}
+                          className="w-full mb-2 text-xs font-semibold px-3 py-2 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors inline-flex items-center justify-center gap-1"
+                        >
+                          <Package className="w-3.5 h-3.5" /> Edit items (qty / add / delete)
+                        </button>
+                      )}
                       <input
                         type="text"
                         placeholder="Remarks (optional)"
@@ -541,6 +555,21 @@ export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ toke
             })}
           </div>
         </div>
+      )}
+
+      {editingItems && (
+        <AssetRequisitionEditItemsModal
+          token={token}
+          requisitionId={Number(editingItems.source_id)}
+          requesterName={editingItems.requested_by_name}
+          items={editingItems.asset_requisition_details?.items || []}
+          onClose={() => setEditingItems(null)}
+          onSaved={() => {
+            setEditingItems(null);
+            setViewingAssetRequisition(null);
+            load();
+          }}
+        />
       )}
 
       {fulfilling && (
@@ -581,6 +610,15 @@ export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ toke
                   </p>
                 </div>
               </div>
+              {viewingAssetRequisition.can_edit_asset_items && (
+                <button
+                  type="button"
+                  onClick={() => setEditingItems(viewingAssetRequisition)}
+                  className="ml-auto text-xs font-semibold px-3 py-1.5 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 shrink-0"
+                >
+                  Edit items
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setViewingAssetRequisition(null)}

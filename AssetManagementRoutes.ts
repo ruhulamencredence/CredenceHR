@@ -204,6 +204,42 @@ export async function ensureAssetManagementSchema(dbPool: any): Promise<void> {
   } catch (err: any) {
     console.warn("⚠️ Could not ensure Asset Management tables exist: " + err.message);
   }
+  // Supervisor item edits: which lines the employee asked for vs. which the
+  // Supervisor added, the quantity the employee originally asked for, and
+  // soft-removal so a deleted line still shows in the history.
+  for (const [col, def] of [
+    ["source", "VARCHAR(20) NULL"],
+    ["original_quantity", "DECIMAL(10,2) NULL"],
+    ["edited_by", "INT NULL"],
+    ["removed_at", "TIMESTAMP NULL DEFAULT NULL"],
+    ["removed_by", "INT NULL"]
+  ]) {
+    try {
+      await dbPool.query(`ALTER TABLE asset_requisition_items ADD COLUMN ${col} ${def}`);
+    } catch (err: any) {
+      if (err.code !== "ER_DUP_FIELDNAME") console.warn(`⚠️ Could not add asset_requisition_items.${col}: ` + err.message);
+    }
+  }
+  // One row per operation on a requisition (submitted, each approval, item
+  // edits, hand-over, acknowledge, issue reported/resolved, return…) — the
+  // requester's History view reads this.
+  try {
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS asset_requisition_events (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        requisition_id INT NOT NULL,
+        actor_user_id INT NULL,
+        actor_name VARCHAR(150) NULL,
+        action VARCHAR(50) NOT NULL,
+        message TEXT NOT NULL,
+        details_json TEXT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_asset_req_events_req (requisition_id)
+      )
+    `);
+  } catch (err: any) {
+    console.warn("⚠️ Could not ensure asset_requisition_events table exists: " + err.message);
+  }
   // What the fulfiller typed on the handover form for this line (quantity,
   // unit and a free-text note) — the fulfill form lists the requisition's
   // own items instead of picking from inventory, so a consumable ("A4 Paper
@@ -220,6 +256,76 @@ export async function ensureAssetManagementSchema(dbPool: any): Promise<void> {
     }
   }
 }
+
+// Title of the alert the requester gets for each kind of operation.
+const EVENT_ALERT_TITLE: Record<string, string> = {
+  submitted: "Asset Requisition Submitted",
+  approved_step: "Asset Requisition — Layer Approved",
+  approved: "Requisition Approved",
+  rejected: "Requisition Rejected",
+  items_edited: "Your Asset Requisition Was Edited",
+  handed_over: "Asset Handed Over",
+  acknowledged: "Asset Acknowledged",
+  issue_reported: "Asset Issue Reported",
+  issue_resolved: "Asset Issue Resolved",
+  return_requested: "Asset Return Requested",
+  returned: "Asset Return Recorded"
+};
+
+// Records one operation on an Asset Requisition in asset_requisition_events
+// and, unless the requester did it themselves (or notify is false because
+// the caller already sends its own alert), notifies the requester. Never
+// throws — history/notification failures mustn't fail the operation.
+// Exported so server.ts's performApprovalAction can log approvals too.
+export async function logAssetRequisitionEvent(
+  queryDB: (sql: string, params?: any[]) => Promise<any>,
+  createAlert: AssetManagementRouteDeps["createAlert"],
+  opts: {
+    requisitionId: number;
+    actor: { id?: number | null; name?: string | null } | null;
+    action: string;
+    message: string;
+    details?: any;
+    notify?: boolean;
+  }
+) {
+  try {
+    await queryDB(
+      `INSERT INTO asset_requisition_events (requisition_id, actor_user_id, actor_name, action, message, details_json)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [
+        opts.requisitionId,
+        opts.actor?.id ?? null,
+        opts.actor?.name ?? null,
+        opts.action,
+        opts.message,
+        opts.details != null ? JSON.stringify(opts.details) : null
+      ]
+    );
+    if (opts.notify === false) return;
+    const rows = await queryDB("SELECT * FROM asset_requisitions WHERE id = ?", [opts.requisitionId]);
+    const requisition = rows[0];
+    if (!requisition || Number(requisition.employee_user_id) === Number(opts.actor?.id)) return;
+    await createAlert(queryDB, {
+      userId: Number(requisition.employee_user_id),
+      type: "asset_requisition" as AlertType,
+      title: EVENT_ALERT_TITLE[opts.action] || "Asset Requisition Update",
+      message: opts.message,
+      relatedType: "asset_requisition",
+      relatedId: opts.requisitionId
+    });
+  } catch (err: any) {
+    console.warn("⚠️ Could not record history for Asset Requisition #" + opts.requisitionId + ": " + err.message);
+  }
+}
+
+// Claims (issues an employee reports on a handed-over item) are resolved
+// from Admin Panel -> Asset Management -> Issue Reports, which needs the
+// 'asset_management' module. When this is true, whoever handed the item
+// over (asset_assignments.assigned_by — e.g. the Template's Asset Fulfiller)
+// can also resolve claims on it from Self Service -> My Asset -> "Approved
+// by Me", with no module grant. Ready but switched off for now.
+const FULFILLER_CAN_RESOLVE_CLAIMS = false;
 
 export function registerAssetManagementRoutes(app: Express, deps: AssetManagementRouteDeps) {
   const {
@@ -241,6 +347,14 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
     const modules = await getAdminModules(userId);
     return modules.includes("asset_management");
   }
+
+  const logEvent = (
+    requisitionId: number,
+    actor: { id?: number | null; name?: string | null } | null,
+    action: string,
+    message: string,
+    opts: { details?: any; notify?: boolean } = {}
+  ) => logAssetRequisitionEvent(queryDB, createAlert, { requisitionId, actor, action, message, ...opts });
 
   const requisitionSelectBase = `
     SELECT r.*, u.name AS employee_name, m.name AS manager_name, a.name AS asset_name, a.asset_tag AS asset_tag
@@ -278,10 +392,13 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
       if (!byRequisition.has(it.requisition_id)) byRequisition.set(it.requisition_id, []);
       byRequisition.get(it.requisition_id)!.push(it);
     }
-    return rows.map((r) => ({
-      ...r,
-      items: byRequisition.get(r.id) || [{ item_name: r.asset_category, purpose: r.reason, unit: "pcs", quantity: 1 }]
-    }));
+    // Lines the Supervisor removed are kept (for history) as removed_items,
+    // never as part of the live requisition.
+    return rows.map((r) => {
+      const all = byRequisition.get(r.id);
+      if (!all) return { ...r, items: [{ item_name: r.asset_category, purpose: r.reason, unit: "pcs", quantity: 1 }], removed_items: [] };
+      return { ...r, items: all.filter((it) => !it.removed_at), removed_items: all.filter((it) => !!it.removed_at) };
+    });
   }
 
   // Attaches r.pending_with — who this requisition's Approval Workflow is
@@ -462,6 +579,15 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
         ? await queryDB("SELECT * FROM asset_assignments WHERE requisition_id = ?", [assignment.requisition_id])
         : [];
       const allAcknowledged = siblings.every((a: any) => Number(a.id) === Number(assignment.id) || !!a.acknowledged_at || !!a.returned_date);
+      if (assignment.requisition_id) {
+        const ackAsset = (await queryDB("SELECT * FROM assets WHERE id = ?", [assignment.asset_id]))[0];
+        await logEvent(
+          Number(assignment.requisition_id),
+          req.user,
+          "acknowledged",
+          `${req.user.name || "The employee"} confirmed receipt of ${ackAsset ? `${ackAsset.name} (${ackAsset.asset_tag})` : "an item"}.`
+        );
+      }
       if (assignment.requisition_id && allAcknowledged) {
         await queryDB("UPDATE asset_requisitions SET status = 'fulfilled' WHERE id = ? AND status = 'dispatched'", [assignment.requisition_id]);
         await notifyHrLayer(
@@ -521,6 +647,13 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
         relatedId: result.insertId
       });
       if (assignment.requisition_id) {
+        await logEvent(
+          Number(assignment.requisition_id),
+          req.user,
+          "issue_reported",
+          `${req.user.name || "The employee"} reported an issue with ${asset ? `${asset.name} (${asset.asset_tag})` : "an item"}: ${desc}`,
+          { details: { issue_type: issueType } }
+        );
         await notifyHrLayer(
           Number(assignment.requisition_id),
           "Asset Issue Reported",
@@ -549,6 +682,15 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
       }
       if (assignment.returned_date) return res.status(400).json({ error: "This asset was already returned." });
       await queryDB("UPDATE asset_assignments SET return_requested_at = NOW() WHERE id = ?", [assignment.id]);
+      if (assignment.requisition_id) {
+        const retAsset = (await queryDB("SELECT * FROM assets WHERE id = ?", [assignment.asset_id]))[0];
+        await logEvent(
+          Number(assignment.requisition_id),
+          req.user,
+          "return_requested",
+          `${req.user.name || "The employee"} asked to return ${retAsset ? `${retAsset.name} (${retAsset.asset_tag})` : "an item"}.`
+        );
+      }
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -614,6 +756,14 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
           [result.insertId, it.item_name, it.purpose, it.unit, it.quantity]
         );
       }
+
+      await logEvent(
+        Number(result.insertId),
+        req.user,
+        "submitted",
+        `${req.user.name || "The employee"} submitted the requisition: ${cleanItems.map((it: any) => `${it.item_name} × ${it.quantity} ${it.unit}`).join(", ")}.`,
+        { details: { items: cleanItems } }
+      );
 
       // Dynamic Approval Engine — routed through this Employee's assigned
       // Template for request_type 'asset' (Layer 1 defaults to their own
@@ -878,8 +1028,6 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
   app.put(
     "/api/assets/assignment-claims/:id/resolve",
     authenticateToken,
-    requireAdmin,
-    requireModule("asset_management"),
     async (req: any, res) => {
       try {
         const { resolution_note, replacement_asset_id } = req.body || {};
@@ -894,6 +1042,17 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
         const assignmentRows = await queryDB("SELECT * FROM asset_assignments WHERE id = ?", [claim.assignment_id]);
         const assignment = assignmentRows[0];
         if (!assignment) return res.status(404).json({ error: "Assignment not found." });
+
+        // Asset Management module holders, or — only when
+        // FULFILLER_CAN_RESOLVE_CLAIMS is on — whoever handed this item over.
+        const manage = await canManage(req.user.id, req.user.role);
+        const isHandoverPerson = FULFILLER_CAN_RESOLVE_CLAIMS && Number(assignment.assigned_by) === Number(req.user.id);
+        if (!manage && !isHandoverPerson) {
+          return res.status(403).json({ error: "You need Asset Management access to resolve this issue." });
+        }
+        if (replacement_asset_id && !manage) {
+          return res.status(403).json({ error: "Only Asset Management can swap in a replacement item from inventory." });
+        }
 
         if (replacement_asset_id) {
           const newAssetRows = await queryDB("SELECT * FROM assets WHERE id = ?", [replacement_asset_id]);
@@ -928,6 +1087,13 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
           relatedId: claim.id
         });
         if (assignment.requisition_id) {
+          await logEvent(
+            Number(assignment.requisition_id),
+            req.user,
+            "issue_resolved",
+            `${req.user.name || "Inventory"} resolved the reported issue: ${note}${replacement_asset_id ? " (a replacement item was assigned)" : ""}`,
+            { notify: false }
+          );
           await notifyHrLayer(
             Number(assignment.requisition_id),
             "Asset Issue Resolved",
@@ -1036,6 +1202,10 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
       relatedId: requisition.id
     });
     await notifyHrLayer(Number(requisition.id), "Asset Dispatched", `Requisition #${requisition.id} was handed over by ${actor.name || "the fulfiller"}: ${summary}.`);
+    await logEvent(Number(requisition.id), actor, "handed_over", `${actor.name || "The fulfiller"} handed over: ${summary}.`, {
+      details: { items },
+      notify: false
+    });
   }
 
   // POST /api/assets/requisitions/:id/fulfill — Digital Handover of an
@@ -1117,6 +1287,16 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
       const condition = ["new", "good"].includes(req.body?.condition_on_assign) ? req.body.condition_on_assign : "good";
       const remarks = typeof req.body?.remarks === "string" ? req.body.remarks.trim().slice(0, 1000) || null : null;
 
+      for (const it of items) {
+        if (it.asset_tag && (await queryDB("SELECT id FROM assets WHERE asset_tag = ?", [it.asset_tag])).length > 0) {
+          return res.status(400).json({ error: `Asset Tag "${it.asset_tag}" already exists.` });
+        }
+      }
+      const actedStep = Number(request.current_step);
+      await logEvent(id, req.user, "approved", `${req.user.name || "The fulfiller"} approved the requisition (Layer ${actedStep} of ${request.total_steps}).`, {
+        details: { remarks },
+        notify: false
+      });
       // Mark approved first (records who decided), then hand over.
       await queryDB(
         "UPDATE asset_requisitions SET status = 'approved', admin_decided_by = ?, admin_decided_at = NOW() WHERE id = ?",
@@ -1153,6 +1333,210 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
         request.id
       ]);
       res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Can this account see a requisition's history? The requester, Asset
+  // Management, anyone on its approval trail or currently waiting on it, and
+  // whoever handed its items over.
+  async function canViewRequisition(requisition: any, user: any): Promise<boolean> {
+    if (Number(requisition.employee_user_id) === Number(user.id)) return true;
+    if (await canManage(user.id, user.role)) return true;
+    const requestRows: any = await queryDB("SELECT * FROM approval_requests WHERE source_type = ?", ["asset_requisition"]);
+    const request = requestRows.find((r: any) => Number(r.source_id) === Number(requisition.id));
+    if (request) {
+      let actions: any[] = [];
+      try {
+        actions = JSON.parse(request.actions_json || "[]");
+      } catch {
+        actions = [];
+      }
+      if (actions.some((a) => Number(a.approver_id) === Number(user.id))) return true;
+      if (request.status === "pending" && (await getCurrentStepApprovers(request)).some((a) => Number(a.user_id) === Number(user.id))) return true;
+    }
+    const assignments = await queryDB("SELECT * FROM asset_assignments WHERE requisition_id = ?", [requisition.id]);
+    return assignments.some((a: any) => Number(a.assigned_by) === Number(user.id));
+  }
+
+  // GET /api/assets/requisitions/:id/history — every operation on this
+  // requisition (asset_requisition_events, oldest first) plus every line
+  // ever on it, including ones the Supervisor added/changed/removed, so the
+  // requester can see what they asked for vs. what the Supervisor changed.
+  app.get("/api/assets/requisitions/:id/history", authenticateToken, async (req: any, res) => {
+    try {
+      const id = Number(req.params.id);
+      const rows = await queryDB("SELECT * FROM asset_requisitions WHERE id = ?", [id]);
+      const requisition = rows[0];
+      if (!requisition) return res.status(404).json({ error: "Requisition not found." });
+      if (!(await canViewRequisition(requisition, req.user))) return res.status(403).json({ error: "Not authorized." });
+      const events = (await queryDB("SELECT * FROM asset_requisition_events WHERE requisition_id = ?", [id]))
+        .filter((e: any) => Number(e.requisition_id) === id)
+        .sort((a: any, b: any) => String(a.created_at).localeCompare(String(b.created_at)) || Number(a.id) - Number(b.id))
+        .map((e: any) => {
+          let details = null;
+          try {
+            details = e.details_json ? JSON.parse(e.details_json) : null;
+          } catch {
+            details = null;
+          }
+          return { id: e.id, action: e.action, message: e.message, actor_name: e.actor_name, created_at: e.created_at, details };
+        });
+      const items = await queryDB(`SELECT * FROM asset_requisition_items WHERE requisition_id IN (?) ORDER BY id ASC`, [id]);
+      res.json({
+        events,
+        items: items.map((it: any) => ({
+          id: Number(it.id),
+          item_name: it.item_name,
+          purpose: it.purpose,
+          unit: it.unit,
+          quantity: Number(it.quantity),
+          source: it.source || "requested",
+          original_quantity: it.original_quantity != null ? Number(it.original_quantity) : null,
+          removed: !!it.removed_at
+        }))
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // PUT /api/assets/requisitions/:id/items — the requester's Supervisor,
+  // while the requisition is waiting on them (auto Supervisor Layer 1), may
+  // change quantities, delete lines and add lines before approving. Body:
+  // { items: [{ id?, item_name, purpose, unit, quantity }] } — the full
+  // list as it should be; a missing id is a new line, an existing line not
+  // in the list is removed (kept for history). Every change is recorded and
+  // the requester is notified.
+  app.put("/api/assets/requisitions/:id/items", authenticateToken, async (req: any, res) => {
+    try {
+      const id = Number(req.params.id);
+      const rows = await queryDB("SELECT * FROM asset_requisitions WHERE id = ?", [id]);
+      const requisition = rows[0];
+      if (!requisition) return res.status(404).json({ error: "Requisition not found." });
+      if (requisition.status !== "pending") return res.status(400).json({ error: "Only a requisition still waiting on approval can be edited." });
+      const requestRows: any = await queryDB("SELECT * FROM approval_requests WHERE source_type = ?", ["asset_requisition"]);
+      const request = requestRows.find((r: any) => Number(r.source_id) === id && r.status === "pending");
+      if (!request || !request.supervisor_step_user_id || Number(request.current_step) !== 1) {
+        return res.status(400).json({ error: "Items can only be edited while the requisition is with the Supervisor." });
+      }
+      if (req.user.role !== "superadmin" && Number(request.supervisor_step_user_id) !== Number(req.user.id)) {
+        return res.status(403).json({ error: "Only this employee's Supervisor can edit the items." });
+      }
+
+      const raw = req.body?.items;
+      if (!Array.isArray(raw) || raw.length === 0) return res.status(400).json({ error: "Keep at least one item on the requisition." });
+      let wanted: { id: number | null; item_name: string; purpose: string; unit: string; quantity: number }[];
+      try {
+        wanted = raw.map((it: any, idx: number) => {
+          const item_name = String(it?.item_name || "").trim().slice(0, 150);
+          const purpose = String(it?.purpose || "").trim();
+          const unit = String(it?.unit || "").trim().slice(0, 50);
+          const quantity = Number(it?.quantity);
+          if (!item_name) throw new Error(`Item #${idx + 1}: item name is required.`);
+          if (!purpose) throw new Error(`Item #${idx + 1}: purpose is required.`);
+          if (!unit) throw new Error(`Item #${idx + 1}: unit is required.`);
+          if (!Number.isFinite(quantity) || quantity <= 0) throw new Error(`Item #${idx + 1}: quantity must be greater than 0.`);
+          return { id: it?.id ? Number(it.id) : null, item_name, purpose, unit, quantity };
+        });
+      } catch (e: any) {
+        return res.status(400).json({ error: e.message });
+      }
+
+      const existing = (await queryDB(`SELECT * FROM asset_requisition_items WHERE requisition_id IN (?) ORDER BY id ASC`, [id])).filter(
+        (it: any) => !it.removed_at
+      );
+      const existingById = new Map<number, any>(existing.map((it: any) => [Number(it.id), it]));
+      for (const w of wanted) {
+        if (w.id && !existingById.has(w.id)) return res.status(400).json({ error: "One of the items no longer exists — reload and try again." });
+      }
+
+      const changes: { action: "added" | "edited" | "removed"; item_name: string; from?: any; to?: any }[] = [];
+      const now = new Date();
+      const wantedIds = new Set(wanted.filter((w) => w.id).map((w) => w.id));
+      for (const it of existing) {
+        if (!wantedIds.has(Number(it.id))) {
+          await queryDB("UPDATE asset_requisition_items SET removed_at = ?, removed_by = ? WHERE id = ?", [now, req.user.id, it.id]);
+          changes.push({ action: "removed", item_name: it.item_name, from: { quantity: Number(it.quantity), unit: it.unit } });
+        }
+      }
+      for (const w of wanted) {
+        if (w.id) {
+          // Snapshot before the UPDATE so the history keeps the old values.
+          const it = { ...existingById.get(w.id) };
+          const changed =
+            it.item_name !== w.item_name || it.purpose !== w.purpose || it.unit !== w.unit || Number(it.quantity) !== w.quantity;
+          if (!changed) continue;
+          const originalQty = it.original_quantity != null ? Number(it.original_quantity) : Number(it.quantity);
+          await queryDB(
+            "UPDATE asset_requisition_items SET item_name = ?, purpose = ?, unit = ?, quantity = ?, original_quantity = ?, edited_by = ? WHERE id = ?",
+            [w.item_name, w.purpose, w.unit, w.quantity, originalQty, req.user.id, w.id]
+          );
+          changes.push({
+            action: "edited",
+            item_name: w.item_name,
+            from: { item_name: it.item_name, quantity: Number(it.quantity), unit: it.unit, purpose: it.purpose },
+            to: { item_name: w.item_name, quantity: w.quantity, unit: w.unit, purpose: w.purpose }
+          });
+        } else {
+          const ins = await queryDB(
+            `INSERT INTO asset_requisition_items (requisition_id, item_name, purpose, unit, quantity)
+             VALUES (?, ?, ?, ?, ?)`,
+            [id, w.item_name, w.purpose, w.unit, w.quantity]
+          );
+          await queryDB("UPDATE asset_requisition_items SET source = ?, edited_by = ? WHERE id = ?", ["supervisor", req.user.id, ins.insertId]);
+          changes.push({ action: "added", item_name: w.item_name, to: { quantity: w.quantity, unit: w.unit, purpose: w.purpose } });
+        }
+      }
+      if (changes.length === 0) return res.json({ success: true, changes: [] });
+
+      const { category, reason } = summarizeItems(wanted);
+      await queryDB("UPDATE asset_requisitions SET asset_category = ?, reason = ? WHERE id = ?", [category, reason, id]);
+
+      const describe = changes
+        .map((c) =>
+          c.action === "added"
+            ? `added ${c.item_name} × ${c.to.quantity} ${c.to.unit}`
+            : c.action === "removed"
+              ? `removed ${c.item_name}`
+              : c.from.quantity !== c.to.quantity
+                ? `changed ${c.item_name} quantity ${c.from.quantity} → ${c.to.quantity} ${c.to.unit}`
+                : `edited ${c.item_name}`
+        )
+        .join("; ");
+      await logEvent(id, req.user, "items_edited", `${req.user.name || "Your Supervisor"} ${describe}.`, { details: { changes } });
+      res.json({ success: true, changes });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/assets/assignment-claims/mine — open issues on items THIS
+  // account handed over, for Self Service -> "Approved by Me". Returns
+  // { enabled: false } while FULFILLER_CAN_RESOLVE_CLAIMS is off.
+  app.get("/api/assets/assignment-claims/mine", authenticateToken, async (req: any, res) => {
+    try {
+      if (!FULFILLER_CAN_RESOLVE_CLAIMS) return res.json({ enabled: false, claims: [] });
+      const claims = await queryDB("SELECT * FROM asset_assignment_claims WHERE status = ?", ["pending"]);
+      const out: any[] = [];
+      for (const c of claims) {
+        const asg = (await queryDB("SELECT * FROM asset_assignments WHERE id = ?", [c.assignment_id]))[0];
+        if (!asg || Number(asg.assigned_by) !== Number(req.user.id)) continue;
+        const asset = (await queryDB("SELECT * FROM assets WHERE id = ?", [asg.asset_id]))[0];
+        const emp = (await queryDB("SELECT id, name FROM users WHERE id = ?", [c.employee_user_id]))[0];
+        out.push({
+          id: c.id,
+          issue_type: c.issue_type,
+          description: c.description,
+          created_at: c.created_at,
+          requisition_id: asg.requisition_id,
+          asset_name: asset?.name || null,
+          asset_tag: asset?.asset_tag || null,
+          employee_name: emp?.name || null
+        });
+      }
+      res.json({ enabled: true, claims: out });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -1195,6 +1579,13 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
 
         if (assignment.requisition_id) {
           await queryDB("UPDATE asset_requisitions SET status = 'fulfilled' WHERE id = ? AND status = 'dispatched'", [assignment.requisition_id]);
+          const retAsset = (await queryDB("SELECT * FROM assets WHERE id = ?", [assignment.asset_id]))[0];
+          await logEvent(
+            Number(assignment.requisition_id),
+            req.user,
+            "returned",
+            `${req.user.name || "IT/Admin"} recorded the return of ${retAsset ? `${retAsset.name} (${retAsset.asset_tag})` : "an item"} — condition: ${condition_on_return}.`
+          );
         }
 
         res.json({ success: true });
