@@ -293,7 +293,7 @@ export const PersonalDataForm: React.FC<PersonalDataFormProps> = ({ token, onBac
                     placeholder="First Name"
                   />
                 </Field>
-                <Field label="Last Name" icon={<UserIcon className="w-4 h-4" />}>
+                <Field label="Last Name (optional)" icon={<UserIcon className="w-4 h-4" />}>
                   <input
                     type="text"
                     value={data.last_name}

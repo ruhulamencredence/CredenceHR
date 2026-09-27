@@ -178,7 +178,15 @@ export function RideDetails({ requisitionId, onClose }: RideDetailsProps) {
   const tripTime = data ? durationLabel(data.decided_at, data.actual_return_at) : null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-0 sm:p-4">
+    // Full screen on phones, so keep the header (and its close button) below
+    // the status bar / notch.
+    <div
+      className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-0 sm:p-4"
+      style={{
+        paddingTop: 'var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px))',
+        paddingBottom: 'var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px))'
+      }}
+    >
       <div className="bg-white sm:rounded-lg shadow-xl w-full max-w-2xl h-full sm:h-auto sm:max-h-[92vh] flex flex-col">
         <div className="flex items-center justify-between px-4 py-3 border-b shrink-0">
           <div className="min-w-0">
@@ -189,8 +197,8 @@ export function RideDetails({ requisitionId, onClose }: RideDetailsProps) {
               </div>
             )}
           </div>
-          <button onClick={onClose} className="p-1 rounded hover:bg-gray-100 shrink-0" aria-label="Close">
-            <X className="w-4 h-4 text-gray-500" />
+          <button onClick={onClose} className="p-2 -mr-1 rounded-full hover:bg-gray-100 shrink-0" aria-label="Close">
+            <X className="w-5 h-5 text-gray-500" />
           </button>
         </div>
 

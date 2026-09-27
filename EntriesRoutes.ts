@@ -1539,6 +1539,117 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
     }
   });
 
+  // Admin Panel -> PEPM Management -> Reports -> "Submission Status": for one
+  // Budget, every Project it covers (the Project Name column of its imported
+  // Budget items, plus any Project that has Jobs under it anyway) and how far
+  // each got — no Job yet, Jobs submitted but not every submitter has Final
+  // Submitted, or Final Submitted. Aggregated in JS from plain SELECTs so it
+  // runs the same on MySQL and the in-memory fallback.
+  app.get("/api/reports/budget-submission-status", authenticateToken, requireAdmin, requireModule("reports"), async (req, res) => {
+    try {
+      const budgetId = Number(req.query.budget_id);
+      if (!budgetId) return res.status(400).json({ error: "budget_id is required." });
+      const budgetRows = await queryDB("SELECT id, budget_name FROM budgets WHERE id = ?", [budgetId]);
+      if (budgetRows.length === 0) return res.status(404).json({ error: "Budget not found" });
+
+      const [items, entries, projects, submissions, users, jobs] = await Promise.all([
+        queryDB("SELECT project_name FROM budget_items WHERE budget_id = ?", [budgetId]),
+        queryDB("SELECT id, project_id, job_id, created_by, created_at, deleted_at FROM entries WHERE budget_id = ?", [budgetId]),
+        queryDB("SELECT id, project_name FROM projects", []),
+        queryDB("SELECT user_id, submitted_at FROM budget_submissions WHERE budget_id = ?", [budgetId]),
+        queryDB("SELECT id, name FROM users", []),
+        queryDB("SELECT id, job_no FROM jobs WHERE budget_id = ?", [budgetId])
+      ]);
+
+      const norm = (v: any) => String(v || "").trim().toLowerCase();
+      const userName = new Map<number, string>(users.map((u: any) => [Number(u.id), u.name]));
+      const jobNo = new Map<number, string>(jobs.map((j: any) => [Number(j.id), j.job_no]));
+      const submittedAt = new Map<number, any>(submissions.map((s: any) => [Number(s.user_id), s.submitted_at]));
+
+      type Row = {
+        key: string;
+        project_id: number | null;
+        project_name: string;
+        in_budget: boolean;
+        budget_item_count: number;
+        jobs: Set<number>;
+        entry_count: number;
+        last_entry_at: any;
+        byUser: Map<number, Set<number>>;
+      };
+      const rows = new Map<string, Row>();
+      const projectByName = new Map<string, any>(projects.map((p: any) => [norm(p.project_name), p]));
+      const projectById = new Map<number, any>(projects.map((p: any) => [Number(p.id), p]));
+      const rowFor = (name: string, projectId: number | null) => {
+        const key = norm(name);
+        if (!rows.has(key)) {
+          rows.set(key, {
+            key,
+            project_id: projectId,
+            project_name: name,
+            in_budget: false,
+            budget_item_count: 0,
+            jobs: new Set(),
+            entry_count: 0,
+            last_entry_at: null,
+            byUser: new Map()
+          });
+        }
+        return rows.get(key)!;
+      };
+
+      for (const it of items) {
+        const name = String(it.project_name || "").trim();
+        if (!name) continue;
+        const p = projectByName.get(norm(name));
+        const r = rowFor(p ? p.project_name : name, p ? Number(p.id) : null);
+        r.in_budget = true;
+        r.budget_item_count++;
+      }
+      for (const e of entries) {
+        if (e.deleted_at) continue;
+        const p = projectById.get(Number(e.project_id));
+        const r = rowFor(p ? p.project_name : `Project #${e.project_id}`, Number(e.project_id));
+        r.project_id = Number(e.project_id);
+        r.entry_count++;
+        if (e.job_id) r.jobs.add(Number(e.job_id));
+        if (!r.last_entry_at || String(e.created_at) > String(r.last_entry_at)) r.last_entry_at = e.created_at;
+        const uid = Number(e.created_by);
+        if (!r.byUser.has(uid)) r.byUser.set(uid, new Set());
+        if (e.job_id) r.byUser.get(uid)!.add(Number(e.job_id));
+      }
+
+      const result = Array.from(rows.values()).map((r) => {
+        const submitters = Array.from(r.byUser.entries()).map(([uid, jobIds]) => ({
+          user_id: uid,
+          name: userName.get(uid) || `User #${uid}`,
+          job_count: jobIds.size,
+          job_nos: Array.from(jobIds).map((id) => jobNo.get(id)).filter(Boolean),
+          final_submitted: submittedAt.has(uid),
+          final_submitted_at: submittedAt.get(uid) || null
+        }));
+        const status =
+          r.entry_count === 0 ? "not_submitted" : submitters.every((s) => s.final_submitted) ? "final_submitted" : "job_submitted";
+        return {
+          project_id: r.project_id,
+          project_name: r.project_name,
+          in_budget: r.in_budget,
+          budget_item_count: r.budget_item_count,
+          job_count: r.jobs.size,
+          entry_count: r.entry_count,
+          last_entry_at: r.last_entry_at,
+          submitters,
+          status
+        };
+      });
+      const order: Record<string, number> = { not_submitted: 0, job_submitted: 1, final_submitted: 2 };
+      result.sort((a, b) => order[a.status] - order[b.status] || a.project_name.localeCompare(b.project_name));
+      res.json({ budget: budgetRows[0], projects: result });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to load the submission status" });
+    }
+  });
+
   // Full change history for one entry row (Item Name, Delivery Date, MPR No, and any
   // Job Name / Job Duration edits made from this or a sibling row under the same Job).
   // Admin-only, per the Admin Panel's Reports tab.
