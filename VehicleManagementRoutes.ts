@@ -153,7 +153,9 @@ export async function ensureVehicleManagementSchema(dbPool: any): Promise<void> 
       `ALTER TABLE vehicle_requisitions ADD COLUMN driver_user_id INT NULL, ADD FOREIGN KEY (driver_user_id) REFERENCES users(id) ON DELETE SET NULL`
     );
   } catch (err: any) {
-    console.warn("⚠️ Could not add vehicle_requisitions.driver_user_id (already applied, or manual migration needed): " + err.message);
+    if (err.code !== "ER_DUP_FIELDNAME") {
+      console.warn("⚠️ Could not add vehicle_requisitions.driver_user_id: " + err.message);
+    }
   }
 }
 
