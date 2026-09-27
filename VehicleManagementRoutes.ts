@@ -437,6 +437,29 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
     }
   });
 
+  // GET /api/vehicles/driver-candidates — every login account, for the
+  // driver picker on PUT .../assign / .../approve-and-assign / the Vehicle
+  // Maintainer's direct-book/direct-assign (see validateVehicleAssignment
+  // above, which only ever needs a users.id — the driver never has to be
+  // linked to an all_employees row). Deliberately NOT sourced from GET
+  // /api/employee-directory (all_employees): an account created directly as
+  // a login (e.g. POST /api/users/bulk) or otherwise never linked to an
+  // Employee record would be a real driver with a real account, yet
+  // invisible there — that's exactly the "driver dropdown shows nobody" bug
+  // this route exists to avoid. No module gate, same reasoning as GET
+  // /api/vehicles/available just above.
+  app.get("/api/vehicles/driver-candidates", authenticateToken, async (req: any, res: any) => {
+    try {
+      const rows: any = await queryDB("SELECT id, name, role FROM users ORDER BY name ASC");
+      // Same "plain account never sees the Superadmin account" rule GET
+      // /api/employees/unlinked-users already applies.
+      const visible = req.user.role === "superadmin" ? rows : rows.filter((u: any) => u.role !== "superadmin");
+      res.json(visible.map((u: any) => ({ id: Number(u.id), name: u.name })));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Shared by POST /api/vehicles/requisitions (self-service "Book a Ride")
   // and POST /api/vehicles/requisitions/admin-create (flowchart's "জরুরি/HR
   // Direct" initiator path) — validates the ride form, inserts the row, and

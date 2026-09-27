@@ -139,16 +139,28 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
   const [assigningFor, setAssigningFor] = useState<number | null>(null);
   const [assignForm, setAssignForm] = useState({ vehicle_id: '', driver_user_id: '' });
 
-  // Fetched once on mount (not gated behind any tab) — needed for the driver
-  // picker on the regular "Approved by Me" assign form AND the Vehicle
-  // Maintainer tab's Employee/Driver pickers. A driver MUST be a real login
-  // account now (see VehicleManagementRoutes.ts's validateVehicleAssignment)
-  // so Employee Tracking has somewhere to pull their live position from.
+  // Fetched once on mount (not gated behind any tab) — the "who is this ride
+  // for" employee picker on the Vehicle Maintainer's Direct Book form (needs
+  // a name/designation, so it stays sourced from the Employee Directory).
   const [directoryEmployees, setDirectoryEmployees] = useState<DirectoryEmployee[]>([]);
   useEffect(() => {
     fetch(apiUrl('/api/employee-directory'), { headers: authHeaders() })
       .then((r) => r.json())
       .then((rows) => setDirectoryEmployees((Array.isArray(rows) ? rows : []).filter((e: DirectoryEmployee) => e.user_id)))
+      .catch(() => {});
+  }, []);
+
+  // Driver picker — every login account (see GET /api/vehicles/driver-
+  // candidates), NOT the Employee Directory: a driver only ever needs to be
+  // a real users.id (validateVehicleAssignment in VehicleManagementRoutes.ts),
+  // and an account created straight as a login (e.g. bulk-created via POST
+  // /api/users/bulk) is never linked to an all_employees row, so it would be
+  // invisible in the Directory despite being a perfectly real driver account.
+  const [driverCandidates, setDriverCandidates] = useState<{ id: number; name: string }[]>([]);
+  useEffect(() => {
+    fetch(apiUrl('/api/vehicles/driver-candidates'), { headers: authHeaders() })
+      .then((r) => r.json())
+      .then((rows) => setDriverCandidates(Array.isArray(rows) ? rows : []))
       .catch(() => {});
   }, []);
 
@@ -640,9 +652,9 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
                       className="border rounded px-2 py-1 text-xs"
                     >
                       <option value="">Pick a driver…</option>
-                      {directoryEmployees.map((e) => (
-                        <option key={e.user_id} value={e.user_id as number}>
-                          {e.name}
+                      {driverCandidates.map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {d.name}
                         </option>
                       ))}
                     </select>
@@ -809,9 +821,9 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
                     className="w-full border rounded px-3 py-2 text-sm"
                   >
                     <option value="">Pick a driver…</option>
-                    {directoryEmployees.map((e) => (
-                      <option key={e.user_id} value={e.user_id as number}>
-                        {e.name}{e.designation ? ` — ${e.designation}` : ''}
+                    {driverCandidates.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.name}
                       </option>
                     ))}
                   </select>
@@ -868,9 +880,9 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
                           className="border rounded px-2 py-1 text-xs"
                         >
                           <option value="">Pick a driver…</option>
-                          {directoryEmployees.map((e) => (
-                            <option key={e.user_id} value={e.user_id as number}>
-                              {e.name}
+                          {driverCandidates.map((d) => (
+                            <option key={d.id} value={d.id}>
+                              {d.name}
                             </option>
                           ))}
                         </select>
