@@ -6292,6 +6292,56 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         </div>
       )}
 
+      {/* User "Manage" popup — rendered before every popup it can open
+          (Manage Projects, Module Access, Reset Password, Change Login ID)
+          so those appear on top of it. */}
+      {managingUserId != null &&
+        (() => {
+          const mu = users.find((x) => x.id === managingUserId);
+          if (!mu) return null;
+          return (
+            <UserAccessDrawer
+              u={mu}
+              isSuperAdmin={isSuperAdmin}
+              canGrantModuleAccess={canGrantModuleAccess}
+              canSeeLoginLocation={canSeeLoginLocation}
+              projectCount={projectIdsForUser(mu.id).size}
+              projects={projects}
+              lastLogin={
+                mu.last_login_lat != null && mu.last_login_lng != null ? (
+                  <LastLoginAddress lat={Number(mu.last_login_lat)} lng={Number(mu.last_login_lng)} asOf={mu.last_login_at || undefined} />
+                ) : (
+                  <span className="text-slate-400">No login yet</span>
+                )
+              }
+              onClose={() => setManagingUserId(null)}
+              onToggleFeature={(field, value) => handleFeaturePermissionToggle(mu.id, field, value)}
+              onToggleLoginLocation={(value) => handleLoginLocationAccessToggle(mu.id, value)}
+              onAttendanceProject={(projectId) => handleAttendanceProjectChange(mu.id, projectId)}
+              onRoleChange={(role) => handleRoleChange(mu.id, role)}
+              onOpenModules={() => openManageModules(mu)}
+              onOpenProjects={() => openManageProjects(mu)}
+              onChangeLoginId={() => {
+                setNewEmailInput(mu.email || '');
+                setChangingEmailFor(mu);
+              }}
+              onResetPassword={() => {
+                setNewPasswordInput('');
+                setResettingPasswordFor(mu);
+              }}
+              onDelete={async () => {
+                await handleDeleteUser(mu.id);
+              }}
+              token={token}
+              templates={accessTemplates}
+              onApplyTemplate={async (t) => {
+                await applyTemplateToUser(token, t, mu, { isSuperAdmin, canGrantModuleAccess });
+                fetchAllData();
+              }}
+            />
+          );
+        })()}
+
       {/* Manage Projects modal — Admin sets which Projects a User can access */}
       {managingUser && (
         <div
@@ -6377,53 +6427,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
 
       {/* Module Access modal — Superadmin sets which Admin Panel tabs a given Admin
           may open (projects, mprs, imports, reports, users, recycle, editlog). */}
-      {managingUserId != null &&
-        (() => {
-          const mu = users.find((x) => x.id === managingUserId);
-          if (!mu) return null;
-          return (
-            <UserAccessDrawer
-              u={mu}
-              isSuperAdmin={isSuperAdmin}
-              canGrantModuleAccess={canGrantModuleAccess}
-              canSeeLoginLocation={canSeeLoginLocation}
-              projectCount={projectIdsForUser(mu.id).size}
-              projects={projects}
-              lastLogin={
-                mu.last_login_lat != null && mu.last_login_lng != null ? (
-                  <LastLoginAddress lat={Number(mu.last_login_lat)} lng={Number(mu.last_login_lng)} asOf={mu.last_login_at || undefined} />
-                ) : (
-                  <span className="text-slate-400">No login yet</span>
-                )
-              }
-              onClose={() => setManagingUserId(null)}
-              onToggleFeature={(field, value) => handleFeaturePermissionToggle(mu.id, field, value)}
-              onToggleLoginLocation={(value) => handleLoginLocationAccessToggle(mu.id, value)}
-              onAttendanceProject={(projectId) => handleAttendanceProjectChange(mu.id, projectId)}
-              onRoleChange={(role) => handleRoleChange(mu.id, role)}
-              onOpenModules={() => openManageModules(mu)}
-              onOpenProjects={() => openManageProjects(mu)}
-              onChangeLoginId={() => {
-                setNewEmailInput(mu.email || '');
-                setChangingEmailFor(mu);
-              }}
-              onResetPassword={() => {
-                setNewPasswordInput('');
-                setResettingPasswordFor(mu);
-              }}
-              onDelete={async () => {
-                await handleDeleteUser(mu.id);
-              }}
-              token={token}
-              templates={accessTemplates}
-              onApplyTemplate={async (t) => {
-                await applyTemplateToUser(token, t, mu, { isSuperAdmin, canGrantModuleAccess });
-                fetchAllData();
-              }}
-            />
-          );
-        })()}
-
       {showAccessTemplates && (
         <AccessTemplatesModal
           token={token}
