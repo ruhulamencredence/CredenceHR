@@ -15,6 +15,8 @@ import React, { useEffect, useState } from 'react';
 import { apiUrl } from '../lib/api';
 import { LiveRideMap } from './LiveRideMap';
 import { RideDetails } from './RideDetails';
+import { RideBookingMap } from './RideBookingMap';
+import { useWideWeb } from '../lib/useWideWeb';
 import { RideDestinationPicker, RidePlaces } from './RideDestinationPicker';
 
 interface Requisition {
@@ -124,7 +126,17 @@ interface VehicleManagementProps {
 
 export function VehicleManagement({ user }: VehicleManagementProps) {
   const isVehicleMaintainer = user?.role === 'superadmin' || !!(user?.module_permissions || []).includes('vehicle_maintainer');
-  const [tab, setTab] = useState<'book' | 'status' | 'assign' | 'maintainer'>('book');
+  const [tab, setTab] = useState<'book' | 'status' | 'assign' | 'maintainer'>(() => {
+    // One-shot tab request from the web Dashboard's Book a Ride card.
+    try {
+      const requested = sessionStorage.getItem('credence.bookRideTab');
+      sessionStorage.removeItem('credence.bookRideTab');
+      if (requested === 'status') return 'status';
+    } catch {
+      // Storage blocked — default tab.
+    }
+    return 'book';
+  });
   const [requisitions, setRequisitions] = useState<Requisition[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -133,6 +145,10 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
   // Book a Ride is two steps: pick where from/to (RideDestinationPicker),
   // then the rest of the form. null = still on step 1.
   const [places, setPlaces] = useState<RidePlaces | null>(null);
+  // Kept when "Change" goes back to step 1, so the picks aren't lost.
+  const [lastPlaces, setLastPlaces] = useState<RidePlaces | null>(null);
+  // Desktop web browser only: map beside the booking panel, Ride Status in two columns.
+  const wideWeb = useWideWeb();
   const [submitting, setSubmitting] = useState(false);
   const [submitMessage, setSubmitMessage] = useState<string | null>(null);
 
@@ -337,6 +353,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
       setSubmitMessage('Ride request submitted successfully.');
       setForm(emptyForm());
       setPlaces(null);
+      setLastPlaces(null);
     } catch (err: any) {
       setSubmitMessage(err.message);
     } finally {
@@ -431,6 +448,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
         <>
           {submitMessage && <div className="mb-3 rounded bg-green-50 text-green-800 text-sm px-3 py-2 max-w-xl">{submitMessage}</div>}
           <RideDestinationPicker
+            initial={lastPlaces}
             onDone={(picked) => {
               setPlaces(picked);
               setSubmitMessage(null);
@@ -440,7 +458,19 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
       )}
 
       {tab === 'book' && places && (
-        <form onSubmit={submitRequisition} className="space-y-4 max-w-xl">
+        <div className={wideWeb ? 'grid grid-cols-[minmax(0,1fr)_400px] gap-5 items-start' : ''}>
+        {wideWeb && (
+          <RideBookingMap
+            here={null}
+            pickup={places.pickup_lat != null && places.pickup_lng != null ? { lat: places.pickup_lat, lng: places.pickup_lng } : null}
+            destination={places.destination_lat != null && places.destination_lng != null ? { lat: places.destination_lat, lng: places.destination_lng } : null}
+            className="h-[calc(100vh-200px)] min-h-[480px]"
+          />
+        )}
+        <form
+          onSubmit={submitRequisition}
+          className={wideWeb ? 'space-y-4 bg-white rounded-2xl border border-slate-200 shadow-sm p-4' : 'space-y-4 max-w-xl'}
+        >
           <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 flex items-start justify-between gap-3">
             <div className="min-w-0 text-sm space-y-1.5">
               <div className="flex items-center gap-2 text-slate-700">
@@ -452,7 +482,13 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
                 <span className="truncate">{places.destination}</span>
               </div>
             </div>
-            <button type="button" onClick={() => setPlaces(null)} className="text-xs font-medium text-blue-600 hover:underline shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                setLastPlaces(places);
+                setPlaces(null);
+              }}
+              className="text-xs font-medium text-blue-600 hover:underline shrink-0">
               Change
             </button>
           </div>
@@ -467,7 +503,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
               className="w-full border rounded px-3 py-2 text-sm"
             />
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+          <div className={`grid gap-4 ${wideWeb ? 'grid-cols-2' : 'grid-cols-2 sm:grid-cols-3'}`}>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Ride Date</label>
               <input
@@ -505,15 +541,16 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
           <button
             type="submit"
             disabled={submitting}
-            className="w-full sm:w-auto px-4 py-2.5 text-sm font-medium rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+            className={`${wideWeb ? 'w-full' : 'w-full sm:w-auto'} px-4 py-2.5 text-sm font-medium rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50`}
           >
             {submitting ? 'Submitting…' : 'Submit Request'}
           </button>
         </form>
+        </div>
       )}
 
       {tab === 'status' && (
-        <div className="space-y-3">
+        <div className={wideWeb ? 'grid grid-cols-2 gap-3 items-start' : 'space-y-3'}>
           {loading && <div className="text-sm text-gray-500">Loading…</div>}
           {!loading && requisitions.length === 0 && <div className="text-sm text-gray-500">No ride requests yet.</div>}
           {requisitions.map((r) => (

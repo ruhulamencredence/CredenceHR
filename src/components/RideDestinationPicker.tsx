@@ -8,20 +8,28 @@
 // GET /api/vehicles/places/reverse); the destination is picked from typed
 // suggestions (GET /api/vehicles/places/search), the Recent list (GET
 // /api/vehicles/places/recent), or used exactly as typed.
+//
+// On a desktop web browser (useWideWeb) the panel sits beside a live map
+// (RideBookingMap): clicking the map sets the pickup or the destination, and
+// the user confirms with Continue instead of a pick jumping straight ahead.
 
 import React, { useEffect, useRef, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { Geolocation } from '@capacitor/geolocation';
-import { Armchair, MapPin, MapPinned, History, Search, PencilLine, LocateFixed, X } from 'lucide-react';
+import { Armchair, MapPin, MapPinned, History, Search, PencilLine, LocateFixed, X, ArrowRight } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
 import { RideMapPicker } from './RideMapPicker';
+import { RideBookingMap, RidePoint, RidePointKind } from './RideBookingMap';
+import { useWideWeb } from '../lib/useWideWeb';
 
 export interface RidePlaces {
   pickup_location: string;
   destination: string;
   destination_lat: number | null;
   destination_lng: number | null;
+  pickup_lat?: number | null;
+  pickup_lng?: number | null;
 }
 
 interface Place {
@@ -79,13 +87,64 @@ export function RideDestinationPicker({ initial, onDone }: RideDestinationPicker
   // Destination picked before a pickup was set — finished once the pickup is chosen on the map.
   const [pendingDestination, setPendingDestination] = useState<Place | null>(null);
   const destinationRef = useRef<HTMLInputElement | null>(null);
+  const wideWeb = useWideWeb();
+  const [here, setHere] = useState<RidePoint | null>(null);
+  // Web only: the destination chosen so far (confirmed with Continue) and
+  // which point a map click sets.
+  const [destPlace, setDestPlace] = useState<Place | null>(
+    initial?.destination ? { label: initial.destination, lat: initial.destination_lat, lng: initial.destination_lng } : null
+  );
+  const [activePoint, setActivePoint] = useState<RidePointKind>(initial?.pickup_location ? 'destination' : 'pickup');
+  // Set when the destination box is filled in by a pick, so it isn't searched.
+  const skipSearchRef = useRef(false);
+
+  useEffect(() => {
+    if (initial?.pickup_lat != null && initial?.pickup_lng != null) setPickupCoords({ lat: initial.pickup_lat, lng: initial.pickup_lng });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const reverseLabel = async (point: RidePoint): Promise<string> => {
+    const fallback = `${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}`;
+    try {
+      const res = await fetch(apiUrl(`/api/vehicles/places/reverse?lat=${point.lat}&lng=${point.lng}`), { headers: authHeaders() });
+      const data = await res.json().catch(() => null);
+      return data?.label || fallback;
+    } catch {
+      return fallback;
+    }
+  };
+
+  const setDestinationBox = (text: string) => {
+    skipSearchRef.current = true;
+    setSuggestions([]);
+    setQuery(text);
+  };
+
+  const pickOnMap = async (kind: RidePointKind, point: RidePoint) => {
+    setMessage(null);
+    const coordsText = `${point.lat.toFixed(5)}, ${point.lng.toFixed(5)}`;
+    if (kind === 'pickup') {
+      setPickupCoords(point);
+      setPickup(coordsText);
+      if (!destPlace) setActivePoint('destination');
+      const label = await reverseLabel(point);
+      setPickup(label);
+    } else {
+      setDestPlace({ label: coordsText, lat: point.lat, lng: point.lng });
+      setDestinationBox(coordsText);
+      const label = await reverseLabel(point);
+      setDestPlace({ label, lat: point.lat, lng: point.lng });
+      setDestinationBox(label);
+    }
+  };
 
   const locateCoords = async (): Promise<{ lat: number; lng: number } | null> => {
     try {
       const { latitude, longitude } = await getCurrentCoords();
-      const here = { lat: latitude, lng: longitude };
-      setPickupCoords(here);
-      return here;
+      const point = { lat: latitude, lng: longitude };
+      setPickupCoords(point);
+      setHere(point);
+      return point;
     } catch {
       return null;
     }
@@ -96,6 +155,7 @@ export function RideDestinationPicker({ initial, onDone }: RideDestinationPicker
     try {
       const { latitude, longitude } = await getCurrentCoords();
       setPickupCoords({ lat: latitude, lng: longitude });
+      setHere({ lat: latitude, lng: longitude });
       const res = await fetch(apiUrl(`/api/vehicles/places/reverse?lat=${latitude}&lng=${longitude}`), { headers: authHeaders() });
       const data = await res.json().catch(() => null);
       setPickup(data?.label || `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`);
@@ -119,6 +179,10 @@ export function RideDestinationPicker({ initial, onDone }: RideDestinationPicker
 
   // Debounced place search while typing.
   useEffect(() => {
+    if (skipSearchRef.current) {
+      skipSearchRef.current = false;
+      return;
+    }
     const q = query.trim();
     if (q.length < 3) {
       setSuggestions([]);
@@ -150,6 +214,12 @@ export function RideDestinationPicker({ initial, onDone }: RideDestinationPicker
   }, [query]);
 
   const choose = (place: Place) => {
+    if (wideWeb) {
+      setDestPlace(place);
+      setDestinationBox(place.label);
+      setMessage(null);
+      return;
+    }
     if (!pickup.trim()) {
       setPendingDestination(place);
       setMessage('Set your pickup location on the map first.');
@@ -159,20 +229,61 @@ export function RideDestinationPicker({ initial, onDone }: RideDestinationPicker
     onDone({ pickup_location: pickup.trim(), destination: place.label, destination_lat: place.lat, destination_lng: place.lng });
   };
 
-  const typing = query.trim().length >= 3;
+  const typing = query.trim().length >= 3 && !(wideWeb && destPlace && destPlace.label === query);
+
+  // Web: confirm the pickup + destination picked in the panel or on the map.
+  const continueWeb = () => {
+    const dest = destPlace && destPlace.label === query ? destPlace : query.trim() ? { label: query.trim(), lat: null, lng: null } : null;
+    if (!pickup.trim()) {
+      setActivePoint('pickup');
+      setMessage('Set your pickup location — type it or click the map.');
+      return;
+    }
+    if (!dest) {
+      setActivePoint('destination');
+      destinationRef.current?.focus();
+      setMessage('Choose where you are going — search, or click the map.');
+      return;
+    }
+    onDone({
+      pickup_location: pickup.trim(),
+      destination: dest.label,
+      destination_lat: dest.lat,
+      destination_lng: dest.lng,
+      pickup_lat: pickupCoords?.lat ?? null,
+      pickup_lng: pickupCoords?.lng ?? null
+    });
+  };
 
   return (
-    <div className="max-w-xl">
+    <div className={wideWeb ? 'grid grid-cols-[minmax(0,1fr)_400px] gap-5 items-start' : 'max-w-xl'}>
+      {wideWeb && (
+        <RideBookingMap
+          here={here}
+          pickup={pickupCoords}
+          destination={destPlace && destPlace.lat != null && destPlace.lng != null ? { lat: destPlace.lat, lng: destPlace.lng } : null}
+          active={activePoint}
+          onPick={pickOnMap}
+          onLocateMe={locate}
+          className="h-[calc(100vh-200px)] min-h-[480px]"
+        />
+      )}
+      <div className={wideWeb ? 'bg-white rounded-2xl border border-slate-200 shadow-sm p-4 lg:max-h-[calc(100vh-200px)] lg:overflow-y-auto' : ''}>
+      {wideWeb && <div className="text-base font-bold text-slate-900 mb-3">Where are you going?</div>}
       <div className="rounded-2xl bg-slate-50 border border-slate-200 p-2 space-y-2">
         <div className="flex items-center gap-3 px-3 py-2.5">
           <Armchair className="w-5 h-5 text-slate-600 shrink-0" />
           <input
             value={pickup}
-            onChange={(e) => setPickup(e.target.value)}
+            onChange={(e) => {
+              setPickup(e.target.value);
+              setPickupCoords(null);
+            }}
+            onFocus={() => setActivePoint('pickup')}
             placeholder={locating ? 'Finding your location…' : 'Pickup location'}
             className="flex-1 min-w-0 bg-transparent text-sm font-medium text-slate-800 placeholder:text-slate-400 focus:outline-none"
           />
-          <button type="button" onClick={() => setMapFor('pickup')} title="Set pickup on map" className="p-1 text-slate-500 hover:text-blue-600">
+          <button type="button" onClick={() => (wideWeb ? setActivePoint('pickup') : setMapFor('pickup'))} title="Set pickup on map" className="p-1 text-slate-500 hover:text-blue-600">
             <MapPinned className="w-4 h-4" />
           </button>
           <button type="button" onClick={locate} title="Use my current location" className="p-1 text-slate-500 hover:text-blue-600">
@@ -187,8 +298,10 @@ export function RideDestinationPicker({ initial, onDone }: RideDestinationPicker
             value={query}
             onChange={(e) => {
               setQuery(e.target.value);
+              setDestPlace(null);
               setMessage(null);
             }}
+            onFocus={() => setActivePoint('destination')}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && query.trim()) {
                 e.preventDefault();
@@ -199,7 +312,13 @@ export function RideDestinationPicker({ initial, onDone }: RideDestinationPicker
             className="flex-1 min-w-0 bg-transparent text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none"
           />
           {query && (
-            <button type="button" onClick={() => setQuery('')} className="p-1 text-slate-400 hover:text-slate-600">
+            <button
+              type="button"
+              onClick={() => {
+                setQuery('');
+                setDestPlace(null);
+              }}
+              className="p-1 text-slate-400 hover:text-slate-600">
               <X className="w-4 h-4" />
             </button>
           )}
@@ -210,7 +329,7 @@ export function RideDestinationPicker({ initial, onDone }: RideDestinationPicker
       {!message && locateFailed && !pickup.trim() && (
         <div className="mt-2 text-xs text-amber-600">
           Couldn't get your current location. Type the pickup or{' '}
-          <button type="button" onClick={() => setMapFor('pickup')} className="font-semibold underline">
+          <button type="button" onClick={() => (wideWeb ? setActivePoint('pickup') : setMapFor('pickup'))} className="font-semibold underline">
             set it on the map
           </button>
           .
@@ -245,6 +364,15 @@ export function RideDestinationPicker({ initial, onDone }: RideDestinationPicker
         </div>
       </div>
 
+      {wideWeb ? (
+        <button
+          type="button"
+          onClick={continueWeb}
+          className="mt-4 w-full flex items-center justify-center gap-2 py-3 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700"
+        >
+          Continue <ArrowRight className="w-4 h-4" />
+        </button>
+      ) : (
       <div className="mt-4 grid grid-cols-2 rounded-xl border border-slate-200 divide-x divide-slate-200 overflow-hidden">
         <button
           type="button"
@@ -267,6 +395,8 @@ export function RideDestinationPicker({ initial, onDone }: RideDestinationPicker
         >
           <MapPinned className="w-4 h-4 text-red-500" /> Set On Map
         </button>
+      </div>
+      )}
       </div>
 
       {mapFor && (

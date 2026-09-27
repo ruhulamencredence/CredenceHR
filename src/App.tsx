@@ -985,7 +985,9 @@ export default function App() {
           // VehicleManagement.tsx (Book a Ride/Ride Status) — same header-
           // less wrapper pattern as My Asset just above.
           <div className="w-full min-h-[calc(100vh-4rem)]" style={{ background: 'var(--g-surface-muted)' }}>
-            <div className="max-w-3xl mx-auto px-4 pt-3 pb-28">
+            {/* Web: full content width (map beside the booking panel, Ride Status
+                in two columns) instead of a narrow phone-width column. */}
+            <div className={`mx-auto px-4 pt-3 pb-28 ${Capacitor.isNativePlatform() ? 'max-w-3xl' : 'max-w-3xl lg:max-w-none lg:px-8 lg:pb-8'}`}>
               <div className="flex items-center gap-2 mb-3">
                 <button
                   type="button"
@@ -1026,6 +1028,14 @@ export default function App() {
               dashboardNavRequest={dashboardNavRequest}
               leaveNavRequest={leaveNavRequest}
               onActiveSectionChange={setUserActiveSection}
+              onOpenBookRide={(tab) => {
+                try {
+                  sessionStorage.setItem('credence.bookRideTab', tab);
+                } catch {
+                  // Storage blocked — Book a Ride just opens on its default tab.
+                }
+                sidebarNavProps.onGoToSelfServiceTab('vehicleManagement');
+              }}
             />
             {/* Superadmin/Admin-authored Notice popup — only shown on the plain
                 User's dashboard, right after they land here post-login. */}
