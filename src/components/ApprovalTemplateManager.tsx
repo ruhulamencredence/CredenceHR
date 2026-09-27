@@ -59,7 +59,13 @@ function layerLabel(requestType: ApprovalRequestType, idx: number): string {
 // approver. Only index 0 can ever be 'supervisor'.
 interface StepDraft {
   approver_user_ids: number[];
-  approver_type: 'supervisor' | 'employee' | 'admin';
+  // 'vehicle_maintainer' is only valid on a Vehicle Requisition template's
+  // LAST Layer — reaching it skips the separate Approve step entirely: the
+  // Vehicle Maintainer's own vehicle+driver Assign action both closes the
+  // approval chain and confirms the ride in one step (see PUT
+  // .../approve-and-assign in VehicleManagementRoutes.ts). Enforced
+  // server-side too (validateTemplateSteps in ApprovalRoutes.ts).
+  approver_type: 'supervisor' | 'employee' | 'admin' | 'vehicle_maintainer';
   // Custom Layer name — empty means "fall back to the generic/position-based
   // name" (layerLabel() below). Travels WITH this step's own approvers when
   // dragged/moved, unlike the position-based fallback, so e.g. an Asset
@@ -176,7 +182,8 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
       // index 0 always represents Layer 1 in the editor, exactly like create.
       const persistedSteps: StepDraft[] = (data.steps || []).map((s: ApprovalTemplateStep) => ({
         approver_user_ids: s.approvers.map((a) => a.user_id),
-        approver_type: (s as any).approver_type === 'admin' ? 'admin' : 'employee',
+        approver_type:
+          (s as any).approver_type === 'admin' ? 'admin' : (s as any).approver_type === 'vehicle_maintainer' ? 'vehicle_maintainer' : 'employee',
         label: (s as any).label || ''
       }));
       setStepsDraft(
@@ -213,7 +220,7 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
   // 'employee'/'admin' (override — Layer 1 becomes a real Layer with its own
   // picked approver(s), and the auto-Supervisor gate is skipped for requests
   // on this template). Layers below Layer 1 are never 'supervisor'.
-  const setStepApproverType = (stepIdx: number, type: 'supervisor' | 'employee' | 'admin') =>
+  const setStepApproverType = (stepIdx: number, type: 'supervisor' | 'employee' | 'admin' | 'vehicle_maintainer') =>
     setStepsDraft((prev) => prev.map((s, i) => (i === stepIdx ? { ...s, approver_type: type, approver_user_ids: type === 'supervisor' ? [] : s.approver_user_ids } : s)));
   const addApproverToStep = (stepIdx: number, uid: number) => {
     if (!uid) return;
@@ -248,7 +255,22 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
         is_default: isDefaultDraft,
         is_active: isActiveDraft,
         skip_auto_supervisor: skipAutoSupervisor,
-        steps: realSteps.map((s) => ({ approver_user_ids: s.approver_user_ids, approver_type: s.approver_type === 'admin' ? 'admin' : 'employee', label: s.label.trim() || undefined }))
+        // 'vehicle_maintainer' is only valid on the LAST Layer (see
+        // validateTemplateSteps in ApprovalRoutes.ts) — a Layer added or
+        // moved after it since it was set no longer qualifies, so it's
+        // downgraded here rather than left to fail the save.
+        steps: realSteps.map((s, i) => ({
+          approver_user_ids: s.approver_user_ids,
+          approver_type:
+            s.approver_type === 'vehicle_maintainer' && i !== realSteps.length - 1
+              ? 'employee'
+              : s.approver_type === 'admin'
+                ? 'admin'
+                : s.approver_type === 'vehicle_maintainer'
+                  ? 'vehicle_maintainer'
+                  : 'employee',
+          label: s.label.trim() || undefined
+        }))
       };
       const url = editingId ? apiUrl(`/api/approval-templates/${editingId}`) : apiUrl('/api/approval-templates');
       const res = await fetch(url, {
@@ -629,7 +651,13 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
                 <label className="text-xs font-semibold text-slate-600 block">Layers</label>
                 {stepsDraft.map((step, idx) => {
                   const isVirtualSupervisor = idx === 0 && step.approver_type === 'supervisor';
-                  const pickerUsers = step.approver_type === 'admin' ? users.filter((u) => isAdminRole(u.role)) : users;
+                  const pickerUsers =
+                    step.approver_type === 'admin'
+                      ? users.filter((u) => isAdminRole(u.role))
+                      : step.approver_type === 'vehicle_maintainer'
+                        ? users.filter((u) => u.role === 'superadmin' || (u.module_permissions || []).includes('vehicle_maintainer'))
+                        : users;
+                  const isLastLayer = idx === stepsDraft.length - 1;
                   return (
                     <div
                       key={idx}
@@ -696,6 +724,7 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
                           {idx === 0 && <option value="supervisor">Supervisor</option>}
                           <option value="employee">Employee</option>
                           <option value="admin">Admin</option>
+                          {typeDraft === 'vehicle' && isLastLayer && <option value="vehicle_maintainer">Vehicle Maintainer (Ride Bypass)</option>}
                         </select>
                         {idx > 0 && (
                           <button
@@ -716,6 +745,13 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
                         </p>
                       ) : (
                         <>
+                          {step.approver_type === 'vehicle_maintainer' && (
+                            <p className="text-[11px] text-slate-500 pl-7">
+                              Whoever's picked here won't see Approve/Reject — reaching this Layer takes them
+                              straight to "Assign Vehicle & Driver" on their Pending Approvals; submitting that
+                              closes the chain and confirms the ride in one step.
+                            </p>
+                          )}
                           <div className="flex flex-wrap gap-1.5 pl-7">
                             {step.approver_user_ids.length === 0 && <span className="text-[11px] text-slate-400">No approvers yet — add at least one.</span>}
                             {step.approver_user_ids.map((uid) => (
@@ -744,7 +780,9 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
                               placeholder={
                                 step.approver_type === 'admin'
                                   ? 'Search an Admin/Superadmin by name to add as approver…'
-                                  : 'Search an employee by name to add as approver — one member per row, add the whole team to represent a Department…'
+                                  : step.approver_type === 'vehicle_maintainer'
+                                    ? 'Search a Vehicle Maintainer by name to add as approver…'
+                                    : 'Search an employee by name to add as approver — one member per row, add the whole team to represent a Department…'
                               }
                               className="w-full text-xs px-2.5 py-2 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
                             />
@@ -757,7 +795,9 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
                               return (
                                 <div className="absolute z-20 left-0 right-0 mt-1 max-h-56 overflow-y-auto bg-white border border-slate-200 rounded-lg shadow-lg">
                                   {matches.length === 0 ? (
-                                    <div className="px-3 py-2 text-xs text-slate-400">No matching {step.approver_type === 'admin' ? 'Admin' : 'employee'} found.</div>
+                                    <div className="px-3 py-2 text-xs text-slate-400">
+                                      No matching {step.approver_type === 'admin' ? 'Admin' : step.approver_type === 'vehicle_maintainer' ? 'Vehicle Maintainer' : 'employee'} found.
+                                    </div>
                                   ) : (
                                     matches.map((u) => (
                                       <button

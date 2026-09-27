@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ShieldCheck, CheckCircle2, XCircle, AlertCircle, MapPin, ChevronRight, ArrowLeft, X, Package, Paperclip } from 'lucide-react';
+import { ShieldCheck, CheckCircle2, XCircle, AlertCircle, MapPin, ChevronRight, ArrowLeft, X, Package, Paperclip, Car } from 'lucide-react';
 import { apiUrl, dedupedFetchJson } from '../lib/api';
 import { Spinner } from './Spinner';
 import { UserClaimReference, ClaimRecord } from '../types';
@@ -35,6 +35,22 @@ interface MyApprovalItem {
     attachment_filename: string | null;
     items: { item_name: string; purpose: string; unit: string; quantity: number }[];
   } | null;
+  // See ApproveApplications.tsx's identical field — true only for a
+  // vehicle_requisition item on its Template's FINAL Layer, when that
+  // Layer's Approver Type is 'vehicle_maintainer'.
+  vehicle_maintainer_bypass?: boolean;
+}
+
+interface AvailableVehicle {
+  id: number;
+  vehicle_no: string;
+  model: string;
+}
+
+interface DirectoryEmployee {
+  id: number;
+  name: string;
+  user_id: number | null;
 }
 
 const sourceTitle = (t: MyApprovalItem['source_type']) =>
@@ -93,6 +109,26 @@ export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ toke
   // (and for many approvers, only) place an Asset Requisition is seen, so it
   // needs the same way to see every requested item before deciding.
   const [viewingAssetRequisition, setViewingAssetRequisition] = useState<MyApprovalItem | null>(null);
+
+  // Vehicle + driver picker data for a vehicle_maintainer_bypass item's
+  // "Assign Vehicle & Driver" form below — see ApproveApplications.tsx's
+  // identical fetch.
+  const [availableVehicles, setAvailableVehicles] = useState<AvailableVehicle[]>([]);
+  const [directoryEmployees, setDirectoryEmployees] = useState<DirectoryEmployee[]>([]);
+  const [assignForm, setAssignForm] = useState<Record<number, { vehicle_id: string; driver_user_id: string }>>({});
+
+  useEffect(() => {
+    const authHeaders = { Authorization: `Bearer ${token}` };
+    fetch(apiUrl('/api/vehicles/available'), { headers: authHeaders })
+      .then((r) => r.json())
+      .then((rows) => setAvailableVehicles(Array.isArray(rows) ? rows : []))
+      .catch(() => {});
+    fetch(apiUrl('/api/employee-directory'), { headers: authHeaders })
+      .then((r) => r.json())
+      .then((rows) => setDirectoryEmployees((Array.isArray(rows) ? rows : []).filter((e: DirectoryEmployee) => e.user_id)))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
 
   const refToClaimRecord = (ref: UserClaimReference, item: MyApprovalItem): ClaimRecord => ({
     id: ref.claim_id,
@@ -169,6 +205,41 @@ export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ toke
       setRemarksDraft((prev) => ({ ...prev, [id]: '' }));
       setApprovedAmountDraft((prev) => ({ ...prev, [id]: '' }));
       setItems((prev) => prev.filter((i) => !(i.id === id && i.source_type === item.source_type)));
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message || 'Something went wrong.' });
+    } finally {
+      setActingId(null);
+    }
+  };
+
+  // See ApproveApplications.tsx's identical handler — the vehicle+driver
+  // form's own submit doubles as this Layer's Approve for a
+  // vehicle_maintainer_bypass item, via PUT .../approve-and-assign instead
+  // of the generic POST /api/my-approvals/:id/act.
+  const handleAssignAndApprove = async (item: MyApprovalItem) => {
+    const form = assignForm[item.id];
+    if (!form?.vehicle_id || !form?.driver_user_id) {
+      setMessage({ type: 'error', text: 'Pick a vehicle and a driver.' });
+      return;
+    }
+    setActingId(item.id);
+    setMessage(null);
+    try {
+      const res = await fetch(apiUrl(`/api/vehicles/requisitions/${item.source_id}/approve-and-assign`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          vehicle_id: Number(form.vehicle_id),
+          driver_user_id: Number(form.driver_user_id),
+          remarks: remarksDraft[item.id] || undefined
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not assign a vehicle to this ride.');
+      setMessage({ type: 'success', text: 'Assigned — ride confirmed.' });
+      setRemarksDraft((prev) => ({ ...prev, [item.id]: '' }));
+      setAssignForm((prev) => ({ ...prev, [item.id]: { vehicle_id: '', driver_user_id: '' } }));
+      setItems((prev) => prev.filter((i) => !(i.id === item.id && i.source_type === item.source_type)));
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message || 'Something went wrong.' });
     } finally {
@@ -371,33 +442,75 @@ export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ toke
                     </div>
                   )}
 
-                  <div onClick={(e) => e.stopPropagation()}>
-                    <input
-                      type="text"
-                      placeholder="Remarks (optional)"
-                      value={remarksDraft[item.id] || ''}
-                      onChange={(e) => setRemarksDraft((prev) => ({ ...prev, [item.id]: e.target.value }))}
-                      className="w-full text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
-                    />
-                    <div className="flex gap-2 mt-2.5">
-                      <button
-                        type="button"
-                        disabled={actingId === item.id}
-                        onClick={() => handleAct(item, 'rejected')}
-                        className="flex-1 text-xs font-semibold px-3 py-2 rounded-lg bg-rose-50 text-rose-700 hover:bg-rose-100 disabled:opacity-50 transition-colors inline-flex items-center justify-center gap-1"
-                      >
-                        <XCircle className="w-3.5 h-3.5" /> Reject
-                      </button>
-                      <button
-                        type="button"
-                        disabled={actingId === item.id}
-                        onClick={() => handleApprove(item)}
-                        className="flex-1 text-xs font-semibold px-3 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 transition-colors inline-flex items-center justify-center gap-1"
-                      >
-                        {actingId === item.id ? <Spinner size={12} /> : <CheckCircle2 className="w-3.5 h-3.5" />} Approve
-                      </button>
+                  {item.vehicle_maintainer_bypass ? (
+                    <div onClick={(e) => e.stopPropagation()}>
+                      <p className="text-[11px] text-slate-500 flex items-center gap-1 mb-2">
+                        <Car className="w-3 h-3 text-blue-500" /> Pick a vehicle to approve and confirm this ride in one step.
+                      </p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <select
+                          value={assignForm[item.id]?.vehicle_id || ''}
+                          onChange={(e) => setAssignForm((prev) => ({ ...prev, [item.id]: { vehicle_id: e.target.value, driver_user_id: prev[item.id]?.driver_user_id || '' } }))}
+                          className="text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                        >
+                          <option value="">Pick a vehicle…</option>
+                          {availableVehicles.map((v) => (
+                            <option key={v.id} value={v.id}>
+                              {v.model} ({v.vehicle_no})
+                            </option>
+                          ))}
+                        </select>
+                        <select
+                          value={assignForm[item.id]?.driver_user_id || ''}
+                          onChange={(e) => setAssignForm((prev) => ({ ...prev, [item.id]: { vehicle_id: prev[item.id]?.vehicle_id || '', driver_user_id: e.target.value } }))}
+                          className="text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                        >
+                          <option value="">Pick a driver…</option>
+                          {directoryEmployees.map((e) => (
+                            <option key={e.user_id} value={e.user_id as number}>
+                              {e.name}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          disabled={actingId === item.id}
+                          onClick={() => handleAssignAndApprove(item)}
+                          className="text-xs font-semibold px-3 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 transition-colors inline-flex items-center justify-center gap-1"
+                        >
+                          {actingId === item.id ? <Spinner size={12} /> : <CheckCircle2 className="w-3.5 h-3.5" />} Assign & Confirm
+                        </button>
+                      </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="text"
+                        placeholder="Remarks (optional)"
+                        value={remarksDraft[item.id] || ''}
+                        onChange={(e) => setRemarksDraft((prev) => ({ ...prev, [item.id]: e.target.value }))}
+                        className="w-full text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                      />
+                      <div className="flex gap-2 mt-2.5">
+                        <button
+                          type="button"
+                          disabled={actingId === item.id}
+                          onClick={() => handleAct(item, 'rejected')}
+                          className="flex-1 text-xs font-semibold px-3 py-2 rounded-lg bg-rose-50 text-rose-700 hover:bg-rose-100 disabled:opacity-50 transition-colors inline-flex items-center justify-center gap-1"
+                        >
+                          <XCircle className="w-3.5 h-3.5" /> Reject
+                        </button>
+                        <button
+                          type="button"
+                          disabled={actingId === item.id}
+                          onClick={() => handleApprove(item)}
+                          className="flex-1 text-xs font-semibold px-3 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 transition-colors inline-flex items-center justify-center gap-1"
+                        >
+                          {actingId === item.id ? <Spinner size={12} /> : <CheckCircle2 className="w-3.5 h-3.5" />} Approve
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })}
