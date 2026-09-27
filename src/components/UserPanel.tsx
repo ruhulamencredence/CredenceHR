@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Capacitor } from '@capacitor/core';
 import { Project, MprNumber, Entry, Budget, BudgetItem, User, MprUsage, ClaimsNavRequest, JobsNavRequest, DashboardNavRequest, LeaveNavRequest } from '../types';
-import { Calendar, Building2, FileText, Package, Clock, Plus, AlertTriangle, CheckCircle2, ChevronRight, X, Trash2, Edit2, Lock, Wallet, ArrowLeft, FolderOpen, ListChecks, Search, Save, Briefcase, FileDown, Scissors, Route, Info, Contact, Bell } from 'lucide-react';
+import { Calendar, Building2, FileText, Package, Clock, Plus, AlertTriangle, CheckCircle2, ChevronRight, X, Trash2, Edit2, Lock, Wallet, ArrowLeft, FolderOpen, ListChecks, Search, Save, Briefcase, FileDown, Scissors, Route, Info, Contact, Bell, Car } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { formatDate, todayDateOnlyString, dateRangeOptions, formatDateLabel, latestDateStr, isDateBlockedByLeadTime } from '../lib/formatDate';
 import { useDeliveryLeadTime } from '../lib/useDeliveryLeadTime';
@@ -22,9 +22,8 @@ import { PendingApprovalsCard } from './PendingApprovalsCard';
 import { MyRequestsCard } from './MyRequestsCard';
 import { MyMonthAttendanceCard } from './MyMonthAttendanceCard';
 import { TodayOverviewCard } from './TodayOverviewCard';
-import { BookRideCard } from './BookRideCard';
-import { MyAssetCard } from './MyAssetCard';
-import { MobileQuickAccess } from './MobileQuickAccess';
+import { BookRideCard, useActiveRides } from './BookRideCard';
+import { MyAssetCard, useMyAssetSummary } from './MyAssetCard';
 import { BookRideTarget, MyAssetTarget } from '../lib/quickAccess';
 import { NoticePreviewCard } from './NoticePreviewCard';
 import { HolidayCalendarWidget } from './HolidayCalendarWidget';
@@ -933,6 +932,10 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // initializer) so "pull down to reload" — see App.tsx — lands back on the exact
   // same section instead of resetting to the tile menu.
   const userSectionStorageKey = `mpr_user_section_${user.id}`;
+  // Live badges for the mobile Dashboard's Book a Ride / My Asset tiles.
+  const activeRides = useActiveRides(token, user.id) || [];
+  const assetSummary = useMyAssetSummary(token);
+
   const [mobileActiveSection, setMobileActiveSection] = useState<'budget' | 'jobs' | 'entries' | 'jobEdit' | 'claim' | 'claims' | 'conveyanceClaim' | 'leave' | 'timesheet' | 'employeeDirectory' | 'noticeBoard' | null>(
     () => {
       try {
@@ -2778,18 +2781,6 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           </div>
         )}
 
-        {/* Book a Ride + My Asset quick access tiles (mobile Dashboard, app
-            and mobile web alike). */}
-        {onOpenBookRide && onOpenMyAsset && (
-          <div
-            className={`relative z-10 px-2 pb-3 ${
-              user.can_view_leave_summary ? '' : user.can_use_attendance ? '-mt-1' : '-mt-6'
-            }`}
-          >
-            <MobileQuickAccess token={token} userId={user.id} onOpenBookRide={onOpenBookRide} onOpenMyAsset={onOpenMyAsset} />
-          </div>
-        )}
-
         {/* Pending Approvals (Part 4 — Role Permissiveness) — every account,
             not just Admins, can be named an approver on a Template step now
             (see Admin Panel -> Approvals -> Templates). Renders nothing at
@@ -3161,6 +3152,43 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
             </div>
             <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">Notice Board</span>
           </button>
+          {/* Book a Ride / My Asset quick access — same tile as the rest of
+              this menu. Badges: rides still in progress, and assets waiting
+              for this account's acknowledgement. */}
+          {onOpenBookRide && (
+            <button
+              type="button"
+              onClick={() => onOpenBookRide(activeRides.length > 0 ? 'status' : 'book')}
+              className="relative flex flex-col items-center justify-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 h-[104px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-sky-100/70 via-white/50 to-cyan-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
+            >
+              <div className="p-2.5 rounded-2xl bg-gradient-to-br from-sky-300 to-sky-500 shadow-[0_6px_16px_-2px_rgba(2,132,199,0.35)] border border-white/30 relative">
+                <Car className="w-6 h-6 text-white" />
+                {activeRides.length > 0 && (
+                  <span className="absolute -top-1.5 -right-1.5 text-[10px] font-semibold bg-sky-600 text-white rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 border border-white/70">
+                    {activeRides.length}
+                  </span>
+                )}
+              </div>
+              <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">Book a Ride</span>
+            </button>
+          )}
+          {onOpenMyAsset && (
+            <button
+              type="button"
+              onClick={() => onOpenMyAsset('my-assets')}
+              className="relative flex flex-col items-center justify-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 h-[104px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-lime-100/70 via-white/50 to-green-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
+            >
+              <div className="p-2.5 rounded-2xl bg-gradient-to-br from-lime-400 to-green-500 shadow-[0_6px_16px_-2px_rgba(22,163,74,0.35)] border border-white/30 relative">
+                <Package className="w-6 h-6 text-white" />
+                {!!assetSummary?.awaitingAck && (
+                  <span className="absolute -top-1.5 -right-1.5 text-[10px] font-semibold bg-green-600 text-white rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 border border-white/70">
+                    {assetSummary.awaitingAck}
+                  </span>
+                )}
+              </div>
+              <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">My Asset</span>
+            </button>
+          )}
         </div>
       )}
 
