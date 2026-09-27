@@ -1728,7 +1728,11 @@ async function ensureSchemaMigrations() {
   // approval chain and confirms the ride in one action, since their job at
   // that point is only to hand over a vehicle, not to review the request.
   try {
-    await dbPool.query(`ALTER TABLE approval_template_steps MODIFY COLUMN approver_type ENUM('employee','admin','vehicle_maintainer') NOT NULL DEFAULT 'employee'`);
+    // 'asset_fulfiller' is the Asset Requisition equivalent: an 'asset'
+    // Template's FINAL Layer whose approver fulfills/hands over the items
+    // (typing what was handed over) instead of approving — see PUT
+    // /api/assets/requisitions/:id/approve-and-fulfill in AssetManagementRoutes.ts.
+    await dbPool.query(`ALTER TABLE approval_template_steps MODIFY COLUMN approver_type ENUM('employee','admin','vehicle_maintainer','asset_fulfiller') NOT NULL DEFAULT 'employee'`);
   } catch (err: any) {
     console.warn("⚠️ Could not widen approval_template_steps.approver_type to include 'vehicle_maintainer': " + err.message);
   }
@@ -2675,15 +2679,23 @@ async function getCurrentStepApprovers(request: any): Promise<{ user_id: number;
 // True when a pending request's CURRENT step is a Template step whose
 // approver_type is 'vehicle_maintainer' — used to word the "waiting on you"
 // alert as an assign-a-vehicle task instead of an approval.
-async function isVehicleMaintainerStep(request: any): Promise<boolean> {
-  if (!request?.template_id) return false;
+async function getCurrentTemplateStepType(request: any): Promise<string | null> {
+  if (!request?.template_id) return null;
   const hasSupervisorStep = !!request.supervisor_step_user_id;
-  if (hasSupervisorStep && Number(request.current_step) === 1) return false;
+  if (hasSupervisorStep && Number(request.current_step) === 1) return null;
   const templateStepOrder = hasSupervisorStep ? Number(request.current_step) - 1 : Number(request.current_step);
   const steps = await queryDB("SELECT * FROM approval_template_steps");
-  return steps.some(
-    (s: any) => Number(s.template_id) === Number(request.template_id) && Number(s.step_order) === templateStepOrder && s.approver_type === "vehicle_maintainer"
-  );
+  const step = steps.find((s: any) => Number(s.template_id) === Number(request.template_id) && Number(s.step_order) === templateStepOrder);
+  return step ? step.approver_type || null : null;
+}
+async function isVehicleMaintainerStep(request: any): Promise<boolean> {
+  return (await getCurrentTemplateStepType(request)) === "vehicle_maintainer";
+}
+// Same idea for an Asset Requisition whose current Layer is the Template's
+// 'asset_fulfiller' Layer — that approver fulfills the items instead of
+// approving them.
+async function isAssetFulfillerStep(request: any): Promise<boolean> {
+  return (await getCurrentTemplateStepType(request)) === "asset_fulfiller";
 }
 
 // A small typed error so callers (both the Admin-queue route and the
@@ -4691,6 +4703,7 @@ async function startServer() {
     createAlert,
     createTemplateApprovalRequest,
     getCurrentStepApprovers,
+    isAssetFulfillerStep,
     finalizeAssetRequisitionApproval
   });
 
@@ -4800,6 +4813,7 @@ async function startServer() {
     attachApprovalStatuses,
     getCurrentStepApprovers,
     isVehicleMaintainerStep,
+    isAssetFulfillerStep,
     createAlert
   });
 

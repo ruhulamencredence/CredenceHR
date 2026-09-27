@@ -63,6 +63,7 @@ interface ApprovalRouteDeps {
   // from inside performApprovalAction's per-source finalize/reject call.
   getCurrentStepApprovers: (request: any) => Promise<{ user_id: number; user_name: string | null }[]>;
   isVehicleMaintainerStep: (request: any) => Promise<boolean>;
+  isAssetFulfillerStep: (request: any) => Promise<boolean>;
   createAlert: (
     queryDB: (sql: string, params?: any[]) => Promise<any>,
     params: { userId: number; type: AlertType; title: string; message: string; relatedType?: string; relatedId?: number }
@@ -83,6 +84,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
     attachApprovalStatuses,
     getCurrentStepApprovers,
     isVehicleMaintainerStep,
+    isAssetFulfillerStep,
     createAlert
   } = deps;
 
@@ -114,14 +116,21 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       if (!mapping) return;
       const approvers = await getCurrentStepApprovers(request);
       const assignOnly = request.source_type === "vehicle_requisition" && (await isVehicleMaintainerStep(request));
+      const fulfillOnly = request.source_type === "asset_requisition" && (await isAssetFulfillerStep(request));
       for (const approver of approvers) {
         await createAlert(queryDB, {
           userId: approver.user_id,
           type: mapping.type,
-          title: assignOnly ? "Ride Request Awaiting Vehicle Assignment" : `${mapping.label} Awaiting Your Approval`,
+          title: assignOnly
+            ? "Ride Request Awaiting Vehicle Assignment"
+            : fulfillOnly
+              ? "Asset Requisition Awaiting Fulfillment"
+              : `${mapping.label} Awaiting Your Approval`,
           message: assignOnly
             ? `${actorName || "A previous approver"} approved this ride request — assign a vehicle and driver to confirm it.`
-            : `${actorName || "A previous approver"} approved this ${mapping.label.toLowerCase()} — it's now waiting on your review.`,
+            : fulfillOnly
+              ? `${actorName || "A previous approver"} approved this asset requisition — fulfill and hand over the items from Pending Approvals.`
+              : `${actorName || "A previous approver"} approved this ${mapping.label.toLowerCase()} — it's now waiting on your review.`,
           relatedType: request.source_type,
           relatedId: Number(request.source_id)
         });
@@ -637,10 +646,16 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
           // one action both closes this approval and confirms the ride (see
           // PUT .../approve-and-assign in VehicleManagementRoutes.ts).
           let vehicleMaintainerBypass = false;
-          if (r.source_type === "vehicle_requisition" && Number(r.current_step) >= Number(r.total_steps) && r.template_id) {
+          let assetFulfillerBypass = false;
+          if (Number(r.current_step) >= Number(r.total_steps) && r.template_id) {
             const hasSupervisorStep = !!r.supervisor_step_user_id;
             const templateStepOrder = hasSupervisorStep ? Number(r.current_step) - 1 : Number(r.current_step);
-            vehicleMaintainerBypass = templateStepApproverType.get(`${r.template_id}:${templateStepOrder}`) === "vehicle_maintainer";
+            const stepType = templateStepApproverType.get(`${r.template_id}:${templateStepOrder}`);
+            vehicleMaintainerBypass = r.source_type === "vehicle_requisition" && stepType === "vehicle_maintainer";
+            // Asset Fulfiller Layer — this approver fulfills (types what was
+            // handed over) instead of Approve/Reject; see PUT
+            // .../approve-and-fulfill in AssetManagementRoutes.ts.
+            assetFulfillerBypass = r.source_type === "asset_requisition" && stepType === "asset_fulfiller";
           }
           return {
             id: r.id,
@@ -654,6 +669,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
             current_step: r.current_step,
             total_steps: r.total_steps,
             vehicle_maintainer_bypass: vehicleMaintainerBypass,
+            asset_fulfiller_bypass: assetFulfillerBypass,
             created_at: r.created_at,
             asset_requisition_details: assetRequisitionDetails
           };
@@ -767,7 +783,8 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       skip_auto_supervisor: !!Number(template.skip_auto_supervisor),
       steps: steps.map((s: any) => ({
         ...s,
-        approver_type: s.approver_type === "admin" ? "admin" : s.approver_type === "vehicle_maintainer" ? "vehicle_maintainer" : "employee",
+        approver_type:
+          s.approver_type === "admin" || s.approver_type === "vehicle_maintainer" || s.approver_type === "asset_fulfiller" ? s.approver_type : "employee",
         approvers: approversByStep.get(Number(s.id)) || []
       }))
     };
@@ -783,13 +800,13 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
   async function validateTemplateSteps(
     steps: any,
     requestType: string
-  ): Promise<{ approver_user_ids: number[]; approver_type: "employee" | "admin" | "vehicle_maintainer"; label: string | null }[]> {
+  ): Promise<{ approver_user_ids: number[]; approver_type: "employee" | "admin" | "vehicle_maintainer" | "asset_fulfiller"; label: string | null }[]> {
     if (!Array.isArray(steps) || steps.length === 0) {
       throw new Error("A template needs at least one Layer/Step.");
     }
     const allUsers = await queryDB("SELECT * FROM users");
     const validUserIds = new Set<number>(allUsers.map((u: any) => Number(u.id)));
-    const cleaned: { approver_user_ids: number[]; approver_type: "employee" | "admin" | "vehicle_maintainer"; label: string | null }[] = [];
+    const cleaned: { approver_user_ids: number[]; approver_type: "employee" | "admin" | "vehicle_maintainer" | "asset_fulfiller"; label: string | null }[] = [];
     steps.forEach((step: any, idx: number) => {
       const ids = Array.isArray(step?.approver_user_ids) ? step.approver_user_ids.map((v: any) => Number(v)).filter((v: number) => Number.isFinite(v)) : [];
       const uniqueIds = Array.from(new Set(ids));
@@ -804,7 +821,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       // VehicleManagementRoutes.ts — it only fires once the chain's final
       // step is reached), so it's rejected everywhere else instead of
       // silently downgrading to 'employee' and confusing whoever picked it.
-      let approverType: "employee" | "admin" | "vehicle_maintainer" = step?.approver_type === "admin" ? "admin" : "employee";
+      let approverType: "employee" | "admin" | "vehicle_maintainer" | "asset_fulfiller" = step?.approver_type === "admin" ? "admin" : "employee";
       if (step?.approver_type === "vehicle_maintainer") {
         if (requestType !== "vehicle") {
           throw new Error(`Layer ${idx + 1}: "Vehicle Maintainer" is only available for Vehicle Requisition templates.`);
@@ -813,6 +830,17 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
           throw new Error(`Layer ${idx + 1}: "Vehicle Maintainer" can only be used on the last Layer.`);
         }
         approverType = "vehicle_maintainer";
+      }
+      // Asset Requisition counterpart — the last Layer's approver fulfills
+      // and hands over the items instead of approving.
+      if (step?.approver_type === "asset_fulfiller") {
+        if (requestType !== "asset") {
+          throw new Error(`Layer ${idx + 1}: "Asset Fulfiller" is only available for Asset Requisition templates.`);
+        }
+        if (idx !== steps.length - 1) {
+          throw new Error(`Layer ${idx + 1}: "Asset Fulfiller" can only be used on the last Layer.`);
+        }
+        approverType = "asset_fulfiller";
       }
       // Custom Layer name — travels with THIS step's approvers regardless of
       // where it ends up after a drag/reorder, instead of the position-based

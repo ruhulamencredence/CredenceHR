@@ -77,6 +77,9 @@ interface AssetManagementRouteDeps {
     requestedBy: number
   ) => Promise<{ autoApproved: boolean; template: any | null }>;
   getCurrentStepApprovers: (request: any) => Promise<{ user_id: number; user_name: string | null }[]>;
+  // True when the request's current Layer is the Template's 'asset_fulfiller'
+  // Layer (server.ts) — that approver fulfills instead of approving.
+  isAssetFulfillerStep: (request: any) => Promise<boolean>;
   // Auto-approve path (no Supervisor and no Template resolved at all) — same
   // finalize function performApprovalAction's 'asset_requisition' branch
   // calls once the Approval Workflow's LAST step signs off.
@@ -201,6 +204,21 @@ export async function ensureAssetManagementSchema(dbPool: any): Promise<void> {
   } catch (err: any) {
     console.warn("⚠️ Could not ensure Asset Management tables exist: " + err.message);
   }
+  // What the fulfiller typed on the handover form for this line (quantity,
+  // unit and a free-text note) — the fulfill form lists the requisition's
+  // own items instead of picking from inventory, so a consumable ("A4 Paper
+  // x 5 reams") is handed over with its real quantity.
+  for (const [col, def] of [
+    ["quantity", "DECIMAL(10,2) NULL"],
+    ["unit", "VARCHAR(50) NULL"],
+    ["handover_note", "TEXT NULL"]
+  ]) {
+    try {
+      await dbPool.query(`ALTER TABLE asset_assignments ADD COLUMN ${col} ${def}`);
+    } catch (err: any) {
+      if (err.code !== "ER_DUP_FIELDNAME") console.warn(`⚠️ Could not add asset_assignments.${col}: ` + err.message);
+    }
+  }
 }
 
 export function registerAssetManagementRoutes(app: Express, deps: AssetManagementRouteDeps) {
@@ -213,6 +231,7 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
     createAlert,
     createTemplateApprovalRequest,
     getCurrentStepApprovers,
+    isAssetFulfillerStep,
     finalizeAssetRequisitionApproval
   } = deps;
 
@@ -390,7 +409,7 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
     try {
       const rows = await queryDB(
         `SELECT asg.id AS assignment_id, asg.assigned_date, asg.condition_on_assign,
-                asg.acknowledged_at, asg.return_requested_at,
+                asg.acknowledged_at, asg.return_requested_at, asg.quantity, asg.unit, asg.handover_note, asg.requisition_id,
                 a.id AS asset_id, a.asset_tag, a.name, a.category, a.serial_number
            FROM asset_assignments asg
            JOIN assets a ON a.id = asg.asset_id
@@ -437,7 +456,13 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
         return res.status(400).json({ error: "You've already reported an issue on this item — wait for IT/Admin to resolve it first." });
       }
       await queryDB("UPDATE asset_assignments SET acknowledged_at = NOW() WHERE id = ?", [assignment.id]);
-      if (assignment.requisition_id) {
+      // A requisition handed over as several lines is only complete once
+      // every one of them has been acknowledged.
+      const siblings = assignment.requisition_id
+        ? await queryDB("SELECT * FROM asset_assignments WHERE requisition_id = ?", [assignment.requisition_id])
+        : [];
+      const allAcknowledged = siblings.every((a: any) => Number(a.id) === Number(assignment.id) || !!a.acknowledged_at || !!a.returned_date);
+      if (assignment.requisition_id && allAcknowledged) {
         await queryDB("UPDATE asset_requisitions SET status = 'fulfilled' WHERE id = ? AND status = 'dispatched'", [assignment.requisition_id]);
         await notifyHrLayer(
           Number(assignment.requisition_id),
@@ -611,12 +636,15 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
           const createdRequest = requestRows.find((r: any) => Number(r.source_id) === Number(result.insertId));
           if (createdRequest) {
             const approvers = await getCurrentStepApprovers(createdRequest);
+            const fulfillOnly = await isAssetFulfillerStep(createdRequest);
             for (const approver of approvers) {
               await createAlert(queryDB, {
                 userId: approver.user_id,
                 type: "asset_requisition" as AlertType,
-                title: "New Asset Requisition Awaiting Your Approval",
-                message: `${req.user.name || "An employee"} requested ${category}. Please review.`,
+                title: fulfillOnly ? "New Asset Requisition Awaiting Fulfillment" : "New Asset Requisition Awaiting Your Approval",
+                message: fulfillOnly
+                  ? `${req.user.name || "An employee"} requested ${category}. Fulfill and hand it over from Pending Approvals.`
+                  : `${req.user.name || "An employee"} requested ${category}. Please review.`,
                 relatedType: "asset_requisition",
                 relatedId: result.insertId
               });
@@ -914,11 +942,106 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
     }
   );
 
-  // POST /api/assets/requisitions/:id/fulfill — Digital Handover: IT/Admin
-  // picks a specific 'available' asset from inventory and hands it over.
-  // Creates the asset_assignments row (the Employee then confirms receipt
-  // via POST .../acknowledge above), flips the asset to 'assigned', and
-  // moves the requisition to 'dispatched'.
+  // Validates the fulfill form: one line per item actually handed over,
+  // typed by the fulfiller (prefilled from the requisition's own items —
+  // there's no picking from inventory). Throws a message safe to show.
+  function cleanHandoverItems(raw: any): {
+    item_name: string;
+    quantity: number;
+    unit: string;
+    serial_number: string | null;
+    asset_tag: string | null;
+    note: string | null;
+    category: string | null;
+  }[] {
+    if (!Array.isArray(raw) || raw.length === 0) throw new Error("Add at least one item to hand over.");
+    const tags = new Set<string>();
+    return raw.map((it: any, idx: number) => {
+      const item_name = String(it?.item_name || "").trim().slice(0, 255);
+      const quantity = Number(it?.quantity);
+      const unit = String(it?.unit || "").trim().slice(0, 50) || "pcs";
+      if (!item_name) throw new Error(`Item #${idx + 1}: item name is required.`);
+      if (!Number.isFinite(quantity) || quantity <= 0) throw new Error(`Item #${idx + 1}: quantity must be greater than 0.`);
+      const asset_tag = String(it?.asset_tag || "").trim().slice(0, 50) || null;
+      if (asset_tag) {
+        if (tags.has(asset_tag.toLowerCase())) throw new Error(`Item #${idx + 1}: Asset Tag "${asset_tag}" is used twice.`);
+        tags.add(asset_tag.toLowerCase());
+      }
+      return {
+        item_name,
+        quantity,
+        unit,
+        serial_number: String(it?.serial_number || "").trim().slice(0, 150) || null,
+        asset_tag,
+        note: String(it?.note || "").trim().slice(0, 1000) || null,
+        category: String(it?.category || "").trim().slice(0, 100) || null
+      };
+    });
+  }
+
+  // Hands the typed items over to the requester: each line becomes an
+  // inventory record (assets, tagged with the typed Asset Tag or an
+  // auto one like AR-12-1) assigned to the employee, so it shows in their
+  // My Asset list where they Accept & Acknowledge or report an issue.
+  // Moves the requisition to 'dispatched' and alerts the employee + HR.
+  async function handOverItems(requisition: any, items: ReturnType<typeof cleanHandoverItems>, condition: string, actor: any) {
+    for (const it of items) {
+      if (it.asset_tag) {
+        const dup = await queryDB("SELECT id FROM assets WHERE asset_tag = ?", [it.asset_tag]);
+        if (dup.length > 0) throw new Error(`Asset Tag "${it.asset_tag}" already exists.`);
+      }
+    }
+    let firstAssetId: number | null = null;
+    let n = 0;
+    for (const it of items) {
+      n++;
+      let tag = it.asset_tag;
+      if (!tag) {
+        let suffix = n;
+        tag = `AR-${requisition.id}-${suffix}`;
+        while ((await queryDB("SELECT id FROM assets WHERE asset_tag = ?", [tag])).length > 0) {
+          suffix += items.length;
+          tag = `AR-${requisition.id}-${suffix}`;
+        }
+      }
+      const assetResult = await queryDB(
+        `INSERT INTO assets (asset_tag, name, category, serial_number, purchase_date, condition_note, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [tag, it.item_name, it.category || it.item_name, it.serial_number, null, it.note, actor.id]
+      );
+      const assetId = Number(assetResult.insertId);
+      if (firstAssetId === null) firstAssetId = assetId;
+      await queryDB("UPDATE assets SET status = 'assigned' WHERE id = ?", [assetId]);
+      const asg = await queryDB(
+        `INSERT INTO asset_assignments (asset_id, employee_user_id, requisition_id, assigned_date, condition_on_assign, assigned_by)
+         VALUES (?, ?, ?, CURDATE(), ?, ?)`,
+        [assetId, requisition.employee_user_id, requisition.id, condition, actor.id]
+      );
+      await queryDB("UPDATE asset_assignments SET quantity = ?, unit = ?, handover_note = ? WHERE id = ?", [
+        it.quantity,
+        it.unit,
+        it.note,
+        asg.insertId
+      ]);
+    }
+    await queryDB("UPDATE asset_requisitions SET status = 'dispatched', assigned_asset_id = ? WHERE id = ?", [firstAssetId, requisition.id]);
+
+    const summary = items.map((it) => `${it.item_name} × ${it.quantity} ${it.unit}`).join(", ");
+    await createAlert(queryDB, {
+      userId: requisition.employee_user_id,
+      type: "asset_requisition" as AlertType,
+      title: "Asset Handed Over",
+      message: `${actor.name || "The fulfiller"} handed over your requisition: ${summary}. Please check it in My Asset — Accept & Acknowledge, or report an issue if something is wrong.`,
+      relatedType: "asset_requisition",
+      relatedId: requisition.id
+    });
+    await notifyHrLayer(Number(requisition.id), "Asset Dispatched", `Requisition #${requisition.id} was handed over by ${actor.name || "the fulfiller"}: ${summary}.`);
+  }
+
+  // POST /api/assets/requisitions/:id/fulfill — Digital Handover of an
+  // already-Approved requisition: the fulfiller types what was handed over
+  // (the form is prefilled from the requisition's items). The Employee then
+  // confirms receipt via POST .../acknowledge above, or reports an issue.
   //
   // NOT module-gated the way every other Admin Panel route in this file is —
   // a plain 'asset_management' Module Access grant is one way in, but the
@@ -927,58 +1050,113 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
   // .../awaiting-my-fulfillment above for where that account finds this
   // action without any Admin Panel access at all.
   app.post("/api/assets/requisitions/:id/fulfill", authenticateToken, async (req: any, res) => {
-      try {
-        const id = Number(req.params.id);
-        const manage = await canManage(req.user.id, req.user.role);
-        if (!manage && !(await wasFinalApprover(id, req.user.id))) {
-          return res
-            .status(403)
-            .json({ error: "You need Asset Management access, or to be this request's approver, to fulfill it." });
-        }
-        const { asset_id, condition_on_assign } = req.body || {};
-        if (!asset_id) return res.status(400).json({ error: "asset_id is required." });
-
-        const reqRows = await queryDB("SELECT * FROM asset_requisitions WHERE id = ?", [req.params.id]);
-        const requisition = reqRows[0];
-        if (!requisition) return res.status(404).json({ error: "Requisition not found." });
-        if (requisition.status !== "approved") {
-          return res.status(400).json({ error: "This requisition must be Approved before it can be fulfilled." });
-        }
-
-        const assetRows = await queryDB("SELECT * FROM assets WHERE id = ?", [asset_id]);
-        const asset = assetRows[0];
-        if (!asset) return res.status(404).json({ error: "Asset not found." });
-        if (asset.status !== "available") return res.status(400).json({ error: "That asset is not currently available." });
-
-        const condition = ["new", "good"].includes(condition_on_assign) ? condition_on_assign : "good";
-
-        const result = await queryDB(
-          `INSERT INTO asset_assignments (asset_id, employee_user_id, requisition_id, assigned_date, condition_on_assign, assigned_by)
-           VALUES (?, ?, ?, CURDATE(), ?, ?)`,
-          [asset.id, requisition.employee_user_id, requisition.id, condition, req.user.id]
-        );
-        await queryDB("UPDATE assets SET status = 'assigned' WHERE id = ?", [asset.id]);
-        await queryDB("UPDATE asset_requisitions SET status = 'dispatched', assigned_asset_id = ? WHERE id = ?", [asset.id, requisition.id]);
-
-        await createAlert(queryDB, {
-          userId: requisition.employee_user_id,
-          type: "asset_requisition" as AlertType,
-          title: "Asset Dispatched",
-          message: `Your ${asset.name} (${asset.asset_tag}) is ready — please Accept & Acknowledge it in My Assets.`,
-          relatedType: "asset_requisition",
-          relatedId: requisition.id
-        });
-        await notifyHrLayer(
-          Number(requisition.id),
-          "Asset Dispatched",
-          `${asset.name} (${asset.asset_tag}) was dispatched for requisition #${requisition.id}.`
-        );
-
-        res.json({ success: true, assignment_id: result.insertId });
-      } catch (err: any) {
-        res.status(500).json({ error: err.message });
+    try {
+      const id = Number(req.params.id);
+      const manage = await canManage(req.user.id, req.user.role);
+      if (!manage && !(await wasFinalApprover(id, req.user.id))) {
+        return res.status(403).json({ error: "You need Asset Management access, or to be this request's approver, to fulfill it." });
       }
-    });
+      const reqRows = await queryDB("SELECT * FROM asset_requisitions WHERE id = ?", [id]);
+      const requisition = reqRows[0];
+      if (!requisition) return res.status(404).json({ error: "Requisition not found." });
+      if (requisition.status !== "approved") {
+        return res.status(400).json({ error: "This requisition must be Approved before it can be fulfilled." });
+      }
+      let items;
+      try {
+        items = cleanHandoverItems(req.body?.items);
+      } catch (e: any) {
+        return res.status(400).json({ error: e.message });
+      }
+      const condition = ["new", "good"].includes(req.body?.condition_on_assign) ? req.body.condition_on_assign : "good";
+      try {
+        await handOverItems(requisition, items, condition, req.user);
+      } catch (e: any) {
+        if (String(e.message).startsWith("Asset Tag")) return res.status(400).json({ error: e.message });
+        throw e;
+      }
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // PUT /api/assets/requisitions/:id/approve-and-fulfill — for an 'asset'
+  // Template whose LAST Layer is 'asset_fulfiller' (same idea as Vehicle's
+  // PUT .../approve-and-assign): that Layer's approver gets a Fulfill form
+  // on Pending Approvals instead of Approve/Reject, and submitting it both
+  // closes the approval chain (recorded like a normal 'approved' action in
+  // actions_json) and hands the items over. Holding the Layer's approver
+  // slot IS the authorization — no module grant needed.
+  app.put("/api/assets/requisitions/:id/approve-and-fulfill", authenticateToken, async (req: any, res) => {
+    try {
+      const id = Number(req.params.id);
+      const reqRows = await queryDB("SELECT * FROM asset_requisitions WHERE id = ?", [id]);
+      const requisition = reqRows[0];
+      if (!requisition) return res.status(404).json({ error: "Requisition not found." });
+      if (requisition.status !== "pending") {
+        return res.status(400).json({ error: "This requisition isn't waiting on fulfillment right now." });
+      }
+      const requestRows: any = await queryDB("SELECT * FROM approval_requests WHERE source_type = ?", ["asset_requisition"]);
+      const request = requestRows.find((r: any) => Number(r.source_id) === id && r.status === "pending");
+      if (!request) return res.status(400).json({ error: "No pending approval found for this requisition." });
+      if (Number(request.current_step) < Number(request.total_steps) || !(await isAssetFulfillerStep(request))) {
+        return res.status(400).json({ error: "This requisition hasn't reached the Asset Fulfiller Layer yet." });
+      }
+      const currentApprovers = await getCurrentStepApprovers(request);
+      const isApprover = currentApprovers.some((a) => Number(a.user_id) === Number(req.user.id));
+      if (req.user.role !== "superadmin" && !isApprover) {
+        return res.status(403).json({ error: "This requisition isn't waiting on you." });
+      }
+      let items;
+      try {
+        items = cleanHandoverItems(req.body?.items);
+      } catch (e: any) {
+        return res.status(400).json({ error: e.message });
+      }
+      const condition = ["new", "good"].includes(req.body?.condition_on_assign) ? req.body.condition_on_assign : "good";
+      const remarks = typeof req.body?.remarks === "string" ? req.body.remarks.trim().slice(0, 1000) || null : null;
+
+      // Mark approved first (records who decided), then hand over.
+      await queryDB(
+        "UPDATE asset_requisitions SET status = 'approved', admin_decided_by = ?, admin_decided_at = NOW() WHERE id = ?",
+        [req.user.id, id]
+      );
+      try {
+        await handOverItems({ ...requisition, status: "approved" }, items, condition, req.user);
+      } catch (e: any) {
+        await queryDB("UPDATE asset_requisitions SET status = 'pending', admin_decided_by = ?, admin_decided_at = NULL WHERE id = ?", [null, id]);
+        if (String(e.message).startsWith("Asset Tag")) return res.status(400).json({ error: e.message });
+        throw e;
+      }
+
+      let actions: any[] = [];
+      try {
+        actions = JSON.parse(request.actions_json || "[]");
+      } catch {
+        actions = [];
+      }
+      actions.push({
+        step_order: Number(request.current_step),
+        approver_id: req.user.id,
+        approver_name: req.user.name,
+        action: "approved",
+        remarks,
+        acted_at: new Date().toISOString()
+      });
+      // Same 4-param shape performApprovalAction uses (memoryDbFallback's
+      // approval_requests UPDATE handler only recognizes that exact form).
+      await queryDB("UPDATE approval_requests SET status = ?, current_step = ?, actions_json = ? WHERE id = ?", [
+        "approved",
+        request.current_step,
+        JSON.stringify(actions),
+        request.id
+      ]);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
 
   // PUT /api/assets/assignments/:id/return — Asset Return & Clearance:
   // IT/Admin actions an Employee's returned item (or a forced recall). Frees
