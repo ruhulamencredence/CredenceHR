@@ -265,10 +265,10 @@ export function RideDestinationPicker({ initial, onDone }: RideDestinationPicker
           active={activePoint}
           onPick={pickOnMap}
           onLocateMe={locate}
-          className="h-[calc(100vh-200px)] min-h-[480px]"
+          className="h-[calc(100vh-320px)] min-h-[460px]"
         />
       )}
-      <div className={wideWeb ? 'bg-white rounded-2xl border border-slate-200 shadow-sm p-4 lg:max-h-[calc(100vh-200px)] lg:overflow-y-auto' : ''}>
+      <div className={wideWeb ? 'bg-white rounded-2xl border border-slate-200 shadow-sm p-4' : ''}>
       {wideWeb && <div className="text-base font-bold text-slate-900 mb-3">Where are you going?</div>}
       <div className="rounded-2xl bg-slate-50 border border-slate-200 p-2 space-y-2">
         <div className="flex items-center gap-3 px-3 py-2.5">
