@@ -101,7 +101,7 @@ export function VehicleManagementAdmin({ users }: VehicleManagementAdminProps) {
   const [newVehicle, setNewVehicle] = useState({ vehicle_no: '', model: '', vehicle_type: '' });
 
   const [assigningFor, setAssigningFor] = useState<number | null>(null);
-  const [assignForm, setAssignForm] = useState({ vehicle_id: '', driver_name: '', driver_mobile: '' });
+  const [assignForm, setAssignForm] = useState({ vehicle_id: '', driver_user_id: '' });
 
   const [noticeFor, setNoticeFor] = useState<number | null>(null);
   const [noticeNote, setNoticeNote] = useState('');
@@ -179,20 +179,23 @@ export function VehicleManagementAdmin({ users }: VehicleManagementAdminProps) {
   }
 
   async function assign(id: number) {
-    if (!assignForm.vehicle_id || !assignForm.driver_name.trim() || !assignForm.driver_mobile.trim()) {
-      setError('Pick a vehicle and fill in the driver name & mobile number.');
+    if (!assignForm.vehicle_id || !assignForm.driver_user_id) {
+      setError('Pick a vehicle and a driver.');
       return;
     }
     try {
       const res = await fetch(apiUrl(`/api/vehicles/requisitions/${id}/assign`), {
         method: 'PUT',
         headers: authHeaders(),
-        body: JSON.stringify({ ...assignForm, vehicle_id: Number(assignForm.vehicle_id) })
+        body: JSON.stringify({
+          vehicle_id: Number(assignForm.vehicle_id),
+          driver_user_id: Number(assignForm.driver_user_id)
+        })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Could not assign a vehicle to this request.');
       setAssigningFor(null);
-      setAssignForm({ vehicle_id: '', driver_name: '', driver_mobile: '' });
+      setAssignForm({ vehicle_id: '', driver_user_id: '' });
       loadRequisitions();
       loadVehicles();
     } catch (err: any) {
@@ -394,18 +397,18 @@ export function VehicleManagementAdmin({ users }: VehicleManagementAdminProps) {
                           </option>
                         ))}
                       </select>
-                      <input
-                        placeholder="Driver name"
-                        value={assignForm.driver_name}
-                        onChange={(e) => setAssignForm({ ...assignForm, driver_name: e.target.value })}
+                      <select
+                        value={assignForm.driver_user_id}
+                        onChange={(e) => setAssignForm({ ...assignForm, driver_user_id: e.target.value })}
                         className="border rounded px-2 py-1 text-xs"
-                      />
-                      <input
-                        placeholder="Driver mobile"
-                        value={assignForm.driver_mobile}
-                        onChange={(e) => setAssignForm({ ...assignForm, driver_mobile: e.target.value })}
-                        className="border rounded px-2 py-1 text-xs"
-                      />
+                      >
+                        <option value="">Pick a driver…</option>
+                        {users.map((u) => (
+                          <option key={u.id} value={u.id}>
+                            {u.name}
+                          </option>
+                        ))}
+                      </select>
                       <button onClick={() => assign(r.id)} className="px-3 py-1.5 text-xs font-medium rounded bg-blue-600 text-white">
                         Confirm Assignment
                       </button>
@@ -420,7 +423,7 @@ export function VehicleManagementAdmin({ users }: VehicleManagementAdminProps) {
                     <button
                       onClick={() => {
                         setAssigningFor(r.id);
-                        setAssignForm({ vehicle_id: '', driver_name: '', driver_mobile: '' });
+                        setAssignForm({ vehicle_id: '', driver_user_id: '' });
                       }}
                       className="px-3 py-1.5 text-xs font-medium rounded bg-blue-600 text-white hover:bg-blue-700"
                     >
