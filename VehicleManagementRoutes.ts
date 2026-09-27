@@ -1286,6 +1286,76 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
     }
   });
 
+  // GET /api/vehicles/requisitions/:id/trip-details — "Ride Details" for a
+  // finished ride: the full record, the approval history, and the path the
+  // driver (and the employee) actually travelled, rebuilt from Employee
+  // Tracking pings between assignment and return. Same audience as the
+  // Live Ride Map.
+  app.get("/api/vehicles/requisitions/:id/trip-details", authenticateToken, async (req: any, res: any) => {
+    try {
+      const id = Number(req.params.id);
+      const { rows, userById, vehicleById } = await loadContext();
+      const requisition = rows.find((r: any) => Number(r.id) === id);
+      if (!requisition) return res.status(404).json({ error: "Requisition not found." });
+
+      const isOwner = Number(requisition.employee_user_id) === Number(req.user.id);
+      const isMaintainer = req.user.role === "superadmin" || (await canManage(req.user.id, req.user.role)) || (await getAdminModules(req.user.id)).includes("vehicle_maintainer");
+      if (!isOwner && !isMaintainer) return res.status(403).json({ error: "You don't have access to this ride." });
+
+      const plannedStart = new Date(`${String(requisition.ride_date).slice(0, 10)}T${requisition.start_time || "00:00"}:00`);
+      const startCandidates = [requisition.decided_at ? new Date(requisition.decided_at) : null, isNaN(plannedStart.getTime()) ? null : plannedStart].filter(
+        (d): d is Date => !!d && !isNaN(d.getTime())
+      );
+      const windowStart = startCandidates.length > 0 ? new Date(Math.min(...startCandidates.map((d) => d.getTime()))) : null;
+      const windowEnd = requisition.actual_return_at ? new Date(requisition.actual_return_at) : new Date();
+
+      async function track(userId: number | null) {
+        if (!userId || !windowStart || !["ongoing", "completed"].includes(requisition.status)) return [];
+        const pings: any = await queryDB(
+          "SELECT * FROM location_pings WHERE user_id = ? AND recorded_at >= ? AND recorded_at <= ? ORDER BY recorded_at ASC",
+          [userId, windowStart, windowEnd]
+        );
+        return (pings as any[])
+          .map((p) => ({ lat: Number(p.lat), lng: Number(p.lng), recorded_at: p.recorded_at }))
+          .filter((p) => {
+            const t = new Date(p.recorded_at).getTime();
+            return Number.isFinite(p.lat) && Number.isFinite(p.lng) && t >= windowStart.getTime() && t <= windowEnd.getTime();
+          })
+          .sort((a, b) => new Date(a.recorded_at).getTime() - new Date(b.recorded_at).getTime());
+      }
+
+      const driverUserId = requisition.driver_user_id ? Number(requisition.driver_user_id) : null;
+      const [driverTrack, employeeTrack] = await Promise.all([track(driverUserId), track(Number(requisition.employee_user_id))]);
+
+      const requestRows: any = await queryDB("SELECT * FROM approval_requests WHERE source_type = ?", ["vehicle_requisition"]);
+      const request = requestRows.find((r: any) => Number(r.source_id) === id);
+      let actions: any[] = [];
+      try {
+        actions = JSON.parse(request?.actions_json || "[]");
+      } catch {
+        actions = [];
+      }
+
+      res.json({
+        ...serialize(requisition, userById, vehicleById),
+        time_extension_decided_by_name: requisition.time_extension_decided_by
+          ? userById.get(Number(requisition.time_extension_decided_by))?.name || null
+          : null,
+        destination_point: ["ongoing", "completed"].includes(requisition.status) ? await geocodeDestination(requisition) : null,
+        approval_history: actions.map((a: any) => ({
+          approver_name: a.approver_name || userById.get(Number(a.approver_id))?.name || null,
+          action: a.action,
+          remarks: a.remarks || null,
+          acted_at: a.acted_at || null
+        })),
+        driver_track: driverTrack,
+        employee_track: employeeTrack
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // PUT /api/vehicles/requisitions/:id/extension-decision — HR/Admin
   // approves or rejects a still-open time extension request while the ride
   // is ongoing.
