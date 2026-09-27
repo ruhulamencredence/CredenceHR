@@ -22,6 +22,7 @@ import { PendingApprovalsCard } from './PendingApprovalsCard';
 import { MyRequestsCard } from './MyRequestsCard';
 import { MyMonthAttendanceCard } from './MyMonthAttendanceCard';
 import { TodayOverviewCard } from './TodayOverviewCard';
+import { BookRideCard } from './BookRideCard';
 import { NoticePreviewCard } from './NoticePreviewCard';
 import { HolidayCalendarWidget } from './HolidayCalendarWidget';
 import { LeaveReviewPage } from './LeaveReviewPage';
@@ -63,6 +64,9 @@ interface UserPanelProps {
   // localStorage-restored default on mount) instead of just the last thing
   // it was asked to navigate to.
   onActiveSectionChange?: (info: { desktop: string; mobile: string | null }) => void;
+  // Web Dashboard's Book a Ride quick access card -> Self Service -> Book a
+  // Ride (App.tsx), opened on the given tab.
+  onOpenBookRide?: (tab: 'book' | 'status') => void;
 }
 
 // Unique id for one Item entry within an MPR row's itemNames list — see the uid field
@@ -848,7 +852,7 @@ const EntryCard = React.memo(function EntryCard({
   );
 });
 
-export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequest, jobsNavRequest, dashboardNavRequest, leaveNavRequest, onActiveSectionChange }) => {
+export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequest, jobsNavRequest, dashboardNavRequest, leaveNavRequest, onActiveSectionChange, onOpenBookRide }) => {
   const [projects, setProjects] = useState<Project[]>([]);
   // True once the initial Project list fetch (fetchMasterData below) has
   // resolved (success or failure) — lets AttendanceCard tell "still loading"
@@ -2826,6 +2830,9 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
             planning facts worth a glance. The full Holiday Calendar still
             sits at the bottom of the Dashboard for browsing actual dates. */}
         <TodayOverviewCard token={token} />
+
+        {/* Book a Ride quick access — web only; the app has its own menu. */}
+        {!Capacitor.isNativePlatform() && onOpenBookRide && <BookRideCard token={token} userId={user.id} onOpen={onOpenBookRide} />}
 
         {/* Takes the full row at md, where there are only two columns to
             share — it's an actionable list (remarks input + Approve/Reject
