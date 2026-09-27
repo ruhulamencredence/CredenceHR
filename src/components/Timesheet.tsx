@@ -5,7 +5,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
-import { Clock, CalendarDays, CalendarRange, Inbox, CheckCircle2, XCircle, MapPin, Pencil } from 'lucide-react';
+import { Clock, CalendarDays, CalendarRange, Inbox, CheckCircle2, XCircle, MapPin, Pencil, AlarmClock, Plane } from 'lucide-react';
 import { AttendanceRecord, AttendanceCorrection, Project, HolidayEntry } from '../types';
 import { apiUrl } from '../lib/api';
 import { formatDate, todayDateOnlyString } from '../lib/formatDate';
@@ -31,6 +31,27 @@ interface TimesheetProps {
 }
 
 type TimesheetTab = 'month' | 'day' | 'range';
+
+type LateKind = 'delay' | 'extreme';
+
+// Delay / Extreme Delay badges — same two tiers the Late Attendance Policy
+// (Admin Panel -> Payroll) and the month summary card use.
+const LateBadge: React.FC<{ kind: LateKind }> = ({ kind }) =>
+  kind === 'extreme' ? (
+    <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-red-100 text-red-700">
+      <AlarmClock className="w-3 h-3" /> Extreme Delay
+    </span>
+  ) : (
+    <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-orange-50 text-orange-700">
+      <AlarmClock className="w-3 h-3" /> Delay
+    </span>
+  );
+
+const LeaveBadge: React.FC<{ label: string }> = ({ label }) => (
+  <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-violet-50 text-violet-700" title={label}>
+    <Plane className="w-3 h-3" /> On Leave
+  </span>
+);
 
 const TABS: { key: TimesheetTab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { key: 'month', label: 'Month Wise', icon: CalendarDays },
@@ -107,8 +128,10 @@ const DateCard: React.FC<{
   records: AttendanceRecord[];
   correction?: AttendanceCorrection;
   holiday?: HolidayEntry;
+  late?: LateKind;
+  leave?: string;
   onClick: () => void;
-}> = ({ dateStr, records, correction, holiday, onClick }) => {
+}> = ({ dateStr, records, correction, holiday, late, leave, onClick }) => {
   const present = records.length > 0;
   const projectNames = Array.from(new Set(records.map((r) => r.project_name).filter(Boolean))).join(', ');
   const checkIns = records.map((r) => r.check_in_at).filter(Boolean) as string[];
@@ -143,6 +166,8 @@ const DateCard: React.FC<{
             <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700">
               <CheckCircle2 className="w-3 h-3" /> Present
             </span>
+          ) : leave ? (
+            <LeaveBadge label={leave} />
           ) : holiday ? (
             <span
               className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full ${
@@ -157,6 +182,7 @@ const DateCard: React.FC<{
               <XCircle className="w-3 h-3" /> Absent
             </span>
           )}
+          {present && late && <LateBadge kind={late} />}
           {pendingCorrection && (
             <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700">
               <Clock className="w-2.5 h-2.5" /> Correction Pending
@@ -189,6 +215,31 @@ const DateCard: React.FC<{
     </div>
   );
 };
+
+const CountsLegend: React.FC<{
+  counts: { present: number; absent: number; leave: number; delay: number; extreme: number };
+  className?: string;
+}> = ({ counts, className = '' }) => (
+  <div className={`flex flex-wrap items-center gap-x-4 gap-y-1 text-xs ${className}`}>
+    <span className="flex items-center gap-1.5 font-semibold text-emerald-700">
+      <span className="w-2 h-2 rounded-full bg-emerald-500" /> Present: {counts.present}
+    </span>
+    <span className="flex items-center gap-1.5 font-semibold text-rose-600">
+      <span className="w-2 h-2 rounded-full bg-rose-500" /> Absent: {counts.absent}
+    </span>
+    {counts.leave > 0 && (
+      <span className="flex items-center gap-1.5 font-semibold text-violet-700">
+        <span className="w-2 h-2 rounded-full bg-violet-500" /> Leave: {counts.leave}
+      </span>
+    )}
+    <span className="flex items-center gap-1.5 font-semibold text-orange-700">
+      <span className="w-2 h-2 rounded-full bg-orange-500" /> Delay: {counts.delay}
+    </span>
+    <span className="flex items-center gap-1.5 font-semibold text-red-700">
+      <span className="w-2 h-2 rounded-full bg-red-600" /> Extreme Delay: {counts.extreme}
+    </span>
+  </div>
+);
 
 // "Self Service" > "Timesheet" — every account's own Present/Absent Remote
 // Attendance history, viewable Month Wise (a full calendar month's P/A grid),
@@ -225,6 +276,11 @@ export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceP
   // module access (GET /api/holidays is open to every signed-in account), so
   // Weekend/Holiday dates never show as Absent below.
   const [holidays, setHolidays] = useState<HolidayEntry[]>([]);
+  // "YYYY-MM-DD" -> Delay / Extreme Delay, from GET /api/my-late-days
+  // (fetched per visible window below, merged as the window moves).
+  const [lateDays, setLateDays] = useState<Record<string, LateKind>>({});
+  // Approved Leave Applications, so those days read "On Leave", not Absent.
+  const [leaves, setLeaves] = useState<{ start_date: string; end_date: string; leave_type_label?: string; leave_type?: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<TimesheetTab>('month');
   // Which date's row was clicked — opens the Correct Attendance modal for it.
@@ -252,7 +308,7 @@ export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceP
       const groupRes = await fetch(apiUrl('/api/my-holiday-group'), { headers: { Authorization: `Bearer ${token}` } });
       const appliesTo = groupRes.ok ? (await groupRes.json())?.applies_to === 'project_site' ? 'project_site' : 'head_office' : 'head_office';
 
-      const [attRes, corrRes, projRes, holRes] = await Promise.all([
+      const [attRes, corrRes, projRes, holRes, leaveRes] = await Promise.all([
         fetch(apiUrl('/api/attendance/mine'), { headers: { Authorization: `Bearer ${token}` } }),
         fetch(apiUrl('/api/attendance/corrections/mine'), { headers: { Authorization: `Bearer ${token}` } }),
         // /api/projects/all (not the permission-filtered /api/projects) — a
@@ -262,13 +318,18 @@ export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceP
         // past corrections' status) shouldn't be limited to Projects this
         // Employee happens to be explicitly granted.
         fetch(apiUrl('/api/projects/all'), { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(apiUrl(`/api/holidays?applies_to=${appliesTo}`), { headers: { Authorization: `Bearer ${token}` } })
+        fetch(apiUrl(`/api/holidays?applies_to=${appliesTo}`), { headers: { Authorization: `Bearer ${token}` } }),
+        fetch(apiUrl('/api/leave-applications/mine'), { headers: { Authorization: `Bearer ${token}` } })
       ]);
       if (cancelledRef?.cancelled) return;
       if (attRes.ok) setRecords(await attRes.json());
       if (corrRes.ok) setCorrections(await corrRes.json());
       if (projRes.ok) setProjects(await projRes.json());
       if (holRes.ok) setHolidays(await holRes.json());
+      if (leaveRes.ok) {
+        const rows = await leaveRes.json();
+        if (Array.isArray(rows)) setLeaves(rows.filter((l: any) => l.status === 'approved'));
+      }
     } catch {
       // Offline/unreachable — the page just shows whatever it already had (or
       // stays empty); switching tabs/filters still works once back online.
@@ -324,6 +385,18 @@ export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceP
     return map;
   }, [holidays]);
 
+  // "YYYY-MM-DD" -> Leave Type label, for every day covered by an approved
+  // Leave Application.
+  const leaveByDate = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const l of leaves) {
+      for (const d of buildRangeDates(String(l.start_date).slice(0, 10), String(l.end_date).slice(0, 10))) {
+        map.set(d, l.leave_type_label || l.leave_type || 'Leave');
+      }
+    }
+    return map;
+  }, [leaves]);
+
   const monthDates = useMemo(() => buildMonthDates(selYear, selMonth, today), [selYear, selMonth, today]);
   const rangeDates = useMemo(() => buildRangeDates(rangeFrom, rangeTo), [rangeFrom, rangeTo]);
   // Newest-to-oldest for display (today/last date at top) — monthDates/
@@ -332,10 +405,39 @@ export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceP
   const monthDatesDesc = useMemo(() => [...monthDates].reverse(), [monthDates]);
   const rangeDatesDesc = useMemo(() => [...rangeDates].reverse(), [rangeDates]);
 
-  const monthPresentCount = monthDates.filter((d) => (byDate.get(d) || []).length > 0).length;
-  const monthAbsentCount = monthDates.filter((d) => (byDate.get(d) || []).length === 0 && !holidayByDate.has(d)).length;
-  const rangePresentCount = rangeDates.filter((d) => (byDate.get(d) || []).length > 0).length;
-  const rangeAbsentCount = rangeDates.filter((d) => (byDate.get(d) || []).length === 0 && !holidayByDate.has(d)).length;
+  const isAbsent = (d: string) => (byDate.get(d) || []).length === 0 && !holidayByDate.has(d) && !leaveByDate.has(d);
+  const countsFor = (dates: string[]) => ({
+    present: dates.filter((d) => (byDate.get(d) || []).length > 0).length,
+    absent: dates.filter(isAbsent).length,
+    leave: dates.filter((d) => (byDate.get(d) || []).length === 0 && leaveByDate.has(d)).length,
+    delay: dates.filter((d) => lateDays[d] === 'delay').length,
+    extreme: dates.filter((d) => lateDays[d] === 'extreme').length
+  });
+  const monthCounts = countsFor(monthDates);
+  const rangeCounts = countsFor(rangeDates);
+
+  // Fetch Delay / Extreme Delay for whatever window is on screen.
+  const lateWindow =
+    tab === 'month' ? [monthDates[0], monthDates[monthDates.length - 1]] : tab === 'range' ? [rangeDates[0], rangeDates[rangeDates.length - 1]] : [selDay, selDay];
+  const [lateFrom, lateTo] = lateWindow;
+  useEffect(() => {
+    if (!lateFrom || !lateTo) return;
+    let cancelled = false;
+    fetch(apiUrl(`/api/my-late-days?from=${lateFrom}&to=${lateTo}`), { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((json) => {
+        if (cancelled || !json?.days) return;
+        setLateDays((prev) => {
+          const next = { ...prev };
+          for (const d of buildRangeDates(lateFrom, lateTo)) delete next[d];
+          return { ...next, ...json.days };
+        });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [token, lateFrom, lateTo, records]);
 
   const dayRecords = byDate.get(selDay) || [];
 
@@ -447,14 +549,7 @@ export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceP
                         <option key={y} value={y}>{y}</option>
                       ))}
                     </select>
-                    <div className="ml-auto flex items-center gap-4 text-xs">
-                      <span className="flex items-center gap-1.5 font-semibold text-emerald-700">
-                        <span className="w-2 h-2 rounded-full bg-emerald-500" /> Present: {monthPresentCount}
-                      </span>
-                      <span className="flex items-center gap-1.5 font-semibold text-rose-600">
-                        <span className="w-2 h-2 rounded-full bg-rose-500" /> Absent: {monthAbsentCount}
-                      </span>
-                    </div>
+                    <CountsLegend counts={monthCounts} className="ml-auto" />
                   </div>
 
                   {monthDates.length === 0 ? (
@@ -465,7 +560,7 @@ export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceP
                   ) : (
                     <div className="space-y-3">
                       {monthDatesDesc.map((d) => (
-                        <DateCard key={d} dateStr={d} records={byDate.get(d) || []} correction={correctionsByDate.get(d)} holiday={holidayByDate.get(d)} onClick={() => openDateCard(d)} />
+                        <DateCard key={d} dateStr={d} records={byDate.get(d) || []} correction={correctionsByDate.get(d)} holiday={holidayByDate.get(d)} late={lateDays[d]} leave={leaveByDate.get(d)} onClick={() => openDateCard(d)} />
                       ))}
                     </div>
                   )}
@@ -485,8 +580,19 @@ export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceP
                     />
                   </div>
 
+                  {dayRecords.length > 0 && lateDays[selDay] && (
+                    <div className="mb-3">
+                      <LateBadge kind={lateDays[selDay]} />
+                    </div>
+                  )}
                   {dayRecords.length === 0 ? (
-                    holidayByDate.has(selDay) ? (
+                    leaveByDate.has(selDay) ? (
+                      <div className="flex flex-col items-center gap-2 text-center py-14 px-5 text-slate-400">
+                        <Plane className="w-6 h-6 text-violet-300" />
+                        <p className="text-sm font-semibold text-slate-500">On Leave — {leaveByDate.get(selDay)}</p>
+                        <p className="text-xs text-slate-400 max-w-[260px]">{formatDate(selDay)} is covered by an approved Leave Application.</p>
+                      </div>
+                    ) : holidayByDate.has(selDay) ? (
                       <div className="flex flex-col items-center gap-2 text-center py-14 px-5 text-slate-400">
                         <CheckCircle2 className={`w-6 h-6 ${holidayByDate.get(selDay)!.day_type === 'weekend' ? 'text-sky-300' : 'text-amber-300'}`} />
                         <p className="text-sm font-semibold text-slate-500">
@@ -568,14 +674,7 @@ export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceP
                         className={selectClass}
                       />
                     </div>
-                    <div className="ml-auto flex items-center gap-4 text-xs pb-2.5">
-                      <span className="flex items-center gap-1.5 font-semibold text-emerald-700">
-                        <span className="w-2 h-2 rounded-full bg-emerald-500" /> Present: {rangePresentCount}
-                      </span>
-                      <span className="flex items-center gap-1.5 font-semibold text-rose-600">
-                        <span className="w-2 h-2 rounded-full bg-rose-500" /> Absent: {rangeAbsentCount}
-                      </span>
-                    </div>
+                    <CountsLegend counts={rangeCounts} className="ml-auto pb-2.5" />
                   </div>
 
                   {rangeDates.length === 0 ? (
@@ -586,7 +685,7 @@ export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceP
                   ) : (
                     <div className="space-y-3">
                       {rangeDatesDesc.map((d) => (
-                        <DateCard key={d} dateStr={d} records={byDate.get(d) || []} correction={correctionsByDate.get(d)} holiday={holidayByDate.get(d)} onClick={() => openDateCard(d)} />
+                        <DateCard key={d} dateStr={d} records={byDate.get(d) || []} correction={correctionsByDate.get(d)} holiday={holidayByDate.get(d)} late={lateDays[d]} leave={leaveByDate.get(d)} onClick={() => openDateCard(d)} />
                       ))}
                     </div>
                   )}

@@ -1895,6 +1895,55 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
     }
   });
 
+  // Self Service -> Timesheet: which of this account's own days in
+  // [from, to] were a Delay or an Extreme Delay, using the same per-month
+  // late policy, holiday calendar, office punches and waivers the payroll
+  // wizard and the month summary above use. Returns { "YYYY-MM-DD": "delay" |
+  // "extreme" }; days that weren't late are simply absent from the map.
+  app.get("/api/my-late-days", authenticateToken, async (req: any, res) => {
+    try {
+      const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+      const from = String(req.query.from || "");
+      const to = String(req.query.to || "");
+      if (!DATE_RE.test(from) || !DATE_RE.test(to) || from > to) {
+        return res.status(400).json({ error: "from and to must be YYYY-MM-DD dates, from on or before to." });
+      }
+      const empRows = await queryDB("SELECT id, user_id, zk_device_pin FROM all_employees WHERE user_id = ? LIMIT 1", [req.user.id]);
+      if (empRows.length === 0) return res.json({ linked: false, days: {} });
+      const employee = empRows[0];
+      const branchTypeByUserId = await getEmployeeBranchTypeMap(queryDB);
+      const myGroup: HolidayAppliesTo = branchTypeByUserId.get(Number(employee.user_id)) || "head_office";
+
+      const days: Record<string, "delay" | "extreme"> = {};
+      let [y, m] = from.slice(0, 7).split("-").map(Number);
+      // Policy can change month to month, so resolve each month on its own
+      // (capped at 13 months — the Timesheet range is at most a year).
+      for (let i = 0; i < 13; i++) {
+        const monthYear = `${y}-${String(m).padStart(2, "0")}`;
+        if (`${monthYear}-01` > to) break;
+        const daysInMonth = new Date(y, m, 0).getDate();
+        const monthStart = `${monthYear}-01` < from ? from : `${monthYear}-01`;
+        const lastDay = `${monthYear}-${String(daysInMonth).padStart(2, "0")}`;
+        const monthEnd = lastDay > to ? to : lastDay;
+        const holidayMap = await getHolidayMap(queryDB, monthStart, monthEnd, myGroup);
+        const policy = await getLatePolicyForMonth(monthYear);
+        const { lateDatesByEmployee, extremeLateDatesByEmployee } = await computeLateDatesByEmployee(
+          [employee], monthStart, monthEnd, { head_office: holidayMap, project_site: holidayMap }, branchTypeByUserId, policy
+        );
+        for (const d of lateDatesByEmployee.get(Number(employee.id)) || []) days[d] = "delay";
+        for (const d of extremeLateDatesByEmployee.get(Number(employee.id)) || []) days[d] = "extreme";
+        m++;
+        if (m > 12) {
+          m = 1;
+          y++;
+        }
+      }
+      res.json({ linked: true, days });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to load your late days." });
+    }
+  });
+
   // Excuse (or re-include) one specific late day for one employee. Unique
   // key on (employee_id, waiver_date) means calling this twice for the same
   // day just no-ops the second time rather than erroring.

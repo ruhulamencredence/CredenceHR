@@ -59,17 +59,19 @@ export function registerProfileRoutes(app: Express, deps: ProfileRouteDeps) {
       );
       const emp = empRows[0] || null;
 
+      // A row created by a photo upload alone has NULL names, so fall back
+      // per field rather than only when no row exists yet.
       let fallbackFirst = "";
       let fallbackLast = "";
-      if (!detail) {
+      if (!detail || detail.first_name == null) {
         const parts = String(req.user.name || "").trim().split(/\s+/).filter(Boolean);
         fallbackFirst = parts[0] || "";
         fallbackLast = parts.slice(1).join(" ");
       }
 
       res.json({
-        first_name: detail ? detail.first_name || "" : fallbackFirst,
-        last_name: detail ? detail.last_name || "" : fallbackLast,
+        first_name: detail?.first_name != null ? detail.first_name : fallbackFirst,
+        last_name: detail?.first_name != null ? detail.last_name || "" : fallbackLast,
         date_of_birth: detail?.date_of_birth || null,
         country: detail?.country || null,
         state: detail?.state || null,
