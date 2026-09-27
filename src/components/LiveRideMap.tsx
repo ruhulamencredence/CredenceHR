@@ -136,24 +136,32 @@ export function LiveRideMap({ requisitionId, onClose }: LiveRideMapProps) {
       points.push({ pos: [data.driver.lat, data.driver.lng], icon: driverIcon, label: `${data.driver.name} (Driver) — ${agoLabel(data.driver.recorded_at)}` });
     }
     points.forEach((p) => {
-      L.marker(p.pos, { icon: p.icon }).addTo(layer).bindPopup(`<div style="font-size:12px;">${p.label}</div>`);
+      // A DOM node, not an HTML string: labels carry user-editable names.
+      const popup = document.createElement('div');
+      popup.style.fontSize = '12px';
+      popup.textContent = p.label;
+      L.marker(p.pos, { icon: p.icon }).addTo(layer).bindPopup(popup);
     });
 
+    const controller = new AbortController();
     if (points.length === 2) {
       // OSRM's free public routing server — road-based route line between
       // the two live points, refreshed on every poll. No API key needed,
       // same "no Google Maps key" setup as the rest of this project.
       const [a, b] = points;
-      fetch(`https://router.project-osrm.org/route/v1/driving/${a.pos[1]},${a.pos[0]};${b.pos[1]},${b.pos[0]}?overview=full&geometries=geojson`)
+      fetch(`https://router.project-osrm.org/route/v1/driving/${a.pos[1]},${a.pos[0]};${b.pos[1]},${b.pos[0]}?overview=full&geometries=geojson`, {
+        signal: controller.signal
+      })
         .then((r) => r.json())
         .then((json) => {
           const coords = json?.routes?.[0]?.geometry?.coordinates;
-          if (Array.isArray(coords) && layerRef.current === layer) {
+          if (Array.isArray(coords) && !controller.signal.aborted) {
             const latlngs = coords.map((c: [number, number]) => [c[1], c[0]] as [number, number]);
             L.polyline(latlngs, { color: '#7F00FF', weight: 4, opacity: 0.75 }).addTo(layer);
           }
         })
         .catch(() => {
+          if (controller.signal.aborted) return;
           // Routing is a nice-to-have — if OSRM is unreachable (e.g. no
           // internet egress from this deployment) just fall back to a
           // straight line so the two positions are still connected visually.
@@ -164,6 +172,7 @@ export function LiveRideMap({ requisitionId, onClose }: LiveRideMapProps) {
     if (points.length > 0) {
       map.fitBounds(L.latLngBounds(points.map((p) => p.pos)), { padding: [50, 50], maxZoom: 16 });
     }
+    return () => controller.abort();
   }, [data]);
 
   return (
