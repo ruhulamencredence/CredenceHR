@@ -111,6 +111,7 @@ export const memoryDb = {
   // (UserManagement.ts) — plain generic tables.
   userAccessAudit: [] as any[],
   assetRequisitionEvents: [] as any[],
+  caseFeedback: [] as any[],
   accessTemplates: [] as any[],
   // Chat/Alerts push notification device tokens (ChatRoutes.ts's POST/DELETE
   // /api/chat/push-token, PushNotificationService.ts's sendPushToUserIds/
@@ -231,7 +232,8 @@ const GENERIC_TABLES: [string, any[]][] = [
   ["vehicle_requisitions", memoryDb.vehicleRequisitions],
   ["user_access_audit", memoryDb.userAccessAudit],
   ["access_templates", memoryDb.accessTemplates],
-  ["asset_requisition_events", memoryDb.assetRequisitionEvents]
+  ["asset_requisition_events", memoryDb.assetRequisitionEvents],
+  ["case_feedback", memoryDb.caseFeedback]
 ];
 memoryDb.leaveCategories = [{ id: 1, category_key: "custom_earn_leave", label: "Earn Leave", created_by: null, created_at: new Date() }];
 
