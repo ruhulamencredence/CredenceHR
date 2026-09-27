@@ -794,6 +794,97 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
     }
   });
 
+  // PUT /api/vehicles/requisitions/:id/approve-and-assign — for a Template
+  // whose FINAL Layer's Approver Type is 'vehicle_maintainer' (see
+  // server.ts's approval_template_steps.approver_type migration comment):
+  // that Layer's approver doesn't get a plain Approve/Reject on My Approvals
+  // — their job is only to hand over a vehicle, so this one action both
+  // closes the approval chain (recorded exactly like performApprovalAction's
+  // own 'approved' action, for the same actions_json audit trail) AND
+  // confirms the ride, skipping the separate 'approved' stopover and the
+  // normal PUT .../:id/assign step entirely. Open to ANY logged-in account
+  // that's actually a current approver for this step — same authorization
+  // shape as POST /api/my-approvals/:id/act, not gated behind
+  // 'vehicle_management'/'vehicle_maintainer' at all, since holding this
+  // Template step's approver slot IS the authorization.
+  app.put("/api/vehicles/requisitions/:id/approve-and-assign", authenticateToken, async (req: any, res: any) => {
+    try {
+      const id = Number(req.params.id);
+      const reqRows: any = await queryDB("SELECT * FROM vehicle_requisitions WHERE id = ?", [id]);
+      const requisition = reqRows[0];
+      if (!requisition) return res.status(404).json({ error: "Requisition not found." });
+      if (requisition.status !== "pending") {
+        return res.status(400).json({ error: "This requisition isn't waiting on an approval right now." });
+      }
+
+      const requestRows: any = await queryDB("SELECT * FROM approval_requests WHERE source_type = ?", ["vehicle_requisition"]);
+      const request = requestRows.find((r: any) => Number(r.source_id) === id && r.status === "pending");
+      if (!request) return res.status(400).json({ error: "No pending approval found for this requisition." });
+      if (Number(request.current_step) < Number(request.total_steps)) {
+        return res.status(400).json({ error: "This isn't the final approval Layer yet." });
+      }
+
+      const currentApprovers = await getCurrentStepApprovers(request);
+      const isApprover = currentApprovers.some((a) => Number(a.user_id) === Number(req.user.id));
+      if (req.user.role !== "superadmin" && !isApprover) {
+        return res.status(403).json({ error: "This request isn't waiting on you." });
+      }
+
+      const remarks = typeof req.body?.remarks === "string" ? req.body.remarks.trim().slice(0, 1000) || null : null;
+      const { vehicleId, driverUserId, driverName, driverMobile, vehicle } = await validateVehicleAssignment(req.body || {});
+
+      await claimVehicle(vehicleId);
+      try {
+        await queryDB(
+          "UPDATE vehicle_requisitions SET status = ?, decided_by = ?, decided_at = ?, assigned_vehicle_id = ?, driver_user_id = ?, driver_name = ?, driver_mobile = ? WHERE id = ?",
+          ["ongoing", req.user.id, new Date(), vehicleId, driverUserId, driverName, driverMobile, id]
+        );
+      } catch (err) {
+        await releaseVehicle(vehicleId);
+        throw err;
+      }
+
+      let actions: any[] = [];
+      try {
+        actions = JSON.parse(request.actions_json || "[]");
+      } catch {
+        actions = [];
+      }
+      actions.push({
+        step_order: Number(request.current_step),
+        approver_id: req.user.id,
+        approver_name: req.user.name,
+        action: "approved",
+        remarks,
+        acted_at: new Date().toISOString()
+      });
+      // Same 4-param "status, current_step, actions_json, id" shape
+      // performApprovalAction itself uses (current_step stays put — this IS
+      // already the final step) — memoryDbFallback.ts's approval_requests
+      // UPDATE handler is bespoke and only recognizes that exact param
+      // count/order, not a generic positional mapping.
+      await queryDB("UPDATE approval_requests SET status = ?, current_step = ?, actions_json = ? WHERE id = ?", [
+        "approved",
+        request.current_step,
+        JSON.stringify(actions),
+        request.id
+      ]);
+
+      await createAlert(queryDB, {
+        userId: Number(requisition.employee_user_id),
+        type: "vehicle_requisition" as AlertType,
+        title: "Ride Confirmed",
+        message: `Your ride (${requisition.pickup_location} → ${requisition.destination}) was approved and confirmed. Driver: ${driverName} (${driverMobile}), Vehicle: ${vehicle.vehicle_no}.`,
+        relatedType: "vehicle_requisition",
+        relatedId: id
+      });
+
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(err.message?.endsWith(".") ? 400 : 500).json({ error: err.message });
+    }
+  });
+
   // ---------------------------------------------------------------------
   // Vehicle Maintainer bypass — Flowchart v3.0's "গাড়ি রক্ষণাবেক্ষণকারী
   // সরাসরি রাইড কনফার্ম করবেন" path, gated behind 'vehicle_maintainer'

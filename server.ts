@@ -1719,6 +1719,19 @@ async function ensureSchemaMigrations() {
       console.warn("⚠️ Could not add approval_template_steps.approver_type column: " + err.message);
     }
   }
+  // Widen approver_type for 'vehicle_maintainer' — a Vehicle Requisition
+  // template's FINAL Layer can be handed to whoever holds the
+  // 'vehicle_maintainer' module grant instead of a plain employee/admin
+  // approver. Reaching that Layer skips the separate Approve step entirely:
+  // the Vehicle Maintainer's own vehicle+driver Assign action (see PUT
+  // .../approve-and-assign in VehicleManagementRoutes.ts) both closes the
+  // approval chain and confirms the ride in one action, since their job at
+  // that point is only to hand over a vehicle, not to review the request.
+  try {
+    await dbPool.query(`ALTER TABLE approval_template_steps MODIFY COLUMN approver_type ENUM('employee','admin','vehicle_maintainer') NOT NULL DEFAULT 'employee'`);
+  } catch (err: any) {
+    console.warn("⚠️ Could not widen approval_template_steps.approver_type to include 'vehicle_maintainer': " + err.message);
+  }
   // Custom per-step Layer name (Template editor) — NULL means "use the
   // generic/position-based name" (ApprovalTemplateManager.tsx's LAYER_NAMES,
   // e.g. Asset Requisition's Layer 3 = "Inventory/Store Disbursement"). That

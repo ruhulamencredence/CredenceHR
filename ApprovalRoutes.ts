@@ -417,13 +417,18 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       // The reliever query is similarly scoped directly in SQL instead of
       // pulling every Leave Application ever filed — see the old version's
       // comment (now below) on why this exists.
-      const [pendingRequests, templateStepApproverRows, chain, relieverRows, allClearanceItems, allExitRequests] = await Promise.all([
+      const [pendingRequests, templateStepApproverRows, templateSteps, chain, relieverRows, allClearanceItems, allExitRequests] = await Promise.all([
         queryDB("SELECT * FROM approval_requests WHERE status = 'pending' ORDER BY id ASC"),
         queryDB(
           `SELECT s.template_id, s.step_order, sa.user_id
            FROM approval_template_step_approvers sa
            JOIN approval_template_steps s ON s.id = sa.step_id`
         ),
+        // approver_type per (template_id, step_order) — only used to detect a
+        // Vehicle Requisition's FINAL Layer set to 'vehicle_maintainer' (see
+        // vehicle_maintainer_bypass below); a plain SELECT * so the in-memory
+        // fallback DB's generic-table simulator understands it.
+        queryDB("SELECT * FROM approval_template_steps"),
         getApprovalChain(),
         queryDB(
           "SELECT * FROM leave_applications WHERE reliever_id = ? AND reliever_status = 'pending' AND status = 'pending'",
@@ -450,6 +455,9 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
         if (!templateStepApproverIds.has(key)) templateStepApproverIds.set(key, []);
         templateStepApproverIds.get(key)!.push(Number(r.user_id));
       }
+      const templateStepApproverType = new Map<string, string>(
+        templateSteps.map((s: any) => [`${s.template_id}:${s.step_order}`, s.approver_type])
+      );
       const chainByStep = new Map<number, any>(chain.map((s: any) => [Number(s.step_order), s]));
 
       const mine = pendingRequests.filter((r: any) => {
@@ -614,6 +622,19 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
               };
             }
           }
+          // Vehicle Maintainer bypass Layer (see server.ts's
+          // approval_template_steps.approver_type migration comment) — true
+          // only when this IS a vehicle_requisition's FINAL step and that
+          // step is set to 'vehicle_maintainer'. The frontend uses this to
+          // show "Assign Vehicle & Driver" instead of Approve/Reject: that
+          // one action both closes this approval and confirms the ride (see
+          // PUT .../approve-and-assign in VehicleManagementRoutes.ts).
+          let vehicleMaintainerBypass = false;
+          if (r.source_type === "vehicle_requisition" && Number(r.current_step) >= Number(r.total_steps) && r.template_id) {
+            const hasSupervisorStep = !!r.supervisor_step_user_id;
+            const templateStepOrder = hasSupervisorStep ? Number(r.current_step) - 1 : Number(r.current_step);
+            vehicleMaintainerBypass = templateStepApproverType.get(`${r.template_id}:${templateStepOrder}`) === "vehicle_maintainer";
+          }
           return {
             id: r.id,
             source_type: r.source_type,
@@ -625,6 +646,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
             requested_by_name: requesterMap.get(Number(r.requested_by))?.name || null,
             current_step: r.current_step,
             total_steps: r.total_steps,
+            vehicle_maintainer_bypass: vehicleMaintainerBypass,
             created_at: r.created_at,
             asset_requisition_details: assetRequisitionDetails
           };
@@ -736,7 +758,11 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       is_default: !!Number(template.is_default),
       is_active: !!Number(template.is_active),
       skip_auto_supervisor: !!Number(template.skip_auto_supervisor),
-      steps: steps.map((s: any) => ({ ...s, approver_type: s.approver_type === "admin" ? "admin" : "employee", approvers: approversByStep.get(Number(s.id)) || [] }))
+      steps: steps.map((s: any) => ({
+        ...s,
+        approver_type: s.approver_type === "admin" ? "admin" : s.approver_type === "vehicle_maintainer" ? "vehicle_maintainer" : "employee",
+        approvers: approversByStep.get(Number(s.id)) || []
+      }))
     };
   }
 
@@ -747,13 +773,16 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
   // change how a step is cleared, so it isn't cross-checked against the
   // approver_user_ids' actual roles here. Returns a cleaned copy, or throws
   // with a message safe to send straight back to the client.
-  async function validateTemplateSteps(steps: any): Promise<{ approver_user_ids: number[]; approver_type: "employee" | "admin"; label: string | null }[]> {
+  async function validateTemplateSteps(
+    steps: any,
+    requestType: string
+  ): Promise<{ approver_user_ids: number[]; approver_type: "employee" | "admin" | "vehicle_maintainer"; label: string | null }[]> {
     if (!Array.isArray(steps) || steps.length === 0) {
       throw new Error("A template needs at least one Layer/Step.");
     }
     const allUsers = await queryDB("SELECT * FROM users");
     const validUserIds = new Set<number>(allUsers.map((u: any) => Number(u.id)));
-    const cleaned: { approver_user_ids: number[]; approver_type: "employee" | "admin"; label: string | null }[] = [];
+    const cleaned: { approver_user_ids: number[]; approver_type: "employee" | "admin" | "vehicle_maintainer"; label: string | null }[] = [];
     steps.forEach((step: any, idx: number) => {
       const ids = Array.isArray(step?.approver_user_ids) ? step.approver_user_ids.map((v: any) => Number(v)).filter((v: number) => Number.isFinite(v)) : [];
       const uniqueIds = Array.from(new Set(ids));
@@ -763,7 +792,21 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       for (const uid of uniqueIds) {
         if (!validUserIds.has(uid)) throw new Error(`Layer ${idx + 1}: user #${uid} not found.`);
       }
-      const approverType = step?.approver_type === "admin" ? "admin" : "employee";
+      // 'vehicle_maintainer' only makes sense on a Vehicle Requisition
+      // template's LAST Layer (see PUT .../approve-and-assign in
+      // VehicleManagementRoutes.ts — it only fires once the chain's final
+      // step is reached), so it's rejected everywhere else instead of
+      // silently downgrading to 'employee' and confusing whoever picked it.
+      let approverType: "employee" | "admin" | "vehicle_maintainer" = step?.approver_type === "admin" ? "admin" : "employee";
+      if (step?.approver_type === "vehicle_maintainer") {
+        if (requestType !== "vehicle") {
+          throw new Error(`Layer ${idx + 1}: "Vehicle Maintainer" is only available for Vehicle Requisition templates.`);
+        }
+        if (idx !== steps.length - 1) {
+          throw new Error(`Layer ${idx + 1}: "Vehicle Maintainer" can only be used on the last Layer.`);
+        }
+        approverType = "vehicle_maintainer";
+      }
       // Custom Layer name — travels with THIS step's approvers regardless of
       // where it ends up after a drag/reorder, instead of the position-based
       // fallback name (see server.ts's approval_template_steps.label
@@ -829,7 +872,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       if (!["conveyance", "leave", "timesheet", "asset", "vehicle"].includes(requestType)) {
         return res.status(400).json({ error: "request_type must be one of conveyance, leave, timesheet, asset, vehicle." });
       }
-      const steps = await validateTemplateSteps(req.body?.steps);
+      const steps = await validateTemplateSteps(req.body?.steps, requestType);
 
       if (isDefault) {
         // At most one default per request_type — enforced here, not in the DB
@@ -890,7 +933,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
           return res.status(400).json({ error: "This template is assigned to one or more employees — create a new template instead of changing its Request Type." });
         }
       }
-      const steps = await validateTemplateSteps(req.body?.steps);
+      const steps = await validateTemplateSteps(req.body?.steps, requestType);
 
       if (isDefault) {
         await queryDB("UPDATE approval_templates SET is_default = 0 WHERE request_type = ? AND id <> ?", [requestType, id]);

@@ -5,7 +5,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
-import { ArrowLeft, ShieldCheck, Inbox, CheckCircle2, XCircle, RefreshCw, MapPin, X, Package, Paperclip } from 'lucide-react';
+import { ArrowLeft, ShieldCheck, Inbox, CheckCircle2, XCircle, RefreshCw, MapPin, X, Package, Paperclip, Car } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
 import { ModulePath } from './ModulePath';
@@ -55,6 +55,26 @@ interface MyApprovalItem {
     attachment_filename: string | null;
     items: { item_name: string; purpose: string; unit: string; quantity: number }[];
   } | null;
+  // True only for a 'vehicle_requisition' item sitting on its Template's
+  // FINAL Layer, when that Layer's Approver Type is 'vehicle_maintainer'
+  // (see server.ts's approval_template_steps.approver_type migration
+  // comment). Such a Layer skips Approve/Reject entirely — the card below
+  // shows "Assign Vehicle & Driver" instead, and submitting it both closes
+  // this approval and confirms the ride (PUT .../approve-and-assign in
+  // VehicleManagementRoutes.ts).
+  vehicle_maintainer_bypass?: boolean;
+}
+
+interface AvailableVehicle {
+  id: number;
+  vehicle_no: string;
+  model: string;
+}
+
+interface DirectoryEmployee {
+  id: number;
+  name: string;
+  user_id: number | null;
 }
 
 const sourceTitle = (t: MyApprovalItem['source_type']) =>
@@ -128,6 +148,27 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
   // acting still happens from the card underneath.
   const [viewingAssetRequisition, setViewingAssetRequisition] = useState<MyApprovalItem | null>(null);
 
+  // Vehicle + driver picker data for a vehicle_maintainer_bypass item's
+  // "Assign Vehicle & Driver" form below — same source VehicleManagement.tsx's
+  // own Assign form uses. Fetched unconditionally on mount (cheap, and most
+  // accounts here have no admin gate to check first) rather than only once a
+  // vehicle_maintainer_bypass item is actually seen.
+  const [availableVehicles, setAvailableVehicles] = useState<AvailableVehicle[]>([]);
+  const [directoryEmployees, setDirectoryEmployees] = useState<DirectoryEmployee[]>([]);
+  const [assignForm, setAssignForm] = useState<Record<string, { vehicle_id: string; driver_user_id: string }>>({});
+
+  useEffect(() => {
+    fetch(apiUrl('/api/vehicles/available'), { headers: authHeaders })
+      .then((r) => r.json())
+      .then((rows) => setAvailableVehicles(Array.isArray(rows) ? rows : []))
+      .catch(() => {});
+    fetch(apiUrl('/api/employee-directory'), { headers: authHeaders })
+      .then((r) => r.json())
+      .then((rows) => setDirectoryEmployees((Array.isArray(rows) ? rows : []).filter((e: DirectoryEmployee) => e.user_id)))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
   const refToClaimRecord = (ref: UserClaimReference, item: MyApprovalItem): ClaimRecord => ({
     id: ref.claim_id,
     user_id: item.requested_by,
@@ -189,6 +230,43 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
       setMessage({ type: 'success', text: action === 'approved' ? 'Approved.' : 'Rejected.' });
       setRemarksDraft((prev) => ({ ...prev, [key]: '' }));
       setApprovedAmountDraft((prev) => ({ ...prev, [key]: '' }));
+      setItems((prev) => prev.filter((i) => keyFor(i) !== key));
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message || 'Something went wrong.' });
+    } finally {
+      setActingKey(null);
+    }
+  };
+
+  // For a vehicle_maintainer_bypass item — the vehicle+driver form's own
+  // "submit" doubles as this Layer's Approve, so it goes through PUT
+  // .../approve-and-assign instead of POST /api/my-approvals/:id/act (see
+  // that route in VehicleManagementRoutes.ts). Removes the item from the
+  // list on success, same as handleAct.
+  const handleAssignAndApprove = async (item: MyApprovalItem) => {
+    const key = keyFor(item);
+    const form = assignForm[key];
+    if (!form?.vehicle_id || !form?.driver_user_id) {
+      setMessage({ type: 'error', text: 'Pick a vehicle and a driver.' });
+      return;
+    }
+    setActingKey(key);
+    setMessage(null);
+    try {
+      const res = await fetch(apiUrl(`/api/vehicles/requisitions/${item.source_id}/approve-and-assign`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        body: JSON.stringify({
+          vehicle_id: Number(form.vehicle_id),
+          driver_user_id: Number(form.driver_user_id),
+          remarks: remarksDraft[key] || undefined
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not assign a vehicle to this ride.');
+      setMessage({ type: 'success', text: 'Assigned — ride confirmed.' });
+      setRemarksDraft((prev) => ({ ...prev, [key]: '' }));
+      setAssignForm((prev) => ({ ...prev, [key]: { vehicle_id: '', driver_user_id: '' } }));
       setItems((prev) => prev.filter((i) => keyFor(i) !== key));
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message || 'Something went wrong.' });
@@ -378,34 +456,77 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
                       </div>
                     )}
 
-                    <div className="mt-3 flex flex-col sm:flex-row sm:items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                      <input
-                        type="text"
-                        placeholder="Remarks (optional)"
-                        value={remarksDraft[key] || ''}
-                        onChange={(e) => setRemarksDraft((prev) => ({ ...prev, [key]: e.target.value }))}
-                        className="flex-1 min-w-[160px] text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
-                      />
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          disabled={actingKey === key}
-                          onClick={() => handleAct(item, 'rejected')}
-                          className="flex items-center gap-1 text-xs px-3 py-2 rounded-lg bg-rose-50 text-rose-700 hover:bg-rose-100 font-semibold disabled:opacity-50 transition-colors"
-                        >
-                          <XCircle className="w-3.5 h-3.5" /> Reject
-                        </button>
-                        <button
-                          type="button"
-                          disabled={actingKey === key}
-                          onClick={() => handleApprove(item)}
-                          className="flex items-center gap-1 text-xs px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold disabled:opacity-50 transition-colors"
-                        >
-                          {actingKey === key ? <Spinner size={14} /> : <CheckCircle2 className="w-3.5 h-3.5" />}
-                          Approve
-                        </button>
+                    {item.vehicle_maintainer_bypass ? (
+                      <div className="mt-3 space-y-2" onClick={(e) => e.stopPropagation()}>
+                        <p className="text-[11px] text-slate-500 flex items-center gap-1">
+                          <Car className="w-3 h-3 text-blue-500" /> This Layer is yours to hand over a vehicle — pick one below to approve and confirm the ride in one step.
+                        </p>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <select
+                            value={assignForm[key]?.vehicle_id || ''}
+                            onChange={(e) => setAssignForm((prev) => ({ ...prev, [key]: { vehicle_id: e.target.value, driver_user_id: prev[key]?.driver_user_id || '' } }))}
+                            className="text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                          >
+                            <option value="">Pick a vehicle…</option>
+                            {availableVehicles.map((v) => (
+                              <option key={v.id} value={v.id}>
+                                {v.model} ({v.vehicle_no})
+                              </option>
+                            ))}
+                          </select>
+                          <select
+                            value={assignForm[key]?.driver_user_id || ''}
+                            onChange={(e) => setAssignForm((prev) => ({ ...prev, [key]: { vehicle_id: prev[key]?.vehicle_id || '', driver_user_id: e.target.value } }))}
+                            className="text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                          >
+                            <option value="">Pick a driver…</option>
+                            {directoryEmployees.map((e) => (
+                              <option key={e.user_id} value={e.user_id as number}>
+                                {e.name}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            disabled={actingKey === key}
+                            onClick={() => handleAssignAndApprove(item)}
+                            className="flex items-center gap-1 text-xs px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold disabled:opacity-50 transition-colors"
+                          >
+                            {actingKey === key ? <Spinner size={14} /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                            Assign & Confirm
+                          </button>
+                        </div>
                       </div>
-                    </div>
+                    ) : (
+                      <div className="mt-3 flex flex-col sm:flex-row sm:items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="text"
+                          placeholder="Remarks (optional)"
+                          value={remarksDraft[key] || ''}
+                          onChange={(e) => setRemarksDraft((prev) => ({ ...prev, [key]: e.target.value }))}
+                          className="flex-1 min-w-[160px] text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                        />
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            disabled={actingKey === key}
+                            onClick={() => handleAct(item, 'rejected')}
+                            className="flex items-center gap-1 text-xs px-3 py-2 rounded-lg bg-rose-50 text-rose-700 hover:bg-rose-100 font-semibold disabled:opacity-50 transition-colors"
+                          >
+                            <XCircle className="w-3.5 h-3.5" /> Reject
+                          </button>
+                          <button
+                            type="button"
+                            disabled={actingKey === key}
+                            onClick={() => handleApprove(item)}
+                            className="flex items-center gap-1 text-xs px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold disabled:opacity-50 transition-colors"
+                          >
+                            {actingKey === key ? <Spinner size={14} /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                            Approve
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 );
               })}
