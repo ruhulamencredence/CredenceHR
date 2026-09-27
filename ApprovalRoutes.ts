@@ -62,6 +62,7 @@ interface ApprovalRouteDeps {
   // step advance — a final approve/reject already sends its own notification
   // from inside performApprovalAction's per-source finalize/reject call.
   getCurrentStepApprovers: (request: any) => Promise<{ user_id: number; user_name: string | null }[]>;
+  isVehicleMaintainerStep: (request: any) => Promise<boolean>;
   createAlert: (
     queryDB: (sql: string, params?: any[]) => Promise<any>,
     params: { userId: number; type: AlertType; title: string; message: string; relatedType?: string; relatedId?: number }
@@ -81,6 +82,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
     toDateOnlyString,
     attachApprovalStatuses,
     getCurrentStepApprovers,
+    isVehicleMaintainerStep,
     createAlert
   } = deps;
 
@@ -90,7 +92,9 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
   const SOURCE_TYPE_ALERT: Partial<Record<string, { type: AlertType; label: string }>> = {
     user_claim: { type: "conveyance_claim", label: "Movement/Conveyance Claim" },
     asset_requisition: { type: "asset_requisition", label: "Asset Requisition" },
-    vehicle_requisition: { type: "vehicle_requisition", label: "Vehicle Requisition" }
+    // 'vehicle_approval' (not 'vehicle_requisition', which is the requester's
+    // own ride-status alerts) so a click opens Approve Application.
+    vehicle_requisition: { type: "vehicle_approval", label: "Vehicle Requisition" }
   };
 
   // Fires right after performApprovalAction advances a request to its NEXT
@@ -109,12 +113,15 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       const mapping = SOURCE_TYPE_ALERT[request.source_type];
       if (!mapping) return;
       const approvers = await getCurrentStepApprovers(request);
+      const assignOnly = request.source_type === "vehicle_requisition" && (await isVehicleMaintainerStep(request));
       for (const approver of approvers) {
         await createAlert(queryDB, {
           userId: approver.user_id,
           type: mapping.type,
-          title: `${mapping.label} Awaiting Your Approval`,
-          message: `${actorName || "A previous approver"} approved this ${mapping.label.toLowerCase()} — it's now waiting on your review.`,
+          title: assignOnly ? "Ride Request Awaiting Vehicle Assignment" : `${mapping.label} Awaiting Your Approval`,
+          message: assignOnly
+            ? `${actorName || "A previous approver"} approved this ride request — assign a vehicle and driver to confirm it.`
+            : `${actorName || "A previous approver"} approved this ${mapping.label.toLowerCase()} — it's now waiting on your review.`,
           relatedType: request.source_type,
           relatedId: Number(request.source_id)
         });
@@ -818,6 +825,22 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
     return cleaned;
   }
 
+  // Anyone placed on a 'vehicle_maintainer' Layer needs the matching module
+  // grant too (the Vehicle Maintainer screens and bypass routes check it), so
+  // picking them in the Template is enough — no separate Module Access step.
+  async function grantVehicleMaintainerAccess(steps: { approver_user_ids: number[]; approver_type: string }[]) {
+    const userIds = new Set<number>();
+    for (const step of steps) {
+      if (step.approver_type === "vehicle_maintainer") step.approver_user_ids.forEach((uid) => userIds.add(uid));
+    }
+    for (const uid of userIds) {
+      const existing = await queryDB("SELECT module_key FROM admin_module_permissions WHERE user_id = ?", [uid]);
+      if (!existing.some((r: any) => r.module_key === "vehicle_maintainer")) {
+        await queryDB("INSERT INTO admin_module_permissions (user_id, module_key) VALUES (?, ?)", [uid, "vehicle_maintainer"]);
+      }
+    }
+  }
+
   // Every Template, newest-first, with a step_count so the list screen doesn't
   // need a second call per row. Optional ?request_type= filter for the
   // "New Assignment" screen's template picker.
@@ -899,9 +922,10 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
         }
       }
 
+      await grantVehicleMaintainerAccess(steps);
       res.status(201).json(await getTemplateWithSteps(templateId));
     } catch (err: any) {
-      res.status(err.message?.includes("not found") || err.message?.includes("needs at least") ? 400 : 500).json({ error: err.message });
+      res.status(err.message?.includes("not found") || err.message?.includes("needs at least") || err.message?.includes("Vehicle Maintainer") ? 400 : 500).json({ error: err.message });
     }
   });
 
@@ -964,9 +988,10 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
         }
       }
 
+      await grantVehicleMaintainerAccess(steps);
       res.json(await getTemplateWithSteps(id));
     } catch (err: any) {
-      res.status(err.message?.includes("not found") || err.message?.includes("needs at least") ? 400 : 500).json({ error: err.message });
+      res.status(err.message?.includes("not found") || err.message?.includes("needs at least") || err.message?.includes("Vehicle Maintainer") ? 400 : 500).json({ error: err.message });
     }
   });
 

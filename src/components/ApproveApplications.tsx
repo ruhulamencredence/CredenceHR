@@ -397,7 +397,9 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
                     <div className="flex items-start justify-between gap-3 flex-wrap">
                       <div>
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-sm font-semibold text-slate-800">{sourceTitle(item.source_type)}</span>
+                          <span className="text-sm font-semibold text-slate-800">
+                            {item.vehicle_maintainer_bypass ? 'Ride Request — Assign Vehicle' : sourceTitle(item.source_type)}
+                          </span>
                         </div>
                         <p className="text-xs text-slate-500 mt-0.5">
                           {item.source_label}

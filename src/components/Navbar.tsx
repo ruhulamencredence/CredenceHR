@@ -400,7 +400,13 @@ export const Navbar: React.FC<NavbarProps> = ({
               Leave Application alert jumps to Self Service -> Leave
               Application, same destination the "Self Service" menu above
               points at. */}
-          <AlertsBell token={token} onOpenLeaveApplication={() => onGoToSelfServiceTab('leaveApplication')} onViewAll={onOpenAlerts} />
+          <AlertsBell
+            token={token}
+            onOpenLeaveApplication={() => onGoToSelfServiceTab('leaveApplication')}
+            onOpenApproveApplications={() => onGoToSelfServiceTab('approveApplications')}
+            onOpenVehicleManagement={() => onGoToSelfServiceTab('vehicleManagement')}
+            onViewAll={onOpenAlerts}
+          />
 
           {/* Chat bell — hidden while ChatPanel.tsx is already the page
               showing, same isProfilePageOpen/avatar pattern below. */}

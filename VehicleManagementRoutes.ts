@@ -69,6 +69,7 @@ interface VehicleManagementRouteDeps {
     overrideSupervisorId?: number | null
   ) => Promise<{ autoApproved: boolean; template: any | null }>;
   getCurrentStepApprovers: (request: any) => Promise<{ user_id: number; user_name: string | null }[]>;
+  isVehicleMaintainerStep: (request: any) => Promise<boolean>;
   // Auto-approve path (no Template resolved at all for this employee/type) —
   // same finalize function performApprovalAction's 'vehicle_requisition'
   // branch calls once the Approval Workflow's LAST step signs off.
@@ -169,6 +170,7 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
     createAlert,
     createTemplateApprovalRequest,
     getCurrentStepApprovers,
+    isVehicleMaintainerStep,
     finalizeVehicleRequisitionApproval
   } = deps;
   const adminGate = [authenticateToken, requireAdmin, requireModule("vehicle_management")];
@@ -515,12 +517,15 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
         const createdRequest = requestRows.find((r: any) => Number(r.source_id) === Number(result.insertId));
         if (createdRequest) {
           const approvers = await getCurrentStepApprovers(createdRequest);
+          const assignOnly = await isVehicleMaintainerStep(createdRequest);
           for (const approver of approvers) {
             await createAlert(queryDB, {
               userId: approver.user_id,
-              type: "vehicle_requisition" as AlertType,
-              title: "New Ride Request Awaiting Your Approval",
-              message: `${actor.name || "An employee"} requested a ride (${pickup} → ${destination}). Please review.`,
+              type: "vehicle_approval" as AlertType,
+              title: assignOnly ? "Ride Request Awaiting Vehicle Assignment" : "New Ride Request Awaiting Your Approval",
+              message: assignOnly
+                ? `${actor.name || "An employee"} requested a ride (${pickup} → ${destination}). Assign a vehicle and driver to confirm it.`
+                : `${actor.name || "An employee"} requested a ride (${pickup} → ${destination}). Please review.`,
               relatedType: "vehicle_requisition",
               relatedId: result.insertId
             });

@@ -344,7 +344,9 @@ export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ toke
                   </span>
                   <ChevronRight className="w-4 h-4 text-slate-400" />
                 </div>
-                <span className="text-xs font-semibold text-slate-800 leading-tight">{sourceTitle(cat)}</span>
+                <span className="text-xs font-semibold text-slate-800 leading-tight">
+                  {cat === 'vehicle_requisition' && list.every((i) => i.vehicle_maintainer_bypass) ? 'Ride Request — Assign Vehicle' : sourceTitle(cat)}
+                </span>
               </button>
             );
           })}

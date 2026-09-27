@@ -931,6 +931,14 @@ export default function App() {
               setShowAlertsPage(false);
               sidebarNavProps.onGoToSelfServiceTab('leaveApplication');
             }}
+            onOpenApproveApplications={() => {
+              setShowAlertsPage(false);
+              sidebarNavProps.onGoToSelfServiceTab('approveApplications');
+            }}
+            onOpenVehicleManagement={() => {
+              setShowAlertsPage(false);
+              sidebarNavProps.onGoToSelfServiceTab('vehicleManagement');
+            }}
           />
         ) : showProfilePage ? (
           <ProfilePage

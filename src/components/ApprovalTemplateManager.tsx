@@ -654,9 +654,7 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
                   const pickerUsers =
                     step.approver_type === 'admin'
                       ? users.filter((u) => isAdminRole(u.role))
-                      : step.approver_type === 'vehicle_maintainer'
-                        ? users.filter((u) => u.role === 'superadmin' || (u.module_permissions || []).includes('vehicle_maintainer'))
-                        : users;
+                      : users;
                   const isLastLayer = idx === stepsDraft.length - 1;
                   return (
                     <div
@@ -716,16 +714,17 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
                             className="text-xs font-semibold text-slate-700 bg-transparent border-b border-dashed border-slate-300 focus:border-blue-500 focus:outline-none px-0.5 w-40"
                           />
                         )}
-                        <select
-                          value={step.approver_type}
-                          onChange={(e) => setStepApproverType(idx, e.target.value as any)}
-                          className="text-[11px] px-2 py-1 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
-                        >
-                          {idx === 0 && <option value="supervisor">Supervisor</option>}
-                          <option value="employee">Employee</option>
-                          <option value="admin">Admin</option>
-                          {typeDraft === 'vehicle' && isLastLayer && <option value="vehicle_maintainer">Vehicle Maintainer (Ride Bypass)</option>}
-                        </select>
+                        {step.approver_type !== 'vehicle_maintainer' && (
+                          <select
+                            value={step.approver_type}
+                            onChange={(e) => setStepApproverType(idx, e.target.value as any)}
+                            className="text-[11px] px-2 py-1 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                          >
+                            {idx === 0 && <option value="supervisor">Supervisor</option>}
+                            <option value="employee">Employee</option>
+                            <option value="admin">Admin</option>
+                          </select>
+                        )}
                         {idx > 0 && (
                           <button
                             type="button"
@@ -745,12 +744,21 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
                         </p>
                       ) : (
                         <>
-                          {step.approver_type === 'vehicle_maintainer' && (
-                            <p className="text-[11px] text-slate-500 pl-7">
-                              Whoever's picked here won't see Approve/Reject — reaching this Layer takes them
-                              straight to "Assign Vehicle & Driver" on their Pending Approvals; submitting that
-                              closes the chain and confirms the ride in one step.
-                            </p>
+                          {typeDraft === 'vehicle' && isLastLayer && (
+                            <label className="flex items-start gap-2 pl-7 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={step.approver_type === 'vehicle_maintainer'}
+                                onChange={(e) => setStepApproverType(idx, e.target.checked ? 'vehicle_maintainer' : 'employee')}
+                                className="mt-0.5 rounded border-slate-300 text-blue-600 focus:ring-blue-600"
+                              />
+                              <span className="text-[11px] text-slate-600">
+                                <span className="font-semibold text-slate-700">Vehicle Maintainer (Ride Bypass)</span> — the
+                                employees picked here get Vehicle Maintainer access automatically, and instead of
+                                Approve/Reject they assign the vehicle &amp; driver, which approves and confirms the ride
+                                in one step.
+                              </span>
+                            </label>
                           )}
                           <div className="flex flex-wrap gap-1.5 pl-7">
                             {step.approver_user_ids.length === 0 && <span className="text-[11px] text-slate-400">No approvers yet — add at least one.</span>}
