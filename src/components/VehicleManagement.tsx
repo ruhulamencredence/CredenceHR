@@ -14,6 +14,7 @@
 import React, { useEffect, useState } from 'react';
 import { apiUrl } from '../lib/api';
 import { LiveRideMap } from './LiveRideMap';
+import { RideDestinationPicker, RidePlaces } from './RideDestinationPicker';
 
 interface Requisition {
   id: number;
@@ -87,11 +88,16 @@ function authHeaders(): HeadersInit {
   return { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
 }
 
+const todayLocal = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
 const emptyForm = () => ({
   purpose: '',
   pickup_location: '',
   destination: '',
-  ride_date: '',
+  ride_date: todayLocal(),
   start_time: '',
   estimated_duration_hours: 1
 });
@@ -123,6 +129,9 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
   const [error, setError] = useState<string | null>(null);
 
   const [form, setForm] = useState(emptyForm());
+  // Book a Ride is two steps: pick where from/to (RideDestinationPicker),
+  // then the rest of the form. null = still on step 1.
+  const [places, setPlaces] = useState<RidePlaces | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitMessage, setSubmitMessage] = useState<string | null>(null);
 
@@ -319,12 +328,13 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
       const res = await fetch(apiUrl('/api/vehicles/requisitions'), {
         method: 'POST',
         headers: authHeaders(),
-        body: JSON.stringify(form)
+        body: JSON.stringify({ ...form, ...places })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Could not submit request.');
       setSubmitMessage('Ride request submitted successfully.');
       setForm(emptyForm());
+      setPlaces(null);
     } catch (err: any) {
       setSubmitMessage(err.message);
     } finally {
@@ -415,8 +425,35 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
 
       {error && <div className="mb-3 rounded bg-red-50 text-red-700 text-sm px-3 py-2">{error}</div>}
 
-      {tab === 'book' && (
+      {tab === 'book' && !places && (
+        <>
+          {submitMessage && <div className="mb-3 rounded bg-green-50 text-green-800 text-sm px-3 py-2 max-w-xl">{submitMessage}</div>}
+          <RideDestinationPicker
+            onDone={(picked) => {
+              setPlaces(picked);
+              setSubmitMessage(null);
+            }}
+          />
+        </>
+      )}
+
+      {tab === 'book' && places && (
         <form onSubmit={submitRequisition} className="space-y-4 max-w-xl">
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 flex items-start justify-between gap-3">
+            <div className="min-w-0 text-sm space-y-1.5">
+              <div className="flex items-center gap-2 text-slate-700">
+                <span className="w-2.5 h-2.5 rounded-full bg-blue-600 shrink-0" />
+                <span className="truncate">{places.pickup_location}</span>
+              </div>
+              <div className="flex items-center gap-2 text-slate-900 font-medium">
+                <span className="w-2.5 h-2.5 rounded-sm bg-red-500 shrink-0" />
+                <span className="truncate">{places.destination}</span>
+              </div>
+            </div>
+            <button type="button" onClick={() => setPlaces(null)} className="text-xs font-medium text-blue-600 hover:underline shrink-0">
+              Change
+            </button>
+          </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Purpose</label>
             <textarea
@@ -428,27 +465,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
               className="w-full border rounded px-3 py-2 text-sm"
             />
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Pickup Location</label>
-              <input
-                required
-                value={form.pickup_location}
-                onChange={(e) => setForm({ ...form, pickup_location: e.target.value })}
-                className="w-full border rounded px-3 py-2 text-sm"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Destination</label>
-              <input
-                required
-                value={form.destination}
-                onChange={(e) => setForm({ ...form, destination: e.target.value })}
-                className="w-full border rounded px-3 py-2 text-sm"
-              />
-            </div>
-          </div>
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Ride Date</label>
               <input
@@ -486,7 +503,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
           <button
             type="submit"
             disabled={submitting}
-            className="px-4 py-2 text-sm font-medium rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+            className="w-full sm:w-auto px-4 py-2.5 text-sm font-medium rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
           >
             {submitting ? 'Submitting…' : 'Submit Request'}
           </button>

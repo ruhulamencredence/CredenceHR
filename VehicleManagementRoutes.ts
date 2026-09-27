@@ -507,6 +507,14 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
       [employeeUserId, purpose, pickup, destination, rideDate, startTime, duration, expectedReturn, "pending", "none", 0]
     );
 
+    // Coordinates of the place picked in Book a Ride step 1, so the Live Ride
+    // Map doesn't have to look the free-text destination up again later.
+    const destLat = Number(body.destination_lat);
+    const destLng = Number(body.destination_lng);
+    if (body.destination_lat != null && body.destination_lng != null && Number.isFinite(destLat) && Number.isFinite(destLng) && Math.abs(destLat) <= 90 && Math.abs(destLng) <= 180) {
+      await queryDB("UPDATE vehicle_requisitions SET destination_lat = ?, destination_lng = ? WHERE id = ?", [destLat, destLng, result.insertId]);
+    }
+
     // Dynamic Approval Engine — routed through this Employee's assigned
     // Template for request_type 'vehicle'. Falls back to a straight
     // auto-approve if neither a Supervisor nor a Template resolve at all.
@@ -1090,6 +1098,44 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
   // key). Runs server-side so it can send the User-Agent Nominatim's usage
   // policy requires, and the result is stored on the requisition so each
   // ride is looked up once. A failed lookup is retried at most every 10 min.
+  // Nominatim's usage policy allows at most 1 request/second and requires an
+  // identifying User-Agent, so every call goes through this one queue.
+  let nominatimChain: Promise<unknown> = Promise.resolve();
+  let nominatimLastAt = 0;
+  function nominatim(path: string): Promise<any> {
+    const run = async () => {
+      const wait = nominatimLastAt + 1100 - Date.now();
+      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+      nominatimLastAt = Date.now();
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 6000);
+      try {
+        const response = await fetch(`https://nominatim.openstreetmap.org/${path}`, {
+          headers: { "User-Agent": "CredenceHR/1.0 (vehicle requisition)", "Accept-Language": "en" },
+          signal: controller.signal
+        });
+        if (!response.ok) throw new Error(`Place lookup failed (${response.status}).`);
+        return await response.json();
+      } finally {
+        clearTimeout(timer);
+      }
+    };
+    const next = nominatimChain.then(run, run);
+    nominatimChain = next.catch(() => undefined);
+    return next;
+  }
+
+  // "Anandalok Trust, Dhanmondi" rather than the full 8-part display_name.
+  function shortPlaceLabel(hit: any): string {
+    const a = hit?.address || {};
+    const name = hit?.name || a.road || a.neighbourhood || "";
+    const area = a.suburb || a.neighbourhood || a.quarter || a.city_district || a.city || a.town || a.village || "";
+    const parts = [name, area].filter((v, i, arr) => v && arr.indexOf(v) === i);
+    return parts.length > 0 ? parts.join(", ") : String(hit?.display_name || "").split(",").slice(0, 3).join(",").trim();
+  }
+
+  const placeSearchCache = new Map<string, { at: number; results: any[] }>();
+
   const geocodeFailedAt = new Map<number, number>();
   async function geocodeDestination(requisition: any): Promise<{ lat: number; lng: number } | null> {
     if (requisition.destination_lat != null && requisition.destination_lng != null) {
@@ -1101,12 +1147,7 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
     const query = String(requisition.destination || "").trim();
     if (!query) return null;
     try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 6000);
-      const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=bd&q=${encodeURIComponent(query)}`;
-      const response = await fetch(url, { headers: { "User-Agent": "CredenceHR/1.0 (vehicle requisition live map)" }, signal: controller.signal });
-      clearTimeout(timer);
-      const results: any = response.ok ? await response.json() : [];
+      const results: any = await nominatim(`search?format=json&limit=1&countrycodes=bd&q=${encodeURIComponent(query)}`);
       const hit = Array.isArray(results) ? results[0] : null;
       if (!hit) {
         geocodeFailedAt.set(id, Date.now());
@@ -1120,6 +1161,73 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
       return null;
     }
   }
+
+  // Book a Ride step 1 ("Where are you going?") — place suggestions while
+  // typing, restricted to Bangladesh. Cached for an hour per query.
+  app.get("/api/vehicles/places/search", authenticateToken, async (req: any, res: any) => {
+    try {
+      const q = typeof req.query.q === "string" ? req.query.q.trim().slice(0, 120) : "";
+      if (q.length < 2) return res.json([]);
+      const key = q.toLowerCase();
+      const cached = placeSearchCache.get(key);
+      if (cached && Date.now() - cached.at < 60 * 60 * 1000) return res.json(cached.results);
+      const hits: any = await nominatim(`search?format=json&addressdetails=1&limit=6&countrycodes=bd&q=${encodeURIComponent(q)}`);
+      const results = (Array.isArray(hits) ? hits : []).map((h: any) => ({
+        label: shortPlaceLabel(h),
+        detail: String(h.display_name || ""),
+        lat: Number(h.lat),
+        lng: Number(h.lon)
+      }));
+      if (placeSearchCache.size > 500) placeSearchCache.clear();
+      placeSearchCache.set(key, { at: Date.now(), results });
+      res.json(results);
+    } catch (err: any) {
+      res.status(502).json({ error: "Place search is unavailable right now." });
+    }
+  });
+
+  // Book a Ride step 1 — turns the phone's GPS fix into a readable pickup
+  // address ("Anandalok Trust, Dhanmondi").
+  app.get("/api/vehicles/places/reverse", authenticateToken, async (req: any, res: any) => {
+    try {
+      const lat = Number(req.query.lat);
+      const lng = Number(req.query.lng);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+        return res.status(400).json({ error: "Invalid coordinates." });
+      }
+      const hit: any = await nominatim(`reverse?format=json&addressdetails=1&zoom=18&lat=${lat}&lon=${lng}`);
+      res.json({ label: hit && !hit.error ? shortPlaceLabel(hit) : null });
+    } catch {
+      res.json({ label: null });
+    }
+  });
+
+  // Book a Ride step 1's "Recent" list — this account's own last distinct
+  // destinations, newest first.
+  app.get("/api/vehicles/places/recent", authenticateToken, async (req: any, res: any) => {
+    try {
+      const rows: any = await queryDB("SELECT * FROM vehicle_requisitions");
+      const mine = rows
+        .filter((r: any) => Number(r.employee_user_id) === Number(req.user.id) && r.destination)
+        .sort((a: any, b: any) => Number(b.id) - Number(a.id));
+      const seen = new Set<string>();
+      const recent: any[] = [];
+      for (const r of mine) {
+        const key = String(r.destination).trim().toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        recent.push({
+          label: r.destination,
+          lat: r.destination_lat != null ? Number(r.destination_lat) : null,
+          lng: r.destination_lng != null ? Number(r.destination_lng) : null
+        });
+        if (recent.length >= 10) break;
+      }
+      res.json(recent);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
 
   app.get("/api/vehicles/requisitions/:id/live-location", authenticateToken, async (req: any, res: any) => {
     try {
