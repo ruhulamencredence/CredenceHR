@@ -74,7 +74,10 @@ export function RideDestinationPicker({ initial, onDone }: RideDestinationPicker
   const [recent, setRecent] = useState<Place[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const [pickupCoords, setPickupCoords] = useState<{ lat: number; lng: number } | null>(null);
-  const [showMap, setShowMap] = useState(false);
+  const [mapFor, setMapFor] = useState<'pickup' | 'destination' | null>(null);
+  const [locateFailed, setLocateFailed] = useState(false);
+  // Destination picked before a pickup was set — finished once the pickup is chosen on the map.
+  const [pendingDestination, setPendingDestination] = useState<Place | null>(null);
   const destinationRef = useRef<HTMLInputElement | null>(null);
 
   const locateCoords = async (): Promise<{ lat: number; lng: number } | null> => {
@@ -96,8 +99,10 @@ export function RideDestinationPicker({ initial, onDone }: RideDestinationPicker
       const res = await fetch(apiUrl(`/api/vehicles/places/reverse?lat=${latitude}&lng=${longitude}`), { headers: authHeaders() });
       const data = await res.json().catch(() => null);
       setPickup(data?.label || `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`);
+      setLocateFailed(false);
     } catch {
-      // Location unavailable — the pickup box just stays editable by hand.
+      // Location unavailable (common on desktop browsers) — pickup can be typed or set on the map.
+      setLocateFailed(true);
     } finally {
       setLocating(false);
     }
@@ -146,7 +151,9 @@ export function RideDestinationPicker({ initial, onDone }: RideDestinationPicker
 
   const choose = (place: Place) => {
     if (!pickup.trim()) {
-      setMessage('Set your pickup location first.');
+      setPendingDestination(place);
+      setMessage('Set your pickup location on the map first.');
+      setMapFor('pickup');
       return;
     }
     onDone({ pickup_location: pickup.trim(), destination: place.label, destination_lat: place.lat, destination_lng: place.lng });
@@ -165,6 +172,9 @@ export function RideDestinationPicker({ initial, onDone }: RideDestinationPicker
             placeholder={locating ? 'Finding your location…' : 'Pickup location'}
             className="flex-1 min-w-0 bg-transparent text-sm font-medium text-slate-800 placeholder:text-slate-400 focus:outline-none"
           />
+          <button type="button" onClick={() => setMapFor('pickup')} title="Set pickup on map" className="p-1 text-slate-500 hover:text-blue-600">
+            <MapPinned className="w-4 h-4" />
+          </button>
           <button type="button" onClick={locate} title="Use my current location" className="p-1 text-slate-500 hover:text-blue-600">
             {locating ? <Spinner size={16} /> : <LocateFixed className="w-4 h-4" />}
           </button>
@@ -197,6 +207,15 @@ export function RideDestinationPicker({ initial, onDone }: RideDestinationPicker
       </div>
 
       {message && <div className="mt-2 text-xs text-red-600">{message}</div>}
+      {!message && locateFailed && !pickup.trim() && (
+        <div className="mt-2 text-xs text-amber-600">
+          Couldn't get your current location. Type the pickup or{' '}
+          <button type="button" onClick={() => setMapFor('pickup')} className="font-semibold underline">
+            set it on the map
+          </button>
+          .
+        </div>
+      )}
 
       <div className="mt-4">
         <div className="text-xs font-semibold text-slate-500 px-1 mb-1">
@@ -243,21 +262,36 @@ export function RideDestinationPicker({ initial, onDone }: RideDestinationPicker
         </button>
         <button
           type="button"
-          onClick={() => setShowMap(true)}
+          onClick={() => setMapFor('destination')}
           className="flex items-center justify-center gap-2 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
         >
           <MapPinned className="w-4 h-4 text-red-500" /> Set On Map
         </button>
       </div>
 
-      {showMap && (
+      {mapFor && (
         <RideMapPicker
-          title="Choose destination"
+          key={mapFor}
+          title={mapFor === 'pickup' ? 'Choose pickup location' : 'Choose destination'}
           start={pickupCoords}
           onLocateMe={locateCoords}
-          onCancel={() => setShowMap(false)}
+          onCancel={() => {
+            setMapFor(null);
+            setPendingDestination(null);
+          }}
           onConfirm={(place) => {
-            setShowMap(false);
+            setMapFor(null);
+            if (mapFor === 'pickup') {
+              setPickup(place.label);
+              setPickupCoords({ lat: place.lat, lng: place.lng });
+              setMessage(null);
+              if (pendingDestination) {
+                const dest = pendingDestination;
+                setPendingDestination(null);
+                onDone({ pickup_location: place.label, destination: dest.label, destination_lat: dest.lat, destination_lng: dest.lng });
+              }
+              return;
+            }
             choose(place);
           }}
         />
