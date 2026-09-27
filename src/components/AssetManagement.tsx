@@ -32,6 +32,7 @@ import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
 import { NewAssetRequisitionModal } from './NewAssetRequisitionModal';
 import { AssetFulfillModal } from './AssetFulfillModal';
+import { AssetRequisitionHistoryModal } from './AssetRequisitionHistoryModal';
 import { useWideWeb } from '../lib/useWideWeb';
 import { takeQuickAccessTab } from '../lib/quickAccess';
 
@@ -79,7 +80,20 @@ interface RequisitionItem {
   purpose: string;
   unit: string;
   quantity: number;
+  // Supervisor edits (see AssetRequisitionEditItemsModal).
+  source?: string | null;
+  original_quantity?: number | string | null;
 }
+
+// Small marker next to an item the Supervisor added or changed.
+const SupervisorEditMark: React.FC<{ it: RequisitionItem }> = ({ it }) =>
+  it.source === 'supervisor' ? (
+    <span className="ml-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-700">Added by Supervisor</span>
+  ) : it.original_quantity != null && Number(it.original_quantity) !== Number(it.quantity) ? (
+    <span className="ml-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-700">
+      Qty {Number(it.original_quantity)} → {Number(it.quantity)}
+    </span>
+  ) : null;
 
 interface Requisition {
   id: number;
@@ -171,6 +185,30 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
   const [awaitingFulfillment, setAwaitingFulfillment] = useState<Requisition[]>([]);
   // Requisition whose Fulfill & Hand Over form is open (AssetFulfillModal).
   const [fulfillingFor, setFulfillingFor] = useState<Requisition | null>(null);
+  // Requisition whose History is open (AssetRequisitionHistoryModal).
+  const [historyFor, setHistoryFor] = useState<number | null>(null);
+  // Issues reported on items THIS account handed over — only returned when
+  // the server's FULFILLER_CAN_RESOLVE_CLAIMS switch is on (currently off,
+  // so this section stays hidden).
+  const [myClaims, setMyClaims] = useState<{ enabled: boolean; claims: any[] }>({ enabled: false, claims: [] });
+  const [claimNote, setClaimNote] = useState<Record<number, string>>({});
+  const loadMyClaims = () =>
+    fetch(apiUrl('/api/assets/assignment-claims/mine'), { headers: authHeaders() })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => d && setMyClaims({ enabled: !!d.enabled, claims: Array.isArray(d.claims) ? d.claims : [] }))
+      .catch(() => {});
+  const resolveMyClaim = async (id: number) => {
+    const note = (claimNote[id] || '').trim();
+    if (!note) return setError('Add a note on how the issue was resolved.');
+    const res = await fetch(apiUrl(`/api/assets/assignment-claims/${id}/resolve`), {
+      method: 'PUT',
+      headers: authHeaders(),
+      body: JSON.stringify({ resolution_note: note })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return setError(data.error || 'Could not resolve this issue.');
+    loadMyClaims();
+  };
 
   // "+ New Requisition" — popup button next to the page title (same
   // "+ Add New" treatment as Leave Application), opening
@@ -245,7 +283,10 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
   useEffect(() => {
     if (tab === 'my-assets') loadMyAssets();
     if (tab === 'status') loadRequisitions();
-    if (tab === 'fulfill') loadAwaitingFulfillment();
+    if (tab === 'fulfill') {
+      loadAwaitingFulfillment();
+      loadMyClaims();
+    }
   }, [tab]);
 
   // Runs once on mount, regardless of which tab is active, purely so the
@@ -690,6 +731,9 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
                       <div className="min-w-0">
                         <div className="font-semibold text-slate-800 truncate">{r.asset_category}</div>
                         <div className="text-xs text-slate-500 capitalize">Urgency: {r.urgency}</div>
+                        <button type="button" onClick={() => setHistoryFor(r.id)} className="mt-1 text-xs font-semibold text-blue-600 hover:underline">
+                          View history
+                        </button>
                       </div>
                       <div className="min-w-0 space-y-0.5">
                         {(r.items || []).map((it, idx) => (
@@ -698,6 +742,7 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
                             <span className="text-xs text-slate-500">
                               × {it.quantity} {it.unit}
                             </span>
+                            <SupervisorEditMark it={it} />
                           </div>
                         ))}
                       </div>
@@ -748,6 +793,7 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
                           <div key={idx} className="text-xs text-slate-600 flex items-baseline justify-between gap-2">
                             <span>
                               <span className="font-semibold text-slate-800">{it.item_name}</span> — {it.purpose}
+                              <SupervisorEditMark it={it} />
                             </span>
                             <span className="text-[11px] text-slate-500 shrink-0">
                               {it.quantity} {it.unit}
@@ -755,6 +801,9 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
                           </div>
                         ))}
                       </div>
+                      <button type="button" onClick={() => setHistoryFor(r.id)} className="mt-2 text-[11px] font-semibold text-blue-600 hover:underline">
+                        View history
+                      </button>
                       {r.status === 'rejected' && r.rejection_reason && (
                         <div className="mt-2 text-[11px] text-rose-600">
                           <span className="font-semibold">Reason:</span> {r.rejection_reason}
@@ -777,6 +826,33 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
                   Requisitions you approved that are still waiting to be handed over — open Fulfill, type what you're
                   handing over, and the employee confirms it in My Asset. No Asset Management Module Access needed.
                 </div>
+                {myClaims.enabled && myClaims.claims.length > 0 && (
+                  <div className="border border-orange-200 bg-orange-50/50 rounded-xl p-3.5 space-y-2.5">
+                    <div className="text-xs font-bold text-orange-800">Issues reported on items you handed over</div>
+                    {myClaims.claims.map((c) => (
+                      <div key={c.id} className="bg-white border border-orange-100 rounded-lg p-2.5 text-xs space-y-1.5">
+                        <div className="text-slate-800">
+                          <span className="font-semibold">{c.employee_name}</span> — {c.asset_name} ({c.asset_tag}): {c.description}
+                        </div>
+                        <div className="flex gap-2">
+                          <input
+                            value={claimNote[c.id] || ''}
+                            onChange={(e) => setClaimNote((prev) => ({ ...prev, [c.id]: e.target.value }))}
+                            placeholder="How was it resolved?"
+                            className="flex-1 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-100"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => resolveMyClaim(c.id)}
+                            className="px-3 py-1.5 text-[11px] font-semibold rounded-lg bg-blue-600 text-white hover:bg-blue-700"
+                          >
+                            Resolve
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {loading ? (
                   <div className="flex justify-center py-14">
                     <Spinner size={20} className="text-slate-400" />
@@ -843,6 +919,10 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
             loadRequisitions();
           }}
         />
+      )}
+
+      {historyFor !== null && (
+        <AssetRequisitionHistoryModal token={localStorage.getItem('mpr_token') || ''} requisitionId={historyFor} onClose={() => setHistoryFor(null)} />
       )}
 
       {fulfillingFor && (

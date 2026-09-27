@@ -19,6 +19,7 @@
 import React, { useEffect, useState } from 'react';
 import { apiUrl } from '../lib/api';
 import { AssetFulfillModal } from './AssetFulfillModal';
+import { AssetRequisitionHistoryModal } from './AssetRequisitionHistoryModal';
 
 interface Asset {
   id: number;
@@ -92,6 +93,7 @@ export function AssetManagementAdmin() {
   const [newAsset, setNewAsset] = useState({ asset_tag: '', name: '', category: '', serial_number: '' });
   // Requisition whose Fulfill & Hand Over form is open (AssetFulfillModal).
   const [fulfillFor, setFulfillFor] = useState<Requisition | null>(null);
+  const [historyFor, setHistoryFor] = useState<number | null>(null);
   const [resolvingFor, setResolvingFor] = useState<number | null>(null);
   const [resolveNote, setResolveNote] = useState('');
   const [resolveReplacementId, setResolveReplacementId] = useState('');
@@ -213,7 +215,12 @@ export function AssetManagementAdmin() {
                 </div>
                 <span className="text-xs font-medium px-2 py-1 rounded bg-gray-100 text-gray-700">{r.status}</span>
               </div>
-              <div className="text-xs text-gray-500 mt-1">Requested: {r.created_at} • Urgency: {r.urgency}</div>
+              <div className="text-xs text-gray-500 mt-1">
+                Requested: {r.created_at} • Urgency: {r.urgency} •{' '}
+                <button type="button" onClick={() => setHistoryFor(r.id)} className="font-medium text-blue-600 hover:underline">
+                  History
+                </button>
+              </div>
               {r.status === 'pending' && (
                 <div className="text-xs text-amber-700 mt-1">
                   Waiting on: <span className="font-medium">{r.pending_with || 'no approver configured for this Layer'}</span>
@@ -397,6 +404,9 @@ export function AssetManagementAdmin() {
             </tbody>
           </table>
         </div>
+      )}
+      {historyFor !== null && (
+        <AssetRequisitionHistoryModal token={localStorage.getItem('mpr_token') || ''} requisitionId={historyFor} onClose={() => setHistoryFor(null)} />
       )}
       {fulfillFor && (
         <AssetFulfillModal

@@ -110,6 +110,7 @@ export const memoryDb = {
   // Admin Panel -> Users: access change log + Access Templates
   // (UserManagement.ts) — plain generic tables.
   userAccessAudit: [] as any[],
+  assetRequisitionEvents: [] as any[],
   accessTemplates: [] as any[],
   // Chat/Alerts push notification device tokens (ChatRoutes.ts's POST/DELETE
   // /api/chat/push-token, PushNotificationService.ts's sendPushToUserIds/
@@ -229,7 +230,8 @@ const GENERIC_TABLES: [string, any[]][] = [
   ["vehicles", memoryDb.vehicles],
   ["vehicle_requisitions", memoryDb.vehicleRequisitions],
   ["user_access_audit", memoryDb.userAccessAudit],
-  ["access_templates", memoryDb.accessTemplates]
+  ["access_templates", memoryDb.accessTemplates],
+  ["asset_requisition_events", memoryDb.assetRequisitionEvents]
 ];
 memoryDb.leaveCategories = [{ id: 1, category_key: "custom_earn_leave", label: "Earn Leave", created_by: null, created_at: new Date() }];
 
@@ -3113,6 +3115,15 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
       const row = memoryDb.assets.find((a: any) => a.id === id);
       if (row) row.status = "maintenance";
       return { affectedRows: row ? 1 : 0 };
+    }
+    // Supervisor item edits (AssetManagementRoutes.ts PUT .../items) — plain
+    // "SET a = ?, b = ? WHERE id = ?" updates, same shape the generic
+    // simulator handles.
+    if (lowerSql.startsWith("update asset_requisition_items set")) {
+      return simulateGenericTable("asset_requisition_items", memoryDb.assetRequisitionItems, sql, lowerSql, params);
+    }
+    if (lowerSql.startsWith("update asset_requisitions set asset_category")) {
+      return simulateGenericTable("asset_requisitions", memoryDb.assetRequisitions, sql, lowerSql, params);
     }
     if (lowerSql.startsWith("update asset_requisitions set assigned_asset_id")) {
       const [assigned_asset_id, id] = params;
