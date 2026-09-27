@@ -6,12 +6,13 @@
 // Book a Ride -> "Set On Map": full-screen map with a fixed pin in the
 // centre. The user drags the map until the pin sits on the place they want;
 // the address under the pin is looked up (GET /api/vehicles/places/reverse)
-// each time the map stops moving.
+// each time the map stops moving. A search box on top (GET
+// /api/vehicles/places/search) jumps the map straight to a named place.
 
 import React, { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { ArrowLeft, LocateFixed, MapPin } from 'lucide-react';
+import { ArrowLeft, LocateFixed, MapPin, Search, X } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
 import { Spinner } from './Spinner';
@@ -34,6 +35,13 @@ export function RideMapPicker({ title, start, onLocateMe, onCancel, onConfirm }:
   const [resolving, setResolving] = useState(false);
   const [moving, setMoving] = useState(false);
   const [locating, setLocating] = useState(false);
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<{ label: string; detail?: string; lat: number; lng: number }[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [showResults, setShowResults] = useState(false);
+  // Label of a place picked from search — used instead of a reverse lookup once the map lands there.
+  const pickedLabelRef = useRef<string | null>(null);
 
   useBackButtonClose(true, onCancel);
 
@@ -46,6 +54,7 @@ export function RideMapPicker({ title, start, onLocateMe, onCancel, onConfirm }:
     }).addTo(map);
     L.control.zoom({ position: 'bottomright' }).addTo(map);
     map.on('movestart', () => setMoving(true));
+    map.on('dragstart', () => setShowResults(false));
     map.on('moveend', () => {
       const c = map.getCenter();
       setMoving(false);
@@ -62,6 +71,11 @@ export function RideMapPicker({ title, start, onLocateMe, onCancel, onConfirm }:
 
   // Look up the address under the pin once the map has settled.
   useEffect(() => {
+    if (pickedLabelRef.current) {
+      setLabel(pickedLabelRef.current);
+      pickedLabelRef.current = null;
+      return;
+    }
     const controller = new AbortController();
     const timer = setTimeout(async () => {
       setResolving(true);
@@ -84,6 +98,55 @@ export function RideMapPicker({ title, start, onLocateMe, onCancel, onConfirm }:
       clearTimeout(timer);
     };
   }, [center.lat, center.lng]);
+
+  // Debounced place search.
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 3) {
+      setResults([]);
+      setSearchError(null);
+      return;
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const token = localStorage.getItem('mpr_token');
+        const res = await fetch(apiUrl(`/api/vehicles/places/search?q=${encodeURIComponent(q)}`), {
+          headers: { Authorization: `Bearer ${token}` },
+          signal: controller.signal
+        });
+        const data = await res.json().catch(() => null);
+        if (!res.ok) throw new Error(data?.error || 'Place search failed.');
+        setResults(Array.isArray(data) ? data.filter((p: any) => p.lat != null && p.lng != null) : []);
+        setSearchError(null);
+      } catch (err: any) {
+        if (!controller.signal.aborted) setSearchError(err.message || 'Place search failed.');
+      } finally {
+        if (!controller.signal.aborted) setSearching(false);
+      }
+    }, 450);
+    return () => {
+      controller.abort();
+      clearTimeout(timer);
+    };
+  }, [query]);
+
+  const goTo = (place: { label: string; lat: number; lng: number }) => {
+    setShowResults(false);
+    (document.activeElement as HTMLElement | null)?.blur();
+    setQuery(place.label);
+    const map = mapRef.current;
+    if (!map) return;
+    pickedLabelRef.current = place.label;
+    map.setView([place.lat, place.lng], 17);
+    // setView on the same spot fires no moveend — apply the label directly.
+    const c = map.getCenter();
+    if (Math.abs(c.lat - center.lat) < 1e-7 && Math.abs(c.lng - center.lng) < 1e-7) {
+      setLabel(place.label);
+      pickedLabelRef.current = null;
+    }
+  };
 
   const locate = async () => {
     setLocating(true);
@@ -109,6 +172,55 @@ export function RideMapPicker({ title, start, onLocateMe, onCancel, onConfirm }:
 
       <div className="relative flex-1">
         <div ref={containerRef} className="absolute inset-0" />
+        <div className="absolute left-3 right-16 top-3 z-[600]">
+          <div className="flex items-center gap-2 bg-white rounded-xl shadow-md px-3 py-2.5">
+            <Search className="w-4 h-4 text-slate-400 shrink-0" />
+            <input
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                setShowResults(true);
+              }}
+              onFocus={() => setShowResults(true)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && results[0]) {
+                  e.preventDefault();
+                  goTo(results[0]);
+                }
+              }}
+              placeholder="Search a place"
+              className="flex-1 min-w-0 bg-transparent text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none"
+            />
+            {searching ? (
+              <Spinner size={14} />
+            ) : (
+              query && (
+                <button type="button" onClick={() => { setQuery(''); setResults([]); }} className="p-0.5 text-slate-400 hover:text-slate-600" aria-label="Clear search">
+                  <X className="w-4 h-4" />
+                </button>
+              )
+            )}
+          </div>
+          {showResults && query.trim().length >= 3 && !searching && (
+            <div className="mt-1 bg-white rounded-xl shadow-lg max-h-72 overflow-y-auto divide-y divide-slate-100">
+              {results.map((place, i) => (
+                <button
+                  key={`${place.label}-${i}`}
+                  type="button"
+                  onClick={() => goTo(place)}
+                  className="w-full flex items-start gap-3 px-3 py-2.5 text-left hover:bg-slate-50"
+                >
+                  <MapPin className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
+                  <span className="min-w-0">
+                    <span className="block text-sm text-slate-800 truncate">{place.label}</span>
+                    {place.detail && <span className="block text-[11px] text-slate-400 truncate">{place.detail}</span>}
+                  </span>
+                </button>
+              ))}
+              {results.length === 0 && <div className="px-3 py-2.5 text-sm text-slate-400">{searchError || 'No matching places found.'}</div>}
+            </div>
+          )}
+        </div>
         {/* Fixed centre pin — the map moves underneath it. */}
         <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-full z-[500]">
           <MapPin className={`w-10 h-10 text-red-500 drop-shadow-md transition-transform ${moving ? '-translate-y-2' : ''}`} fill="currentColor" stroke="white" strokeWidth={1.5} />
