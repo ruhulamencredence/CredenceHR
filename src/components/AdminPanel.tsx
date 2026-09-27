@@ -30,6 +30,7 @@ import { GrievanceDisciplinaryPanel } from './GrievanceDisciplinaryPanel';
 import { HRAnalyticsDashboard } from './HRAnalyticsDashboard';
 import { DocumentVaultPanel } from './DocumentVaultPanel';
 import { AdminDashboard } from './AdminDashboard';
+import { UserAccessDrawer, UserAccessChips, userInitials, ROLE_BADGE, ROLE_LABEL } from './UserAccessDrawer';
 import { Spinner } from './Spinner';
 import { apiUrl } from '../lib/api';
 import { formatDate, todayDateOnlyString } from '../lib/formatDate';
@@ -195,6 +196,17 @@ const ReportRow = React.memo(function ReportRow({
 // what's actually rendered, and re-lookups are free — reverseGeocode's own
 // cache (keyed by rounded coordinate) already dedupes accounts sharing a
 // login spot, like an office Wi-Fi gate.
+// User Management quick filter chips.
+const USER_ACCESS_FILTERS: { key: string; label: string; match: (u: User) => boolean }[] = [
+  { key: 'admins', label: 'Admins', match: (u) => u.role === 'admin' },
+  { key: 'no_modules', label: 'No modules', match: (u) => u.role !== 'superadmin' && (u.module_permissions || []).length === 0 },
+  { key: 'attendance', label: 'Attendance on', match: (u) => u.role !== 'superadmin' && !!u.can_use_attendance },
+  { key: 'tracking', label: 'Tracking on', match: (u) => u.role !== 'superadmin' && !!u.can_use_tracking },
+  { key: 'leave_summary', label: 'Leave Summary on', match: (u) => u.role !== 'superadmin' && !!u.can_view_leave_summary },
+  { key: 'job_edit', label: 'Job Edit on', match: (u) => u.role !== 'superadmin' && !!u.can_job_edit },
+  { key: 'never_logged_in', label: 'Never logged in', match: (u) => u.last_login_at == null }
+];
+
 const LastLoginAddress: React.FC<{ lat: number; lng: number; asOf?: string }> = ({ lat, lng, asOf }) => {
   const [address, setAddress] = useState<string | null>(null);
   useEffect(() => {
@@ -824,10 +836,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // dropdown, etc.) still sees the full list.
   const [userSearchText, setUserSearchText] = useState('');
   const [userRoleFilter, setUserRoleFilter] = useState<'all' | 'superadmin' | 'admin' | 'user'>('all');
+  // Quick filter chips above the list (see USER_ACCESS_FILTERS).
+  const [userAccessFilter, setUserAccessFilter] = useState<string>('all');
+  // Account open in the "Manage" side panel (UserAccessDrawer), by id so it
+  // always shows the latest copy from `users`.
+  const [managingUserId, setManagingUserId] = useState<number | null>(null);
   const filteredUsers = useMemo(() => {
     const q = userSearchText.trim().toLowerCase();
+    const accessFilter = USER_ACCESS_FILTERS.find((f) => f.key === userAccessFilter);
     return users.filter((u) => {
       if (userRoleFilter !== 'all' && u.role !== userRoleFilter) return false;
+      if (accessFilter && !accessFilter.match(u)) return false;
       if (!q) return true;
       return (
         u.name.toLowerCase().includes(q) ||
@@ -835,7 +854,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         (u.username || '').toLowerCase().includes(q)
       );
     });
-  }, [users, userSearchText, userRoleFilter]);
+  }, [users, userSearchText, userRoleFilter, userAccessFilter]);
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [permissions, setPermissions] = useState<UserProjectPermission[]>([]);
 
@@ -2612,6 +2631,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to update permission');
+      setUsers((prev) => prev.map((x) => (x.id === userId ? { ...x, [field]: value } : x)));
       fetchAllData();
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message });
@@ -2634,6 +2654,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to update attendance project');
+      setUsers((prev) => prev.map((x) => (x.id === userId ? { ...x, attendance_project_id: projectId } : x)));
       fetchAllData();
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message });
@@ -2652,6 +2673,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to update permission');
+      setUsers((prev) => prev.map((x) => (x.id === userId ? { ...x, can_view_login_location: value } : x)));
       fetchAllData();
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message });
@@ -5434,391 +5456,122 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
               </div>
             </div>
           </div>
-          {(userSearchText || userRoleFilter !== 'all') && (
-            <div className="px-6 py-2 border-b border-slate-100 text-[11px] text-slate-500">
-              Showing {filteredUsers.length} of {users.length} users
-            </div>
-          )}
-          <div className="overflow-x-auto">
-            <table className="w-full divide-y divide-slate-200">
-              {/* Was `sticky top-16 z-10` (to keep column headers visible
-                  while scrolling a long User list, under Navbar's own
-                  sticky top-0 h-16) — removed: `position: sticky` on a
-                  <thead> inside a plain (non-scrolling-container) table
-                  doesn't reliably reserve its own space against the
-                  <tbody> that follows it, so once stuck it painted directly
-                  on top of the table's very first row, hiding it entirely
-                  behind this opaque background (most visible with a
-                  search narrowed to exactly one result — the row was still
-                  there, just invisible underneath the header). A plain
-                  static header has no such conflict. */}
-              <thead className="bg-slate-50 text-slate-500 text-[11px] uppercase tracking-wider">
-                <tr>
-                  <th className="w-24 px-2.5 py-2 text-left">Name</th>
-                  <th className="w-28 px-2.5 py-2 text-left">Login ID</th>
-                  <th className="w-20 px-2.5 py-2 text-left">Role</th>
-                  {canGrantModuleAccess && <th className="w-24 px-2.5 py-2 text-left">Modules</th>}
-                  <th className="w-24 px-2.5 py-2 text-left">Projects</th>
-                  <th className="px-2.5 py-2 text-left">Joined</th>
-                  {canSeeLoginLocation && <th className="w-48 px-2.5 py-2 text-left">Last Login</th>}
-                  {isSuperAdmin && <th className="px-2.5 py-2 text-left">Location</th>}
-                  {isSuperAdmin && <th className="w-24 px-2.5 py-2 text-left">Grants Modules</th>}
-                  <th className="px-2.5 py-2 text-left">Delivery</th>
-                  <th className="px-2.5 py-2 text-left">Job Edit</th>
-                  <th className="px-2.5 py-2 text-left">Attend.</th>
-                  <th className="w-28 px-2.5 py-2 text-left">Attend. Project</th>
-                  <th className="px-2.5 py-2 text-left">Tracking</th>
-                  <th className="px-2.5 py-2 text-left">Leave</th>
-                  <th className="px-2.5 py-2 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-200 text-sm">
-                {filteredUsers.length === 0 ? (
-                  <tr>
-                    <td
-                      colSpan={
-                        3 + (canGrantModuleAccess ? 1 : 0) + 1 + 1 + (canSeeLoginLocation ? 1 : 0) +
-                        (isSuperAdmin ? 1 : 0) + (isSuperAdmin ? 1 : 0) + 1 + 1 + 1 + 1 + 1 + 1 + 1
-                      }
-                      className="px-4 py-8 text-center text-sm text-slate-400"
-                    >
-                      No users match your search.
-                    </td>
-                  </tr>
-                ) : filteredUsers.map((u) => {
-                  const grantedCount = projectIdsForUser(u.id).size;
-                  const grantedModuleCount = (u.module_permissions || []).length;
-                  // Same rule the Actions column (Change Login ID/Reset Password/
-                  // Delete) already applies: a delegated (non-superadmin) Admin
-                  // can only touch a role='user' row, never another 'admin' —
-                  // reused here for the Delivery/Job Edit/Attend./Attend.
-                  // Project/Tracking/Leave toggle cells below, which previously
-                  // had no such gate at all (server-enforced now too, see PUT
-                  // /api/users/:id/feature-permissions in UserManagement.ts).
-                  const canEditFeaturesFor = u.role !== 'superadmin' && (u.role !== 'admin' || isSuperAdmin);
-                  return (
-                  <tr key={u.id} className="hover:bg-slate-50/80 transition-colors">
-                    <td className="px-3 py-3 font-medium text-slate-900 text-xs truncate" title={u.name}>{u.name}</td>
-                    <td className="px-3 py-3 text-slate-600 text-xs truncate" title={u.email || u.username || undefined}>
-                      {u.email || (u.username ? <span className="font-mono">{u.username}</span> : '—')}
-                    </td>
-                    <td className="px-3 py-3">
-                      {u.role === 'superadmin' ? (
-                        <span className="inline-block text-[11px] font-semibold px-2 py-1 rounded-full border bg-rose-50 text-rose-800 border-rose-200 truncate max-w-full">
-                          Superadmin
-                        </span>
-                      ) : isSuperAdmin ? (
-                        <select
-                          value={u.role}
-                          onChange={(e) => handleRoleChange(u.id, e.target.value as 'admin' | 'user')}
-                          className={`text-[11px] font-semibold px-2 py-1 rounded-full border cursor-pointer max-w-full ${
-                            u.role === 'admin'
-                              ? 'bg-amber-50 text-amber-800 border-amber-200'
-                              : 'bg-blue-50 text-blue-800 border-blue-200'
-                          }`}
-                        >
-                          <option value="admin" className="bg-white text-slate-900">Admin</option>
-                          <option value="user" className="bg-white text-slate-900">User</option>
-                        </select>
-                      ) : (
-                        <span className={`inline-block text-[11px] font-semibold px-2 py-1 rounded-full border truncate max-w-full ${
-                          u.role === 'admin'
-                            ? 'bg-amber-50 text-amber-800 border-amber-200'
-                            : 'bg-blue-50 text-blue-800 border-blue-200'
-                        }`}>
-                          {u.role === 'admin' ? 'Admin' : 'User'}
-                        </span>
-                      )}
-                    </td>
-                    {canGrantModuleAccess && (
-                      <td className="px-3 py-3 text-xs">
-                        {u.role === 'superadmin' ? (
-                          <span className="text-slate-400 truncate block">All (Super)</span>
-                        ) : /* A delegated (non-superadmin) Admin with can_grant_module_access can only
-                               ever reach a role='user' target here — an 'admin' row falls through to
-                               the "—" case below for them, same restriction the server enforces on
-                               PUT /api/users/:id/module-permissions. */
-                        u.role === 'user' || (u.role === 'admin' && isSuperAdmin) ? (
-                          <button
-                            type="button"
-                            onClick={() => openManageModules(u)}
-                            className={`flex items-center gap-1 px-2 py-1 rounded-full border font-semibold transition-colors max-w-full truncate ${
-                              grantedModuleCount > 0
-                                ? 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
-                                : 'bg-slate-100 text-slate-500 border-slate-200 hover:bg-slate-200'
-                            }`}
-                          >
-                            <LayoutGrid className="w-3.5 h-3.5 shrink-0" />
-                            <span className="truncate">{grantedModuleCount > 0 ? `${grantedModuleCount} Mod.` : 'Set Access'}</span>
-                          </button>
-                        ) : (
-                          <span className="text-slate-300">—</span>
-                        )}
-                      </td>
-                    )}
-                    <td className="px-3 py-3 text-xs">
-                      {u.role === 'admin' || u.role === 'superadmin' ? (
-                        <span className="text-slate-400 truncate block">All (Admin)</span>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => openManageProjects(u)}
-                          className={`flex items-center gap-1 px-2 py-1 rounded-full border font-semibold transition-colors max-w-full truncate ${
-                            grantedCount > 0
-                              ? 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
-                              : 'bg-slate-100 text-slate-500 border-slate-200 hover:bg-slate-200'
-                          }`}
-                        >
-                          <KeyRound className="w-3.5 h-3.5 shrink-0" />
-                          <span className="truncate">{grantedCount > 0 ? `${grantedCount} Proj.` : 'Set Access'}</span>
-                        </button>
-                      )}
-                    </td>
-                    <td className="px-3 py-3 whitespace-nowrap text-slate-500 text-xs">
-                      {u.created_at ? formatDate(u.created_at) : 'N/A'}
-                    </td>
-                    {canSeeLoginLocation && (
-                      <td className="px-3 py-3 text-xs">
-                        {u.last_login_lat != null && u.last_login_lng != null ? (
-                          <LastLoginAddress
-                            lat={Number(u.last_login_lat)}
-                            lng={Number(u.last_login_lng)}
-                            asOf={u.last_login_at || undefined}
-                          />
-                        ) : (
-                          <span className="text-slate-400">No login yet</span>
-                        )}
-                      </td>
-                    )}
-                    {isSuperAdmin && (
-                      <td className="px-3 py-3 whitespace-nowrap text-xs">
-                        {u.role === 'admin' ? (
-                          <button
-                            type="button"
-                            onClick={() => handleLoginLocationAccessToggle(u.id, !u.can_view_login_location)}
-                            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                              u.can_view_login_location ? 'bg-emerald-500' : 'bg-slate-300'
-                            }`}
-                            title={
-                              u.can_view_login_location
-                                ? 'Can see Last Login Location — click to revoke'
-                                : 'Cannot see Last Login Location — click to grant'
-                            }
-                          >
-                            <span
-                              className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                                u.can_view_login_location ? 'translate-x-[18px]' : 'translate-x-1'
-                              }`}
-                            />
-                          </button>
-                        ) : (
-                          <span className="text-slate-300">—</span>
-                        )}
-                      </td>
-                    )}
-                    {isSuperAdmin && (
-                      <td className="px-3 py-3 whitespace-nowrap text-xs">
-                        {u.role === 'admin' ? (
-                          <button
-                            type="button"
-                            onClick={() => handleFeaturePermissionToggle(u.id, 'can_grant_module_access', !u.can_grant_module_access)}
-                            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                              u.can_grant_module_access ? 'bg-emerald-500' : 'bg-slate-300'
-                            }`}
-                            title={
-                              u.can_grant_module_access
-                                ? "Can set OTHER Users' Module Access (never another Admin's) — click to revoke"
-                                : "Can't set Module Access for anyone — click to grant"
-                            }
-                          >
-                            <span
-                              className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                                u.can_grant_module_access ? 'translate-x-[18px]' : 'translate-x-1'
-                              }`}
-                            />
-                          </button>
-                        ) : (
-                          <span className="text-slate-300">—</span>
-                        )}
-                      </td>
-                    )}
-                    <td className="px-3 py-3 whitespace-nowrap text-xs">
-                      {canEditFeaturesFor ? (
-                        <button
-                          type="button"
-                          onClick={() => handleFeaturePermissionToggle(u.id, 'can_edit_delivery_date', !(u.can_edit_delivery_date ?? true))}
-                          className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                            (u.can_edit_delivery_date ?? true) ? 'bg-emerald-500' : 'bg-slate-300'
-                          }`}
-                          title={(u.can_edit_delivery_date ?? true) ? 'On — click to turn off' : 'Off — click to turn on'}
-                        >
-                          <span
-                            className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                              (u.can_edit_delivery_date ?? true) ? 'translate-x-[18px]' : 'translate-x-1'
-                            }`}
-                          />
-                        </button>
-                      ) : (
-                        <span className="text-slate-300">—</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-3 whitespace-nowrap text-xs">
-                      {canEditFeaturesFor ? (
-                        <button
-                          type="button"
-                          onClick={() => handleFeaturePermissionToggle(u.id, 'can_job_edit', !u.can_job_edit)}
-                          className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                            u.can_job_edit ? 'bg-emerald-500' : 'bg-slate-300'
-                          }`}
-                          title={u.can_job_edit ? 'On — click to turn off' : 'Off — click to turn on'}
-                        >
-                          <span
-                            className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                              u.can_job_edit ? 'translate-x-[18px]' : 'translate-x-1'
-                            }`}
-                          />
-                        </button>
-                      ) : (
-                        <span className="text-slate-300">—</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-3 whitespace-nowrap text-xs">
-                      {!canEditFeaturesFor ? (
-                        <span className="text-slate-300">—</span>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => handleFeaturePermissionToggle(u.id, 'can_use_attendance', !u.can_use_attendance)}
-                          className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                            u.can_use_attendance ? 'bg-emerald-500' : 'bg-slate-300'
-                          }`}
-                          title={
-                            u.can_use_attendance
-                              ? 'Sees Remote Attendance on their Dashboard — click to revoke'
-                              : "Doesn't see Remote Attendance on their Dashboard — click to grant"
-                          }
-                        >
-                          <span
-                            className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                              u.can_use_attendance ? 'translate-x-[18px]' : 'translate-x-1'
-                            }`}
-                          />
-                        </button>
-                      )}
-                    </td>
-                    <td className="px-3 py-3 whitespace-nowrap text-xs">
-                      {!canEditFeaturesFor ? (
-                        <span className="text-slate-300">—</span>
-                      ) : (
-                        <select
-                          value={u.attendance_project_id ?? ''}
-                          onChange={(e) =>
-                            handleAttendanceProjectChange(u.id, e.target.value ? Number(e.target.value) : null)
-                          }
-                          disabled={!u.can_use_attendance}
-                          title={
-                            u.can_use_attendance
-                              ? 'Locks this account to one Project for Remote Attendance — leave unset for no restriction. Budget/Jobs/MPR project selection is unaffected.'
-                              : 'Grant Remote Attendance first to pin a Project.'
-                          }
-                          className="w-full text-xs px-2 py-1.5 bg-white border border-slate-200 rounded-lg disabled:bg-slate-50 disabled:text-slate-300 focus:ring-2 focus:ring-blue-600 focus:outline-none"
-                        >
-                          <option value="">Unrestricted</option>
-                          {projects.map((p) => (
-                            <option key={p.id} value={p.id}>{p.project_name}</option>
-                          ))}
-                        </select>
-                      )}
-                    </td>
-                    <td className="px-3 py-3 whitespace-nowrap text-xs">
-                      {!canEditFeaturesFor ? (
-                        <span className="text-slate-300">—</span>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => handleFeaturePermissionToggle(u.id, 'can_use_tracking', !u.can_use_tracking)}
-                          className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                            u.can_use_tracking ? 'bg-emerald-500' : 'bg-slate-300'
-                          }`}
-                          title={
-                            u.can_use_tracking
-                              ? "Their APK reports live location — click to revoke"
-                              : "Their APK doesn't report location — click to grant"
-                          }
-                        >
-                          <span
-                            className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                              u.can_use_tracking ? 'translate-x-[18px]' : 'translate-x-1'
-                            }`}
-                          />
-                        </button>
-                      )}
-                    </td>
-                    <td className="px-3 py-3 whitespace-nowrap text-xs">
-                      {!canEditFeaturesFor ? (
-                        <span className="text-slate-300">—</span>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => handleFeaturePermissionToggle(u.id, 'can_view_leave_summary', !u.can_view_leave_summary)}
-                          className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                            u.can_view_leave_summary ? 'bg-emerald-500' : 'bg-slate-300'
-                          }`}
-                          title={
-                            u.can_view_leave_summary
-                              ? 'Sees Leave Summary on their Dashboard — click to revoke'
-                              : "Doesn't see Leave Summary on their Dashboard — click to grant"
-                          }
-                        >
-                          <span
-                            className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                              u.can_view_leave_summary ? 'translate-x-[18px]' : 'translate-x-1'
-                            }`}
-                          />
-                        </button>
-                      )}
-                    </td>
-                    <td className="px-3 py-3 whitespace-nowrap text-right text-xs">
-                      {u.role !== 'superadmin' && (u.role !== 'admin' || isSuperAdmin) && (
-                        <button
-                          onClick={() => {
-                            setNewEmailInput(u.email || '');
-                            setChangingEmailFor(u);
-                          }}
-                          className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                          title="Change Login ID (email)"
-                        >
-                          <Mail className="w-4 h-4" />
-                        </button>
-                      )}
-                      {u.role !== 'superadmin' && (u.role !== 'admin' || isSuperAdmin) && (
-                        <button
-                          onClick={() => {
-                            setNewPasswordInput('');
-                            setResettingPasswordFor(u);
-                          }}
-                          className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                          title="Reset password"
-                        >
-                          <Lock className="w-4 h-4" />
-                        </button>
-                      )}
-                      {u.role !== 'superadmin' && (u.role !== 'admin' || isSuperAdmin) && (
-                        <button
-                          onClick={() => handleDeleteUser(u.id)}
-                          className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
-                          title="Delete user"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          {/* Quick filters — one tap narrows the list to accounts with a given
+              switch on (counts are for the whole list, not the current search). */}
+          <div className="px-6 py-3 border-b border-slate-100 flex flex-wrap items-center gap-1.5">
+            {USER_ACCESS_FILTERS.map((f) => {
+              const count = users.filter(f.match).length;
+              const active = userAccessFilter === f.key;
+              return (
+                <button
+                  key={f.key}
+                  type="button"
+                  onClick={() => setUserAccessFilter(active ? 'all' : f.key)}
+                  className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border transition-colors ${
+                    active ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                  }`}
+                >
+                  {f.label} <span className={active ? 'text-white/80' : 'text-slate-400'}>{count}</span>
+                </button>
+              );
+            })}
+            {(userSearchText || userRoleFilter !== 'all' || userAccessFilter !== 'all') && (
+              <span className="ml-auto text-[11px] text-slate-500">
+                Showing {filteredUsers.length} of {users.length} users
+              </span>
+            )}
           </div>
+
+          {/* Simple list: who, role, what they can access at a glance, last
+              login. Every switch lives in the "Manage" side panel
+              (UserAccessDrawer) with a plain-language description. */}
+          {filteredUsers.length === 0 ? (
+            <div className="px-4 py-10 text-center text-sm text-slate-400">No users match your search.</div>
+          ) : (
+            <>
+              <table className="hidden md:table w-full divide-y divide-slate-200">
+                <thead className="bg-slate-50 text-slate-500 text-[11px] uppercase tracking-wider">
+                  <tr>
+                    <th className="px-5 py-2.5 text-left">User</th>
+                    <th className="px-3 py-2.5 text-left w-28">Role</th>
+                    <th className="px-3 py-2.5 text-left">Access</th>
+                    {canSeeLoginLocation && <th className="px-3 py-2.5 text-left w-56">Last Login</th>}
+                    <th className="px-5 py-2.5 text-right w-28"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-sm">
+                  {filteredUsers.map((u) => (
+                    <tr key={u.id} onClick={() => setManagingUserId(u.id)} className="hover:bg-slate-50/80 transition-colors cursor-pointer">
+                      <td className="px-5 py-3">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0" style={{ background: 'var(--g-gradient)' }}>
+                            {userInitials(u.name)}
+                          </div>
+                          <div className="min-w-0">
+                            <div className="font-semibold text-slate-900 truncate">{u.name}</div>
+                            <div className="text-xs text-slate-500 truncate">{u.email || (u.username ? <span className="font-mono">{u.username}</span> : '—')}</div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-3 py-3">
+                        <span className={`inline-block text-[11px] font-semibold px-2 py-0.5 rounded-full border ${ROLE_BADGE[u.role]}`}>{ROLE_LABEL[u.role]}</span>
+                      </td>
+                      <td className="px-3 py-3">
+                        <UserAccessChips u={u} projectCount={projectIdsForUser(u.id).size} />
+                      </td>
+                      {canSeeLoginLocation && (
+                        <td className="px-3 py-3 text-xs" onClick={(e) => e.stopPropagation()}>
+                          {u.last_login_lat != null && u.last_login_lng != null ? (
+                            <LastLoginAddress lat={Number(u.last_login_lat)} lng={Number(u.last_login_lng)} asOf={u.last_login_at || undefined} />
+                          ) : (
+                            <span className="text-slate-400">No login yet</span>
+                          )}
+                        </td>
+                      )}
+                      <td className="px-5 py-3 text-right">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setManagingUserId(u.id);
+                          }}
+                          className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 text-slate-700 hover:bg-white hover:border-blue-300 hover:text-blue-700 transition-colors"
+                        >
+                          Manage
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              {/* Phone: one card per user instead of a wide table. */}
+              <div className="md:hidden divide-y divide-slate-100">
+                {filteredUsers.map((u) => (
+                  <button
+                    key={u.id}
+                    type="button"
+                    onClick={() => setManagingUserId(u.id)}
+                    className="w-full text-left px-4 py-3 flex items-start gap-3 active:bg-slate-50"
+                  >
+                    <div className="w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0" style={{ background: 'var(--g-gradient)' }}>
+                      {userInitials(u.name)}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-semibold text-sm text-slate-900 truncate">{u.name}</span>
+                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border shrink-0 ${ROLE_BADGE[u.role]}`}>{ROLE_LABEL[u.role]}</span>
+                      </div>
+                      <div className="text-xs text-slate-500 truncate">{u.email || u.username || '—'}</div>
+                      <div className="mt-1.5">
+                        <UserAccessChips u={u} projectCount={projectIdsForUser(u.id).size} />
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
           </div>
         </div>
       )}
@@ -6535,6 +6288,47 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
 
       {/* Module Access modal — Superadmin sets which Admin Panel tabs a given Admin
           may open (projects, mprs, imports, reports, users, recycle, editlog). */}
+      {managingUserId != null &&
+        (() => {
+          const mu = users.find((x) => x.id === managingUserId);
+          if (!mu) return null;
+          return (
+            <UserAccessDrawer
+              u={mu}
+              isSuperAdmin={isSuperAdmin}
+              canGrantModuleAccess={canGrantModuleAccess}
+              canSeeLoginLocation={canSeeLoginLocation}
+              projectCount={projectIdsForUser(mu.id).size}
+              projects={projects}
+              lastLogin={
+                mu.last_login_lat != null && mu.last_login_lng != null ? (
+                  <LastLoginAddress lat={Number(mu.last_login_lat)} lng={Number(mu.last_login_lng)} asOf={mu.last_login_at || undefined} />
+                ) : (
+                  <span className="text-slate-400">No login yet</span>
+                )
+              }
+              onClose={() => setManagingUserId(null)}
+              onToggleFeature={(field, value) => handleFeaturePermissionToggle(mu.id, field, value)}
+              onToggleLoginLocation={(value) => handleLoginLocationAccessToggle(mu.id, value)}
+              onAttendanceProject={(projectId) => handleAttendanceProjectChange(mu.id, projectId)}
+              onRoleChange={(role) => handleRoleChange(mu.id, role)}
+              onOpenModules={() => openManageModules(mu)}
+              onOpenProjects={() => openManageProjects(mu)}
+              onChangeLoginId={() => {
+                setNewEmailInput(mu.email || '');
+                setChangingEmailFor(mu);
+              }}
+              onResetPassword={() => {
+                setNewPasswordInput('');
+                setResettingPasswordFor(mu);
+              }}
+              onDelete={async () => {
+                await handleDeleteUser(mu.id);
+              }}
+            />
+          );
+        })()}
+
       {managingModulesFor && (
         <div
           className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4"
