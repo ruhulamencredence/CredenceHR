@@ -50,7 +50,7 @@ const MODULE_ACCESS_GROUPS: { label: string; keys: AdminModuleKey[] }[] = [
   { label: 'HR', keys: ['approvals', 'notices', 'holidays', 'leave_applications', 'departments'] },
   { label: 'HR - Attendance', keys: ['attendance', 'attendance_reports', 'office_attendance'] },
   { label: 'HR - Claims/Bill/Disbursement', keys: ['claims', 'conveyance', 'disbursement'] },
-  { label: 'HR - Employee', keys: ['employees', 'tracking', 'asset_management', 'vehicle_management'] },
+  { label: 'HR - Employee', keys: ['employees', 'tracking', 'asset_management', 'vehicle_management', 'vehicle_maintainer'] },
   { label: 'MIS', keys: ['users', 'projects', 'branches'] },
   { label: 'Payroll', keys: ['payroll'] },
   {
@@ -61,7 +61,7 @@ const MODULE_ACCESS_GROUPS: { label: string; keys: AdminModuleKey[] }[] = [
         'approvals', 'notices', 'holidays', 'leave_applications', 'departments',
         'attendance', 'attendance_reports', 'office_attendance',
         'claims', 'conveyance', 'disbursement',
-        'employees', 'tracking', 'asset_management', 'vehicle_management',
+        'employees', 'tracking', 'asset_management', 'vehicle_management', 'vehicle_maintainer',
         'users', 'projects', 'branches',
         'payroll',
       ].includes(key)

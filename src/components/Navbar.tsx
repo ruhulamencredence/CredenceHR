@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { User } from '../types';
-import { Shield, LogOut, Smartphone, Search, X } from 'lucide-react';
+import { Shield, LogOut, Search, X, Calendar } from 'lucide-react';
 import credenceLogo from '../assets/credence-logo.png';
 import { AlertsBell } from './AlertsBell';
 import { ChatBell } from './ChatBell';
@@ -136,6 +136,21 @@ export const Navbar: React.FC<NavbarProps> = ({
   // solid header either way.
   const isNativeApp = Capacitor.isNativePlatform();
   const transparentHeader = isNativeApp;
+
+  // Today's Date & Day — web header only (see the "hidden md:flex" wrapper
+  // below), same dd-MMM-yyyy convention as formatDate.ts elsewhere in the
+  // app, prefixed with the short weekday name. Re-reads the clock once a
+  // minute (not every render) so it silently rolls over to the next day
+  // around midnight without anyone needing to refresh the page.
+  const [today, setToday] = useState(() => new Date());
+  useEffect(() => {
+    const interval = setInterval(() => setToday(new Date()), 60_000);
+    return () => clearInterval(interval);
+  }, []);
+  const todayLabel = today.toLocaleDateString('en-US', { weekday: 'short' }) + ', ' +
+    String(today.getDate()).padStart(2, '0') + '-' +
+    ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][today.getMonth()] + '-' +
+    today.getFullYear();
 
   // Whichever page is showing may have docked its own search box into this
   // header (see headerSearch.ts) — while that page's own search bar has
@@ -350,14 +365,24 @@ export const Navbar: React.FC<NavbarProps> = ({
               above and onGoToBudgetTab/onGoToManageTab/onGoToWorkforceTab in
               App.tsx, which switch viewMode to 'admin' themselves). */}
 
-          <button
-            onClick={onOpenApkInfo}
-            className="hidden md:flex items-center justify-center w-9 h-9 rounded-full transition-colors hover:opacity-70"
-            style={{ color: 'var(--g-text-muted)' }}
-            title="Android APK Build Instructions"
-          >
-            <Smartphone className="w-[18px] h-[18px]" />
-          </button>
+          {/* Android APK Build Instructions button removed from the header
+              (per request) — onOpenApkInfo/onOpenApkInfo prop is left wired
+              in App.tsx in case another entry point still needs it. */}
+
+          {/* Today's Date & Day — web header only, hidden on the native
+              Android APK (transparentHeader's own purple gradient header
+              already has less room, and the mobile page-title/date isn't
+              needed there the way it is on a wide desktop browser tab). */}
+          {!isNativeApp && (
+            <div
+              className={`hidden md:flex items-center gap-1 shrink-0 ${showMobilePageTitle ? 'md:hidden lg:flex' : ''}`}
+              style={{ color: 'var(--g-text-muted)' }}
+              title="Today"
+            >
+              <Calendar className="w-[16px] h-[16px]" />
+              <span className="text-xs font-medium whitespace-nowrap">{todayLabel}</span>
+            </div>
+          )}
 
           {/* Live weather — free (no API key, no permission prompt of its
               own), shown on both the mobile and web header since this

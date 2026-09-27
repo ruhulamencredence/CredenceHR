@@ -3,7 +3,7 @@ export type UserRole = 'superadmin' | 'admin' | 'user';
 // Every Admin Panel tab. A Superadmin implicitly has all of these; a plain Admin
 // only sees/uses the ones the Superadmin has explicitly granted via
 // PUT /api/users/:id/module-permissions. Mirrors ADMIN_MODULE_KEYS in server.ts.
-export type AdminModuleKey = 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'recycle' | 'editlog' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'disbursement' | 'employees' | 'departments' | 'tracking' | 'office_attendance' | 'holidays' | 'payroll' | 'asset_management' | 'vehicle_management' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'admin_dashboard';
+export type AdminModuleKey = 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'recycle' | 'editlog' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'disbursement' | 'employees' | 'departments' | 'tracking' | 'office_attendance' | 'holidays' | 'payroll' | 'asset_management' | 'vehicle_management' | 'vehicle_maintainer' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'admin_dashboard';
 
 export const ADMIN_MODULES: { key: AdminModuleKey; label: string }[] = [
   // Every role==='admin'|'superadmin' account already gets this as their own
@@ -40,6 +40,14 @@ export const ADMIN_MODULES: { key: AdminModuleKey; label: string }[] = [
   { key: 'payroll', label: 'Payroll' },
   { key: 'asset_management', label: 'Asset Management' },
   { key: 'vehicle_management', label: 'Vehicle Management' },
+  // Separate from 'vehicle_management' above — only unlocks Book a Ride's
+  // "Direct Book" bypass tab (VehicleManagement.tsx): book+confirm a ride for
+  // any employee, or push an existing request straight to Assigned, without
+  // going through the Approval Workflow. Meant for whoever actually keeps
+  // the vehicles running day to day, even if they don't hold full Vehicle
+  // Management Admin Panel access. See VehicleManagementRoutes.ts's
+  // POST .../direct-book / PUT .../:id/direct-assign.
+  { key: 'vehicle_maintainer', label: 'Vehicle Maintainer (Ride Bypass)' },
   { key: 'recycle', label: 'Job Recycle' },
   { key: 'editlog', label: 'MPR Edit Log' },
   { key: 'exit_offboarding', label: 'Exit / Offboarding' },

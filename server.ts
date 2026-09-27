@@ -2232,7 +2232,14 @@ async function ensureSchemaMigrations() {
 // of truth here and mirrored in src/types.ts (ADMIN_MODULES) for the UI.
 const USER_CLAIM_CATEGORIES = ["Transport", "Fuel", "Toll", "Parking", "Others"] as const;
 
-const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports", "users", "attendance", "attendance_reports", "leave_applications", "recycle", "editlog", "notices", "claims", "approvals", "conveyance", "disbursement", "employees", "departments", "tracking", "office_attendance", "holidays", "payroll", "asset_management", "vehicle_management", "exit_offboarding", "performance_management", "recruitment", "grievance_disciplinary", "hr_analytics", "document_vault", "admin_dashboard"] as const;
+// 'vehicle_maintainer' — deliberately separate from 'vehicle_management':
+// grants ONLY the Vehicle Requisition bypass actions in
+// VehicleManagementRoutes.ts (POST .../direct-book, PUT .../:id/direct-assign)
+// so a Superadmin can hand this out to whoever actually keeps the vehicles
+// running day-to-day without also giving them the full Admin Panel ->
+// Vehicle Management tab (fleet CRUD, the Approval Workflow's own queue,
+// etc.). See the two routes' own comments for what the bypass does.
+const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports", "users", "attendance", "attendance_reports", "leave_applications", "recycle", "editlog", "notices", "claims", "approvals", "conveyance", "disbursement", "employees", "departments", "tracking", "office_attendance", "holidays", "payroll", "asset_management", "vehicle_management", "vehicle_maintainer", "exit_offboarding", "performance_management", "recruitment", "grievance_disciplinary", "hr_analytics", "document_vault", "admin_dashboard"] as const;
 
 // Granular per-module action layers — mirrors PermissionLayerKey/
 // PERMISSION_LAYERS in src/types.ts (single source of truth is duplicated
