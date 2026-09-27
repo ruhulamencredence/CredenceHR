@@ -143,36 +143,17 @@ export function LiveRideMap({ requisitionId, onClose }: LiveRideMapProps) {
       L.marker(p.pos, { icon: p.icon }).addTo(layer).bindPopup(popup);
     });
 
-    const controller = new AbortController();
     if (points.length === 2) {
-      // OSRM's free public routing server — road-based route line between
-      // the two live points, refreshed on every poll. No API key needed,
-      // same "no Google Maps key" setup as the rest of this project.
+      // A plain straight line between the two live points — no external
+      // routing call, so no third-party data leak, no extra network/battery
+      // cost on every 15s poll, and no per-request server to run or pay for.
       const [a, b] = points;
-      fetch(`https://router.project-osrm.org/route/v1/driving/${a.pos[1]},${a.pos[0]};${b.pos[1]},${b.pos[0]}?overview=full&geometries=geojson`, {
-        signal: controller.signal
-      })
-        .then((r) => r.json())
-        .then((json) => {
-          const coords = json?.routes?.[0]?.geometry?.coordinates;
-          if (Array.isArray(coords) && !controller.signal.aborted) {
-            const latlngs = coords.map((c: [number, number]) => [c[1], c[0]] as [number, number]);
-            L.polyline(latlngs, { color: '#7F00FF', weight: 4, opacity: 0.75 }).addTo(layer);
-          }
-        })
-        .catch(() => {
-          if (controller.signal.aborted) return;
-          // Routing is a nice-to-have — if OSRM is unreachable (e.g. no
-          // internet egress from this deployment) just fall back to a
-          // straight line so the two positions are still connected visually.
-          L.polyline([a.pos, b.pos], { color: '#7F00FF', weight: 3, opacity: 0.6, dashArray: '6 6' }).addTo(layer);
-        });
+      L.polyline([a.pos, b.pos], { color: '#7F00FF', weight: 3, opacity: 0.7, dashArray: '6 6' }).addTo(layer);
     }
 
     if (points.length > 0) {
       map.fitBounds(L.latLngBounds(points.map((p) => p.pos)), { padding: [50, 50], maxZoom: 16 });
     }
-    return () => controller.abort();
   }, [data]);
 
   return (
