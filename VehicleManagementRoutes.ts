@@ -259,10 +259,10 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
     const driverRows: any = await queryDB("SELECT id, name FROM users WHERE id = ?", [driverUserId]);
     const driverUser = driverRows[0];
     if (!driverUser) throw new Error("That driver's account was not found.");
-    // employees.user_id -> employees row is how EmployeeDirectoryRoutes.ts
-    // links a login account to its contact number(s); mobile/phone/telephone
-    // are all optional there, so fall back through them for a display number.
-    const employeeRows: any = await queryDB("SELECT mobile, phone, telephone FROM employees WHERE user_id = ?", [driverUserId]);
+    // all_employees.user_id is how EmployeeDirectoryRoutes.ts links a login
+    // account to its contact number(s); mobile/phone/telephone are all
+    // optional there, so fall back through them for a display number.
+    const employeeRows: any = await queryDB("SELECT * FROM all_employees WHERE user_id = ?", [driverUserId]);
     const employeeRow = employeeRows[0] || {};
     const driverMobile = employeeRow.mobile || employeeRow.phone || employeeRow.telephone || "";
 
