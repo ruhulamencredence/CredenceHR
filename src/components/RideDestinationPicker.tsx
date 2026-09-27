@@ -12,9 +12,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { Geolocation } from '@capacitor/geolocation';
-import { Armchair, MapPin, History, Search, PencilLine, LocateFixed, X } from 'lucide-react';
+import { Armchair, MapPin, MapPinned, History, Search, PencilLine, LocateFixed, X } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
+import { RideMapPicker } from './RideMapPicker';
 
 export interface RidePlaces {
   pickup_location: string;
@@ -72,12 +73,26 @@ export function RideDestinationPicker({ initial, onDone }: RideDestinationPicker
   const [searchError, setSearchError] = useState<string | null>(null);
   const [recent, setRecent] = useState<Place[]>([]);
   const [message, setMessage] = useState<string | null>(null);
+  const [pickupCoords, setPickupCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [showMap, setShowMap] = useState(false);
   const destinationRef = useRef<HTMLInputElement | null>(null);
+
+  const locateCoords = async (): Promise<{ lat: number; lng: number } | null> => {
+    try {
+      const { latitude, longitude } = await getCurrentCoords();
+      const here = { lat: latitude, lng: longitude };
+      setPickupCoords(here);
+      return here;
+    } catch {
+      return null;
+    }
+  };
 
   const locate = async () => {
     setLocating(true);
     try {
       const { latitude, longitude } = await getCurrentCoords();
+      setPickupCoords({ lat: latitude, lng: longitude });
       const res = await fetch(apiUrl(`/api/vehicles/places/reverse?lat=${latitude}&lng=${longitude}`), { headers: authHeaders() });
       const data = await res.json().catch(() => null);
       setPickup(data?.label || `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`);
@@ -211,20 +226,42 @@ export function RideDestinationPicker({ initial, onDone }: RideDestinationPicker
         </div>
       </div>
 
-      <button
-        type="button"
-        onClick={() => {
-          if (!query.trim()) {
-            destinationRef.current?.focus();
-            setMessage('Type the destination address first.');
-            return;
-          }
-          choose({ label: query.trim(), lat: null, lng: null });
-        }}
-        className="mt-4 w-full flex items-center justify-center gap-2 py-3 rounded-xl border border-slate-200 text-sm font-medium text-slate-700 hover:bg-slate-50"
-      >
-        <PencilLine className="w-4 h-4" /> Use the address as typed
-      </button>
+      <div className="mt-4 grid grid-cols-2 rounded-xl border border-slate-200 divide-x divide-slate-200 overflow-hidden">
+        <button
+          type="button"
+          onClick={() => {
+            if (!query.trim()) {
+              destinationRef.current?.focus();
+              setMessage('Type the destination address first.');
+              return;
+            }
+            choose({ label: query.trim(), lat: null, lng: null });
+          }}
+          className="flex items-center justify-center gap-2 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
+        >
+          <PencilLine className="w-4 h-4" /> Use as typed
+        </button>
+        <button
+          type="button"
+          onClick={() => setShowMap(true)}
+          className="flex items-center justify-center gap-2 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50"
+        >
+          <MapPinned className="w-4 h-4 text-red-500" /> Set On Map
+        </button>
+      </div>
+
+      {showMap && (
+        <RideMapPicker
+          title="Choose destination"
+          start={pickupCoords}
+          onLocateMe={locateCoords}
+          onCancel={() => setShowMap(false)}
+          onConfirm={(place) => {
+            setShowMap(false);
+            choose(place);
+          }}
+        />
+      )}
     </div>
   );
 }
