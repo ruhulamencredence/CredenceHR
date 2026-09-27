@@ -2769,6 +2769,10 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
             condition_on_assign: asg.condition_on_assign,
             acknowledged_at: asg.acknowledged_at,
             return_requested_at: asg.return_requested_at,
+            quantity: asg.quantity ?? null,
+            unit: asg.unit ?? null,
+            handover_note: asg.handover_note ?? null,
+            requisition_id: asg.requisition_id ?? null,
             asset_id: asset ? asset.id : null,
             asset_tag: asset ? asset.asset_tag : null,
             name: asset ? asset.name : null,
@@ -2830,6 +2834,16 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
         created_at: new Date()
       });
       return { insertId: newId };
+    }
+    if (lowerSql.startsWith("update asset_assignments set quantity")) {
+      const [quantity, unit, handover_note, id] = params;
+      const row = memoryDb.assetAssignments.find((asg: any) => asg.id === Number(id));
+      if (row) Object.assign(row, { quantity: Number(quantity), unit, handover_note });
+      return { affectedRows: row ? 1 : 0 };
+    }
+    if (lowerSql.startsWith("select * from asset_assignments where requisition_id")) {
+      const requisitionId = Number(params[0]);
+      return memoryDb.assetAssignments.filter((asg: any) => Number(asg.requisition_id) === requisitionId);
     }
     if (lowerSql.startsWith("update asset_assignments set asset_id")) {
       const [asset_id, id] = params;

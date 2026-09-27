@@ -31,6 +31,7 @@ import {
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
 import { NewAssetRequisitionModal } from './NewAssetRequisitionModal';
+import { AssetFulfillModal } from './AssetFulfillModal';
 import { useWideWeb } from '../lib/useWideWeb';
 import { takeQuickAccessTab } from '../lib/quickAccess';
 
@@ -53,7 +54,14 @@ interface AssignedAsset {
   acknowledged_at: string | null;
   return_requested_at: string | null;
   pending_claim: PendingClaim | null;
+  // Set when the item came through the typed Fulfill & Hand Over form.
+  quantity?: number | string | null;
+  unit?: string | null;
+  handover_note?: string | null;
 }
+
+// "5 reams" — only shown for items handed over with a quantity.
+const qtyLabel = (a: AssignedAsset) => (a.quantity != null && a.quantity !== '' ? `${Number(a.quantity)} ${a.unit || 'pcs'}` : null);
 
 const ISSUE_TYPE_LABEL: Record<PendingClaim['issue_type'], string> = {
   mismatch: 'Wrong item (doesn’t match requisition)',
@@ -124,13 +132,6 @@ const RequisitionStatusBadge: React.FC<{ status: Requisition['status'] }> = ({ s
   );
 };
 
-interface AvailableAsset {
-  id: number;
-  asset_tag: string;
-  name: string;
-  category: string;
-}
-
 function authHeaders(): HeadersInit {
   const token = localStorage.getItem('mpr_token');
   return { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
@@ -168,9 +169,8 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
   // requisition's Approval Workflow. See GET
   // /api/assets/requisitions/awaiting-my-fulfillment.
   const [awaitingFulfillment, setAwaitingFulfillment] = useState<Requisition[]>([]);
-  const [availableAssets, setAvailableAssets] = useState<AvailableAsset[]>([]);
-  const [fulfillingFor, setFulfillingFor] = useState<number | null>(null);
-  const [fulfillAssetId, setFulfillAssetId] = useState('');
+  // Requisition whose Fulfill & Hand Over form is open (AssetFulfillModal).
+  const [fulfillingFor, setFulfillingFor] = useState<Requisition | null>(null);
 
   // "+ New Requisition" — popup button next to the page title (same
   // "+ Add New" treatment as Leave Application), opening
@@ -231,16 +231,10 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
       setError(null);
     }
     try {
-      const [reqRes, assetRes] = await Promise.all([
-        fetch(apiUrl('/api/assets/requisitions/awaiting-my-fulfillment'), { headers: authHeaders() }),
-        fetch(apiUrl('/api/assets/available'), { headers: authHeaders() })
-      ]);
+      const reqRes = await fetch(apiUrl('/api/assets/requisitions/awaiting-my-fulfillment'), { headers: authHeaders() });
       const reqData = await reqRes.json();
-      const assetData = await assetRes.json();
       if (!reqRes.ok) throw new Error(reqData.error || 'Failed to load requests awaiting fulfillment.');
-      if (!assetRes.ok) throw new Error(assetData.error || 'Failed to load available assets.');
       setAwaitingFulfillment(reqData);
-      setAvailableAssets(assetData);
     } catch (err: any) {
       if (!silent) setError(err.message);
     } finally {
@@ -309,24 +303,6 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
       setError(err.message);
     } finally {
       setReportingSubmitting(false);
-    }
-  }
-
-  async function fulfillRequisition(id: number) {
-    if (!fulfillAssetId) return;
-    try {
-      const res = await fetch(apiUrl(`/api/assets/requisitions/${id}/fulfill`), {
-        method: 'POST',
-        headers: authHeaders(),
-        body: JSON.stringify({ asset_id: Number(fulfillAssetId) })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Could not fulfill this request.');
-      setFulfillingFor(null);
-      setFulfillAssetId('');
-      loadAwaitingFulfillment();
-    } catch (err: any) {
-      setError(err.message);
     }
   }
 
@@ -531,7 +507,11 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
                           <div className="font-semibold text-slate-800 truncate" title={a.name}>
                             {a.name}
                           </div>
-                          <div className="text-xs text-slate-500 truncate">{a.category}</div>
+                          <div className="text-xs text-slate-500 truncate">
+                            {qtyLabel(a) ? `Qty: ${qtyLabel(a)} · ` : ''}
+                            {a.category}
+                          </div>
+                          {a.handover_note && <div className="text-xs text-slate-400 truncate" title={a.handover_note}>{a.handover_note}</div>}
                         </div>
                         <div className="min-w-0 text-sm text-slate-700">
                           <div className="truncate">{a.asset_tag}</div>
@@ -619,9 +599,11 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
                             Tag: {a.asset_tag} • Category: {a.category}
                             {a.serial_number ? ` • S/N: ${a.serial_number}` : ''}
                           </p>
+                          {qtyLabel(a) && <p className="text-[11px] font-semibold text-slate-700 mt-0.5">Qty: {qtyLabel(a)}</p>}
                           <p className="text-[11px] text-slate-500 mt-0.5">
                             Handed over: {a.assigned_date} • Condition: {a.condition_on_assign}
                           </p>
+                          {a.handover_note && <p className="text-[11px] text-slate-500 mt-0.5">Note: {a.handover_note}</p>}
                           {a.return_requested_at && (
                             <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-amber-700">
                               <Clock className="w-3 h-3" /> Return requested — awaiting IT/Admin.
@@ -792,8 +774,8 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
             {tab === 'fulfill' && (
               <div className="space-y-3">
                 <div className="rounded-xl bg-blue-50 border border-blue-200 text-blue-800 text-xs px-3.5 py-2.5">
-                  Requisitions you approved that are still waiting for a specific item to be handed over — no Asset
-                  Management Module Access needed.
+                  Requisitions you approved that are still waiting to be handed over — open Fulfill, type what you're
+                  handing over, and the employee confirms it in My Asset. No Asset Management Module Access needed.
                 </div>
                 {loading ? (
                   <div className="flex justify-center py-14">
@@ -806,9 +788,6 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
                   </div>
                 ) : (
                   awaitingFulfillment.map((r) => {
-                    const requestedNames = (r.items || []).map((it) => it.item_name.toLowerCase());
-                    const matching = availableAssets.filter((a) => requestedNames.includes(a.category.toLowerCase()));
-                    const rest = availableAssets.filter((a) => !requestedNames.includes(a.category.toLowerCase()));
                     return (
                       <div key={r.id} className="border border-slate-200 rounded-xl p-3.5">
                         <div className="text-xs font-bold text-slate-900">{r.asset_category}</div>
@@ -825,50 +804,12 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
                           ))}
                         </div>
                         <div className="mt-3">
-                          {fulfillingFor === r.id ? (
-                            <div className="flex flex-wrap items-center gap-2">
-                              <select
-                                value={fulfillAssetId}
-                                onChange={(e) => setFulfillAssetId(e.target.value)}
-                                className="border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-100 focus:border-blue-400"
-                              >
-                                <option value="">Pick an item…</option>
-                                {matching.map((a) => (
-                                  <option key={a.id} value={a.id}>
-                                    {a.name} ({a.asset_tag})
-                                  </option>
-                                ))}
-                                {rest.length > 0 && matching.length > 0 && <option disabled>──────────</option>}
-                                {rest.map((a) => (
-                                  <option key={a.id} value={a.id}>
-                                    {a.name} ({a.asset_tag})
-                                  </option>
-                                ))}
-                              </select>
-                              <button
-                                onClick={() => fulfillRequisition(r.id)}
-                                className="px-3 py-1.5 text-[11px] font-semibold rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors"
-                              >
-                                Dispatch
-                              </button>
-                              <button
-                                onClick={() => setFulfillingFor(null)}
-                                className="px-3 py-1.5 text-[11px] font-semibold rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors"
-                              >
-                                Cancel
-                              </button>
-                            </div>
-                          ) : (
-                            <button
-                              onClick={() => {
-                                setFulfillingFor(r.id);
-                                setFulfillAssetId('');
-                              }}
-                              className="px-3 py-1.5 text-[11px] font-semibold rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors"
-                            >
-                              Fulfill / Hand Over
-                            </button>
-                          )}
+                          <button
+                            onClick={() => setFulfillingFor(r)}
+                            className="px-3 py-1.5 text-[11px] font-semibold rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors"
+                          >
+                            Fulfill / Hand Over
+                          </button>
                         </div>
                       </div>
                     );
@@ -900,6 +841,21 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
             setShowNewRequisitionModal(false);
             setTab('status');
             loadRequisitions();
+          }}
+        />
+      )}
+
+      {fulfillingFor && (
+        <AssetFulfillModal
+          token={localStorage.getItem('mpr_token') || ''}
+          requisitionId={fulfillingFor.id}
+          mode="fulfill"
+          requesterName={(fulfillingFor as any).employee_name}
+          items={fulfillingFor.items || []}
+          onClose={() => setFulfillingFor(null)}
+          onDone={() => {
+            setFulfillingFor(null);
+            loadAwaitingFulfillment();
           }}
         />
       )}

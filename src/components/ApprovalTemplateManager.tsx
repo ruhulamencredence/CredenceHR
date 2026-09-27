@@ -65,7 +65,10 @@ interface StepDraft {
   // approval chain and confirms the ride in one step (see PUT
   // .../approve-and-assign in VehicleManagementRoutes.ts). Enforced
   // server-side too (validateTemplateSteps in ApprovalRoutes.ts).
-  approver_type: 'supervisor' | 'employee' | 'admin' | 'vehicle_maintainer';
+  // 'asset_fulfiller' is the Asset Requisition equivalent: the LAST Layer's
+  // approver fulfills/hands over the items instead of approving (PUT
+  // .../approve-and-fulfill in AssetManagementRoutes.ts).
+  approver_type: 'supervisor' | 'employee' | 'admin' | 'vehicle_maintainer' | 'asset_fulfiller';
   // Custom Layer name — empty means "fall back to the generic/position-based
   // name" (layerLabel() below). Travels WITH this step's own approvers when
   // dragged/moved, unlike the position-based fallback, so e.g. an Asset
@@ -183,7 +186,7 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
       const persistedSteps: StepDraft[] = (data.steps || []).map((s: ApprovalTemplateStep) => ({
         approver_user_ids: s.approvers.map((a) => a.user_id),
         approver_type:
-          (s as any).approver_type === 'admin' ? 'admin' : (s as any).approver_type === 'vehicle_maintainer' ? 'vehicle_maintainer' : 'employee',
+          ['admin', 'vehicle_maintainer', 'asset_fulfiller'].includes((s as any).approver_type) ? (s as any).approver_type : 'employee',
         label: (s as any).label || ''
       }));
       setStepsDraft(
@@ -220,7 +223,7 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
   // 'employee'/'admin' (override — Layer 1 becomes a real Layer with its own
   // picked approver(s), and the auto-Supervisor gate is skipped for requests
   // on this template). Layers below Layer 1 are never 'supervisor'.
-  const setStepApproverType = (stepIdx: number, type: 'supervisor' | 'employee' | 'admin' | 'vehicle_maintainer') =>
+  const setStepApproverType = (stepIdx: number, type: StepDraft['approver_type']) =>
     setStepsDraft((prev) => prev.map((s, i) => (i === stepIdx ? { ...s, approver_type: type, approver_user_ids: type === 'supervisor' ? [] : s.approver_user_ids } : s)));
   const addApproverToStep = (stepIdx: number, uid: number) => {
     if (!uid) return;
@@ -262,13 +265,11 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
         steps: realSteps.map((s, i) => ({
           approver_user_ids: s.approver_user_ids,
           approver_type:
-            s.approver_type === 'vehicle_maintainer' && i !== realSteps.length - 1
+            (s.approver_type === 'vehicle_maintainer' || s.approver_type === 'asset_fulfiller') && i !== realSteps.length - 1
               ? 'employee'
-              : s.approver_type === 'admin'
-                ? 'admin'
-                : s.approver_type === 'vehicle_maintainer'
-                  ? 'vehicle_maintainer'
-                  : 'employee',
+              : s.approver_type === 'admin' || s.approver_type === 'vehicle_maintainer' || s.approver_type === 'asset_fulfiller'
+                ? s.approver_type
+                : 'employee',
           label: s.label.trim() || undefined
         }))
       };
@@ -714,7 +715,7 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
                             className="text-xs font-semibold text-slate-700 bg-transparent border-b border-dashed border-slate-300 focus:border-blue-500 focus:outline-none px-0.5 w-40"
                           />
                         )}
-                        {step.approver_type !== 'vehicle_maintainer' && (
+                        {step.approver_type !== 'vehicle_maintainer' && step.approver_type !== 'asset_fulfiller' && (
                           <select
                             value={step.approver_type}
                             onChange={(e) => setStepApproverType(idx, e.target.value as any)}
@@ -760,6 +761,23 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
                               </span>
                             </label>
                           )}
+                          {typeDraft === 'asset' && isLastLayer && (
+                            <label className="flex items-start gap-2 pl-7 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={step.approver_type === 'asset_fulfiller'}
+                                onChange={(e) => setStepApproverType(idx, e.target.checked ? 'asset_fulfiller' : 'employee')}
+                                className="mt-0.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-600"
+                              />
+                              <span className="text-[11px] text-slate-600">
+                                <span className="font-semibold text-slate-700">Asset Fulfiller (Hand Over)</span> — the
+                                people picked here get an alert when a requisition reaches this Layer, and on Pending
+                                Approvals they get <span className="font-semibold">Fulfill &amp; Hand Over</span> instead of
+                                Approve/Reject: they type what they're handing over, the employee is notified to confirm
+                                it in My Asset, or report an issue if something is wrong.
+                              </span>
+                            </label>
+                          )}
                           <div className="flex flex-wrap gap-1.5 pl-7">
                             {step.approver_user_ids.length === 0 && <span className="text-[11px] text-slate-400">No approvers yet — add at least one.</span>}
                             {step.approver_user_ids.map((uid) => (
@@ -790,6 +808,8 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
                                   ? 'Search an Admin/Superadmin by name to add as approver…'
                                   : step.approver_type === 'vehicle_maintainer'
                                     ? 'Search a Vehicle Maintainer by name to add as approver…'
+                                    : step.approver_type === 'asset_fulfiller'
+                                      ? 'Search who hands over the assets (store/inventory) by name…'
                                     : 'Search an employee by name to add as approver — one member per row, add the whole team to represent a Department…'
                               }
                               className="w-full text-xs px-2.5 py-2 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"

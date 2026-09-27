@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { ShieldCheck, CheckCircle2, XCircle, AlertCircle, MapPin, ChevronRight, ArrowLeft, X, Package, Paperclip, Car } from 'lucide-react';
 import { apiUrl, dedupedFetchJson } from '../lib/api';
 import { Spinner } from './Spinner';
+import { AssetFulfillModal } from './AssetFulfillModal';
 import { UserClaimReference, ClaimRecord } from '../types';
 import ClaimLocationMap from './ClaimLocationMap';
 
@@ -39,6 +40,9 @@ interface MyApprovalItem {
   // vehicle_requisition item on its Template's FINAL Layer, when that
   // Layer's Approver Type is 'vehicle_maintainer'.
   vehicle_maintainer_bypass?: boolean;
+  // Asset Requisition on its Template's 'asset_fulfiller' Layer — this
+  // approver gets Fulfill & Hand Over instead of Approve/Reject.
+  asset_fulfiller_bypass?: boolean;
 }
 
 interface AvailableVehicle {
@@ -108,6 +112,8 @@ export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ toke
   // (and for many approvers, only) place an Asset Requisition is seen, so it
   // needs the same way to see every requested item before deciding.
   const [viewingAssetRequisition, setViewingAssetRequisition] = useState<MyApprovalItem | null>(null);
+  // asset_fulfiller_bypass item whose Fulfill & Hand Over form is open.
+  const [fulfilling, setFulfilling] = useState<MyApprovalItem | null>(null);
 
   // Vehicle + driver picker data for a vehicle_maintainer_bypass item's
   // "Assign Vehicle & Driver" form below — see ApproveApplications.tsx's
@@ -345,7 +351,11 @@ export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ toke
                   <ChevronRight className="w-4 h-4 text-slate-400" />
                 </div>
                 <span className="text-xs font-semibold text-slate-800 leading-tight">
-                  {cat === 'vehicle_requisition' && list.every((i) => i.vehicle_maintainer_bypass) ? 'Ride Request — Assign Vehicle' : sourceTitle(cat)}
+                  {cat === 'vehicle_requisition' && list.every((i) => i.vehicle_maintainer_bypass)
+                    ? 'Ride Request — Assign Vehicle'
+                    : cat === 'asset_requisition' && list.every((i) => i.asset_fulfiller_bypass)
+                      ? 'Asset Requisition — Fulfill'
+                      : sourceTitle(cat)}
                 </span>
               </button>
             );
@@ -444,7 +454,20 @@ export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ toke
                     </div>
                   )}
 
-                  {item.vehicle_maintainer_bypass ? (
+                  {item.asset_fulfiller_bypass ? (
+                    <div onClick={(e) => e.stopPropagation()}>
+                      <p className="text-[11px] text-slate-500 flex items-center gap-1 mb-2">
+                        <Package className="w-3 h-3 text-emerald-600" /> You hand over this requisition — open the form, type what you're giving, and the employee confirms it.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setFulfilling(item)}
+                        className="w-full text-xs font-semibold px-3 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors inline-flex items-center justify-center gap-1"
+                      >
+                        <Package className="w-3.5 h-3.5" /> Fulfill & Hand Over
+                      </button>
+                    </div>
+                  ) : item.vehicle_maintainer_bypass ? (
                     <div onClick={(e) => e.stopPropagation()}>
                       <p className="text-[11px] text-slate-500 flex items-center gap-1 mb-2">
                         <Car className="w-3 h-3 text-blue-500" /> Pick a vehicle to approve and confirm this ride in one step.
@@ -518,6 +541,22 @@ export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ toke
             })}
           </div>
         </div>
+      )}
+
+      {fulfilling && (
+        <AssetFulfillModal
+          token={token}
+          requisitionId={Number(fulfilling.source_id)}
+          mode="approve"
+          requesterName={fulfilling.requested_by_name}
+          items={fulfilling.asset_requisition_details?.items || []}
+          onClose={() => setFulfilling(null)}
+          onDone={() => {
+            const f = fulfilling;
+            setFulfilling(null);
+            setItems((prev) => prev.filter((i) => !(i.id === f.id && i.source_type === f.source_type)));
+          }}
+        />
       )}
 
       {viewingRef && (

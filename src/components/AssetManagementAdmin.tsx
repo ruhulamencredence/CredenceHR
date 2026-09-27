@@ -5,7 +5,7 @@
 
 // Admin Panel -> Asset Management — IT/Admin side: inventory (add/edit
 // assets), a read-only requisition status board, and fulfilling an approved
-// request by handing over a specific in-stock item. Gated behind the
+// request by typing what was handed over (AssetFulfillModal). Gated behind the
 // 'asset_management' AdminModuleKey the same way every other Admin Panel tab
 // is (Admin Panel -> Users -> Module Access).
 //
@@ -18,6 +18,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { apiUrl } from '../lib/api';
+import { AssetFulfillModal } from './AssetFulfillModal';
 
 interface Asset {
   id: number;
@@ -89,8 +90,8 @@ export function AssetManagementAdmin() {
   const [claims, setClaims] = useState<AssignmentClaim[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [newAsset, setNewAsset] = useState({ asset_tag: '', name: '', category: '', serial_number: '' });
-  const [fulfillFor, setFulfillFor] = useState<number | null>(null);
-  const [fulfillAssetId, setFulfillAssetId] = useState<string>('');
+  // Requisition whose Fulfill & Hand Over form is open (AssetFulfillModal).
+  const [fulfillFor, setFulfillFor] = useState<Requisition | null>(null);
   const [resolvingFor, setResolvingFor] = useState<number | null>(null);
   const [resolveNote, setResolveNote] = useState('');
   const [resolveReplacementId, setResolveReplacementId] = useState('');
@@ -174,25 +175,6 @@ export function AssetManagementAdmin() {
     }
   }
 
-  async function fulfill(id: number) {
-    if (!fulfillAssetId) return;
-    try {
-      const res = await fetch(apiUrl(`/api/assets/requisitions/${id}/fulfill`), {
-        method: 'POST',
-        headers: authHeaders(),
-        body: JSON.stringify({ asset_id: Number(fulfillAssetId) })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Could not fulfill request.');
-      setFulfillFor(null);
-      setFulfillAssetId('');
-      loadRequisitions();
-      loadAssets();
-    } catch (err: any) {
-      setError(err.message);
-    }
-  }
-
   const availableAssets = assets.filter((a) => a.status === 'available');
 
   return (
@@ -252,51 +234,12 @@ export function AssetManagementAdmin() {
 
               {r.status === 'approved' && (
                 <div className="mt-3">
-                  {fulfillFor === r.id ? (
-                    <div className="flex items-center gap-2">
-                      <select value={fulfillAssetId} onChange={(e) => setFulfillAssetId(e.target.value)} className="border rounded px-2 py-1 text-xs">
-                        <option value="">Pick an item…</option>
-                        {(() => {
-                          // A requisition can now list several items, so
-                          // there's no single category to match inventory
-                          // against — offer anything in stock whose
-                          // category matches ANY requested item name first
-                          // (most likely picks up top), then every other
-                          // available item below, so IT/Admin can still
-                          // hand over an asset that doesn't neatly match
-                          // one of the item names as typed.
-                          const requestedNames = (r.items || []).map((it) => it.item_name.toLowerCase());
-                          const matching = availableAssets.filter((a) => requestedNames.includes(a.category.toLowerCase()));
-                          const rest = availableAssets.filter((a) => !requestedNames.includes(a.category.toLowerCase()));
-                          return (
-                            <>
-                              {matching.map((a) => (
-                                <option key={a.id} value={a.id}>
-                                  {a.name} ({a.asset_tag})
-                                </option>
-                              ))}
-                              {rest.length > 0 && matching.length > 0 && <option disabled>──────────</option>}
-                              {rest.map((a) => (
-                                <option key={a.id} value={a.id}>
-                                  {a.name} ({a.asset_tag})
-                                </option>
-                              ))}
-                            </>
-                          );
-                        })()}
-                      </select>
-                      <button onClick={() => fulfill(r.id)} className="px-3 py-1.5 text-xs font-medium rounded bg-blue-600 text-white">
-                        Dispatch
-                      </button>
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => setFulfillFor(r.id)}
-                      className="px-3 py-1.5 text-xs font-medium rounded bg-blue-600 text-white hover:bg-blue-700"
-                    >
-                      Fulfill / Hand Over
-                    </button>
-                  )}
+                  <button
+                    onClick={() => setFulfillFor(r)}
+                    className="px-3 py-1.5 text-xs font-medium rounded bg-blue-600 text-white hover:bg-blue-700"
+                  >
+                    Fulfill / Hand Over
+                  </button>
                 </div>
               )}
             </div>
@@ -454,6 +397,21 @@ export function AssetManagementAdmin() {
             </tbody>
           </table>
         </div>
+      )}
+      {fulfillFor && (
+        <AssetFulfillModal
+          token={localStorage.getItem('mpr_token') || ''}
+          requisitionId={fulfillFor.id}
+          mode="fulfill"
+          requesterName={fulfillFor.employee_name}
+          items={fulfillFor.items || []}
+          onClose={() => setFulfillFor(null)}
+          onDone={() => {
+            setFulfillFor(null);
+            loadRequisitions();
+            loadAssets();
+          }}
+        />
       )}
     </div>
   );

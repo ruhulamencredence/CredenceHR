@@ -8,6 +8,7 @@ import { Capacitor } from '@capacitor/core';
 import { ArrowLeft, ShieldCheck, Inbox, CheckCircle2, XCircle, RefreshCw, MapPin, X, Package, Paperclip, Car } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
+import { AssetFulfillModal } from './AssetFulfillModal';
 import { ModulePath } from './ModulePath';
 import { UserClaimReference, ClaimRecord } from '../types';
 import ClaimLocationMap from './ClaimLocationMap';
@@ -63,6 +64,9 @@ interface MyApprovalItem {
   // this approval and confirms the ride (PUT .../approve-and-assign in
   // VehicleManagementRoutes.ts).
   vehicle_maintainer_bypass?: boolean;
+  // Asset Requisition on its Template's 'asset_fulfiller' Layer — this
+  // approver gets Fulfill & Hand Over instead of Approve/Reject.
+  asset_fulfiller_bypass?: boolean;
 }
 
 interface AvailableVehicle {
@@ -146,6 +150,8 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
   // deciding. Closed by the modal's own X/backdrop, not by acting on it —
   // acting still happens from the card underneath.
   const [viewingAssetRequisition, setViewingAssetRequisition] = useState<MyApprovalItem | null>(null);
+  // asset_fulfiller_bypass item whose Fulfill & Hand Over form is open.
+  const [fulfilling, setFulfilling] = useState<MyApprovalItem | null>(null);
 
   // Vehicle + driver picker data for a vehicle_maintainer_bypass item's
   // "Assign Vehicle & Driver" form below — same source VehicleManagement.tsx's
@@ -398,7 +404,11 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
                       <div>
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-sm font-semibold text-slate-800">
-                            {item.vehicle_maintainer_bypass ? 'Ride Request — Assign Vehicle' : sourceTitle(item.source_type)}
+                            {item.vehicle_maintainer_bypass
+                              ? 'Ride Request — Assign Vehicle'
+                              : item.asset_fulfiller_bypass
+                                ? 'Asset Requisition — Fulfill'
+                                : sourceTitle(item.source_type)}
                           </span>
                         </div>
                         <p className="text-xs text-slate-500 mt-0.5">
@@ -460,7 +470,20 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
                       </div>
                     )}
 
-                    {item.vehicle_maintainer_bypass ? (
+                    {item.asset_fulfiller_bypass ? (
+                      <div className="mt-3 space-y-2" onClick={(e) => e.stopPropagation()}>
+                        <p className="text-[11px] text-slate-500 flex items-center gap-1">
+                          <Package className="w-3 h-3 text-emerald-600" /> This Layer is yours to hand over the items — type what you're giving; the employee then confirms it in My Asset.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => setFulfilling(item)}
+                          className="flex items-center gap-1 text-xs px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold transition-colors"
+                        >
+                          <Package className="w-3.5 h-3.5" /> Fulfill & Hand Over
+                        </button>
+                      </div>
+                    ) : item.vehicle_maintainer_bypass ? (
                       <div className="mt-3 space-y-2" onClick={(e) => e.stopPropagation()}>
                         <p className="text-[11px] text-slate-500 flex items-center gap-1">
                           <Car className="w-3 h-3 text-blue-500" /> This Layer is yours to hand over a vehicle — pick one below to approve and confirm the ride in one step.
@@ -538,6 +561,23 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
           )}
         </div>
       </div>
+
+      {fulfilling && (
+        <AssetFulfillModal
+          token={token}
+          requisitionId={Number(fulfilling.source_id)}
+          mode="approve"
+          requesterName={fulfilling.requested_by_name}
+          items={fulfilling.asset_requisition_details?.items || []}
+          onClose={() => setFulfilling(null)}
+          onDone={() => {
+            const f = fulfilling;
+            setFulfilling(null);
+            setMessage({ type: 'success', text: 'Handed over — the employee has been notified to confirm it.' });
+            setItems((prev) => prev.filter((i) => keyFor(i) !== keyFor(f)));
+          }}
+        />
+      )}
 
       {viewingRef && (
         <ClaimLocationMap claim={refToClaimRecord(viewingRef.ref, viewingRef.item)} onClose={() => setViewingRef(null)} />
