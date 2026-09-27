@@ -158,6 +158,18 @@ export async function ensureVehicleManagementSchema(dbPool: any): Promise<void> 
       console.warn("⚠️ Could not add vehicle_requisitions.driver_user_id: " + err.message);
     }
   }
+  // Geocoded destination for the Live Ride Map's road route — filled lazily
+  // the first time the map is opened (see geocodeDestination below), since
+  // destination itself is free text typed by the requester.
+  for (const col of ["destination_lat", "destination_lng"]) {
+    try {
+      await dbPool.query(`ALTER TABLE vehicle_requisitions ADD COLUMN ${col} DECIMAL(10,7) NULL`);
+    } catch (err: any) {
+      if (err.code !== "ER_DUP_FIELDNAME") {
+        console.warn(`⚠️ Could not add vehicle_requisitions.${col}: ` + err.message);
+      }
+    }
+  }
 }
 
 export function registerVehicleManagementRoutes(app: Express, deps: VehicleManagementRouteDeps) {
@@ -1074,6 +1086,41 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
   // and the driver need can_use_tracking enabled AND to have actually pinged
   // at least once for their dot to appear; otherwise that side comes back
   // null and the frontend shows "waiting for location".
+  // Free-text destination -> lat/lng via OpenStreetMap's Nominatim (free, no
+  // key). Runs server-side so it can send the User-Agent Nominatim's usage
+  // policy requires, and the result is stored on the requisition so each
+  // ride is looked up once. A failed lookup is retried at most every 10 min.
+  const geocodeFailedAt = new Map<number, number>();
+  async function geocodeDestination(requisition: any): Promise<{ lat: number; lng: number } | null> {
+    if (requisition.destination_lat != null && requisition.destination_lng != null) {
+      return { lat: Number(requisition.destination_lat), lng: Number(requisition.destination_lng) };
+    }
+    const id = Number(requisition.id);
+    const lastFail = geocodeFailedAt.get(id);
+    if (lastFail && Date.now() - lastFail < 10 * 60 * 1000) return null;
+    const query = String(requisition.destination || "").trim();
+    if (!query) return null;
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 6000);
+      const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=bd&q=${encodeURIComponent(query)}`;
+      const response = await fetch(url, { headers: { "User-Agent": "CredenceHR/1.0 (vehicle requisition live map)" }, signal: controller.signal });
+      clearTimeout(timer);
+      const results: any = response.ok ? await response.json() : [];
+      const hit = Array.isArray(results) ? results[0] : null;
+      if (!hit) {
+        geocodeFailedAt.set(id, Date.now());
+        return null;
+      }
+      const point = { lat: Number(hit.lat), lng: Number(hit.lon) };
+      await queryDB("UPDATE vehicle_requisitions SET destination_lat = ?, destination_lng = ? WHERE id = ?", [point.lat, point.lng, id]);
+      return point;
+    } catch {
+      geocodeFailedAt.set(id, Date.now());
+      return null;
+    }
+  }
+
   app.get("/api/vehicles/requisitions/:id/live-location", authenticateToken, async (req: any, res: any) => {
     try {
       const id = Number(req.params.id);
@@ -1122,6 +1169,7 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
         status: requisition.status,
         pickup_location: requisition.pickup_location,
         destination: requisition.destination,
+        destination_point: await geocodeDestination(requisition),
         employee: toPoint(Number(requisition.employee_user_id), employeeUserRows[0], employeePing),
         driver: driverUserId ? toPoint(driverUserId, driverUserRows[0], driverPing) : null
       });
