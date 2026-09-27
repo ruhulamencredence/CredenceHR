@@ -981,13 +981,15 @@ export default function App() {
           // so the sidebar entry point and the Profile entry point land on
           // an identical page.
           <AssetManagement onBack={() => setSelfServiceView(null)} />
+        ) : selfServiceView === 'vehicleManagement' && !Capacitor.isNativePlatform() ? (
+          // Web: VehicleManagement.tsx draws its own My Asset-style page
+          // (breadcrumb + Back + panel), same as AssetManagement just above.
+          <VehicleManagement user={user} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'vehicleManagement' ? (
-          // VehicleManagement.tsx (Book a Ride/Ride Status) — same header-
-          // less wrapper pattern as My Asset just above.
+          // VehicleManagement.tsx (Book a Ride/Ride Status) — native app's
+          // header-less wrapper with its own back arrow.
           <div className="w-full min-h-[calc(100vh-4rem)]" style={{ background: 'var(--g-surface-muted)' }}>
-            {/* Web: full content width (map beside the booking panel, Ride Status
-                in two columns) instead of a narrow phone-width column. */}
-            <div className={`mx-auto px-4 pt-3 pb-28 ${Capacitor.isNativePlatform() ? 'max-w-3xl' : 'max-w-3xl lg:max-w-none lg:px-8 lg:pb-8'}`}>
+            <div className="max-w-3xl mx-auto px-4 pt-3 pb-28">
               <div className="flex items-center gap-2 mb-3">
                 <button
                   type="button"

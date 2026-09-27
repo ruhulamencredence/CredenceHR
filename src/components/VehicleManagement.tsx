@@ -12,7 +12,10 @@
 // already uses.
 
 import React, { useEffect, useState } from 'react';
+import { Capacitor } from '@capacitor/core';
+import { ArrowLeft, Car, Plus } from 'lucide-react';
 import { apiUrl } from '../lib/api';
+import { ModulePath } from './ModulePath';
 import { LiveRideMap } from './LiveRideMap';
 import { RideDetails } from './RideDetails';
 import { RideBookingMap } from './RideBookingMap';
@@ -125,9 +128,13 @@ interface VehicleManagementProps {
   // Book" tab (the Vehicle Maintainer bypass) shows at all. A Superadmin
   // implicitly has every module, same convention as requireModule server-side.
   user?: { role?: string; module_permissions?: string[] } | null;
+  // Web only: the "Back" link beside the breadcrumb (same page shell as My
+  // Asset). The native app renders its own header in App.tsx instead.
+  onBack?: () => void;
 }
 
-export function VehicleManagement({ user }: VehicleManagementProps) {
+export function VehicleManagement({ user, onBack }: VehicleManagementProps) {
+  const isNativeApp = Capacitor.isNativePlatform();
   const isVehicleMaintainer = user?.role === 'superadmin' || !!(user?.module_permissions || []).includes('vehicle_maintainer');
   const [tab, setTab] = useState<'book' | 'status' | 'assign' | 'maintainer'>(() => {
     // One-shot tab request from the web Dashboard's Book a Ride card.
@@ -424,6 +431,14 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
     }
   }
 
+  // [key, label, badge count] — the native tab bar shows the count in the label.
+  const rideTabs: ['book' | 'status' | 'assign' | 'maintainer', string, number][] = [
+    ['book', 'Book a Ride', 0],
+    ['status', 'Ride Status', 0],
+    ['assign', isNativeApp && awaitingAssignment.length > 0 ? `Approved by Me (${awaitingAssignment.length})` : 'Approved by Me', isNativeApp ? 0 : awaitingAssignment.length],
+    ...(isVehicleMaintainer ? [['maintainer', 'Direct Book', 0] as ['maintainer', string, number]] : [])
+  ];
+
   const renderExtensionForm = (r: Requisition) =>
     extendingFor === r.id && (
       <div className="mt-3 border-t pt-3 space-y-2">
@@ -452,27 +467,106 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
     );
 
   return (
-    <div className="w-full">
-      <div className="flex gap-1 border-b border-gray-200 mb-4">
-        {([
-          ['book', 'Book a Ride'],
-          ['status', 'Ride Status'],
-          ['assign', `Approved by Me${awaitingAssignment.length > 0 ? ` (${awaitingAssignment.length})` : ''}`],
-          ...(isVehicleMaintainer ? [['maintainer', 'Direct Book'] as const] : [])
-        ] as const).map(([key, label]) => (
-          <button
-            key={key}
-            onClick={() => setTab(key)}
-            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
-              tab === key ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-800'
-            }`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+    // Web: same page shell as My Asset (AssetManagement.tsx) — breadcrumb +
+    // Back, one panel with an icon header and a segmented tab control. The
+    // native app keeps its plain underline tabs inside App.tsx's header.
+    <div className={isNativeApp ? 'w-full' : 'w-full min-h-[calc(100vh-4rem)] bg-[#dceeff] text-slate-900'}>
+      <div className={isNativeApp ? '' : 'w-full px-4 sm:px-6 lg:px-8 pt-3 pb-8'}>
+      {!isNativeApp && (
+        <>
+          <ModulePath path={['Self Service', 'Book a Ride']} />
+          {onBack && (
+            <button
+              type="button"
+              onClick={onBack}
+              className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-blue-600 mb-3 transition-colors"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" /> Back
+            </button>
+          )}
+        </>
+      )}
+      <div
+        className={
+          isNativeApp
+            ? ''
+            : 'bg-gradient-to-br from-sky-100/70 via-white/50 to-blue-50/40 backdrop-blur-xl border border-white/70 rounded-[28px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] overflow-hidden md:bg-white md:from-transparent md:via-transparent md:to-transparent md:backdrop-blur-none md:border-slate-200 md:rounded-2xl md:shadow-sm'
+        }
+      >
+      {!isNativeApp && (
+        <div className="flex items-center justify-between gap-3 px-6 py-5 border-b border-slate-100">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center shrink-0">
+              <Car className="w-5 h-5 text-blue-600" />
+            </div>
+            <div>
+              <h1 className="text-base font-bold text-slate-900">Book a Ride</h1>
+              <p className="text-xs text-slate-500">Request an office vehicle, and follow your rides from request to return.</p>
+            </div>
+          </div>
+          {tab !== 'book' && (
+            <button
+              type="button"
+              onClick={() => setTab('book')}
+              className="hidden md:flex items-center gap-1.5 text-sm px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-semibold transition-colors shrink-0"
+            >
+              <Plus className="w-4 h-4" /> New Ride
+            </button>
+          )}
+        </div>
+      )}
+      {isNativeApp ? (
+        <div className="flex gap-1 border-b border-gray-200 mb-4">
+          {rideTabs.map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => setTab(key)}
+              className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                tab === key ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-800'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="mx-4 mt-4 flex items-center gap-1.5 rounded-full bg-white/50 backdrop-blur p-1.5 text-xs font-semibold overflow-x-auto md:bg-slate-100 md:backdrop-blur-none">
+          {rideTabs.map(([key, label, count]) => {
+            const active = tab === key;
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setTab(key)}
+                className={`flex-1 flex items-center justify-center gap-1.5 py-2 px-2 rounded-full whitespace-nowrap transition-colors ${
+                  active ? 'text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                }`}
+                style={active ? { background: 'var(--g-accent)' } : undefined}
+              >
+                {label}
+                {count > 0 && (
+                  <span
+                    className={`inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold ${
+                      active ? 'bg-white/25 text-white' : 'bg-slate-200 text-slate-500'
+                    }`}
+                  >
+                    {count}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
-      {error && <div className="mb-3 rounded bg-red-50 text-red-700 text-sm px-3 py-2">{error}</div>}
+      {error &&
+        (isNativeApp ? (
+          <div className="mb-3 rounded bg-red-50 text-red-700 text-sm px-3 py-2">{error}</div>
+        ) : (
+          <div className="mx-4 mt-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs px-3.5 py-2.5">{error}</div>
+        ))}
+
+      <div className={isNativeApp ? '' : 'p-4'}>
 
       {tab === 'book' && !places && (
         <>
@@ -494,7 +588,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
             here={null}
             pickup={places.pickup_lat != null && places.pickup_lng != null ? { lat: places.pickup_lat, lng: places.pickup_lng } : null}
             destination={places.destination_lat != null && places.destination_lng != null ? { lat: places.destination_lat, lng: places.destination_lng } : null}
-            className="h-[calc(100vh-200px)] min-h-[480px]"
+            className="h-[calc(100vh-320px)] min-h-[460px]"
           />
         )}
         <form
@@ -1136,6 +1230,10 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
           )}
         </div>
       )}
+
+      </div>
+      </div>
+      </div>
 
       {viewingMapFor != null && <LiveRideMap requisitionId={viewingMapFor} onClose={() => setViewingMapFor(null)} />}
       {viewingDetailsFor != null && <RideDetails requisitionId={viewingDetailsFor} onClose={() => setViewingDetailsFor(null)} />}
