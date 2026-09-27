@@ -46,7 +46,7 @@ interface GlobalSidebarProps {
   onGoToUserClaims: (target: 'movementClaims' | 'conveyanceBill') => void;
   // Everyday employee self-service items — not Admin-gated, shown to every
   // account regardless of role/module access.
-  onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement') => void;
+  onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases') => void;
   // Admin Panel's own Movement Claims / Conveyance Bill Claim review tabs —
   // separate feature from onGoToUserClaims above, gated by module_permissions
   // like every other Admin Panel module.
@@ -301,6 +301,10 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // Ride"/Ride Status, same reasoning as My Asset just above: NOT
   // Admin-gated, any signed-in account can request a ride for themselves.
   selfServiceItems.push({ key: 'vehicleManagement', label: 'Book a Ride', icon: Car, onClick: () => onGoToSelfServiceTab('vehicleManagement') });
+  // Grievance & Disciplinary (MyCases.tsx) — raise a grievance, and give
+  // feedback on one that names you / is assigned to you, or on a
+  // disciplinary action issued to you. Every account.
+  selfServiceItems.push({ key: 'myCases', label: 'Grievance & Disciplinary', icon: Gavel, onClick: () => onGoToSelfServiceTab('myCases') });
 
   // "Admin Dashboard" — the HR-overview landing page (stat tiles, quick
   // view, charts, notices, leave balances). Every real role === 'admin' |

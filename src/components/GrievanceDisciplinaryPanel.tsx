@@ -15,10 +15,38 @@ interface Grievance {
   description: string;
   is_anonymous: boolean;
   status: 'open' | 'investigating' | 'resolved' | 'dismissed';
+  assigned_to: number | null;
   assigned_to_name: string | null;
   resolution_notes: string | null;
   created_at: string;
+  feedback?: CaseFeedback[];
+  feedback_pending?: { named: boolean; assignee: boolean };
 }
+
+interface CaseFeedback {
+  id: number;
+  user_name: string | null;
+  role: 'named' | 'assignee' | 'hr';
+  message: string;
+  created_at: string;
+}
+
+const FEEDBACK_ROLE: Record<string, string> = { named: 'Named person', assignee: 'Investigator', hr: 'HR' };
+
+// Feedback thread (case_feedback) under a grievance / disciplinary action.
+const FeedbackThread: React.FC<{ list?: CaseFeedback[] }> = ({ list }) =>
+  !list || list.length === 0 ? null : (
+    <div className="mt-2 mb-3 space-y-1.5">
+      {list.map((f) => (
+        <div key={f.id} className="rounded-lg bg-slate-50 border border-slate-100 px-3 py-2 text-xs">
+          <div className="text-[10px] font-semibold text-slate-500">
+            {FEEDBACK_ROLE[f.role] || f.role} · {f.user_name || '—'} · {new Date(f.created_at).toLocaleString()}
+          </div>
+          <div className="text-slate-700 whitespace-pre-wrap mt-0.5">{f.message}</div>
+        </div>
+      ))}
+    </div>
+  );
 
 interface DisciplinaryAction {
   id: number;
@@ -30,6 +58,8 @@ interface DisciplinaryAction {
   issued_at: string;
   acknowledged: boolean;
   status: 'active' | 'acknowledged' | 'closed';
+  feedback?: CaseFeedback[];
+  feedback_pending?: boolean;
 }
 
 const GRIEVANCE_STATUS_STYLE: Record<string, string> = {
@@ -49,12 +79,9 @@ const ACTION_TYPE_LABEL: Record<string, string> = {
 
 // Admin Panel -> HR Advanced -> "Grievance & Disciplinary" — a shared
 // grievance queue (assign/investigate/resolve) and a log of formal
-// disciplinary actions issued to employees. Management-only view; the
-// backend already lets any employee raise their OWN grievance
-// (POST /api/grievances) and acknowledge their own disciplinary action
-// (PUT .../:id with acknowledge:true) — those two are just not wired into a
-// self-service page yet, same "layer on later" note as the other 5 HR
-// Advanced panels.
+// disciplinary actions issued to employees, each with its feedback thread.
+// Employees raise grievances and give their feedback from Self Service ->
+// Grievance & Disciplinary (MyCases.tsx).
 export const GrievanceDisciplinaryPanel: React.FC<GrievanceDisciplinaryPanelProps> = ({ token }) => {
   const authHeaders = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
 
@@ -102,7 +129,7 @@ export const GrievanceDisciplinaryPanel: React.FC<GrievanceDisciplinaryPanelProp
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const updateGrievance = async (id: number, patch: { status?: string; resolution_notes?: string }) => {
+  const updateGrievance = async (id: number, patch: { status?: string; resolution_notes?: string; assigned_to?: number | null }) => {
     setError('');
     setSuccess('');
     try {
@@ -215,8 +242,36 @@ export const GrievanceDisciplinaryPanel: React.FC<GrievanceDisciplinaryPanelProp
                 </p>
                 <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${GRIEVANCE_STATUS_STYLE[g.status]}`}>{g.status}</span>
               </div>
-              <p className="text-xs text-slate-600 mb-3">{g.description}</p>
+              <p className="text-xs text-slate-600 mb-2">{g.description}</p>
+              <div className="flex flex-wrap items-center gap-1.5 mb-1">
+                {g.feedback_pending?.named && (
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
+                    Waiting for {g.against_user_name || 'named person'}'s feedback
+                  </span>
+                )}
+                {g.feedback_pending?.assignee && (
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
+                    Waiting for investigator {g.assigned_to_name || ''}'s feedback
+                  </span>
+                )}
+              </div>
+              <FeedbackThread list={g.feedback} />
               <div className="flex flex-wrap items-center gap-2">
+                {(g.status === 'open' || g.status === 'investigating') && (
+                  <select
+                    value={g.assigned_to ?? ''}
+                    onChange={(e) => updateGrievance(g.id, { assigned_to: e.target.value ? Number(e.target.value) : null })}
+                    title="Assign to someone to investigate — they're notified and asked for feedback"
+                    className="text-xs px-2.5 py-1.5 border border-slate-200 rounded-lg"
+                  >
+                    <option value="">Assign investigator…</option>
+                    {users.map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
                 {g.status === 'open' && (
                   <button type="button" onClick={() => updateGrievance(g.id, { status: 'investigating' })} className="text-[11px] font-semibold px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white">
                     Start Investigating
@@ -314,6 +369,12 @@ export const GrievanceDisciplinaryPanel: React.FC<GrievanceDisciplinaryPanelProp
                   </div>
                 </div>
                 <p className="text-xs text-slate-600 mb-2">{a.reason}</p>
+                {a.status !== 'closed' && a.feedback_pending && (
+                  <span className="inline-block mb-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
+                    Waiting for {a.user_name || 'the employee'}'s feedback
+                  </span>
+                )}
+                <FeedbackThread list={a.feedback} />
                 <p className="text-[11px] text-slate-400">
                   Issued by {a.issued_by_name || '—'} · {new Date(a.issued_at).toLocaleDateString()}
                 </p>

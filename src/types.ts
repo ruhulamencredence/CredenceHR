@@ -1387,7 +1387,9 @@ export type AlertType =
   | 'conveyance_disbursed'
   | 'asset_requisition'
   | 'vehicle_requisition'
-  | 'vehicle_approval';
+  | 'vehicle_approval'
+  | 'grievance'
+  | 'disciplinary';
 
 export interface Alert {
   id: number;

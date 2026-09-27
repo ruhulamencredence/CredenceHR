@@ -22,6 +22,8 @@ interface AlertsBellProps {
   // 'vehicle_requisition' = the requester's own ride updates -> Book a Ride.
   onOpenApproveApplications?: () => void;
   onOpenVehicleManagement?: () => void;
+  // Grievance / Disciplinary alerts open Self Service -> Grievance & Disciplinary.
+  onOpenMyCases?: () => void;
   // Dropdown footer "View all" link — opens AlertsPage.tsx (the full-page
   // inbox), since this dropdown itself only ever shows the 50 most recent.
   onViewAll?: () => void;
@@ -33,7 +35,7 @@ interface AlertsBellProps {
 // unlike the Admin Panel tabs). Polls the lightweight unread-count endpoint
 // so the badge stays current without re-fetching the whole list constantly;
 // the full list is only fetched when the dropdown is actually opened.
-export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplication, onOpenApproveApplications, onOpenVehicleManagement, onViewAll }) => {
+export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplication, onOpenApproveApplications, onOpenVehicleManagement, onOpenMyCases, onViewAll }) => {
   const [unreadCount, setUnreadCount] = useState(0);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [open, setOpen] = useState(false);
@@ -141,6 +143,8 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
         ? onOpenApproveApplications
         : alert.type === 'vehicle_requisition'
         ? onOpenVehicleManagement
+        : alert.type === 'grievance' || alert.type === 'disciplinary'
+        ? onOpenMyCases
         : undefined;
     if (target) {
       setOpen(false);
