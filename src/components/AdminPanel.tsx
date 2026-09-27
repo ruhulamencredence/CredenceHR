@@ -32,6 +32,7 @@ import { DocumentVaultPanel } from './DocumentVaultPanel';
 import { AdminDashboard } from './AdminDashboard';
 import { UserAccessDrawer, UserAccessChips, userInitials, ROLE_BADGE, ROLE_LABEL } from './UserAccessDrawer';
 import { UserBulkBar } from './UserBulkBar';
+import { ModuleAccessChecklist } from './ModuleAccessChecklist';
 import { AccessTemplatesModal } from './AccessTemplatesModal';
 import { AccessTemplate, applyTemplateToUser, canEditUserFeatures } from '../lib/accessTemplates';
 import { Spinner } from './Spinner';
@@ -610,6 +611,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       return next;
     });
   };
+
+  // "Select all" in the Module Access checklists (ModuleAccessChecklist).
+  const setManyInSet = <T,>(setter: React.Dispatch<React.SetStateAction<Set<T>>>, keys: T[], checked: boolean) =>
+    setter((prev) => {
+      const next = new Set(prev);
+      keys.forEach((k) => (checked ? next.add(k) : next.delete(k)));
+      return next;
+    });
+  const setManyModuleLayers = (moduleKey: AdminModuleKey, layers: PermissionLayerKey[], checked: boolean) =>
+    setModuleLayers((prev) => {
+      const current = new Set(prev[moduleKey] || []);
+      layers.forEach((l) => (checked ? current.add(l) : current.delete(l)));
+      return { ...prev, [moduleKey]: current };
+    });
 
   const toggleModuleLayer = (moduleKey: AdminModuleKey, layer: PermissionLayerKey) => {
     setModuleLayers((prev) => {
@@ -6745,22 +6760,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                     Leave Manage — any combination. Leaving all of these unchecked (while the toggle above stays on)
                     blocks every action here.
                   </p>
-                  <div className="grid grid-cols-2 xl:grid-cols-3 gap-2">
-                    {LEAVE_MANAGE_LAYERS.map((layer) => (
-                      <label
-                        key={layer.key}
-                        className="flex items-center gap-2 px-2.5 py-1.5 bg-white border border-violet-100 rounded-lg cursor-pointer hover:bg-violet-100/40"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={leaveManageLayers.has(layer.key)}
-                          onChange={() => toggleLeaveManageLayer(layer.key)}
-                          className="w-3.5 h-3.5 rounded border-slate-300 text-violet-600 focus:ring-violet-600 cursor-pointer"
-                        />
-                        <span className="text-xs text-slate-800">{layer.label}</span>
-                      </label>
-                    ))}
-                  </div>
+                  <ModuleAccessChecklist
+                    items={LEAVE_MANAGE_LAYERS.map((layer) => ({ key: layer.key, label: layer.label }))}
+                    selected={leaveManageLayers as Set<string>}
+                    onToggle={(key) => toggleLeaveManageLayer(key as LeaveManageLayerKey)}
+                    onSetMany={(keys, checked) => setManyInSet(setLeaveManageLayers, keys as LeaveManageLayerKey[], checked)}
+                    tone="violet"
+                    layout="grid"
+                    searchPlaceholder="Search actions…"
+                  />
                 </div>
               )}
               {MODULE_ACCESS_GROUPS.map((group) => {
@@ -6795,22 +6803,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                                 do inside {m.label} — any combination. Leaving all of these unchecked (while the module
                                 itself stays checked above) blocks every action here.
                               </p>
-                              <div className="grid grid-cols-2 xl:grid-cols-3 gap-2">
-                                {PERMISSION_LAYERS.map((layer) => (
-                                  <label
-                                    key={layer.key}
-                                    className="flex items-center gap-2 px-2.5 py-1.5 bg-white border border-violet-100 rounded-lg cursor-pointer hover:bg-violet-100/40"
-                                  >
-                                    <input
-                                      type="checkbox"
-                                      checked={(moduleLayers[m.key] || new Set()).has(layer.key)}
-                                      onChange={() => toggleModuleLayer(m.key, layer.key)}
-                                      className="w-3.5 h-3.5 rounded border-slate-300 text-violet-600 focus:ring-violet-600 cursor-pointer"
-                                    />
-                                    <span className="text-xs text-slate-800">{layer.label}</span>
-                                  </label>
-                                ))}
-                              </div>
+                              <ModuleAccessChecklist
+                                items={PERMISSION_LAYERS.map((layer) => ({ key: layer.key, label: layer.label }))}
+                                selected={(moduleLayers[m.key] || new Set()) as Set<string>}
+                                onToggle={(key) => toggleModuleLayer(m.key, key as PermissionLayerKey)}
+                                onSetMany={(keys, checked) => setManyModuleLayers(m.key, keys as PermissionLayerKey[], checked)}
+                                tone="violet"
+                                layout="grid"
+                                searchPlaceholder="Search actions…"
+                              />
                             </div>
                           )}
                           {m.key === 'attendance_reports' && selectedModules.has('attendance_reports') && (
@@ -6831,25 +6832,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                               ) : departments.length === 0 ? (
                                 <p className="text-[11px] text-slate-400">No Departments set up yet (Admin Panel -&gt; Departments).</p>
                               ) : (
-                                <div className="space-y-1 max-h-40 overflow-y-auto pr-1">
-                                  {departments.map((d) => (
-                                    <label
-                                      key={d.id}
-                                      className="flex items-center gap-2 px-2 py-1.5 bg-white border border-amber-100 rounded-lg cursor-pointer hover:bg-amber-100/40"
-                                    >
-                                      <input
-                                        type="checkbox"
-                                        checked={attendanceReportDepts.has(d.name)}
-                                        onChange={() => toggleAttendanceReportDept(d.name)}
-                                        className="w-3.5 h-3.5 rounded border-slate-300 text-amber-600 focus:ring-amber-600 cursor-pointer"
-                                      />
-                                      <span className="text-xs text-slate-800">{d.name}</span>
-                                      {d.supervisor_user_id === managingModulesFor?.id && (
-                                        <span className="text-[10px] text-amber-700 font-semibold">Supervisor</span>
-                                      )}
-                                    </label>
-                                  ))}
-                                </div>
+                                <ModuleAccessChecklist
+                                  items={departments.map((d) => ({
+                                    key: d.name,
+                                    label: d.name,
+                                    badge: d.supervisor_user_id === managingModulesFor?.id ? 'Supervisor' : undefined
+                                  }))}
+                                  selected={attendanceReportDepts}
+                                  onToggle={toggleAttendanceReportDept}
+                                  onSetMany={(keys, checked) => setManyInSet(setAttendanceReportDepts, keys, checked)}
+                                  tone="amber"
+                                  searchPlaceholder="Search departments…"
+                                />
                               )}
                             </div>
                           )}
@@ -6871,25 +6865,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                               ) : departments.length === 0 ? (
                                 <p className="text-[11px] text-slate-400">No Departments set up yet (Admin Panel -&gt; Departments).</p>
                               ) : (
-                                <div className="space-y-1 max-h-40 overflow-y-auto pr-1">
-                                  {departments.map((d) => (
-                                    <label
-                                      key={d.id}
-                                      className="flex items-center gap-2 px-2 py-1.5 bg-white border border-amber-100 rounded-lg cursor-pointer hover:bg-amber-100/40"
-                                    >
-                                      <input
-                                        type="checkbox"
-                                        checked={leaveApplicationDepts.has(d.name)}
-                                        onChange={() => toggleLeaveApplicationDept(d.name)}
-                                        className="w-3.5 h-3.5 rounded border-slate-300 text-amber-600 focus:ring-amber-600 cursor-pointer"
-                                      />
-                                      <span className="text-xs text-slate-800">{d.name}</span>
-                                      {d.supervisor_user_id === managingModulesFor?.id && (
-                                        <span className="text-[10px] text-amber-700 font-semibold">Supervisor</span>
-                                      )}
-                                    </label>
-                                  ))}
-                                </div>
+                                <ModuleAccessChecklist
+                                  items={departments.map((d) => ({
+                                    key: d.name,
+                                    label: d.name,
+                                    badge: d.supervisor_user_id === managingModulesFor?.id ? 'Supervisor' : undefined
+                                  }))}
+                                  selected={leaveApplicationDepts}
+                                  onToggle={toggleLeaveApplicationDept}
+                                  onSetMany={(keys, checked) => setManyInSet(setLeaveApplicationDepts, keys, checked)}
+                                  tone="amber"
+                                  searchPlaceholder="Search departments…"
+                                />
                               )}
                             </div>
                           )}
@@ -6911,25 +6898,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                               ) : departments.length === 0 ? (
                                 <p className="text-[11px] text-slate-400">No Departments set up yet (Admin Panel -&gt; Departments).</p>
                               ) : (
-                                <div className="space-y-1 max-h-40 overflow-y-auto pr-1">
-                                  {departments.map((d) => (
-                                    <label
-                                      key={d.id}
-                                      className="flex items-center gap-2 px-2 py-1.5 bg-white border border-amber-100 rounded-lg cursor-pointer hover:bg-amber-100/40"
-                                    >
-                                      <input
-                                        type="checkbox"
-                                        checked={conveyanceClaimDepts.has(d.name)}
-                                        onChange={() => toggleConveyanceClaimDept(d.name)}
-                                        className="w-3.5 h-3.5 rounded border-slate-300 text-amber-600 focus:ring-amber-600 cursor-pointer"
-                                      />
-                                      <span className="text-xs text-slate-800">{d.name}</span>
-                                      {d.supervisor_user_id === managingModulesFor?.id && (
-                                        <span className="text-[10px] text-amber-700 font-semibold">Supervisor</span>
-                                      )}
-                                    </label>
-                                  ))}
-                                </div>
+                                <ModuleAccessChecklist
+                                  items={departments.map((d) => ({
+                                    key: d.name,
+                                    label: d.name,
+                                    badge: d.supervisor_user_id === managingModulesFor?.id ? 'Supervisor' : undefined
+                                  }))}
+                                  selected={conveyanceClaimDepts}
+                                  onToggle={toggleConveyanceClaimDept}
+                                  onSetMany={(keys, checked) => setManyInSet(setConveyanceClaimDepts, keys, checked)}
+                                  tone="amber"
+                                  searchPlaceholder="Search departments…"
+                                />
                               )}
                             </div>
                           )}
