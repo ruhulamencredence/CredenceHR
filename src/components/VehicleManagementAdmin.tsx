@@ -28,6 +28,7 @@
 import React, { useEffect, useState } from 'react';
 import { apiUrl } from '../lib/api';
 import { User } from '../types';
+import { LiveRideMap } from './LiveRideMap';
 
 interface VehicleManagementAdminProps {
   // Same `users` list AdminPanel already fetches for ApprovalTemplateManager
@@ -98,6 +99,7 @@ export function VehicleManagementAdmin(_props: VehicleManagementAdminProps) {
   // instead of reusing the `users` prop, which comes from GET /api/users and
   // is empty for anyone without the 'users' module.
   const [people, setPeople] = useState<{ id: number; name: string }[]>([]);
+  const [viewingMapFor, setViewingMapFor] = useState<number | null>(null);
   useEffect(() => {
     fetch(apiUrl('/api/vehicles/driver-candidates'), { headers: authHeaders() })
       .then((r) => r.json())
@@ -315,6 +317,14 @@ export function VehicleManagementAdmin(_props: VehicleManagementAdminProps) {
                   <div>Vehicle: {r.vehicle_model} ({r.vehicle_no})</div>
                   <div>Driver: {r.driver_name} — {r.driver_mobile}</div>
                   {r.expected_return_at && <div>Expected back by: {new Date(r.expected_return_at).toLocaleString()}</div>}
+                  {r.status === 'ongoing' && (
+                    <button
+                      onClick={() => setViewingMapFor(r.id)}
+                      className="mt-1.5 px-2.5 py-1 text-xs font-medium rounded bg-purple-600 text-white hover:bg-purple-700"
+                    >
+                      View Live Map
+                    </button>
+                  )}
                 </div>
               )}
 
@@ -625,6 +635,7 @@ export function VehicleManagementAdmin(_props: VehicleManagementAdminProps) {
           </table>
         </div>
       )}
+      {viewingMapFor !== null && <LiveRideMap requisitionId={viewingMapFor} onClose={() => setViewingMapFor(null)} />}
     </div>
   );
 }
