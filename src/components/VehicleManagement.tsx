@@ -50,6 +50,9 @@ interface Requisition {
   created_at: string;
 }
 
+// Web Ride Status list: Route | Schedule | Vehicle & Driver | Status | Actions.
+const RIDE_LIST_COLS = 'grid-cols-[minmax(0,2.2fr)_minmax(0,1fr)_minmax(0,1.5fr)_minmax(0,1.5fr)_260px]';
+
 const STATUS_LABEL: Record<Requisition['status'], string> = {
   pending: 'Pending HR/Admin Review',
   approved: 'Approved — Awaiting Vehicle Assignment',
@@ -421,6 +424,33 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
     }
   }
 
+  const renderExtensionForm = (r: Requisition) =>
+    extendingFor === r.id && (
+      <div className="mt-3 border-t pt-3 space-y-2">
+        <textarea
+          value={extendNote}
+          onChange={(e) => setExtendNote(e.target.value)}
+          rows={2}
+          placeholder="Why will you be late / how much more time do you need?"
+          className="w-full border rounded px-2 py-1.5 text-sm"
+        />
+        <div className="flex gap-2">
+          <button
+            onClick={() => requestExtension(r.id)}
+            className="px-3 py-1.5 text-xs font-medium rounded bg-amber-600 text-white hover:bg-amber-700"
+          >
+            Submit
+          </button>
+          <button
+            onClick={() => setExtendingFor(null)}
+            className="px-3 py-1.5 text-xs font-medium rounded border border-gray-300 text-gray-600 hover:bg-gray-50"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    );
+
   return (
     <div className="w-full">
       <div className="flex gap-1 border-b border-gray-200 mb-4">
@@ -549,8 +579,130 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
         </div>
       )}
 
-      {tab === 'status' && (
-        <div className={wideWeb ? 'grid grid-cols-2 gap-3 items-start' : 'space-y-3'}>
+      {tab === 'status' && wideWeb && (
+        // Web: one row per ride, table-style, full content width.
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className={`grid ${RIDE_LIST_COLS} gap-4 px-5 py-2.5 bg-slate-50 border-b border-slate-200 text-[11px] font-semibold uppercase tracking-wide text-slate-500`}>
+            <div>Route</div>
+            <div>Schedule</div>
+            <div>Vehicle & Driver</div>
+            <div>Status</div>
+            <div className="text-right">Actions</div>
+          </div>
+          {loading && <div className="px-5 py-4 text-sm text-gray-500">Loading…</div>}
+          {!loading && requisitions.length === 0 && <div className="px-5 py-4 text-sm text-gray-500">No ride requests yet.</div>}
+          {requisitions.map((r) => (
+            <div key={r.id} className="px-5 py-3.5 border-b border-slate-100 last:border-b-0 hover:bg-slate-50/60">
+              <div className={`grid ${RIDE_LIST_COLS} gap-4 items-start`}>
+                <div className="min-w-0">
+                  <div className="font-semibold text-slate-800 truncate" title={`${r.pickup_location} → ${r.destination}`}>
+                    {r.pickup_location} → {r.destination}
+                  </div>
+                  <div className="text-xs text-slate-500 truncate" title={r.purpose}>
+                    {r.purpose}
+                  </div>
+                </div>
+                <div className="text-sm text-slate-700">
+                  {String(r.ride_date).slice(0, 10)}
+                  <div className="text-xs text-slate-500">
+                    {r.start_time} · Est. {r.estimated_duration_hours} hr{r.estimated_duration_hours === 1 ? '' : 's'}
+                  </div>
+                </div>
+                <div className="min-w-0 text-sm text-slate-700">
+                  {r.vehicle_no ? (
+                    <>
+                      <div className="truncate">
+                        {r.vehicle_model} ({r.vehicle_no})
+                      </div>
+                      <div className="text-xs text-slate-500 truncate">
+                        {r.driver_name}
+                        {r.driver_mobile ? ` — ${r.driver_mobile}` : ''}
+                      </div>
+                    </>
+                  ) : (
+                    <span className="text-slate-400">—</span>
+                  )}
+                </div>
+                <div className="min-w-0 space-y-1">
+                  <span className={`inline-block text-xs font-medium px-2 py-0.5 rounded ${STATUS_COLOR[r.status]}`}>{STATUS_LABEL[r.status]}</span>
+                  {r.status === 'pending' && r.pending_with && (
+                    <div className="text-xs text-amber-700 truncate" title={r.pending_with}>
+                      Waiting on: <span className="font-medium">{r.pending_with}</span>
+                    </div>
+                  )}
+                  {r.status === 'rejected' && r.rejection_reason && <div className="text-xs text-red-600">Reason: {r.rejection_reason}</div>}
+                  {r.status === 'ongoing' && r.expected_return_at && (
+                    <div className="text-xs text-slate-500">Back by {new Date(r.expected_return_at).toLocaleString()}</div>
+                  )}
+                  {r.status === 'ongoing' && r.time_extension_status !== 'none' && (
+                    <div className="text-xs text-amber-700">
+                      Extension {r.time_extension_status}
+                      {r.time_extension_note ? `: ${r.time_extension_note}` : ''}
+                    </div>
+                  )}
+                  {r.status === 'completed' && (
+                    <div className={`text-xs ${r.returned_late ? 'text-amber-700' : 'text-slate-500'}`}>
+                      {r.returned_late ? 'Returned late' : 'Returned on time'}
+                      {r.actual_return_at ? ` — ${new Date(r.actual_return_at).toLocaleString()}` : ''}
+                    </div>
+                  )}
+                </div>
+                <div className="flex flex-wrap justify-end gap-1.5">
+                  {r.status === 'pending' && (
+                    <button
+                      onClick={() => cancelRequisition(r.id)}
+                      className="px-2.5 py-1 text-xs font-medium rounded border border-gray-300 text-gray-600 hover:bg-gray-50"
+                    >
+                      Cancel
+                    </button>
+                  )}
+                  {r.status === 'completed' && (
+                    <button
+                      onClick={() => setViewingDetailsFor(r.id)}
+                      className="px-2.5 py-1 text-xs font-medium rounded bg-purple-600 text-white hover:bg-purple-700"
+                    >
+                      Details & Map
+                    </button>
+                  )}
+                  {r.status === 'ongoing' && (
+                    <>
+                      {r.driver_user_id && (
+                        <button
+                          onClick={() => setViewingMapFor(r.id)}
+                          className="px-2.5 py-1 text-xs font-medium rounded bg-purple-600 text-white hover:bg-purple-700"
+                        >
+                          Live Map
+                        </button>
+                      )}
+                      <button
+                        onClick={() => completeRide(r.id)}
+                        className="px-2.5 py-1 text-xs font-medium rounded bg-blue-600 text-white hover:bg-blue-700"
+                      >
+                        Mark Returned
+                      </button>
+                      {r.time_extension_status === 'none' && (
+                        <button
+                          onClick={() => {
+                            setExtendingFor(extendingFor === r.id ? null : r.id);
+                            setExtendNote('');
+                          }}
+                          className="px-2.5 py-1 text-xs font-medium rounded border border-amber-300 text-amber-700 hover:bg-amber-50"
+                        >
+                          Running Late
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+              </div>
+              {renderExtensionForm(r)}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {tab === 'status' && !wideWeb && (
+        <div className="space-y-3">
           {loading && <div className="text-sm text-gray-500">Loading…</div>}
           {!loading && requisitions.length === 0 && <div className="text-sm text-gray-500">No ride requests yet.</div>}
           {requisitions.map((r) => (
@@ -646,31 +798,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
                 </div>
               )}
 
-              {extendingFor === r.id && (
-                <div className="mt-3 border-t pt-3 space-y-2">
-                  <textarea
-                    value={extendNote}
-                    onChange={(e) => setExtendNote(e.target.value)}
-                    rows={2}
-                    placeholder="Why will you be late / how much more time do you need?"
-                    className="w-full border rounded px-2 py-1.5 text-sm"
-                  />
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => requestExtension(r.id)}
-                      className="px-3 py-1.5 text-xs font-medium rounded bg-amber-600 text-white hover:bg-amber-700"
-                    >
-                      Submit
-                    </button>
-                    <button
-                      onClick={() => setExtendingFor(null)}
-                      className="px-3 py-1.5 text-xs font-medium rounded border border-gray-300 text-gray-600 hover:bg-gray-50"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              )}
+              {renderExtensionForm(r)}
             </div>
           ))}
         </div>
