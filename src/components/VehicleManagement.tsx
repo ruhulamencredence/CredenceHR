@@ -14,6 +14,7 @@
 import React, { useEffect, useState } from 'react';
 import { apiUrl } from '../lib/api';
 import { LiveRideMap } from './LiveRideMap';
+import { RideDetails } from './RideDetails';
 import { RideDestinationPicker, RidePlaces } from './RideDestinationPicker';
 
 interface Requisition {
@@ -177,6 +178,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
   // in the modal, or null when closed. Available from "Ride Status" (the
   // requester's own ongoing ride) and the Maintainer tab's "Live Rides" list.
   const [viewingMapFor, setViewingMapFor] = useState<number | null>(null);
+  const [viewingDetailsFor, setViewingDetailsFor] = useState<number | null>(null);
 
   // Vehicle Maintainer bypass (see VehicleManagementRoutes.ts's
   // POST .../direct-book and PUT .../:id/direct-assign) — books+confirms a
@@ -557,6 +559,15 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
                   {r.returned_late ? 'Returned late' : 'Returned on time'}
                   {r.actual_return_at ? ` — ${new Date(r.actual_return_at).toLocaleString()}` : ''}
                 </div>
+              )}
+
+              {r.status === 'completed' && (
+                <button
+                  onClick={() => setViewingDetailsFor(r.id)}
+                  className="mt-3 px-3 py-1.5 text-xs font-medium rounded bg-purple-600 text-white hover:bg-purple-700"
+                >
+                  View Ride Details & Map
+                </button>
               )}
 
               {r.status === 'pending' && (
@@ -962,6 +973,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
       )}
 
       {viewingMapFor != null && <LiveRideMap requisitionId={viewingMapFor} onClose={() => setViewingMapFor(null)} />}
+      {viewingDetailsFor != null && <RideDetails requisitionId={viewingDetailsFor} onClose={() => setViewingDetailsFor(null)} />}
     </div>
   );
 }

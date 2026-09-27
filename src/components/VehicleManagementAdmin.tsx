@@ -29,6 +29,7 @@ import React, { useEffect, useState } from 'react';
 import { apiUrl } from '../lib/api';
 import { User } from '../types';
 import { LiveRideMap } from './LiveRideMap';
+import { RideDetails } from './RideDetails';
 
 interface VehicleManagementAdminProps {
   // Same `users` list AdminPanel already fetches for ApprovalTemplateManager
@@ -100,6 +101,7 @@ export function VehicleManagementAdmin(_props: VehicleManagementAdminProps) {
   // is empty for anyone without the 'users' module.
   const [people, setPeople] = useState<{ id: number; name: string }[]>([]);
   const [viewingMapFor, setViewingMapFor] = useState<number | null>(null);
+  const [viewingDetailsFor, setViewingDetailsFor] = useState<number | null>(null);
   useEffect(() => {
     fetch(apiUrl('/api/vehicles/driver-candidates'), { headers: authHeaders() })
       .then((r) => r.json())
@@ -337,6 +339,15 @@ export function VehicleManagementAdmin(_props: VehicleManagementAdminProps) {
                   {r.returned_late ? 'Returned late' : 'Returned on time'}
                   {r.actual_return_at ? ` — ${new Date(r.actual_return_at).toLocaleString()}` : ''}
                 </div>
+              )}
+
+              {r.status === 'completed' && (
+                <button
+                  onClick={() => setViewingDetailsFor(r.id)}
+                  className="mt-2 px-2.5 py-1 text-xs font-medium rounded bg-purple-600 text-white hover:bg-purple-700"
+                >
+                  View Ride Details & Map
+                </button>
               )}
 
               {r.time_extension_status === 'requested' && (
@@ -636,6 +647,7 @@ export function VehicleManagementAdmin(_props: VehicleManagementAdminProps) {
         </div>
       )}
       {viewingMapFor !== null && <LiveRideMap requisitionId={viewingMapFor} onClose={() => setViewingMapFor(null)} />}
+      {viewingDetailsFor !== null && <RideDetails requisitionId={viewingDetailsFor} onClose={() => setViewingDetailsFor(null)} />}
     </div>
   );
 }
