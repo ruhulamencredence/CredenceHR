@@ -18,6 +18,11 @@ interface AlertsPageProps {
   // Same destination AlertsBell's dropdown already jumps to for a
   // 'leave_application' alert — see App.tsx's onOpenLeaveApplication.
   onOpenLeaveApplication?: () => void;
+  // 'vehicle_approval' = a ride request waiting on this account (approve, or
+  // assign a vehicle on a Vehicle Maintainer Layer) -> Approve Application.
+  // 'vehicle_requisition' = the requester's own ride updates -> Book a Ride.
+  onOpenApproveApplications?: () => void;
+  onOpenVehicleManagement?: () => void;
 }
 
 // Full "self service" style page for the Personal Alerts inbox — same data
@@ -26,7 +31,7 @@ interface AlertsPageProps {
 // every other self-service section (Employee Directory, My Leave, ...).
 // Reachable from GlobalSidebar's "Alerts" item and AlertsBell's dropdown
 // footer "View all" link.
-export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLeaveApplication }) => {
+export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLeaveApplication, onOpenApproveApplications, onOpenVehicleManagement }) => {
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [loading, setLoading] = useState(true);
   const isNativeApp = Capacitor.isNativePlatform();
@@ -79,8 +84,16 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
 
   const handleAlertClick = (alert: Alert) => {
     if (!alert.is_read) markRead(alert.id);
-    if (alert.type === 'leave_application' && onOpenLeaveApplication) {
-      onOpenLeaveApplication();
+    const target =
+      alert.type === 'leave_application'
+        ? onOpenLeaveApplication
+        : alert.type === 'vehicle_approval'
+        ? onOpenApproveApplications
+        : alert.type === 'vehicle_requisition'
+        ? onOpenVehicleManagement
+        : undefined;
+    if (target) {
+      target();
     }
   };
 

@@ -2672,6 +2672,20 @@ async function getCurrentStepApprovers(request: any): Promise<{ user_id: number;
   return step ? [{ user_id: Number(step.user_id), user_name: step.user_name }] : [];
 }
 
+// True when a pending request's CURRENT step is a Template step whose
+// approver_type is 'vehicle_maintainer' — used to word the "waiting on you"
+// alert as an assign-a-vehicle task instead of an approval.
+async function isVehicleMaintainerStep(request: any): Promise<boolean> {
+  if (!request?.template_id) return false;
+  const hasSupervisorStep = !!request.supervisor_step_user_id;
+  if (hasSupervisorStep && Number(request.current_step) === 1) return false;
+  const templateStepOrder = hasSupervisorStep ? Number(request.current_step) - 1 : Number(request.current_step);
+  const steps = await queryDB("SELECT * FROM approval_template_steps");
+  return steps.some(
+    (s: any) => Number(s.template_id) === Number(request.template_id) && Number(s.step_order) === templateStepOrder && s.approver_type === "vehicle_maintainer"
+  );
+}
+
 // A small typed error so callers (both the Admin-queue route and the
 // personal-queue route below) can map it to the right HTTP status without
 // duplicating the status-picking logic.
@@ -4698,6 +4712,7 @@ async function startServer() {
     createAlert,
     createTemplateApprovalRequest,
     getCurrentStepApprovers,
+    isVehicleMaintainerStep,
     finalizeVehicleRequisitionApproval
   });
 
@@ -4784,6 +4799,7 @@ async function startServer() {
     toDateOnlyString,
     attachApprovalStatuses,
     getCurrentStepApprovers,
+    isVehicleMaintainerStep,
     createAlert
   });
 

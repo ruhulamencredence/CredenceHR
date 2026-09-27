@@ -92,7 +92,19 @@ const emptyEmergencyForm = () => ({
   estimated_duration_hours: 1
 });
 
-export function VehicleManagementAdmin({ users }: VehicleManagementAdminProps) {
+export function VehicleManagementAdmin(_props: VehicleManagementAdminProps) {
+  // Driver / Employee / Supervisor pickers. Fetched here from GET
+  // /api/vehicles/driver-candidates (any logged-in account may call it)
+  // instead of reusing the `users` prop, which comes from GET /api/users and
+  // is empty for anyone without the 'users' module.
+  const [people, setPeople] = useState<{ id: number; name: string }[]>([]);
+  useEffect(() => {
+    fetch(apiUrl('/api/vehicles/driver-candidates'), { headers: authHeaders() })
+      .then((r) => r.json())
+      .then((rows) => setPeople(Array.isArray(rows) ? rows : []))
+      .catch(() => {});
+  }, []);
+
   const [tab, setTab] = useState<'requests' | 'emergency' | 'inventory'>('requests');
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [requisitions, setRequisitions] = useState<Requisition[]>([]);
@@ -403,7 +415,7 @@ export function VehicleManagementAdmin({ users }: VehicleManagementAdminProps) {
                         className="border rounded px-2 py-1 text-xs"
                       >
                         <option value="">Pick a driver…</option>
-                        {users.map((u) => (
+                        {people.map((u) => (
                           <option key={u.id} value={u.id}>
                             {u.name}
                           </option>
@@ -455,7 +467,7 @@ export function VehicleManagementAdmin({ users }: VehicleManagementAdminProps) {
                   className="w-full border rounded px-3 py-2 text-sm"
                 >
                   <option value="">Select an employee…</option>
-                  {users.map((u) => (
+                  {people.map((u) => (
                     <option key={u.id} value={u.id}>
                       {u.name}
                     </option>
@@ -472,7 +484,7 @@ export function VehicleManagementAdmin({ users }: VehicleManagementAdminProps) {
                   className="w-full border rounded px-3 py-2 text-sm"
                 >
                   <option value="">Use their own Supervisor (default)</option>
-                  {users.map((u) => (
+                  {people.map((u) => (
                     <option key={u.id} value={u.id}>
                       {u.name}
                     </option>

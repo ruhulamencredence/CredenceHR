@@ -17,6 +17,11 @@ interface AlertsBellProps {
   // in Navbar already points at) — optional so this component still works
   // standing alone if nothing wires it up.
   onOpenLeaveApplication?: () => void;
+  // 'vehicle_approval' = a ride request waiting on this account (approve, or
+  // assign a vehicle on a Vehicle Maintainer Layer) -> Approve Application.
+  // 'vehicle_requisition' = the requester's own ride updates -> Book a Ride.
+  onOpenApproveApplications?: () => void;
+  onOpenVehicleManagement?: () => void;
   // Dropdown footer "View all" link — opens AlertsPage.tsx (the full-page
   // inbox), since this dropdown itself only ever shows the 50 most recent.
   onViewAll?: () => void;
@@ -28,7 +33,7 @@ interface AlertsBellProps {
 // unlike the Admin Panel tabs). Polls the lightweight unread-count endpoint
 // so the badge stays current without re-fetching the whole list constantly;
 // the full list is only fetched when the dropdown is actually opened.
-export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplication, onViewAll }) => {
+export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplication, onOpenApproveApplications, onOpenVehicleManagement, onViewAll }) => {
   const [unreadCount, setUnreadCount] = useState(0);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [open, setOpen] = useState(false);
@@ -129,9 +134,17 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
 
   const handleAlertClick = (alert: Alert) => {
     if (!alert.is_read) markRead(alert.id);
-    if (alert.type === 'leave_application' && onOpenLeaveApplication) {
+    const target =
+      alert.type === 'leave_application'
+        ? onOpenLeaveApplication
+        : alert.type === 'vehicle_approval'
+        ? onOpenApproveApplications
+        : alert.type === 'vehicle_requisition'
+        ? onOpenVehicleManagement
+        : undefined;
+    if (target) {
       setOpen(false);
-      onOpenLeaveApplication();
+      target();
     }
   };
 

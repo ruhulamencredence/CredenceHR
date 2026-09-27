@@ -1381,7 +1381,13 @@ export interface Notice {
 // `type` stays a plain string on the server (not a DB enum) so more kinds can
 // be added later without a migration; 'leave_application' is the first one
 // wired up (Leave Application Approve/Reject notifies the applicant).
-export type AlertType = 'leave_application';
+export type AlertType =
+  | 'leave_application'
+  | 'conveyance_claim'
+  | 'conveyance_disbursed'
+  | 'asset_requisition'
+  | 'vehicle_requisition'
+  | 'vehicle_approval';
 
 export interface Alert {
   id: number;
