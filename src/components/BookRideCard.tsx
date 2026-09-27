@@ -6,15 +6,16 @@
 import React, { useEffect, useState } from 'react';
 import { Car, MapPin, ChevronRight } from 'lucide-react';
 import { apiUrl } from '../lib/api';
+import { BookRideTarget } from '../lib/quickAccess';
 
 interface BookRideCardProps {
   token: string;
   userId: number;
-  onOpen: (tab: 'book' | 'status') => void;
+  onOpen: (tab: BookRideTarget) => void;
   className?: string;
 }
 
-interface Ride {
+export interface Ride {
   id: number;
   employee_user_id: number;
   pickup_location: string;
@@ -27,31 +28,37 @@ interface Ride {
   driver_name: string | null;
 }
 
-const ACTIVE_LABEL: Record<string, { text: string; color: string }> = {
+export const ACTIVE_LABEL: Record<string, { text: string; color: string }> = {
   pending: { text: 'Awaiting approval', color: 'bg-yellow-100 text-yellow-800' },
   approved: { text: 'Awaiting vehicle', color: 'bg-teal-100 text-teal-800' },
   ongoing: { text: 'Ride ongoing', color: 'bg-green-100 text-green-800' }
 };
 
-// Web Dashboard quick access to Book a Ride (VehicleManagement.tsx): a
-// "Where are you going?" shortcut plus this account's own current ride, if
-// any, so its status is one glance away.
-export const BookRideCard: React.FC<BookRideCardProps> = ({ token, userId, onOpen, className = '' }) => {
-  const [active, setActive] = useState<Ride[]>([]);
-
+// This account's own rides still in progress (awaiting approval, awaiting a
+// vehicle, or ongoing), newest first.
+export function useActiveRides(token: string, userId: number): Ride[] | null {
+  const [active, setActive] = useState<Ride[] | null>(null);
   useEffect(() => {
     let cancelled = false;
     fetch(apiUrl('/api/vehicles/requisitions'), { headers: { Authorization: `Bearer ${token}` } })
       .then((r) => (r.ok ? r.json() : []))
       .then((rows) => {
         if (cancelled || !Array.isArray(rows)) return;
-        setActive(rows.filter((r: Ride) => Number(r.employee_user_id) === Number(userId) && ACTIVE_LABEL[r.status]).slice(0, 2));
+        setActive(rows.filter((r: Ride) => Number(r.employee_user_id) === Number(userId) && ACTIVE_LABEL[r.status]));
       })
       .catch(() => {});
     return () => {
       cancelled = true;
     };
   }, [token, userId]);
+  return active;
+}
+
+// Web Dashboard quick access to Book a Ride (VehicleManagement.tsx): a
+// "Where are you going?" shortcut plus this account's own current ride, if
+// any, so its status is one glance away.
+export const BookRideCard: React.FC<BookRideCardProps> = ({ token, userId, onOpen, className = '' }) => {
+  const active = (useActiveRides(token, userId) || []).slice(0, 2);
 
   return (
     <div className={`bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden flex flex-col ${className}`}>
