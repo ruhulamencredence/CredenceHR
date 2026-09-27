@@ -63,6 +63,168 @@ interface UserManagementRouteDeps {
 export function registerUserManagementRoutes(app: Express, deps: UserManagementRouteDeps) {
   const { authenticateToken, requireAdmin, requireSuperAdmin, requireModuleGrantAccess, requireModule, requireModuleLayer, queryDB, adminModuleKeys, moduleLayerKeySets } = deps;
 
+  // ---------------------------------------------------------------------
+  // Access audit log + Access Templates (Admin Panel -> Users, Phase 3).
+  // ---------------------------------------------------------------------
+  queryDB(`
+    CREATE TABLE IF NOT EXISTS user_access_audit (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      target_user_id INT NOT NULL,
+      actor_user_id INT NULL,
+      action VARCHAR(64) NOT NULL,
+      detail TEXT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_user_access_audit_target (target_user_id, created_at)
+    )
+  `).catch((err: any) => console.warn("⚠️ Could not ensure user_access_audit table exists: " + err.message));
+  queryDB(`
+    CREATE TABLE IF NOT EXISTS access_templates (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      name VARCHAR(100) NOT NULL,
+      description VARCHAR(255) NULL,
+      features_json TEXT NULL,
+      modules_json TEXT NULL,
+      created_by INT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )
+  `).catch((err: any) => console.warn("⚠️ Could not ensure access_templates table exists: " + err.message));
+
+  // Every successful change to one account (PUT/DELETE /api/users/:id/...) is
+  // recorded after the response goes out: who did it, which endpoint, and
+  // the request body (passwords never stored). An "X-Access-Template" header
+  // marks changes made by applying a template.
+  const AUDIT_SECRET_KEYS = new Set(["password", "new_password", "newPassword", "login_password"]);
+  app.use("/api/users/:id", (req: any, res: any, next: any) => {
+    const targetId = Number(req.params.id);
+    if (!["PUT", "DELETE"].includes(req.method) || !Number.isFinite(targetId)) return next();
+    // Path below /api/users/:id ("/role", "/feature-permissions", "/" for a
+    // delete) — read now, since Express rewrites req.path once routing moves on.
+    const subPath = String(req.path || "/").replace(/^\//, "");
+    res.on("finish", () => {
+      if (res.statusCode >= 400 || !req.user) return;
+      const action = subPath || (req.method === "DELETE" ? "delete" : "update");
+      const body: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(req.body || {})) {
+        if (!AUDIT_SECRET_KEYS.has(k)) body[k] = v;
+      }
+      const template = typeof req.headers["x-access-template"] === "string" ? req.headers["x-access-template"].slice(0, 100) : null;
+      const detail = JSON.stringify(template ? { ...body, _template: template } : body).slice(0, 4000);
+      queryDB("INSERT INTO user_access_audit (target_user_id, actor_user_id, action, detail) VALUES (?, ?, ?, ?)", [
+        targetId,
+        req.user.id,
+        action.slice(0, 64),
+        detail
+      ]).catch((err: any) => console.warn("⚠️ Could not write user access audit: " + err.message));
+    });
+    next();
+  });
+
+  // GET /api/users/:id/access-audit — the "Activity" list in the Manage panel.
+  app.get("/api/users/:id/access-audit", authenticateToken, requireAdmin, requireModule("users"), async (req: any, res) => {
+    try {
+      const id = Number(req.params.id);
+      const [rows, users]: [any, any] = await Promise.all([
+        queryDB("SELECT * FROM user_access_audit WHERE target_user_id = ? ORDER BY id DESC LIMIT 100", [id]),
+        queryDB("SELECT id, name FROM users")
+      ]);
+      const nameById = new Map<number, string>(users.map((u: any) => [Number(u.id), u.name]));
+      const list = (rows as any[])
+        .filter((r) => Number(r.target_user_id) === id)
+        .sort((a, b) => Number(b.id) - Number(a.id))
+        .slice(0, 100)
+        .map((r) => {
+          let detail: any = null;
+          try {
+            detail = r.detail ? JSON.parse(r.detail) : null;
+          } catch {
+            detail = null;
+          }
+          return {
+            id: Number(r.id),
+            action: r.action,
+            detail,
+            actor_name: r.actor_user_id ? nameById.get(Number(r.actor_user_id)) || null : null,
+            created_at: r.created_at
+          };
+        });
+      res.json(list);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Access Templates — named presets ("Driver", "Field Staff"…): feature
+  // switches to turn on and Admin Panel modules to add. Applying one is done
+  // by the client through the normal per-user endpoints (so every permission
+  // check and the audit log above still apply per account).
+  const TEMPLATE_FEATURES = ["can_edit_delivery_date", "can_job_edit", "can_use_attendance", "can_use_tracking", "can_view_leave_summary"];
+  function parseTemplateBody(body: any) {
+    const name = typeof body?.name === "string" ? body.name.trim().slice(0, 100) : "";
+    if (!name) throw Object.assign(new Error("Template name is required."), { status: 400 });
+    const description = typeof body?.description === "string" ? body.description.trim().slice(0, 255) : "";
+    const features = (Array.isArray(body?.features) ? body.features : []).filter((f: any) => TEMPLATE_FEATURES.includes(f));
+    const modules = (Array.isArray(body?.modules) ? body.modules : []).filter((m: any) => adminModuleKeys.includes(m));
+    return { name, description, features, modules };
+  }
+  function serializeTemplate(r: any) {
+    const parse = (v: any) => {
+      try {
+        const a = JSON.parse(v || "[]");
+        return Array.isArray(a) ? a : [];
+      } catch {
+        return [];
+      }
+    };
+    return { id: Number(r.id), name: r.name, description: r.description || "", features: parse(r.features_json), modules: parse(r.modules_json) };
+  }
+
+  app.get("/api/access-templates", authenticateToken, requireAdmin, requireModule("users"), async (_req: any, res) => {
+    try {
+      const rows: any = await queryDB("SELECT * FROM access_templates");
+      res.json((rows as any[]).map(serializeTemplate).sort((a, b) => a.name.localeCompare(b.name)));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/access-templates", authenticateToken, requireAdmin, requireModule("users"), requireModuleLayer("users", "edit_add"), async (req: any, res) => {
+    try {
+      const t = parseTemplateBody(req.body);
+      const result: any = await queryDB(
+        "INSERT INTO access_templates (name, description, features_json, modules_json, created_by) VALUES (?, ?, ?, ?, ?)",
+        [t.name, t.description, JSON.stringify(t.features), JSON.stringify(t.modules), req.user.id]
+      );
+      res.json({ id: Number(result.insertId), ...t });
+    } catch (err: any) {
+      res.status(err.status || 500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/access-templates/:id", authenticateToken, requireAdmin, requireModule("users"), requireModuleLayer("users", "edit_add"), async (req: any, res) => {
+    try {
+      const id = Number(req.params.id);
+      const t = parseTemplateBody(req.body);
+      const result: any = await queryDB(
+        "UPDATE access_templates SET name = ?, description = ?, features_json = ?, modules_json = ? WHERE id = ?",
+        [t.name, t.description, JSON.stringify(t.features), JSON.stringify(t.modules), id]
+      );
+      if (!result.affectedRows) return res.status(404).json({ error: "Template not found." });
+      res.json({ id, ...t });
+    } catch (err: any) {
+      res.status(err.status || 500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/access-templates/:id", authenticateToken, requireAdmin, requireModule("users"), requireModuleLayer("users", "delete_trash"), async (req: any, res) => {
+    try {
+      await queryDB("DELETE FROM access_templates WHERE id = ?", [Number(req.params.id)]);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // 6. User Management (Admin Only)
   app.post("/api/users", authenticateToken, requireAdmin, requireModule("users"), requireModuleLayer("users", "edit_add"), async (req: any, res) => {
     try {
