@@ -528,6 +528,26 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
     }
   });
 
+  // The Self Service switches and Department scopes inside the Module Access
+  // popup (Movement Claim, Timesheet, Leave Application, Monthly Attendance
+  // Report departments…) follow the same rule as the modules themselves: a
+  // Superadmin can set them for anyone; an Admin with can_grant_module_access
+  // (requireModuleGrantAccess, used before this) only for a role='user'
+  // account, never another Admin.
+  const requireUserTargetUnlessSuperadmin = async (req: any, res: any, next: any) => {
+    if (req.user?.role === "superadmin") return next();
+    try {
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [req.params.id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "user") {
+        return res.status(403).json({ error: "Only the Superadmin can change another Admin's access." });
+      }
+      next();
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  };
+
   // Sets which Admin Panel modules a given Admin or User may access — the tabs
   // are: projects, mprs, imports, reports, users, recycle, editlog, etc. Normally
   // Superadmin-only; a plain Admin reaches these two routes only once the
@@ -647,7 +667,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
   // accounts, and to accounts that supervise no Department at all — the
   // Department picker in the modal only uses supervisor_user_id client-side
   // to pre-tick a sensible starting selection, it isn't required here.
-  app.get("/api/users/:id/attendance-report-departments", authenticateToken, requireSuperAdmin, async (req, res) => {
+  app.get("/api/users/:id/attendance-report-departments", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
     try {
       const { id } = req.params;
       const rows: any = await queryDB(
@@ -660,7 +680,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
     }
   });
 
-  app.put("/api/users/:id/attendance-report-departments", authenticateToken, requireSuperAdmin, async (req, res) => {
+  app.put("/api/users/:id/attendance-report-departments", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
     try {
       const { id } = req.params;
       const requested: string[] = Array.isArray(req.body?.departments) ? req.body.departments : [];
@@ -701,7 +721,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
   // and to accounts that supervise no Department at all — the Department
   // picker in the modal only uses supervisor_user_id client-side to pre-tick
   // a sensible starting selection, it isn't required here.
-  app.get("/api/users/:id/leave-application-departments", authenticateToken, requireSuperAdmin, async (req, res) => {
+  app.get("/api/users/:id/leave-application-departments", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
     try {
       const { id } = req.params;
       const rows: any = await queryDB(
@@ -714,7 +734,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
     }
   });
 
-  app.put("/api/users/:id/leave-application-departments", authenticateToken, requireSuperAdmin, async (req, res) => {
+  app.put("/api/users/:id/leave-application-departments", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
     try {
       const { id } = req.params;
       const requested: string[] = Array.isArray(req.body?.departments) ? req.body.departments : [];
@@ -754,7 +774,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
   // no Department at all — the Department picker in the modal only uses
   // supervisor_user_id client-side to pre-tick a sensible starting
   // selection, it isn't required here.
-  app.get("/api/users/:id/conveyance-claim-departments", authenticateToken, requireSuperAdmin, async (req, res) => {
+  app.get("/api/users/:id/conveyance-claim-departments", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
     try {
       const { id } = req.params;
       const rows: any = await queryDB(
@@ -767,7 +787,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
     }
   });
 
-  app.put("/api/users/:id/conveyance-claim-departments", authenticateToken, requireSuperAdmin, async (req, res) => {
+  app.put("/api/users/:id/conveyance-claim-departments", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
     try {
       const { id } = req.params;
       const requested: string[] = Array.isArray(req.body?.departments) ? req.body.departments : [];
@@ -847,7 +867,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
   // user-panel-access above, but (unlike that one) applies to BOTH roles since
   // Leave Management isn't Admin Panel-only. Never applies to the Superadmin
   // itself, which always has this implicitly.
-  app.put("/api/users/:id/leave-management-access", authenticateToken, requireSuperAdmin, async (req, res) => {
+  app.put("/api/users/:id/leave-management-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
     try {
       const { id } = req.params;
       const canManage = !!req.body?.can_manage_leave;
@@ -873,7 +893,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
   // until the Superadmin explicitly grants it, matching every other module in
   // this app. Never applies to the Superadmin itself, which always has this
   // implicitly.
-  app.put("/api/users/:id/movement-claim-access", authenticateToken, requireSuperAdmin, async (req, res) => {
+  app.put("/api/users/:id/movement-claim-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
     try {
       const { id } = req.params;
       const canView = !!req.body?.can_view_movement_claims;
@@ -894,7 +914,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
   // Superadmin-only: grant/revoke a given Admin OR User account's ability to
   // see/use the Conveyance Bill Claim section on their own User Panel at all —
   // same on/off switch pattern as movement-claim-access above.
-  app.put("/api/users/:id/conveyance-claim-access", authenticateToken, requireSuperAdmin, async (req, res) => {
+  app.put("/api/users/:id/conveyance-claim-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
     try {
       const { id } = req.params;
       const canView = !!req.body?.can_view_conveyance_claims;
@@ -919,7 +939,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
   // their own User Panel at all — same on/off switch pattern as
   // movement-claim-access above, except ON by default (see the ALTER TABLE),
   // so this only ever needs to be called to turn it OFF for a given account.
-  app.put("/api/users/:id/budget-module-access", authenticateToken, requireSuperAdmin, async (req, res) => {
+  app.put("/api/users/:id/budget-module-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
     try {
       const { id } = req.params;
       const canView = !!req.body?.can_view_budget_module;
@@ -940,7 +960,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
   // Superadmin-only: grant/revoke a given Admin OR User account's ability to
   // see/use Self Service -> Timesheet at all — same on/off switch pattern as
   // movement-claim-access above.
-  app.put("/api/users/:id/timesheet-access", authenticateToken, requireSuperAdmin, async (req, res) => {
+  app.put("/api/users/:id/timesheet-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
     try {
       const { id } = req.params;
       const canView = !!req.body?.can_view_timesheet;
@@ -961,7 +981,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
   // Superadmin-only: grant/revoke a given Admin OR User account's ability to
   // see/use Self Service -> Leave Application at all — same on/off switch
   // pattern as movement-claim-access above.
-  app.put("/api/users/:id/leave-application-access", authenticateToken, requireSuperAdmin, async (req, res) => {
+  app.put("/api/users/:id/leave-application-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
     try {
       const { id } = req.params;
       const canView = !!req.body?.can_view_leave_application;
@@ -982,7 +1002,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
   // Superadmin-only: grant/revoke a given Admin OR User account's ability to
   // see/use Self Service -> My Leave at all — same on/off switch pattern as
   // movement-claim-access above.
-  app.put("/api/users/:id/my-leave-access", authenticateToken, requireSuperAdmin, async (req, res) => {
+  app.put("/api/users/:id/my-leave-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
     try {
       const { id } = req.params;
       const canView = !!req.body?.can_view_my_leave;
