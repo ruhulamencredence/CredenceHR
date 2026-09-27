@@ -6,7 +6,7 @@ import credenceLogo from '../assets/credence-logo.png';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
 import { savePdfCrossPlatform } from '../lib/saveFile';
 import { Project, Branch, MprNumber, Entry, User, Budget, BudgetItem, BudgetSubmission, UserProjectPermission, EntryEditHistory, EntryPermanentDeleteLog, BulkUserRow, BulkUserResultItem, AdminModuleKey, ADMIN_MODULES, PermissionLayerKey, PERMISSION_LAYERS, PERMISSION_LAYER_MODULES, LeaveManageLayerKey, LEAVE_MANAGE_LAYERS, AttendanceRecord, ClaimsNavRequest, AdminNavRequest, Department, LeaveApplication, PendingJobEdit } from '../types';
-import { Building2, FileText, Users, Users2, BarChart3, Plus, Trash2, Edit2, Search, Filter, UserCheck, Calendar, CalendarClock, Download, Upload, FolderPlus, X, Eye, FileSpreadsheet, KeyRound, History, RotateCcw, Recycle, ListChecks, FileDown, MapPin, LayoutGrid, Navigation, LogIn, LogOut, Bell, Route, ShieldCheck, Wallet, Contact, Lock, Unlock, Mail, CheckCircle2, XCircle, Clock3, ShieldAlert, Copy, Eraser } from 'lucide-react';
+import { Building2, FileText, Users, Users2, BarChart3, Plus, Trash2, Edit2, Search, Filter, UserCheck, Calendar, CalendarClock, Download, Upload, FolderPlus, X, Eye, FileSpreadsheet, KeyRound, History, RotateCcw, Recycle, ListChecks, FileDown, MapPin, LayoutGrid, Navigation, LogIn, LogOut, Bell, Route, ShieldCheck, Wallet, Contact, Lock, Unlock, Mail, CheckCircle2, XCircle, Clock3, ShieldAlert, Copy, Eraser, LayoutTemplate } from 'lucide-react';
 import LocationMapPicker from './LocationMapPicker';
 import { NoticeManager } from './NoticeManager';
 import { EmployeesPanel } from './EmployeesPanel';
@@ -31,6 +31,9 @@ import { HRAnalyticsDashboard } from './HRAnalyticsDashboard';
 import { DocumentVaultPanel } from './DocumentVaultPanel';
 import { AdminDashboard } from './AdminDashboard';
 import { UserAccessDrawer, UserAccessChips, userInitials, ROLE_BADGE, ROLE_LABEL } from './UserAccessDrawer';
+import { UserBulkBar } from './UserBulkBar';
+import { AccessTemplatesModal } from './AccessTemplatesModal';
+import { AccessTemplate, applyTemplateToUser, canEditUserFeatures } from '../lib/accessTemplates';
 import { Spinner } from './Spinner';
 import { apiUrl } from '../lib/api';
 import { formatDate, todayDateOnlyString } from '../lib/formatDate';
@@ -841,6 +844,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // Account open in the "Manage" side panel (UserAccessDrawer), by id so it
   // always shows the latest copy from `users`.
   const [managingUserId, setManagingUserId] = useState<number | null>(null);
+  // Ticked rows for the bulk bar (UserBulkBar), and the Access Templates list.
+  const [selectedUserIds, setSelectedUserIds] = useState<Set<number>>(new Set());
+  const [accessTemplates, setAccessTemplates] = useState<AccessTemplate[]>([]);
+  const [showAccessTemplates, setShowAccessTemplates] = useState(false);
   const filteredUsers = useMemo(() => {
     const q = userSearchText.trim().toLowerCase();
     const accessFilter = USER_ACCESS_FILTERS.find((f) => f.key === userAccessFilter);
@@ -855,6 +862,25 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       );
     });
   }, [users, userSearchText, userRoleFilter, userAccessFilter]);
+  const loadAccessTemplates = async () => {
+    try {
+      const res = await fetch(apiUrl('/api/access-templates'), { headers: { Authorization: `Bearer ${token}` } });
+      if (res.ok) setAccessTemplates(await res.json());
+    } catch {
+      // Templates are optional — the list just stays empty.
+    }
+  };
+  useEffect(() => {
+    if (activeTab === 'users') loadAccessTemplates();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+  const toggleUserSelected = (id: number) =>
+    setSelectedUserIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [permissions, setPermissions] = useState<UserProjectPermission[]>([]);
 
@@ -5454,6 +5480,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   <option value="user">User</option>
                 </select>
               </div>
+              <button
+                type="button"
+                onClick={() => setShowAccessTemplates(true)}
+                className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-xl text-slate-700 text-xs font-semibold hover:bg-slate-50 whitespace-nowrap"
+              >
+                <LayoutTemplate className="w-3.5 h-3.5" /> Access Templates
+              </button>
             </div>
           </div>
           {/* Quick filters — one tap narrows the list to accounts with a given
@@ -5482,6 +5515,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
             )}
           </div>
 
+          {selectedUserIds.size > 0 && (
+            <UserBulkBar
+              token={token}
+              selected={users.filter((x) => selectedUserIds.has(x.id))}
+              templates={accessTemplates}
+              viewer={{ isSuperAdmin, canGrantModuleAccess }}
+              onClear={() => setSelectedUserIds(new Set())}
+              onDone={() => fetchAllData()}
+              onOpenTemplates={() => setShowAccessTemplates(true)}
+            />
+          )}
+
           {/* Simple list: who, role, what they can access at a glance, last
               login. Every switch lives in the "Manage" side panel
               (UserAccessDrawer) with a plain-language description. */}
@@ -5492,7 +5537,28 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
               <table className="hidden md:table w-full divide-y divide-slate-200">
                 <thead className="bg-slate-50 text-slate-500 text-[11px] uppercase tracking-wider">
                   <tr>
-                    <th className="px-5 py-2.5 text-left">User</th>
+                    <th className="pl-5 pr-1 py-2.5 w-8">
+                      {(() => {
+                        const selectable = filteredUsers.filter((x) => canEditUserFeatures(x, { isSuperAdmin, canGrantModuleAccess }));
+                        const all = selectable.length > 0 && selectable.every((x) => selectedUserIds.has(x.id));
+                        return (
+                          <input
+                            type="checkbox"
+                            aria-label="Select all"
+                            checked={all}
+                            disabled={selectable.length === 0}
+                            onChange={() =>
+                              setSelectedUserIds((prev) => {
+                                const next = new Set(prev);
+                                selectable.forEach((x) => (all ? next.delete(x.id) : next.add(x.id)));
+                                return next;
+                              })
+                            }
+                          />
+                        );
+                      })()}
+                    </th>
+                    <th className="px-3 py-2.5 text-left">User</th>
                     <th className="px-3 py-2.5 text-left w-28">Role</th>
                     <th className="px-3 py-2.5 text-left">Access</th>
                     {canSeeLoginLocation && <th className="px-3 py-2.5 text-left w-56">Last Login</th>}
@@ -5501,8 +5567,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-sm">
                   {filteredUsers.map((u) => (
-                    <tr key={u.id} onClick={() => setManagingUserId(u.id)} className="hover:bg-slate-50/80 transition-colors cursor-pointer">
-                      <td className="px-5 py-3">
+                    <tr
+                      key={u.id}
+                      onClick={() => setManagingUserId(u.id)}
+                      className={`transition-colors cursor-pointer ${selectedUserIds.has(u.id) ? 'bg-blue-50/60' : 'hover:bg-slate-50/80'}`}
+                    >
+                      <td className="pl-5 pr-1 py-3" onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          aria-label={`Select ${u.name}`}
+                          checked={selectedUserIds.has(u.id)}
+                          disabled={!canEditUserFeatures(u, { isSuperAdmin, canGrantModuleAccess })}
+                          onChange={() => toggleUserSelected(u.id)}
+                        />
+                      </td>
+                      <td className="px-3 py-3">
                         <div className="flex items-center gap-3 min-w-0">
                           <div className="w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0" style={{ background: 'var(--g-gradient)' }}>
                             {userInitials(u.name)}
@@ -5548,12 +5627,22 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
               {/* Phone: one card per user instead of a wide table. */}
               <div className="md:hidden divide-y divide-slate-100">
                 {filteredUsers.map((u) => (
-                  <button
+                  <div
                     key={u.id}
-                    type="button"
+                    role="button"
+                    tabIndex={0}
                     onClick={() => setManagingUserId(u.id)}
-                    className="w-full text-left px-4 py-3 flex items-start gap-3 active:bg-slate-50"
+                    className={`w-full text-left px-4 py-3 flex items-start gap-3 active:bg-slate-50 ${selectedUserIds.has(u.id) ? 'bg-blue-50/60' : ''}`}
                   >
+                    <input
+                      type="checkbox"
+                      aria-label={`Select ${u.name}`}
+                      className="mt-2.5"
+                      checked={selectedUserIds.has(u.id)}
+                      disabled={!canEditUserFeatures(u, { isSuperAdmin, canGrantModuleAccess })}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={() => toggleUserSelected(u.id)}
+                    />
                     <div className="w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0" style={{ background: 'var(--g-gradient)' }}>
                       {userInitials(u.name)}
                     </div>
@@ -5567,7 +5656,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                         <UserAccessChips u={u} projectCount={projectIdsForUser(u.id).size} />
                       </div>
                     </div>
-                  </button>
+                  </div>
                 ))}
               </div>
             </>
@@ -6325,9 +6414,25 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
               onDelete={async () => {
                 await handleDeleteUser(mu.id);
               }}
+              token={token}
+              templates={accessTemplates}
+              onApplyTemplate={async (t) => {
+                await applyTemplateToUser(token, t, mu, { isSuperAdmin, canGrantModuleAccess });
+                fetchAllData();
+              }}
             />
           );
         })()}
+
+      {showAccessTemplates && (
+        <AccessTemplatesModal
+          token={token}
+          canGrantModuleAccess={canGrantModuleAccess}
+          templates={accessTemplates}
+          onChanged={loadAccessTemplates}
+          onClose={() => setShowAccessTemplates(false)}
+        />
+      )}
 
       {managingModulesFor && (
         <div

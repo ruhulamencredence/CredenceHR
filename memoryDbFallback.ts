@@ -107,6 +107,10 @@ export const memoryDb = {
   // zero bespoke handlers.
   vehicles: [] as any[],
   vehicleRequisitions: [] as any[],
+  // Admin Panel -> Users: access change log + Access Templates
+  // (UserManagement.ts) — plain generic tables.
+  userAccessAudit: [] as any[],
+  accessTemplates: [] as any[],
   // Chat/Alerts push notification device tokens (ChatRoutes.ts's POST/DELETE
   // /api/chat/push-token, PushNotificationService.ts's sendPushToUserIds/
   // sendPushToRoomMembers) — was missing a handler entirely, so in
@@ -223,7 +227,9 @@ const GENERIC_TABLES: [string, any[]][] = [
   ["approval_template_step_approvers", memoryDb.approvalTemplateStepApprovers],
   ["approval_template_steps", memoryDb.approvalTemplateSteps],
   ["vehicles", memoryDb.vehicles],
-  ["vehicle_requisitions", memoryDb.vehicleRequisitions]
+  ["vehicle_requisitions", memoryDb.vehicleRequisitions],
+  ["user_access_audit", memoryDb.userAccessAudit],
+  ["access_templates", memoryDb.accessTemplates]
 ];
 memoryDb.leaveCategories = [{ id: 1, category_key: "custom_earn_leave", label: "Earn Leave", created_by: null, created_at: new Date() }];
 
