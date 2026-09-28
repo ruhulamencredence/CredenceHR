@@ -496,10 +496,14 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
   // Alerts every HR/Admin-layer approver on this requisition — see
   // getHrLayerApprovers above. Never throws — a notification failure
   // shouldn't fail the actual operation it's reporting on.
-  async function notifyHrLayer(requisitionId: number, title: string, message: string) {
+  // skipUserIds: whoever did the operation, or already got their own alert
+  // about it, so nobody is told twice (or about their own action).
+  async function notifyHrLayer(requisitionId: number, title: string, message: string, skipUserIds: (number | null | undefined)[] = []) {
     try {
+      const skip = new Set(skipUserIds.filter((id) => id != null).map(Number));
       const approvers = await getHrLayerApprovers(requisitionId);
       for (const approver of approvers) {
+        if (skip.has(Number(approver.user_id))) continue;
         await createAlert(queryDB, {
           userId: approver.user_id,
           type: "asset_requisition" as AlertType,
@@ -593,7 +597,8 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
         await notifyHrLayer(
           Number(assignment.requisition_id),
           "Asset Requisition Completed",
-          `${req.user.name || "The employee"} confirmed receipt — requisition #${assignment.requisition_id} is now successfully fulfilled.`
+          `${req.user.name || "The employee"} confirmed receipt — requisition #${assignment.requisition_id} is now successfully fulfilled.`,
+          [req.user.id]
         );
       }
       res.json({ success: true });
@@ -657,7 +662,8 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
         await notifyHrLayer(
           Number(assignment.requisition_id),
           "Asset Issue Reported",
-          `${req.user.name || "An employee"} reported a problem on requisition #${assignment.requisition_id}: ${desc}`
+          `${req.user.name || "An employee"} reported a problem on requisition #${assignment.requisition_id}: ${desc}`,
+          [req.user.id, assignment.assigned_by]
         );
       }
 
@@ -772,6 +778,8 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
       // Falls back to a straight auto-approve if neither a Supervisor nor a
       // Template resolve at all.
       const { autoApproved } = await createTemplateApprovalRequest("asset", "asset_requisition", result.insertId, req.user.id);
+      // Already told about this requisition below — left out of the HR CC.
+      const alreadyAlerted: number[] = [req.user.id];
       if (autoApproved) {
         try {
           await finalizeAssetRequisitionApproval(result.insertId, req.user.id, null);
@@ -788,9 +796,10 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
             const approvers = await getCurrentStepApprovers(createdRequest);
             const fulfillOnly = await isAssetFulfillerStep(createdRequest);
             for (const approver of approvers) {
+              alreadyAlerted.push(Number(approver.user_id));
               await createAlert(queryDB, {
                 userId: approver.user_id,
-                type: "asset_requisition" as AlertType,
+                type: "asset_approval" as AlertType,
                 title: fulfillOnly ? "New Asset Requisition Awaiting Fulfillment" : "New Asset Requisition Awaiting Your Approval",
                 message: fulfillOnly
                   ? `${req.user.name || "An employee"} requested ${category}. Fulfill and hand it over from Pending Approvals.`
@@ -811,7 +820,8 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
       await notifyHrLayer(
         Number(result.insertId),
         "New Asset Requisition Submitted",
-        `${req.user.name || "An employee"} submitted a request for ${category}.`
+        `${req.user.name || "An employee"} submitted a request for ${category}.`,
+        alreadyAlerted
       );
 
       res.json({ success: true, id: result.insertId });
@@ -1097,7 +1107,8 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
           await notifyHrLayer(
             Number(assignment.requisition_id),
             "Asset Issue Resolved",
-            `The reported issue on requisition #${assignment.requisition_id} was resolved: ${note}`
+            `The reported issue on requisition #${assignment.requisition_id} was resolved: ${note}`,
+            [req.user.id]
           );
         }
 
@@ -1198,10 +1209,15 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
       type: "asset_requisition" as AlertType,
       title: "Asset Handed Over",
       message: `${actor.name || "The fulfiller"} handed over your requisition: ${summary}. Please check it in My Asset — Accept & Acknowledge, or report an issue if something is wrong.`,
-      relatedType: "asset_requisition",
+      // 'asset_handover' so a click opens My Asset on My Assets (where the
+      // Accept button is) rather than the Status tab.
+      relatedType: "asset_handover",
       relatedId: requisition.id
     });
-    await notifyHrLayer(Number(requisition.id), "Asset Dispatched", `Requisition #${requisition.id} was handed over by ${actor.name || "the fulfiller"}: ${summary}.`);
+    await notifyHrLayer(Number(requisition.id), "Asset Dispatched", `Requisition #${requisition.id} was handed over by ${actor.name || "the fulfiller"}: ${summary}.`, [
+      actor.id,
+      requisition.employee_user_id
+    ]);
     await logEvent(Number(requisition.id), actor, "handed_over", `${actor.name || "The fulfiller"} handed over: ${summary}.`, {
       details: { items },
       notify: false

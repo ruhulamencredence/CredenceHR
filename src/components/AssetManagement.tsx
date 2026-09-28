@@ -742,7 +742,7 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
                           <div key={idx} className="text-sm text-slate-700 truncate" title={`${it.item_name} — ${it.purpose}`}>
                             <span className="font-medium text-slate-800">{it.item_name}</span>{' '}
                             <span className="text-xs text-slate-500">
-                              × {it.quantity} {it.unit}
+                              × {Number(it.quantity)} {it.unit}
                             </span>
                             <SupervisorEditMark it={it} />
                           </div>
@@ -784,7 +784,7 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
                         <div className="text-xs font-bold text-slate-900">{r.asset_category}</div>
                         <RequisitionStatusBadge status={r.status} />
                       </div>
-                      <p className="text-[11px] text-slate-500 mt-1">Requested: {r.created_at} • Urgency: {r.urgency}</p>
+                      <p className="text-[11px] text-slate-500 mt-1">Requested: {r.created_at} • Urgency: <span className="capitalize">{r.urgency}</span></p>
                       {r.status === 'pending' && r.pending_with && (
                         <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-amber-700">
                           <Clock className="w-3 h-3" /> Waiting on: <span className="font-semibold">{r.pending_with}</span>
@@ -798,7 +798,7 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
                               <SupervisorEditMark it={it} />
                             </span>
                             <span className="text-[11px] text-slate-500 shrink-0">
-                              {it.quantity} {it.unit}
+                              {Number(it.quantity)} {it.unit}
                             </span>
                           </div>
                         ))}
@@ -876,7 +876,7 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
                                 <span className="font-semibold text-slate-800">{it.item_name}</span> — {it.purpose}
                               </span>
                               <span className="text-[11px] text-slate-500 shrink-0">
-                                {it.quantity} {it.unit}
+                                {Number(it.quantity)} {it.unit}
                               </span>
                             </div>
                           ))}

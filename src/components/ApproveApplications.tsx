@@ -478,7 +478,7 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
                     {item.asset_fulfiller_bypass ? (
                       <div className="mt-3 space-y-2" onClick={(e) => e.stopPropagation()}>
                         <p className="text-[11px] text-slate-500 flex items-center gap-1">
-                          <Package className="w-3 h-3 text-emerald-600" /> This Layer is yours to hand over the items — type what you're giving; the employee then confirms it in My Asset.
+                          <Package className="w-3 h-3 shrink-0 text-emerald-600" /> This Layer is yours to hand over the items — type what you're giving; the employee then confirms it in My Asset.
                         </p>
                         <button
                           type="button"
@@ -491,7 +491,7 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
                     ) : item.vehicle_maintainer_bypass ? (
                       <div className="mt-3 space-y-2" onClick={(e) => e.stopPropagation()}>
                         <p className="text-[11px] text-slate-500 flex items-center gap-1">
-                          <Car className="w-3 h-3 text-blue-500" /> This Layer is yours to hand over a vehicle — pick one below to approve and confirm the ride in one step.
+                          <Car className="w-3 h-3 shrink-0 text-blue-500" /> This Layer is yours to hand over a vehicle — pick one below to approve and confirm the ride in one step.
                         </p>
                         <div className="flex flex-wrap items-center gap-2">
                           <select
@@ -699,7 +699,7 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
                         <span className="font-medium text-slate-800">{it.item_name}</span>
                         <span className="text-slate-500"> — {it.purpose}</span>
                       </div>
-                      <span className="shrink-0 font-semibold text-slate-700">{it.quantity} {it.unit}</span>
+                      <span className="shrink-0 font-semibold text-slate-700">{Number(it.quantity)} {it.unit}</span>
                     </div>
                   ))}
                 </div>

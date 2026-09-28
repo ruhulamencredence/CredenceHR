@@ -93,7 +93,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
   // reads naturally regardless of which module the request belongs to.
   const SOURCE_TYPE_ALERT: Partial<Record<string, { type: AlertType; label: string }>> = {
     user_claim: { type: "conveyance_approval", label: "Conveyance Bill Claim" },
-    asset_requisition: { type: "asset_requisition", label: "Asset Requisition" },
+    asset_requisition: { type: "asset_approval", label: "Asset Requisition" },
     leave_application: { type: "leave_approval", label: "Leave Application" },
     // 'vehicle_approval' (not 'vehicle_requisition', which is the requester's
     // own ride-status alerts) so a click opens Approve Application.
