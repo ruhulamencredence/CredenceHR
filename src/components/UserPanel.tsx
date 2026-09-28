@@ -2795,7 +2795,8 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
       {/* Desktop-only plain welcome banner (no avatar/bell/drop-notch — those
           are the mobile-specific drop-banner design above). Same gating the
           single banner used before this change. */}
-      <div className={`hidden ${showingClaimsPage || showingMainGroupPage ? 'md:hidden' : 'md:block'}`}>
+      {/* Dashboard only — never on a section page (Leave, Timesheet, Jobs…). */}
+      <div className={`hidden ${mobileActiveSection !== null || showingClaimsPage || showingMainGroupPage ? 'md:hidden' : 'md:block'}`}>
         <div
           className="rounded-2xl px-6 py-5 sm:px-8 sm:py-6 text-white shadow-sm"
           style={{ background: 'var(--g-gradient)' }}
