@@ -2308,6 +2308,10 @@ const EMPLOYEE_TEXT_FIELDS = [
   "permanent_address", "permanent_country", "permanent_state", "permanent_city", "permanent_zip"
 ] as const;
 const EMPLOYEE_DATE_FIELDS = [
+  // The day this person actually started — attendance summaries don't count
+  // any day before it as Absent (see /api/my-attendance-summary and the
+  // Monthly Attendance Report).
+  "joining_date",
   "date_of_birth", "status_effective_date", "job_status_effective_date", "job_base_effective_date",
   "employment_category_effective_date", "designation_effective_date"
 ] as const;
@@ -5285,10 +5289,29 @@ async function startServer() {
   // stay Superadmin-only, same as that dedicated endpoint — a plain Admin
   // (even with the "employees" module) can still create the login and set
   // Project Access, but login_module_keys is silently ignored for them.
+  // Office Attendance (ZKTeco) device PIN — the number this Employee is
+  // enrolled under on the office terminals, which is how their punches in
+  // zk_attendance_logs are matched to them (see zkSync.ts). Only touched when
+  // the request actually carries zk_device_pin, so older callers that never
+  // send it leave an existing PIN alone. Returns an error message for a PIN
+  // already given to someone else (the column is UNIQUE), null when fine.
+  async function checkZkDevicePin(body: any, employeeId: number | null): Promise<{ set: boolean; pin: string | null; error: string | null }> {
+    if (!body || !Object.prototype.hasOwnProperty.call(body, "zk_device_pin")) return { set: false, pin: null, error: null };
+    const pin = body.zk_device_pin != null && String(body.zk_device_pin).trim() ? String(body.zk_device_pin).trim().slice(0, 20) : null;
+    if (pin) {
+      const taken = await queryDB("SELECT id, name FROM all_employees WHERE zk_device_pin = ?", [pin]);
+      const other = taken.find((r: any) => Number(r.id) !== Number(employeeId));
+      if (other) return { set: true, pin, error: `Attendance Device PIN ${pin} is already used by ${other.name}.` };
+    }
+    return { set: true, pin, error: null };
+  }
+
   app.post("/api/employees", authenticateToken, requireAdmin, requireModule("employees"), async (req: any, res) => {
     try {
       const { employee_id, name, designation, department, department_id, email, phone, is_active, create_login, login_email, login_username, login_password, login_project_ids, login_module_keys } = req.body;
       if (!name || !String(name).trim()) return res.status(400).json({ error: "Name is required" });
+      const zkPin = await checkZkDevicePin(req.body, null);
+      if (zkPin.error) return res.status(400).json({ error: zkPin.error });
       const branch = await resolveEmployeeBranch(req.body);
 
       let newUserId: number | null = null;
@@ -5368,6 +5391,9 @@ async function startServer() {
         `INSERT INTO all_employees (${columns.join(", ")}) VALUES (${placeholders})`,
         values
       );
+      if (zkPin.set && zkPin.pin) {
+        await queryDB("UPDATE all_employees SET zk_device_pin = ? WHERE id = ?", [zkPin.pin, result.insertId]);
+      }
       res.status(201).json({ id: result.insertId, user_id: newUserId, project_ids: grantedProjectIds, module_keys: grantedModuleKeys });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -5388,6 +5414,8 @@ async function startServer() {
 
       const { employee_id, name, designation, department, department_id, email, phone, is_active } = req.body;
       if (!name || !String(name).trim()) return res.status(400).json({ error: "Name is required" });
+      const zkPin = await checkZkDevicePin(req.body, id);
+      if (zkPin.error) return res.status(400).json({ error: zkPin.error });
       const branch = await resolveEmployeeBranch(req.body);
 
       const extColumns = EMPLOYEE_EXT_FIELDS;
@@ -5446,6 +5474,9 @@ async function startServer() {
           id
         ]
       );
+      if (zkPin.set && (existing[0].zk_device_pin ?? null) !== zkPin.pin) {
+        await queryDB("UPDATE all_employees SET zk_device_pin = ? WHERE id = ?", [zkPin.pin, id]);
+      }
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });

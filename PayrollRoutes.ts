@@ -1777,7 +1777,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       const monthEnd = `${monthYear}-${String(daysInMonth).padStart(2, "0")}`;
 
       const empRows = await queryDB(
-        "SELECT id, user_id, zk_device_pin FROM all_employees WHERE user_id = ? LIMIT 1",
+        "SELECT id, user_id, zk_device_pin, joining_date FROM all_employees WHERE user_id = ? LIMIT 1",
         [req.user.id]
       );
       // No Employee record is linked to this login, so there's no payroll
@@ -1789,7 +1789,16 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       const branchTypeByUserId = await getEmployeeBranchTypeMap(queryDB);
       const myGroup: HolidayAppliesTo = branchTypeByUserId.get(Number(employee.user_id)) || "head_office";
       const holidayMap = await getHolidayMap(queryDB, monthStart, monthEnd, myGroup);
-      const workingDays = Math.max(1, daysInMonth - holidayMap.size);
+      // Days before this person's Joining Date aren't theirs to attend — they
+      // count as neither working days nor Absent, so someone who joins on the
+      // 28th doesn't open their dashboard to 27 days "absent".
+      const joiningDate = employee.joining_date ? String(employee.joining_date).slice(0, 10) : null;
+      const isWorkingDay = (dateStr: string) => !holidayMap.has(dateStr) && (!joiningDate || dateStr >= joiningDate);
+      let workingDays = 0;
+      for (let d = 1; d <= daysInMonth; d++) {
+        if (isWorkingDay(`${monthYear}-${String(d).padStart(2, "0")}`)) workingDays++;
+      }
+      if (!joiningDate) workingDays = Math.max(1, workingDays);
 
       // Present days — the same two sources the payroll wizard reads: Remote
       // Attendance check-ins, plus Office (ZKTeco) punches for any day with no
@@ -1863,9 +1872,9 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         for (let d = 1; d <= daysInMonth; d++) {
           const dateStr = `${monthYear}-${String(d).padStart(2, "0")}`;
           if (dateStr > today) break;
-          if (!holidayMap.has(dateStr)) elapsed++;
+          if (isWorkingDay(dateStr)) elapsed++;
         }
-        workingDaysSoFar = Math.max(1, elapsed);
+        workingDaysSoFar = joiningDate ? elapsed : Math.max(1, elapsed);
       }
 
       // Absence — working days elapsed so far, minus days actually present
