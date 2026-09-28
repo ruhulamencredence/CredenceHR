@@ -28,6 +28,8 @@ interface AlertsBellProps {
   // The requester's own Asset Requisition updates -> My Asset (Status for
   // the requisition's approval updates, My Assets for handed-over items).
   onOpenMyAsset?: (target: MyAssetTarget) => void;
+  // The employee's own resignation updates -> My Resignation.
+  onOpenResignation?: () => void;
   // Grievance / Disciplinary alerts open Self Service -> Grievance & Disciplinary.
   onOpenMyCases?: () => void;
   // Dropdown footer "View all" link — opens AlertsPage.tsx (the full-page
@@ -41,7 +43,7 @@ interface AlertsBellProps {
 // unlike the Admin Panel tabs). Polls the lightweight unread-count endpoint
 // so the badge stays current without re-fetching the whole list constantly;
 // the full list is only fetched when the dropdown is actually opened.
-export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplication, onOpenApproveApplications, onOpenVehicleManagement, onOpenConveyanceClaim, onOpenMyAsset, onOpenMyCases, onViewAll }) => {
+export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplication, onOpenApproveApplications, onOpenVehicleManagement, onOpenConveyanceClaim, onOpenMyAsset, onOpenResignation, onOpenMyCases, onViewAll }) => {
   const [unreadCount, setUnreadCount] = useState(0);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [open, setOpen] = useState(false);
@@ -147,7 +149,7 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
     const target =
       alert.type === 'leave_application'
         ? onOpenLeaveApplication
-        : alert.type === 'vehicle_approval' || alert.type === 'leave_approval' || alert.type === 'conveyance_approval' || alert.type === 'asset_approval'
+        : alert.type === 'vehicle_approval' || alert.type === 'leave_approval' || alert.type === 'conveyance_approval' || alert.type === 'asset_approval' || alert.type === 'exit_clearance'
         ? onOpenApproveApplications
         : alert.type === 'vehicle_requisition'
         ? onOpenVehicleManagement
@@ -155,6 +157,8 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
         ? onOpenConveyanceClaim
         : alert.type === 'asset_requisition' && onOpenMyAsset
         ? () => onOpenMyAsset(alert.related_type === 'asset_requisition' ? 'status' : 'my-assets')
+        : alert.type === 'resignation'
+        ? onOpenResignation
         : alert.type === 'grievance' || alert.type === 'disciplinary'
         ? onOpenMyCases
         : undefined;
