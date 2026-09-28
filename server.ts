@@ -3440,6 +3440,37 @@ async function rejectLeaveApplicationRecord(leaveId: number, rejectedBy: number 
 // itself would have if there'd been no Reliever at all — auto-approving via
 // finalizeLeaveApplicationApproval when the applicant has no Template
 // assigned, otherwise leaving it 'pending' on the Template's first Layer.
+// Tells whoever a just-routed Leave Application is now sitting with (the
+// Supervisor, or the Template's first Layer) that it's waiting on them —
+// same idea as the Conveyance Bill Claim submit alert. Best-effort.
+async function notifyLeaveFirstApprovers(leaveId: number) {
+  try {
+    const [appRows, requestRows] = await Promise.all([
+      queryDB("SELECT * FROM leave_applications WHERE id = ?", [leaveId]),
+      queryDB("SELECT * FROM approval_requests WHERE source_type = ?", ["leave_application"])
+    ]);
+    const application = appRows[0];
+    const request = requestRows.find((r: any) => Number(r.source_id) === Number(leaveId) && r.status === "pending");
+    if (!application || !request) return;
+    const applicantRows = await queryDB("SELECT id, name FROM users WHERE id = ?", [application.user_id]);
+    const applicantName = applicantRows[0]?.name || "An employee";
+    const leaveTypeLabel = await getLeaveTypeLabel(application.leave_type);
+    const approvers = await getCurrentStepApprovers(request);
+    for (const approver of approvers) {
+      await createAlert(queryDB, {
+        userId: approver.user_id,
+        type: "leave_approval",
+        title: "Leave Application Awaiting Your Approval",
+        message: `${applicantName} applied for ${leaveTypeLabel} Leave (${toDateOnlyString(application.start_date)} to ${toDateOnlyString(application.end_date)}). Please review it.`,
+        relatedType: "leave_application",
+        relatedId: Number(leaveId)
+      });
+    }
+  } catch (err: any) {
+    console.warn("⚠️ Could not notify the approver(s) for Leave Application #" + leaveId + ": " + err.message);
+  }
+}
+
 async function approveLeaveApplicationReliever(leaveId: number, relieverUserId: number, remarks: string | null) {
   const rows = await queryDB("SELECT * FROM leave_applications WHERE id = ?", [leaveId]);
   if (rows.length === 0) throw new Error("Leave Application not found");
@@ -3465,6 +3496,7 @@ async function approveLeaveApplicationReliever(leaveId: number, relieverUserId: 
       relatedType: "leave_application",
       relatedId: application.id
     });
+    await notifyLeaveFirstApprovers(leaveId);
   }
 }
 
@@ -7064,7 +7096,8 @@ async function startServer() {
     getLeaveTypeBalance,
     adjustLeaveTypeBalance,
     createTemplateApprovalRequest,
-    finalizeLeaveApplicationApproval
+    finalizeLeaveApplicationApproval,
+    notifyLeaveFirstApprovers
   });
 
   // --- Vite Middleware / Static Serving ---

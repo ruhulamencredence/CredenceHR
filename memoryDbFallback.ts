@@ -2475,6 +2475,11 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
   // Reliever existence check in POST /api/leave-applications ("SELECT id,
   // name FROM users WHERE id = ?") — checked before the "!=" variant below
   // since both share the same prefix up to "where id ".
+  if (lowerSql.startsWith("select id, name from users where id in")) {
+    // fetchByIds("users", ids, "id, name") — GET /api/my-approvals' requester names.
+    const ids = params.map((p: any) => Number(p));
+    return memoryDb.users.filter((u: any) => ids.includes(Number(u.id))).map((u: any) => ({ id: u.id, name: u.name }));
+  }
   if (lowerSql.startsWith("select id, name from users where id = ?")) {
     const id = Number(params[0]);
     return memoryDb.users.filter((u: any) => u.id === id).map((u: any) => ({ id: u.id, name: u.name }));
@@ -2542,6 +2547,17 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
     return [...memoryDb.leaveApplications].sort(
       (a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     );
+  }
+  if (lowerSql.startsWith("select * from leave_applications where reliever_id = ?")) {
+    // GET /api/my-approvals — Leave Applications still waiting on this Reliever.
+    const relieverId = Number(params[0]);
+    return memoryDb.leaveApplications.filter(
+      (a: any) => Number(a.reliever_id) === relieverId && a.reliever_status === "pending" && a.status === "pending"
+    );
+  }
+  if (lowerSql.startsWith("select * from leave_applications where id in")) {
+    const ids = params.map((p: any) => Number(p));
+    return memoryDb.leaveApplications.filter((a: any) => ids.includes(Number(a.id)));
   }
   if (lowerSql.startsWith("select * from leave_applications where id")) {
     const id = Number(params[0]);

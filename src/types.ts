@@ -1383,6 +1383,9 @@ export interface Notice {
 // wired up (Leave Application Approve/Reject notifies the applicant).
 export type AlertType =
   | 'leave_application'
+  // A Leave Application waiting on this account (Reliever or an approval
+  // Layer) — opens Approve Application.
+  | 'leave_approval'
   | 'conveyance_claim'
   | 'conveyance_disbursed'
   | 'asset_requisition'

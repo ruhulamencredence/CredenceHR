@@ -89,7 +89,7 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
     const target =
       alert.type === 'leave_application'
         ? onOpenLeaveApplication
-        : alert.type === 'vehicle_approval'
+        : alert.type === 'vehicle_approval' || alert.type === 'leave_approval'
         ? onOpenApproveApplications
         : alert.type === 'vehicle_requisition'
         ? onOpenVehicleManagement

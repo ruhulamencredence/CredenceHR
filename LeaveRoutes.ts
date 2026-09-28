@@ -68,6 +68,7 @@ interface LeaveRouteDeps {
     requestedBy: number
   ) => Promise<{ autoApproved: boolean; template: any | null }>;
   finalizeLeaveApplicationApproval: (leaveId: number, approvedBy: number | null, remarks: string | null) => Promise<void>;
+  notifyLeaveFirstApprovers: (leaveId: number) => Promise<void>;
 }
 
 export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
@@ -89,7 +90,8 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
     getLeaveTypeBalance,
     adjustLeaveTypeBalance,
     createTemplateApprovalRequest,
-    finalizeLeaveApplicationApproval
+    finalizeLeaveApplicationApproval,
+    notifyLeaveFirstApprovers
   } = deps;
 
   // Every custom Leave Category defined so far, as a category_key -> label
@@ -806,6 +808,13 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
         );
         approvalByLeaveId = new Map(approvalRequests.map((ar: any) => [Number(ar.source_id), ar]));
       }
+      // Who approved/rejected each finished one — shown as "Decided By".
+      const deciderIds: number[] = Array.from(new Set<number>(rows.map((r: any) => Number(r.decided_by)).filter((id: number) => id > 0)));
+      const deciderNames = new Map<number, string>();
+      for (const id of deciderIds) {
+        const u: any = await queryDB("SELECT id, name FROM users WHERE id = ?", [id]);
+        if (u.length > 0) deciderNames.set(id, u[0].name);
+      }
       const enriched = await Promise.all(
         rows.map(async (r: any) => {
           const ar = approvalByLeaveId.get(Number(r.id));
@@ -833,6 +842,7 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
             current_step: currentStep,
             total_steps: totalSteps,
             reliever_name: r.reliever_name || null,
+            decided_by_name: deciderNames.get(Number(r.decided_by)) || null,
             leave_type_label: leaveTypeLabelFor(r.leave_type)
           };
         })
@@ -959,7 +969,7 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
         // /api/leave-applications/:id/reliever-decision below.
         await createAlert(queryDB, {
           userId: relieverUserId,
-          type: "leave_application",
+          type: "leave_approval",
           title: "You've Been Selected as Reliever",
           message: `${req.user.name} selected you as Reliever for their Leave Application (${start_date} to ${end_date}). Please review it.`,
           relatedType: "leave_application",
@@ -972,6 +982,8 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
         const { autoApproved } = await createTemplateApprovalRequest("leave", "leave_application", result.insertId, req.user.id);
         if (autoApproved) {
           await finalizeLeaveApplicationApproval(result.insertId, null, "Auto-approved (no Approval Template configured for Leave, and no Reliever required for this Leave Type).");
+        } else {
+          await notifyLeaveFirstApprovers(result.insertId);
         }
       }
 
