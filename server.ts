@@ -8,7 +8,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import mysql from "mysql2/promise";
 import { createServer as createViteServer } from "vite";
-import { syncAllZkDevices, syncZkDevice, startZkSyncSchedule } from "./zkSync";
+import { syncAllZkDevices, syncZkDevice, startZkSyncSchedule, ensureZkSchema } from "./zkSync";
 import { resolveMinLeadDays, addDaysToDateStr, DeliveryConditionType } from "./deliveryDateConditions";
 import { registerProfileRoutes } from "./profileRoutes";
 import { registerHolidayRoutes, ensureHolidayCalendarSchema } from "./holidayRoutes";
@@ -153,6 +153,7 @@ async function initDB() {
     isMySQLConnected = true;
     connection.release();
     await ensureSchemaMigrations();
+    await ensureZkSchema(dbPool);
     startZkSyncSchedule(dbPool);
   } catch (err: any) {
     console.warn("⚠️ MySQL Connection failed (" + err.message + "). Falling back to in-memory storage for preview/testing. (To use MySQL, ensure XAMPP MySQL is running and .env is configured).");

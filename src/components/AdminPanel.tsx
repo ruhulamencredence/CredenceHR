@@ -1212,7 +1212,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       body: monthlyReport.users.map((u: any) => {
         const daySymbols = u.days.map((d: any) => {
           const isHoliday = !!d.day_type;
-          return d.present ? 'P' : isHoliday ? (d.day_type === 'weekend' ? 'W' : 'H') : '-';
+          return d.present ? 'P' : isHoliday ? (d.day_type === 'weekend' ? 'W' : 'H') : d.future ? '' : '-';
         });
         return [u.user_name, ...daySymbols, String(u.present_days), String(u.holiday_days ?? 0), String(u.absent_days)];
       }),
@@ -3603,11 +3603,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                     <tr>
                       <th className="px-4 py-2.5 text-left sticky left-0 bg-slate-50">User</th>
                       {Array.from({ length: monthlyReport.days_in_month }, (_, i) => i + 1).map((d) => (
-                        <th key={d} className={`px-1.5 py-2.5 text-center ${monthlyCellDisplay === 'times' ? 'w-16' : 'w-6'}`}>{d}</th>
+                        <th key={d} className={`px-1 py-2.5 text-center ${monthlyCellDisplay === 'times' ? 'w-16' : 'w-6'}`}>{d}</th>
                       ))}
-                      <th className="px-4 py-2.5 text-center">Present</th>
-                      <th className="px-4 py-2.5 text-center">Holiday</th>
-                      <th className="px-4 py-2.5 text-center">Absent</th>
+                      <th className="px-2 py-2.5 text-center">Present</th>
+                      <th className="px-2 py-2.5 text-center">Holiday</th>
+                      <th className="px-2 py-2.5 text-center">Absent</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-sm">
@@ -3618,11 +3618,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                           // A Global Calendar date (Admin Panel -> Holidays) is never
                           // shown as Absent, whether or not this person checked in.
                           const isHoliday = !!d.day_type;
-                          const label = d.present ? 'P' : isHoliday ? (d.day_type === 'weekend' ? 'W' : 'H') : '·';
+                          const label = d.present ? 'P' : isHoliday ? (d.day_type === 'weekend' ? 'W' : 'H') : d.future ? '' : '·';
                           const colorClass = d.present
                             ? d.source === 'office' ? 'text-sky-600' : 'text-emerald-600'
                             : isHoliday
-                              ? d.day_type === 'weekend' ? 'text-sky-500' : 'text-amber-500'
+                              ? d.day_type === 'weekend' ? 'text-violet-500' : 'text-amber-500'
                               : 'text-slate-300';
                           // "Which way" attendance was given (GPS via Remote
                           // Attendance, or ZKT via the office biometric device),
@@ -3664,15 +3664,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                             <td
                               key={d.date}
                               title={cellTitle}
-                              className={`px-1.5 py-3 text-center text-[10px] font-bold ${colorClass}`}
+                              className={`px-1 py-3 text-center text-[10px] font-bold ${colorClass}`}
                             >
                               {label}
                             </td>
                           );
                         })}
-                        <td className="px-4 py-3 text-center text-xs font-semibold text-emerald-700">{u.present_days}</td>
-                        <td className="px-4 py-3 text-center text-xs font-semibold text-amber-600">{u.holiday_days ?? 0}</td>
-                        <td className="px-4 py-3 text-center text-xs font-semibold text-rose-600">{u.absent_days}</td>
+                        <td className="px-2 py-3 text-center text-xs font-semibold text-emerald-700">{u.present_days}</td>
+                        <td className="px-2 py-3 text-center text-xs font-semibold text-amber-600">{u.holiday_days ?? 0}</td>
+                        <td className="px-2 py-3 text-center text-xs font-semibold text-rose-600">{u.absent_days}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -3680,7 +3680,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 <div className="flex flex-wrap items-center gap-4 px-4 py-3 text-[10px] text-slate-500 border-t border-slate-100">
                   <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-emerald-500" /> Present — GPS (Remote Attendance)</span>
                   <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-sky-500" /> Present — ZKT (Office Attendance)</span>
-                  <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-amber-400" /> Holiday</span>
+                  <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-violet-500" /> W — Weekend</span>
+                  <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-amber-400" /> H — Holiday</span>
                   <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-slate-300" /> Absent</span>
                   <span className="text-slate-400">Hover a day for check-in time, project, source and remarks.</span>
                 </div>

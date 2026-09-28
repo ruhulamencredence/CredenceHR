@@ -594,6 +594,7 @@ export const OfficeAttendancePanel: React.FC<OfficeAttendancePanelProps> = ({ to
               </h3>
               <button
                 onClick={() => { setShowDeviceModal(false); closeDeviceForm(); }}
+                aria-label="Close"
                 className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:bg-slate-100 hover:text-slate-700"
               >
                 <X className="w-4 h-4" />

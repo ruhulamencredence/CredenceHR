@@ -752,6 +752,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
       const prefix = `${year}-${monthStr}`;
       const daysInMonth = new Date(year, month, 0).getDate();
       const monthStart = `${prefix}-01`;
+      const todayStr = todayInDhaka();
       const monthEnd = `${prefix}-${String(daysInMonth).padStart(2, "0")}`;
 
       // Department comes from the Employee Directory row linked to this login
@@ -853,6 +854,8 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
         const days: any[] = [];
         for (let d = 1; d <= daysInMonth; d++) {
           const dateStr = `${prefix}-${String(d).padStart(2, "0")}`;
+          // A day that hasn't happened yet is never Absent.
+          const isFuture = dateStr > todayStr;
           const rec: any = dayMap.get(dateStr);
           let hasIn = !!rec?.check_in_at;
           let hasOut = !!rec?.check_out_at;
@@ -883,7 +886,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
           // didn't check in; it's not a normal working day at all.
           const holiday = holidayMap.get(dateStr);
           if (holiday) holidayDays++;
-          else if (!hasIn) absentDays++;
+          else if (!hasIn && !isFuture) absentDays++;
 
           if (hasIn) presentDays++;
           if (hasIn && hasOut) completeDays++;
@@ -897,7 +900,8 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
             check_in_remarks: checkInRemarks,
             check_out_remarks: checkOutRemarks,
             day_type: holiday ? holiday.day_type : null,
-            holiday_title: holiday ? holiday.title : null
+            holiday_title: holiday ? holiday.title : null,
+            future: isFuture
           });
         }
         return {

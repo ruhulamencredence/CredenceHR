@@ -48,6 +48,52 @@ interface ZkDeviceRow {
 // reject with a plain string, an object like { err: 'timeout' }, or similar.
 // This pulls out something readable no matter the shape, instead of the
 // "error: undefined" you'd get from a bare `err.message`.
+// Office Attendance tables (same as zk_office_attendance_schema.sql) —
+// created on startup so a fresh database works without running that patch
+// by hand. Without them the Monthly/Date-Wise Attendance Report, Office
+// Attendance and even Remote Attendance Check In/Out fail, since they all
+// look up zk_device_pin / zk_attendance_logs. Safe to run every time.
+export async function ensureZkSchema(dbPool: Pool | null): Promise<void> {
+  if (!dbPool) return;
+  try {
+    await dbPool.query("ALTER TABLE all_employees ADD COLUMN zk_device_pin VARCHAR(20) NULL UNIQUE AFTER employee_id");
+  } catch (err: any) {
+    if (err.code !== "ER_DUP_FIELDNAME") console.warn("⚠️ Could not add all_employees.zk_device_pin: " + err.message);
+  }
+  try {
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS zk_devices (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        ip_address VARCHAR(45) NOT NULL,
+        port INT NOT NULL DEFAULT 4370,
+        serial_number VARCHAR(100) NULL,
+        is_active TINYINT(1) NOT NULL DEFAULT 1,
+        last_synced_at TIMESTAMP NULL DEFAULT NULL,
+        last_sync_status VARCHAR(255) NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY unique_device_ip_port (ip_address, port)
+      )
+    `);
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS zk_attendance_logs (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        device_id INT NOT NULL,
+        device_user_pin VARCHAR(20) NOT NULL,
+        punch_time DATETIME NOT NULL,
+        verify_mode INT NULL,
+        work_code INT NULL,
+        synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY unique_device_pin_time (device_id, device_user_pin, punch_time),
+        FOREIGN KEY (device_id) REFERENCES zk_devices(id) ON DELETE CASCADE,
+        INDEX idx_pin_time (device_user_pin, punch_time)
+      )
+    `);
+  } catch (err: any) {
+    console.warn("⚠️ Could not ensure Office Attendance (ZKTeco) tables exist: " + err.message);
+  }
+}
+
 function describeError(err: any): string {
   if (!err) return "unknown error";
   if (typeof err === "string") return err;
