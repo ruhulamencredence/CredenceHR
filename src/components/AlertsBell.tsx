@@ -181,7 +181,9 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
 
       {open && (
         <div
-          className="absolute right-0 mt-2 w-80 max-w-[90vw] rounded-2xl shadow-lg border overflow-hidden z-50"
+          // Phones: pinned edge to edge under the header — anchored to the
+          // bell (which isn't at the screen edge) it ran off the left side.
+          className="absolute right-0 mt-2 w-80 max-w-[90vw] max-sm:fixed max-sm:left-2 max-sm:right-2 max-sm:w-auto max-sm:max-w-none max-sm:mt-0 max-sm:top-[calc(4rem+var(--native-safe-area-inset-top,env(safe-area-inset-top,0px)))] rounded-2xl shadow-lg border overflow-hidden z-50"
           style={{ background: 'var(--g-surface, #fff)', borderColor: 'var(--g-border, #e5e7eb)' }}
         >
           <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: 'var(--g-border, #e5e7eb)' }}>
