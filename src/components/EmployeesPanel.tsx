@@ -47,6 +47,8 @@ interface EmployeeFormState {
   branch_id: number | null;
   email: string;
   phone: string;
+  // Office Attendance (ZKTeco) device PIN — see checkZkDevicePin in server.ts.
+  zk_device_pin: string;
   is_active: boolean;
   // "Also create a login account" — only offered on the New Employee form (an
   // existing row that still has none gets the same option later via the
@@ -66,6 +68,7 @@ interface EmployeeFormState {
   middle_name: string;
   gender: string;
   date_of_birth: string;
+  joining_date: string;
   nid_ssn: string;
   nationality: string;
   marital_status: string;
@@ -112,6 +115,7 @@ const emptyForm: EmployeeFormState = {
   branch_id: null,
   email: '',
   phone: '',
+  zk_device_pin: '',
   is_active: true,
   create_login: false,
   login_username: '',
@@ -122,6 +126,7 @@ const emptyForm: EmployeeFormState = {
   middle_name: '',
   gender: '',
   date_of_birth: '',
+  joining_date: '',
   nid_ssn: '',
   nationality: '',
   marital_status: '',
@@ -450,6 +455,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
       branch_id: e.branch_id ?? null,
       email: e.email || '',
       phone: e.phone || '',
+      zk_device_pin: e.zk_device_pin || '',
       is_active: e.is_active,
       create_login: false,
       login_username: '',
@@ -460,6 +466,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
       middle_name: e.middle_name || '',
       gender: e.gender || '',
       date_of_birth: toDateInput(e.date_of_birth),
+      joining_date: toDateInput(e.joining_date),
       nid_ssn: e.nid_ssn || '',
       nationality: e.nationality || '',
       marital_status: e.marital_status || '',
@@ -723,11 +730,13 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
         branch_id: form.branch_id || null,
         email: form.email.trim() || null,
         phone: form.phone.trim() || null,
+        zk_device_pin: form.zk_device_pin.trim() || null,
         is_active: form.is_active,
 
         middle_name: form.middle_name.trim() || null,
         gender: form.gender || null,
         date_of_birth: form.date_of_birth || null,
+        joining_date: form.joining_date || null,
         nid_ssn: form.nid_ssn.trim() || null,
         nationality: form.nationality.trim() || null,
         marital_status: form.marital_status || null,
@@ -1351,6 +1360,21 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                     placeholder="e.g. 01877772209"
                     className="block w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
                   />
+                </div>
+                <div>
+                  <DateField label="Joining Date" value={form.joining_date} onChange={(v) => setForm((f) => ({ ...f, joining_date: v }))} />
+                  <p className="text-[11px] text-slate-400 mt-1">Days before this aren't counted as Absent.</p>
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">Attendance Device PIN</label>
+                  <input
+                    type="text"
+                    value={form.zk_device_pin}
+                    onChange={(e) => setForm((f) => ({ ...f, zk_device_pin: e.target.value }))}
+                    placeholder="e.g. 1045"
+                    className="block w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                  />
+                  <p className="text-[11px] text-slate-400 mt-1">The User ID this person is enrolled under on the office fingerprint/face machine — links their punches to Office Attendance.</p>
                 </div>
               </div>
 

@@ -175,11 +175,14 @@ export interface Employee {
   // no account. Lets the Employees list show a "Has Login" badge and stops the
   // Add/Edit form from offering to create a second account for the same row.
   user_id?: number | null;
+  // Office Attendance (ZKTeco) device PIN — matches zk_attendance_logs punches to this Employee.
+  zk_device_pin?: string | null;
 
   // --- Employee Info tab ---
   middle_name?: string | null;
   gender?: string | null;
   date_of_birth?: string | null;
+  joining_date?: string | null;
   nid_ssn?: string | null;
   nationality?: string | null;
   marital_status?: string | null;

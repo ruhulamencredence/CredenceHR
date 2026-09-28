@@ -844,8 +844,17 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
         }
       }
 
+      // Joining Date per login — a day before someone joined is blank on the
+      // report, never Absent (same as a day that hasn't happened yet).
+      const joinRows = await queryDB("SELECT user_id, joining_date FROM all_employees WHERE user_id IS NOT NULL");
+      const joiningDateByUserId = new Map<number, string>();
+      for (const j of joinRows) {
+        if (j.joining_date) joiningDateByUserId.set(Number(j.user_id), String(j.joining_date).slice(0, 10));
+      }
+
       const result = relevantUsers.map((u: any) => {
         const dayMap = byUser.get(u.id) || new Map<string, any>();
+        const joiningDate = joiningDateByUserId.get(Number(u.id)) || null;
         const holidayMap = holidayMapsByGroup[branchTypeByUserId.get(u.id) || "head_office"];
         let presentDays = 0;
         let completeDays = 0;
@@ -854,8 +863,10 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
         const days: any[] = [];
         for (let d = 1; d <= daysInMonth; d++) {
           const dateStr = `${prefix}-${String(d).padStart(2, "0")}`;
-          // A day that hasn't happened yet is never Absent.
+          // A day that hasn't happened yet, or came before this person
+          // joined, is never Absent.
           const isFuture = dateStr > todayStr;
+          const beforeJoining = !!joiningDate && dateStr < joiningDate;
           const rec: any = dayMap.get(dateStr);
           let hasIn = !!rec?.check_in_at;
           let hasOut = !!rec?.check_out_at;
@@ -886,7 +897,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
           // didn't check in; it's not a normal working day at all.
           const holiday = holidayMap.get(dateStr);
           if (holiday) holidayDays++;
-          else if (!hasIn && !isFuture) absentDays++;
+          else if (!hasIn && !isFuture && !beforeJoining) absentDays++;
 
           if (hasIn) presentDays++;
           if (hasIn && hasOut) completeDays++;
@@ -901,7 +912,8 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
             check_out_remarks: checkOutRemarks,
             day_type: holiday ? holiday.day_type : null,
             holiday_title: holiday ? holiday.title : null,
-            future: isFuture
+            future: isFuture,
+            before_joining: beforeJoining
           });
         }
         return {

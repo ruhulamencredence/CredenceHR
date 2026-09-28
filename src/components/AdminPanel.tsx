@@ -1212,7 +1212,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       body: monthlyReport.users.map((u: any) => {
         const daySymbols = u.days.map((d: any) => {
           const isHoliday = !!d.day_type;
-          return d.present ? 'P' : isHoliday ? (d.day_type === 'weekend' ? 'W' : 'H') : d.future ? '' : '-';
+          return d.present ? 'P' : isHoliday ? (d.day_type === 'weekend' ? 'W' : 'H') : d.future || d.before_joining ? '' : '-';
         });
         return [u.user_name, ...daySymbols, String(u.present_days), String(u.holiday_days ?? 0), String(u.absent_days)];
       }),
@@ -3618,7 +3618,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                           // A Global Calendar date (Admin Panel -> Holidays) is never
                           // shown as Absent, whether or not this person checked in.
                           const isHoliday = !!d.day_type;
-                          const label = d.present ? 'P' : isHoliday ? (d.day_type === 'weekend' ? 'W' : 'H') : d.future ? '' : '·';
+                          const label = d.present ? 'P' : isHoliday ? (d.day_type === 'weekend' ? 'W' : 'H') : d.future || d.before_joining ? '' : '·';
                           const colorClass = d.present
                             ? d.source === 'office' ? 'text-sky-600' : 'text-emerald-600'
                             : isHoliday

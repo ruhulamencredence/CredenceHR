@@ -122,6 +122,30 @@ export function registerDocumentVaultRoutes(app: Express, deps: DocumentVaultRou
     }
   });
 
+  // The Employee picker for Upload Document — every login-linked account
+  // except the Superadmin, with its Employee ID when it has a directory row.
+  // Its own endpoint (instead of GET /api/users) so an HR account granted
+  // only document_vault, not the Users module, can still pick an employee.
+  app.get("/api/employee-documents/people", ...adminGate, async (_req: any, res: any) => {
+    try {
+      const [users, employees]: [any, any] = await Promise.all([
+        queryDB("SELECT id, name, role FROM users"),
+        queryDB("SELECT * FROM all_employees")
+      ]);
+      const codeByUser = new Map<number, string>(
+        employees.filter((e: any) => e.user_id != null).map((e: any): [number, string] => [Number(e.user_id), e.employee_id])
+      );
+      res.json(
+        users
+          .filter((u: any) => u.role !== "superadmin")
+          .map((u: any) => ({ id: Number(u.id), name: u.name, employee_code: codeByUser.get(Number(u.id)) || null }))
+          .sort((a: any, b: any) => String(a.name).localeCompare(String(b.name)))
+      );
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // POST: upload a document against an employee — module-gated (only HR
   // uploads into the vault; an employee never uploads their own).
   app.post("/api/employee-documents", ...adminGate, async (req: any, res: any) => {

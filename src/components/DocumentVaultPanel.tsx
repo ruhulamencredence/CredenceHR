@@ -53,7 +53,7 @@ export const DocumentVaultPanel: React.FC<DocumentVaultPanelProps> = ({ token })
   const authHeaders = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
 
   const [documents, setDocuments] = useState<VaultDocument[]>([]);
-  const [users, setUsers] = useState<{ id: number; name: string }[]>([]);
+  const [users, setUsers] = useState<{ id: number; name: string; employee_code?: string | null }[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -73,13 +73,13 @@ export const DocumentVaultPanel: React.FC<DocumentVaultPanelProps> = ({ token })
     try {
       const [docsRes, usersRes] = await Promise.all([
         fetch(apiUrl('/api/employee-documents'), { headers: authHeaders }),
-        fetch(apiUrl('/api/users'), { headers: authHeaders })
+        fetch(apiUrl('/api/employee-documents/people'), { headers: authHeaders })
       ]);
       const docsData = await docsRes.json();
       if (!docsRes.ok) throw new Error(docsData.error || 'Failed to load documents');
       setDocuments(Array.isArray(docsData) ? docsData : []);
       const usersData = await usersRes.json();
-      if (usersRes.ok) setUsers(Array.isArray(usersData) ? usersData.filter((u: any) => u.role !== 'superadmin') : []);
+      if (usersRes.ok) setUsers(Array.isArray(usersData) ? usersData : []);
     } catch (err: any) {
       setError(err.message || 'Failed to load documents');
     } finally {
@@ -177,6 +177,7 @@ export const DocumentVaultPanel: React.FC<DocumentVaultPanelProps> = ({ token })
               {users.map((u) => (
                 <option key={u.id} value={u.id}>
                   {u.name}
+                  {u.employee_code ? ` (${u.employee_code})` : ''}
                 </option>
               ))}
             </select>
