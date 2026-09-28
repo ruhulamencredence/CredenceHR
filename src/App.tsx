@@ -974,6 +974,10 @@ export default function App() {
               requestQuickAccessTab('myAsset', target);
               sidebarNavProps.onGoToSelfServiceTab('assetManagement');
             }}
+            onOpenResignation={() => {
+              setShowAlertsPage(false);
+              sidebarNavProps.onGoToSelfServiceTab('resignation');
+            }}
             onOpenMyCases={() => {
               setShowAlertsPage(false);
               sidebarNavProps.onGoToSelfServiceTab('myCases');

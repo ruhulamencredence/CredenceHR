@@ -1399,7 +1399,14 @@ export type AlertType =
   | 'vehicle_requisition'
   | 'vehicle_approval'
   | 'grievance'
-  | 'disciplinary';
+  | 'disciplinary'
+  // The employee's own resignation updates — opens My Resignation.
+  | 'resignation'
+  // An exit clearance item waiting on its department approver — opens
+  // Approve Application.
+  | 'exit_clearance'
+  // FYI to HR (new resignation, all clearances done).
+  | 'exit_offboarding';
 
 export interface Alert {
   id: number;

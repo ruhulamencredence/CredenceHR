@@ -26,7 +26,14 @@ interface ClearanceItem {
 }
 
 interface Settlement {
+  unused_leave_days: number;
+  unused_leave_encashment: number;
+  gratuity_amount: number;
+  outstanding_dues: number;
+  other_additions: number;
+  other_deductions: number;
   net_payable: number;
+  notes: string | null;
   status: 'draft' | 'approved' | 'paid';
 }
 
@@ -164,7 +171,7 @@ export const MyResignation: React.FC<MyResignationProps> = ({ token, onBack }) =
                 <p className="text-xs text-slate-500">Submit and track your own resignation through clearance and settlement.</p>
               </div>
             </div>
-            {!activeRequest && (
+            {!activeRequest && !showNew && (
               <button
                 type="button"
                 onClick={() => setShowNew(true)}
@@ -248,7 +255,7 @@ export const MyResignation: React.FC<MyResignationProps> = ({ token, onBack }) =
                         type="button"
                         onClick={submit}
                         disabled={submitting}
-                        className="flex items-center gap-1.5 text-xs font-semibold px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white transition-colors"
+                        className="flex items-center gap-1.5 whitespace-nowrap text-xs font-semibold px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white transition-colors"
                       >
                         {submitting ? <Spinner size={14} className="text-white" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
                         Confirm & Submit
@@ -305,16 +312,63 @@ export const MyResignation: React.FC<MyResignationProps> = ({ token, onBack }) =
                             style={{ width: `${totalCount > 0 ? (clearedCount / totalCount) * 100 : 0}%` }}
                           />
                         </div>
+                        {/* Which department still has to clear you — only
+                            once HR has started clearance. */}
+                        {r.status !== 'pending' && (
+                          <div className="mt-2.5 divide-y divide-slate-100 rounded-lg border border-slate-100">
+                            {r.clearance_items.map((ci) => (
+                              <div key={ci.id} className="flex items-start gap-2 px-3 py-2 text-xs">
+                                {ci.is_cleared ? (
+                                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
+                                ) : (
+                                  <Clock className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
+                                )}
+                                <div className="min-w-0 flex-1">
+                                  <div className="font-semibold text-slate-800">{ci.department}</div>
+                                  <div className="text-[11px] text-slate-500">{ci.item_label}</div>
+                                  {ci.remarks && <div className={`text-[11px] mt-0.5 ${ci.is_cleared ? 'text-slate-500' : 'text-amber-700'}`}>Note: {ci.remarks}</div>}
+                                </div>
+                                <span className={`text-[10px] font-semibold shrink-0 ${ci.is_cleared ? 'text-emerald-700' : 'text-amber-700'}`}>
+                                  {ci.is_cleared ? 'Cleared' : 'Pending'}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     )}
 
                     {r.settlement && (
-                      <div className="mt-3 rounded-lg bg-emerald-50 border border-emerald-100 px-3 py-2 flex items-center justify-between text-xs">
-                        <span className="text-emerald-700 font-semibold">
-                          Final Settlement {r.settlement.status === 'paid' ? '— Paid' : r.settlement.status === 'approved' ? '— Approved' : '— In progress'}
-                        </span>
+                      <div className="mt-3 rounded-lg bg-emerald-50 border border-emerald-100 px-3 py-2 text-xs">
+                        <div className="flex items-center justify-between">
+                          <span className="text-emerald-700 font-semibold">
+                            Final Settlement {r.settlement.status === 'paid' ? '— Paid' : r.settlement.status === 'approved' ? '— Approved' : '— In progress'}
+                          </span>
+                          {r.settlement.status !== 'draft' && (
+                            <span className="font-bold text-emerald-800">৳{r.settlement.net_payable.toLocaleString()}</span>
+                          )}
+                        </div>
+                        {/* The breakdown behind the figure, once HR has approved it. */}
                         {r.settlement.status !== 'draft' && (
-                          <span className="font-bold text-emerald-800">৳{r.settlement.net_payable.toLocaleString()}</span>
+                          <div className="mt-2 pt-2 border-t border-emerald-100 space-y-0.5 text-[11px] text-slate-600">
+                            {([
+                              [`Unused leave encashment (${r.settlement.unused_leave_days} days)`, r.settlement.unused_leave_encashment, 1],
+                              ['Gratuity', r.settlement.gratuity_amount, 1],
+                              ['Other additions', r.settlement.other_additions, 1],
+                              ['Outstanding dues', r.settlement.outstanding_dues, -1],
+                              ['Other deductions', r.settlement.other_deductions, -1]
+                            ] as [string, number, number][])
+                              .filter(([, v]) => v)
+                              .map(([label, v, sign]) => (
+                                <div key={label} className="flex justify-between gap-2">
+                                  <span>{label}</span>
+                                  <span className={sign < 0 ? 'text-rose-600' : ''}>
+                                    {sign < 0 ? '−' : ''}৳{v.toLocaleString()}
+                                  </span>
+                                </div>
+                              ))}
+                            {r.settlement.notes && <div className="text-slate-500 pt-1">{r.settlement.notes}</div>}
+                          </div>
                         )}
                       </div>
                     )}

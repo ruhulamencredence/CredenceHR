@@ -415,6 +415,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               requestQuickAccessTab('myAsset', target);
               onGoToSelfServiceTab('assetManagement');
             }}
+            onOpenResignation={() => onGoToSelfServiceTab('resignation')}
             onOpenMyCases={() => onGoToSelfServiceTab('myCases')}
             onViewAll={onOpenAlerts}
           />

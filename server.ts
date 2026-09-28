@@ -4823,7 +4823,7 @@ async function startServer() {
   // Management, Recruitment/ATS, Grievance & Disciplinary, HR Analytics,
   // Document Vault) — each its own AdminModuleKey, each in its own file,
   // same reasoning as every registerXRoutes call above.
-  registerExitOffboardingRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB, getAdminModules });
+  registerExitOffboardingRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB, getAdminModules, createAlert });
   registerPerformanceRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB, getAdminModules });
   registerRecruitmentRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB });
   registerGrievanceRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB, getAdminModules, createAlert });

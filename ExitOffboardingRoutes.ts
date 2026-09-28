@@ -27,6 +27,7 @@
 // HR-admin-tool data volumes.
 
 import type { Express } from "express";
+import type { AlertType } from "./Alerts";
 
 const CLEARANCE_DEPARTMENTS: { department: string; item_label: string }[] = [
   { department: "IT", item_label: "Laptop / equipment & system access return" },
@@ -41,6 +42,10 @@ interface ExitOffboardingRouteDeps {
   requireModule: (moduleKey: "exit_offboarding") => any;
   queryDB: (sql: string, params?: any[]) => Promise<any>;
   getAdminModules: (userId: number) => Promise<string[]>;
+  createAlert: (
+    queryDB: (sql: string, params?: any[]) => Promise<any>,
+    params: { userId: number; type: AlertType; title: string; message: string; relatedType?: string; relatedId?: number }
+  ) => Promise<void>;
 }
 
 export async function ensureExitOffboardingSchema(dbPool: any): Promise<void> {
@@ -161,13 +166,66 @@ export async function ensureExitOffboardingSchema(dbPool: any): Promise<void> {
 }
 
 export function registerExitOffboardingRoutes(app: Express, deps: ExitOffboardingRouteDeps) {
-  const { authenticateToken, requireAdmin, requireModule, queryDB, getAdminModules } = deps;
+  const { authenticateToken, requireAdmin, requireModule, queryDB, getAdminModules, createAlert } = deps;
 
   async function canManageExits(userId: number, role: string): Promise<boolean> {
     if (role === "superadmin") return true;
     if (role !== "admin" && role !== "user") return false;
     const modules = await getAdminModules(userId);
     return modules.includes("exit_offboarding");
+  }
+
+  // Alerts: 'resignation' is the employee's own updates (opens My
+  // Resignation), 'exit_clearance' a clearance item waiting on its
+  // department approver (opens Approve Application), 'exit_offboarding' an
+  // FYI to HR. Never throws — a failed alert mustn't fail the action.
+  async function notify(userIds: (number | null | undefined)[], type: AlertType, title: string, message: string, exitId: number, exceptUserId?: number) {
+    const seen = new Set<number>();
+    for (const raw of userIds) {
+      const uid = Number(raw);
+      if (!uid || seen.has(uid) || uid === Number(exceptUserId)) continue;
+      seen.add(uid);
+      try {
+        await createAlert(queryDB, { userId: uid, type, title, message, relatedType: "exit_request", relatedId: exitId });
+      } catch (err: any) {
+        console.warn("⚠️ Could not send exit/offboarding alert: " + err.message);
+      }
+    }
+  }
+
+  // HR side: every Superadmin plus anyone holding the 'exit_offboarding' module.
+  async function hrUserIds(): Promise<number[]> {
+    const users: any = await queryDB("SELECT id, role FROM users");
+    const out: number[] = [];
+    for (const u of users) {
+      if (await canManageExits(Number(u.id), u.role)) out.push(Number(u.id));
+    }
+    return out;
+  }
+
+  const fmtDay = (v: any) => {
+    if (!v) return null;
+    const d = new Date(v);
+    return isNaN(d.getTime()) ? String(v) : d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+  };
+
+  // Tells each department approver whose clearance item is still open that
+  // it's now in their Approve Application queue (only once HR has moved the
+  // exit to 'clearance' — that's when the queue starts showing it).
+  async function notifyClearanceApprovers(exitRow: any) {
+    const items: any = await queryDB("SELECT * FROM exit_clearance_items");
+    const users: any = await queryDB("SELECT id, name FROM users");
+    const who = users.find((u: any) => Number(u.id) === Number(exitRow.user_id))?.name || "An employee";
+    for (const it of items) {
+      if (Number(it.exit_id) !== Number(exitRow.id) || Number(it.is_cleared) || it.approver_user_id == null) continue;
+      await notify(
+        [it.approver_user_id],
+        "exit_clearance",
+        `${it.department} Clearance Awaiting Your Approval`,
+        `${who} is leaving${exitRow.last_working_day ? ` (last working day ${fmtDay(exitRow.last_working_day)})` : ""} — ${it.item_label}. Review it in Approve Application.`,
+        Number(exitRow.id)
+      );
+    }
   }
 
   async function serializeExit(exitRow: any): Promise<any> {
@@ -274,6 +332,16 @@ export function registerExitOffboardingRoutes(app: Express, deps: ExitOffboardin
         );
       }
       const rows: any = await queryDB("SELECT * FROM exit_requests WHERE id = ?", [exitId]);
+      if (exitType === "resignation" && targetUserId === Number(req.user.id)) {
+        await notify(
+          await hrUserIds(),
+          "exit_offboarding",
+          "New Resignation Submitted",
+          `${req.user.name || "An employee"} submitted a resignation${lastWorkingDay ? ` — preferred last working day ${fmtDay(lastWorkingDay)}` : ""}.`,
+          exitId,
+          req.user.id
+        );
+      }
       res.status(201).json(await serializeExit(rows[0]));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -289,10 +357,24 @@ export function registerExitOffboardingRoutes(app: Express, deps: ExitOffboardin
       if (!["pending", "clearance", "settled", "cancelled"].includes(status)) {
         return res.status(400).json({ error: "Invalid status." });
       }
+      const before: any = await queryDB("SELECT * FROM exit_requests WHERE id = ?", [id]);
+      if (before.length === 0) return res.status(404).json({ error: "Exit request not found." });
       await queryDB("UPDATE exit_requests SET status = ? WHERE id = ?", [status, id]);
       const rows: any = await queryDB("SELECT * FROM exit_requests WHERE id = ?", [id]);
-      if (rows.length === 0) return res.status(404).json({ error: "Exit request not found." });
-      res.json(await serializeExit(rows[0]));
+      const exitRow = rows[0];
+      if (status !== before[0].status) {
+        const lwd = fmtDay(exitRow.last_working_day);
+        const msg: Record<string, [string, string]> = {
+          clearance: ["Resignation Accepted — Clearance Started", `HR accepted your resignation${lwd ? `; last working day ${lwd}` : ""}. Each department will now clear you — follow it in My Resignation.`],
+          cancelled: ["Resignation Cancelled", "Your resignation request was cancelled by HR."],
+          settled: ["Resignation Settled", "Your exit is complete and your Full & Final Settlement is settled."],
+          pending: ["Resignation Back Under Review", "Your resignation is back with HR for review."]
+        };
+        const [title, message] = msg[status];
+        await notify([exitRow.user_id], "resignation", title, message, id, req.user.id);
+        if (status === "clearance") await notifyClearanceApprovers(exitRow);
+      }
+      res.json(await serializeExit(exitRow));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -395,6 +477,27 @@ export function registerExitOffboardingRoutes(app: Express, deps: ExitOffboardin
       );
       const updated: any = await queryDB("SELECT * FROM exit_clearance_items WHERE id = ?", [id]);
       const r = updated[0];
+      const exitRows: any = await queryDB("SELECT * FROM exit_requests WHERE id = ?", [Number(item.exit_id)]);
+      const exitRow = exitRows[0];
+      if (exitRow) {
+        await notify(
+          [exitRow.user_id],
+          "resignation",
+          isCleared ? `${item.department} Clearance Done` : `${item.department} Clearance On Hold`,
+          isCleared
+            ? `${req.user.name || "The department"} cleared you: ${item.item_label}.${remarks ? ` Note: ${remarks}` : ""}`
+            : `${req.user.name || "The department"} couldn't clear you yet: ${remarks || item.item_label}.`,
+          Number(exitRow.id),
+          req.user.id
+        );
+        const siblings: any = await queryDB("SELECT * FROM exit_clearance_items");
+        const mine = siblings.filter((ci: any) => Number(ci.exit_id) === Number(exitRow.id));
+        if (isCleared && mine.length > 0 && mine.every((ci: any) => !!Number(ci.is_cleared))) {
+          const users: any = await queryDB("SELECT id, name FROM users");
+          const who = users.find((u: any) => Number(u.id) === Number(exitRow.user_id))?.name || "The employee";
+          await notify(await hrUserIds(), "exit_offboarding", "All Exit Clearances Done", `${who} is cleared by every department — ready for Full & Final Settlement.`, Number(exitRow.id), req.user.id);
+        }
+      }
       res.json({ id: Number(r.id), department: r.department, item_label: r.item_label, is_cleared: !!Number(r.is_cleared), remarks: r.remarks });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -489,6 +592,19 @@ export function registerExitOffboardingRoutes(app: Express, deps: ExitOffboardin
       );
       if (status === "paid") {
         await queryDB("UPDATE exit_requests SET status = ? WHERE id = ?", ["settled", exitId]);
+      }
+      if (status !== settlement.status && (status === "approved" || status === "paid")) {
+        const amount = `৳${netPayable.toLocaleString("en-US")}`;
+        await notify(
+          [settlement.user_id],
+          "resignation",
+          status === "paid" ? "Final Settlement Paid" : "Final Settlement Approved",
+          status === "paid"
+            ? `Your Full & Final Settlement of ${amount} has been paid. Your exit is now complete.`
+            : `Your Full & Final Settlement of ${amount} has been approved. See the breakdown in My Resignation.`,
+          exitId,
+          req.user.id
+        );
       }
       const rows: any = await queryDB("SELECT * FROM final_settlements WHERE id = ?", [Number(settlement.id)]);
       const s = rows[0];
