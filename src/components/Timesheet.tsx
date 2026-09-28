@@ -483,7 +483,7 @@ export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceP
             "Self Service / Timesheet" path is redundant there. */}
         {!isNativeApp && (
           <div className="hidden md:block px-2 sm:px-0">
-            <ModulePath path={['Self Service', 'Timesheet']} />
+            <ModulePath path={['Self Service', 'My HR', 'Attendance', 'Timesheet']} />
           </div>
         )}
         {/* Liquid glass on mobile (soft violet-tint gradient + backdrop-blur +
