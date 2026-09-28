@@ -421,9 +421,9 @@ export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ toke
                             title="View check-in/out location"
                             className="w-full flex items-center justify-between gap-2 text-[11px] px-2 py-1 bg-slate-50 hover:bg-blue-50 border border-slate-200 hover:border-blue-200 rounded-lg transition-colors text-left"
                           >
-                            <span className="flex items-center gap-1 text-slate-600 min-w-0 truncate">
+                            <span className="flex items-center gap-1 text-slate-600 min-w-0">
                               <MapPin className="w-3 h-3 text-blue-500 shrink-0" />
-                              Movement Claim &middot; {r.purpose}
+                              <span className="truncate">Movement Claim &middot; {r.purpose}</span>
                             </span>
                             <span className="shrink-0 font-semibold text-slate-800">
                               ৳{Number(r.amount).toLocaleString('en-BD', { minimumFractionDigits: 2 })}

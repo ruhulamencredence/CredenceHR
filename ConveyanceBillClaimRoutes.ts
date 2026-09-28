@@ -658,7 +658,7 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
             for (const approver of approvers) {
               await createAlert(queryDB, {
                 userId: approver.user_id,
-                type: "conveyance_claim",
+                type: "conveyance_approval",
                 title: "New Conveyance Bill Claim Awaiting Your Approval",
                 message: `${req.user.name} submitted a ${category} claim of \u09f3${amt.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (${toDateOnlyString(claim_date)}). Please review it.`,
                 relatedType: "user_claim",

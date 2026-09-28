@@ -405,6 +405,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             onOpenLeaveApplication={() => onGoToSelfServiceTab('leaveApplication')}
             onOpenApproveApplications={() => onGoToSelfServiceTab('approveApplications')}
             onOpenVehicleManagement={() => onGoToSelfServiceTab('vehicleManagement')}
+            onOpenConveyanceClaim={onGoToConveyanceBillClaim}
             onOpenMyCases={() => onGoToSelfServiceTab('myCases')}
             onViewAll={onOpenAlerts}
           />

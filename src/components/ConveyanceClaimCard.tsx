@@ -69,7 +69,7 @@ export const ConveyanceClaimCard: React.FC<ConveyanceClaimCardProps> = ({ token,
 
   const handleSubmitted = () => {
     setShowNewClaim(false);
-    setMessage('Claim submitted — it\u2019s now pending Admin review.');
+    setMessage('Claim submitted — it\u2019s now waiting for approval.');
     fetchClaims();
     setTimeout(() => setMessage(null), 4000);
   };

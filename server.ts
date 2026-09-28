@@ -3227,8 +3227,29 @@ async function finalizeUserClaimApproval(
     "UPDATE user_claims SET status = 'approved', approved_amount = ?, admin_remarks = ?, reviewed_by = ?, reviewed_at = NOW() WHERE id = ?",
     [finalAmount, remarks, approvedBy, userClaimId]
   );
+  await notifyUserClaimDecision(uc, "approved", finalAmount, remarks);
 
   return { bill_id: targetBillId, bill_item_id: item.insertId };
+}
+
+// Tells the claimant their Conveyance Bill Claim was approved or rejected.
+async function notifyUserClaimDecision(uc: any, decision: "approved" | "rejected", amount: number | null, remarks: string | null) {
+  try {
+    const amt = amount != null ? `\u09f3${Number(amount).toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : null;
+    await createAlert(queryDB, {
+      userId: Number(uc.user_id),
+      type: "conveyance_claim",
+      title: decision === "approved" ? "Conveyance Bill Claim Approved" : "Conveyance Bill Claim Rejected",
+      message:
+        decision === "approved"
+          ? `Your ${uc.category} claim (${toDateOnlyString(uc.claim_date)}) has been approved${amt ? ` for ${amt}` : ""}.${remarks ? ` Remarks: ${remarks}` : ""}`
+          : `Your ${uc.category} claim (${toDateOnlyString(uc.claim_date)}) was rejected.${remarks ? ` Reason: ${remarks}` : ""}`,
+      relatedType: "user_claim",
+      relatedId: Number(uc.id)
+    });
+  } catch (err: any) {
+    console.warn("⚠️ Could not notify the claimant for Conveyance Bill Claim #" + uc.id + ": " + err.message);
+  }
 }
 
 // Records an Approved Amount edit made at a NON-final step of a still-pending
@@ -3272,6 +3293,8 @@ async function rejectUserClaimRecord(userClaimId: number, rejectedBy: number, re
     "UPDATE user_claims SET status = 'rejected', admin_remarks = ?, reviewed_by = ?, reviewed_at = NOW() WHERE id = ?",
     [remarks, rejectedBy, userClaimId]
   );
+  const rows = await queryDB("SELECT * FROM user_claims WHERE id = ?", [userClaimId]);
+  if (rows.length > 0) await notifyUserClaimDecision(rows[0], "rejected", null, remarks);
 }
 
 // Approves a Leave Application (Part 5 of 5) — day_count was ALREADY deducted

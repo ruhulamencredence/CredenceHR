@@ -23,6 +23,8 @@ interface AlertsPageProps {
   // 'vehicle_requisition' = the requester's own ride updates -> Book a Ride.
   onOpenApproveApplications?: () => void;
   onOpenVehicleManagement?: () => void;
+  // The claimant's own Conveyance Bill Claim updates -> Conveyance Bill Claim.
+  onOpenConveyanceClaim?: () => void;
   // Grievance / Disciplinary alerts open Self Service -> Grievance & Disciplinary.
   onOpenMyCases?: () => void;
 }
@@ -33,7 +35,7 @@ interface AlertsPageProps {
 // every other self-service section (Employee Directory, My Leave, ...).
 // Reachable from GlobalSidebar's "Alerts" item and AlertsBell's dropdown
 // footer "View all" link.
-export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLeaveApplication, onOpenApproveApplications, onOpenVehicleManagement, onOpenMyCases }) => {
+export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLeaveApplication, onOpenApproveApplications, onOpenVehicleManagement, onOpenConveyanceClaim, onOpenMyCases }) => {
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [loading, setLoading] = useState(true);
   const isNativeApp = Capacitor.isNativePlatform();
@@ -89,10 +91,12 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
     const target =
       alert.type === 'leave_application'
         ? onOpenLeaveApplication
-        : alert.type === 'vehicle_approval' || alert.type === 'leave_approval'
+        : alert.type === 'vehicle_approval' || alert.type === 'leave_approval' || alert.type === 'conveyance_approval'
         ? onOpenApproveApplications
         : alert.type === 'vehicle_requisition'
         ? onOpenVehicleManagement
+        : alert.type === 'conveyance_claim' || alert.type === 'conveyance_disbursed'
+        ? onOpenConveyanceClaim
         : alert.type === 'grievance' || alert.type === 'disciplinary'
         ? onOpenMyCases
         : undefined;

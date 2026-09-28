@@ -964,6 +964,10 @@ export default function App() {
               setShowAlertsPage(false);
               sidebarNavProps.onGoToSelfServiceTab('vehicleManagement');
             }}
+            onOpenConveyanceClaim={() => {
+              setShowAlertsPage(false);
+              sidebarNavProps.onGoToUserClaims('conveyanceBill');
+            }}
             onOpenMyCases={() => {
               setShowAlertsPage(false);
               sidebarNavProps.onGoToSelfServiceTab('myCases');
