@@ -53,6 +53,9 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
   const isSuperAdmin = user.role === 'superadmin';
 
   const [chain, setChain] = useState<ApprovalChainStep[]>([]);
+  // Set once the chain has loaded, so "No approval chain configured yet"
+  // doesn't flash up while it's still being fetched.
+  const [chainLoaded, setChainLoaded] = useState(false);
   const [requests, setRequests] = useState<ApprovalRequest[]>([]);
   const [loading, setLoading] = useState(false);
   const [view, setView] = useState<'mine' | 'all'>('mine');
@@ -86,6 +89,8 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
       if (res.ok) setChain(await res.json());
     } catch (err) {
       console.error('Failed to load approval chain', err);
+    } finally {
+      setChainLoaded(true);
     }
   };
 
@@ -115,6 +120,9 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
   }, [view, statusFilter]);
 
   const userMap = new Map<number, User>(users.map((u) => [u.id, u]));
+  // The three amount columns only mean anything for a Conveyance Bill Claim —
+  // left out when none is listed, so Remote Attendance rows aren't squeezed.
+  const hasClaims = requests.some((r) => r.source_type === 'user_claim');
   // Only Admins/Superadmins are eligible to be added to the chain.
   const eligibleApprovers = users.filter((u) => u.role === 'admin' || u.role === 'superadmin');
 
@@ -227,9 +235,10 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
               <ShieldCheck className="w-4 h-4 text-blue-600" /> Approval Workflow
             </h3>
             <p className="text-xs text-slate-500 mt-0.5">
-              Every Check In / Check Out for Remote Attendance is recorded right away — this is a
-              non-blocking review trail on top of that. A Conveyance Bill Claim is different: it only becomes a real
-              Bill once the last step here Approves it. Movement Claims don't route through here at all.
+              The Global Chain below reviews Remote Attendance Check In / Check Out — each one is recorded
+              right away, this is a non-blocking review trail on top of that. Conveyance Bill Claim, Leave,
+              Timesheet, Asset and Vehicle requests follow their own Templates (Templates tab); they're
+              listed here too under "All requests".
             </p>
           </div>
           {isSuperAdmin && (
@@ -245,7 +254,7 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
 
         {/* Chain preview */}
         <div className="flex flex-wrap items-center gap-2">
-          {chain.length === 0 ? (
+          {!chainLoaded ? null : chain.length === 0 ? (
             <div className="flex items-center gap-2 text-xs text-amber-700 bg-amber-50 px-3 py-2 rounded-xl">
               <AlertCircle className="w-3.5 h-3.5 shrink-0" />
               No approval chain configured yet — check-ins/outs are being recorded but not routed to anyone.
@@ -328,9 +337,13 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
             <thead className="bg-slate-50 text-[11px] uppercase tracking-wider text-slate-500">
               <tr>
                 <th className="text-left px-4 py-3 font-semibold">Event</th>
-                <th className="text-left px-4 py-3 font-semibold">Claim Amount</th>
-                <th className="text-left px-4 py-3 font-semibold">Approved Amount</th>
-                <th className="text-left px-4 py-3 font-semibold">Remaining Amount</th>
+                {hasClaims && (
+                  <>
+                    <th className="text-left px-4 py-3 font-semibold">Claim Amount</th>
+                    <th className="text-left px-4 py-3 font-semibold">Approved Amount</th>
+                    <th className="text-left px-4 py-3 font-semibold">Remaining Amount</th>
+                  </>
+                )}
                 <th className="text-left px-4 py-3 font-semibold">Requested By</th>
                 <th className="text-left px-4 py-3 font-semibold">Progress</th>
                 <th className="text-left px-4 py-3 font-semibold">Status</th>
@@ -372,7 +385,7 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
                         <div className="text-xs text-slate-500">{r.source_category}</div>
                       )}
                     </td>
-                    {(() => {
+                    {hasClaims && (() => {
                       // Only a 'user_claim' request finishing its LAST step is
                       // where an Approve actually finalizes an Approved Amount
                       // (see finalizeUserClaimApproval) — that's the only case
