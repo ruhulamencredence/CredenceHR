@@ -27,6 +27,7 @@ const ChatPanel = lazy(() => import('./components/ChatPanel').then(m => ({ defau
 const AlertsPage = lazy(() => import('./components/AlertsPage').then(m => ({ default: m.AlertsPage })));
 
 import { AppLoader } from './components/AppLoader';
+import { ModulePath } from './components/ModulePath';
 import { UserDashboardSkeleton } from './components/UserDashboardSkeleton';
 import { Spinner } from './components/Spinner';
 import { ApkModal } from './components/ApkModal';
@@ -1008,6 +1009,7 @@ export default function App() {
             {/* Web: full content width (map beside the booking panel, Ride Status
                 in two columns) instead of a narrow phone-width column. */}
             <div className={`mx-auto px-4 pt-3 pb-28 ${Capacitor.isNativePlatform() ? 'max-w-3xl' : 'max-w-3xl lg:max-w-none lg:px-8 lg:pb-8'}`}>
+              {!Capacitor.isNativePlatform() && <ModulePath path={['Self Service', 'Book a Ride']} />}
               <div className="flex items-center gap-2 mb-3">
                 <button
                   type="button"

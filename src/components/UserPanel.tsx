@@ -2797,6 +2797,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           single banner used before this change. */}
       {/* Dashboard only — never on a section page (Leave, Timesheet, Jobs…). */}
       <div className={`hidden ${mobileActiveSection !== null || showingClaimsPage || showingMainGroupPage ? 'md:hidden' : 'md:block'}`}>
+        {!isNativeApp && <ModulePath path={['Dashboard']} />}
         <div
           className="rounded-2xl px-6 py-5 sm:px-8 sm:py-6 text-white shadow-sm"
           style={{ background: 'var(--g-gradient)' }}
@@ -2887,6 +2888,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           In/Out form directly on desktop, where there's room for it inline. */}
       <div className={mobileActiveSection === 'claim' && canSeeMovementClaim ? 'block max-md:!mt-0 mobile-page-in' : 'hidden'}>
         <div className="hidden md:block">
+          {!isNativeApp && <ModulePath path={['Self Service', 'HRM', 'Movement Claims']} />}
           <ClaimCard token={token} />
         </div>
         <div className="md:hidden">
@@ -2927,6 +2929,11 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           can_view_leave_summary — see canSeeLeave above — same as the Leave
           Summary card itself and the BottomNav "Leave" tab that opens this. */}
       <div className={mobileActiveSection === 'leave' && canSeeLeave ? 'block max-md:!mt-0 mobile-page-in' : 'hidden'}>
+        {!isNativeApp && (
+          <div className="hidden md:block">
+            <ModulePath path={['Self Service', 'HRM', 'Leave Application']} />
+          </div>
+        )}
         <LeaveReviewPage token={token} onBack={() => goToMobileSection(null)} />
       </div>
 
@@ -3235,7 +3242,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
         >
           {!isNativeApp && (
             <div className="hidden md:block">
-              <ModulePath path={['Main', 'Entry']} />
+              <ModulePath path={['Self Service', 'PEPM Operation', 'Entry']} />
             </div>
           )}
           {!selectedBudget ? (
@@ -4164,7 +4171,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
         <div className={`space-y-8 ${!showingClaimsPage && desktopActiveSection !== 'budget' ? 'lg:col-span-3' : 'lg:col-span-2'}`}>
           {!isNativeApp && !showingClaimsPage && desktopActiveSection === 'jobs' && canSeeBudgetModule && (
             <div className="hidden md:block">
-              <ModulePath path={['Main', 'Jobs']} />
+              <ModulePath path={['Self Service', 'PEPM Operation', 'Jobs']} />
             </div>
           )}
           {/* Jobs summary card — every distinct Job this user has submitted, as a
@@ -4298,7 +4305,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
 
           {!isNativeApp && !showingClaimsPage && desktopActiveSection === 'entries' && canSeeBudgetModule && (
             <div className="hidden md:block">
-              <ModulePath path={['Main', 'Entry Details']} />
+              <ModulePath path={['Self Service', 'PEPM Operation', 'Entry Details']} />
             </div>
           )}
           <div
@@ -4865,7 +4872,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
         // under both that mt-8 AND the container's own pt-8, a ~4rem gap above
         // just a breadcrumb before an otherwise near-empty page.
         <div className="hidden md:block !mt-0">
-          <ModulePath path={['Main', 'Job Edits']} />
+          <ModulePath path={['Self Service', 'PEPM Operation', 'Job Edits']} />
         </div>
       )}
       {user.can_job_edit && (

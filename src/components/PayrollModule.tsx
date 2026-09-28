@@ -589,7 +589,7 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({ token, onBack }) =
       <div className="w-full px-4 sm:px-6 lg:px-8 pt-3 pb-8">
         {!isNativeApp && (
           <>
-            <ModulePath path={['Self Service', 'Payroll']} />
+            <ModulePath path={['Admin Panel', 'HRM', 'Payroll']} />
             <button
               type="button"
               onClick={onBack}

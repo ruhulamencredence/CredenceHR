@@ -38,6 +38,9 @@ import { BudgetSubmissionReport } from './BudgetSubmissionReport';
 import { AccessTemplate, applyTemplateToUser, canEditUserFeatures } from '../lib/accessTemplates';
 import { Spinner } from './Spinner';
 import { apiUrl } from '../lib/api';
+import { Capacitor } from '@capacitor/core';
+import { ModulePath } from './ModulePath';
+import { ADMIN_TAB_PATH } from '../lib/modulePaths';
 import { formatDate, todayDateOnlyString } from '../lib/formatDate';
 import { useStableCallback } from '../lib/useStableCallback';
 import { reverseGeocode } from '../lib/reverseGeocode';
@@ -2972,6 +2975,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
 
   return (
     <div className="w-full px-4 sm:px-6 lg:px-8 pt-3 pb-8 space-y-4 min-h-[calc(100vh-4rem)] text-slate-900" style={{ background: 'var(--g-bg-gradient)' }}>
+      {/* Where this page sits in the menu — web only, same as every
+          Self Service page's breadcrumb. */}
+      {!Capacitor.isNativePlatform() && ADMIN_TAB_PATH[activeTab] && (
+        <div className="-mb-2">
+          <ModulePath path={ADMIN_TAB_PATH[activeTab]} />
+        </div>
+      )}
       {/* Violet gradient welcome banner — same brand gradient as the logo/hero
           text elsewhere (see --g-gradient in index.css), sitting right below the
           title the way the reference dashboard's "Welcome Back" card does.

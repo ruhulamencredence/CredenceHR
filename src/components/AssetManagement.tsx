@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
+import { ModulePath } from './ModulePath';
 import { NewAssetRequisitionModal } from './NewAssetRequisitionModal';
 import { AssetFulfillModal } from './AssetFulfillModal';
 import { AssetRequisitionHistoryModal } from './AssetRequisitionHistoryModal';
@@ -408,6 +409,7 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
       style={isNativeApp ? undefined : { background: 'var(--g-surface-muted)' }}
     >
       <div className={isNativeApp ? 'w-full px-4 sm:px-6 lg:px-8 pt-3 pb-8' : 'w-full px-4 lg:px-8 pt-3 pb-28 md:pb-8'}>
+        {!isNativeApp && <ModulePath path={['Self Service', 'My Asset']} />}
         {!isNativeApp && (
           <div className="flex items-center justify-between gap-3 mb-3">
             <div className="flex items-center gap-2">
