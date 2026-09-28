@@ -259,40 +259,41 @@ export const PayrollListPanel: React.FC<PayrollListPanelProps> = ({ token }) => 
           <table className="min-w-full divide-y divide-slate-200">
             <thead className="bg-slate-50 text-slate-500 text-[10px] uppercase tracking-wider">
               <tr>
-                <th className="px-4 py-2.5 text-left">Employee</th>
-                <th className="px-4 py-2.5 text-left">Designation</th>
-                <th className="px-4 py-2.5 text-left">Department</th>
-                <th className="px-4 py-2.5 text-right">Basic</th>
-                <th className="px-4 py-2.5 text-right">House Rent</th>
-                <th className="px-4 py-2.5 text-right">Medical</th>
-                <th className="px-4 py-2.5 text-right">Other Allow.</th>
-                <th className="px-4 py-2.5 text-right">Tax</th>
-                <th className="px-4 py-2.5 text-right">PF</th>
-                <th className="px-4 py-2.5 text-right">Other Ded.</th>
-                <th className="px-4 py-2.5 text-right">Net Salary</th>
-                <th className="px-4 py-2.5 text-left">Status</th>
-                <th className="px-4 py-2.5 text-right">Actions</th>
+                <th className="px-2.5 py-2.5 text-left sticky left-0 z-10 bg-slate-50">Employee</th>
+                <th className="px-2.5 py-2.5 text-left">Designation</th>
+                <th className="px-2.5 py-2.5 text-left">Department</th>
+                <th className="px-2.5 py-2.5 text-right">Basic</th>
+                <th className="px-2.5 py-2.5 text-right">House Rent</th>
+                <th className="px-2.5 py-2.5 text-right">Medical</th>
+                <th className="px-2.5 py-2.5 text-right">Other Allow.</th>
+                <th className="px-2.5 py-2.5 text-right">Tax</th>
+                <th className="px-2.5 py-2.5 text-right">PF</th>
+                <th className="px-2.5 py-2.5 text-right">Other Ded.</th>
+                <th className="px-2.5 py-2.5 text-right">Net Salary</th>
+                <th className="px-2.5 py-2.5 text-left">Status</th>
+                <th className="px-2.5 py-2.5 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs">
               {records.map((r) => (
                 <tr key={r.id} className="hover:bg-slate-50/80 transition-colors">
-                  <td className="px-4 py-2.5 whitespace-nowrap">
+                  {/* Sticky so the name stays in view while the wide row is scrolled to its actions. */}
+                  <td className="px-2.5 py-2.5 whitespace-nowrap sticky left-0 z-10 bg-white">
                     <p className="font-medium text-slate-800">{r.employee_name}</p>
                     <p className="text-[10px] text-slate-400">{r.employee_code || '—'}</p>
                   </td>
-                  <td className="px-4 py-2.5 whitespace-nowrap text-slate-600">{r.designation || '—'}</td>
-                  <td className="px-4 py-2.5 whitespace-nowrap text-slate-600">{r.department || '—'}</td>
-                  <td className="px-4 py-2.5 whitespace-nowrap text-right text-slate-700">{money(r.basic_salary)}</td>
-                  <td className="px-4 py-2.5 whitespace-nowrap text-right text-slate-700">{money(r.house_rent)}</td>
-                  <td className="px-4 py-2.5 whitespace-nowrap text-right text-slate-700">{money(r.medical_allowance)}</td>
-                  <td className="px-4 py-2.5 whitespace-nowrap text-right text-slate-700">{money(r.other_allowance)}</td>
-                  <td className="px-4 py-2.5 whitespace-nowrap text-right text-rose-600">{money(r.tax_deduction)}</td>
-                  <td className="px-4 py-2.5 whitespace-nowrap text-right text-rose-600">{money(r.pf_deduction)}</td>
-                  <td className="px-4 py-2.5 whitespace-nowrap text-right text-rose-600">{money(r.other_deduction)}</td>
-                  <td className="px-4 py-2.5 whitespace-nowrap text-right font-semibold text-slate-900">{money(r.net_salary)}</td>
-                  <td className="px-4 py-2.5 whitespace-nowrap"><StatusBadge status={r.payment_status} /></td>
-                  <td className="px-4 py-2.5 whitespace-nowrap text-right">
+                  <td className="px-2.5 py-2.5 whitespace-nowrap text-slate-600">{r.designation || '—'}</td>
+                  <td className="px-2.5 py-2.5 whitespace-nowrap text-slate-600">{r.department || '—'}</td>
+                  <td className="px-2.5 py-2.5 whitespace-nowrap text-right text-slate-700">{money(r.basic_salary)}</td>
+                  <td className="px-2.5 py-2.5 whitespace-nowrap text-right text-slate-700">{money(r.house_rent)}</td>
+                  <td className="px-2.5 py-2.5 whitespace-nowrap text-right text-slate-700">{money(r.medical_allowance)}</td>
+                  <td className="px-2.5 py-2.5 whitespace-nowrap text-right text-slate-700">{money(r.other_allowance)}</td>
+                  <td className="px-2.5 py-2.5 whitespace-nowrap text-right text-rose-600">{money(r.tax_deduction)}</td>
+                  <td className="px-2.5 py-2.5 whitespace-nowrap text-right text-rose-600">{money(r.pf_deduction)}</td>
+                  <td className="px-2.5 py-2.5 whitespace-nowrap text-right text-rose-600">{money(r.other_deduction)}</td>
+                  <td className="px-2.5 py-2.5 whitespace-nowrap text-right font-semibold text-slate-900">{money(r.net_salary)}</td>
+                  <td className="px-2.5 py-2.5 whitespace-nowrap"><StatusBadge status={r.payment_status} /></td>
+                  <td className="px-2.5 py-2.5 whitespace-nowrap text-right">
                     <div className="flex items-center justify-end gap-1.5">
                       {r.payment_status === 'unpaid' && (
                         <>
@@ -330,8 +331,8 @@ export const PayrollListPanel: React.FC<PayrollListPanelProps> = ({ token }) => 
             </tbody>
             <tfoot>
               <tr className="bg-slate-50 font-semibold text-slate-700">
-                <td className="px-4 py-2.5" colSpan={10}>Total ({records.length} record{records.length === 1 ? '' : 's'})</td>
-                <td className="px-4 py-2.5 text-right">{money(totalNet)}</td>
+                <td className="px-2.5 py-2.5" colSpan={10}>Total ({records.length} record{records.length === 1 ? '' : 's'})</td>
+                <td className="px-2.5 py-2.5 text-right">{money(totalNet)}</td>
                 <td colSpan={2} />
               </tr>
             </tfoot>
