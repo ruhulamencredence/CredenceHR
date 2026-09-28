@@ -2980,12 +2980,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           space on a small screen, and this repeated greeting doesn't add
           anything there; desktop keeps it, and every other tab keeps it on
           both mobile and desktop, unchanged. */}
-      <div
-        className={`rounded-2xl px-6 py-5 sm:px-8 sm:py-6 text-white shadow-sm ${
-          activeTab === 'leave_applications' ? 'hidden md:block' : ''
-        }`}
-        style={{ background: 'var(--g-gradient)' }}
-      >
+      {/* Only on the Admin Dashboard and HR Analytics — every other Admin
+          Panel page goes straight to its own content, web and mobile. */}
+      {(activeTab === 'dashboard' || activeTab === 'hr_analytics') && (
+      <div className="rounded-2xl px-6 py-5 sm:px-8 sm:py-6 text-white shadow-sm" style={{ background: 'var(--g-gradient)' }}>
         <h3 className="text-xl sm:text-2xl font-bold">Welcome back, {user.name.split(' ')[0]}!</h3>
         <p className="mt-1 text-sm text-white/85">
           {isSuperAdmin
@@ -2993,6 +2991,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
             : "Here's your overview for the modules you've been granted access to."}
         </p>
       </div>
+      )}
 
       {visibleModules.length === 0 && activeTab !== 'dashboard' && (
         <div className="p-6 rounded-xl border border-amber-200 bg-amber-50 text-amber-800 text-sm">
