@@ -2973,9 +2973,14 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
 
       {/* Timesheet — same Self Service page GlobalSidebar's "Timesheet" item
           opens, reachable here too via the BottomNav "Timesheet" tab below. */}
-      <div className={mobileActiveSection === 'timesheet' ? 'block max-md:!mt-0 mobile-page-in' : 'hidden'}>
-        <Timesheet token={token} onBack={() => goToMobileSection(null)} attendanceProjectId={user.attendance_project_id} />
-      </div>
+      {/* Mounted only while open, so it loads fresh every time — kept
+          mounted in the background it showed the data from when the
+          Dashboard first loaded (e.g. "Absent" right after a Check In). */}
+      {mobileActiveSection === 'timesheet' && (
+        <div className="block max-md:!mt-0 mobile-page-in">
+          <Timesheet token={token} onBack={() => goToMobileSection(null)} attendanceProjectId={user.attendance_project_id} />
+        </div>
+      )}
 
       {/* Floating "Add Check In/Out" — mobile only, shown only while the
           Movement Claim page itself is open, sitting above BottomNav's fixed
