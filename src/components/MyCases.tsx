@@ -317,18 +317,18 @@ export const MyCases: React.FC<{ token: string; onBack?: () => void }> = ({ toke
         <div className="flex items-center justify-between gap-3 mb-4 mt-2">
           <div className="flex items-center gap-2">
             {onBack && (
-              <button type="button" onClick={onBack} className="w-9 h-9 rounded-full flex items-center justify-center hover:bg-black/5" aria-label="Back">
+              <button type="button" onClick={onBack} className="w-9 h-9 shrink-0 rounded-full flex items-center justify-center hover:bg-black/5" aria-label="Back">
                 <ArrowLeft className="w-5 h-5 text-slate-500" />
               </button>
             )}
-            <h1 className="text-lg font-bold flex items-center gap-2">
-              <Gavel className="w-5 h-5 text-blue-600" /> Grievance &amp; Disciplinary
+            <h1 className="text-base sm:text-lg font-bold flex items-center gap-2 leading-tight">
+              <Gavel className="w-5 h-5 text-blue-600 shrink-0" /> Grievance &amp; Disciplinary
             </h1>
           </div>
           <button
             type="button"
             onClick={() => setShowRaise(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-xl bg-blue-600 hover:bg-blue-700 text-white"
+            className="shrink-0 whitespace-nowrap flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-xl bg-blue-600 hover:bg-blue-700 text-white"
           >
             <Plus className="w-3.5 h-3.5" /> Raise Grievance
           </button>
