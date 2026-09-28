@@ -2137,6 +2137,21 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       const latesPerDay = Number(latePolicy.lates_per_deduction_day || 1);
       const extremeLatesPerDay = Number(latePolicy.extreme_lates_per_deduction_day || 1);
 
+      // Running Payroll before the month is over (e.g. on the 28th): the
+      // working days still to come can't have attendance yet, so they're
+      // counted as expected-present instead of Absent — otherwise everyone's
+      // pay would be cut for days that simply haven't happened.
+      const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Dhaka" });
+      const upcomingDaysByGroup: Record<string, number> = {};
+      for (const group of Object.keys(holidayMapsByGroup)) {
+        let n = 0;
+        for (let d = 1; d <= daysInMonth; d++) {
+          const dateStr = `${monthYear}-${String(d).padStart(2, "0")}`;
+          if (dateStr > todayStr && !(holidayMapsByGroup as any)[group].has(dateStr)) n++;
+        }
+        upcomingDaysByGroup[group] = n;
+      }
+
       const result = employees.map((e: any) => {
         // has_attendance_data must mean "we actually found at least one
         // present day for this person", not just "their pin is registered
@@ -2145,7 +2160,11 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         // file, which is what made the "Synced" badge show up falsely.
         const workingDays = workingDaysByEmployeeId.get(Number(e.id)) || 1;
         const hasAttendanceData = !!(e.user_id && presentDaysByUser.has(Number(e.user_id)));
-        const present = hasAttendanceData ? (presentDaysByUser.get(Number(e.user_id))?.size || 0) : workingDays;
+        const group = e.user_id ? branchTypeByUserId.get(Number(e.user_id)) || "head_office" : "head_office";
+        const upcomingDays = upcomingDaysByGroup[group] || 0;
+        const present = hasAttendanceData
+          ? Math.min(workingDays, (presentDaysByUser.get(Number(e.user_id))?.size || 0) + upcomingDays)
+          : workingDays;
         const leave = e.user_id ? Math.min(workingDays, leaveDaysByUser.get(Number(e.user_id)) || 0) : 0;
         const absent = Math.max(0, workingDays - present - leave);
         const lateCount = lateDatesByEmployee.get(e.id)?.length || 0;
