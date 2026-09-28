@@ -79,7 +79,10 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
     [bills, statusFilter]
   );
 
-  const selectableIds = useMemo(() => visibleBills.filter((b) => !b.is_disbursed).map((b) => b.id), [visibleBills]);
+  // A Bill with no line items yet can't be disbursed (the server refuses it),
+  // so it gets no checkbox or Disburse button until items are added.
+  const canDisburse = (b: ConveyanceBill) => !b.is_disbursed && Number(b.item_count || 0) > 0;
+  const selectableIds = useMemo(() => visibleBills.filter(canDisburse).map((b) => b.id), [visibleBills]);
   const allSelectableChecked = selectableIds.length > 0 && selectableIds.every((id) => selected.has(id));
 
   const toggleOne = (id: number) => {
@@ -116,6 +119,7 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
 
     const letterheadOptions = {
       reportTitle: 'Conveyance Payment Voucher',
+      filtersLabel: 'Voucher Details:',
       filters: [
         ['Voucher No', bill.voucher_no || '—'],
         ['Paid To', bill.user_name || '—'],
@@ -128,7 +132,7 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
 
     autoTable(doc, {
       startY: contentStartY,
-      margin: { top: contentStartY, left: 8, right: 8 },
+      margin: { top: contentStartY, left: 14, right: 14 },
       head: [['SL', 'Date', 'Particulars', 'From', 'To', 'Distance (KM)', 'Amount']],
       body: items.map((it, idx) => [
         String(idx + 1),
@@ -143,7 +147,7 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
       columnStyles: {
         0: { cellWidth: 8 },
         1: { cellWidth: 20 },
-        2: { cellWidth: 55 },
+        2: { cellWidth: 58 },
         3: { cellWidth: 26 },
         4: { cellWidth: 26 },
         5: { cellWidth: 22 },
@@ -160,16 +164,16 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(11);
     doc.setTextColor(15, 23, 42);
-    doc.text(`Total Amount Disbursed: ${total.toFixed(2)}`, 8, finalY + 8);
+    doc.text(`Total Amount Disbursed: ${total.toFixed(2)}`, 14, finalY + 8);
 
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(9);
     doc.setTextColor(71, 85, 105);
     doc.text(
       `I acknowledge receipt of the above amount in full settlement of the conveyance claim referenced above.`,
-      8,
+      14,
       finalY + 16,
-      { maxWidth: doc.internal.pageSize.getWidth() - 16 }
+      { maxWidth: doc.internal.pageSize.getWidth() - 28 }
     );
 
     // Signature lines — a Voucher is a physical payout receipt, so leave room
@@ -374,7 +378,7 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
                 <div key={b.id} className="p-4 flex flex-col gap-2.5">
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex items-start gap-2.5 min-w-0">
-                      {!b.is_disbursed && (
+                      {canDisburse(b) && (
                         <button type="button" onClick={() => toggleOne(b.id)} className="mt-0.5 text-slate-400 hover:text-emerald-600 shrink-0">
                           {selected.has(b.id) ? <CheckSquare className="w-4 h-4 text-emerald-600" /> : <Square className="w-4 h-4" />}
                         </button>
@@ -420,6 +424,8 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
                           {undoingId === b.id ? <Spinner size={14} /> : <RotateCcw className="w-3.5 h-3.5" />} Undo
                         </button>
                       </>
+                    ) : !canDisburse(b) ? (
+                      <span className="text-xs text-slate-400">No items yet — add them from Bill Claim first.</span>
                     ) : (
                       <button
                         type="button"
@@ -457,7 +463,7 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
                   {visibleBills.map((b) => (
                     <tr key={b.id} className="hover:bg-slate-50/80 transition-colors">
                       <td className="px-4 py-3 whitespace-nowrap">
-                        {!b.is_disbursed && (
+                        {canDisburse(b) && (
                           <button type="button" onClick={() => toggleOne(b.id)} className="text-slate-400 hover:text-emerald-600">
                             {selected.has(b.id) ? <CheckSquare className="w-4 h-4 text-emerald-600" /> : <Square className="w-4 h-4" />}
                           </button>
@@ -502,6 +508,8 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
                                 {undoingId === b.id ? <Spinner size={14} /> : <RotateCcw className="w-3.5 h-3.5" />}
                               </button>
                             </>
+                          ) : !canDisburse(b) ? (
+                            <span className="text-[11px] text-slate-400" title="Add items to this Bill from Bill Claim first">No items yet</span>
                           ) : (
                             <button
                               type="button"

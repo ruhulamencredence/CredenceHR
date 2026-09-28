@@ -90,6 +90,7 @@ const monthLabel = (my: string) => {
 const drawPayslipPage = (doc: jsPDF, logoImg: HTMLImageElement, record: PayrollRecord) => {
   const startY = drawPdfLetterhead(doc, logoImg, {
     reportTitle: `Payslip — ${monthLabel(record.month_year)}`,
+    filtersLabel: 'Employee Details:',
     filters: [
       ['Employee', `${record.employee_name}${record.employee_code ? ` (${record.employee_code})` : ''}`],
       ['Designation', record.designation || '—'],

@@ -110,7 +110,7 @@ export const MyConveyanceBillClaimPanel: React.FC<MyConveyanceBillClaimPanelProp
         <div>
           <h2 className="text-lg font-semibold text-slate-900">My Conveyance Bill Claim</h2>
           <p className="text-xs text-slate-500">
-            Your own Conveyance Bills and Claims — view only. Reviewing everyone else's is on the Conveyance Bill Claim tab.
+            Your own Conveyance Bills and Claims — view only. Everyone else's are reviewed on the Bill Claim page.
           </p>
         </div>
       </div>
