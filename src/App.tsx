@@ -330,6 +330,18 @@ export default function App() {
       localStorage.removeItem(`mpr_self_service_view_${user.id}`);
       localStorage.removeItem(`mpr_show_profile_page_${user.id}`);
     }
+    // The in-memory nav requests / open page outlive the logout too — without
+    // clearing them the next account to log in on this device was dropped
+    // onto whatever page the previous one last opened (e.g. Leave Application).
+    setClaimsNavRequest(null);
+    setJobsNavRequest(null);
+    setAdminNavRequest(null);
+    setDashboardNavRequest(null);
+    setLeaveNavRequest(null);
+    setSelfServiceView(null);
+    setShowProfilePage(false);
+    setShowChat(false);
+    setShowAlertsPage(false);
     if (token) clearPushToken(token);
     localStorage.removeItem('mpr_token');
     localStorage.removeItem('mpr_user');

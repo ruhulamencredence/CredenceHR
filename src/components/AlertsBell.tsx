@@ -39,7 +39,9 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
   const [unreadCount, setUnreadCount] = useState(0);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [open, setOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
+  // Starts true so the first open shows "Loading..." rather than flashing
+  // "No alerts yet." for the render before fetchAlerts kicks in.
+  const [loading, setLoading] = useState(true);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
   const fetchUnreadCount = useCallback(async () => {
