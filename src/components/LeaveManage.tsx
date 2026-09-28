@@ -170,6 +170,17 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
     return `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   };
 
+  // Only month-day is stored; the date pickers show it on the current Leave
+  // Year (Close this year, Start the year after when it comes round again),
+  // so Dec 31 2026 -> Jan 1 2027 instead of an old fixed year that made the
+  // Start Date look earlier than the Close Date. Feb 29 moves to the next
+  // leap year so the picker never shows an invalid date.
+  const yearDateValue = (monthDay: string, yearOffset: number): string => {
+    let year = new Date().getFullYear() + yearOffset;
+    if (monthDay === '02-29') while (!(year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0))) year++;
+    return `${year}-${monthDay}`;
+  };
+
   const fetchYearSettings = async () => {
     try {
       const res = await fetch(apiUrl('/api/leave-year-settings'), { headers: { Authorization: `Bearer ${token}` } });
@@ -661,7 +672,7 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
               <div>
                 <h1 className="text-lg font-semibold text-slate-800">Leave Manage</h1>
                 <p className="text-xs text-slate-500 mt-0.5 max-w-md">
-                  Set the Casual Leave, Sick Leave and Leave without Pay balance for every account.
+                  Set every account's leave balance (Casual, Sick, Earn and any other category), the leave rules, the Leave Year and yearly balance workflows.
                 </p>
               </div>
             </div>
@@ -1164,7 +1175,7 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
                       <label className="block text-[10px] font-semibold text-slate-500 mb-1">Year Close Date</label>
                       <input
                         type="date"
-                        value={`2024-${yearSettingsDraft.close_month_day}`}
+                        value={yearDateValue(yearSettingsDraft.close_month_day, 0)}
                         onChange={(e) => {
                           const parts = e.target.value.split('-');
                           if (parts.length === 3) handleCloseDateChange(`${parts[1]}-${parts[2]}`);
@@ -1176,7 +1187,7 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
                       <label className="block text-[10px] font-semibold text-slate-500 mb-1">Year Start Date (suggested)</label>
                       <input
                         type="date"
-                        value={`2024-${yearSettingsDraft.start_month_day}`}
+                        value={yearDateValue(yearSettingsDraft.start_month_day, yearSettingsDraft.start_month_day <= yearSettingsDraft.close_month_day ? 1 : 0)}
                         onChange={(e) => {
                           const parts = e.target.value.split('-');
                           if (parts.length === 3) setYearSettingsDraft((prev) => ({ ...prev, start_month_day: `${parts[1]}-${parts[2]}` }));
