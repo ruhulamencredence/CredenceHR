@@ -962,6 +962,7 @@ export default function App() {
             }}
             onOpenVehicleManagement={() => {
               setShowAlertsPage(false);
+              requestQuickAccessTab('bookRide', 'status');
               sidebarNavProps.onGoToSelfServiceTab('vehicleManagement');
             }}
             onOpenConveyanceClaim={() => {

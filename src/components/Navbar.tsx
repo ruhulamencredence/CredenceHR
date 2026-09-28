@@ -3,6 +3,7 @@ import { Capacitor } from '@capacitor/core';
 import { User } from '../types';
 import { Shield, LogOut, Search, X, Calendar } from 'lucide-react';
 import credenceLogo from '../assets/credence-logo.png';
+import { requestQuickAccessTab } from '../lib/quickAccess';
 import { AlertsBell } from './AlertsBell';
 import { ChatBell } from './ChatBell';
 import { WeatherBadge } from './WeatherBadge';
@@ -404,7 +405,11 @@ export const Navbar: React.FC<NavbarProps> = ({
             token={token}
             onOpenLeaveApplication={() => onGoToSelfServiceTab('leaveApplication')}
             onOpenApproveApplications={() => onGoToSelfServiceTab('approveApplications')}
-            onOpenVehicleManagement={() => onGoToSelfServiceTab('vehicleManagement')}
+            onOpenVehicleManagement={() => {
+              // A ride update is about an existing ride — open Ride Status.
+              requestQuickAccessTab('bookRide', 'status');
+              onGoToSelfServiceTab('vehicleManagement');
+            }}
             onOpenConveyanceClaim={onGoToConveyanceBillClaim}
             onOpenMyCases={() => onGoToSelfServiceTab('myCases')}
             onViewAll={onOpenAlerts}

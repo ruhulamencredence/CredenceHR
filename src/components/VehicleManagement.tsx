@@ -55,7 +55,8 @@ interface Requisition {
 const RIDE_LIST_COLS = 'grid-cols-[minmax(0,2.2fr)_minmax(0,1fr)_minmax(0,1.5fr)_minmax(0,1.5fr)_260px]';
 
 const STATUS_LABEL: Record<Requisition['status'], string> = {
-  pending: 'Pending HR/Admin Review',
+  // Could be with the Supervisor or HR/Admin — "Waiting on" names who.
+  pending: 'Pending Approval',
   approved: 'Approved — Awaiting Vehicle Assignment',
   ongoing: 'Vehicle Assigned — Ride Ongoing',
   rejected: 'Rejected',
