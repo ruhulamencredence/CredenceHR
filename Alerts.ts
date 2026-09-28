@@ -27,7 +27,7 @@
 import type { Express } from "express";
 import { sendPushToUserIds } from "./PushNotificationService";
 
-export type AlertType = "leave_application" | "leave_approval" | "conveyance_claim" | "conveyance_disbursed" | "asset_requisition" | "vehicle_requisition" | "vehicle_approval" | "grievance" | "disciplinary";
+export type AlertType = "leave_application" | "leave_approval" | "conveyance_claim" | "conveyance_approval" | "conveyance_disbursed" | "asset_requisition" | "vehicle_requisition" | "vehicle_approval" | "grievance" | "disciplinary";
 
 export interface AlertRow {
   id: number;

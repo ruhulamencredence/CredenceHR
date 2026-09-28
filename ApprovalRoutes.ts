@@ -92,7 +92,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
   // only by notifyNextStepApprovers below, so a step advance's notification
   // reads naturally regardless of which module the request belongs to.
   const SOURCE_TYPE_ALERT: Partial<Record<string, { type: AlertType; label: string }>> = {
-    user_claim: { type: "conveyance_claim", label: "Movement/Conveyance Claim" },
+    user_claim: { type: "conveyance_approval", label: "Conveyance Bill Claim" },
     asset_requisition: { type: "asset_requisition", label: "Asset Requisition" },
     leave_application: { type: "leave_approval", label: "Leave Application" },
     // 'vehicle_approval' (not 'vehicle_requisition', which is the requester's

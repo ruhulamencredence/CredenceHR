@@ -1387,6 +1387,9 @@ export type AlertType =
   // Layer) — opens Approve Application.
   | 'leave_approval'
   | 'conveyance_claim'
+  // A Conveyance Bill Claim waiting on this account's approval — opens
+  // Approve Application ('conveyance_claim' is the claimant's own updates).
+  | 'conveyance_approval'
   | 'conveyance_disbursed'
   | 'asset_requisition'
   | 'vehicle_requisition'
