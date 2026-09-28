@@ -27,6 +27,7 @@ const ChatPanel = lazy(() => import('./components/ChatPanel').then(m => ({ defau
 const AlertsPage = lazy(() => import('./components/AlertsPage').then(m => ({ default: m.AlertsPage })));
 
 import { AppLoader } from './components/AppLoader';
+import { UserDashboardSkeleton } from './components/UserDashboardSkeleton';
 import { Spinner } from './components/Spinner';
 import { ApkModal } from './components/ApkModal';
 import { FloatingChatButton } from './components/FloatingChatButton';
@@ -916,7 +917,18 @@ export default function App() {
 
         <div className="flex-1 min-w-0 flex flex-col">
       <main className="flex-1">
-        <Suspense fallback={<AppLoader />}>
+        {/* The User Dashboard gets a placeholder in its own layout (see
+            UserDashboardSkeleton) so nothing jumps when it arrives; every
+            other page keeps the generic loader. */}
+        <Suspense
+          fallback={
+            !showChat && !showAlertsPage && !showProfilePage && !selfServiceView && !isAdminView ? (
+              <UserDashboardSkeleton showAttendance={!!user?.can_use_attendance} showLeaveSummary={!!user?.can_view_leave_summary} />
+            ) : (
+              <AppLoader />
+            )
+          }
+        >
         {showChat ? (
           <ChatPanel
             user={user}

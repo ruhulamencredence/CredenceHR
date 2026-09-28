@@ -206,11 +206,17 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
   // card and only its data (not the card itself) shows up a beat later.
   if (loading && projects.length === 0) {
     return (
-      <div className="relative rounded-[24px] overflow-hidden border border-white/70 p-3.5 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-blue-100/70 via-white/50 to-indigo-50/40 animate-pulse">
-        <div className="h-4 w-32 bg-white/60 rounded-md mb-3" />
+      // Same shell as the real card below: tinted glass on mobile, plain
+      // white card from md up (where it sits beside the other white cards).
+      <div className="relative rounded-[24px] overflow-hidden border border-white/70 p-4 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-blue-200/80 via-white/40 to-indigo-100/60 md:bg-white md:from-transparent md:via-transparent md:to-transparent md:border-slate-200 md:rounded-2xl md:shadow-sm animate-pulse">
+        <div className="flex items-center gap-2 mb-3">
+          <div className="w-4 h-4 rounded bg-white/70 md:bg-slate-200" />
+          <div className="h-4 w-28 bg-white/70 md:bg-slate-200 rounded-md" />
+        </div>
+        <div className="h-9 rounded-xl bg-white/70 md:bg-slate-100 mb-2" />
         <div className="grid grid-cols-2 gap-2">
-          <div className="rounded-xl px-3 py-2 bg-white/70 border border-white/50 h-14" />
-          <div className="rounded-xl px-3 py-2 bg-white/70 border border-white/50 h-14" />
+          <div className="rounded-xl bg-white/70 border border-white/50 md:bg-slate-50 md:border-slate-100 h-14" />
+          <div className="rounded-xl bg-white/70 border border-white/50 md:bg-slate-50 md:border-slate-100 h-14" />
         </div>
       </div>
     );
