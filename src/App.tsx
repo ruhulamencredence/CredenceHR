@@ -969,6 +969,11 @@ export default function App() {
               setShowAlertsPage(false);
               sidebarNavProps.onGoToUserClaims('conveyanceBill');
             }}
+            onOpenMyAsset={(target) => {
+              setShowAlertsPage(false);
+              requestQuickAccessTab('myAsset', target);
+              sidebarNavProps.onGoToSelfServiceTab('assetManagement');
+            }}
             onOpenMyCases={() => {
               setShowAlertsPage(false);
               sidebarNavProps.onGoToSelfServiceTab('myCases');

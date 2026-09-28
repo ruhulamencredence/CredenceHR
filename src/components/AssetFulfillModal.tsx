@@ -35,6 +35,9 @@ interface Line {
   asset_tag: string;
   note: string;
   requested?: string;
+  // The requested item's name ("Laptop") — saved as the handed-over item's
+  // category, so "Dell Latitude 5440" reads as a Laptop in My Asset.
+  category?: string;
 }
 
 interface AssetFulfillModalProps {
@@ -60,6 +63,7 @@ export function AssetFulfillModal({ token, requisitionId, mode, requesterName, i
       serial_number: '',
       asset_tag: '',
       note: '',
+      category: it.item_name || undefined,
       requested: it.item_name ? `${it.item_name} × ${Number(it.quantity ?? 1)} ${it.unit || 'pcs'}${it.purpose ? ` — ${it.purpose}` : ''}` : undefined
     }))
   );
@@ -94,7 +98,8 @@ export function AssetFulfillModal({ token, requisitionId, mode, requesterName, i
             unit: l.unit.trim() || 'pcs',
             serial_number: l.serial_number.trim() || undefined,
             asset_tag: l.asset_tag.trim() || undefined,
-            note: l.note.trim() || undefined
+            note: l.note.trim() || undefined,
+            category: l.category || undefined
           }))
         })
       });

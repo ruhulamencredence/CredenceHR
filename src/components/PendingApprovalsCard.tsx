@@ -679,7 +679,7 @@ export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ toke
                         <span className="font-medium text-slate-800">{it.item_name}</span>
                         <span className="text-slate-500"> — {it.purpose}</span>
                       </div>
-                      <span className="shrink-0 font-semibold text-slate-700">{it.quantity} {it.unit}</span>
+                      <span className="shrink-0 font-semibold text-slate-700">{Number(it.quantity)} {it.unit}</span>
                     </div>
                   ))}
                 </div>

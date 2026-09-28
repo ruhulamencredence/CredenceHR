@@ -1392,6 +1392,10 @@ export type AlertType =
   | 'conveyance_approval'
   | 'conveyance_disbursed'
   | 'asset_requisition'
+  // An Asset Requisition waiting on this account (approve, or fulfill on an
+  // Asset Fulfiller Layer) — opens Approve Application ('asset_requisition'
+  // is the requester's own updates, which open My Asset).
+  | 'asset_approval'
   | 'vehicle_requisition'
   | 'vehicle_approval'
   | 'grievance'
