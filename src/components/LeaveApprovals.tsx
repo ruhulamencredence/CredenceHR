@@ -128,7 +128,7 @@ export const LeaveApprovals: React.FC<LeaveApprovalsProps> = ({ token, user, onB
       <div className="w-full px-4 sm:px-6 lg:px-8 pt-3 pb-8">
         {!isNativeApp && (
           <>
-            <ModulePath path={['Self Service', 'Leave Approvals']} />
+            <ModulePath path={['Self Service', 'My HR', 'Leave Manage', 'Leave Approvals']} />
             <button
               type="button"
               onClick={onBack}
