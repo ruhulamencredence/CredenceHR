@@ -5,6 +5,7 @@ import { PersonalDataForm } from './PersonalDataForm';
 import { ChangePasswordForm } from './ChangePasswordForm';
 import { ChangeUsernameForm } from './ChangeUsernameForm';
 import { AssetManagement } from './AssetManagement';
+import { ModulePath } from './ModulePath';
 import { useProfilePhoto } from '../lib/useProfilePhoto';
 import { BACKGROUND_THEMES, BackgroundThemeId, applyBackgroundTheme, getSavedBackgroundTheme } from '../lib/backgroundTheme';
 
@@ -218,6 +219,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
           the middle of the content area beside the sidebar, which read as the
           phone layout blown up rather than a desktop page. */}
       <div className="hidden md:block max-w-5xl mx-auto px-6 py-8">
+        <ModulePath path={['Profile']} />
         <button
           type="button"
           onClick={onBack}
