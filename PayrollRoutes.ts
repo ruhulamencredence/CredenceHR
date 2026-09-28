@@ -392,7 +392,7 @@ function buildPayslipEmailHtml(record: any): string {
         </tr>
         <tr>
           <td style="${cell}">Basic Salary</td><td style="${cell} text-align:right;">${fmtMoney(record.basic_amount)}</td>
-          <td style="${cell}">Absent / LWP Deduction</td><td style="${cell} text-align:right;">${fmtMoney(record.absent_deduction)}</td>
+          <td style="${cell}">Absent / LWP / Late Deduction</td><td style="${cell} text-align:right;">${fmtMoney(record.absent_deduction)}</td>
         </tr>
         <tr>
           <td style="${cell}">Allowances</td><td style="${cell} text-align:right;">${fmtMoney(record.allowances_total)}</td>
@@ -2267,8 +2267,12 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         // separate line item.
         const unpaidDays = absent + lwp + lateDeductionDays;
         const lateDeductionAmount = money(perDayGross * lateDeductionDays);
-        const basicAmount = money(basicSalary * (present / workingDays));
-        const allowancesEarned = money(allowancesTotal * (present / workingDays));
+        // Earnings are the full monthly amounts; every unpaid day (Absent,
+        // LWP and Late-policy days) is priced at the per-day gross and taken
+        // off once, as absent_deduction. Paid Leave days cost nothing, and
+        // Gross Earned - Total Deduction always equals Net Salary.
+        const basicAmount = money(basicSalary);
+        const allowancesEarned = money(allowancesTotal);
         const absentDeduction = money(perDayGross * unpaidDays);
         const grossEarned = money(basicAmount + allowancesEarned + otAmount + bonus);
         const taxDeduction = money(Number(structure.tax_deduction) || 0);
@@ -2287,7 +2291,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         advanceDeduction = money(advanceDeduction);
 
         const totalDeduction = money(absentDeduction + taxDeduction + pfDeduction + advanceDeduction + otherDed);
-        const netSalary = money(grossEarned - taxDeduction - pfDeduction - advanceDeduction - otherDed);
+        const netSalary = money(grossEarned - totalDeduction);
         const paymentSplit = await buildPaymentSplit(employeeId, netSalary);
 
         results.push({
@@ -2377,8 +2381,12 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
           const perDayGross = grossSalary / workingDays;
           const unpaidDays = absent + lwp + lateDeductionDays;
           const lateDeductionAmount = money(perDayGross * lateDeductionDays);
-          const basicAmount = money(basicSalary * (present / workingDays));
-          const allowancesEarned = money(allowancesTotal * (present / workingDays));
+          // Earnings are the full monthly amounts; every unpaid day (Absent,
+        // LWP and Late-policy days) is priced at the per-day gross and taken
+        // off once, as absent_deduction. Paid Leave days cost nothing, and
+        // Gross Earned - Total Deduction always equals Net Salary.
+        const basicAmount = money(basicSalary);
+          const allowancesEarned = money(allowancesTotal);
           const absentDeduction = money(perDayGross * unpaidDays);
           const grossEarned = money(basicAmount + allowancesEarned + otAmount + bonus);
           const taxDeduction = money(Number(structure.tax_deduction) || 0);
@@ -2397,7 +2405,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
           advanceDeduction = money(advanceDeduction);
 
           const totalDeduction = money(absentDeduction + taxDeduction + pfDeduction + advanceDeduction + otherDed);
-          const netSalary = money(grossEarned - taxDeduction - pfDeduction - advanceDeduction - otherDed);
+          const netSalary = money(grossEarned - totalDeduction);
           const paymentSplit = await buildPaymentSplit(employeeId, netSalary);
           // An employee with a configured Bank/MFS split is paid out that
           // way regardless of the run's single global Payment Method
@@ -2521,8 +2529,12 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       // are paid, hence excluded here).
       const unpaidDays = absent + lwp + lateDeductionDays;
       const lateDeductionAmount = money(perDayGross * lateDeductionDays);
-      const basicAmount = money(basicSalary * (present / workingDays));
-      const allowancesEarned = money(allowancesTotal * (present / workingDays));
+      // Earnings are the full monthly amounts; every unpaid day (Absent,
+        // LWP and Late-policy days) is priced at the per-day gross and taken
+        // off once, as absent_deduction. Paid Leave days cost nothing, and
+        // Gross Earned - Total Deduction always equals Net Salary.
+        const basicAmount = money(basicSalary);
+      const allowancesEarned = money(allowancesTotal);
       const absentDeduction = money(perDayGross * unpaidDays);
       const grossEarned = money(basicAmount + allowancesEarned + otAmount + bonus);
 
@@ -2545,7 +2557,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       advanceDeduction = money(advanceDeduction);
 
       const totalDeduction = money(absentDeduction + taxDeduction + pfDeduction + advanceDeduction + otherDed);
-      const netSalary = money(grossEarned - taxDeduction - pfDeduction - advanceDeduction - otherDed);
+      const netSalary = money(grossEarned - totalDeduction);
 
       const result = await queryDB(
         `INSERT INTO payrolls
@@ -2615,10 +2627,15 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       const basicSalary = Number(structure.basic_salary);
       const allowancesTotal = money(grossSalary - basicSalary);
       const perDayGross = grossSalary / workingDays;
-      const unpaidDays = absent + lwp;
+      // Keep the Late-policy days this run was generated with.
+      const unpaidDays = absent + lwp + Math.max(0, Math.round(num(existing.late_deduction_days)));
 
-      const basicAmount = money(basicSalary * (present / workingDays));
-      const allowancesEarned = money(allowancesTotal * (present / workingDays));
+      // Earnings are the full monthly amounts; every unpaid day (Absent,
+        // LWP and Late-policy days) is priced at the per-day gross and taken
+        // off once, as absent_deduction. Paid Leave days cost nothing, and
+        // Gross Earned - Total Deduction always equals Net Salary.
+        const basicAmount = money(basicSalary);
+      const allowancesEarned = money(allowancesTotal);
       const absentDeduction = money(perDayGross * unpaidDays);
       const grossEarned = money(basicAmount + allowancesEarned + otAmount + bonus);
       const taxDeduction = money(Number(structure.tax_deduction) || 0);
@@ -2637,7 +2654,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       advanceDeduction = money(advanceDeduction);
 
       const totalDeduction = money(absentDeduction + taxDeduction + pfDeduction + advanceDeduction + otherDed);
-      const netSalary = money(grossEarned - taxDeduction - pfDeduction - advanceDeduction - otherDed);
+      const netSalary = money(grossEarned - totalDeduction);
 
       await queryDB(
         `UPDATE payrolls SET

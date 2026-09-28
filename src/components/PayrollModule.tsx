@@ -309,7 +309,7 @@ const GeneratePayslipModal: React.FC<{ token: string; monthYear: string; onClose
         margin: { top: startY, left: 14, right: 14 },
         head: [['Earnings', 'Amount', 'Deductions', 'Amount']],
         body: [
-          ['Basic Salary', money(record.basic_amount), 'Absent / LWP Deduction', money(record.absent_deduction)],
+          ['Basic Salary', money(record.basic_amount), 'Absent / LWP / Late Deduction', money(record.absent_deduction)],
           ['Allowances', money(record.allowances_total), 'Tax Deduction', money(record.tax_deduction)],
           ['Overtime', money(record.overtime_amount), 'Provident Fund', money(record.pf_deduction)],
           ['Bonus', money(record.bonus_amount), 'Advance Recovery', money(record.advance_deduction)],
