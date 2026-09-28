@@ -69,6 +69,46 @@ const GRIEVANCE_STATUS_STYLE: Record<string, string> = {
   dismissed: 'bg-slate-100 text-slate-500 border-slate-200'
 };
 
+const STATUS_LABEL: Record<string, string> = {
+  open: 'Open',
+  investigating: 'Investigating',
+  resolved: 'Resolved',
+  dismissed: 'Dismissed',
+  active: 'Active',
+  acknowledged: 'Acknowledged',
+  closed: 'Closed'
+};
+
+// HR's own reply on a case — posted as an 'hr' entry in its feedback thread
+// (POST .../feedback), which notifies the other side.
+const HrNoteBox: React.FC<{ onSend: (message: string) => Promise<boolean> }> = ({ onSend }) => {
+  const [text, setText] = useState('');
+  const [sending, setSending] = useState(false);
+  return (
+    <div className="flex items-center gap-2 mb-2">
+      <input
+        type="text"
+        placeholder="HR note / reply…"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        className="text-xs px-2.5 py-1.5 border border-slate-200 rounded-lg flex-1 min-w-[160px]"
+      />
+      <button
+        type="button"
+        disabled={sending || !text.trim()}
+        onClick={async () => {
+          setSending(true);
+          if (await onSend(text.trim())) setText('');
+          setSending(false);
+        }}
+        className="text-[11px] font-semibold px-3 py-1.5 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+      >
+        {sending ? 'Sending…' : 'Send Note'}
+      </button>
+    </div>
+  );
+};
+
 const ACTION_TYPE_LABEL: Record<string, string> = {
   verbal_warning: 'Verbal Warning',
   written_warning: 'Written Warning',
@@ -100,14 +140,17 @@ export const GrievanceDisciplinaryPanel: React.FC<GrievanceDisciplinaryPanelProp
   const [newActionType, setNewActionType] = useState('verbal_warning');
   const [newActionReason, setNewActionReason] = useState('');
 
-  const fetchAll = async () => {
-    setLoading(true);
+  // silent: refresh in place (after a note) without the full-page spinner.
+  const fetchAll = async (silent = false) => {
+    if (!silent) setLoading(true);
     setError('');
     try {
       const [gRes, aRes, uRes] = await Promise.all([
         fetch(apiUrl('/api/grievances'), { headers: authHeaders }),
         fetch(apiUrl('/api/disciplinary-actions'), { headers: authHeaders }),
-        fetch(apiUrl('/api/users'), { headers: authHeaders })
+        // Same picker list the self-service form uses — GET /api/users needs
+        // the Users module, which an HR account usually doesn't have.
+        fetch(apiUrl('/api/grievances/people'), { headers: authHeaders })
       ]);
       const gData = await gRes.json();
       const aData = await aRes.json();
@@ -116,7 +159,7 @@ export const GrievanceDisciplinaryPanel: React.FC<GrievanceDisciplinaryPanelProp
       if (!aRes.ok) throw new Error(aData.error || 'Failed to load disciplinary actions');
       setGrievances(Array.isArray(gData) ? gData : []);
       setActions(Array.isArray(aData) ? aData : []);
-      if (uRes.ok) setUsers(Array.isArray(uData) ? uData.filter((u: any) => u.role !== 'superadmin') : []);
+      if (uRes.ok) setUsers(Array.isArray(uData) ? uData : []);
     } catch (err: any) {
       setError(err.message || 'Failed to load');
     } finally {
@@ -166,7 +209,22 @@ export const GrievanceDisciplinaryPanel: React.FC<GrievanceDisciplinaryPanelProp
     }
   };
 
+  const sendNote = async (kind: 'grievances' | 'disciplinary-actions', id: number, message: string) => {
+    setError('');
+    try {
+      const res = await fetch(apiUrl(`/api/${kind}/${id}/feedback`), { method: 'POST', headers: authHeaders, body: JSON.stringify({ message }) });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to send note');
+      await fetchAll(true);
+      return true;
+    } catch (err: any) {
+      setError(err.message || 'Failed to send note');
+      return false;
+    }
+  };
+
   const closeAction = async (id: number) => {
+    if (!confirm('Close this disciplinary action? The employee is notified and no more feedback can be added.')) return;
     try {
       const res = await fetch(apiUrl(`/api/disciplinary-actions/${id}`), {
         method: 'PUT',
@@ -196,7 +254,7 @@ export const GrievanceDisciplinaryPanel: React.FC<GrievanceDisciplinaryPanelProp
         <div className="flex gap-2">
           <button
             type="button"
-            onClick={() => setTab('grievances')}
+            onClick={() => { setTab('grievances'); setSuccess(''); setError(''); }}
             className={`text-xs font-semibold px-3 py-1.5 rounded-full border transition-colors ${
               tab === 'grievances' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-200'
             }`}
@@ -205,7 +263,7 @@ export const GrievanceDisciplinaryPanel: React.FC<GrievanceDisciplinaryPanelProp
           </button>
           <button
             type="button"
-            onClick={() => setTab('disciplinary')}
+            onClick={() => { setTab('disciplinary'); setSuccess(''); setError(''); }}
             className={`text-xs font-semibold px-3 py-1.5 rounded-full border transition-colors ${
               tab === 'disciplinary' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-200'
             }`}
@@ -240,9 +298,18 @@ export const GrievanceDisciplinaryPanel: React.FC<GrievanceDisciplinaryPanelProp
                   {g.raised_by_name} {g.against_user_name && <span className="text-slate-400 font-normal">against {g.against_user_name}</span>}
                   {g.category && <span className="text-slate-400 font-normal"> · {g.category}</span>}
                 </p>
-                <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${GRIEVANCE_STATUS_STYLE[g.status]}`}>{g.status}</span>
+                <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${GRIEVANCE_STATUS_STYLE[g.status]}`}>{STATUS_LABEL[g.status] || g.status}</span>
               </div>
-              <p className="text-xs text-slate-600 mb-2">{g.description}</p>
+              <p className="text-xs text-slate-600 mb-1">{g.description}</p>
+              <p className="text-[11px] text-slate-400 mb-2">
+                Raised {new Date(g.created_at).toLocaleDateString()}
+                {g.assigned_to_name ? ` · Investigator: ${g.assigned_to_name}` : ''}
+              </p>
+              {(g.status === 'resolved' || g.status === 'dismissed') && g.resolution_notes && (
+                <p className="text-xs text-slate-700 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2 mb-2">
+                  <span className="font-semibold">Resolution:</span> {g.resolution_notes}
+                </p>
+              )}
               <div className="flex flex-wrap items-center gap-1.5 mb-1">
                 {g.feedback_pending?.named && (
                   <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
@@ -256,6 +323,7 @@ export const GrievanceDisciplinaryPanel: React.FC<GrievanceDisciplinaryPanelProp
                 )}
               </div>
               <FeedbackThread list={g.feedback} />
+              {(g.status === 'open' || g.status === 'investigating') && <HrNoteBox onSend={(m) => sendNote('grievances', g.id, m)} />}
               <div className="flex flex-wrap items-center gap-2">
                 {(g.status === 'open' || g.status === 'investigating') && (
                   <select
@@ -365,7 +433,10 @@ export const GrievanceDisciplinaryPanel: React.FC<GrievanceDisciplinaryPanelProp
                     >
                       {a.acknowledged ? 'Acknowledged' : 'Pending acknowledgement'}
                     </span>
-                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">{a.status}</span>
+                    {/* Active/Acknowledged is already said by the badge above; only Closed adds anything. */}
+                    {a.status === 'closed' && (
+                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">{STATUS_LABEL.closed}</span>
+                    )}
                   </div>
                 </div>
                 <p className="text-xs text-slate-600 mb-2">{a.reason}</p>
@@ -375,6 +446,7 @@ export const GrievanceDisciplinaryPanel: React.FC<GrievanceDisciplinaryPanelProp
                   </span>
                 )}
                 <FeedbackThread list={a.feedback} />
+                {a.status !== 'closed' && <HrNoteBox onSend={(m) => sendNote('disciplinary-actions', a.id, m)} />}
                 <p className="text-[11px] text-slate-400">
                   Issued by {a.issued_by_name || '—'} · {new Date(a.issued_at).toLocaleDateString()}
                 </p>
