@@ -874,12 +874,10 @@ export default function App() {
           if (canSwitchPanels) setViewMode('admin');
           setAdminNavRequest({ target, ts: Date.now() });
         }}
-        onGoToSelfServiceTab={(target) => {
-          setShowProfilePage(false);
-          setShowChat(false);
-          setShowAlertsPage(false);
-          setSelfServiceView(target);
-        }}
+        // Same handler GlobalSidebar uses, so the Alerts bell's "Leave
+        // Application" jump routes into UserPanel's Leave page (a plain
+        // selfServiceView = 'leaveApplication' rendered nothing).
+        onGoToSelfServiceTab={sidebarNavProps.onGoToSelfServiceTab}
         onOpenMobileMenu={() => setGlobalSidebarOpen(true)}
         onOpenProfile={() => {
           setSelfServiceView(null);

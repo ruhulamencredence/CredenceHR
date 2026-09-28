@@ -88,6 +88,10 @@ export const LeaveDurationCalendar: React.FC<LeaveDurationCalendarProps> = ({ st
   const initial = startDate ? new Date(`${startDate}T00:00:00`) : new Date();
   const [viewYear, setViewYear] = useState(initial.getFullYear());
   const [viewMonth, setViewMonth] = useState(initial.getMonth());
+  // True between the first and second tap of a pick. The form starts with
+  // today pre-selected, so without this the very first tap on a later day
+  // stretched a range from today instead of starting a new one.
+  const [awaitingEnd, setAwaitingEnd] = useState(false);
 
   const cells = useMemo(() => buildGrid(viewYear, viewMonth), [viewYear, viewMonth]);
 
@@ -130,6 +134,7 @@ export const LeaveDurationCalendar: React.FC<LeaveDurationCalendarProps> = ({ st
     const d = startDate ? new Date(`${startDate}T00:00:00`) : new Date();
     setViewYear(d.getFullYear());
     setViewMonth(d.getMonth());
+    setAwaitingEnd(false);
     reposition();
     setOpen(true);
   };
@@ -205,18 +210,14 @@ export const LeaveDurationCalendar: React.FC<LeaveDurationCalendarProps> = ({ st
   };
 
   const handlePick = (dateStr: string) => {
-    const hasCompleteRange = !!startDate && !!endDate && startDate !== endDate;
-    if (!startDate || hasCompleteRange) {
-      // Nothing picked yet, or a full range is already sitting there — this
-      // tap starts a brand new single-day selection.
+    if (!awaitingEnd || !startDate || dateStr < startDate) {
+      // First tap (or a tap before the current start) starts a new
+      // single-day selection; the next tap completes the range.
       onChange(dateStr, dateStr);
-    } else if (dateStr < startDate) {
-      // Tapped before the current single-day start — restart there instead
-      // of forming a backwards range.
-      onChange(dateStr, dateStr);
+      setAwaitingEnd(true);
     } else {
-      // Completes the range from the existing start through this day.
       onChange(startDate, dateStr);
+      setAwaitingEnd(false);
     }
   };
 

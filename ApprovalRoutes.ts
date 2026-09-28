@@ -94,6 +94,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
   const SOURCE_TYPE_ALERT: Partial<Record<string, { type: AlertType; label: string }>> = {
     user_claim: { type: "conveyance_claim", label: "Movement/Conveyance Claim" },
     asset_requisition: { type: "asset_requisition", label: "Asset Requisition" },
+    leave_application: { type: "leave_approval", label: "Leave Application" },
     // 'vehicle_approval' (not 'vehicle_requisition', which is the requester's
     // own ride-status alerts) so a click opens Approve Application.
     vehicle_requisition: { type: "vehicle_approval", label: "Vehicle Requisition" }
@@ -103,8 +104,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
   // step (status still 'pending', current_step already moved on) — tells
   // that next step's approver(s) it's now waiting on them, instead of them
   // only finding out by happening to open My Approvals. A no-op for source
-  // types with no alert mapping above (Attendance/Leave keep their existing
-  // reliever-style notifications) or a request whose new step has nobody
+  // types with no alert mapping above (Attendance) or a request whose new step has nobody
   // assigned yet.
   async function notifyNextStepApprovers(requestId: number, newStatus: string, actorName: string) {
     if (newStatus !== "pending") return;
