@@ -3886,7 +3886,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                               a.status === 'approved' ? 'bg-emerald-50 text-emerald-700' :
                               a.status === 'rejected' ? 'bg-rose-50 text-rose-700' : 'bg-amber-50 text-amber-700'
                             }`}>
-                              {a.status}
+                              <span className="capitalize">{a.status}</span>
                             </span>
                           </td>
                           <td className="px-4 py-3 text-slate-600">{a.approver_name || '—'}</td>
@@ -3918,7 +3918,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                           a.status === 'approved' ? 'bg-emerald-50 text-emerald-700' :
                           a.status === 'rejected' ? 'bg-rose-50 text-rose-700' : 'bg-amber-50 text-amber-700'
                         }`}>
-                          {a.status}
+                          <span className="capitalize">{a.status}</span>
                         </span>
                       </div>
 

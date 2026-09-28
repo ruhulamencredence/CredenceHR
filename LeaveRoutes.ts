@@ -1077,6 +1077,12 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
               approverName = approvers.length > 0 ? approvers.map((x: any) => x.user_name || `User #${x.user_id}`).join(" or ") : null;
             }
           }
+          // Still with the Reliever (no approval request yet) — name them,
+          // so the list says who it's waiting on instead of a blank Approver.
+          if (!approverName && a.status === "pending" && a.reliever_status === "pending" && a.reliever_id) {
+            const relieverName = userMap.get(Number(a.reliever_id))?.name;
+            if (relieverName) approverName = `${relieverName} (Reliever)`;
+          }
           // Passed its first Approval Layer (the Department Supervisor
           // auto-layer when the applicant's Department has one configured,
           // otherwise the Template's own first Layer) — true once current_step
@@ -1209,6 +1215,12 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
               const approvers = await getCurrentStepApprovers(ar);
               approverName = approvers.length > 0 ? approvers.map((x: any) => x.user_name || `User #${x.user_id}`).join(" or ") : null;
             }
+          }
+          // Still with the Reliever (no approval request yet) — name them,
+          // so the list says who it's waiting on instead of a blank Approver.
+          if (!approverName && a.status === "pending" && a.reliever_status === "pending" && a.reliever_id) {
+            const relieverName = userMap.get(Number(a.reliever_id))?.name;
+            if (relieverName) approverName = `${relieverName} (Reliever)`;
           }
           // Passed its first Approval Layer — same signal GET
           // /api/leave-applications computes, see that route's comment. The

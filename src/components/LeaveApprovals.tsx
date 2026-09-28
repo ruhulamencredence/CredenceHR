@@ -245,9 +245,10 @@ export const LeaveApprovals: React.FC<LeaveApprovalsProps> = ({ token, user, onB
                     <div className="mt-3 flex items-center gap-1.5 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-2">
                       <Clock className="w-3 h-3 shrink-0" />
                       <span>
-                        Routed through the Approval Workflow{a.approver_name ? ` — currently waiting on ${a.approver_name}` : ''}. Act on it from
-                        Admin Panel -&gt; Approvals, or that account's own Dashboard.
-                        {a.total_steps ? ` (Layer ${a.current_step} of ${a.total_steps})` : ''}
+                        {(a as any).reliever_status === 'pending'
+                          ? `Waiting on the Reliever${(a as any).reliever_name ? `, ${(a as any).reliever_name},` : ''} to accept — then it goes through the Approval Workflow.`
+                          : `Routed through the Approval Workflow${a.approver_name ? ` — currently waiting on ${a.approver_name}` : ''}${a.total_steps ? ` (Layer ${a.current_step} of ${a.total_steps})` : ''}.`}{' '}
+                        The approver acts on it from their own Approve Application page.
                       </span>
                     </div>
                   ) : (
