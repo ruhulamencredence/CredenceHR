@@ -403,6 +403,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
 
     const letterheadOptions = {
       reportTitle: 'Conveyance Bill Claim',
+      filtersLabel: 'Bill Details:',
       filters: [
         ['User', bill.user_name || '—'],
         ['Bill Date', formatDate(bill.bill_date) || '—']
@@ -1571,8 +1572,10 @@ const UserClaimDetailModal: React.FC<{
                   {claim.approval ? (
                     <div className="flex items-center gap-2 text-xs px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-700">
                       <Clock className="w-3.5 h-3.5 shrink-0" />
-                      Waiting on Approval Workflow — step {claim.approval.current_step} of {claim.approval.total_steps}. Act on it
-                      from the <span className="font-semibold">Approvals</span> tab.
+                      <span>
+                        Waiting on {claim.approval.current_approver_name || 'the Approval Workflow'} — step {claim.approval.current_step} of{' '}
+                        {claim.approval.total_steps}. The approver acts on it from their own Approve Application page.
+                      </span>
                     </div>
                   ) : (
                     <div className="flex flex-col sm:flex-row sm:items-center gap-2">

@@ -26,6 +26,8 @@ export interface PdfLetterheadOptions {
   reportTitle: string;
   /** Label/value pairs shown in the "Filtered By" box — omit or pass [] to hide it entirely. */
   filters?: [string, string][];
+  /** Heading above that box — defaults to "Filtered By:" (reports); a voucher or payslip names its own details instead. */
+  filtersLabel?: string;
 }
 
 // Preloads an <img> so jsPDF's addImage (which needs actual pixel data, not just
@@ -97,7 +99,7 @@ export function drawPdfLetterhead(
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(8.5);
     doc.setTextColor(71, 85, 105);
-    doc.text('Filtered By:', 14, y);
+    doc.text(options.filtersLabel || 'Filtered By:', 14, y);
     y += 2.5;
 
     const boxX = 14;

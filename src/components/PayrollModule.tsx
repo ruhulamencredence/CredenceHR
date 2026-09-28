@@ -296,6 +296,7 @@ const GeneratePayslipModal: React.FC<{ token: string; monthYear: string; onClose
       const doc = new jsPDF();
       const startY = drawPdfLetterhead(doc, logoImg, {
         reportTitle: `Payslip — ${monthLabel(record.month_year)}`,
+        filtersLabel: 'Employee Details:',
         filters: [
           ['Employee', `${record.employee_name}${record.employee_code ? ` (${record.employee_code})` : ''}`],
           ['Designation', record.designation || '—'],
