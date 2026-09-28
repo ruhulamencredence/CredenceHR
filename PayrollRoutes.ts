@@ -630,8 +630,14 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       const structureByEmployee = new Map<number, any>(structureRows.map((s: any) => [s.employee_id, s]));
 
       const records = rows.map((r: any) => {
-        const ratio = num(r.total_working_days) > 0 ? num(r.present_days) / num(r.total_working_days) : 0;
         const structure = structureByEmployee.get(r.employee_id);
+        // Split the run's own allowances_total across the structure's
+        // allowance lines in proportion, so the columns always add up to what
+        // was actually paid (full amounts now; prorated on older runs).
+        const structureAllowances = structure
+          ? num(structure.house_rent) + num(structure.medical_allowance) + num(structure.conveyance_allowance) + num(structure.other_allowance)
+          : 0;
+        const ratio = structureAllowances > 0 ? num(r.allowances_total) / structureAllowances : 0;
         const houseRent = structure ? money(num(structure.house_rent) * ratio) : 0;
         const medicalAllowance = structure ? money(num(structure.medical_allowance) * ratio) : 0;
         const otherAllowance = structure
