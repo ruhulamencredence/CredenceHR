@@ -124,6 +124,10 @@ export const memoryDb = {
   hrOnboardingTasks: [] as any[],
   hrOnboardingItems: [] as any[],
   hrIncrementPolicies: [] as any[],
+  hrEmpExperience: [] as any[],
+  hrEmpEducation: [] as any[],
+  hrEmpFamily: [] as any[],
+  hrEmpTraining: [] as any[],
   accessTemplates: [] as any[],
   // Chat/Alerts push notification device tokens (ChatRoutes.ts's POST/DELETE
   // /api/chat/push-token, PushNotificationService.ts's sendPushToUserIds/
@@ -255,7 +259,11 @@ const GENERIC_TABLES: [string, any[]][] = [
   ["hr_letter_requests", memoryDb.hrLetterRequests],
   ["hr_onboarding_tasks", memoryDb.hrOnboardingTasks],
   ["hr_onboarding_items", memoryDb.hrOnboardingItems],
-  ["hr_increment_policies", memoryDb.hrIncrementPolicies]
+  ["hr_increment_policies", memoryDb.hrIncrementPolicies],
+  ["hr_emp_experience", memoryDb.hrEmpExperience],
+  ["hr_emp_education", memoryDb.hrEmpEducation],
+  ["hr_emp_family", memoryDb.hrEmpFamily],
+  ["hr_emp_training", memoryDb.hrEmpTraining]
 ];
 seedHROperationsMemory(memoryDb.hrLetterTemplates, memoryDb.hrOnboardingTasks);
 memoryDb.leaveCategories = [{ id: 1, category_key: "custom_earn_leave", label: "Earn Leave", created_by: null, created_at: new Date() }];

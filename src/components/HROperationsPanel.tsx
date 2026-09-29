@@ -6,7 +6,8 @@
 // Admin Panel -> HRM -> "HR Operations" — the HR department's day-to-day
 // work on Employees in one module (HROperationsRoutes.ts): the monthly
 // report, Personnel Actions (promotion / increment / transfer /
-// confirmation / separation… with approval), each Employee's Service Book,
+// confirmation / separation… with approval), each Employee's Service Book
+// (Employee 360 — everything about one Employee on one page),
 // Letters (templates, register, requests), the Onboarding checklist,
 // Increment planning, and Settings.
 
@@ -16,7 +17,7 @@ import { Spinner } from './Spinner';
 import { useHrApi, Notice, type HrOpsEmployee, type HrOpsMeta } from './HrOpsShared';
 import { HrOpsDashboard } from './HrOpsDashboard';
 import { HrOpsActions } from './HrOpsActions';
-import { HrOpsServiceBook } from './HrOpsServiceBook';
+import { Employee360 } from './HrOps360';
 import { HrOpsLetters } from './HrOpsLetters';
 import { HrOpsOnboarding } from './HrOpsOnboarding';
 import { HrOpsIncrements } from './HrOpsIncrements';
@@ -27,7 +28,7 @@ export type HrOpsTab = 'dashboard' | 'actions' | 'service_book' | 'letters' | 'o
 const TABS: { key: HrOpsTab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { key: 'dashboard', label: 'Monthly Report', icon: LayoutDashboard },
   { key: 'actions', label: 'Personnel Actions', icon: ClipboardList },
-  { key: 'service_book', label: 'Service Book', icon: BookOpen },
+  { key: 'service_book', label: 'Service Book (360°)', icon: BookOpen },
   { key: 'letters', label: 'Letters', icon: FileText },
   { key: 'onboarding', label: 'Onboarding', icon: ClipboardCheck },
   { key: 'increments', label: 'Increments', icon: TrendingUp },
@@ -133,7 +134,7 @@ export const HROperationsPanel: React.FC<{ token: string }> = ({ token }) => {
         ) : tab === 'actions' ? (
           <HrOpsActions token={token} meta={meta} employees={employees} onChanged={changed} refreshKey={refreshKey} />
         ) : tab === 'service_book' ? (
-          <HrOpsServiceBook token={token} meta={meta} employees={employees} employeeId={bookEmployee} onPick={setBookEmployee} onChanged={changed} />
+          <Employee360 token={token} meta={meta} employees={employees} employeeId={bookEmployee} onPick={setBookEmployee} onChanged={changed} />
         ) : tab === 'letters' ? (
           <HrOpsLetters token={token} meta={meta} employees={employees} refreshKey={refreshKey} />
         ) : tab === 'onboarding' ? (

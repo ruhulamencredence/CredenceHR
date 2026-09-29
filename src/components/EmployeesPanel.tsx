@@ -2,24 +2,28 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import {
   Contact, Plus, Trash2, Edit2, X, Search, Eye, EyeOff, Mail, Phone, Briefcase, Building2, KeyRound, ShieldCheck,
   FolderKanban, LayoutGrid, UserCircle2, ClipboardList, MapPin, Users2, Star, Link2, ArrowLeftRight, History, ArrowRight,
-  Landmark
+  Landmark, GraduationCap
 } from 'lucide-react';
 import { Employee, EmployeeSupervisor, EmployeePaymentAccount, EmployeeTransfer, EmployeeChangeLogEntry, User, Project, Department, Branch, AdminModuleKey, ADMIN_MODULES } from '../types';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
 import { EmployeeChangeHistory, HistoryEntryCard, buildHistoryTimeline, HISTORY_FILTERS, HistoryFilter } from './EmployeeChangeHistory';
+import { RecordFields } from './HrOps360Parts';
 
 // Add/Edit Employee modal tabs — Basic + Employee Info fields live under
 // "info", the rest mirror the reference HR system's own tab split (Status /
 // Contact / Supervisor), just restyled to this app's own design. "payment"
 // (Bank/MFS payroll disbursement split) is this app's own addition, not part
 // of that reference split.
-type EmployeeFormTab = 'info' | 'status' | 'contact' | 'supervisor' | 'payment' | 'history';
+// "career" (previous experience + education) saves into HR Operations'
+// Employee 360 records (HrOps360Routes.ts) right after the Employee itself.
+type EmployeeFormTab = 'info' | 'status' | 'contact' | 'career' | 'supervisor' | 'payment' | 'history';
 
 const FORM_TABS: { key: EmployeeFormTab; label: string; icon: React.ReactNode }[] = [
   { key: 'info', label: 'Employee Info', icon: <UserCircle2 className="w-3.5 h-3.5" /> },
   { key: 'status', label: 'Status', icon: <ClipboardList className="w-3.5 h-3.5" /> },
   { key: 'contact', label: 'Contact', icon: <MapPin className="w-3.5 h-3.5" /> },
+  { key: 'career', label: 'Experience & Education', icon: <GraduationCap className="w-3.5 h-3.5" /> },
   { key: 'supervisor', label: 'Supervisor', icon: <Users2 className="w-3.5 h-3.5" /> },
   { key: 'payment', label: 'Payment', icon: <Landmark className="w-3.5 h-3.5" /> },
   // Read-only audit trail: Department/Designation changes (employee_transfers)
@@ -267,6 +271,10 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [formTab, setFormTab] = useState<EmployeeFormTab>('info');
+  // Experience & Education tab — rows typed here are added on Save; the
+  // Employee's already-saved ones are listed (read-only) above them.
+  const [careerDrafts, setCareerDrafts] = useState<{ kind: 'experience' | 'education'; data: Record<string, any> }[]>([]);
+  const [savedCareer, setSavedCareer] = useState<{ experience: any[]; education: any[] } | null>(null);
 
   // Supervisor tab — loaded on demand for the employee currently being
   // edited (a brand-new, not-yet-saved employee has no id yet, so the tab
@@ -430,6 +438,8 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
     setEditingId(null);
     setForm(emptyForm);
     setFormTab('info');
+    setCareerDrafts([]);
+    setSavedCareer(null);
     setSupervisors([]);
     setSupervisorForm(emptySupervisorForm);
     setEditingSupervisorRowId(null);
@@ -514,6 +524,12 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
     setShowForm(true);
     fetchSupervisors(e.id);
     fetchPaymentAccounts(e.id);
+    setCareerDrafts([]);
+    setSavedCareer(null);
+    fetch(apiUrl(`/api/hr-ops/p360/${e.id}/career`), { headers: authHeaders })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => d && setSavedCareer(d))
+      .catch(() => {});
   };
 
   const closeForm = () => {
@@ -790,9 +806,26 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to save employee');
 
+      // Experience & Education rows typed on this form — added once the
+      // Employee row exists. Blank rows are skipped.
+      let careerNote = '';
+      const savedId = editingId || Number(data.id);
+      const items = careerDrafts
+        .filter((d) => (d.kind === 'experience' ? String(d.data.company_name || '').trim() : String(d.data.degree || '').trim()))
+        .map((d) => ({ kind: d.kind, ...d.data }));
+      if (savedId && items.length > 0) {
+        const cr = await fetch(apiUrl(`/api/hr-ops/p360/${savedId}/records`), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...authHeaders },
+          body: JSON.stringify({ items })
+        });
+        const cd = await cr.json().catch(() => ({}));
+        careerNote = !cr.ok ? ` Experience/education not saved: ${cd.error || 'failed'}.` : cd.errors?.length ? ` Some experience/education rows were not saved: ${cd.errors.join('; ')}.` : ` ${cd.created} experience/education record(s) added.`;
+      }
+
       setMessage({
-        type: 'success',
-        text: editingId ? 'Employee updated.' : form.create_login ? 'Employee added with a login account.' : 'Employee added.'
+        type: careerNote.includes('not saved') ? 'error' : 'success',
+        text: (editingId ? 'Employee updated.' : form.create_login ? 'Employee added with a login account.' : 'Employee added.') + careerNote
       });
       closeForm();
       fetchAll();
@@ -1619,6 +1652,51 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                       </div>
                     </div>
                   </div>
+                </div>
+              )}
+
+              {formTab === 'career' && (
+                <div className="space-y-4">
+                  {savedCareer && (savedCareer.experience.length > 0 || savedCareer.education.length > 0) && (
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 space-y-1.5">
+                      <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Already recorded</p>
+                      {savedCareer.experience.map((x: any) => (
+                        <div key={`e${x.id}`} className="text-xs text-slate-700">
+                          <Briefcase className="w-3 h-3 inline mr-1 text-slate-400" />
+                          {x.designation ? `${x.designation}, ` : ''}
+                          {x.company_name} <span className="text-slate-400">({x.from_date || '?'} – {x.to_date || 'present'})</span>
+                        </div>
+                      ))}
+                      {savedCareer.education.map((x: any) => (
+                        <div key={`d${x.id}`} className="text-xs text-slate-700">
+                          <GraduationCap className="w-3 h-3 inline mr-1 text-slate-400" />
+                          {x.degree}
+                          {x.institute ? `, ${x.institute}` : ''} {x.passing_year && <span className="text-slate-400">({x.passing_year})</span>}
+                        </div>
+                      ))}
+                      <p className="text-[10px] text-slate-400">Edit, verify or attach certificates from HR Operations → Service Book.</p>
+                    </div>
+                  )}
+                  {careerDrafts.map((d, i) => (
+                    <div key={i} className="rounded-xl border border-slate-200 p-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-600">{d.kind === 'experience' ? 'Previous Experience' : 'Education'}</p>
+                        <button type="button" onClick={() => setCareerDrafts((ds) => ds.filter((_, j) => j !== i))} className="p-1 text-slate-400 hover:text-rose-600" aria-label="Remove">
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                      <RecordFields kind={d.kind} form={d.data} onChange={(data) => setCareerDrafts((ds) => ds.map((x, j) => (j === i ? { ...x, data } : x)))} />
+                    </div>
+                  ))}
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" onClick={() => setCareerDrafts((ds) => [...ds, { kind: 'experience', data: {} }])} className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50">
+                      <Plus className="w-3.5 h-3.5" /> Add Previous Experience
+                    </button>
+                    <button type="button" onClick={() => setCareerDrafts((ds) => [...ds, { kind: 'education', data: {} }])} className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50">
+                      <Plus className="w-3.5 h-3.5" /> Add Education
+                    </button>
+                  </div>
+                  {careerDrafts.length === 0 && <p className="text-[11px] text-slate-400">Add the employee's previous jobs and degrees — saved together with the employee.</p>}
                 </div>
               )}
 
