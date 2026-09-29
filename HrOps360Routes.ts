@@ -37,7 +37,7 @@
 // re-filtered in JS, writes only ever use `WHERE id = ?`.
 
 import type { Express } from "express";
-import { getHolidayMap, getEmployeeBranchTypeMap } from "./holidayRoutes";
+import { getHolidayMapsByGroup, getEmployeeBranchTypeMap, type HolidayAppliesTo } from "./holidayRoutes";
 import { buildServiceBook, loadEmployeeWorld, loadSettings, snapshotOf, currentValues, toDate, num, monthsBetween } from "./HROperationsRoutes";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
@@ -305,6 +305,29 @@ export function coveredMonths(periods: { from: string | null; to: string | null 
   return merged.reduce((s, [a, b]) => s + Math.max(0, monthsBetween(a, dayAfter(b))), 0);
 }
 
+// The required-document list (HR Ops Settings -> required_documents, one
+// per line) and which of them an Employee has no upload for. A Document
+// Vault type matches when either name contains the other, ignoring case
+// and punctuation ("NID Card" covers "NID").
+export function requiredDocuments(settings: Record<string, string>): string[] {
+  return String(settings.required_documents || "")
+    .split(/\n|,/)
+    .map((x) => x.trim())
+    .filter(Boolean);
+}
+export function missingDocuments(required: string[], docTypes: string[]): string[] {
+  const norm = (x: string) => String(x || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  return required.filter((r) => !docTypes.some((t) => norm(t) && (norm(t).includes(norm(r)) || norm(r).includes(norm(t)))));
+}
+
+// Leave type key -> label ("casual" -> "Casual Leave", custom categories by
+// their own label).
+export async function leaveLabelFn(queryDB: QueryDB): Promise<(k: string) => string> {
+  const cats: any[] = await queryDB("SELECT * FROM leave_categories").catch(() => []);
+  const fixed: Record<string, string> = { casual: "Casual Leave", sick: "Sick Leave", without_pay: "Leave Without Pay" };
+  return (k: string) => fixed[k] || cats.find((c: any) => c.category_key === k)?.label || String(k || "").replace(/_/g, " ");
+}
+
 // ---------------------------------------------------------------------------
 // Attendance — the same sources Payroll reads (Remote check-ins, ZKTeco
 // punches, holiday calendar per Branch type, approved leave, late policy +
@@ -316,7 +339,7 @@ const ymd = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.ge
 const minutesOf = (d: Date) => d.getHours() * 60 + d.getMinutes();
 const hhmm = (d: Date | null) => (d ? `${pad(d.getHours())}:${pad(d.getMinutes())}` : null);
 
-async function rowsFor(queryDB: QueryDB, table: string, column: string, value: any): Promise<any[]> {
+export async function rowsFor(queryDB: QueryDB, table: string, column: string, value: any): Promise<any[]> {
   // Narrowed by one indexed column in MySQL; always re-filtered here since
   // the in-memory fallback DB may hand back the whole table.
   const rows: any[] = await queryDB(`SELECT * FROM ${table} WHERE ${column} = ?`, [value]).catch(() =>
@@ -325,7 +348,7 @@ async function rowsFor(queryDB: QueryDB, table: string, column: string, value: a
   return (rows || []).filter((r: any) => String(r[column]) === String(value));
 }
 
-interface AttendanceDay {
+export interface AttendanceDay {
   date: string;
   weekday: number;
   status: "present" | "absent" | "leave" | "holiday" | "weekend" | "future" | "not_joined" | "separated";
@@ -339,11 +362,70 @@ interface AttendanceDay {
   correction: string | null;
 }
 
-async function attendanceDays(queryDB: QueryDB, emp: any, from: string, to: string, today: string, leaveLabel: (k: string) => string) {
+// Every attendance input for a date range, indexed for per-employee lookup.
+// With `emp` it reads only that Employee's rows (Employee 360); without, the
+// whole company's rows for the range in one query per table (Employee
+// Reports, HrOpsReportsRoutes.ts).
+export interface AttendanceData {
+  branchTypes: Map<number, HolidayAppliesTo>;
+  holidays: Record<HolidayAppliesTo, Map<string, { day_type: string; title: string }>>;
+  remoteByUser: Map<number, any[]>;
+  punchesByPin: Map<string, any[]>;
+  leavesByUser: Map<number, any[]>;
+  correctionsByUser: Map<number, any[]>;
+  waiversByEmployee: Map<number, any[]>;
+  policies: any[];
+}
+
+const indexBy = <K>(rows: any[], key: (r: any) => K | null) => {
+  const m = new Map<K, any[]>();
+  for (const r of rows) {
+    const k = key(r);
+    if (k === null || k === undefined) continue;
+    if (!m.has(k)) m.set(k, []);
+    m.get(k)!.push(r);
+  }
+  return m;
+};
+
+async function rowsInRange(queryDB: QueryDB, table: string, column: string, from: string, to: string): Promise<any[]> {
+  return (await queryDB(`SELECT * FROM ${table} WHERE ${column} BETWEEN ? AND ?`, [from, to]).catch(() => queryDB(`SELECT * FROM ${table}`).catch(() => []))) || [];
+}
+
+export async function loadAttendanceData(queryDB: QueryDB, from: string, to: string, emp?: any): Promise<AttendanceData> {
+  const userId = emp?.user_id ? Number(emp.user_id) : null;
+  const [branchTypes, holidays, remote, punches, leaves, corrections, waivers, policies] = await Promise.all([
+    getEmployeeBranchTypeMap(queryDB),
+    getHolidayMapsByGroup(queryDB, from, to),
+    emp ? (userId ? rowsFor(queryDB, "attendance", "user_id", userId) : Promise.resolve([])) : rowsInRange(queryDB, "attendance", "attendance_date", from, to),
+    emp
+      ? emp.zk_device_pin
+        ? rowsFor(queryDB, "zk_attendance_logs", "device_user_pin", emp.zk_device_pin)
+        : Promise.resolve([])
+      : rowsInRange(queryDB, "zk_attendance_logs", "punch_time", `${from} 00:00:00`, `${to} 23:59:59`),
+    emp ? (userId ? rowsFor(queryDB, "leave_applications", "user_id", userId) : Promise.resolve([])) : queryDB("SELECT * FROM leave_applications").catch(() => []),
+    emp ? (userId ? rowsFor(queryDB, "attendance_corrections", "user_id", userId) : Promise.resolve([])) : rowsInRange(queryDB, "attendance_corrections", "attendance_date", from, to),
+    emp ? rowsFor(queryDB, "late_waivers", "employee_id", Number(emp.id)) : rowsInRange(queryDB, "late_waivers", "waiver_date", from, to),
+    queryDB("SELECT * FROM late_policy_settings").catch(() => [])
+  ]);
+  return {
+    branchTypes,
+    holidays: holidays as AttendanceData["holidays"],
+    remoteByUser: indexBy<number>(remote, (r) => (r.user_id != null ? Number(r.user_id) : null)),
+    punchesByPin: indexBy<string>(punches, (r) => (r.device_user_pin != null ? String(r.device_user_pin) : null)),
+    leavesByUser: indexBy<number>(leaves, (r) => (r.user_id != null ? Number(r.user_id) : null)),
+    correctionsByUser: indexBy<number>(corrections, (r) => (r.user_id != null ? Number(r.user_id) : null)),
+    waiversByEmployee: indexBy<number>(waivers, (r) => (r.employee_id != null ? Number(r.employee_id) : null)),
+    policies
+  };
+}
+
+// One Employee's days in [from, to] — present / absent / leave / holiday…,
+// first-in / last-out and late marks (Payroll's late policy and waivers).
+export function computeAttendanceDays(data: AttendanceData, emp: any, from: string, to: string, today: string, leaveLabel: (k: string) => string): AttendanceDay[] {
   const userId = emp.user_id ? Number(emp.user_id) : null;
-  const branchTypes = await getEmployeeBranchTypeMap(queryDB);
-  const group = (userId && branchTypes.get(userId)) || "head_office";
-  const holidays = await getHolidayMap(queryDB, from, to, group);
+  const group: HolidayAppliesTo = (userId && data.branchTypes.get(userId)) || "head_office";
+  const holidays = data.holidays[group];
   const joining = toDate(emp.joining_date);
   const lastDay = Number(emp.is_active ?? 1) === 0 ? toDate(emp.job_status_effective_date) || toDate(emp.status_effective_date) : null;
 
@@ -363,14 +445,12 @@ async function attendanceDays(queryDB: QueryDB, emp: any, from: string, to: stri
     if (!cur || t > cur) lastOut.set(d, t);
   };
 
-  const [remote, punches, leaves, corrections, waivers, policies] = await Promise.all([
-    userId ? rowsFor(queryDB, "attendance", "user_id", userId) : Promise.resolve([]),
-    emp.zk_device_pin ? rowsFor(queryDB, "zk_attendance_logs", "device_user_pin", emp.zk_device_pin) : Promise.resolve([]),
-    userId ? rowsFor(queryDB, "leave_applications", "user_id", userId) : Promise.resolve([]),
-    userId ? rowsFor(queryDB, "attendance_corrections", "user_id", userId) : Promise.resolve([]),
-    rowsFor(queryDB, "late_waivers", "employee_id", Number(emp.id)),
-    queryDB("SELECT * FROM late_policy_settings").catch(() => [])
-  ]);
+  const remote = userId ? data.remoteByUser.get(userId) || [] : [];
+  const punches = emp.zk_device_pin ? data.punchesByPin.get(String(emp.zk_device_pin)) || [] : [];
+  const leaves = userId ? data.leavesByUser.get(userId) || [] : [];
+  const corrections = userId ? data.correctionsByUser.get(userId) || [] : [];
+  const waivers = data.waiversByEmployee.get(Number(emp.id)) || [];
+  const policies = data.policies;
   for (const r of remote) {
     const d = toDate(r.attendance_date);
     if (!d || d < from || d > to || !r.check_in_at) continue;
@@ -449,7 +529,7 @@ async function attendanceDays(queryDB: QueryDB, emp: any, from: string, to: stri
   return days;
 }
 
-function summarizeDays(days: AttendanceDay[]) {
+export function summarizeDays(days: AttendanceDay[]) {
   const count = (s: string) => days.filter((d) => d.status === s).length;
   const present = count("present");
   const absent = count("absent");
@@ -499,11 +579,7 @@ export function registerEmployee360Routes(app: Express, deps: Employee360RouteDe
     const byId = new Map<number, string>(users.map((u: any) => [Number(u.id), u.name]));
     return (id: any) => (id ? byId.get(Number(id)) || null : null);
   }
-  async function leaveLabeler() {
-    const cats: any[] = await queryDB("SELECT * FROM leave_categories").catch(() => []);
-    const fixed: Record<string, string> = { casual: "Casual Leave", sick: "Sick Leave", without_pay: "Leave Without Pay" };
-    return (k: string) => fixed[k] || cats.find((c: any) => c.category_key === k)?.label || String(k || "").replace(/_/g, " ");
-  }
+  const leaveLabeler = () => leaveLabelFn(queryDB);
 
   // ---- section builders ----
   async function recordsSection(empId: number) {
@@ -542,12 +618,8 @@ export function registerEmployee360Routes(app: Express, deps: Employee360RouteDe
         uploaded_by_name: userName(d.uploaded_by)
       }))
       .sort((a: any, b: any) => b.id - a.id);
-    const required = String(settings.required_documents || "")
-      .split(/\n|,/)
-      .map((s) => s.trim())
-      .filter(Boolean);
-    const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
-    const missing = required.filter((r) => !list.some((d: any) => norm(d.doc_type).includes(norm(r)) || norm(r).includes(norm(d.doc_type))));
+    const required = requiredDocuments(settings);
+    const missing = missingDocuments(required, list.map((d: any) => d.doc_type));
     return { documents: list, required, missing, linked: !!emp.user_id };
   }
 
@@ -555,7 +627,7 @@ export function registerEmployee360Routes(app: Express, deps: Employee360RouteDe
     const [y, m] = month.split("-").map(Number);
     const from = `${month}-01`;
     const to = `${month}-${pad(new Date(y, m, 0).getDate())}`;
-    const days = await attendanceDays(queryDB, emp, from, to, todayInDhaka(), await leaveLabeler());
+    const days = computeAttendanceDays(await loadAttendanceData(queryDB, from, to, emp), emp, from, to, todayInDhaka(), await leaveLabeler());
     return { month, days, summary: summarizeDays(days), linked: !!emp.user_id || !!emp.zk_device_pin };
   }
 
@@ -563,7 +635,7 @@ export function registerEmployee360Routes(app: Express, deps: Employee360RouteDe
     const today = todayInDhaka();
     const to = `${year}-12-31` < today ? `${year}-12-31` : today;
     if (`${year}-01-01` > today) return { year, months: [] };
-    const days = await attendanceDays(queryDB, emp, `${year}-01-01`, to, today, await leaveLabeler());
+    const days = computeAttendanceDays(await loadAttendanceData(queryDB, `${year}-01-01`, to, emp), emp, `${year}-01-01`, to, today, await leaveLabeler());
     const months = [];
     for (let mo = 1; mo <= 12; mo++) {
       const key = `${year}-${pad(mo)}`;

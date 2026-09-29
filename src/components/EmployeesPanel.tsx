@@ -8,7 +8,7 @@ import { Employee, EmployeeSupervisor, EmployeePaymentAccount, EmployeeTransfer,
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
 import { EmployeeChangeHistory, HistoryEntryCard, buildHistoryTimeline, HISTORY_FILTERS, HistoryFilter } from './EmployeeChangeHistory';
-import { RecordFields } from './HrOps360Parts';
+import { RecordFields, useNameSuggestions, refreshNameSuggestions } from './HrOps360Parts';
 
 // Add/Edit Employee modal tabs — Basic + Employee Info fields live under
 // "info", the rest mirror the reference HR system's own tab split (Status /
@@ -275,6 +275,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
   // Employee's already-saved ones are listed (read-only) above them.
   const [careerDrafts, setCareerDrafts] = useState<{ kind: 'experience' | 'education'; data: Record<string, any> }[]>([]);
   const [savedCareer, setSavedCareer] = useState<{ experience: any[]; education: any[] } | null>(null);
+  const nameSuggestions = useNameSuggestions(token);
 
   // Supervisor tab — loaded on demand for the employee currently being
   // edited (a brand-new, not-yet-saved employee has no id yet, so the tab
@@ -820,6 +821,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
           body: JSON.stringify({ items })
         });
         const cd = await cr.json().catch(() => ({}));
+        refreshNameSuggestions();
         careerNote = !cr.ok ? ` Experience/education not saved: ${cd.error || 'failed'}.` : cd.errors?.length ? ` Some experience/education rows were not saved: ${cd.errors.join('; ')}.` : ` ${cd.created} experience/education record(s) added.`;
       }
 
@@ -1685,7 +1687,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </div>
-                      <RecordFields kind={d.kind} form={d.data} onChange={(data) => setCareerDrafts((ds) => ds.map((x, j) => (j === i ? { ...x, data } : x)))} />
+                      <RecordFields kind={d.kind} form={d.data} suggestions={nameSuggestions} onChange={(data) => setCareerDrafts((ds) => ds.map((x, j) => (j === i ? { ...x, data } : x)))} />
                     </div>
                   ))}
                   <div className="flex flex-wrap gap-2">

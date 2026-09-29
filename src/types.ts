@@ -1416,7 +1416,8 @@ export type AlertType =
   // FYI to HR (new resignation, all clearances done).
   | 'exit_offboarding'
   | 'hr_action'
-  | 'hr_letter';
+  | 'hr_letter'
+  | 'hr_report';
 
 export interface Alert {
   id: number;
