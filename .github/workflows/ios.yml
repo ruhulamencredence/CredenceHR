@@ -1,0 +1,175 @@
+# iPhone app build on GitHub's cloud Mac (no Mac needed locally).
+#
+# Job "simulator" (always): builds the iOS app for the iPhone Simulator
+# without code signing, installs it on a simulator, opens it and takes a
+# screenshot. Download "CredenceHR-simulator" from the run's Artifacts to see
+# the screenshot / the .app. This proves the project compiles and launches;
+# it can't be installed on a real iPhone (that needs Apple signing).
+#
+# Job "testflight" (once an Apple Developer account exists): archives a
+# signed Release build and uploads it to App Store Connect / TestFlight.
+# Turn it on by adding these repository secrets:
+#   APPLE_TEAM_ID                  - 10-character Team ID (developer.apple.com -> Membership)
+#   APP_STORE_CONNECT_KEY_ID       - App Store Connect API key ID (Users and Access -> Integrations)
+#   APP_STORE_CONNECT_ISSUER_ID    - that page's Issuer ID
+#   APP_STORE_CONNECT_KEY_P8       - contents of the downloaded AuthKey_XXXX.p8 file
+# and the repository variable IOS_SIGNING_READY = true. Before the first
+# upload, create the app in App Store Connect with bundle ID com.credencehr.app.
+#
+# The app loads its screens from the server (capacitor.config.ts), so the
+# build only needs rebuilding for native changes — not for every web change.
+
+name: iOS build
+
+on:
+  workflow_dispatch:
+    inputs:
+      server_url:
+        description: "Server the app opens (scheme, no trailing slash)"
+        required: false
+        default: "http://203.95.222.58:3000"
+  push:
+    branches: [main, claude/nice-fermi-0tale9]
+    paths:
+      - "ios/**"
+      - "capacitor.config.ts"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/ios.yml"
+
+env:
+  CAP_SERVER_URL: ${{ github.event.inputs.server_url || 'http://203.95.222.58:3000' }}
+
+jobs:
+  simulator:
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build web assets and sync the iOS project
+        run: |
+          npx vite build
+          npx cap sync ios
+
+      - name: Build for the iPhone Simulator (unsigned)
+        run: |
+          xcodebuild \
+            -workspace ios/App/App.xcworkspace \
+            -scheme App \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            build | tail -n 40
+          test -d build/Build/Products/Debug-iphonesimulator/App.app
+
+      - name: Launch on a simulator and take a screenshot
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c "
+          import json, sys
+          d = json.load(sys.stdin)['devices']
+          runtimes = sorted((k for k in d if 'iOS' in k), reverse=True)
+          print(next(x['udid'] for k in runtimes for x in d[k] if x['name'].startswith('iPhone')))
+          ")
+          echo "Simulator $UDID"
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl install "$UDID" build/Build/Products/Debug-iphonesimulator/App.app
+          xcrun simctl launch "$UDID" com.credencehr.app
+          sleep 30
+          mkdir -p out
+          xcrun simctl io "$UDID" screenshot out/launch.png
+          (cd build/Build/Products/Debug-iphonesimulator && zip -qr ../../../../out/CredenceHR-simulator-app.zip App.app)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CredenceHR-simulator
+          path: out/
+          retention-days: 14
+
+  testflight:
+    if: vars.IOS_SIGNING_READY == 'true'
+    needs: simulator
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build web assets and sync the iOS project
+        run: |
+          npx vite build
+          npx cap sync ios
+
+      - name: App Store Connect API key
+        env:
+          KEY_P8: ${{ secrets.APP_STORE_CONNECT_KEY_P8 }}
+          KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+        run: |
+          mkdir -p ~/private_keys
+          printf '%s' "$KEY_P8" > ~/private_keys/AuthKey_${KEY_ID}.p8
+
+      - name: Archive (signed, Release)
+        env:
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: |
+          xcodebuild \
+            -workspace ios/App/App.xcworkspace \
+            -scheme App \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/App.xcarchive \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/private_keys/AuthKey_${KEY_ID}.p8 \
+            -authenticationKeyID "$KEY_ID" \
+            -authenticationKeyIssuerID "$ISSUER_ID" \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
+            CODE_SIGN_STYLE=Automatic \
+            CURRENT_PROJECT_VERSION=${{ github.run_number }} \
+            archive | tail -n 40
+
+      - name: Upload to App Store Connect (TestFlight)
+        env:
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: |
+          cat > ExportOptions.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>app-store</string>
+            <key>destination</key><string>upload</string>
+            <key>teamID</key><string>${TEAM_ID}</string>
+            <key>signingStyle</key><string>automatic</string>
+          </dict>
+          </plist>
+          EOF
+          xcodebuild -exportArchive \
+            -archivePath build/App.xcarchive \
+            -exportOptionsPlist ExportOptions.plist \
+            -exportPath build/export \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/private_keys/AuthKey_${KEY_ID}.p8 \
+            -authenticationKeyID "$KEY_ID" \
+            -authenticationKeyIssuerID "$ISSUER_ID"

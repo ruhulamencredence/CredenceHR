@@ -188,6 +188,9 @@ async function switchMode(next: 'active' | 'idle') {
 // build or if tracking is already running for this token.
 export async function startBackgroundTracking(token: string): Promise<void> {
   if (!Capacitor.isNativePlatform()) return;
+  // Android only — the iPhone app is built without the background-location
+  // plugin (capacitor.config.ts -> ios.includePlugins).
+  if (Capacitor.getPlatform() === 'ios') return;
   if (watcherId && currentToken === token) return; // already running for this account
   if (watcherId) await stopBackgroundTracking();
 

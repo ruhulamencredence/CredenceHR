@@ -27,7 +27,9 @@ const REAL_SERVER_URL = 'http://203.95.222.58:3000';
 // rebuild + re-sync as noted above.
 const USE_REAL_SERVER = false;
 
-const ACTIVE_SERVER_URL = USE_REAL_SERVER ? REAL_SERVER_URL : LOCAL_SERVER_URL;
+// CAP_SERVER_URL (set by the cloud iPhone build, .github/workflows/ios.yml)
+// overrides both, so a build can point at any server without editing this file.
+const ACTIVE_SERVER_URL = process.env.CAP_SERVER_URL || (USE_REAL_SERVER ? REAL_SERVER_URL : LOCAL_SERVER_URL);
 
 const config = {
   appId: 'com.credencehr.app',
@@ -57,6 +59,24 @@ const config = {
   // https://github.com/capacitor-community/background-geolocation/issues/89.
   android: {
     useLegacyBridge: true
+  },
+  // iPhone build (ios/, built on a cloud Mac — see .github/workflows/ios.yml).
+  // Employee Tracking is Android-only: iOS reviews "Always" background
+  // location strictly, so the background-geolocation plugin is left out of
+  // the iOS app entirely (src/lib/backgroundTracking.ts also skips iOS).
+  // Every other native plugin is listed here — add new ones to this list too.
+  ios: {
+    contentInset: 'never',
+    includePlugins: [
+      '@capacitor/app',
+      '@capacitor/filesystem',
+      '@capacitor/geolocation',
+      '@capacitor/keyboard',
+      '@capacitor/push-notifications',
+      '@capacitor/share',
+      '@capacitor/status-bar',
+      'capacitor-voice-recorder'
+    ]
   },
   plugins: {
     // Tells Android to shrink the WebView's own viewport when the on-screen

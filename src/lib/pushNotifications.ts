@@ -35,6 +35,12 @@ let registeredToken: string | null = null;
 // PushNotificationService.ts's setup steps) and the app rebuilt — flipping
 // it on before then will crash the APK on first launch.
 const PUSH_NOTIFICATIONS_ENABLED = true;
+// iPhone: off until Firebase is set up for iOS (GoogleService-Info.plist in
+// ios/App/App, an APNs key uploaded to Firebase, and the Firebase Messaging
+// SDK so register() hands back an FCM token — out of the box the plugin
+// returns a raw APNs token, which PushNotificationService.ts's FCM sender
+// can't use). Needs an Apple Developer account first.
+const IOS_PUSH_ENABLED = false;
 
 export interface PushTapHandlers {
   // Fires when a Chat push notification is tapped — passes the roomId to
@@ -49,6 +55,7 @@ export interface PushTapHandlers {
 // Call once right after login (mirrors connectChatSocket/startBackgroundTracking).
 export async function initPushNotifications(token: string, handlers: PushTapHandlers): Promise<void> {
   if (!PUSH_NOTIFICATIONS_ENABLED || !Capacitor.isNativePlatform()) return;
+  if (Capacitor.getPlatform() === 'ios' && !IOS_PUSH_ENABLED) return;
   try {
     const { PushNotifications } = await import('@capacitor/push-notifications');
 
@@ -67,7 +74,7 @@ export async function initPushNotifications(token: string, handlers: PushTapHand
       fetch(apiUrl('/api/chat/push-token'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ token: result.value, platform: 'android' })
+        body: JSON.stringify({ token: result.value, platform: Capacitor.getPlatform() })
       }).catch(() => {
         // Offline right at registration — the next app open/token refresh retries.
       });
