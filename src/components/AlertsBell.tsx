@@ -170,6 +170,30 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
         ? /Awaiting Your Approval/.test(alert.title)
           ? onOpenApproveApplications
           : onOpenHrOperations || (() => window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'hr_operations' })))
+        : alert.type === 'hr_request'
+        ? /^Submitted for review/.test(alert.title)
+          ? () => {
+              // HR: Employee Reports -> Requests.
+              try {
+                sessionStorage.setItem('hr_ops_tab', 'reports');
+                sessionStorage.setItem('hr_reports_view', 'requests');
+              } catch {
+                // storage unavailable
+              }
+              (onOpenHrOperations || (() => window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'hr_operations' }))))();
+              setTimeout(() => window.dispatchEvent(new CustomEvent('credence:hr-ops-tab', { detail: 'reports' })), 0);
+            }
+          : onOpenMyLetters
+          ? () => {
+              // Employee: My Letters & Service Record -> Pending Items.
+              try {
+                sessionStorage.setItem('my_letters_tab', 'pending');
+              } catch {
+                // storage unavailable
+              }
+              onOpenMyLetters();
+            }
+          : undefined
         : alert.type === 'hr_report'
         ? () => {
             // HR Operations -> Employee Reports -> Received.

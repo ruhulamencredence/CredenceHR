@@ -7,18 +7,21 @@
 // to this account's Employee record (view / download the PDF, and
 // "Acknowledge" the ones that ask for it), requests for a Salary Certificate
 // / Experience Certificate / NOC / Bank Account letter, and the Employee's
-// own service record timeline. Backed by HROperationsRoutes.ts's
-// /api/hr-ops/my/* routes; works the same in the mobile app.
+// own service record timeline, and Pending Items — documents / nominee /
+// emergency contact HR has asked for (MyInfoRequests.tsx). Backed by
+// HROperationsRoutes.ts's /api/hr-ops/my/* routes; works the same in the
+// mobile app.
 
 import React, { useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
-import { ArrowLeft, FileText, CheckCircle2, Clock, Download, Eye, Send, BookOpen, Inbox } from 'lucide-react';
+import { ArrowLeft, FileText, CheckCircle2, Clock, Download, Eye, Send, BookOpen, Inbox, ClipboardList } from 'lucide-react';
 import { Spinner } from './Spinner';
 import { ModulePath } from './ModulePath';
 import { PdfPreviewModal } from './PdfPreviewModal';
 import { letterFileName } from '../lib/hrLetterPdf';
 import { useHrApi, Badge, fmtDate, letterPdfBytes, saveLetterPdf, inputCls, labelCls, btnPrimary, btnGhost, Notice } from './HrOpsShared';
 import { ServiceTimeline, serviceLength, type ServiceBookData } from './HrOpsServiceBook';
+import { MyInfoRequests, useMyOpenRequests } from './MyInfoRequests';
 
 interface MyLetter {
   id: number;
@@ -42,7 +45,20 @@ interface MyData {
 export const MyLetters: React.FC<{ token: string; onBack?: () => void }> = ({ token, onBack }) => {
   const isNativeApp = Capacitor.isNativePlatform();
   const api = useHrApi(token);
-  const [tab, setTab] = useState<'letters' | 'record'>('letters');
+  // An alert about a request opens straight on Pending Items.
+  const [tab, setTab] = useState<'letters' | 'pending' | 'record'>(() => {
+    try {
+      const t = sessionStorage.getItem('my_letters_tab');
+      if (t) sessionStorage.removeItem('my_letters_tab');
+      if (t === 'pending' || t === 'record') return t;
+    } catch {
+      // storage unavailable
+    }
+    return 'letters';
+  });
+  const initialOpen = useMyOpenRequests(token);
+  const [openCount, setOpenCount] = useState<number | null>(null);
+  const pendingCount = openCount ?? initialOpen;
   const [data, setData] = useState<MyData | null>(null);
   const [book, setBook] = useState<ServiceBookData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -122,6 +138,10 @@ export const MyLetters: React.FC<{ token: string; onBack?: () => void }> = ({ to
             <FileText className="w-3.5 h-3.5" /> Letters
             {pendingAck.length > 0 && <span className={`text-[10px] rounded-full px-1.5 ${tab === 'letters' ? 'bg-white/25' : 'bg-amber-500 text-white'}`}>{pendingAck.length}</span>}
           </button>
+          <button type="button" onClick={() => setTab('pending')} className={`text-xs font-semibold px-3.5 py-2 rounded-lg flex items-center gap-1.5 ${tab === 'pending' ? 'bg-blue-600 text-white' : 'text-slate-600'}`}>
+            <ClipboardList className="w-3.5 h-3.5" /> Pending Items
+            {pendingCount > 0 && <span className={`text-[10px] rounded-full px-1.5 ${tab === 'pending' ? 'bg-white/25' : 'bg-rose-500 text-white'}`}>{pendingCount}</span>}
+          </button>
           <button type="button" onClick={() => setTab('record')} className={`text-xs font-semibold px-3.5 py-2 rounded-lg flex items-center gap-1.5 ${tab === 'record' ? 'bg-blue-600 text-white' : 'text-slate-600'}`}>
             <BookOpen className="w-3.5 h-3.5" /> Service Record
           </button>
@@ -134,6 +154,8 @@ export const MyLetters: React.FC<{ token: string; onBack?: () => void }> = ({ to
             </div>
           ) : !data?.employee ? (
             <div className="rounded-2xl bg-white border border-slate-200 p-8 text-center text-sm text-slate-500">Your login isn't linked to an Employee record yet — please contact HR.</div>
+          ) : tab === 'pending' ? (
+            <MyInfoRequests token={token} onCountChange={setOpenCount} />
           ) : tab === 'letters' ? (
             <>
               <div className="rounded-2xl bg-white border border-slate-200 divide-y divide-slate-100">

@@ -296,9 +296,11 @@ export const RecordModal: React.FC<{
   employeeId: number;
   kind: RecordKind;
   record: Record<string, any> | null;
+  // Pre-filled values for a new record (e.g. "Nominee" ticked).
+  initial?: Record<string, any>;
   onClose: () => void;
   onSaved: () => void;
-}> = ({ token, employeeId, kind, record, onClose, onSaved }) => {
+}> = ({ token, employeeId, kind, record, initial, onClose, onSaved }) => {
   const api = useHrApi(token);
   const cfg = RECORD_FIELDS[kind];
   const suggestions = useNameSuggestions(token);
@@ -306,6 +308,7 @@ export const RecordModal: React.FC<{
     const init: Record<string, any> = {};
     for (const f of cfg.fields) init[f.key] = record ? (record[f.key] ?? (f.type === 'check' ? false : '')) : f.type === 'check' ? false : '';
     if (!record && kind === 'training') init.training_type = 'internal';
+    if (!record && initial) Object.assign(init, initial);
     return init;
   });
   const [file, setFile] = useState<File | null>(null);
