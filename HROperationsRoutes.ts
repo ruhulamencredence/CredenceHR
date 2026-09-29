@@ -112,7 +112,10 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   ref_format: "{CODE}/HR/{TYPE}/{YYYY}/{SEQ}",
   signatory_name: "Head of HR",
   signatory_designation: "Human Resources Department",
-  default_probation_months: "6"
+  default_probation_months: "6",
+  // Employee 360 -> Documents: the document types every Employee should have
+  // on file (one per line); anything not uploaded is listed as missing.
+  required_documents: "NID\nPhotograph\nCV / Resume\nEducational Certificate\nAppointment Letter (signed)"
 };
 
 const DEFAULT_ONBOARDING_TASKS: { task_key: string; label: string; category: string; due_days: number }[] = [
@@ -561,7 +564,7 @@ export function seedHROperationsMemory(templates: any[], tasks: any[]) {
 // Small helpers
 // ---------------------------------------------------------------------------
 
-const toDate = (v: any): string | null => {
+export const toDate = (v: any): string | null => {
   if (!v) return null;
   if (v instanceof Date) {
     const y = v.getFullYear();
@@ -572,7 +575,7 @@ const toDate = (v: any): string | null => {
   const s = String(v);
   return /^\d{4}-\d{2}-\d{2}/.test(s) ? s.slice(0, 10) : null;
 };
-const parseJson = (v: any, fallback: any) => {
+export const parseJson = (v: any, fallback: any) => {
   if (v == null || v === "") return fallback;
   if (typeof v === "object") return v;
   try {
@@ -581,7 +584,7 @@ const parseJson = (v: any, fallback: any) => {
     return fallback;
   }
 };
-const num = (v: any): number | null => (v === null || v === undefined || v === "" || !Number.isFinite(Number(v)) ? null : Number(v));
+export const num = (v: any): number | null => (v === null || v === undefined || v === "" || !Number.isFinite(Number(v)) ? null : Number(v));
 const money = (v: any): string => {
   const n = num(v);
   return n === null ? "—" : n.toLocaleString("en-IN", { maximumFractionDigits: 2 });
@@ -603,7 +606,7 @@ const addDays = (d: string, days: number): string => {
   const [y, m, day] = d.split("-").map(Number);
   return new Date(Date.UTC(y, m - 1, day + days)).toISOString().slice(0, 10);
 };
-const monthsBetween = (from: string, to: string): number => {
+export const monthsBetween = (from: string, to: string): number => {
   const [y1, m1, d1] = from.split("-").map(Number);
   const [y2, m2, d2] = to.split("-").map(Number);
   return (y2 - y1) * 12 + (m2 - m1) - (d2 < d1 ? 1 : 0);
@@ -644,7 +647,7 @@ export function takaInWords(value: any): string {
 // Shared data loaders
 // ---------------------------------------------------------------------------
 
-async function loadSettings(queryDB: QueryDB): Promise<Record<string, string>> {
+export async function loadSettings(queryDB: QueryDB): Promise<Record<string, string>> {
   const rows: any[] = await queryDB("SELECT * FROM hr_ops_settings").catch(() => []);
   const out: Record<string, string> = { ...DEFAULT_SETTINGS };
   for (const r of rows) out[r.setting_key] = r.setting_value ?? "";
@@ -659,7 +662,7 @@ interface EmployeeSnapshot {
   project: { id: number; name: string } | null;
 }
 
-async function loadEmployeeWorld(queryDB: QueryDB) {
+export async function loadEmployeeWorld(queryDB: QueryDB) {
   const [employees, services, salaries, supervisors, users, projects, departments, branches] = await Promise.all([
     queryDB("SELECT * FROM all_employees"),
     queryDB("SELECT * FROM hr_employee_service").catch(() => []),
@@ -681,7 +684,7 @@ function latestSalary(world: World, employeeId: number, asOf?: string): any | nu
   return rows[0] || null;
 }
 
-function snapshotOf(world: World, employeeId: number, asOf?: string): EmployeeSnapshot | null {
+export function snapshotOf(world: World, employeeId: number, asOf?: string): EmployeeSnapshot | null {
   const employee = world.employees.find((e: any) => Number(e.id) === employeeId);
   if (!employee) return null;
   const service = world.services.find((s: any) => Number(s.employee_id) === employeeId) || null;
@@ -701,7 +704,7 @@ function snapshotOf(world: World, employeeId: number, asOf?: string): EmployeeSn
 }
 
 // The Employee's current values in the same shape an action's from/to use.
-function currentValues(snap: EmployeeSnapshot) {
+export function currentValues(snap: EmployeeSnapshot) {
   const e = snap.employee;
   return {
     designation: e.designation || null,
@@ -1156,6 +1159,147 @@ export const PLACEHOLDER_HELP: { key: string; label: string }[] = [
 // ---------------------------------------------------------------------------
 // Routes
 // ---------------------------------------------------------------------------
+
+// One Employee's Service Book timeline (joining, actions, transfers, salary
+// revisions, letters, disciplinary, exit) — shared by the HR Operations
+// routes below and Employee 360 (HrOps360Routes.ts).
+export async function buildServiceBook(queryDB: QueryDB, today: string, employeeId: number, forEmployee: boolean) {
+  await applyDueEmployeeTransfers(queryDB, today);
+  await applyDueHrActions(queryDB, today);
+  const world = await loadEmployeeWorld(queryDB);
+  const snap = snapshotOf(world, employeeId);
+  if (!snap) throw Object.assign(new Error("Employee not found."), { statusCode: 404 });
+  const e = snap.employee;
+  const [transfers, actions, letters, disciplinary, exits, users] = await Promise.all([
+    queryDB("SELECT * FROM employee_transfers").catch(() => []),
+    queryDB("SELECT * FROM hr_actions"),
+    queryDB("SELECT * FROM hr_letters"),
+    queryDB("SELECT * FROM disciplinary_actions").catch(() => []),
+    queryDB("SELECT * FROM exit_requests").catch(() => []),
+    queryDB("SELECT * FROM users")
+  ]);
+  const userName = (id: any) => users.find((u: any) => Number(u.id) === Number(id))?.name || null;
+  const events: any[] = [];
+  const joining = toDate(e.joining_date) || toDate(e.created_at);
+  if (joining) {
+    // The position they joined in — the FROM side of their earliest
+    // recorded change, or today's values when nothing has changed yet.
+    const firstChange = [
+      ...transfers.filter((t: any) => Number(t.employee_id) === employeeId).map((t: any) => ({ d: toDate(t.effective_date) || "", id: Number(t.id), desig: t.from_designation, dept: t.from_department_name })),
+      ...actions
+        .filter((a: any) => Number(a.employee_id) === employeeId && a.status === "approved")
+        .map((a: any) => {
+          const f = parseJson(a.from_json, {});
+          return { d: toDate(a.effective_date) || "", id: Number(a.id), desig: f.designation, dept: f.department };
+        })
+    ].sort((x, y) => x.d.localeCompare(y.d) || x.id - y.id)[0];
+    const desig = firstChange ? firstChange.desig : e.designation;
+    const dept = firstChange ? firstChange.dept : e.department;
+    events.push({ date: joining, kind: "joining", title: "Joined", detail: [desig, dept].filter(Boolean).join(", ") || null });
+  }
+  const myActions = actions.filter((a: any) => Number(a.employee_id) === employeeId && a.status !== "cancelled" && (!forEmployee || a.status === "approved"));
+  const linkedTransferIds = new Set(myActions.map((a: any) => Number(a.transfer_id)).filter(Boolean));
+  const linkedSalaryIds = new Set(myActions.map((a: any) => Number(a.salary_structure_id)).filter(Boolean));
+  for (const a of myActions) {
+    events.push({
+      date: toDate(a.effective_date),
+      kind: a.action_type,
+      title: ACTION_LABEL.get(a.action_type) || a.action_type,
+      detail: describeChange(a).replace(/^[^:]*:?\s?/, "").replace(/ \(eff\. .*\)$/, "") || null,
+      status: a.status,
+      applied: !!Number(a.applied),
+      reason: a.reason || null,
+      approved_by: parseJson(a.history_json, []).filter((h: any) => h.action === "approved").map((h: any) => h.by_name),
+      action_id: Number(a.id)
+    });
+  }
+  for (const t of transfers.filter((t: any) => Number(t.employee_id) === employeeId && !linkedTransferIds.has(Number(t.id)))) {
+    const parts: string[] = [];
+    if ((t.from_department_name || "") !== (t.to_department_name || "")) parts.push(`${t.from_department_name || "—"} → ${t.to_department_name || "—"}`);
+    if ((t.from_designation || "") !== (t.to_designation || "")) parts.push(`${t.from_designation || "—"} → ${t.to_designation || "—"}`);
+    if (t.to_supervisor_id) parts.push(`Supervisor: ${world.employees.find((x: any) => Number(x.id) === Number(t.to_supervisor_id))?.name || "—"}`);
+    if (parts.length === 0) continue;
+    events.push({
+      date: toDate(t.effective_date),
+      kind: (t.from_department_name || "") !== (t.to_department_name || "") ? "transfer" : "designation_change",
+      title: (t.from_department_name || "") !== (t.to_department_name || "") ? "Transfer" : "Designation Change",
+      detail: parts.join(", "),
+      reason: t.reason || null,
+      applied: !!Number(t.applied ?? 1)
+    });
+  }
+  const mySalaries = world.salaries
+    .filter((s: any) => Number(s.employee_id) === employeeId)
+    .sort((a: any, b: any) => (toDate(a.effective_date) || "").localeCompare(toDate(b.effective_date) || "") || Number(a.id) - Number(b.id));
+  mySalaries.forEach((s: any, i: number) => {
+    if (linkedSalaryIds.has(Number(s.id))) return;
+    const prev = mySalaries[i - 1];
+    events.push({
+      date: toDate(s.effective_date),
+      kind: "salary",
+      title: prev ? "Salary Revision" : "Salary Fixed",
+      detail: prev ? `Gross ${money(prev.gross_salary)} → ${money(s.gross_salary)}` : `Gross ${money(s.gross_salary)}`
+    });
+  });
+  if (!forEmployee || true) {
+    for (const l of letters.filter((l: any) => Number(l.employee_id) === employeeId && l.status !== "cancelled")) {
+      events.push({
+        date: toDate(l.letter_date),
+        kind: "letter",
+        title: LETTER_LABEL.get(l.letter_type) || "Letter",
+        detail: `${l.ref_no} — ${l.subject}`,
+        letter_id: Number(l.id),
+        acknowledged: !!l.acknowledged_at
+      });
+    }
+  }
+  if (e.user_id) {
+    for (const d of disciplinary.filter((d: any) => Number(d.user_id) === Number(e.user_id))) {
+      events.push({
+        date: toDate(d.issued_at),
+        kind: "disciplinary",
+        title: "Disciplinary: " + String(d.action_type || "").replace(/_/g, " "),
+        detail: d.reason || null,
+        by: userName(d.issued_by)
+      });
+    }
+    for (const x of exits.filter((x: any) => Number(x.user_id) === Number(e.user_id) && x.status !== "cancelled")) {
+      events.push({
+        date: toDate(x.notice_date) || toDate(x.created_at),
+        kind: "exit",
+        title: x.exit_type === "termination" ? "Termination Initiated" : "Resignation Submitted",
+        detail: x.last_working_day ? `Last working day ${toDate(x.last_working_day)}` : null,
+        reason: x.reason || null
+      });
+    }
+  }
+  if (snap.service?.confirmation_date && !myActions.some((a: any) => a.action_type === "confirmation")) {
+    events.push({ date: toDate(snap.service.confirmation_date), kind: "confirmation", title: "Confirmation", detail: "Service confirmed" });
+  }
+  events.sort((a, b) => (a.date || "").localeCompare(b.date || ""));
+  const cur = currentValues(snap);
+  return {
+    employee: {
+      id: Number(e.id),
+      name: e.name,
+      employee_code: e.employee_id || null,
+      designation: e.designation,
+      department: e.department,
+      branch: e.branch,
+      grade: cur.grade,
+      supervisor: cur.supervisor,
+      project: snap.project?.name || null,
+      joining_date: joining,
+      job_base: e.job_base || null,
+      is_active: Number(e.is_active ?? 1) !== 0,
+      gross_salary: forEmployee ? cur.gross_salary : cur.gross_salary,
+      probation_end_date: toDate(snap.service?.probation_end_date),
+      confirmation_date: toDate(snap.service?.confirmation_date),
+      service_length_months: joining ? monthsBetween(joining, today) : null
+    },
+    events
+  };
+}
 
 export function registerHROperationsRoutes(app: Express, deps: HROperationsRouteDeps) {
   const { authenticateToken, requireModule, queryDB, getAdminModules, todayInDhaka, createAlert } = deps;
@@ -1615,142 +1759,7 @@ export function registerHROperationsRoutes(app: Express, deps: HROperationsRoute
   });
 
   // ---------------- service book ----------------
-  async function serviceBook(employeeId: number, forEmployee: boolean) {
-    await sweep();
-    const world = await loadEmployeeWorld(queryDB);
-    const snap = snapshotOf(world, employeeId);
-    if (!snap) throw bad("Employee not found.", 404);
-    const e = snap.employee;
-    const [transfers, actions, letters, disciplinary, exits, users] = await Promise.all([
-      queryDB("SELECT * FROM employee_transfers").catch(() => []),
-      queryDB("SELECT * FROM hr_actions"),
-      queryDB("SELECT * FROM hr_letters"),
-      queryDB("SELECT * FROM disciplinary_actions").catch(() => []),
-      queryDB("SELECT * FROM exit_requests").catch(() => []),
-      queryDB("SELECT * FROM users")
-    ]);
-    const userName = (id: any) => users.find((u: any) => Number(u.id) === Number(id))?.name || null;
-    const events: any[] = [];
-    const joining = toDate(e.joining_date) || toDate(e.created_at);
-    if (joining) {
-      // The position they joined in — the FROM side of their earliest
-      // recorded change, or today's values when nothing has changed yet.
-      const firstChange = [
-        ...transfers.filter((t: any) => Number(t.employee_id) === employeeId).map((t: any) => ({ d: toDate(t.effective_date) || "", id: Number(t.id), desig: t.from_designation, dept: t.from_department_name })),
-        ...actions
-          .filter((a: any) => Number(a.employee_id) === employeeId && a.status === "approved")
-          .map((a: any) => {
-            const f = parseJson(a.from_json, {});
-            return { d: toDate(a.effective_date) || "", id: Number(a.id), desig: f.designation, dept: f.department };
-          })
-      ].sort((x, y) => x.d.localeCompare(y.d) || x.id - y.id)[0];
-      const desig = firstChange ? firstChange.desig : e.designation;
-      const dept = firstChange ? firstChange.dept : e.department;
-      events.push({ date: joining, kind: "joining", title: "Joined", detail: [desig, dept].filter(Boolean).join(", ") || null });
-    }
-    const myActions = actions.filter((a: any) => Number(a.employee_id) === employeeId && a.status !== "cancelled" && (!forEmployee || a.status === "approved"));
-    const linkedTransferIds = new Set(myActions.map((a: any) => Number(a.transfer_id)).filter(Boolean));
-    const linkedSalaryIds = new Set(myActions.map((a: any) => Number(a.salary_structure_id)).filter(Boolean));
-    for (const a of myActions) {
-      events.push({
-        date: toDate(a.effective_date),
-        kind: a.action_type,
-        title: ACTION_LABEL.get(a.action_type) || a.action_type,
-        detail: describeChange(a).replace(/^[^:]*:?\s?/, "").replace(/ \(eff\. .*\)$/, "") || null,
-        status: a.status,
-        applied: !!Number(a.applied),
-        reason: a.reason || null,
-        approved_by: parseJson(a.history_json, []).filter((h: any) => h.action === "approved").map((h: any) => h.by_name),
-        action_id: Number(a.id)
-      });
-    }
-    for (const t of transfers.filter((t: any) => Number(t.employee_id) === employeeId && !linkedTransferIds.has(Number(t.id)))) {
-      const parts: string[] = [];
-      if ((t.from_department_name || "") !== (t.to_department_name || "")) parts.push(`${t.from_department_name || "—"} → ${t.to_department_name || "—"}`);
-      if ((t.from_designation || "") !== (t.to_designation || "")) parts.push(`${t.from_designation || "—"} → ${t.to_designation || "—"}`);
-      if (t.to_supervisor_id) parts.push(`Supervisor: ${world.employees.find((x: any) => Number(x.id) === Number(t.to_supervisor_id))?.name || "—"}`);
-      if (parts.length === 0) continue;
-      events.push({
-        date: toDate(t.effective_date),
-        kind: (t.from_department_name || "") !== (t.to_department_name || "") ? "transfer" : "designation_change",
-        title: (t.from_department_name || "") !== (t.to_department_name || "") ? "Transfer" : "Designation Change",
-        detail: parts.join(", "),
-        reason: t.reason || null,
-        applied: !!Number(t.applied ?? 1)
-      });
-    }
-    const mySalaries = world.salaries
-      .filter((s: any) => Number(s.employee_id) === employeeId)
-      .sort((a: any, b: any) => (toDate(a.effective_date) || "").localeCompare(toDate(b.effective_date) || "") || Number(a.id) - Number(b.id));
-    mySalaries.forEach((s: any, i: number) => {
-      if (linkedSalaryIds.has(Number(s.id))) return;
-      const prev = mySalaries[i - 1];
-      events.push({
-        date: toDate(s.effective_date),
-        kind: "salary",
-        title: prev ? "Salary Revision" : "Salary Fixed",
-        detail: prev ? `Gross ${money(prev.gross_salary)} → ${money(s.gross_salary)}` : `Gross ${money(s.gross_salary)}`
-      });
-    });
-    if (!forEmployee || true) {
-      for (const l of letters.filter((l: any) => Number(l.employee_id) === employeeId && l.status !== "cancelled")) {
-        events.push({
-          date: toDate(l.letter_date),
-          kind: "letter",
-          title: LETTER_LABEL.get(l.letter_type) || "Letter",
-          detail: `${l.ref_no} — ${l.subject}`,
-          letter_id: Number(l.id),
-          acknowledged: !!l.acknowledged_at
-        });
-      }
-    }
-    if (e.user_id) {
-      for (const d of disciplinary.filter((d: any) => Number(d.user_id) === Number(e.user_id))) {
-        events.push({
-          date: toDate(d.issued_at),
-          kind: "disciplinary",
-          title: "Disciplinary: " + String(d.action_type || "").replace(/_/g, " "),
-          detail: d.reason || null,
-          by: userName(d.issued_by)
-        });
-      }
-      for (const x of exits.filter((x: any) => Number(x.user_id) === Number(e.user_id) && x.status !== "cancelled")) {
-        events.push({
-          date: toDate(x.notice_date) || toDate(x.created_at),
-          kind: "exit",
-          title: x.exit_type === "termination" ? "Termination Initiated" : "Resignation Submitted",
-          detail: x.last_working_day ? `Last working day ${toDate(x.last_working_day)}` : null,
-          reason: x.reason || null
-        });
-      }
-    }
-    if (snap.service?.confirmation_date && !myActions.some((a: any) => a.action_type === "confirmation")) {
-      events.push({ date: toDate(snap.service.confirmation_date), kind: "confirmation", title: "Confirmation", detail: "Service confirmed" });
-    }
-    events.sort((a, b) => (a.date || "").localeCompare(b.date || ""));
-    const cur = currentValues(snap);
-    return {
-      employee: {
-        id: Number(e.id),
-        name: e.name,
-        employee_code: e.employee_id || null,
-        designation: e.designation,
-        department: e.department,
-        branch: e.branch,
-        grade: cur.grade,
-        supervisor: cur.supervisor,
-        project: snap.project?.name || null,
-        joining_date: joining,
-        job_base: e.job_base || null,
-        is_active: Number(e.is_active ?? 1) !== 0,
-        gross_salary: forEmployee ? cur.gross_salary : cur.gross_salary,
-        probation_end_date: toDate(snap.service?.probation_end_date),
-        confirmation_date: toDate(snap.service?.confirmation_date),
-        service_length_months: joining ? monthsBetween(joining, todayInDhaka()) : null
-      },
-      events
-    };
-  }
+  const serviceBook = (employeeId: number, forEmployee: boolean) => buildServiceBook(queryDB, todayInDhaka(), employeeId, forEmployee);
 
   app.get("/api/hr-ops/service-book/:employeeId", ...gate, async (req: any, res: any) => {
     try {

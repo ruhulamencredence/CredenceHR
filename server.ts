@@ -30,6 +30,7 @@ import { registerPerformanceRoutes, ensurePerformanceSchema } from "./Performanc
 import { registerRecruitmentRoutes, ensureRecruitmentSchema } from "./RecruitmentRoutes";
 import { registerGrievanceRoutes, ensureGrievanceSchema } from "./GrievanceRoutes";
 import { registerHROperationsRoutes, ensureHROperationsSchema, applyDueHrActions } from "./HROperationsRoutes";
+import { registerEmployee360Routes, ensureEmployee360Schema } from "./HrOps360Routes";
 import { registerHRAnalyticsRoutes } from "./HRAnalyticsRoutes";
 import { registerDocumentVaultRoutes, ensureDocumentVaultSchema } from "./DocumentVaultRoutes";
 import { registerErp360SsoRoutes } from "./Erp360SsoRoutes";
@@ -229,6 +230,7 @@ async function ensureSchemaMigrations() {
   // HR Operations (personnel actions, letters, onboarding, service book) —
   // HROperationsRoutes.ts.
   await ensureHROperationsSchema(dbPool);
+  await ensureEmployee360Schema(dbPool);
 
   // Chat (Direct/Group/Community messaging) — table + schema owned by
   // ChatRoutes.ts, only the call site lives here, same as every other
@@ -4839,6 +4841,9 @@ async function startServer() {
   registerHRAnalyticsRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB });
   registerDocumentVaultRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB, getAdminModules });
   registerHROperationsRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB, getAdminModules, todayInDhaka, createAlert });
+  // Employee 360 (HR Operations -> Service Book): experience / education /
+  // family / training records + every other module's data for one Employee.
+  registerEmployee360Routes(app, { authenticateToken, requireModule, queryDB, getAdminModules, todayInDhaka });
 
   // Employee Directory (Self Service -> "Employee Directory") — kept in its
   // own file (EmployeeDirectoryRoutes.ts), same reasoning as
