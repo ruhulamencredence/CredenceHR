@@ -53,6 +53,14 @@ const CompanySettings: React.FC<{ token: string; meta: HrOpsMeta; onSaved: () =>
           Use {'{CODE}'} company code, {'{TYPE}'} letter code (APT, PRM, INC, TRF…), {'{YYYY}'} / {'{YY}'} year, {'{MM}'} month, {'{SEQ}'} running number (per letter type per year). Example: <span className="font-semibold text-slate-800">{sample}</span>
         </p>
       </div>
+      <div>
+        <label className={labelCls}>Required documents (one per line)</label>
+        <textarea rows={5} value={s.required_documents || ''} onChange={(e) => setS({ ...s, required_documents: e.target.value })} className={inputCls} />
+        <p className="text-[11px] text-slate-500 mt-1">
+          Every employee should have these in Document Vault. Anything not uploaded shows as missing in Service Book and in Employee Reports → Pending Documents. A
+          document type matches when either name contains the other ("NID Card" covers "NID").
+        </p>
+      </div>
       <button
         type="button"
         className={btnPrimary}

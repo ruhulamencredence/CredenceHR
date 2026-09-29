@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   X, LogOut, Home, Wallet, Briefcase, FileText, Edit2, Route, CreditCard,
   CalendarClock, ListChecks, CheckSquare, ChevronDown, Building2, Users, Users2,
-  BarChart3, Upload, History, Recycle, Navigation, Bell, ShieldCheck,
+  BarChart3, FileSpreadsheet, Upload, History, Recycle, Navigation, Bell, ShieldCheck,
   Contact, Calendar, Clock, Fingerprint, Banknote, Package, LayoutDashboard, Server, MessageSquare,
   ChevronsLeft, ChevronsRight, ShieldAlert, Search,
   Target, UserPlus, Gavel, FolderLock, Sparkles, ExternalLink, Car,
@@ -454,6 +454,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
         { key: 'hr_operations_letters', label: 'Letters', icon: FileText, onClick: () => openHrOps('letters') },
         { key: 'hr_operations_onboarding', label: 'Onboarding', icon: ClipboardCheck, onClick: () => openHrOps('onboarding') },
         { key: 'hr_operations_increments', label: 'Increments', icon: TrendingUp, onClick: () => openHrOps('increments') },
+        { key: 'hr_operations_reports', label: 'Employee Reports', icon: FileSpreadsheet, onClick: () => openHrOps('reports') },
         { key: 'hr_operations_settings', label: 'HR Ops Settings', icon: Settings, onClick: () => openHrOps('settings') },
       ]
     : [];

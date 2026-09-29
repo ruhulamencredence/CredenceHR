@@ -9,7 +9,7 @@
 // small forms for operations that belong to other modules (document upload,
 // loan, disciplinary action), and the Dossier PDF / Excel export.
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
@@ -19,6 +19,7 @@ import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../
 import { savePdfCrossPlatform } from '../lib/saveFile';
 import credenceLogo from '../assets/credence-logo.png';
 import { serviceLength, type ServiceEvent } from './HrOpsServiceBook';
+import { apiUrl } from '../lib/api';
 import { useHrApi, Modal, Notice, fmtDate, monthLabel, inputCls, labelCls, btnPrimary, btnGhost } from './HrOpsShared';
 
 // ---------------------------------------------------------------------------
@@ -84,7 +85,63 @@ export type RecordKind = 'experience' | 'education' | 'family' | 'training';
 // exports.
 // ---------------------------------------------------------------------------
 
-type FieldDef = { key: string; label: string; type?: 'text' | 'date' | 'number' | 'textarea' | 'select' | 'check'; options?: string[]; wide?: boolean; placeholder?: string };
+type FieldDef = {
+  key: string;
+  label: string;
+  type?: 'text' | 'date' | 'number' | 'textarea' | 'select' | 'check';
+  options?: string[];
+  wide?: boolean;
+  placeholder?: string;
+  // Offer names already used elsewhere (GET /api/hr-ops/name-suggestions).
+  suggest?: keyof NameSuggestions;
+};
+
+export interface NameSuggestions {
+  companies: string[];
+  designations: string[];
+  institutes: string[];
+  degrees: string[];
+  boards: string[];
+}
+
+// Names already recorded, so new entries reuse the same spelling. Fetched
+// once per page load and shared by every form.
+let suggestionsCache: Promise<NameSuggestions | null> | null = null;
+export function useNameSuggestions(token: string): NameSuggestions | null {
+  const [data, setData] = useState<NameSuggestions | null>(null);
+  useEffect(() => {
+    if (!suggestionsCache) {
+      suggestionsCache = fetch(apiUrl('/api/hr-ops/name-suggestions'), { headers: { Authorization: `Bearer ${token}` } })
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null);
+    }
+    let alive = true;
+    suggestionsCache.then((d) => alive && setData(d));
+    return () => {
+      alive = false;
+    };
+  }, [token]);
+  return data;
+}
+// Call after saving new records so the next form sees the new names.
+export const refreshNameSuggestions = () => {
+  suggestionsCache = null;
+};
+
+// Same matching as the server's companyKey: case, punctuation and a
+// trailing Ltd / Limited / Pvt… don't matter.
+const COMPANY_SUFFIXES = new Set(['ltd', 'limited', 'pvt', 'private', 'plc', 'inc', 'incorporated', 'co', 'company', 'corp', 'corporation', 'llc']);
+export function companyKey(name: string): string {
+  const words = String(name || '')
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9\u0980-\u09ff]+/g, ' ')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  while (words.length > 1 && COMPANY_SUFFIXES.has(words[words.length - 1])) words.pop();
+  return words.join(' ');
+}
 
 export const RECORD_FIELDS: Record<RecordKind, { title: string; fields: FieldDef[]; hasFile: boolean; hasVerify: boolean }> = {
   experience: {
@@ -92,10 +149,10 @@ export const RECORD_FIELDS: Record<RecordKind, { title: string; fields: FieldDef
     hasFile: true,
     hasVerify: true,
     fields: [
-      { key: 'company_name', label: 'Company name *', wide: true },
+      { key: 'company_name', label: 'Company name *', wide: true, suggest: 'companies' },
       { key: 'company_business', label: 'Type of business', placeholder: 'e.g. Real Estate' },
       { key: 'location', label: 'Location' },
-      { key: 'designation', label: 'Designation' },
+      { key: 'designation', label: 'Designation', suggest: 'designations' },
       { key: 'department', label: 'Department' },
       { key: 'from_date', label: 'From', type: 'date' },
       { key: 'to_date', label: 'To', type: 'date' },
@@ -112,10 +169,10 @@ export const RECORD_FIELDS: Record<RecordKind, { title: string; fields: FieldDef
     hasVerify: true,
     fields: [
       { key: 'level', label: 'Level', type: 'select', options: ['PhD', 'Masters', 'Bachelor', 'Diploma', 'HSC / A Level', 'SSC / O Level', 'Professional', 'Other'] },
-      { key: 'degree', label: 'Degree / Exam title *', placeholder: 'e.g. B.Sc in Civil Engineering' },
+      { key: 'degree', label: 'Degree / Exam title *', placeholder: 'e.g. B.Sc in Civil Engineering', suggest: 'degrees' },
       { key: 'major', label: 'Major / Group' },
-      { key: 'institute', label: 'Institute' },
-      { key: 'board_university', label: 'Board / University' },
+      { key: 'institute', label: 'Institute', suggest: 'institutes' },
+      { key: 'board_university', label: 'Board / University', suggest: 'boards' },
       { key: 'passing_year', label: 'Passing year', type: 'number' },
       { key: 'result', label: 'Result', placeholder: 'e.g. CGPA 3.50 / GPA 5.00' },
       { key: 'duration', label: 'Duration', placeholder: 'e.g. 4 years' }
@@ -171,7 +228,12 @@ export const readFileBase64 = (file: File) =>
 
 // Fields for one record, rendered into a form — used by RecordModal and by
 // the Add Employee form's Experience / Education rows.
-export const RecordFields: React.FC<{ kind: RecordKind; form: Record<string, any>; onChange: (f: Record<string, any>) => void }> = ({ kind, form, onChange }) => (
+export const RecordFields: React.FC<{ kind: RecordKind; form: Record<string, any>; onChange: (f: Record<string, any>) => void; suggestions?: NameSuggestions | null }> = ({
+  kind,
+  form,
+  onChange,
+  suggestions
+}) => (
   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
     {RECORD_FIELDS[kind].fields.map((f) =>
       f.type === 'check' ? (
@@ -193,13 +255,35 @@ export const RecordFields: React.FC<{ kind: RecordKind; form: Record<string, any
               ))}
             </select>
           ) : (
-            <input
-              type={f.type || 'text'}
-              value={form[f.key] ?? ''}
-              placeholder={f.placeholder}
-              onChange={(e) => onChange({ ...form, [f.key]: e.target.value })}
-              className={inputCls}
-            />
+            <>
+              <input
+                type={f.type || 'text'}
+                value={form[f.key] ?? ''}
+                placeholder={f.placeholder}
+                list={f.suggest && suggestions ? `p360-sug-${f.suggest}` : undefined}
+                onChange={(e) => onChange({ ...form, [f.key]: e.target.value })}
+                className={inputCls}
+              />
+              {f.suggest && suggestions && (
+                <datalist id={`p360-sug-${f.suggest}`}>
+                  {suggestions[f.suggest].map((n) => (
+                    <option key={n} value={n} />
+                  ))}
+                </datalist>
+              )}
+              {f.suggest === 'companies' &&
+                suggestions &&
+                (() => {
+                  // Typed a new spelling of a company already on record.
+                  const typed = String(form[f.key] || '').trim();
+                  const same = typed ? suggestions.companies.find((c) => c !== typed && companyKey(c) === companyKey(typed)) : null;
+                  return same ? (
+                    <button type="button" onClick={() => onChange({ ...form, [f.key]: same })} className="mt-1 text-[11px] text-blue-600 font-semibold">
+                      Already recorded as “{same}” — use that spelling
+                    </button>
+                  ) : null;
+                })()}
+            </>
           )}
         </div>
       )
@@ -217,6 +301,7 @@ export const RecordModal: React.FC<{
 }> = ({ token, employeeId, kind, record, onClose, onSaved }) => {
   const api = useHrApi(token);
   const cfg = RECORD_FIELDS[kind];
+  const suggestions = useNameSuggestions(token);
   const [form, setForm] = useState<Record<string, any>>(() => {
     const init: Record<string, any> = {};
     for (const f of cfg.fields) init[f.key] = record ? (record[f.key] ?? (f.type === 'check' ? false : '')) : f.type === 'check' ? false : '';
@@ -239,6 +324,7 @@ export const RecordModal: React.FC<{
       } else if (removeFile) body.remove_file = true;
       if (record) await api.put(`/api/hr-ops/p360/records/${kind}/${record.id}`, body);
       else await api.post(`/api/hr-ops/p360/${employeeId}/records/${kind}`, { ...body, verified });
+      refreshNameSuggestions();
       onSaved();
     } catch (e: any) {
       setMsg({ type: 'error', text: e.message });
@@ -265,7 +351,7 @@ export const RecordModal: React.FC<{
     >
       <div className="space-y-4">
         <Notice msg={msg} onClose={() => setMsg(null)} />
-        <RecordFields kind={kind} form={form} onChange={setForm} />
+        <RecordFields kind={kind} form={form} onChange={setForm} suggestions={suggestions} />
         {cfg.hasFile && (
           <div className="rounded-lg border border-dashed border-slate-300 p-3">
             <label className={labelCls}>

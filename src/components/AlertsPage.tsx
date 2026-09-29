@@ -118,6 +118,18 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
         ? /Awaiting Your Approval/.test(alert.title)
           ? onOpenApproveApplications
           : onOpenHrOperations || (() => window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'hr_operations' })))
+        : alert.type === 'hr_report'
+        ? () => {
+            // HR Operations -> Employee Reports -> Received.
+            try {
+              sessionStorage.setItem('hr_ops_tab', 'reports');
+              sessionStorage.setItem('hr_reports_view', 'received');
+            } catch {
+              // storage unavailable — opens on the default tab
+            }
+            (onOpenHrOperations || (() => window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'hr_operations' }))))();
+            setTimeout(() => window.dispatchEvent(new CustomEvent('credence:hr-ops-tab', { detail: 'reports' })), 0);
+          }
         : alert.type === 'hr_letter'
         ? /^New Letter|Request Rejected$/.test(alert.title)
           ? onOpenMyLetters
