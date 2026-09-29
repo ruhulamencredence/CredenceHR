@@ -87,7 +87,7 @@ interface NavbarProps {
   // Workforce above, this isn't Admin-gated — every account sees it. Leave
   // Approvals is the one exception: only shown to Admin/Superadmin accounts,
   // since only they can ever be picked as a Leave Application's Approver.
-  onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases') => void;
+  onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters') => void;
   // Mobile-only hamburger button in the header — opens the single
   // GlobalSidebar drawer (see GlobalSidebar.tsx / App.tsx). Desktop
   // (md and up) keeps using the dropdown menus above instead, unchanged —
@@ -417,6 +417,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             }}
             onOpenResignation={() => onGoToSelfServiceTab('resignation')}
             onOpenMyCases={() => onGoToSelfServiceTab('myCases')}
+            onOpenMyLetters={() => onGoToSelfServiceTab('myLetters')}
             onViewAll={onOpenAlerts}
           />
 

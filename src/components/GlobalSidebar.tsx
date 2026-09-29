@@ -6,6 +6,7 @@ import {
   Contact, Calendar, Clock, Fingerprint, Banknote, Package, LayoutDashboard, Server, MessageSquare,
   ChevronsLeft, ChevronsRight, ShieldAlert, Search,
   Target, UserPlus, Gavel, FolderLock, Sparkles, ExternalLink, Car,
+  ClipboardList, BookOpen, ClipboardCheck, TrendingUp, Settings,
 } from 'lucide-react';
 import { User, AdminModuleKey } from '../types';
 import credenceLogo from '../assets/credence-logo.png';
@@ -46,7 +47,7 @@ interface GlobalSidebarProps {
   onGoToUserClaims: (target: 'movementClaims' | 'conveyanceBill') => void;
   // Everyday employee self-service items — not Admin-gated, shown to every
   // account regardless of role/module access.
-  onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases') => void;
+  onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters') => void;
   // Admin Panel's own Movement Claims / Conveyance Bill Claim review tabs —
   // separate feature from onGoToUserClaims above, gated by module_permissions
   // like every other Admin Panel module.
@@ -305,6 +306,10 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // feedback on one that names you / is assigned to you, or on a
   // disciplinary action issued to you. Every account.
   selfServiceItems.push({ key: 'myCases', label: 'Grievance & Disciplinary', icon: Gavel, onClick: () => onGoToSelfServiceTab('myCases') });
+  // My Letters & Service Record (MyLetters.tsx) — letters HR issued to this
+  // account (view / download / acknowledge), certificate requests, and the
+  // Employee's own service record. Every account.
+  selfServiceItems.push({ key: 'myLetters', label: 'My Letters & Service Record', icon: FileText, onClick: () => onGoToSelfServiceTab('myLetters') });
 
   // "Admin Dashboard" — the HR-overview landing page (stat tiles, quick
   // view, charts, notices, leave balances). Every real role === 'admin' |
@@ -429,7 +434,32 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     hrPayrollGroup.push({ key: 'payroll', label: 'Payroll', icon: Banknote, onClick: () => onGoToSelfServiceTab('payroll') });
   }
 
+  // "HR Operations" (HROperationsPanel.tsx) — one 'hr_operations' module
+  // grant; each item opens that page on its own tab (the panel listens for
+  // the tab event, and reads the stored tab when it mounts fresh).
+  const openHrOps = (tab: string) => {
+    try {
+      sessionStorage.setItem('hr_ops_tab', tab);
+    } catch {
+      // storage unavailable — the panel just opens on its default tab
+    }
+    onGoToAdminModule('hr_operations');
+    setTimeout(() => window.dispatchEvent(new CustomEvent('credence:hr-ops-tab', { detail: tab })), 0);
+  };
+  const hrOperationsItems: NavItem[] = canSeeModule('hr_operations')
+    ? [
+        { key: 'hr_operations', label: 'Monthly Report', icon: BarChart3, onClick: () => openHrOps('dashboard') },
+        { key: 'hr_operations_actions', label: 'Personnel Actions', icon: ClipboardList, onClick: () => openHrOps('actions') },
+        { key: 'hr_operations_service_book', label: 'Service Book', icon: BookOpen, onClick: () => openHrOps('service_book') },
+        { key: 'hr_operations_letters', label: 'Letters', icon: FileText, onClick: () => openHrOps('letters') },
+        { key: 'hr_operations_onboarding', label: 'Onboarding', icon: ClipboardCheck, onClick: () => openHrOps('onboarding') },
+        { key: 'hr_operations_increments', label: 'Increments', icon: TrendingUp, onClick: () => openHrOps('increments') },
+        { key: 'hr_operations_settings', label: 'HR Ops Settings', icon: Settings, onClick: () => openHrOps('settings') },
+      ]
+    : [];
+
   const hrSubGroups: { key: string; label: string; icon: React.ComponentType<{ className?: string }>; items: NavItem[] }[] = [
+    { key: 'hr_operations', label: 'HR Operations', icon: Briefcase, items: hrOperationsItems },
     { key: 'hr_attendance', label: 'Attendance', icon: Fingerprint, items: attendanceItems },
     { key: 'hr_claims_bill', label: 'Claims/Bill/Disbursement', icon: CreditCard, items: claimsItems },
     { key: 'hr_employee', label: 'Employee', icon: Contact, items: employeeItems },

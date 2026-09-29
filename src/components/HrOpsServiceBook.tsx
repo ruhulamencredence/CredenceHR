@@ -1,0 +1,377 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+// HR Operations -> "Service Book": one Employee's whole record from the
+// joining date — every transfer, promotion, increment, confirmation, letter,
+// disciplinary action and resignation in date order — plus their service
+// settings (grade, probation, contract end) and a printable PDF.
+
+import React, { useEffect, useState } from 'react';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import {
+  BookOpen,
+  FileDown,
+  Pencil,
+  Plus,
+  UserPlus,
+  TrendingUp,
+  ArrowLeftRight,
+  BadgeCheck,
+  Banknote,
+  FileText,
+  Gavel,
+  LogOut,
+  Award,
+  Circle
+} from 'lucide-react';
+import { Spinner } from './Spinner';
+import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
+import { savePdfCrossPlatform } from '../lib/saveFile';
+import credenceLogo from '../assets/credence-logo.png';
+import { NewActionModal } from './HrOpsActions';
+import {
+  useHrApi,
+  EmployeePicker,
+  Modal,
+  Notice,
+  Field,
+  Badge,
+  fmtDate,
+  taka,
+  inputCls,
+  labelCls,
+  btnPrimary,
+  btnGhost,
+  SERVICE_STATUS_LABEL,
+  type HrOpsEmployee,
+  type HrOpsMeta
+} from './HrOpsShared';
+
+export interface ServiceEvent {
+  date: string | null;
+  kind: string;
+  title: string;
+  detail: string | null;
+  status?: string;
+  applied?: boolean;
+  reason?: string | null;
+  approved_by?: string[];
+  acknowledged?: boolean;
+}
+export interface ServiceBookData {
+  employee: {
+    id: number;
+    name: string;
+    employee_code: string | null;
+    designation: string | null;
+    department: string | null;
+    branch: string | null;
+    grade: string | null;
+    supervisor: string | null;
+    project: string | null;
+    joining_date: string | null;
+    job_base: string | null;
+    is_active: boolean;
+    gross_salary: number | null;
+    probation_end_date: string | null;
+    confirmation_date: string | null;
+    service_length_months: number | null;
+  } | null;
+  events: ServiceEvent[];
+}
+
+export const EVENT_STYLE: Record<string, { icon: React.ComponentType<{ className?: string }>; tint: string }> = {
+  joining: { icon: UserPlus, tint: 'bg-emerald-100 text-emerald-700' },
+  promotion: { icon: Award, tint: 'bg-violet-100 text-violet-700' },
+  increment: { icon: TrendingUp, tint: 'bg-amber-100 text-amber-700' },
+  salary_adjustment: { icon: TrendingUp, tint: 'bg-amber-100 text-amber-700' },
+  salary: { icon: Banknote, tint: 'bg-amber-50 text-amber-600' },
+  transfer: { icon: ArrowLeftRight, tint: 'bg-sky-100 text-sky-700' },
+  designation_change: { icon: ArrowLeftRight, tint: 'bg-sky-50 text-sky-600' },
+  confirmation: { icon: BadgeCheck, tint: 'bg-teal-100 text-teal-700' },
+  letter: { icon: FileText, tint: 'bg-slate-100 text-slate-600' },
+  disciplinary: { icon: Gavel, tint: 'bg-rose-100 text-rose-700' },
+  exit: { icon: LogOut, tint: 'bg-rose-50 text-rose-600' },
+  resignation: { icon: LogOut, tint: 'bg-rose-100 text-rose-700' },
+  termination: { icon: LogOut, tint: 'bg-rose-100 text-rose-700' },
+  retirement: { icon: LogOut, tint: 'bg-rose-100 text-rose-700' }
+};
+
+export const serviceLength = (months: number | null) => {
+  if (months === null || months < 0) return '—';
+  const y = Math.floor(months / 12);
+  const m = months % 12;
+  return [y ? `${y} yr${y > 1 ? 's' : ''}` : '', m ? `${m} mo` : '', !y && !m ? 'Less than a month' : ''].filter(Boolean).join(' ');
+};
+
+// Shared timeline (also used by Self Service -> My Letters & Service Record).
+export const ServiceTimeline: React.FC<{ events: ServiceEvent[] }> = ({ events }) =>
+  events.length === 0 ? (
+    <p className="text-sm text-slate-400 text-center py-10">No records yet.</p>
+  ) : (
+    <ol className="relative border-l-2 border-slate-100 ml-3.5 space-y-4">
+      {[...events].reverse().map((ev, i) => {
+        const st = EVENT_STYLE[ev.kind] || { icon: Circle, tint: 'bg-slate-100 text-slate-500' };
+        return (
+          <li key={i} className="ml-6">
+            <span className={`absolute -left-[15px] w-7 h-7 rounded-full flex items-center justify-center ring-4 ring-white ${st.tint}`}>
+              <st.icon className="w-3.5 h-3.5" />
+            </span>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-bold text-slate-800">{ev.title}</span>
+              <span className="text-[11px] text-slate-400">{fmtDate(ev.date)}</span>
+              {ev.status === 'pending' && <Badge tone="pending">Pending approval</Badge>}
+              {ev.status === 'rejected' && <Badge tone="rejected">Rejected</Badge>}
+              {ev.status === 'approved' && ev.applied === false && <Badge tone="pending">Takes effect {fmtDate(ev.date)}</Badge>}
+              {ev.kind === 'letter' && (ev.acknowledged ? <Badge tone="approved">Acknowledged</Badge> : null)}
+            </div>
+            {ev.detail && <p className="text-xs text-slate-600 mt-0.5">{ev.detail}</p>}
+            {ev.reason && <p className="text-[11px] text-slate-400 mt-0.5">{ev.reason}</p>}
+            {ev.approved_by && ev.approved_by.length > 0 && <p className="text-[11px] text-emerald-700 mt-0.5">Approved by {ev.approved_by.join(' → ')}</p>}
+          </li>
+        );
+      })}
+    </ol>
+  );
+
+export async function saveServiceBookPdf(data: ServiceBookData) {
+  if (!data.employee) return;
+  const e = data.employee;
+  const logo = await loadImageElement(credenceLogo);
+  const doc = new jsPDF();
+  const y = drawPdfLetterhead(doc, logo, {
+    reportTitle: 'Employee Service Book',
+    filtersLabel: 'Employee Details:',
+    filters: [
+      ['Name', e.name],
+      ['Employee ID', e.employee_code || '—'],
+      ['Designation', e.designation || '—'],
+      ['Department', e.department || '—'],
+      ['Grade', e.grade || '—'],
+      ['Branch', e.branch || '—'],
+      ['Joining Date', fmtDate(e.joining_date)],
+      ['Service Length', serviceLength(e.service_length_months)],
+      ['Confirmation', fmtDate(e.confirmation_date)],
+      ['Current Gross', e.gross_salary != null ? `BDT ${Number(e.gross_salary).toLocaleString('en-IN')}` : '—']
+    ]
+  });
+  autoTable(doc, {
+    startY: y,
+    head: [['Date', 'Event', 'Details', 'Status / Approved by']],
+    body: data.events.map((ev) => [
+      fmtDate(ev.date),
+      ev.title,
+      [ev.detail, ev.reason].filter(Boolean).join('\n'),
+      ev.status === 'pending' ? 'Pending' : ev.approved_by?.length ? ev.approved_by.join(' → ') : ev.kind === 'letter' ? (ev.acknowledged ? 'Acknowledged' : 'Issued') : ''
+    ]),
+    styles: { fontSize: 8, cellPadding: 2 },
+    columnStyles: { 0: { cellWidth: 24 }, 1: { cellWidth: 36 }, 3: { cellWidth: 40 } },
+    headStyles: { fillColor: [124, 58, 237] }
+  });
+  finalizePdfPageNumbers(doc);
+  await savePdfCrossPlatform(doc, `Service_Book_${e.name.replace(/\s+/g, '_')}.pdf`);
+}
+
+export const HrOpsServiceBook: React.FC<{
+  token: string;
+  meta: HrOpsMeta;
+  employees: HrOpsEmployee[];
+  employeeId: number | null;
+  onPick: (id: number | null) => void;
+  onChanged: () => void;
+}> = ({ token, meta, employees, employeeId, onPick, onChanged }) => {
+  const api = useHrApi(token);
+  const [data, setData] = useState<ServiceBookData | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [msg, setMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState<Record<string, string>>({});
+  const [newAction, setNewAction] = useState(false);
+  const emp = employees.find((e) => e.id === employeeId) || null;
+
+  const load = async () => {
+    if (!employeeId) {
+      setData(null);
+      return;
+    }
+    setLoading(true);
+    try {
+      setData(await api.get<ServiceBookData>(`/api/hr-ops/service-book/${employeeId}`));
+    } catch (e: any) {
+      setMsg({ type: 'error', text: e.message });
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [employeeId]);
+
+  const openEdit = () => {
+    if (!emp) return;
+    setForm({
+      grade: emp.grade || '',
+      probation_months: emp.probation_months != null ? String(emp.probation_months) : '',
+      probation_end_date: emp.probation_end_date || '',
+      confirmation_date: emp.confirmation_date || '',
+      contract_end_date: emp.contract_end_date || '',
+      service_status: emp.service_status || ''
+    });
+    setEditing(true);
+  };
+  const saveEdit = async () => {
+    try {
+      await api.put(`/api/hr-ops/service/${employeeId}`, form);
+      setEditing(false);
+      setMsg({ type: 'success', text: 'Service details saved.' });
+      onChanged();
+      load();
+    } catch (e: any) {
+      setMsg({ type: 'error', text: e.message });
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <Notice msg={msg} onClose={() => setMsg(null)} />
+      <div className="max-w-md">
+        <label className={labelCls}>Employee</label>
+        <EmployeePicker employees={employees} value={employeeId} onChange={onPick} includeInactive />
+      </div>
+      {!employeeId ? (
+        <div className="text-center py-16 text-sm text-slate-400">
+          <BookOpen className="w-9 h-9 mx-auto mb-2 text-slate-300" />
+          Pick an employee to see their complete service record.
+        </div>
+      ) : loading || !data?.employee ? (
+        <div className="flex items-center justify-center gap-2 py-16 text-sm text-slate-500">
+          <Spinner size={16} /> Loading…
+        </div>
+      ) : (
+        <div className="grid lg:grid-cols-[320px_1fr] gap-5">
+          <div className="space-y-3">
+            <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-3">
+              <div>
+                <div className="text-base font-bold text-slate-900">{data.employee.name}</div>
+                <div className="text-xs text-slate-500">
+                  {data.employee.employee_code} · {data.employee.designation}
+                </div>
+                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                  <Badge tone={emp?.service_status === 'separated' ? 'rejected' : emp?.service_status === 'confirmed' ? 'approved' : 'pending'}>
+                    {SERVICE_STATUS_LABEL[emp?.service_status || ''] || emp?.service_status}
+                  </Badge>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Department" value={data.employee.department} />
+                <Field label="Branch" value={data.employee.branch} />
+                <Field label="Grade" value={data.employee.grade} />
+                <Field label="Project" value={data.employee.project} />
+                <Field label="Supervisor" value={data.employee.supervisor} />
+                <Field label="Gross Salary" value={taka(data.employee.gross_salary)} />
+                <Field label="Joined" value={fmtDate(data.employee.joining_date)} />
+                <Field label="Service" value={serviceLength(data.employee.service_length_months)} />
+                <Field label="Probation until" value={fmtDate(emp?.probation_end_date)} />
+                <Field label="Confirmed" value={fmtDate(emp?.confirmation_date)} />
+                <Field label="Contract until" value={fmtDate(emp?.contract_end_date)} />
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" className={btnPrimary} onClick={() => setNewAction(true)}>
+                <Plus className="w-3.5 h-3.5" /> New HR Action
+              </button>
+              <button type="button" className={btnGhost} onClick={openEdit}>
+                <Pencil className="w-3.5 h-3.5" /> Service Details
+              </button>
+              <button type="button" className={btnGhost} onClick={() => saveServiceBookPdf(data)}>
+                <FileDown className="w-3.5 h-3.5" /> PDF
+              </button>
+            </div>
+          </div>
+          <div className="rounded-xl border border-slate-200 bg-white p-5">
+            <div className="text-xs font-bold text-slate-700 mb-4">Service history (latest first)</div>
+            <ServiceTimeline events={data.events} />
+          </div>
+        </div>
+      )}
+
+      {editing && (
+        <Modal
+          title="Service Details"
+          onClose={() => setEditing(false)}
+          footer={
+            <>
+              <button type="button" className={btnGhost} onClick={() => setEditing(false)}>
+                Cancel
+              </button>
+              <button type="button" className={btnPrimary} onClick={saveEdit}>
+                Save
+              </button>
+            </>
+          }
+        >
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={labelCls}>Grade</label>
+              <input value={form.grade} onChange={(e) => setForm({ ...form, grade: e.target.value })} className={inputCls} placeholder="e.g. G-5" />
+            </div>
+            <div>
+              <label className={labelCls}>Service status</label>
+              <select value={form.service_status} onChange={(e) => setForm({ ...form, service_status: e.target.value })} className={inputCls}>
+                <option value="">Auto</option>
+                {Object.entries(SERVICE_STATUS_LABEL).map(([k, v]) => (
+                  <option key={k} value={k}>
+                    {v}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className={labelCls}>Probation (months)</label>
+              <input
+                type="number"
+                min={0}
+                value={form.probation_months}
+                onChange={(e) => setForm({ ...form, probation_months: e.target.value, probation_end_date: '' })}
+                className={inputCls}
+              />
+            </div>
+            <div>
+              <label className={labelCls}>Probation end date</label>
+              <input type="date" value={form.probation_end_date} onChange={(e) => setForm({ ...form, probation_end_date: e.target.value })} className={inputCls} />
+              <p className="text-[10px] text-slate-400 mt-0.5">Leave empty to count from the joining date.</p>
+            </div>
+            <div>
+              <label className={labelCls}>Confirmation date</label>
+              <input type="date" value={form.confirmation_date} onChange={(e) => setForm({ ...form, confirmation_date: e.target.value })} className={inputCls} />
+            </div>
+            <div>
+              <label className={labelCls}>Contract end date</label>
+              <input type="date" value={form.contract_end_date} onChange={(e) => setForm({ ...form, contract_end_date: e.target.value })} className={inputCls} />
+            </div>
+          </div>
+          <p className="text-[11px] text-slate-400 mt-3">Use these for the starting values. Later changes (promotion, confirmation, extension…) should go through an HR Action so they are approved and recorded.</p>
+        </Modal>
+      )}
+      {newAction && (
+        <NewActionModal
+          token={token}
+          meta={meta}
+          employees={employees}
+          initialEmployeeId={employeeId}
+          onClose={() => setNewAction(false)}
+          onSaved={(st) => {
+            setNewAction(false);
+            setMsg({ type: 'success', text: st === 'approved' ? 'Saved and approved.' : 'Submitted for approval.' });
+            onChanged();
+            load();
+          }}
+        />
+      )}
+    </div>
+  );
+};

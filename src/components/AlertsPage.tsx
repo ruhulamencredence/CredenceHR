@@ -33,6 +33,11 @@ interface AlertsPageProps {
   onOpenResignation?: () => void;
   // Grievance / Disciplinary alerts open Self Service -> Grievance & Disciplinary.
   onOpenMyCases?: () => void;
+  // HR Operations: a letter issued to this account -> My Letters; HR-side
+  // updates (a letter acknowledged/requested, an action decided) -> the
+  // HR Operations module.
+  onOpenMyLetters?: () => void;
+  onOpenHrOperations?: () => void;
 }
 
 // Full "self service" style page for the Personal Alerts inbox — same data
@@ -41,7 +46,7 @@ interface AlertsPageProps {
 // every other self-service section (Employee Directory, My Leave, ...).
 // Reachable from GlobalSidebar's "Alerts" item and AlertsBell's dropdown
 // footer "View all" link.
-export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLeaveApplication, onOpenApproveApplications, onOpenVehicleManagement, onOpenConveyanceClaim, onOpenMyAsset, onOpenResignation, onOpenMyCases }) => {
+export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLeaveApplication, onOpenApproveApplications, onOpenVehicleManagement, onOpenConveyanceClaim, onOpenMyAsset, onOpenResignation, onOpenMyCases, onOpenMyLetters, onOpenHrOperations }) => {
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [loading, setLoading] = useState(true);
   const isNativeApp = Capacitor.isNativePlatform();
@@ -109,6 +114,14 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
         ? onOpenResignation
         : alert.type === 'grievance' || alert.type === 'disciplinary'
         ? onOpenMyCases
+        : alert.type === 'hr_action'
+        ? /Awaiting Your Approval/.test(alert.title)
+          ? onOpenApproveApplications
+          : onOpenHrOperations || (() => window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'hr_operations' })))
+        : alert.type === 'hr_letter'
+        ? /^New Letter|Request Rejected$/.test(alert.title)
+          ? onOpenMyLetters
+          : onOpenHrOperations || (() => window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'hr_operations' })))
         : undefined;
     if (target) {
       target();

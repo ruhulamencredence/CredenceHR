@@ -29,6 +29,7 @@ import { registerExitOffboardingRoutes, ensureExitOffboardingSchema } from "./Ex
 import { registerPerformanceRoutes, ensurePerformanceSchema } from "./PerformanceRoutes";
 import { registerRecruitmentRoutes, ensureRecruitmentSchema } from "./RecruitmentRoutes";
 import { registerGrievanceRoutes, ensureGrievanceSchema } from "./GrievanceRoutes";
+import { registerHROperationsRoutes, ensureHROperationsSchema, applyDueHrActions } from "./HROperationsRoutes";
 import { registerHRAnalyticsRoutes } from "./HRAnalyticsRoutes";
 import { registerDocumentVaultRoutes, ensureDocumentVaultSchema } from "./DocumentVaultRoutes";
 import { registerErp360SsoRoutes } from "./Erp360SsoRoutes";
@@ -225,6 +226,9 @@ async function ensureSchemaMigrations() {
   await ensureRecruitmentSchema(dbPool);
   await ensureGrievanceSchema(dbPool);
   await ensureDocumentVaultSchema(dbPool);
+  // HR Operations (personnel actions, letters, onboarding, service book) —
+  // HROperationsRoutes.ts.
+  await ensureHROperationsSchema(dbPool);
 
   // Chat (Direct/Group/Community messaging) — table + schema owned by
   // ChatRoutes.ts, only the call site lives here, same as every other
@@ -2257,7 +2261,7 @@ const USER_CLAIM_CATEGORIES = ["Transport", "Fuel", "Toll", "Parking", "Others"]
 // running day-to-day without also giving them the full Admin Panel ->
 // Vehicle Management tab (fleet CRUD, the Approval Workflow's own queue,
 // etc.). See the two routes' own comments for what the bypass does.
-const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports", "users", "attendance", "attendance_reports", "leave_applications", "recycle", "editlog", "notices", "claims", "approvals", "conveyance", "disbursement", "employees", "departments", "tracking", "office_attendance", "holidays", "payroll", "asset_management", "vehicle_management", "vehicle_maintainer", "exit_offboarding", "performance_management", "recruitment", "grievance_disciplinary", "hr_analytics", "document_vault", "admin_dashboard"] as const;
+const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports", "users", "attendance", "attendance_reports", "leave_applications", "recycle", "editlog", "notices", "claims", "approvals", "conveyance", "disbursement", "employees", "departments", "tracking", "office_attendance", "holidays", "payroll", "asset_management", "vehicle_management", "vehicle_maintainer", "exit_offboarding", "performance_management", "recruitment", "grievance_disciplinary", "hr_analytics", "document_vault", "hr_operations", "admin_dashboard"] as const;
 
 // Granular per-module action layers — mirrors PermissionLayerKey/
 // PERMISSION_LAYERS in src/types.ts (single source of truth is duplicated
@@ -4834,6 +4838,7 @@ async function startServer() {
   registerGrievanceRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB, getAdminModules, createAlert });
   registerHRAnalyticsRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB });
   registerDocumentVaultRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB, getAdminModules });
+  registerHROperationsRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB, getAdminModules, todayInDhaka, createAlert });
 
   // Employee Directory (Self Service -> "Employee Directory") — kept in its
   // own file (EmployeeDirectoryRoutes.ts), same reasoning as
@@ -5187,6 +5192,9 @@ async function startServer() {
       // that lazily happens for everyone, not just whoever next opens the
       // Transfer modal for that one employee.
       await applyDueEmployeeTransfers(queryDB, todayInDhaka());
+      // Same lazy catch-up for approved HR Operations actions (grade,
+      // confirmation, separation…) whose Effective Date has arrived.
+      await applyDueHrActions(queryDB, todayInDhaka());
       const rows = await queryDB("SELECT * FROM all_employees");
       const sorted = [...rows].sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""));
       res.json(

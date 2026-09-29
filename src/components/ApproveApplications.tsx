@@ -23,7 +23,7 @@ interface ApproveApplicationsProps {
 // original, narrower version of this same shape.
 interface MyApprovalItem {
   id: number;
-  source_type: 'attendance' | 'claim' | 'user_claim' | 'attendance_correction' | 'leave_application' | 'leave_reliever' | 'exit_clearance' | 'asset_requisition' | 'vehicle_requisition';
+  source_type: 'attendance' | 'claim' | 'user_claim' | 'attendance_correction' | 'leave_application' | 'leave_reliever' | 'exit_clearance' | 'asset_requisition' | 'vehicle_requisition' | 'hr_action';
   source_id: number;
   source_label: string;
   source_amount: number | null;
@@ -70,7 +70,36 @@ interface MyApprovalItem {
   asset_fulfiller_bypass?: boolean;
   // Requester's Supervisor Layer — may edit the items before approving.
   can_edit_asset_items?: boolean;
+  // Only on an 'hr_action' item (HR Operations — Promotion, Increment,
+  // Transfer…): the Employee and every FROM -> TO change being approved.
+  hr_action_details?: {
+    action_label: string;
+    employee_name: string | null;
+    employee_code: string | null;
+    effective_date: string | null;
+    reason: string | null;
+    from: Record<string, any>;
+    to: Record<string, any>;
+    history: { action: string; by_name: string; step_label?: string | null; remarks?: string | null; at: string }[];
+  } | null;
 }
+
+// FROM -> TO rows for an HR action card.
+const HR_CHANGE_FIELDS: [string, string, boolean?][] = [
+  ['designation', 'Designation'],
+  ['department', 'Department'],
+  ['branch', 'Branch'],
+  ['supervisor', 'Supervisor'],
+  ['grade', 'Grade'],
+  ['gross_salary', 'Gross Salary', true],
+  ['probation_end_date', 'Probation Until'],
+  ['contract_end_date', 'Contract Until']
+];
+const hrChangeRows = (d: NonNullable<MyApprovalItem['hr_action_details']>) =>
+  HR_CHANGE_FIELDS.filter(([k]) => d.to[k] !== undefined && d.to[k] !== null && d.to[k] !== '').map(([k, label, isMoney]) => {
+    const f = (v: any) => (v === undefined || v === null || v === '' ? '—' : isMoney ? `৳${Number(v).toLocaleString('en-BD')}` : String(v));
+    return { label, from: f(d.from[k]), to: f(d.to[k]) };
+  });
 
 interface AvailableVehicle {
   id: number;
@@ -100,6 +129,8 @@ const sourceTitle = (t: MyApprovalItem['source_type']) =>
     ? 'Asset Requisition'
     : t === 'vehicle_requisition'
     ? 'Vehicle Requisition'
+    : t === 'hr_action'
+    ? 'HR Action'
     : 'Movement Claim';
 
 // "Self Service" -> "Approve Application" — reachable from the Navbar/Sidebar
@@ -228,6 +259,8 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
           ? apiUrl(`/api/leave-applications/${item.id}/reliever-decision`)
           : item.source_type === 'exit_clearance'
           ? apiUrl(`/api/exit-clearance-items/${item.id}/decision`)
+          : item.source_type === 'hr_action'
+          ? apiUrl(`/api/hr-ops/actions/${item.id}/decision`)
           : apiUrl(`/api/my-approvals/${item.id}/act`);
       const res = await fetch(url, {
         method: 'POST',
@@ -413,11 +446,15 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
                               ? 'Ride Request — Assign Vehicle'
                               : item.asset_fulfiller_bypass
                                 ? 'Asset Requisition — Fulfill'
-                                : sourceTitle(item.source_type)}
+                                : item.hr_action_details
+                                  ? `${item.hr_action_details.action_label} — ${item.hr_action_details.employee_name || ''}`
+                                  : sourceTitle(item.source_type)}
                           </span>
                         </div>
                         <p className="text-xs text-slate-500 mt-0.5">
-                          {item.source_label}
+                          {item.hr_action_details
+                            ? `${item.hr_action_details.employee_code ? item.hr_action_details.employee_code + ' · ' : ''}Effective ${item.hr_action_details.effective_date || '—'}`
+                            : item.source_label}
                           {!editable && item.source_amount != null && <> &middot; ৳{item.source_amount.toLocaleString('en-BD', { minimumFractionDigits: 2 })}</>}
                         </p>
                         <p className="text-[11px] text-slate-400 mt-1">
@@ -425,6 +462,27 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
                           {item.total_steps ? <> &middot; Layer {item.current_step} of {item.total_steps}</> : null}
                           {isAssetRequisition && <span className="text-blue-500 font-medium"> &middot; Tap to view details</span>}
                         </p>
+
+                        {item.hr_action_details && (
+                          <div className="mt-2 max-w-md">
+                            <div className="rounded-lg border border-slate-200 overflow-hidden text-[11px]">
+                              {hrChangeRows(item.hr_action_details).map((r) => (
+                                <div key={r.label} className="grid grid-cols-[90px_1fr] gap-2 px-2.5 py-1.5 border-b last:border-b-0 border-slate-100">
+                                  <span className="text-slate-400 font-semibold">{r.label}</span>
+                                  <span className="text-slate-700">
+                                    <span className="text-slate-400 line-through decoration-slate-300">{r.from}</span> → <span className="font-semibold text-slate-900">{r.to}</span>
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                            {item.hr_action_details.reason && <p className="text-[11px] text-slate-500 mt-1.5">Reason: {item.hr_action_details.reason}</p>}
+                            {item.hr_action_details.history.filter((h) => h.action === 'approved').map((h, i) => (
+                              <p key={i} className="text-[11px] text-emerald-700 mt-1">
+                                ✓ {h.step_label ? `${h.step_label}: ` : ''}{h.by_name}{h.remarks ? ` — ${h.remarks}` : ''}
+                              </p>
+                            ))}
+                          </div>
+                        )}
 
                         {item.source_type === 'user_claim' && item.claim_refs && item.claim_refs.length > 0 && (
                           <div className="mt-2 space-y-1 max-w-md">
