@@ -1803,6 +1803,9 @@ export function queryMemoryDb(sql: string, params: any[] = []): any {
     const userId = Number(params[0]);
     return memoryDb.noticeDismissals.filter((d: any) => d.user_id === userId);
   }
+  if (lowerSql === "select * from notice_dismissals") {
+    return memoryDb.noticeDismissals;
+  }
   if (lowerSql.startsWith("insert into notice_dismissals")) {
     const [notice_id, user_id] = params;
     const already = memoryDb.noticeDismissals.some((d: any) => d.notice_id === Number(notice_id) && d.user_id === Number(user_id));

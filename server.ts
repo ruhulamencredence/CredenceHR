@@ -5022,13 +5022,27 @@ async function startServer() {
     try {
       const notices = await queryDB("SELECT * FROM notices");
       const targets = await queryDB("SELECT * FROM notice_targets");
-      const users = await queryDB("SELECT id, name FROM users");
+      const users = await queryDB("SELECT id, name, role FROM users");
       const userMap = new Map<number, any>(users.map((u: any) => [u.id, u]));
+      // Who has seen each notice — closing the login popup records a
+      // dismissal, so "seen" is the audience members with one. The audience
+      // is every account except its author for an 'all' notice (the popup
+      // goes to Admins too), or the picked users for 'specific'.
+      const dismissals = await queryDB("SELECT * FROM notice_dismissals");
+      const allUserIds = users.map((u: any) => Number(u.id));
 
       const sorted = [...notices].sort((a: any, b: any) => (a.id < b.id ? 1 : -1));
       res.json(
         sorted.map((n: any) => {
           const targetUserIds = targets.filter((t: any) => t.notice_id === n.id).map((t: any) => t.user_id);
+          const audience = new Set<number>(
+            n.target_type === "all" ? allUserIds.filter((id: number) => id !== Number(n.created_by)) : targetUserIds.map((id: any) => Number(id))
+          );
+          const seenIds = new Set<number>(
+            dismissals
+              .filter((d: any) => Number(d.notice_id) === Number(n.id) && audience.has(Number(d.user_id)))
+              .map((d: any) => Number(d.user_id))
+          );
           return {
             id: n.id,
             title: n.title,
@@ -5042,7 +5056,10 @@ async function startServer() {
             created_at: n.created_at,
             updated_at: n.updated_at,
             target_user_ids: targetUserIds,
-            target_users: targetUserIds.map((id: number) => ({ id, name: userMap.get(id)?.name || "Unknown" }))
+            target_users: targetUserIds.map((id: number) => ({ id, name: userMap.get(id)?.name || "Unknown" })),
+            audience_count: audience.size,
+            seen_count: seenIds.size,
+            seen_by: Array.from(seenIds).map((id) => userMap.get(id)?.name || "Unknown").sort()
           };
         })
       );
@@ -5845,6 +5862,8 @@ async function startServer() {
 
       const visible = active.filter((n: any) => {
         if (dismissedIds.has(Number(n.id))) return false;
+        // The author doesn't need their own notice popped up at them.
+        if (Number(n.created_by) === Number(req.user.id)) return false;
         if (n.target_type === "all") return true;
         return targets.some((t: any) => Number(t.notice_id) === Number(n.id) && Number(t.user_id) === Number(req.user.id));
       });

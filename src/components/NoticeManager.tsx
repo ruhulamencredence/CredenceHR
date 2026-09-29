@@ -275,6 +275,14 @@ export const NoticeManager: React.FC<NoticeManagerProps> = ({ token, user }) => 
                         {n.target_type === 'all' ? <Globe className="w-2.5 h-2.5" /> : <UsersIcon className="w-2.5 h-2.5" />}
                         {n.target_type === 'all' ? 'All Users' : `${n.target_users?.length || 0} selected user${(n.target_users?.length || 0) === 1 ? '' : 's'}`}
                       </span>
+                      {typeof n.seen_count === 'number' && typeof n.audience_count === 'number' && (
+                        <span
+                          className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-violet-50 text-violet-700 border border-violet-200 flex items-center gap-1"
+                          title={n.seen_by && n.seen_by.length > 0 ? `Seen by: ${n.seen_by.join(', ')}` : 'Nobody has seen it yet'}
+                        >
+                          <Eye className="w-2.5 h-2.5" /> Seen by {n.seen_count} of {n.audience_count}
+                        </span>
+                      )}
                     </div>
                     <p className="text-xs text-slate-500 mt-1 line-clamp-2 break-words">
                       {n.content_html.replace(/<[^>]+>/g, ' ').trim().slice(0, 160) || '—'}

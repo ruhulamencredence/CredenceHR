@@ -1378,6 +1378,10 @@ export interface Notice {
   // Only present on rows returned from the Admin's GET /api/notices list.
   target_user_ids?: number[];
   target_users?: { id: number; name: string }[];
+  // Admin list only — how many of the notice's audience have seen (closed) it.
+  audience_count?: number;
+  seen_count?: number;
+  seen_by?: string[];
 }
 
 // Personal Alerts (bell icon, web + mobile) — a small per-account inbox.
