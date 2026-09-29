@@ -3,7 +3,7 @@ export type UserRole = 'superadmin' | 'admin' | 'user';
 // Every Admin Panel tab. A Superadmin implicitly has all of these; a plain Admin
 // only sees/uses the ones the Superadmin has explicitly granted via
 // PUT /api/users/:id/module-permissions. Mirrors ADMIN_MODULE_KEYS in server.ts.
-export type AdminModuleKey = 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'recycle' | 'editlog' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'disbursement' | 'employees' | 'departments' | 'tracking' | 'office_attendance' | 'holidays' | 'payroll' | 'asset_management' | 'vehicle_management' | 'vehicle_maintainer' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'admin_dashboard';
+export type AdminModuleKey = 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'recycle' | 'editlog' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'disbursement' | 'employees' | 'departments' | 'tracking' | 'office_attendance' | 'holidays' | 'payroll' | 'asset_management' | 'vehicle_management' | 'vehicle_maintainer' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'hr_operations' | 'admin_dashboard';
 
 export const ADMIN_MODULES: { key: AdminModuleKey; label: string }[] = [
   // Every role==='admin'|'superadmin' account already gets this as their own
@@ -55,7 +55,8 @@ export const ADMIN_MODULES: { key: AdminModuleKey; label: string }[] = [
   { key: 'recruitment', label: 'Recruitment (ATS)' },
   { key: 'grievance_disciplinary', label: 'Grievance & Disciplinary' },
   { key: 'hr_analytics', label: 'HR Analytics' },
-  { key: 'document_vault', label: 'Document Vault' }
+  { key: 'document_vault', label: 'Document Vault' },
+  { key: 'hr_operations', label: 'HR Operations' }
 ];
 
 // Granular per-module action layers, layered on top of the coarse module
@@ -1413,7 +1414,9 @@ export type AlertType =
   // Approve Application.
   | 'exit_clearance'
   // FYI to HR (new resignation, all clearances done).
-  | 'exit_offboarding';
+  | 'exit_offboarding'
+  | 'hr_action'
+  | 'hr_letter';
 
 export interface Alert {
   id: number;
@@ -1552,7 +1555,7 @@ export interface AdminNavRequest {
   // 'permanent_delete_log' is likewise NOT an AdminModuleKey/module_permissions
   // entry — Superadmin-only, see GET /api/entries/permanent-delete-log in
   // EntriesRoutes.ts.
-  target: 'dashboard' | 'reports' | 'mprs' | 'imports' | 'editlog' | 'recycle' | 'projects' | 'branches' | 'users' | 'notices' | 'approvals' | 'attendance' | 'attendance_reports' | 'employees' | 'departments' | 'tracking' | 'holidays' | 'disbursement' | 'my_conveyance' | 'asset_management' | 'permanent_delete_log' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault';
+  target: 'dashboard' | 'reports' | 'mprs' | 'imports' | 'editlog' | 'recycle' | 'projects' | 'branches' | 'users' | 'notices' | 'approvals' | 'attendance' | 'attendance_reports' | 'employees' | 'departments' | 'tracking' | 'holidays' | 'disbursement' | 'my_conveyance' | 'asset_management' | 'permanent_delete_log' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'hr_operations';
   ts: number;
 }
 

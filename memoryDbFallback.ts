@@ -1,3 +1,4 @@
+import { seedHROperationsMemory } from "./HROperationsRoutes";
 // Boolean-typed extended employee fields (see EMPLOYEE_EXT_FIELDS in server.ts), needed
 // here to coerce all_employees insert/update params to 0/1 in the memory-DB simulation.
 export const EMPLOYEE_BOOL_FIELDS = ["is_foreigner"] as const;
@@ -112,6 +113,17 @@ export const memoryDb = {
   userAccessAudit: [] as any[],
   assetRequisitionEvents: [] as any[],
   caseFeedback: [] as any[],
+  // HR Operations (HROperationsRoutes.ts)
+  hrOpsSettings: [] as any[],
+  hrEmployeeService: [] as any[],
+  hrActionApprovalSteps: [] as any[],
+  hrActions: [] as any[],
+  hrLetterTemplates: [] as any[],
+  hrLetters: [] as any[],
+  hrLetterRequests: [] as any[],
+  hrOnboardingTasks: [] as any[],
+  hrOnboardingItems: [] as any[],
+  hrIncrementPolicies: [] as any[],
   accessTemplates: [] as any[],
   // Chat/Alerts push notification device tokens (ChatRoutes.ts's POST/DELETE
   // /api/chat/push-token, PushNotificationService.ts's sendPushToUserIds/
@@ -233,8 +245,19 @@ const GENERIC_TABLES: [string, any[]][] = [
   ["user_access_audit", memoryDb.userAccessAudit],
   ["access_templates", memoryDb.accessTemplates],
   ["asset_requisition_events", memoryDb.assetRequisitionEvents],
-  ["case_feedback", memoryDb.caseFeedback]
+  ["case_feedback", memoryDb.caseFeedback],
+  ["hr_ops_settings", memoryDb.hrOpsSettings],
+  ["hr_employee_service", memoryDb.hrEmployeeService],
+  ["hr_action_approval_steps", memoryDb.hrActionApprovalSteps],
+  ["hr_actions", memoryDb.hrActions],
+  ["hr_letter_templates", memoryDb.hrLetterTemplates],
+  ["hr_letters", memoryDb.hrLetters],
+  ["hr_letter_requests", memoryDb.hrLetterRequests],
+  ["hr_onboarding_tasks", memoryDb.hrOnboardingTasks],
+  ["hr_onboarding_items", memoryDb.hrOnboardingItems],
+  ["hr_increment_policies", memoryDb.hrIncrementPolicies]
 ];
+seedHROperationsMemory(memoryDb.hrLetterTemplates, memoryDb.hrOnboardingTasks);
 memoryDb.leaveCategories = [{ id: 1, category_key: "custom_earn_leave", label: "Earn Leave", created_by: null, created_at: new Date() }];
 
 // SQL-string pattern-matching simulator for the in-memory fallback DB, used by queryDB()

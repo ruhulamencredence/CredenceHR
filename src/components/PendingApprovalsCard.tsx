@@ -11,7 +11,7 @@ import ClaimLocationMap from './ClaimLocationMap';
 // enough for this card (see server.ts for the full shape).
 interface MyApprovalItem {
   id: number;
-  source_type: 'attendance' | 'claim' | 'user_claim' | 'attendance_correction' | 'leave_application' | 'leave_reliever' | 'exit_clearance' | 'asset_requisition' | 'vehicle_requisition';
+  source_type: 'attendance' | 'claim' | 'user_claim' | 'attendance_correction' | 'leave_application' | 'leave_reliever' | 'exit_clearance' | 'asset_requisition' | 'vehicle_requisition' | 'hr_action';
   source_id: number;
   source_label: string;
   source_amount: number | null;
@@ -76,6 +76,8 @@ const sourceTitle = (t: MyApprovalItem['source_type']) =>
     ? 'Asset Requisition'
     : t === 'vehicle_requisition'
     ? 'Vehicle Requisition'
+    : t === 'hr_action'
+    ? 'HR Action'
     : 'Movement Claim';
 
 interface PendingApprovalsCardProps {
@@ -200,6 +202,8 @@ export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ toke
           ? apiUrl(`/api/leave-applications/${id}/reliever-decision`)
           : item.source_type === 'exit_clearance'
           ? apiUrl(`/api/exit-clearance-items/${id}/decision`)
+          : item.source_type === 'hr_action'
+          ? apiUrl(`/api/hr-ops/actions/${id}/decision`)
           : apiUrl(`/api/my-approvals/${id}/act`);
       const res = await fetch(url, {
         method: 'POST',
@@ -301,6 +305,7 @@ export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ toke
     'asset_requisition',
     'vehicle_requisition',
     'exit_clearance',
+    'hr_action',
     'claim'
   ];
   const byCategory = new Map<MyApprovalItem['source_type'], MyApprovalItem[]>();

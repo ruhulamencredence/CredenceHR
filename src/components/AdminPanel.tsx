@@ -29,6 +29,7 @@ import { RecruitmentPanel } from './RecruitmentPanel';
 import { GrievanceDisciplinaryPanel } from './GrievanceDisciplinaryPanel';
 import { HRAnalyticsDashboard } from './HRAnalyticsDashboard';
 import { DocumentVaultPanel } from './DocumentVaultPanel';
+import { HROperationsPanel } from './HROperationsPanel';
 import { AdminDashboard } from './AdminDashboard';
 import { UserAccessDrawer, UserAccessChips, userInitials, ROLE_BADGE, ROLE_LABEL } from './UserAccessDrawer';
 import { UserBulkBar } from './UserBulkBar';
@@ -60,6 +61,7 @@ const MODULE_ACCESS_GROUPS: { label: string; keys: AdminModuleKey[] }[] = [
   { label: 'HR - Attendance', keys: ['attendance', 'attendance_reports', 'office_attendance'] },
   { label: 'HR - Claims/Bill/Disbursement', keys: ['claims', 'conveyance', 'disbursement'] },
   { label: 'HR - Employee', keys: ['employees', 'tracking', 'asset_management', 'vehicle_management', 'vehicle_maintainer'] },
+  { label: 'HR Operations', keys: ['hr_operations'] },
   { label: 'MIS', keys: ['users', 'projects', 'branches'] },
   { label: 'Payroll', keys: ['payroll'] },
   {
@@ -72,7 +74,7 @@ const MODULE_ACCESS_GROUPS: { label: string; keys: AdminModuleKey[] }[] = [
         'claims', 'conveyance', 'disbursement',
         'employees', 'tracking', 'asset_management', 'vehicle_management', 'vehicle_maintainer',
         'users', 'projects', 'branches',
-        'payroll',
+        'payroll', 'hr_operations',
       ].includes(key)
     )
   }
@@ -270,7 +272,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // PUT /api/users/:id/module-permissions).
   const canGrantModuleAccess = isSuperAdmin || !!user.can_grant_module_access;
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'my_conveyance' | 'disbursement' | 'holidays' | 'asset_management' | 'vehicle_management' | 'permanent_delete_log' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault'>(
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'my_conveyance' | 'disbursement' | 'holidays' | 'asset_management' | 'vehicle_management' | 'permanent_delete_log' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'hr_operations'>(
     () => {
       // Restores whichever tab this Admin was last looking at — see the
       // "pull down to reload" note in App.tsx: since a reload now has to be
@@ -4002,6 +4004,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       {activeTab === 'grievance_disciplinary' && <GrievanceDisciplinaryPanel token={token} />}
       {activeTab === 'hr_analytics' && <HRAnalyticsDashboard token={token} />}
       {activeTab === 'document_vault' && <DocumentVaultPanel token={token} />}
+      {activeTab === 'hr_operations' && <HROperationsPanel token={token} />}
 
       {/* TAB: PERMANENT DELETE LOG — Superadmin-only (see GET
           /api/entries/permanent-delete-log and the comment on DELETE

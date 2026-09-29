@@ -41,6 +41,7 @@ import { EmployeeDirectory } from './components/EmployeeDirectory';
 import { MyResignation } from './components/MyResignation';
 import { AssetManagement } from './components/AssetManagement';
 import { MyCases } from './components/MyCases';
+import { MyLetters } from './components/MyLetters';
 import { VehicleManagement } from './components/VehicleManagement';
 import { requestQuickAccessTab } from './lib/quickAccess';
 import { NoticePopup } from './components/NoticePopup';
@@ -97,7 +98,7 @@ export default function App() {
   // this account was actually looking at, instead of resetting to the
   // Admin/User Panel default every time.
   const selfServiceViewStorageKey = user ? `mpr_self_service_view_${user.id}` : null;
-  const [selfServiceView, setSelfServiceView] = useState<'leaveApplication' | 'leaveManagement' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | null>(() => {
+  const [selfServiceView, setSelfServiceView] = useState<'leaveApplication' | 'leaveManagement' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | null>(() => {
     try {
       const saved = selfServiceViewStorageKey ? localStorage.getItem(selfServiceViewStorageKey) : null;
       if (saved === 'leaveApplication' || saved === 'leaveManagement' || saved === 'leaveApprovals' || saved === 'timesheet' || saved === 'approveApplications' || saved === 'employeeDirectory' || saved === 'resignation') {
@@ -577,6 +578,24 @@ export default function App() {
     </div>
   );
 
+  // Opens an Admin Panel module from places that don't get
+  // onGoToAdminModule as a prop (the header's alerts bell — e.g. an HR
+  // Operations alert). Same state changes as sidebarNavProps.onGoToAdminModule.
+  useEffect(() => {
+    const onOpen = (e: Event) => {
+      const target = (e as CustomEvent).detail;
+      if (!target) return;
+      setSelfServiceView(null);
+      setShowProfilePage(false);
+      setShowChat(false);
+      setShowAlertsPage(false);
+      setViewMode('admin');
+      setAdminNavRequest({ target, ts: Date.now() });
+    };
+    window.addEventListener('credence:open-admin-module', onOpen);
+    return () => window.removeEventListener('credence:open-admin-module', onOpen);
+  }, []);
+
   if (!token || !user) {
     return (
       <>
@@ -730,7 +749,7 @@ export default function App() {
       setViewMode('admin');
       setAdminNavRequest({ target, ts: Date.now() });
     },
-    onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases') => {
+    onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters') => {
       setShowProfilePage(false);
           setShowChat(false);
           setShowAlertsPage(false);
@@ -982,6 +1001,14 @@ export default function App() {
               setShowAlertsPage(false);
               sidebarNavProps.onGoToSelfServiceTab('myCases');
             }}
+            onOpenMyLetters={() => {
+              setShowAlertsPage(false);
+              sidebarNavProps.onGoToSelfServiceTab('myLetters');
+            }}
+            onOpenHrOperations={() => {
+              setShowAlertsPage(false);
+              sidebarNavProps.onGoToAdminModule('hr_operations');
+            }}
           />
         ) : showProfilePage ? (
           <ProfilePage
@@ -1026,6 +1053,8 @@ export default function App() {
           <AssetManagement onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'myCases' ? (
           <MyCases token={token} onBack={() => setSelfServiceView(null)} />
+        ) : selfServiceView === 'myLetters' ? (
+          <MyLetters token={token} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'vehicleManagement' ? (
           // VehicleManagement.tsx (Book a Ride/Ride Status) — same header-
           // less wrapper pattern as My Asset just above.

@@ -30,6 +30,7 @@
 
 import type { Express } from "express";
 import type { AlertType } from "./Alerts";
+import { getMyHrActionApprovals } from "./HROperationsRoutes";
 
 interface ApprovalRouteDeps {
   authenticateToken: any;
@@ -716,6 +717,12 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
           };
         })
       ];
+
+      // HR Operations personnel actions (Promotion/Increment/Transfer…)
+      // waiting on this account — their own chain lives in
+      // HROperationsRoutes.ts and is decided through
+      // POST /api/hr-ops/actions/:id/decision.
+      (combined as any[]).push(...(await getMyHrActionApprovals(queryDB, myId)));
 
       res.json(await attachClaimRefsToMyApprovals(combined));
     } catch (err: any) {
