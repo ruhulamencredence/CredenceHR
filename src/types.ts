@@ -1418,7 +1418,10 @@ export type AlertType =
   | 'hr_action'
   | 'hr_letter'
   | 'hr_report'
-  | 'hr_request';
+  | 'hr_request'
+  // Site Attendance (supervisor muster roll): a reminder / review outcome
+  // for the supervisor — opens Self Service -> Team Attendance.
+  | 'site_attendance';
 
 export interface Alert {
   id: number;

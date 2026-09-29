@@ -154,6 +154,8 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
             (onOpenHrOperations || (() => window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'hr_operations' }))))();
             setTimeout(() => window.dispatchEvent(new CustomEvent('credence:hr-ops-tab', { detail: 'reports' })), 0);
           }
+        : alert.type === 'site_attendance'
+        ? () => window.dispatchEvent(new CustomEvent('credence:open-self-service', { detail: 'teamAttendance' }))
         : alert.type === 'hr_letter'
         ? /^New Letter|Request Rejected$/.test(alert.title)
           ? onOpenMyLetters

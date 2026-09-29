@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Capacitor } from '@capacitor/core';
 import { Project, MprNumber, Entry, Budget, BudgetItem, User, MprUsage, ClaimsNavRequest, JobsNavRequest, DashboardNavRequest, LeaveNavRequest } from '../types';
-import { Calendar, Building2, FileText, Package, Clock, Plus, AlertTriangle, CheckCircle2, ChevronRight, X, Trash2, Edit2, Lock, Wallet, ArrowLeft, FolderOpen, ListChecks, Search, Save, Briefcase, FileDown, Scissors, Route, Info, Contact, Bell, Car } from 'lucide-react';
+import { Calendar, Building2, FileText, Package, Clock, Plus, AlertTriangle, CheckCircle2, ChevronRight, X, Trash2, Edit2, Lock, Wallet, ArrowLeft, FolderOpen, ListChecks, Search, Save, Briefcase, FileDown, Scissors, Route, Info, Contact, Bell, Car, ClipboardCheck } from 'lucide-react';
+import { useSiteSupervisor } from './TeamAttendance';
 import { apiUrl } from '../lib/api';
 import { formatDate, todayDateOnlyString, dateRangeOptions, formatDateLabel, latestDateStr, isDateBlockedByLeadTime } from '../lib/formatDate';
 import { useDeliveryLeadTime } from '../lib/useDeliveryLeadTime';
@@ -935,6 +936,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // Live badges for the mobile Dashboard's Book a Ride / My Asset tiles.
   const activeRides = useActiveRides(token, user.id) || [];
   const assetSummary = useMyAssetSummary(token);
+  const siteSupervisor = useSiteSupervisor(token);
 
   const [mobileActiveSection, setMobileActiveSection] = useState<'budget' | 'jobs' | 'entries' | 'jobEdit' | 'claim' | 'claims' | 'conveyanceClaim' | 'leave' | 'timesheet' | 'employeeDirectory' | 'noticeBoard' | null>(
     () => {
@@ -3213,6 +3215,25 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                 )}
               </div>
               <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">My Asset</span>
+            </button>
+          )}
+          {/* Team Attendance — only for Site Attendance supervisors
+              (TeamAttendance.tsx); badge = teams not submitted today. */}
+          {siteSupervisor.teams > 0 && (
+            <button
+              type="button"
+              onClick={() => window.dispatchEvent(new CustomEvent('credence:open-self-service', { detail: 'teamAttendance' }))}
+              className="relative flex flex-col items-center justify-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 h-[104px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-teal-100/70 via-white/50 to-emerald-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
+            >
+              <div className="p-2.5 rounded-2xl bg-gradient-to-br from-teal-400 to-emerald-500 shadow-[0_6px_16px_-2px_rgba(13,148,136,0.35)] border border-white/30 relative">
+                <ClipboardCheck className="w-6 h-6 text-white" />
+                {siteSupervisor.notSubmitted > 0 && (
+                  <span className="absolute -top-1.5 -right-1.5 text-[10px] font-semibold bg-rose-600 text-white rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 border border-white/70">
+                    {siteSupervisor.notSubmitted}
+                  </span>
+                )}
+              </div>
+              <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">Team Attendance</span>
             </button>
           )}
         </div>

@@ -37,7 +37,8 @@
 // re-filtered in JS, writes only ever use `WHERE id = ?`.
 
 import type { Express } from "express";
-import { getHolidayMapsByGroup, getEmployeeBranchTypeMap, type HolidayAppliesTo } from "./holidayRoutes";
+import { getHolidayMapsByGroup, getEmployeeBranchTypeMap, getEmployeeBranchTypeByEmployeeId, type HolidayAppliesTo } from "./holidayRoutes";
+import { loadSiteEntries } from "./SiteAttendanceRoutes";
 import { buildServiceBook, loadEmployeeWorld, loadSettings, snapshotOf, currentValues, toDate, num, monthsBetween } from "./HROperationsRoutes";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
@@ -368,12 +369,16 @@ export interface AttendanceDay {
 // Reports, HrOpsReportsRoutes.ts).
 export interface AttendanceData {
   branchTypes: Map<number, HolidayAppliesTo>;
+  // Keyed by all_employees.id — covers Employees with no login too.
+  branchByEmployee: Map<number, HolidayAppliesTo>;
   holidays: Record<HolidayAppliesTo, Map<string, { day_type: string; title: string }>>;
   remoteByUser: Map<number, any[]>;
   punchesByPin: Map<string, any[]>;
   leavesByUser: Map<number, any[]>;
   correctionsByUser: Map<number, any[]>;
   waiversByEmployee: Map<number, any[]>;
+  // Confirmed Site Attendance (supervisor muster roll) entries.
+  siteByEmployee: Map<number, any[]>;
   policies: any[];
 }
 
@@ -394,8 +399,9 @@ async function rowsInRange(queryDB: QueryDB, table: string, column: string, from
 
 export async function loadAttendanceData(queryDB: QueryDB, from: string, to: string, emp?: any): Promise<AttendanceData> {
   const userId = emp?.user_id ? Number(emp.user_id) : null;
-  const [branchTypes, holidays, remote, punches, leaves, corrections, waivers, policies] = await Promise.all([
+  const [branchTypes, branchByEmployee, holidays, remote, punches, leaves, corrections, waivers, policies, site] = await Promise.all([
     getEmployeeBranchTypeMap(queryDB),
+    getEmployeeBranchTypeByEmployeeId(queryDB),
     getHolidayMapsByGroup(queryDB, from, to),
     emp ? (userId ? rowsFor(queryDB, "attendance", "user_id", userId) : Promise.resolve([])) : rowsInRange(queryDB, "attendance", "attendance_date", from, to),
     emp
@@ -406,16 +412,19 @@ export async function loadAttendanceData(queryDB: QueryDB, from: string, to: str
     emp ? (userId ? rowsFor(queryDB, "leave_applications", "user_id", userId) : Promise.resolve([])) : queryDB("SELECT * FROM leave_applications").catch(() => []),
     emp ? (userId ? rowsFor(queryDB, "attendance_corrections", "user_id", userId) : Promise.resolve([])) : rowsInRange(queryDB, "attendance_corrections", "attendance_date", from, to),
     emp ? rowsFor(queryDB, "late_waivers", "employee_id", Number(emp.id)) : rowsInRange(queryDB, "late_waivers", "waiver_date", from, to),
-    queryDB("SELECT * FROM late_policy_settings").catch(() => [])
+    queryDB("SELECT * FROM late_policy_settings").catch(() => []),
+    loadSiteEntries(queryDB, from, to, emp ? Number(emp.id) : undefined)
   ]);
   return {
     branchTypes,
+    branchByEmployee,
     holidays: holidays as AttendanceData["holidays"],
     remoteByUser: indexBy<number>(remote, (r) => (r.user_id != null ? Number(r.user_id) : null)),
     punchesByPin: indexBy<string>(punches, (r) => (r.device_user_pin != null ? String(r.device_user_pin) : null)),
     leavesByUser: indexBy<number>(leaves, (r) => (r.user_id != null ? Number(r.user_id) : null)),
     correctionsByUser: indexBy<number>(corrections, (r) => (r.user_id != null ? Number(r.user_id) : null)),
     waiversByEmployee: indexBy<number>(waivers, (r) => (r.employee_id != null ? Number(r.employee_id) : null)),
+    siteByEmployee: indexBy<number>(site, (r) => (r.employee_id != null ? Number(r.employee_id) : null)),
     policies
   };
 }
@@ -424,7 +433,7 @@ export async function loadAttendanceData(queryDB: QueryDB, from: string, to: str
 // first-in / last-out and late marks (Payroll's late policy and waivers).
 export function computeAttendanceDays(data: AttendanceData, emp: any, from: string, to: string, today: string, leaveLabel: (k: string) => string): AttendanceDay[] {
   const userId = emp.user_id ? Number(emp.user_id) : null;
-  const group: HolidayAppliesTo = (userId && data.branchTypes.get(userId)) || "head_office";
+  const group: HolidayAppliesTo = data.branchByEmployee.get(Number(emp.id)) || (userId && data.branchTypes.get(userId)) || "head_office";
   const holidays = data.holidays[group];
   const joining = toDate(emp.joining_date);
   const lastDay = Number(emp.is_active ?? 1) === 0 ? toDate(emp.job_status_effective_date) || toDate(emp.status_effective_date) : null;
@@ -467,6 +476,24 @@ export function computeAttendanceDays(data: AttendanceData, emp: any, from: stri
     keepOut(d, t);
     note(d, "Office device");
   }
+  // Site Attendance: Present without a time still counts as present (at the
+  // shift start, so never late); Late carries the arrival time; Leave is a
+  // supervisor-recorded leave day; Absent is simply no attendance.
+  const sitePresent = new Set<string>();
+  const siteLeave = new Set<string>();
+  for (const e of data.siteByEmployee.get(Number(emp.id)) || []) {
+    const d = toDate(e.attendance_date);
+    if (!d || d < from || d > to) continue;
+    if (e.status === "leave") {
+      siteLeave.add(d);
+      continue;
+    }
+    if (e.status !== "present" && e.status !== "late") continue;
+    sitePresent.add(d);
+    if (e.in_time) keepIn(d, new Date(`${d}T${e.in_time}:00`));
+    if (e.out_time) keepOut(d, new Date(`${d}T${e.out_time}:00`));
+    note(d, "Site supervisor");
+  }
   const leaveByDay = new Map<string, string>();
   for (const l of leaves) {
     if (l.status !== "approved") continue;
@@ -475,6 +502,7 @@ export function computeAttendanceDays(data: AttendanceData, emp: any, from: stri
     if (!s || !e || e < from || s > to) continue;
     for (let d = new Date(`${s < from ? from : s}T00:00:00`); ymd(d) <= (e > to ? to : e); d.setDate(d.getDate() + 1)) leaveByDay.set(ymd(d), leaveLabel(l.leave_type));
   }
+  for (const d of siteLeave) if (!leaveByDay.has(d)) leaveByDay.set(d, "Leave (site)");
   const correctionByDay = new Map<string, string>();
   for (const c of corrections) {
     const d = toDate(c.attendance_date);
@@ -499,7 +527,7 @@ export function computeAttendanceDays(data: AttendanceData, emp: any, from: stri
     let status: AttendanceDay["status"];
     if (joining && d < joining) status = "not_joined";
     else if (lastDay && d > lastDay) status = "separated";
-    else if (inAt) status = "present";
+    else if (inAt || sitePresent.has(d)) status = "present";
     else if (hol) status = hol.day_type === "weekend" ? "weekend" : "holiday";
     else if (leaveByDay.has(d)) status = "leave";
     else if (d > today) status = "future";

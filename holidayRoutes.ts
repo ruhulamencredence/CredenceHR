@@ -164,6 +164,28 @@ export async function getEmployeeBranchTypeMap(
   return map;
 }
 
+// Same as getEmployeeBranchTypeMap, but keyed by all_employees.id — so an
+// Employee with no login (site workers marked by a supervisor, ZK-only
+// staff) still gets their own branch's Weekend/Holiday calendar.
+export async function getEmployeeBranchTypeByEmployeeId(
+  queryDB: (sql: string, params?: any[]) => Promise<any>
+): Promise<Map<number, HolidayAppliesTo>> {
+  const map = new Map<number, HolidayAppliesTo>();
+  try {
+    const [employees, branches] = await Promise.all([queryDB("SELECT * FROM all_employees"), queryDB("SELECT * FROM branches")]);
+    const branchTypeById = new Map<number, HolidayAppliesTo>(
+      branches.map((b: any) => [Number(b.id), (b.branch_type === "project_site" ? "project_site" : "head_office") as HolidayAppliesTo])
+    );
+    for (const e of employees) {
+      const type = e.branch_id != null ? branchTypeById.get(Number(e.branch_id)) : undefined;
+      map.set(Number(e.id), type || "head_office");
+    }
+  } catch {
+    // Best-effort, same as above.
+  }
+  return map;
+}
+
 // Every calendar entry between from/to (inclusive), as a Map keyed by
 // "YYYY-MM-DD" for O(1) lookups while looping a month's days. Used by the
 // Monthly Attendance Report and Date-Wise Attendance Report in server.ts —

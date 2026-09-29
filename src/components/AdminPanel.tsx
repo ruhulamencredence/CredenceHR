@@ -18,7 +18,7 @@ import { ApprovalManager } from './ApprovalManager';
 import { ApprovalTemplateManager } from './ApprovalTemplateManager';
 import { ApprovalBadge } from './ApprovalBadge';
 import { EmployeeTrackingPanel } from './EmployeeTrackingPanel';
-import { OfficeAttendancePanel } from './OfficeAttendancePanel';
+import { OfficeAttendanceHub } from './SiteAttendanceAdmin';
 import { DeliveryDateConditionsPanel } from './DeliveryDateConditionsPanel';
 import { HolidayCalendarPanel } from './HolidayCalendarPanel';
 import { AssetManagementAdmin } from './AssetManagementAdmin';
@@ -3960,7 +3960,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           roster's zk_device_pin instead of a logged-in user. */}
       {activeTab === 'office_attendance' && (
         <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6">
-          <OfficeAttendancePanel token={token} />
+          <OfficeAttendanceHub token={token} />
         </div>
       )}
 
