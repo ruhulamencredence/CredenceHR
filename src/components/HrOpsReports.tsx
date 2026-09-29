@@ -12,6 +12,9 @@
 //     schedule that notifies chosen HR users.
 //   My Reports — the viewer's own saved reports.
 //   Received — results a schedule (or "Send now") delivered to the viewer.
+//   Requests — what employees submitted for their gaps, to approve / reject
+//     (asked from any report: tick employees -> Request from employees, or
+//     "Fix" a row directly — HrOpsGapTools.tsx).
 //   Company Names — previous-employer spellings, merged into one.
 
 import React, { useEffect, useMemo, useState } from 'react';
@@ -31,6 +34,8 @@ import {
   GraduationCap,
   HandCoins,
   Inbox,
+  MailQuestion,
+  Wrench,
   Layers,
   ListFilter,
   Package,
@@ -53,6 +58,7 @@ import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../
 import { savePdfCrossPlatform } from '../lib/saveFile';
 import credenceLogo from '../assets/credence-logo.png';
 import { pdfSafe } from './HrOps360Parts';
+import { FixGapsModal, RequestInfoModal, InfoRequestsReview } from './HrOpsGapTools';
 import { useHrApi, Modal, Notice, Badge, fmtDate, monthLabel, taka, inputCls, labelCls, btnPrimary, btnGhost } from './HrOpsShared';
 
 // ---------------------------------------------------------------------------
@@ -430,8 +436,24 @@ async function exportPdf(title: string, r: ReportResult, filtersText: string) {
 // Result view (builder, saved and received runs)
 // ---------------------------------------------------------------------------
 
-const ResultView: React.FC<{ title: string; result: ReportResult; filtersText?: string; onOpenEmployee?: (id: number) => void }> = ({ title, result, filtersText, onOpenEmployee }) => {
+// Columns that make a report about gaps HR can fix from the row.
+const GAP_KEYS = new Set(['missing_documents', 'missing_documents_count', 'documents_status', 'expired_documents', 'nominee_status', 'nominees', 'nominee_share_total', 'has_emergency_contact', 'emergency_contact']);
+
+const ResultView: React.FC<{
+  title: string;
+  result: ReportResult;
+  filtersText?: string;
+  onOpenEmployee?: (id: number) => void;
+  // Row selection + "Request from employees" + per-row "Fix" (Report Builder).
+  gapTools?: { token: string; canUpload: boolean; onChanged: () => void };
+}> = ({ title, result, filtersText, onOpenEmployee, gapTools }) => {
   const [groupKey, setGroupKey] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [fixing, setFixing] = useState<{ employee_id: number; name: string; user_id: number | null } | null>(null);
+  const [requesting, setRequesting] = useState(false);
+  const [notice, setNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  useEffect(() => setSelected(new Set()), [result]);
+  const showFix = !!gapTools && [...result.columns.map((c) => c.key), result.group_by?.key].some((k) => k && GAP_KEYS.has(k));
   const [sort, setSort] = useState<{ key: string; dir: 1 | -1 }>({ key: 'name', dir: 1 });
   const [q, setQ] = useState('');
   useEffect(() => setGroupKey(null), [result]);
@@ -454,8 +476,11 @@ const ResultView: React.FC<{ title: string; result: ReportResult; filtersText?: 
     });
   }, [result, group, q, sort]);
   const maxCount = Math.max(1, ...(result.groups || []).map((g) => g.count));
+  const allVisibleSelected = rows.length > 0 && rows.every((r) => selected.has(r.employee_id));
+  const requestTargets = (selected.size ? result.rows.filter((r) => selected.has(r.employee_id)) : rows).map((r) => ({ employee_id: r.employee_id, name: r.name }));
   return (
     <div className="space-y-3">
+      <Notice msg={notice} onClose={() => setNotice(null)} />
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="text-sm">
           <span className="font-bold text-slate-900">{result.total}</span> <span className="text-slate-500">employee(s)</span>
@@ -497,6 +522,11 @@ const ResultView: React.FC<{ title: string; result: ReportResult; filtersText?: 
       )}
       <div className="flex flex-wrap items-center gap-2">
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search in results…" className={`${inputCls} max-w-xs`} />
+        {gapTools && rows.length > 0 && (
+          <button type="button" className={btnPrimary} onClick={() => setRequesting(true)}>
+            <MailQuestion className="w-3.5 h-3.5" /> Request from employees ({selected.size || rows.length})
+          </button>
+        )}
         {group && (
           <span className="inline-flex items-center gap-1 text-xs bg-blue-50 text-blue-700 px-2 py-1 rounded-md">
             {result.group_by?.label}: {group.key}
@@ -510,6 +540,16 @@ const ResultView: React.FC<{ title: string; result: ReportResult; filtersText?: 
         <table className="min-w-full text-xs">
           <thead className="bg-slate-50 text-slate-500 sticky top-0">
             <tr>
+              {gapTools && (
+                <th className="px-3 py-2 w-8">
+                  <input
+                    type="checkbox"
+                    checked={allVisibleSelected}
+                    onChange={(e) => setSelected(e.target.checked ? new Set(rows.map((r) => r.employee_id)) : new Set())}
+                    aria-label="Select all"
+                  />
+                </th>
+              )}
               {result.columns.map((c) => (
                 <th
                   key={c.key}
@@ -519,18 +559,36 @@ const ResultView: React.FC<{ title: string; result: ReportResult; filtersText?: 
                   {c.label} {sort.key === c.key ? (sort.dir === 1 ? '▲' : '▼') : ''}
                 </th>
               ))}
+              {showFix && <th className="px-3 py-2" />}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={result.columns.length} className="px-3 py-8 text-center text-slate-400">
+                <td colSpan={result.columns.length + (gapTools ? 1 : 0) + (showFix ? 1 : 0)} className="px-3 py-8 text-center text-slate-400">
                   No employee matches.
                 </td>
               </tr>
             ) : (
               rows.map((r) => (
-                <tr key={r.employee_id} className="hover:bg-slate-50/60">
+                <tr key={r.employee_id} className={`hover:bg-slate-50/60 ${selected.has(r.employee_id) ? 'bg-blue-50/40' : ''}`}>
+                  {gapTools && (
+                    <td className="px-3 py-1.5 align-top">
+                      <input
+                        type="checkbox"
+                        checked={selected.has(r.employee_id)}
+                        onChange={(e) =>
+                          setSelected((sel) => {
+                            const n = new Set(sel);
+                            if (e.target.checked) n.add(r.employee_id);
+                            else n.delete(r.employee_id);
+                            return n;
+                          })
+                        }
+                        aria-label={`Select ${r.name}`}
+                      />
+                    </td>
+                  )}
                   {result.columns.map((c) => (
                     <td key={c.key} className={`px-3 py-1.5 align-top ${c.type === 'number' || c.type === 'money' ? 'text-right whitespace-nowrap' : ''} ${c.type === 'list' ? 'min-w-[160px]' : ''}`}>
                       {c.key === 'name' && onOpenEmployee ? (
@@ -542,12 +600,46 @@ const ResultView: React.FC<{ title: string; result: ReportResult; filtersText?: 
                       )}
                     </td>
                   ))}
+                  {showFix && (
+                    <td className="px-3 py-1.5 align-top text-right">
+                      <button
+                        type="button"
+                        className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-600 whitespace-nowrap"
+                        onClick={() => setFixing({ employee_id: r.employee_id, name: r.name, user_id: r.user_id ?? null })}
+                      >
+                        <Wrench className="w-3 h-3" /> Fix
+                      </button>
+                    </td>
+                  )}
                 </tr>
               ))
             )}
           </tbody>
         </table>
       </div>
+      {fixing && gapTools && (
+        <FixGapsModal
+          token={gapTools.token}
+          employee={fixing}
+          canUpload={gapTools.canUpload}
+          onClose={(changed) => {
+            setFixing(null);
+            if (changed) gapTools.onChanged();
+          }}
+        />
+      )}
+      {requesting && gapTools && (
+        <RequestInfoModal
+          token={gapTools.token}
+          employees={requestTargets}
+          onClose={() => setRequesting(false)}
+          onSent={(text) => {
+            setRequesting(false);
+            setSelected(new Set());
+            setNotice({ type: 'success', text: `${text} Track them under Requests.` });
+          }}
+        />
+      )}
     </div>
   );
 };
@@ -558,12 +650,13 @@ const ResultView: React.FC<{ title: string; result: ReportResult; filtersText?: 
 
 const Builder: React.FC<{
   token: string;
+  canUpload: boolean;
   columns: ColumnDef[];
   recipients: { id: number; name: string }[];
   initial: { config: ReportConfig; title: string; saved?: SavedReport | null; autorun?: boolean; ts: number };
   onSaved: () => void;
   onOpenEmployee: (id: number) => void;
-}> = ({ token, columns, recipients, initial, onSaved, onOpenEmployee }) => {
+}> = ({ token, canUpload, columns, recipients, initial, onSaved, onOpenEmployee }) => {
   const api = useHrApi(token);
   const colBy = useMemo(() => new Map(columns.map((c) => [c.key, c])), [columns]);
   const clean = (c: ReportConfig): ReportConfig => ({
@@ -816,7 +909,7 @@ const Builder: React.FC<{
           <>
             <h3 className="text-sm font-bold text-slate-900 mb-1">{title}</h3>
             {filtersText && <p className="text-[11px] text-slate-500 mb-2">Filters: {filtersText}</p>}
-            <ResultView title={title} result={result} filtersText={filtersText} onOpenEmployee={onOpenEmployee} />
+            <ResultView title={title} result={result} filtersText={filtersText} onOpenEmployee={onOpenEmployee} gapTools={{ token, canUpload, onChanged: () => run() }} />
           </>
         ) : (
           <div className="text-center py-20 text-sm text-slate-400">
@@ -1104,7 +1197,7 @@ const CompanyNames: React.FC<{ token: string }> = ({ token }) => {
 // Page
 // ---------------------------------------------------------------------------
 
-type View = 'ready' | 'builder' | 'saved' | 'received' | 'companies';
+type View = 'ready' | 'builder' | 'saved' | 'received' | 'requests' | 'companies';
 const VIEW_KEY = 'hr_reports_view';
 
 export const HrOpsReports: React.FC<{ token: string; onOpenEmployee: (id: number) => void }> = ({ token, onOpenEmployee }) => {
@@ -1113,13 +1206,13 @@ export const HrOpsReports: React.FC<{ token: string; onOpenEmployee: (id: number
     try {
       const v = sessionStorage.getItem(VIEW_KEY) as View | null;
       if (v) sessionStorage.removeItem(VIEW_KEY);
-      if (v && ['ready', 'builder', 'saved', 'received', 'companies'].includes(v)) return v;
+      if (v && ['ready', 'builder', 'saved', 'received', 'requests', 'companies'].includes(v)) return v;
     } catch {
       // storage unavailable
     }
     return 'ready';
   });
-  const [catalog, setCatalog] = useState<{ columns: ColumnDef[]; payroll: boolean; recipients: { id: number; name: string }[] } | null>(null);
+  const [catalog, setCatalog] = useState<{ columns: ColumnDef[]; payroll: boolean; document_vault: boolean; recipients: { id: number; name: string }[] } | null>(null);
   const [error, setError] = useState('');
   const [builderInit, setBuilderInit] = useState<{ config: ReportConfig; title: string; saved?: SavedReport | null; autorun?: boolean; ts: number }>({
     config: EMPTY,
@@ -1134,6 +1227,24 @@ export const HrOpsReports: React.FC<{ token: string; onOpenEmployee: (id: number
   useEffect(() => {
     api.get<any>('/api/hr-ops/reports/catalog').then(setCatalog).catch((e) => setError(e.message));
   }, [api]);
+  // An alert (Received / Requests) clicked while this page is already open.
+  useEffect(() => {
+    const onTab = (e: Event) => {
+      if ((e as CustomEvent).detail !== 'reports') return;
+      try {
+        const v = sessionStorage.getItem(VIEW_KEY) as View | null;
+        if (v) {
+          sessionStorage.removeItem(VIEW_KEY);
+          setView(v);
+          setOpenRun(null);
+        }
+      } catch {
+        // storage unavailable
+      }
+    };
+    window.addEventListener('credence:hr-ops-tab', onTab);
+    return () => window.removeEventListener('credence:hr-ops-tab', onTab);
+  }, []);
   const loadSaved = () => api.get<SavedReport[]>('/api/hr-ops/saved-reports').then(setSaved).catch(() => {});
   const loadRuns = () => api.get<RunRow[]>('/api/hr-ops/report-runs').then(setRuns).catch(() => {});
   useEffect(() => {
@@ -1160,6 +1271,7 @@ export const HrOpsReports: React.FC<{ token: string; onOpenEmployee: (id: number
     { key: 'builder', label: 'Report Builder', icon: ListFilter },
     { key: 'saved', label: 'My Reports', icon: Save },
     { key: 'received', label: 'Received', icon: Inbox },
+    { key: 'requests', label: 'Requests', icon: MailQuestion },
     { key: 'companies', label: 'Company Names', icon: Building2 }
   ];
 
@@ -1204,7 +1316,7 @@ export const HrOpsReports: React.FC<{ token: string; onOpenEmployee: (id: number
       )}
 
       {view === 'builder' && (
-        <Builder token={token} columns={catalog.columns} recipients={catalog.recipients} initial={builderInit} onSaved={loadSaved} onOpenEmployee={onOpenEmployee} />
+        <Builder token={token} canUpload={catalog.document_vault} columns={catalog.columns} recipients={catalog.recipients} initial={builderInit} onSaved={loadSaved} onOpenEmployee={onOpenEmployee} />
       )}
 
       {view === 'saved' && (
@@ -1321,6 +1433,8 @@ export const HrOpsReports: React.FC<{ token: string; onOpenEmployee: (id: number
             </table>
           </div>
         ))}
+
+      {view === 'requests' && <InfoRequestsReview token={token} canApproveDocs={catalog.document_vault} onOpenEmployee={onOpenEmployee} />}
 
       {view === 'companies' && <CompanyNames token={token} />}
     </div>

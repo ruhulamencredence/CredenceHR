@@ -737,6 +737,7 @@ export async function runReport(queryDB: QueryDB, today: string, config: ReportC
       for (const k of columns) r[k] = f[k] ?? null;
       if (groupBy && !(groupBy in r)) r[groupBy] = f[groupBy] ?? null;
       if (!("employee_code" in r)) r.employee_code = f.employee_code;
+      r.user_id = f.user_id;
       return r;
     })
     .sort((a, b) => String(a.name).localeCompare(String(b.name)));
@@ -958,7 +959,8 @@ export function registerHrReportsRoutes(app: Express, deps: HrReportsRouteDeps) 
   app.get("/api/hr-ops/reports/catalog", ...gate, async (req: any, res: any) => {
     try {
       const pay = await canPayroll(req);
-      res.json({ columns: REPORT_COLUMNS.filter((c) => !c.payroll || pay), payroll: pay, recipients: await hrOperatorUsers() });
+      const mods = await modulesOf(Number(req.user.id), req.user.role);
+      res.json({ columns: REPORT_COLUMNS.filter((c) => !c.payroll || pay), payroll: pay, document_vault: has(mods, "document_vault"), recipients: await hrOperatorUsers() });
     } catch (err) {
       fail(res, err);
     }

@@ -1417,7 +1417,8 @@ export type AlertType =
   | 'exit_offboarding'
   | 'hr_action'
   | 'hr_letter'
-  | 'hr_report';
+  | 'hr_report'
+  | 'hr_request';
 
 export interface Alert {
   id: number;
