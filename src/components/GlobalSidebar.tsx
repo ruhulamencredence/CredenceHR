@@ -11,6 +11,7 @@ import {
 import { User, AdminModuleKey } from '../types';
 import credenceLogo from '../assets/credence-logo.png';
 import { useProfilePhoto } from '../lib/useProfilePhoto';
+import { useSiteSupervisor } from './TeamAttendance';
 
 interface NavItem {
   key: string;
@@ -47,7 +48,7 @@ interface GlobalSidebarProps {
   onGoToUserClaims: (target: 'movementClaims' | 'conveyanceBill') => void;
   // Everyday employee self-service items — not Admin-gated, shown to every
   // account regardless of role/module access.
-  onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters') => void;
+  onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance') => void;
   // Admin Panel's own Movement Claims / Conveyance Bill Claim review tabs —
   // separate feature from onGoToUserClaims above, gated by module_permissions
   // like every other Admin Panel module.
@@ -124,6 +125,8 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   const [selfServiceOpen, setSelfServiceOpen] = useState(false);
   const [adminPanelOpen, setAdminPanelOpen] = useState(false);
   const photoUrl = useProfilePhoto(token, photoVersion);
+  // Site Attendance supervisor? (shows Self Service -> Team Attendance)
+  const siteSupervisor = useSiteSupervisor(token);
 
   // Minimized/collapsed mode — desktop persistent column only (the mobile
   // overlay drawer is already a full-width sheet the user opens on demand,
@@ -310,6 +313,11 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // account (view / download / acknowledge), certificate requests, and the
   // Employee's own service record. Every account.
   selfServiceItems.push({ key: 'myLetters', label: 'My Letters & Service Record', icon: FileText, onClick: () => onGoToSelfServiceTab('myLetters') });
+  // Team Attendance (TeamAttendance.tsx) — only for accounts HR made the
+  // supervisor (or backup) of a Site Attendance team.
+  if (siteSupervisor.teams > 0) {
+    selfServiceItems.push({ key: 'teamAttendance', label: 'Team Attendance', icon: ClipboardCheck, onClick: () => onGoToSelfServiceTab('teamAttendance') });
+  }
 
   // "Admin Dashboard" — the HR-overview landing page (stat tiles, quick
   // view, charts, notices, leave balances). Every real role === 'admin' |
@@ -365,6 +373,24 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     { key: 'attendance_reports', label: 'Monthly Attendance Report', icon: Calendar, onClick: () => onGoToAdminModule('attendance_reports') },
     { key: 'office_attendance', label: 'Office Attendance', icon: Fingerprint, onClick: () => onGoToAdminModule('office_attendance') },
   ].filter((i) => canSeeModule(i.key as AdminModuleKey));
+  // Site Attendance (supervisor muster roll) lives inside Office Attendance
+  // (SiteAttendanceAdmin.tsx) — same module grant, its own entry here.
+  if (canSeeModule('office_attendance')) {
+    attendanceItems.push({
+      key: 'site_attendance',
+      label: 'Site Attendance',
+      icon: ClipboardCheck,
+      onClick: () => {
+        try {
+          sessionStorage.setItem('office_att_view', 'site');
+        } catch {
+          // storage unavailable — opens on the device view
+        }
+        onGoToAdminModule('office_attendance');
+        setTimeout(() => window.dispatchEvent(new CustomEvent('credence:office-att-view', { detail: 'site' })), 0);
+      }
+    });
+  }
 
   // "Organization" — Projects, Branches. No longer its own collapsible
   // group — Projects/Branches merged into "MIS" below, Departments merged

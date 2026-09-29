@@ -38,7 +38,8 @@
 // (Admin Panel -> Users -> Module Access), exactly like every other module.
 
 import type { Express } from "express";
-import { getHolidayMap, getHolidayMapsByGroup, getEmployeeBranchTypeMap, HolidayAppliesTo } from "./holidayRoutes";
+import { getHolidayMap, getHolidayMapsByGroup, getEmployeeBranchTypeMap, getEmployeeBranchTypeByEmployeeId, HolidayAppliesTo } from "./holidayRoutes";
+import { loadSiteEntries } from "./SiteAttendanceRoutes";
 import { isMailerConfigured, sendMail } from "./mailer";
 
 interface PayrollRouteDeps {
@@ -1605,11 +1606,34 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       if (e.user_id) userIdToEmployeeId.set(Number(e.user_id), Number(e.id));
     }
 
-    const lateDatesByEmployee = new Map<number, string[]>();
-    const extremeLateDatesByEmployee = new Map<number, string[]>();
+    // Re-keyed by Employee, so Site Attendance (supervisor muster roll —
+    // Employees who may have no login at all) can join in: a Late / Present
+    // entry with an arrival time counts like any other first check-in.
+    const firstCheckInByEmployeeDate = new Map<number, Map<string, Date>>();
     for (const [userId, dateMap] of firstCheckInByUserDate.entries()) {
       const employeeId = userIdToEmployeeId.get(userId);
-      if (!employeeId) continue;
+      if (employeeId) firstCheckInByEmployeeDate.set(employeeId, new Map(dateMap));
+    }
+    const employeeIds = new Set<number>(employees.map((e: any) => Number(e.id)));
+    const siteEntries = (await loadSiteEntries(queryDB, monthStart, monthEnd)).filter(
+      (r: any) => employeeIds.has(Number(r.employee_id)) && r.in_time && (r.status === "late" || r.status === "present")
+    );
+    if (siteEntries.length) {
+      const groupByEmployee = await getEmployeeBranchTypeByEmployeeId(queryDB);
+      for (const r of siteEntries) {
+        const employeeId = Number(r.employee_id);
+        const dateStr = String(r.attendance_date instanceof Date ? r.attendance_date.toLocaleDateString("en-CA") : r.attendance_date).slice(0, 10);
+        if (holidayMapsByGroup[groupByEmployee.get(employeeId) || "head_office"].get(dateStr)) continue;
+        const at = new Date(`${dateStr}T${String(r.in_time).slice(0, 5)}:00`);
+        if (!firstCheckInByEmployeeDate.has(employeeId)) firstCheckInByEmployeeDate.set(employeeId, new Map());
+        const existing = firstCheckInByEmployeeDate.get(employeeId)!.get(dateStr);
+        if (!existing || at < existing) firstCheckInByEmployeeDate.get(employeeId)!.set(dateStr, at);
+      }
+    }
+
+    const lateDatesByEmployee = new Map<number, string[]>();
+    const extremeLateDatesByEmployee = new Map<number, string[]>();
+    for (const [employeeId, dateMap] of firstCheckInByEmployeeDate.entries()) {
       for (const [dateStr, checkInAt] of dateMap.entries()) {
         if (waivedKeys.has(`${employeeId}_${dateStr}`)) continue;
         const minutesOfDay = checkInAt.getHours() * 60 + checkInAt.getMinutes();
@@ -2040,9 +2064,14 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       // above. Keyed by all_employees.id (not user_id — an employee with no
       // login still needs a working-days figure for has_attendance_data:
       // false rows below, which default to fully present).
+      // Resolved per Employee (branch_id), so a no-login Employee still gets
+      // their own branch's calendar.
+      const groupByEmployeeId = await getEmployeeBranchTypeByEmployeeId(queryDB);
+      const groupOf = (e: any): HolidayAppliesTo =>
+        groupByEmployeeId.get(Number(e.id)) || (e.user_id ? branchTypeByUserId.get(Number(e.user_id)) : undefined) || "head_office";
       const workingDaysByEmployeeId = new Map<number, number>(
         employees.map((e: any) => {
-          const group = e.user_id ? branchTypeByUserId.get(Number(e.user_id)) || "head_office" : "head_office";
+          const group = groupOf(e);
           return [Number(e.id), Math.max(1, daysInMonth - holidayMapsByGroup[group].size)];
         })
       );
@@ -2110,6 +2139,28 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         }
       }
 
+      // Site Attendance (supervisor muster roll) — keyed by Employee, since
+      // most people marked this way have no login. Any confirmed entry at all
+      // (even Absent) means this Employee's attendance IS tracked, so their
+      // unmarked working days count as absent rather than defaulting to
+      // fully present.
+      const sitePresentByEmployee = new Map<number, Set<string>>();
+      const siteLeaveByEmployee = new Map<number, Set<string>>();
+      const siteTracked = new Set<number>();
+      const employeeById = new Map<number, any>(employees.map((e: any) => [Number(e.id), e]));
+      for (const r of await loadSiteEntries(queryDB, monthStart, monthEnd)) {
+        const employeeId = Number(r.employee_id);
+        const e = employeeById.get(employeeId);
+        if (!e) continue;
+        siteTracked.add(employeeId);
+        const dateStr = String(r.attendance_date instanceof Date ? r.attendance_date.toLocaleDateString("en-CA") : r.attendance_date).slice(0, 10);
+        if (holidayMapsByGroup[groupOf(e)].has(dateStr)) continue;
+        const target = r.status === "present" || r.status === "late" ? sitePresentByEmployee : r.status === "leave" ? siteLeaveByEmployee : null;
+        if (!target) continue;
+        if (!target.has(employeeId)) target.set(employeeId, new Set());
+        target.get(employeeId)!.add(dateStr);
+      }
+
       // Approved Leave Applications overlapping this month — clipped to the
       // days that actually fall inside the month, since a leave range can
       // straddle two months but only the overlapping part counts here.
@@ -2174,13 +2225,16 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         // true for anyone with a pin configured, even with zero punches on
         // file, which is what made the "Synced" badge show up falsely.
         const workingDays = workingDaysByEmployeeId.get(Number(e.id)) || 1;
-        const hasAttendanceData = !!(e.user_id && presentDaysByUser.has(Number(e.user_id)));
-        const group = e.user_id ? branchTypeByUserId.get(Number(e.user_id)) || "head_office" : "head_office";
+        const presentDates = new Set<string>([
+          ...(e.user_id ? presentDaysByUser.get(Number(e.user_id)) || [] : []),
+          ...(sitePresentByEmployee.get(Number(e.id)) || [])
+        ]);
+        const siteLeaveDays = [...(siteLeaveByEmployee.get(Number(e.id)) || [])].filter((d) => !presentDates.has(d)).length;
+        const hasAttendanceData = presentDates.size > 0 || siteTracked.has(Number(e.id));
+        const group = groupOf(e);
         const upcomingDays = upcomingDaysByGroup[group] || 0;
-        const present = hasAttendanceData
-          ? Math.min(workingDays, (presentDaysByUser.get(Number(e.user_id))?.size || 0) + upcomingDays)
-          : workingDays;
-        const leave = e.user_id ? Math.min(workingDays, leaveDaysByUser.get(Number(e.user_id)) || 0) : 0;
+        const present = hasAttendanceData ? Math.min(workingDays, presentDates.size + upcomingDays) : workingDays;
+        const leave = Math.min(workingDays, (e.user_id ? leaveDaysByUser.get(Number(e.user_id)) || 0 : 0) + siteLeaveDays);
         const absent = Math.max(0, workingDays - present - leave);
         const lateCount = lateDatesByEmployee.get(e.id)?.length || 0;
         const lateDeductionDays = Math.floor(lateCount / latesPerDay);

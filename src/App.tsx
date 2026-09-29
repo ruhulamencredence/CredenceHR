@@ -42,6 +42,7 @@ import { MyResignation } from './components/MyResignation';
 import { AssetManagement } from './components/AssetManagement';
 import { MyCases } from './components/MyCases';
 import { MyLetters } from './components/MyLetters';
+import { TeamAttendance } from './components/TeamAttendance';
 import { VehicleManagement } from './components/VehicleManagement';
 import { requestQuickAccessTab } from './lib/quickAccess';
 import { NoticePopup } from './components/NoticePopup';
@@ -98,7 +99,7 @@ export default function App() {
   // this account was actually looking at, instead of resetting to the
   // Admin/User Panel default every time.
   const selfServiceViewStorageKey = user ? `mpr_self_service_view_${user.id}` : null;
-  const [selfServiceView, setSelfServiceView] = useState<'leaveApplication' | 'leaveManagement' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | null>(() => {
+  const [selfServiceView, setSelfServiceView] = useState<'leaveApplication' | 'leaveManagement' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | null>(() => {
     try {
       const saved = selfServiceViewStorageKey ? localStorage.getItem(selfServiceViewStorageKey) : null;
       if (saved === 'leaveApplication' || saved === 'leaveManagement' || saved === 'leaveApprovals' || saved === 'timesheet' || saved === 'approveApplications' || saved === 'employeeDirectory' || saved === 'resignation') {
@@ -595,6 +596,20 @@ export default function App() {
     window.addEventListener('credence:open-admin-module', onOpen);
     return () => window.removeEventListener('credence:open-admin-module', onOpen);
   }, []);
+  // Same, for a Self Service page (e.g. a Site Attendance alert or the
+  // mobile Team Attendance tile -> Team Attendance).
+  useEffect(() => {
+    const onOpen = (e: Event) => {
+      const target = (e as CustomEvent).detail;
+      if (target !== 'teamAttendance') return;
+      setShowProfilePage(false);
+      setShowChat(false);
+      setShowAlertsPage(false);
+      setSelfServiceView(target);
+    };
+    window.addEventListener('credence:open-self-service', onOpen);
+    return () => window.removeEventListener('credence:open-self-service', onOpen);
+  }, []);
 
   if (!token || !user) {
     return (
@@ -749,7 +764,7 @@ export default function App() {
       setViewMode('admin');
       setAdminNavRequest({ target, ts: Date.now() });
     },
-    onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters') => {
+    onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance') => {
       setShowProfilePage(false);
           setShowChat(false);
           setShowAlertsPage(false);
@@ -1055,6 +1070,8 @@ export default function App() {
           <MyCases token={token} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'myLetters' ? (
           <MyLetters token={token} onBack={() => setSelfServiceView(null)} />
+        ) : selfServiceView === 'teamAttendance' ? (
+          <TeamAttendance token={token} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'vehicleManagement' ? (
           // VehicleManagement.tsx (Book a Ride/Ride Status) — same header-
           // less wrapper pattern as My Asset just above.

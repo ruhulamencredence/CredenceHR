@@ -33,6 +33,7 @@ import { registerHROperationsRoutes, ensureHROperationsSchema, applyDueHrActions
 import { registerEmployee360Routes, ensureEmployee360Schema } from "./HrOps360Routes";
 import { registerHrReportsRoutes, ensureHrReportsSchema } from "./HrOpsReportsRoutes";
 import { registerInfoRequestRoutes, ensureInfoRequestsSchema } from "./HrOpsInfoRequestsRoutes";
+import { registerSiteAttendanceRoutes, ensureSiteAttendanceSchema } from "./SiteAttendanceRoutes";
 import { registerHRAnalyticsRoutes } from "./HRAnalyticsRoutes";
 import { registerDocumentVaultRoutes, ensureDocumentVaultSchema } from "./DocumentVaultRoutes";
 import { registerErp360SsoRoutes } from "./Erp360SsoRoutes";
@@ -235,6 +236,7 @@ async function ensureSchemaMigrations() {
   await ensureEmployee360Schema(dbPool);
   await ensureHrReportsSchema(dbPool);
   await ensureInfoRequestsSchema(dbPool);
+  await ensureSiteAttendanceSchema(dbPool);
 
   // Chat (Direct/Group/Community messaging) — table + schema owned by
   // ChatRoutes.ts, only the call site lives here, same as every other
@@ -4854,6 +4856,9 @@ async function startServer() {
   // Information requests: ask employees for missing documents / nominee /
   // emergency contact; HR approves each submission before it is recorded.
   registerInfoRequestRoutes(app, { authenticateToken, requireModule, queryDB, getAdminModules, todayInDhaka, createAlert });
+  // Site Attendance — supervisor muster roll for people who never use the app
+  // (SiteAttendanceRoutes.ts).
+  registerSiteAttendanceRoutes(app, { authenticateToken, requireModule, queryDB, getAdminModules, todayInDhaka, haversineMeters, createAlert });
 
   // Employee Directory (Self Service -> "Employee Directory") — kept in its
   // own file (EmployeeDirectoryRoutes.ts), same reasoning as
