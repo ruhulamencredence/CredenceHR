@@ -34,7 +34,7 @@ import { registerEmployee360Routes, ensureEmployee360Schema } from "./HrOps360Ro
 import { registerHrReportsRoutes, ensureHrReportsSchema } from "./HrOpsReportsRoutes";
 import { registerInfoRequestRoutes, ensureInfoRequestsSchema } from "./HrOpsInfoRequestsRoutes";
 import { registerSiteAttendanceRoutes, ensureSiteAttendanceSchema } from "./SiteAttendanceRoutes";
-import { registerCompanyRoutes, ensureCompanySchema, resolveCompanyContext, checkWorkspaceLogin } from "./CompanyRoutes";
+import { registerCompanyRoutes, ensureCompanySchema, resolveCompanyContext, checkWorkspaceLogin, workspaceStartCompany } from "./CompanyRoutes";
 import { companyStore, activeCompanyId, activeGroupId } from "./companyContext";
 import { scopeSql, scopeColumnsFor } from "./companyScope";
 import { registerHRAnalyticsRoutes } from "./HRAnalyticsRoutes";
@@ -4110,7 +4110,9 @@ async function startServer() {
         { expiresIn: "7d" }
       );
       // The account's default company — its Module Access below is that company's.
-      const companyCtx = await resolveCompanyContext(queryDB, user, undefined).catch(() => ({ companyId: 1, groupId: 1 }));
+      // (The system owner signing in through another group's workspace starts inside it.)
+      const startCompany = await workspaceStartCompany(queryDB, req.body.workspace, user).catch(() => undefined);
+      const companyCtx = await resolveCompanyContext(queryDB, user, startCompany).catch(() => ({ companyId: 1, groupId: 1 }));
 
       res.json(await companyStore.run(companyCtx, async () => ({
         token,
