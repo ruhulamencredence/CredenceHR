@@ -1033,7 +1033,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // mobile tiles, the matching BottomNav tabs, and the desktop Navbar/
   // GlobalSidebar "Jobs" menu's Entry/Jobs/Entry Details items. Job Edit stays
   // on its own separate can_job_edit gate.
-  const canSeeBudgetModule = user.role === 'superadmin' || user.can_view_budget_module !== false;
+  const canSeeBudgetModule = user.pepm_enabled !== false && (user.role === 'superadmin' || user.can_view_budget_module !== false);
   // Superadmin-gated, same as can_view_movement_claims/can_view_conveyance_claims
   // above — OFF by default, granted per account via Admin Panel -> Users ->
   // Module Access (PUT /api/users/:id/timesheet-access). Also mirrored in

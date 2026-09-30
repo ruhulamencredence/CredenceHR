@@ -30,7 +30,7 @@
 import type { Express } from "express";
 import bcrypt from "bcryptjs";
 import { DEFAULT_COMPANY_ID, DEFAULT_GROUP_ID, activeCompanyId, type CompanyContext } from "./companyContext";
-import { SHARE_KINDS, CONFIG_TABLES, OWN_TABLES } from "./companyScope";
+import { SHARE_KINDS, CONFIG_TABLES, OWN_TABLES, GROUP_TABLES } from "./companyScope";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 
@@ -191,6 +191,22 @@ export async function ensureCompanySchema(dbPool: any): Promise<void> {
     await run(`${table} company key`, `ALTER TABLE ${table} ADD UNIQUE KEY ucompany_${oldKey} (company_id, ${cols})`, ["ER_DUP_KEYNAME", "ER_NO_SUCH_TABLE"]);
     await run(`${table} old key`, `ALTER TABLE ${table} DROP INDEX ${oldKey}`, ["ER_CANT_DROP_FIELD_OR_KEY", "ER_NO_SUCH_TABLE"]);
   }
+  // A group's own records (PEPM budgets and rate file, chat rooms…): shared by
+  // its companies, never seen by another group. Everything so far is group 1's.
+  for (const table of GROUP_TABLES) {
+    await run(`${table}.group_id`, `ALTER TABLE ${table} ADD COLUMN group_id INT NOT NULL DEFAULT 1`, ["ER_DUP_FIELDNAME", "ER_NO_SUCH_TABLE"]);
+    await run(`${table} group index`, `ALTER TABLE ${table} ADD INDEX idx_${table}_group (group_id)`, ["ER_DUP_KEYNAME", "ER_NO_SUCH_TABLE"]);
+  }
+  await run(
+    "delivery_date_conditions group key",
+    "ALTER TABLE delivery_date_conditions ADD UNIQUE KEY ugroup_delivery_condition (group_id, condition_type, scope, scope_id)",
+    ["ER_DUP_KEYNAME", "ER_NO_SUCH_TABLE"]
+  );
+  await run("delivery_date_conditions old key", "ALTER TABLE delivery_date_conditions DROP INDEX uniq_delivery_condition", [
+    "ER_CANT_DROP_FIELD_OR_KEY",
+    "ER_NO_SUCH_TABLE"
+  ]);
+  await run("delivery_date_conditions group defaults", SEED_GROUP_DEFAULTS, ["ER_NO_SUCH_TABLE"]);
   await run("companies.shared_settings", "ALTER TABLE companies ADD COLUMN shared_settings TEXT NULL", ["ER_DUP_FIELDNAME"]);
 
   // Module Access per company: add the column, widen the unique key to
@@ -219,6 +235,11 @@ export async function ensureCompanySchema(dbPool: any): Promise<void> {
     ["ER_CANT_DROP_FIELD_OR_KEY"]
   );
 }
+
+// Every group starts with the two Global delivery-date rows the PEPM Condition
+// Set screen expects (disabled, as for the original group).
+const SEED_GROUP_DEFAULTS = `INSERT IGNORE INTO delivery_date_conditions (group_id, condition_type, scope, scope_id, min_lead_days, apply_to_admins, enabled)
+  SELECT g.id, t.ct, 'global', 0, 0, 0, 0 FROM company_groups g CROSS JOIN (SELECT 'entry' AS ct UNION SELECT 'job_edit') t`;
 
 // ---------------------------------------------------------------------------
 // Resolving the active company for a request
@@ -980,6 +1001,7 @@ export function registerCompanyRoutes(app: Express, deps: CompanyRouteDeps) {
       const hash = await bcrypt.hash(adminPassword, 10);
       const u: any = await queryDB("INSERT INTO users (name, email, password_hash, role, group_id) VALUES (?, ?, ?, 'superadmin', ?)", [adminName, adminEmail, hash, groupId]);
       await queryDB("INSERT INTO user_company_access (user_id, company_id, is_default) VALUES (?, ?, ?)", [Number(u.insertId), ids[0], 1]);
+      await queryDB(SEED_GROUP_DEFAULTS).catch(() => {});
       res.json({ success: true, id: groupId, company_ids: ids, superadmin_id: Number(u.insertId) });
     } catch (err) {
       fail(res, err);
