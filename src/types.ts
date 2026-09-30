@@ -549,6 +549,8 @@ export interface User {
   // default for 'admin'/'user' too, so nothing changes until the Superadmin
   // explicitly switches it off (PUT /api/users/:id/budget-module-access).
   can_view_budget_module?: boolean;
+  // false outside the original (Credence) workspace — PEPM is Credence-only.
+  pepm_enabled?: boolean;
   // Admin/Superadmin-granted: shows the Leave Summary card on THIS account's
   // own Dashboard (User Panel) at all. Always true for role === 'superadmin'.
   // OFF by default for 'admin'/'user', switched on per account via PUT

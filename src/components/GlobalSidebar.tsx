@@ -187,7 +187,9 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // Edits stays on its own separate user.can_job_edit gate, and the Movement/
   // Conveyance Claims items further down (now in selfServiceItems) keep their
   // own OFF-by-default gates).
-  const canSeeBudgetModule = isSuperAdmin || user.can_view_budget_module !== false;
+  // PEPM exists only in the Credence workspace (user.pepm_enabled).
+  const pepmOn = user.pepm_enabled !== false;
+  const canSeeBudgetModule = pepmOn && (isSuperAdmin || user.can_view_budget_module !== false);
 
   // Per-module visibility — mirrors AdminPanel.tsx's own `canSee` (Superadmin
   // sees every module; everyone else only the ones explicitly granted).
@@ -211,7 +213,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
       jobEntryGroup.push({ key: 'jobs', label: 'Jobs', icon: Briefcase, onClick: () => onGoToJobsTab('jobs') });
       jobEntryGroup.push({ key: 'entryDetails', label: 'Entry Details', icon: FileText, onClick: () => onGoToJobsTab('entryDetails') });
     }
-    if (user.can_job_edit) {
+    if (pepmOn && user.can_job_edit) {
       jobEntryGroup.push({ key: 'jobEdit', label: 'Job Edits', icon: Edit2, onClick: () => onGoToJobsTab('jobEdit') });
     }
   }
@@ -341,7 +343,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     { key: 'imports', label: 'Data Import', icon: Upload, onClick: () => onGoToAdminModule('imports') },
     { key: 'recycle', label: 'Job Recycle', icon: Recycle, onClick: () => onGoToAdminModule('recycle') },
     { key: 'editlog', label: 'MPR Edit Log', icon: History, onClick: () => onGoToAdminModule('editlog') },
-  ].filter((i) => canSeeModule(i.key as AdminModuleKey));
+  ].filter((i) => pepmOn && canSeeModule(i.key as AdminModuleKey));
 
   // "Claims" — Movement Claims, Conveyance Bill Claim, Conveyance
   // Disbursement. No longer its own collapsible group — merged as flat

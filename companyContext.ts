@@ -25,6 +25,9 @@ export interface CompanyContext {
   // SHARE_KINDS in companyScope.ts.
   motherId?: number;
   shared?: string[];
+  // Background jobs that work on a whole group at once (e.g. the leave-year
+  // rollover): every company of the group, never another group.
+  wholeGroup?: boolean;
 }
 
 export const DEFAULT_COMPANY_ID = 1;

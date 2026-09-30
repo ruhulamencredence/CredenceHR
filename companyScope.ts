@@ -93,7 +93,11 @@ export const SHARE_KINDS: { key: string; label: string; tables: string[] }[] = [
   { key: "late_policy", label: "Late attendance policy", tables: ["late_policy_settings"] },
   { key: "payroll_setup", label: "Salary components & pay grades", tables: ["salary_components", "pay_grades"] },
   { key: "hr_templates", label: "Letter templates, onboarding tasks, increment policies & HR settings", tables: ["hr_letter_templates", "hr_onboarding_tasks", "hr_increment_policies", "hr_ops_settings"] },
-  { key: "approvals", label: "Approval templates & clearance approvers", tables: ["approval_templates", "access_templates", "exit_clearance_approvers"] },
+  {
+    key: "approvals",
+    label: "Approval templates, HR action approvers & clearance approvers",
+    tables: ["approval_templates", "access_templates", "exit_clearance_approvers", "hr_action_approval_steps"]
+  },
   { key: "notices", label: "Notices", tables: ["notices"] },
   { key: "assets", label: "Asset inventory", tables: ["assets"] },
   { key: "vehicles", label: "Vehicles", tables: ["vehicles"] },
@@ -113,7 +117,81 @@ export const OWN_TABLES = new Set([
   "grievances"
 ]);
 
-const ALL_TABLES = [...COMPANY_TABLES, ...EMPLOYEE_TABLES, ...USER_TABLES, ...CONFIG_TABLES.keys(), ...OWN_TABLES, "users"];
+// Shared by every company of a group (PEPM budgets & rate file, chat…) but
+// never seen by another group. Own group_id column.
+export const GROUP_TABLES = new Set([
+  "budgets",
+  "mpr_numbers",
+  "rate_list",
+  "material_categories",
+  "delivery_date_conditions",
+  "chat_rooms",
+  "server_profiles"
+]);
+
+// Rows that hang off another record (a budget's items, a chat room's
+// messages, an account's alerts…): they are seen in the group their parent
+// belongs to. [link column, parent table]. Rows whose link is empty date from
+// before multi-company, so they stay with the original group (1).
+const LINKED_TABLES = new Map<string, [string, string]>([
+  ["admin_module_permissions", ["user_id", "users"]],
+  ["admin_module_permission_layers", ["user_id", "users"]],
+  ["alerts", ["user_id", "users"]],
+  ["approval_chain_steps", ["user_id", "users"]],
+  ["approval_requests", ["requested_by", "users"]],
+  ["approval_template_steps", ["template_id", "approval_templates"]],
+  ["approval_template_step_approvers", ["step_id", "approval_template_steps"]],
+  ["asset_assignments", ["asset_id", "assets"]],
+  ["asset_assignment_claims", ["assignment_id", "asset_assignments"]],
+  ["asset_requisition_items", ["requisition_id", "asset_requisitions"]],
+  ["asset_requisition_events", ["requisition_id", "asset_requisitions"]],
+  ["attendance_report_department_access", ["user_id", "users"]],
+  ["budget_items", ["budget_id", "budgets"]],
+  ["budget_submissions", ["budget_id", "budgets"]],
+  ["entries", ["budget_id", "budgets"]],
+  ["jobs", ["budget_id", "budgets"]],
+  ["job_edit_requests", ["requested_by", "users"]],
+  ["entry_edit_history", ["entry_id", "entries"]],
+  ["entry_permanent_delete_log", ["permanently_deleted_by", "users"]],
+  ["job_candidates", ["posting_id", "job_postings"]],
+  ["candidate_interviews", ["candidate_id", "job_candidates"]],
+  ["case_feedback", ["user_id", "users"]],
+  ["chat_messages", ["room_id", "chat_rooms"]],
+  ["chat_room_members", ["room_id", "chat_rooms"]],
+  ["chat_room_reads", ["room_id", "chat_rooms"]],
+  ["chat_push_tokens", ["user_id", "users"]],
+  ["conveyance_bill_items", ["bill_id", "conveyance_bills"]],
+  ["conveyance_claim_department_access", ["user_id", "users"]],
+  ["document_signatures", ["document_id", "employee_documents"]],
+  ["employee_template_assignments", ["employee_user_id", "users"]],
+  ["exit_clearance_items", ["exit_id", "exit_requests"]],
+  ["hr_report_runs", ["report_id", "hr_saved_reports"]],
+  ["leave_application_department_access", ["user_id", "users"]],
+  ["leave_balance_workflows", ["created_by", "users"]],
+  ["leave_balance_workflow_items", ["workflow_id", "leave_balance_workflows"]],
+  ["notice_dismissals", ["notice_id", "notices"]],
+  ["notice_targets", ["notice_id", "notices"]],
+  ["pay_grade_components", ["pay_grade_id", "pay_grades"]],
+  ["payroll_payment_splits", ["payroll_id", "payrolls"]],
+  ["site_attendance_members", ["team_id", "site_attendance_teams"]],
+  ["site_attendance_sheets", ["team_id", "site_attendance_teams"]],
+  ["user_access_audit", ["target_user_id", "users"]],
+  ["user_claim_references", ["user_claim_id", "user_claims"]],
+  ["user_profile_details", ["user_id", "users"]],
+  ["user_project_permissions", ["user_id", "users"]],
+  ["zk_attendance_logs", ["device_id", "zk_devices"]]
+]);
+
+const ALL_TABLES = [
+  ...COMPANY_TABLES,
+  ...EMPLOYEE_TABLES,
+  ...USER_TABLES,
+  ...CONFIG_TABLES.keys(),
+  ...OWN_TABLES,
+  ...GROUP_TABLES,
+  ...LINKED_TABLES.keys(),
+  "users"
+];
 const TABLE_RE = new RegExp(`\\b(FROM|JOIN)\\s+\`?(${ALL_TABLES.join("|")})\`?(?![\\w\`])(\\s+(?:AS\\s+)?([A-Za-z_][A-Za-z0-9_]*))?`, "gi");
 
 // Words that can follow a table name but are not an alias.
@@ -165,6 +243,22 @@ function scopes(ctx: CompanyContext, group: boolean) {
   };
 }
 
+// Every row of <table> that belongs to the group (any of its companies).
+function groupRows(table: string, gid: string): string {
+  const companies = `SELECT id FROM companies WHERE group_id = ${gid}`;
+  if (table === "users") return `SELECT * FROM users WHERE group_id = ${gid}`;
+  if (GROUP_TABLES.has(table)) return `SELECT * FROM ${table} WHERE group_id = ${gid}`;
+  if (COMPANY_TABLES.has(table) || CONFIG_TABLES.has(table) || OWN_TABLES.has(table)) return `SELECT * FROM ${table} WHERE company_id IN (${companies})`;
+  if (EMPLOYEE_TABLES.has(table)) return `SELECT * FROM ${table} WHERE employee_id IN (SELECT id FROM all_employees WHERE company_id IN (${companies}))`;
+  if (USER_TABLES.has(table)) return `SELECT * FROM ${table} WHERE user_id IN (SELECT id FROM users WHERE group_id = ${gid})`;
+  const [col, parent] = LINKED_TABLES.get(table)!;
+  return `SELECT * FROM ${table} WHERE ${linkCond(col, parent, gid)}`;
+}
+function linkCond(col: string, parent: string, gid: string): string {
+  const ids = parent === "users" ? `SELECT id FROM users WHERE group_id = ${gid}` : `SELECT id FROM (${groupRows(parent, gid)}) gp`;
+  return gid === "1" ? `(${col} IN (${ids}) OR ${col} IS NULL)` : `${col} IN (${ids})`;
+}
+
 // Emergency switch: COMPANY_SCOPE_OFF=1 in the server's environment turns the
 // separation off (every company then sees everything, as before step 2).
 const SCOPE_OFF = process.env.COMPANY_SCOPE_OFF === "1";
@@ -176,7 +270,8 @@ export function scopeSql(sql: string): string {
   if (head.startsWith("INSERT")) return scopeInsert(sql, ctx.companyId, ctx.groupId);
   if (head.startsWith("UPDATE") || head.startsWith("DELETE")) return guardWrite(sql, ctx);
   if (!head.startsWith("SELECT") && !head.startsWith("(")) return sql;
-  const s = scopes(ctx, SINGLE_LOOKUP_RE.test(sql));
+  const s = scopes(ctx, !!ctx.wholeGroup || SINGLE_LOOKUP_RE.test(sql));
+  const gid = int(ctx.groupId);
   return sql.replace(TABLE_RE, (match, kw: string, table: string, aliasPart: string | undefined, alias: string | undefined) => {
     const t = table.toLowerCase();
     let sub: string;
@@ -186,6 +281,7 @@ export function scopeSql(sql: string): string {
     else if (CONFIG_TABLES.has(t)) sub = s.config(t);
     else if (OWN_TABLES.has(t)) sub = s.own(t);
     else if (EMPLOYEE_TABLES.has(t)) sub = s.employeeRows(t);
+    else if (GROUP_TABLES.has(t) || LINKED_TABLES.has(t)) sub = groupRows(t, gid);
     else sub = s.userRows(t);
     const hasAlias = !!alias && !NOT_ALIAS.has(alias.toLowerCase());
     return `${kw} (${sub}) AS ${hasAlias ? alias : t}${hasAlias ? "" : aliasPart || ""}`;
@@ -194,32 +290,80 @@ export function scopeSql(sql: string): string {
 
 // UPDATE / DELETE on a company's own tables only ever touch that company's
 // rows (settings shared from the mother company are read-only here); employees,
-// departments, branches and projects stay within the group.
+// departments, branches and projects stay within the company's group, and so
+// does everything else a group owns.
 const WRITE_RE = /^\s*(UPDATE\s+`?([A-Za-z_][A-Za-z0-9_]*)`?\s+SET\b[\s\S]*?|DELETE\s+FROM\s+`?([A-Za-z_][A-Za-z0-9_]*)`?\s+)\bWHERE\b([\s\S]*)$/i;
+// The same without a WHERE ("DELETE FROM material_categories").
+const WRITE_ALL_RE = /^\s*(UPDATE\s+`?([A-Za-z_][A-Za-z0-9_]*)`?\s+SET\b[\s\S]*|DELETE\s+FROM\s+`?([A-Za-z_][A-Za-z0-9_]*)`?)\s*$/i;
+function writeGuard(table: string, ctx: CompanyContext): string | null {
+  const gid = int(ctx.groupId);
+  if (CONFIG_TABLES.has(table) || OWN_TABLES.has(table)) return `company_id = ${int(ctx.companyId)}`;
+  if (COMPANY_TABLES.has(table)) return `company_id IN (SELECT id FROM companies WHERE group_id = ${gid})`;
+  if (GROUP_TABLES.has(table)) return `group_id = ${gid}`;
+  const link = LINKED_TABLES.get(table);
+  if (link) return linkCond(link[0], link[1], gid);
+  if (EMPLOYEE_TABLES.has(table)) return linkCond("employee_id", "all_employees", gid);
+  if (USER_TABLES.has(table)) return linkCond("user_id", "users", gid);
+  return null;
+}
 function guardWrite(sql: string, ctx: CompanyContext): string {
   const m = sql.match(WRITE_RE);
-  if (!m) return sql;
+  if (!m) {
+    const all = sql.match(WRITE_ALL_RE);
+    if (!all || /\b(ORDER\s+BY|LIMIT|JOIN|SELECT|WHERE)\b/i.test(all[1])) return sql;
+    const extra = writeGuard(String(all[2] || all[3]).toLowerCase(), ctx);
+    return extra ? `${all[1]} WHERE ${extra}` : sql;
+  }
   const table = String(m[2] || m[3]).toLowerCase();
   const cond = m[4];
   // Leave anything unusual (joins, ORDER/LIMIT, subqueries) exactly as written.
   if (/\b(ORDER\s+BY|LIMIT|JOIN|SELECT)\b/i.test(cond)) return sql;
-  let extra: string | null = null;
-  if (CONFIG_TABLES.has(table) || OWN_TABLES.has(table)) extra = `company_id = ${int(ctx.companyId)}`;
-  else if (COMPANY_TABLES.has(table)) extra = `company_id IN (SELECT id FROM companies WHERE group_id = ${int(ctx.groupId)})`;
+  const extra = writeGuard(table, ctx);
   if (!extra) return sql;
   return `${m[1]}WHERE (${cond}) AND ${extra}`;
 }
 
 // INSERT INTO <company table> (cols) VALUES (...) → also sets company_id.
-// New accounts (users) likewise get the active group.
-const INSERT_TABLES = [...COMPANY_TABLES, ...CONFIG_TABLES.keys(), ...OWN_TABLES, "users"];
-const INSERT_RE = new RegExp(`^\\s*INSERT\\s+INTO\\s+\`?(${INSERT_TABLES.join("|")})\`?\\s*\\(([^)]*)\\)\\s*VALUES\\s*\\(([\\s\\S]*)\\)\\s*$`, "i");
+// New accounts (users) and a group's own records likewise get the group.
+const INSERT_TABLES = [...COMPANY_TABLES, ...CONFIG_TABLES.keys(), ...OWN_TABLES, ...GROUP_TABLES, "users"];
+const INSERT_RE = new RegExp(`^\\s*INSERT\\s+INTO\\s+\`?(${INSERT_TABLES.join("|")})\`?\\s*\\(([^)]*)\\)\\s*VALUES\\s*\\(`, "i");
 function scopeInsert(sql: string, companyId: number, groupId: number): string {
   const m = sql.match(INSERT_RE);
   if (!m) return sql;
-  const col = m[1].toLowerCase() === "users" ? "group_id" : "company_id";
-  const val = col === "group_id" ? int(groupId) : int(companyId);
-  // Only the plain single-row form; multi-row / ON DUPLICATE / INSERT…SELECT stay as written.
-  if (new RegExp(`\\b${col}\\b`, "i").test(m[2]) || /\)\s*,\s*\(|ON\s+DUPLICATE|\bSELECT\b/i.test(m[3])) return sql;
-  return `INSERT INTO ${m[1]} (${m[2]}, ${col}) VALUES (${m[3]}, ${val})`;
+  const table = m[1].toLowerCase();
+  const byGroup = table === "users" || GROUP_TABLES.has(table);
+  const col = byGroup ? "group_id" : "company_id";
+  const val = byGroup ? int(groupId) : int(companyId);
+  if (new RegExp(`\\b${col}\\b`, "i").test(m[2])) return sql;
+  // The single row of values, up to its matching ")".
+  const start = m[0].length;
+  let depth = 1;
+  let i = start;
+  let quote = "";
+  for (; i < sql.length && depth > 0; i++) {
+    const ch = sql[i];
+    if (quote) {
+      if (ch === quote && sql[i - 1] !== "\\") quote = "";
+    } else if (ch === "'" || ch === '"') quote = ch;
+    else if (ch === "(") depth++;
+    else if (ch === ")") depth--;
+  }
+  if (depth !== 0) return sql;
+  const values = sql.slice(start, i - 1);
+  const rest = sql.slice(i);
+  // Only the plain single-row form, optionally with ON DUPLICATE KEY UPDATE;
+  // multi-row / INSERT…SELECT stay as written.
+  if (/\bSELECT\b/i.test(values) || !/^\s*(ON\s+DUPLICATE\s+KEY\s+UPDATE\b[\s\S]*)?$/i.test(rest)) return sql;
+  return `INSERT INTO ${m[1]} (${m[2]}, ${col}) VALUES (${values}, ${val})${rest}`;
+}
+
+// Columns to add to a multi-row bulk insert (server.ts bulkInsert) so the rows
+// belong to the active group/company.
+export function scopeColumnsFor(table: string): { col: string; val: number } | null {
+  const ctx = companyStore.getStore();
+  if (!ctx || SCOPE_OFF) return null;
+  const t = table.toLowerCase();
+  if (GROUP_TABLES.has(t)) return { col: "group_id", val: Number(int(ctx.groupId)) };
+  if (COMPANY_TABLES.has(t) || CONFIG_TABLES.has(t) || OWN_TABLES.has(t)) return { col: "company_id", val: Number(int(ctx.companyId)) };
+  return null;
 }

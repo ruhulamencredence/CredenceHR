@@ -21,6 +21,7 @@
 // duplicated or re-imported directly.
 
 import type { Express } from "express";
+import { companyStore, activeGroupId, DEFAULT_COMPANY_ID, DEFAULT_GROUP_ID } from "./companyContext";
 
 interface LeaveRouteDeps {
   authenticateToken: any;
@@ -333,8 +334,18 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
   // hasn't already been rolled over (last_rollover_year), so it's safe to
   // call this often; it only ever actually applies workflows once per year.
   async function checkAndRunLeaveYearRollover(): Promise<void> {
+    // Multi-company: each group keeps its own Year Settings (row id = group
+    // id) and rolls over only its own people.
+    const groups: any[] = await queryDB("SELECT g.id, (SELECT c.id FROM companies c WHERE c.group_id = g.id AND c.is_mother = 1 LIMIT 1) AS mother_id FROM company_groups g").catch(() => []);
+    if (!groups.length) return rolloverGroup(DEFAULT_GROUP_ID);
+    for (const g of groups) {
+      await companyStore.run({ companyId: Number(g.mother_id || DEFAULT_COMPANY_ID), groupId: Number(g.id), wholeGroup: true }, () => rolloverGroup(Number(g.id)));
+    }
+  }
+
+  async function rolloverGroup(groupId: number): Promise<void> {
     try {
-      const rows: any = await queryDB("SELECT * FROM leave_year_settings WHERE id = 1");
+      const rows: any = await queryDB("SELECT * FROM leave_year_settings WHERE id = ?", [groupId]);
       const settings = rows[0];
       if (!settings || !Number(settings.auto_rollover)) return;
 
@@ -353,8 +364,8 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
       if (!actingUserId) return;
 
       await applyAllActiveWorkflows(actingUserId);
-      await queryDB("UPDATE leave_year_settings SET last_rollover_year = ? WHERE id = 1", [currentYear]);
-      console.log(`✅ Leave Year auto-rollover applied for ${currentYear} (start date ${startMonthDay}).`);
+      await queryDB("UPDATE leave_year_settings SET last_rollover_year = ? WHERE id = ?", [currentYear, groupId]);
+      console.log(`✅ Leave Year auto-rollover applied for ${currentYear} (start date ${startMonthDay}, group ${groupId}).`);
     } catch (err: any) {
       console.warn("⚠️ Leave Year auto-rollover check failed: " + err.message);
     }
@@ -1340,7 +1351,7 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
   // itself needs this).
   app.get("/api/leave-year-settings", authenticateToken, requireLeaveManager, async (req: any, res) => {
     try {
-      const rows: any = await queryDB("SELECT * FROM leave_year_settings WHERE id = 1");
+      const rows: any = await queryDB("SELECT * FROM leave_year_settings WHERE id = ?", [activeGroupId()]);
       const r = rows[0];
       res.json({
         close_month_day: r?.close_month_day || "12-31",
@@ -1370,13 +1381,13 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
       const autoRollover = !!body.auto_rollover;
 
       await queryDB(
-        `INSERT INTO leave_year_settings (id, close_month_day, start_month_day, auto_rollover, updated_by) VALUES (1, ?, ?, ?, ?)
+        `INSERT INTO leave_year_settings (close_month_day, start_month_day, auto_rollover, updated_by, id) VALUES (?, ?, ?, ?, ?)
          ON DUPLICATE KEY UPDATE close_month_day = VALUES(close_month_day), start_month_day = VALUES(start_month_day),
            auto_rollover = VALUES(auto_rollover), updated_by = VALUES(updated_by)`,
-        [closeMonthDay, startMonthDay, autoRollover, req.user.id]
+        [closeMonthDay, startMonthDay, autoRollover, req.user.id, activeGroupId()]
       );
 
-      const rows: any = await queryDB("SELECT * FROM leave_year_settings WHERE id = 1");
+      const rows: any = await queryDB("SELECT * FROM leave_year_settings WHERE id = ?", [activeGroupId()]);
       const r = rows[0];
       res.json({
         close_month_day: r.close_month_day,

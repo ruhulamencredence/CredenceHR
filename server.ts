@@ -35,8 +35,8 @@ import { registerHrReportsRoutes, ensureHrReportsSchema } from "./HrOpsReportsRo
 import { registerInfoRequestRoutes, ensureInfoRequestsSchema } from "./HrOpsInfoRequestsRoutes";
 import { registerSiteAttendanceRoutes, ensureSiteAttendanceSchema } from "./SiteAttendanceRoutes";
 import { registerCompanyRoutes, ensureCompanySchema, resolveCompanyContext, checkWorkspaceLogin } from "./CompanyRoutes";
-import { companyStore, activeCompanyId } from "./companyContext";
-import { scopeSql } from "./companyScope";
+import { companyStore, activeCompanyId, activeGroupId } from "./companyContext";
+import { scopeSql, scopeColumnsFor } from "./companyScope";
 import { registerHRAnalyticsRoutes } from "./HRAnalyticsRoutes";
 import { registerDocumentVaultRoutes, ensureDocumentVaultSchema } from "./DocumentVaultRoutes";
 import { registerErp360SsoRoutes } from "./Erp360SsoRoutes";
@@ -240,13 +240,14 @@ async function ensureSchemaMigrations() {
   await ensureHrReportsSchema(dbPool);
   await ensureInfoRequestsSchema(dbPool);
   await ensureSiteAttendanceSchema(dbPool);
-  // Multi-company (CompanyRoutes.ts) — existing data becomes company 1.
-  await ensureCompanySchema(dbPool);
-
   // Chat (Direct/Group/Community messaging) — table + schema owned by
   // ChatRoutes.ts, only the call site lives here, same as every other
   // self-healing migration in this function.
   await ensureChatSchema(dbPool);
+
+  // Multi-company (CompanyRoutes.ts) — existing data becomes company 1. Runs
+  // after every other table exists.
+  await ensureCompanySchema(dbPool);
 
   // Personal Data (ProfilePage.tsx -> PersonalDataForm.tsx) — one row per user,
   // created on first save. Position/Department are deliberately NOT columns
@@ -3626,6 +3627,12 @@ async function seedAdminFromEnv() {
 // which can be several thousand rows) — far fewer round-trips than one INSERT per row.
 async function bulkInsert(table: string, columns: string[], rows: any[][], chunkSize = 500) {
   if (!dbPool || rows.length === 0) return;
+  // Multi-company: the rows belong to the active group / company.
+  const scope = scopeColumnsFor(table);
+  if (scope && !columns.includes(scope.col)) {
+    columns = [...columns, scope.col];
+    rows = rows.map((r) => [...r, scope.val]);
+  }
   const colList = columns.join(", ");
   const rowPlaceholder = `(${columns.map(() => "?").join(", ")})`;
   for (let i = 0; i < rows.length; i += chunkSize) {
@@ -3633,6 +3640,19 @@ async function bulkInsert(table: string, columns: string[], rows: any[][], chunk
     const placeholders = chunk.map(() => rowPlaceholder).join(", ");
     await dbPool.execute(`INSERT INTO ${table} (${colList}) VALUES ${placeholders}`, chunk.flat());
   }
+}
+
+// PEPM (budgets, MPR entries, jobs, rate file…) is used only by the original
+// group (Credence); other workspaces never see it.
+const PEPM_GROUP_ID = 1;
+function pepmEnabled(groupId: number) {
+  return Number(groupId) === PEPM_GROUP_ID;
+}
+const PEPM_API_RE = /^\/api\/(budgets|budget-items|entries|jobs|job-edits|mpr-numbers|rate-file|rate-list|delivery-date-conditions|reports\/budget-submission-status)(\/|$)/;
+
+// dbPool.execute with the same multi-company separation as queryDB.
+function scopedExecute(sql: string, params?: any[]) {
+  return dbPool.execute(scopeSql(sql), params);
 }
 
 async function queryDB(sql: string, params: any[] = []): Promise<any> {
@@ -3728,6 +3748,9 @@ async function startServer() {
       }
       req.companyId = ctx.companyId;
       req.groupId = ctx.groupId;
+      if (!pepmEnabled(ctx.groupId) && PEPM_API_RE.test(String(req.originalUrl || req.url || "").split("?")[0])) {
+        return res.status(403).json({ error: "PEPM is not available in this workspace." });
+      }
       companyStore.run(ctx, () => next());
     });
   };
@@ -4089,12 +4112,13 @@ async function startServer() {
         active_company_id: companyCtx.companyId,
         user: {
           id: user.id,
+          pepm_enabled: pepmEnabled(companyCtx.groupId),
           name: user.name,
           email: user.email,
           username: user.username,
           role: user.role,
           can_edit_delivery_date: user.can_edit_delivery_date === undefined ? true : !!Number(user.can_edit_delivery_date),
-          can_job_edit: !!Number(user.can_job_edit),
+          can_job_edit: !!Number(user.can_job_edit) && pepmEnabled(companyCtx.groupId),
           // Superadmin-granted (or implicit for the Superadmin itself): shows the
           // Remote Attendance Check In/Out card on THIS account's own Dashboard.
           // OFF by default — separate from the "attendance" Admin Panel module,
@@ -4178,8 +4202,9 @@ async function startServer() {
       res.json({
         ...u,
         active_company_id: activeCompanyId(),
+        pepm_enabled: pepmEnabled(activeGroupId()),
         can_edit_delivery_date: u.can_edit_delivery_date === undefined ? true : !!Number(u.can_edit_delivery_date),
-        can_job_edit: !!Number(u.can_job_edit),
+        can_job_edit: !!Number(u.can_job_edit) && pepmEnabled(activeGroupId()),
         can_use_attendance: u.role === "superadmin" ? true : !!Number(u.can_use_attendance),
         attendance_project_id: u.role === "superadmin" ? null : (u.attendance_project_id ?? null),
         can_use_tracking: u.role === "superadmin" ? true : !!Number(u.can_use_tracking),
@@ -6316,7 +6341,7 @@ async function startServer() {
         // Resolve each entry back to its source Budget Excel row the same way GET
         // /api/entries does: prefer budget_item_id, fall back to an MRF No +
         // Description text match for entries created before that column existed.
-        const [rows]: any = await dbPool.execute(
+        const [rows]: any = await scopedExecute(
           `
           SELECT e.id, e.item_name,
             bi.description AS bi_description, bi.specification AS bi_specification, bi.req_qty AS bi_req_qty
@@ -6336,9 +6361,9 @@ async function startServer() {
           [budgetId]
         );
         entryRows = rows;
-        const [r]: any = await dbPool.execute("SELECT materials_name, unit, rate, specification FROM rate_list");
+        const [r]: any = await scopedExecute("SELECT materials_name, unit, rate, specification FROM rate_list");
         rateRows = r;
-        const [c]: any = await dbPool.execute("SELECT head, sub1, sub2, sub3, details, sector FROM material_categories");
+        const [c]: any = await scopedExecute("SELECT head, sub1, sub2, sub3, details, sector FROM material_categories");
         categoryRows = c;
       } else {
         const budgetItemsById = new Map(memoryDb.budget_items.map((bi: any) => [bi.id, bi]));
@@ -6426,7 +6451,7 @@ async function startServer() {
 
       if (isMySQLConnected && dbPool) {
         for (const u of updates) {
-          await dbPool.execute(
+          await scopedExecute(
             `UPDATE entries SET matched_rate = ?, computed_amount = ?, category_head = ?, category_sub1 = ?, category_sub2 = ?, category_sub3 = ?, category_sector = ?, rate_calculated_at = NOW() WHERE id = ?`,
             [
               u.matchedRate,
@@ -6440,7 +6465,7 @@ async function startServer() {
             ]
           );
         }
-        await dbPool.execute(`UPDATE budgets SET rate_approved_at = NOW(), rate_approved_by = ? WHERE id = ?`, [
+        await scopedExecute(`UPDATE budgets SET rate_approved_at = NOW(), rate_approved_by = ? WHERE id = ?`, [
           req.user.id,
           budgetId
         ]);
@@ -6680,14 +6705,14 @@ async function startServer() {
         // Only replace rows that came from a previous Excel import — a manually
         // entered rate (is_manual = 1, added via "No rate match" -> manual entry)
         // survives this re-import instead of being wiped out.
-        await dbPool.execute("DELETE FROM rate_list WHERE is_manual = 0");
+        await scopedExecute("DELETE FROM rate_list WHERE is_manual = 0");
         await bulkInsert(
           "rate_list",
           ["materials_name", "unit", "rate", "specification", "assigned_person", "remarks"],
           rateRecords.map((r: any) => [r.materials_name, r.unit, r.rate, r.specification, r.assigned_person, r.remarks])
         );
 
-        await dbPool.execute("DELETE FROM material_categories");
+        await scopedExecute("DELETE FROM material_categories");
         await bulkInsert(
           "material_categories",
           ["sl_no", "head", "sub1", "sub2", "sub3", "details", "sector"],
@@ -6697,12 +6722,13 @@ async function startServer() {
         if (file_base64 && typeof file_base64 === "string") {
           try {
             const fileBuffer = Buffer.from(file_base64, "base64");
-            await dbPool.execute(
+            await scopedExecute(
               `INSERT INTO rate_file_meta (id, original_filename, file_mimetype, file_data, imported_at)
-               VALUES (1, ?, ?, ?, NOW())
+               VALUES (?, ?, ?, ?, NOW())
                ON DUPLICATE KEY UPDATE original_filename = VALUES(original_filename),
                  file_mimetype = VALUES(file_mimetype), file_data = VALUES(file_data), imported_at = NOW()`,
               [
+                activeGroupId(),
                 String(file_name || "Rate_File.xlsx").slice(0, 255),
                 String(file_mimetype || "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
                 fileBuffer
@@ -6740,10 +6766,11 @@ async function startServer() {
   app.get("/api/rate-file/summary", authenticateToken, requireAdmin, requireModule("imports"), async (req, res) => {
     try {
       if (isMySQLConnected && dbPool) {
-        const [rateCountRows]: any = await dbPool.execute("SELECT COUNT(*) as cnt FROM rate_list");
-        const [catCountRows]: any = await dbPool.execute("SELECT COUNT(*) as cnt FROM material_categories");
-        const [metaRows]: any = await dbPool.execute(
-          "SELECT original_filename, imported_at FROM rate_file_meta WHERE id = 1"
+        const [rateCountRows]: any = await scopedExecute("SELECT COUNT(*) as cnt FROM rate_list");
+        const [catCountRows]: any = await scopedExecute("SELECT COUNT(*) as cnt FROM material_categories");
+        const [metaRows]: any = await scopedExecute(
+          "SELECT original_filename, imported_at FROM rate_file_meta WHERE id = ?",
+          [activeGroupId()]
         );
         res.json({
           rate_count: rateCountRows[0]?.cnt || 0,
@@ -6800,18 +6827,18 @@ async function startServer() {
       const specKey = norm(specification);
 
       if (isMySQLConnected && dbPool) {
-        const [existingRows]: any = await dbPool.execute(
+        const [existingRows]: any = await scopedExecute(
           "SELECT id FROM rate_list WHERE LOWER(TRIM(materials_name)) = ? AND LOWER(TRIM(COALESCE(specification, ''))) = ? AND is_manual = 1",
           [nameKey, specKey]
         );
         if (existingRows.length > 0) {
-          await dbPool.execute("UPDATE rate_list SET rate = ?, added_by = ? WHERE id = ?", [
+          await scopedExecute("UPDATE rate_list SET rate = ?, added_by = ? WHERE id = ?", [
             rate,
             req.user.id,
             existingRows[0].id
           ]);
         } else {
-          await dbPool.execute(
+          await scopedExecute(
             "INSERT INTO rate_list (materials_name, unit, rate, specification, assigned_person, remarks, is_manual, added_by) VALUES (?, NULL, ?, ?, NULL, 'Manually entered by Admin', 1, ?)",
             [materials_name, rate, specification || null, req.user.id]
           );
