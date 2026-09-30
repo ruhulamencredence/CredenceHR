@@ -5,6 +5,10 @@ import App from './App.tsx';
 import ChatStandalone from './ChatStandalone.tsx';
 import { applyBackgroundTheme, getSavedBackgroundTheme } from './lib/backgroundTheme.ts';
 import './index.css';
+import { installCompanyHeader } from './lib/company.ts';
+
+// Multi-company: every /api call carries the picked company (src/lib/company.ts).
+installCompanyHeader();
 
 // Applied here, before the first paint, rather than in a useEffect once
 // App has mounted — otherwise the default background gradient would flash

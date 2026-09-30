@@ -18,6 +18,7 @@
 
 import type { Express } from "express";
 import bcrypt from "bcryptjs";
+import { activeCompanyId } from "./companyContext";
 
 interface UserManagementRouteDeps {
   authenticateToken: any;
@@ -331,7 +332,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
       // UI has them without a separate round trip per row. Only role='admin' rows
       // carry a real (possibly empty) list — a Superadmin implicitly has every
       // module and a plain User never opens the Admin Panel, so both get [].
-      const modulePermRows: any = await queryDB("SELECT user_id, module_key FROM admin_module_permissions");
+      const modulePermRows: any = await queryDB("SELECT user_id, module_key FROM admin_module_permissions WHERE company_id = ?", [activeCompanyId()]);
       const modulesByUser = new Map<number, string[]>();
       for (const row of modulePermRows) {
         const list = modulesByUser.get(row.user_id) || [];
@@ -339,7 +340,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
         modulesByUser.set(row.user_id, list);
       }
       // Same idea, one level more granular — see PERMISSION_LAYER_MODULES.
-      const layerRows: any = await queryDB("SELECT user_id, module_key, layer_key FROM admin_module_permission_layers");
+      const layerRows: any = await queryDB("SELECT user_id, module_key, layer_key FROM admin_module_permission_layers WHERE company_id = ?", [activeCompanyId()]);
       const layersByUser = new Map<number, Record<string, string[]>>();
       for (const row of layerRows) {
         const byModule = layersByUser.get(row.user_id) || {};
@@ -558,7 +559,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
   app.get("/api/users/:id/module-permissions", authenticateToken, requireModuleGrantAccess, async (req, res) => {
     try {
       const { id } = req.params;
-      const rows: any = await queryDB("SELECT module_key FROM admin_module_permissions WHERE user_id = ?", [id]);
+      const rows: any = await queryDB("SELECT module_key FROM admin_module_permissions WHERE user_id = ? AND company_id = ?", [id, activeCompanyId()]);
       res.json({ modules: rows.map((r: any) => r.module_key) });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -584,9 +585,10 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
         return res.status(403).json({ error: "Only the Superadmin can set another Admin's Module Access." });
       }
 
-      await queryDB("DELETE FROM admin_module_permissions WHERE user_id = ?", [id]);
+      // Module Access is per company — this saves the active company's set.
+      await queryDB("DELETE FROM admin_module_permissions WHERE user_id = ? AND company_id = ?", [id, activeCompanyId()]);
       for (const moduleKey of valid) {
-        await queryDB("INSERT INTO admin_module_permissions (user_id, module_key) VALUES (?, ?)", [id, moduleKey]);
+        await queryDB("INSERT INTO admin_module_permissions (user_id, module_key, company_id) VALUES (?, ?, ?)", [id, moduleKey, activeCompanyId()]);
       }
       res.json({ success: true, modules: valid });
     } catch (err: any) {
@@ -611,8 +613,8 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
       const { id } = req.params;
       const moduleKey = String(req.query?.module || "");
       const rows: any = await queryDB(
-        "SELECT layer_key FROM admin_module_permission_layers WHERE user_id = ? AND module_key = ?",
-        [id, moduleKey]
+        "SELECT layer_key FROM admin_module_permission_layers WHERE user_id = ? AND module_key = ? AND company_id = ?",
+        [id, moduleKey, activeCompanyId()]
       );
       res.json({ layers: rows.map((r: any) => r.layer_key) });
     } catch (err: any) {
@@ -640,11 +642,11 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
         return res.status(403).json({ error: "Only the Superadmin can set another Admin's permission layers." });
       }
 
-      await queryDB("DELETE FROM admin_module_permission_layers WHERE user_id = ? AND module_key = ?", [id, moduleKey]);
+      await queryDB("DELETE FROM admin_module_permission_layers WHERE user_id = ? AND module_key = ? AND company_id = ?", [id, moduleKey, activeCompanyId()]);
       for (const layerKey of valid) {
         await queryDB(
-          "INSERT INTO admin_module_permission_layers (user_id, module_key, layer_key) VALUES (?, ?, ?)",
-          [id, moduleKey, layerKey]
+          "INSERT INTO admin_module_permission_layers (user_id, module_key, layer_key, company_id) VALUES (?, ?, ?, ?)",
+          [id, moduleKey, layerKey, activeCompanyId()]
         );
       }
       res.json({ success: true, module: moduleKey, layers: valid });

@@ -34,6 +34,8 @@ import { registerEmployee360Routes, ensureEmployee360Schema } from "./HrOps360Ro
 import { registerHrReportsRoutes, ensureHrReportsSchema } from "./HrOpsReportsRoutes";
 import { registerInfoRequestRoutes, ensureInfoRequestsSchema } from "./HrOpsInfoRequestsRoutes";
 import { registerSiteAttendanceRoutes, ensureSiteAttendanceSchema } from "./SiteAttendanceRoutes";
+import { registerCompanyRoutes, ensureCompanySchema, resolveCompanyContext } from "./CompanyRoutes";
+import { companyStore, activeCompanyId } from "./companyContext";
 import { registerHRAnalyticsRoutes } from "./HRAnalyticsRoutes";
 import { registerDocumentVaultRoutes, ensureDocumentVaultSchema } from "./DocumentVaultRoutes";
 import { registerErp360SsoRoutes } from "./Erp360SsoRoutes";
@@ -237,6 +239,8 @@ async function ensureSchemaMigrations() {
   await ensureHrReportsSchema(dbPool);
   await ensureInfoRequestsSchema(dbPool);
   await ensureSiteAttendanceSchema(dbPool);
+  // Multi-company (CompanyRoutes.ts) — existing data becomes company 1.
+  await ensureCompanySchema(dbPool);
 
   // Chat (Direct/Group/Community messaging) — table + schema owned by
   // ChatRoutes.ts, only the call site lives here, same as every other
@@ -2353,7 +2357,8 @@ type AdminModuleKey = typeof ADMIN_MODULE_KEYS[number];
 
 async function getAdminModules(userId: number): Promise<string[]> {
   try {
-    const rows: any = await queryDB("SELECT module_key FROM admin_module_permissions WHERE user_id = ?", [userId]);
+    // Module Access is per company — the one this request is working in.
+    const rows: any = await queryDB("SELECT module_key FROM admin_module_permissions WHERE user_id = ? AND company_id = ?", [userId, activeCompanyId()]);
     return rows.map((r: any) => r.module_key);
   } catch {
     return [];
@@ -2366,8 +2371,8 @@ async function getAdminModules(userId: number): Promise<string[]> {
 async function getModulePermissionLayersForModule(userId: number, moduleKey: string): Promise<string[]> {
   try {
     const rows: any = await queryDB(
-      "SELECT layer_key FROM admin_module_permission_layers WHERE user_id = ? AND module_key = ?",
-      [userId, moduleKey]
+      "SELECT layer_key FROM admin_module_permission_layers WHERE user_id = ? AND module_key = ? AND company_id = ?",
+      [userId, moduleKey, activeCompanyId()]
     );
     return rows.map((r: any) => r.layer_key);
   } catch {
@@ -2381,8 +2386,8 @@ async function getModulePermissionLayersForModule(userId: number, moduleKey: str
 async function getAllModulePermissionLayers(userId: number): Promise<Record<string, string[]>> {
   try {
     const rows: any = await queryDB(
-      "SELECT module_key, layer_key FROM admin_module_permission_layers WHERE user_id = ?",
-      [userId]
+      "SELECT module_key, layer_key FROM admin_module_permission_layers WHERE user_id = ? AND company_id = ?",
+      [userId, activeCompanyId()]
     );
     const byModule: Record<string, string[]> = {};
     for (const row of rows) {
@@ -3706,10 +3711,21 @@ async function startServer() {
     const token = authHeader && authHeader.split(" ")[1];
     if (!token) return res.status(401).json({ error: "Access token required" });
 
-    jwt.verify(token, JWT_SECRET, (err: any, user: any) => {
+    jwt.verify(token, JWT_SECRET, async (err: any, user: any) => {
       if (err) return res.status(403).json({ error: "Invalid or expired token" });
       req.user = user;
-      next();
+      // Multi-company: the rest of this request runs in the company the app
+      // asked for (X-Company-Id), if this account may enter it — see
+      // companyContext.ts / CompanyRoutes.ts.
+      let ctx = { companyId: 1, groupId: 1 };
+      try {
+        ctx = await resolveCompanyContext(queryDB, user, req.headers["x-company-id"]);
+      } catch {
+        // falls back to company 1, same as before multi-company
+      }
+      req.companyId = ctx.companyId;
+      req.groupId = ctx.groupId;
+      companyStore.run(ctx, () => next());
     });
   };
 
@@ -4058,9 +4074,12 @@ async function startServer() {
         JWT_SECRET,
         { expiresIn: "7d" }
       );
+      // The account's default company — its Module Access below is that company's.
+      const companyCtx = await resolveCompanyContext(queryDB, user, undefined).catch(() => ({ companyId: 1, groupId: 1 }));
 
-      res.json({
+      res.json(await companyStore.run(companyCtx, async () => ({
         token,
+        active_company_id: companyCtx.companyId,
         user: {
           id: user.id,
           name: user.name,
@@ -4135,7 +4154,7 @@ async function startServer() {
           // Same reasoning, one level more granular — see PERMISSION_LAYER_MODULES.
           module_permission_layers: (user.role === "admin" || user.role === "user") ? await getAllModulePermissionLayers(user.id) : {}
         }
-      });
+      })));
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Login failed" });
     }
@@ -4151,6 +4170,7 @@ async function startServer() {
       const u = users[0];
       res.json({
         ...u,
+        active_company_id: activeCompanyId(),
         can_edit_delivery_date: u.can_edit_delivery_date === undefined ? true : !!Number(u.can_edit_delivery_date),
         can_job_edit: !!Number(u.can_job_edit),
         can_use_attendance: u.role === "superadmin" ? true : !!Number(u.can_use_attendance),
@@ -4858,6 +4878,8 @@ async function startServer() {
   registerInfoRequestRoutes(app, { authenticateToken, requireModule, queryDB, getAdminModules, todayInDhaka, createAlert });
   // Site Attendance — supervisor muster roll for people who never use the app
   // (SiteAttendanceRoutes.ts).
+  // Multi-company: companies, who may enter which (CompanyRoutes.ts).
+  registerCompanyRoutes(app, { authenticateToken, requireSuperAdmin, queryDB });
   registerSiteAttendanceRoutes(app, { authenticateToken, requireModule, queryDB, getAdminModules, todayInDhaka, haversineMeters, createAlert });
 
   // Employee Directory (Self Service -> "Employee Directory") — kept in its
@@ -5404,7 +5426,7 @@ async function startServer() {
         if (req.user.role === "superadmin" && Array.isArray(login_module_keys)) {
           grantedModuleKeys = login_module_keys.filter((m: any) => (ADMIN_MODULE_KEYS as readonly string[]).includes(m));
           for (const moduleKey of grantedModuleKeys) {
-            await queryDB("INSERT INTO admin_module_permissions (user_id, module_key) VALUES (?, ?)", [newUserId, moduleKey]);
+            await queryDB("INSERT INTO admin_module_permissions (user_id, module_key, company_id) VALUES (?, ?, ?)", [newUserId, moduleKey, activeCompanyId()]);
           }
         }
       }
@@ -5808,7 +5830,7 @@ async function startServer() {
       if (req.user.role === "superadmin" && Array.isArray(login_module_keys)) {
         grantedModuleKeys = login_module_keys.filter((m: any) => (ADMIN_MODULE_KEYS as readonly string[]).includes(m));
         for (const moduleKey of grantedModuleKeys) {
-          await queryDB("INSERT INTO admin_module_permissions (user_id, module_key) VALUES (?, ?)", [newUserId, moduleKey]);
+          await queryDB("INSERT INTO admin_module_permissions (user_id, module_key, company_id) VALUES (?, ?, ?)", [newUserId, moduleKey, activeCompanyId()]);
         }
       }
 

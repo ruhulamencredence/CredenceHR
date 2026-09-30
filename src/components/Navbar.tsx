@@ -7,6 +7,7 @@ import { requestQuickAccessTab } from '../lib/quickAccess';
 import { AlertsBell } from './AlertsBell';
 import { ChatBell } from './ChatBell';
 import { WeatherBadge } from './WeatherBadge';
+import { CompanySwitcher } from './CompanySwitcher';
 import { useProfilePhoto } from '../lib/useProfilePhoto';
 import { useHeaderSearchState } from '../lib/headerSearch';
 import { useHeaderPageTitle } from '../lib/headerPageTitle';
@@ -384,6 +385,11 @@ export const Navbar: React.FC<NavbarProps> = ({
               <span className="text-xs font-medium whitespace-nowrap">{todayLabel}</span>
             </div>
           )}
+
+          {/* Company switcher — only for accounts in more than one company. */}
+          <div className={showMobilePageTitle ? 'hidden md:block' : ''}>
+            <CompanySwitcher token={token} transparent={transparentHeader} />
+          </div>
 
           {/* Live weather — free (no API key, no permission prompt of its
               own), shown on both the mobile and web header since this

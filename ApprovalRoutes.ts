@@ -31,6 +31,7 @@
 import type { Express } from "express";
 import type { AlertType } from "./Alerts";
 import { getMyHrActionApprovals } from "./HROperationsRoutes";
+import { activeCompanyId } from "./companyContext";
 
 interface ApprovalRouteDeps {
   authenticateToken: any;
@@ -880,9 +881,9 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       if (step.approver_type === "vehicle_maintainer") step.approver_user_ids.forEach((uid) => userIds.add(uid));
     }
     for (const uid of userIds) {
-      const existing = await queryDB("SELECT module_key FROM admin_module_permissions WHERE user_id = ?", [uid]);
+      const existing = await queryDB("SELECT module_key FROM admin_module_permissions WHERE user_id = ? AND company_id = ?", [uid, activeCompanyId()]);
       if (!existing.some((r: any) => r.module_key === "vehicle_maintainer")) {
-        await queryDB("INSERT INTO admin_module_permissions (user_id, module_key) VALUES (?, ?)", [uid, "vehicle_maintainer"]);
+        await queryDB("INSERT INTO admin_module_permissions (user_id, module_key, company_id) VALUES (?, ?, ?)", [uid, "vehicle_maintainer", activeCompanyId()]);
       }
     }
   }
