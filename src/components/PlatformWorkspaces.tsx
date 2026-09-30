@@ -230,7 +230,7 @@ export const PlatformWorkspaces: React.FC<{ token: string }> = ({ token }) => {
             {!w.can_sign_in && (
               <div className="mt-2 text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5 flex items-start gap-1.5">
                 <Lock className="w-3 h-3 mt-0.5 shrink-0" />
-                Sign-in opens after the next multi-company step keeps each company's employees, attendance, leave and payroll apart.
+                Sign-in to other workspaces is switched off on this server.
               </div>
             )}
           </div>
