@@ -126,8 +126,21 @@ export const GROUP_TABLES = new Set([
   "material_categories",
   "delivery_date_conditions",
   "chat_rooms",
-  "server_profiles"
+  "server_profiles",
+  // Records someone raises in a group's workspace — kept with that group even
+  // when the system owner raised them while working inside it.
+  "approval_requests",
+  "leave_balance_workflows",
+  "case_feedback"
 ]);
+
+// The link each of those had before it got its own group_id (CompanyRoutes.ts
+// fills group_id from it once).
+export const GROUP_BACKFILL: [string, string][] = [
+  ["approval_requests", "requested_by"],
+  ["leave_balance_workflows", "created_by"],
+  ["case_feedback", "user_id"]
+];
 
 // Rows that hang off another record (a budget's items, a chat room's
 // messages, an account's alerts…): they are seen in the group their parent
@@ -138,7 +151,6 @@ const LINKED_TABLES = new Map<string, [string, string]>([
   ["admin_module_permission_layers", ["user_id", "users"]],
   ["alerts", ["user_id", "users"]],
   ["approval_chain_steps", ["user_id", "users"]],
-  ["approval_requests", ["requested_by", "users"]],
   ["approval_template_steps", ["template_id", "approval_templates"]],
   ["approval_template_step_approvers", ["step_id", "approval_template_steps"]],
   ["asset_assignments", ["asset_id", "assets"]],
@@ -155,7 +167,6 @@ const LINKED_TABLES = new Map<string, [string, string]>([
   ["entry_permanent_delete_log", ["permanently_deleted_by", "users"]],
   ["job_candidates", ["posting_id", "job_postings"]],
   ["candidate_interviews", ["candidate_id", "job_candidates"]],
-  ["case_feedback", ["user_id", "users"]],
   ["chat_messages", ["room_id", "chat_rooms"]],
   ["chat_room_members", ["room_id", "chat_rooms"]],
   ["chat_room_reads", ["room_id", "chat_rooms"]],
@@ -167,7 +178,6 @@ const LINKED_TABLES = new Map<string, [string, string]>([
   ["exit_clearance_items", ["exit_id", "exit_requests"]],
   ["hr_report_runs", ["report_id", "hr_saved_reports"]],
   ["leave_application_department_access", ["user_id", "users"]],
-  ["leave_balance_workflows", ["created_by", "users"]],
   ["leave_balance_workflow_items", ["workflow_id", "leave_balance_workflows"]],
   ["notice_dismissals", ["notice_id", "notices"]],
   ["notice_targets", ["notice_id", "notices"]],
@@ -213,8 +223,9 @@ function scopes(ctx: CompanyContext, group: boolean) {
     : `SELECT * FROM all_employees WHERE company_id = ${cid} OR id IN (SELECT employee_id FROM employee_company_assignments WHERE company_id = ${cid} AND is_active = 1)`;
   // Accounts that have no Employee record (e.g. an Admin) count in the
   // companies they may enter.
+  const self = ctx.userId ? ` OR id = ${int(ctx.userId)}` : "";
   const users = group
-    ? `SELECT id FROM users WHERE group_id = ${gid}`
+    ? `SELECT id FROM users WHERE group_id = ${gid}${self}`
     : `SELECT user_id FROM (${employees}) se WHERE se.user_id IS NOT NULL
        UNION SELECT a.user_id FROM user_company_access a
          WHERE a.company_id = ${cid} AND a.user_id NOT IN (SELECT user_id FROM all_employees WHERE user_id IS NOT NULL)`;
@@ -235,7 +246,7 @@ function scopes(ctx: CompanyContext, group: boolean) {
     // since multi-company count in the mother company. One specific account
     // (… WHERE id = ?) is found anywhere in the group.
     users: group
-      ? `SELECT * FROM users WHERE group_id = ${gid}`
+      ? `SELECT * FROM users WHERE group_id = ${gid}${self}`
       : `SELECT * FROM users WHERE group_id = ${gid} AND (role = 'superadmin'
            OR id IN (SELECT user_id FROM (${employees}) su WHERE su.user_id IS NOT NULL)
            OR id IN (SELECT user_id FROM user_company_access WHERE company_id = ${cid})

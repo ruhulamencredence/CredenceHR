@@ -29,8 +29,8 @@
 
 import type { Express } from "express";
 import bcrypt from "bcryptjs";
-import { DEFAULT_COMPANY_ID, DEFAULT_GROUP_ID, activeCompanyId, type CompanyContext } from "./companyContext";
-import { SHARE_KINDS, CONFIG_TABLES, OWN_TABLES, GROUP_TABLES } from "./companyScope";
+import { DEFAULT_COMPANY_ID, DEFAULT_GROUP_ID, activeCompanyId, activeGroupId, companyStore, type CompanyContext } from "./companyContext";
+import { SHARE_KINDS, CONFIG_TABLES, OWN_TABLES, GROUP_TABLES, GROUP_BACKFILL } from "./companyScope";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 
@@ -206,6 +206,27 @@ export async function ensureCompanySchema(dbPool: any): Promise<void> {
     "ER_CANT_DROP_FIELD_OR_KEY",
     "ER_NO_SUCH_TABLE"
   ]);
+  // Rows raised by another group's accounts before these tables had their own
+  // group_id belong to that group.
+  for (const [table, col] of GROUP_BACKFILL) {
+    await run(
+      `${table} group backfill`,
+      `UPDATE ${table} t JOIN users u ON u.id = t.${col} SET t.group_id = u.group_id WHERE t.group_id = 1 AND u.group_id <> 1`,
+      ["ER_NO_SUCH_TABLE", "ER_BAD_FIELD_ERROR"]
+    );
+  }
+  // When the system owner works inside another group's workspace.
+  await run(
+    "platform_visits",
+    `CREATE TABLE IF NOT EXISTS platform_visits (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NOT NULL,
+      group_id INT NOT NULL,
+      company_id INT NOT NULL,
+      visited_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_platform_visits_group (group_id, visited_at)
+    )`
+  );
   await run("delivery_date_conditions group defaults", SEED_GROUP_DEFAULTS, ["ER_NO_SUCH_TABLE"]);
   await run("companies.shared_settings", "ALTER TABLE companies ADD COLUMN shared_settings TEXT NULL", ["ER_DUP_FIELDNAME"]);
 
@@ -252,6 +273,9 @@ interface AccessInfo {
   defaultId: number;
   motherId: number;
   shared: Map<number, string[]>;
+  // The system owner (users.is_platform_admin) — may also enter any other
+  // group's companies (resolveCompanyContext).
+  platform: boolean;
 }
 
 // Which kinds of settings a company uses from its mother company. Stored as a
@@ -328,18 +352,52 @@ export async function loadCompanyAccess(queryDB: QueryDB, user: { id: number; ro
   if (!allowed.length) allowed = [mother ? Number(mother.id) : DEFAULT_COMPANY_ID];
   if (!defaultId || !allowed.includes(defaultId)) defaultId = allowed.includes(Number(mother?.id)) ? Number(mother.id) : allowed[0];
   const shared = new Map<number, string[]>(companies.map((c) => [Number(c.id), sharedKindsOf(c, Number(c.id) === Number(mother?.id))]));
-  const info = { at: Date.now(), groupId, allowed, defaultId, motherId: Number(mother?.id ?? DEFAULT_COMPANY_ID), shared };
+  const info = {
+    at: Date.now(),
+    groupId,
+    allowed,
+    defaultId,
+    motherId: Number(mother?.id ?? DEFAULT_COMPANY_ID),
+    shared,
+    platform: Number(u?.is_platform_admin || 0) === 1
+  };
   accessCache.set(Number(user.id), info);
   return info;
 }
 
 // The company this request works in: the one asked for (X-Company-Id), if the
-// account may enter it, else their default company.
+// account may enter it, else their default company. The system owner may also
+// enter any active company of any active group; they then work there as that
+// group's Superadmin (visiting), and the visit is recorded.
+const lastVisitLog = new Map<string, number>();
+const VISIT_LOG_EVERY_MS = 10 * 60 * 1000;
 export async function resolveCompanyContext(queryDB: QueryDB, user: { id: number; role?: string }, requested: any): Promise<CompanyContext> {
   const info = await loadCompanyAccess(queryDB, user);
   const want = Number(Array.isArray(requested) ? requested[0] : requested);
+  if (want && !info.allowed.includes(want) && info.platform) {
+    const [companies, groups]: any[][] = await Promise.all([
+      queryDB("SELECT * FROM companies").catch(() => []),
+      queryDB("SELECT * FROM company_groups").catch(() => [])
+    ]);
+    const c = (companies || []).find((x: any) => Number(x.id) === want && Number(x.is_active ?? 1) === 1);
+    const g = c && (groups || []).find((x: any) => Number(x.id) === Number(c.group_id) && Number(x.is_active ?? 1) === 1);
+    if (c && g) {
+      const ctx = await contextForCompany(queryDB, want);
+      const key = `${user.id}:${ctx.groupId}`;
+      if (ctx.groupId !== info.groupId && Date.now() - (lastVisitLog.get(key) || 0) > VISIT_LOG_EVERY_MS) {
+        lastVisitLog.set(key, Date.now());
+        await queryDB("INSERT INTO platform_visits (user_id, group_id, company_id) VALUES (?, ?, ?)", [user.id, ctx.groupId, want]).catch(() => {});
+      }
+      return { ...ctx, userId: Number(user.id), visiting: ctx.groupId !== info.groupId };
+    }
+  }
   const companyId = want && info.allowed.includes(want) ? want : info.defaultId;
-  return { companyId, groupId: info.groupId, motherId: info.motherId, shared: info.shared.get(companyId) || [] };
+  return { companyId, groupId: info.groupId, motherId: info.motherId, shared: info.shared.get(companyId) || [], userId: Number(user.id) };
+}
+
+// Companies of the group this request is working in.
+async function companiesOfActiveGroup(queryDB: QueryDB): Promise<any[]> {
+  return companiesOfGroup(queryDB, activeGroupId());
 }
 
 // Next Employee ID for a company: its short code + the next number after the
@@ -470,9 +528,35 @@ export function registerCompanyRoutes(app: Express, deps: CompanyRouteDeps) {
   app.get("/api/companies/mine", authenticateToken, async (req: any, res) => {
     try {
       const info = await loadCompanyAccess(queryDB, req.user);
-      const companies = (await companiesOfGroup(queryDB, info.groupId)).filter((c) => info.allowed.includes(Number(c.id))).map(lite);
+      const visiting = !!companyStore.getStore()?.visiting;
+      const groupId = visiting ? activeGroupId() : info.groupId;
+      const companies = (await companiesOfGroup(queryDB, groupId))
+        .filter((c) => (visiting ? Number(c.is_active ?? 1) === 1 : info.allowed.includes(Number(c.id))))
+        .map(lite);
       companies.sort((a, b) => Number(b.is_mother) - Number(a.is_mother) || a.name.localeCompare(b.name));
-      res.json({ group: await groupOf(info.groupId), companies, default_company_id: info.defaultId, active_company_id: activeCompanyId() });
+      // The system owner also gets every workspace, to open any of them.
+      let workspaces: any[] | undefined;
+      if (info.platform) {
+        const [groups, all]: any[][] = await Promise.all([queryDB("SELECT * FROM company_groups"), queryDB("SELECT * FROM companies")]);
+        workspaces = (groups || [])
+          .filter((g: any) => Number(g.is_active ?? 1) === 1)
+          .map((g: any) => {
+            const cs = (all || []).filter((c: any) => Number(c.group_id) === Number(g.id) && Number(c.is_active ?? 1) === 1);
+            const mother = cs.find((c: any) => Number(c.is_mother) === 1) || cs[0];
+            return { id: Number(g.id), name: g.name, workspace_code: g.workspace_code || null, company_id: mother ? Number(mother.id) : null, is_home: Number(g.id) === info.groupId };
+          })
+          .filter((w: any) => w.company_id)
+          .sort((a: any, b: any) => Number(b.is_home) - Number(a.is_home) || a.name.localeCompare(b.name));
+      }
+      res.json({
+        group: await groupOf(groupId),
+        companies,
+        default_company_id: visiting ? companies.find((c) => c.is_mother)?.id || companies[0]?.id : info.defaultId,
+        active_company_id: activeCompanyId(),
+        visiting,
+        home_company_id: info.defaultId,
+        workspaces
+      });
     } catch (err) {
       fail(res, err);
     }
@@ -500,7 +584,7 @@ export function registerCompanyRoutes(app: Express, deps: CompanyRouteDeps) {
   app.get("/api/companies/next-employee-code", authenticateToken, async (req: any, res) => {
     try {
       const companyId = req.query.company_id ? Number(req.query.company_id) : activeCompanyId();
-      const own = (await companiesOfGroup(queryDB, (await loadCompanyAccess(queryDB, req.user)).groupId)).some((c) => Number(c.id) === companyId);
+      const own = (await companiesOfActiveGroup(queryDB)).some((c) => Number(c.id) === companyId);
       if (!own) throw bad("Company not found.", 404);
       res.json(await nextEmployeeCode(queryDB, companyId));
     } catch (err) {
@@ -511,9 +595,8 @@ export function registerCompanyRoutes(app: Express, deps: CompanyRouteDeps) {
   // Every company of the account's group (pickers for transfers / assignments).
   app.get("/api/companies/group", authenticateToken, async (req: any, res) => {
     try {
-      const info = await loadCompanyAccess(queryDB, req.user);
       res.json(
-        (await companiesOfGroup(queryDB, info.groupId))
+        (await companiesOfActiveGroup(queryDB))
           .filter((c) => Number(c.is_active ?? 1) === 1)
           .map((c) => ({ id: Number(c.id), name: c.name, short_code: c.short_code, is_mother: Number(c.is_mother) === 1 }))
       );
@@ -534,8 +617,7 @@ export function registerCompanyRoutes(app: Express, deps: CompanyRouteDeps) {
   app.get("/api/companies/assignments", authenticateToken, hrGate, async (req: any, res) => {
     try {
       const empId = Number(req.query.employee_id);
-      const info = await loadCompanyAccess(queryDB, req.user);
-      const companies = await companiesOfGroup(queryDB, info.groupId);
+      const companies = await companiesOfActiveGroup(queryDB);
       const byId = new Map(companies.map((c) => [Number(c.id), c]));
       const emp = ((await queryDB("SELECT * FROM all_employees WHERE id = ?", [empId])) || []).find((e: any) => Number(e.id) === empId);
       if (!emp) throw bad("Employee not found.", 404);
@@ -580,8 +662,7 @@ export function registerCompanyRoutes(app: Express, deps: CompanyRouteDeps) {
       const b = req.body || {};
       const empId = Number(b.employee_id);
       const companyId = Number(b.company_id);
-      const info = await loadCompanyAccess(queryDB, req.user);
-      const target = (await companiesOfGroup(queryDB, info.groupId)).find((c) => Number(c.id) === companyId && Number(c.is_active ?? 1) === 1);
+      const target = (await companiesOfActiveGroup(queryDB)).find((c) => Number(c.id) === companyId && Number(c.is_active ?? 1) === 1);
       if (!target) throw bad("Pick a company of your group.");
       const emp = ((await queryDB("SELECT * FROM all_employees WHERE id = ?", [empId])) || []).find((e: any) => Number(e.id) === empId);
       if (!emp) throw bad("Employee not found.", 404);
@@ -615,8 +696,7 @@ export function registerCompanyRoutes(app: Express, deps: CompanyRouteDeps) {
       const id = Number(req.params.id);
       const row = ((await queryDB("SELECT * FROM employee_company_assignments WHERE id = ?", [id])) || []).find((r: any) => Number(r.id) === id);
       if (!row) throw bad("Not found.", 404);
-      const info = await loadCompanyAccess(queryDB, req.user);
-      if (!(await companiesOfGroup(queryDB, info.groupId)).some((c) => Number(c.id) === Number(row.company_id))) throw bad("Not found.", 404);
+      if (!(await companiesOfActiveGroup(queryDB)).some((c) => Number(c.id) === Number(row.company_id))) throw bad("Not found.", 404);
       const end = /^\d{4}-\d{2}-\d{2}$/.test(String(req.body?.end_date || "")) ? String(req.body.end_date) : new Date().toISOString().slice(0, 10);
       await queryDB("UPDATE employee_company_assignments SET is_active = ?, end_date = ? WHERE id = ?", [0, end, id]);
       const emp = ((await queryDB("SELECT * FROM all_employees WHERE id = ?", [Number(row.employee_id)])) || [])[0];
@@ -631,8 +711,7 @@ export function registerCompanyRoutes(app: Express, deps: CompanyRouteDeps) {
     try {
       const rows: any[] = (await queryDB("SELECT * FROM companies WHERE id = ?", [Number(req.params.id)])) || [];
       const c = rows.find((r) => Number(r.id) === Number(req.params.id));
-      const info = await loadCompanyAccess(queryDB, req.user);
-      if (!c || !c.logo_mime || Number(c.group_id) !== info.groupId) throw bad("No logo.", 404);
+      if (!c || !c.logo_mime || Number(c.group_id) !== activeGroupId()) throw bad("No logo.", 404);
       res.setHeader("Content-Type", c.logo_mime);
       res.setHeader("Cache-Control", "private, max-age=3600");
       res.send(Buffer.isBuffer(c.logo_data) ? c.logo_data : Buffer.from(c.logo_data || ""));
@@ -643,7 +722,8 @@ export function registerCompanyRoutes(app: Express, deps: CompanyRouteDeps) {
 
   // ---------------- System Management (Superadmin) ----------------
 
-  const myGroup = async (req: any) => (await loadCompanyAccess(queryDB, req.user)).groupId;
+  // The group being worked in (the system owner may be inside another one).
+  const myGroup = async (_req: any) => activeGroupId();
 
   app.get("/api/system/companies", authenticateToken, requireSuperAdmin, async (req: any, res) => {
     try {
@@ -989,8 +1069,7 @@ export function registerCompanyRoutes(app: Express, deps: CompanyRouteDeps) {
       const adminPassword = String(admin.password || "");
       if (!adminName || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(adminEmail)) throw bad("Enter the name and a valid email of this workspace's Superadmin.");
       if (adminPassword.length < 8) throw bad("The Superadmin's password must be at least 8 characters.");
-      const existing: any[] = (await queryDB("SELECT * FROM users WHERE email = ?", [adminEmail])) || [];
-      if (existing.some((u) => String(u.email || "").toLowerCase() === adminEmail)) throw bad("An account with that email already exists.");
+      await assertEmailFree(adminEmail);
 
       const g: any = await queryDB("INSERT INTO company_groups (name, short_name, workspace_code, tagline, is_active, logo_mime, logo_data) VALUES (?, ?, ?, ?, ?, ?, ?)", [
         w.name,
@@ -1034,6 +1113,92 @@ export function registerCompanyRoutes(app: Express, deps: CompanyRouteDeps) {
       ]);
       if (w.logo !== undefined) await queryDB("UPDATE company_groups SET logo_mime = ?, logo_data = ? WHERE id = ?", [w.logo?.mime || null, w.logo?.data || null, id]);
       res.json({ success: true });
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+  // ---------------- A workspace's Superadmins (the system owner) ----------------
+
+  // Emails are unique across every workspace.
+  async function assertEmailFree(email: string) {
+    const rows: any[] = (await queryDB("/*unscoped*/ SELECT id, email FROM users").catch(() => [])) || [];
+    if (rows.some((u) => String(u.email || "").toLowerCase() === email)) throw bad("An account with that email already exists.");
+  }
+  const groupSuperadmin = async (groupId: number, userId: number) => {
+    const rows: any[] = (await queryDB("/*unscoped*/ SELECT * FROM users").catch(() => [])) || [];
+    const u = rows.find((r) => Number(r.id) === userId && Number(r.group_id ?? DEFAULT_GROUP_ID) === groupId && r.role === "superadmin");
+    if (!u) throw bad("Superadmin not found.", 404);
+    return { u, others: rows.filter((r) => Number(r.group_id ?? DEFAULT_GROUP_ID) === groupId && r.role === "superadmin" && Number(r.id) !== userId) };
+  };
+
+  app.post("/api/platform/workspaces/:id/superadmins", authenticateToken, requirePlatformAdmin, async (req: any, res) => {
+    try {
+      const groupId = Number(req.params.id);
+      const groups: any[] = (await queryDB("SELECT * FROM company_groups")) || [];
+      if (!groups.some((g) => Number(g.id) === groupId)) throw bad("Workspace not found.", 404);
+      const name = String(req.body?.name || "").trim().slice(0, 100);
+      const email = String(req.body?.email || "").trim().toLowerCase().slice(0, 150);
+      const password = String(req.body?.password || "");
+      if (!name || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw bad("Enter the name and a valid email.");
+      if (password.length < 8) throw bad("The password must be at least 8 characters.");
+      await assertEmailFree(email);
+      const companies = await companiesOfGroup(queryDB, groupId);
+      const mother = companies.find((c) => Number(c.is_mother) === 1) || companies[0];
+      const hash = await bcrypt.hash(password, 10);
+      const u: any = await queryDB("INSERT INTO users (name, email, password_hash, role, group_id) VALUES (?, ?, ?, 'superadmin', ?)", [name, email, hash, groupId]);
+      if (mother) await queryDB("INSERT INTO user_company_access (user_id, company_id, is_default) VALUES (?, ?, ?)", [Number(u.insertId), Number(mother.id), 1]);
+      res.json({ success: true, id: Number(u.insertId) });
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+  app.put("/api/platform/workspaces/:id/superadmins/:userId/password", authenticateToken, requirePlatformAdmin, async (req: any, res) => {
+    try {
+      const { u } = await groupSuperadmin(Number(req.params.id), Number(req.params.userId));
+      const password = String(req.body?.password || "");
+      if (password.length < 8) throw bad("The password must be at least 8 characters.");
+      await queryDB("/*unscoped*/ UPDATE users SET password_hash = ? WHERE id = ?", [await bcrypt.hash(password, 10), Number(u.id)]);
+      res.json({ success: true });
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+  // Removing a Superadmin keeps the account as an Admin of that workspace; a
+  // workspace always keeps at least one Superadmin.
+  app.delete("/api/platform/workspaces/:id/superadmins/:userId", authenticateToken, requirePlatformAdmin, async (req: any, res) => {
+    try {
+      const { u, others } = await groupSuperadmin(Number(req.params.id), Number(req.params.userId));
+      if (Number(u.is_platform_admin) === 1) throw bad("The system owner can't be removed here.");
+      if (!others.length) throw bad("Add another Superadmin to this workspace first.");
+      await queryDB("/*unscoped*/ UPDATE users SET role = 'admin' WHERE id = ?", [Number(u.id)]);
+      invalidateCompanyAccess(Number(u.id));
+      res.json({ success: true });
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+  // When the system owner last worked inside each workspace.
+  app.get("/api/platform/visits", authenticateToken, requirePlatformAdmin, async (_req: any, res) => {
+    try {
+      const [rows, users, groups, companies]: any[][] = await Promise.all([
+        queryDB("SELECT * FROM platform_visits ORDER BY id DESC LIMIT 50").catch(() => []),
+        queryDB("/*unscoped*/ SELECT id, name FROM users").catch(() => []),
+        queryDB("SELECT * FROM company_groups").catch(() => []),
+        queryDB("SELECT * FROM companies").catch(() => [])
+      ]);
+      const name = (list: any[], id: any) => list.find((x: any) => Number(x.id) === Number(id))?.name || "—";
+      res.json(
+        (rows || []).slice(0, 50).map((r: any) => ({
+          id: Number(r.id),
+          user: name(users, r.user_id),
+          workspace: name(groups, r.group_id),
+          company: name(companies, r.company_id),
+          visited_at: r.visited_at
+        }))
+      );
     } catch (err) {
       fail(res, err);
     }

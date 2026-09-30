@@ -58,11 +58,23 @@ export interface CompanyInfo {
   is_mother: boolean;
   has_logo: boolean;
 }
+export interface WorkspaceEntry {
+  id: number;
+  name: string;
+  workspace_code: string | null;
+  company_id: number;
+  is_home: boolean;
+}
 export interface MyCompanies {
   group: { id: number; name: string; short_name: string | null };
   companies: CompanyInfo[];
   default_company_id: number;
   active_company_id: number;
+  // The system owner working inside another group's workspace.
+  visiting?: boolean;
+  home_company_id?: number;
+  // Only for the system owner: every workspace, to open any of them.
+  workspaces?: WorkspaceEntry[];
 }
 
 let cache: { token: string; data: MyCompanies } | null = null;
