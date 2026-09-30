@@ -4086,7 +4086,11 @@ async function startServer() {
       }
       // Multi-company: the workspace typed before the login form must be this
       // account's own group (CompanyRoutes.ts). Older app builds send none.
-      const workspaceProblem = await checkWorkspaceLogin(queryDB, req.body.workspace, user);
+      // The <address>/system sign-in page is for the system owner only.
+      if (req.body.system && Number(user.is_platform_admin || 0) !== 1) {
+        return res.status(400).json({ error: "Invalid login ID or password" });
+      }
+      const workspaceProblem = await checkWorkspaceLogin(queryDB, req.body.system ? undefined : req.body.workspace, user);
       if (workspaceProblem) return res.status(workspaceProblem.status).json({ error: workspaceProblem.error });
 
       // Store only the latest login's coordinates (overwrites any previous value).
