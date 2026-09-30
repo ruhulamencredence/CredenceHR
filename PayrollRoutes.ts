@@ -40,6 +40,7 @@
 import type { Express } from "express";
 import { getHolidayMap, getHolidayMapsByGroup, getEmployeeBranchTypeMap, getEmployeeBranchTypeByEmployeeId, HolidayAppliesTo } from "./holidayRoutes";
 import { loadSiteEntries } from "./SiteAttendanceRoutes";
+import { activeCompanyId } from "./companyContext";
 import { isMailerConfigured, sendMail } from "./mailer";
 
 interface PayrollRouteDeps {
@@ -2055,10 +2056,14 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       // a mixed roster.
       const workingDaysDisplay = Math.max(1, daysInMonth - holidayMapsByGroup.head_office.size);
 
-      const employees = await queryDB(
-        `SELECT id, employee_id AS employee_code, name, department, designation, user_id, zk_device_pin
-         FROM all_employees WHERE is_active = 1 ORDER BY name ASC`
-      );
+      // Multi-company: salary is run by the Employee's own company only — someone
+      // also assigned to a sister company shows in its lists, not its payroll.
+      const employees = (
+        await queryDB(
+          `SELECT id, employee_id AS employee_code, name, department, designation, user_id, zk_device_pin, company_id
+           FROM all_employees WHERE is_active = 1 ORDER BY name ASC`
+        )
+      ).filter((e: any) => Number(e.company_id ?? 1) === activeCompanyId());
       // Per-employee working days — this employee's OWN group's holiday
       // count subtracted from the month, not the shared display figure
       // above. Keyed by all_employees.id (not user_id — an employee with no
@@ -2411,9 +2416,13 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
           continue;
         }
         try {
-          const empRows = await queryDB("SELECT id FROM all_employees WHERE id = ?", [employeeId]);
+          const empRows = await queryDB("SELECT id, company_id FROM all_employees WHERE id = ?", [employeeId]);
           if (empRows.length === 0) {
             results.push({ employee_id: employeeId, success: false, error: "Employee not found." });
+            continue;
+          }
+          if (Number(empRows[0].company_id ?? 1) !== activeCompanyId()) {
+            results.push({ employee_id: employeeId, success: false, error: "This employee's salary is run by their own company." });
             continue;
           }
           const existing = await queryDB("SELECT id FROM payrolls WHERE employee_id = ? AND month_year = ?", [employeeId, monthYear]);
@@ -2555,8 +2564,10 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       if (!month_year || !MONTH_YEAR_RE.test(String(month_year))) {
         return res.status(400).json({ error: "month_year must be in 'YYYY-MM' format." });
       }
-      const empRows = await queryDB("SELECT id, name FROM all_employees WHERE id = ?", [Number(employee_id)]);
+      const empRows = await queryDB("SELECT id, name, company_id FROM all_employees WHERE id = ?", [Number(employee_id)]);
       if (empRows.length === 0) return res.status(404).json({ error: "Employee not found." });
+      if (Number(empRows[0].company_id ?? 1) !== activeCompanyId())
+        return res.status(400).json({ error: "This employee's salary is run by their own company." });
 
       const existing = await queryDB("SELECT id FROM payrolls WHERE employee_id = ? AND month_year = ?", [Number(employee_id), String(month_year)]);
       if (existing.length > 0) {
