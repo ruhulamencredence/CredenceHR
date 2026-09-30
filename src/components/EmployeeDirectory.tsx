@@ -171,6 +171,9 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
   const [search, setSearch] = useState('');
   const [departmentFilter, setDepartmentFilter] = useState('');
   const [designationFilter, setDesignationFilter] = useState('');
+  // Multi-company: with the whole group's directory (mother + sister
+  // companies), a company filter and a company badge on each person.
+  const [companyFilter, setCompanyFilter] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [pageSize, setPageSize] = useState<(typeof PAGE_SIZE_OPTIONS)[number]>(12);
   const [currentPage, setCurrentPage] = useState(1);
@@ -274,15 +277,25 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
     return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [employees]);
 
+  const companies = useMemo(() => {
+    const m = new Map<string, string>();
+    employees.forEach((e) => {
+      if (e.company_code) m.set(e.company_code, e.company_name || e.company_code);
+    });
+    return Array.from(m, ([code, name]) => ({ code, name })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [employees]);
+  const multiCompany = companies.length > 1;
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return employees.filter((e) => {
+      if (companyFilter && e.company_code !== companyFilter) return false;
       if (q && !e.name.toLowerCase().includes(q) && !(e.employee_id || '').toLowerCase().includes(q)) return false;
       if (departmentFilter && String(e.department_id || '') !== departmentFilter) return false;
       if (designationFilter && e.designation !== designationFilter) return false;
       return true;
     });
-  }, [employees, search, departmentFilter, designationFilter]);
+  }, [employees, search, departmentFilter, designationFilter, companyFilter]);
 
   const filteredDepartments = useMemo(() => {
     const q = deptSearchQuery.trim().toLowerCase();
@@ -300,7 +313,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
   useEffect(() => {
     setCurrentPage(1);
     setMobileVisibleCount(pageSize);
-  }, [search, departmentFilter, designationFilter, pageSize]);
+  }, [search, departmentFilter, designationFilter, companyFilter, pageSize]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const pageSafe = Math.min(currentPage, totalPages);
@@ -332,6 +345,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
     setSearch('');
     setDepartmentFilter('');
     setDesignationFilter('');
+    setCompanyFilter('');
   };
 
   return (
@@ -472,6 +486,22 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
               )}
             </div>
 
+            {multiCompany && (
+              <select
+                value={companyFilter}
+                onChange={(e) => setCompanyFilter(e.target.value)}
+                aria-label="Company"
+                className="px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-700 focus:ring-2 focus:ring-blue-600 focus:outline-none"
+              >
+                <option value="">All Companies</option>
+                {companies.map((c) => (
+                  <option key={c.code} value={c.code}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            )}
+
             {!isNativeApp && (
               <div className="hidden sm:contents">
                 <select
@@ -485,7 +515,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
                   ))}
                 </select>
 
-                {(search || departmentFilter || designationFilter) && (
+                {(search || departmentFilter || designationFilter || companyFilter) && (
                   <button
                     type="button"
                     onClick={clearFilters}
@@ -599,6 +629,14 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
                             ID: {emp.employee_id}
                           </span>
                         )}
+                        {multiCompany && emp.company_code && (
+                          <span
+                            title={emp.company_name || undefined}
+                            className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-white/50 sm:bg-violet-50 backdrop-blur sm:backdrop-blur-none text-violet-800 sm:text-violet-700 border border-white/60 sm:border-violet-200"
+                          >
+                            {emp.company_code}
+                          </span>
+                        )}
                         {emp.department && (
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-white/50 sm:bg-blue-50 backdrop-blur sm:backdrop-blur-none text-blue-800 sm:text-blue-700 border border-white/60 sm:border-blue-200">
                             <Building2 className="w-3 h-3" /> {emp.department}
@@ -661,6 +699,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
                     <tr className="text-[11px] uppercase tracking-wider text-slate-500 border-b border-slate-200">
                       <th className="px-3 py-2 font-semibold">Name &amp; ID</th>
                       <th className="px-3 py-2 font-semibold">Designation</th>
+                      {multiCompany && <th className="px-3 py-2 font-semibold">Company</th>}
                       <th className="px-3 py-2 font-semibold">Department</th>
                       <th className="px-3 py-2 font-semibold">Email</th>
                       <th className="px-3 py-2 font-semibold">Mobile</th>
@@ -681,6 +720,11 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
                           </div>
                         </td>
                         <td className="px-3 py-2.5 text-xs text-slate-700 whitespace-nowrap">{emp.designation || '—'}</td>
+                        {multiCompany && (
+                          <td className="px-3 py-2.5 text-xs text-slate-700 whitespace-nowrap" title={emp.company_name || undefined}>
+                            {emp.company_code || '—'}
+                          </td>
+                        )}
                         <td className="px-3 py-2.5 text-xs text-slate-700 whitespace-nowrap">{emp.department || '—'}</td>
                         <td className="px-3 py-2.5 text-xs text-slate-600 whitespace-nowrap">
                           {emp.email ? <a href={`mailto:${emp.email}`} className="hover:text-blue-600">{emp.email}</a> : '—'}
@@ -816,6 +860,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
                   <p className="text-sm text-slate-500 mt-0.5 truncate">
                     {selectedEmployee.designation || '—'}
                     {selectedEmployee.department ? ` · ${selectedEmployee.department}` : ''}
+                    {multiCompany && selectedEmployee.company_name ? ` · ${selectedEmployee.company_name}` : ''}
                   </p>
                 </div>
                 {selectedEmployee.employee_id && (

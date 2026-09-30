@@ -228,6 +228,8 @@ export async function ensureCompanySchema(dbPool: any): Promise<void> {
     )`
   );
   await run("delivery_date_conditions group defaults", SEED_GROUP_DEFAULTS, ["ER_NO_SUCH_TABLE"]);
+  // Employee Directory across every company of the group (EmployeeDirectoryRoutes.ts).
+  await run("users.can_view_group_directory", "ALTER TABLE users ADD COLUMN can_view_group_directory TINYINT(1) NOT NULL DEFAULT 0", ["ER_DUP_FIELDNAME"]);
   await run("companies.shared_settings", "ALTER TABLE companies ADD COLUMN shared_settings TEXT NULL", ["ER_DUP_FIELDNAME"]);
 
   // Module Access per company: add the column, widen the unique key to
@@ -892,6 +894,7 @@ export function registerCompanyRoutes(app: Express, deps: CompanyRouteDeps) {
               email: u.email || u.username || null,
               role: u.role,
               company_ids: u.role === "superadmin" ? [...companyIds] : mine.length ? mine.map((a) => Number(a.company_id)) : [motherId],
+              can_view_group_directory: u.role === "superadmin" || !!Number(u.can_view_group_directory || 0),
               default_company_id: Number(mine.find((a) => Number(a.is_default) === 1)?.company_id || 0) || (mine.length ? Number(mine[0].company_id) : motherId),
               module_counts: modules
             };
@@ -933,6 +936,20 @@ export function registerCompanyRoutes(app: Express, deps: CompanyRouteDeps) {
 
   // Shared-service HR: give an account the same Module Access (and action
   // layers) in other companies as they already have in one.
+  // Employee Directory across every company of the group, without switching.
+  app.put("/api/system/company-access/:userId/group-directory", authenticateToken, requireSuperAdmin, async (req: any, res) => {
+    try {
+      const groupId = await myGroup(req);
+      const userId = Number(req.params.userId);
+      const target = ((await queryDB("/*unscoped*/ SELECT id, group_id FROM users").catch(() => [])) || []).find((u: any) => Number(u.id) === userId);
+      if (!target || Number(target.group_id ?? DEFAULT_GROUP_ID) !== groupId) throw bad("Account not found.", 404);
+      await queryDB("UPDATE users SET can_view_group_directory = ? WHERE id = ?", [req.body?.enabled ? 1 : 0, userId]);
+      res.json({ success: true });
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
   app.post("/api/system/company-access/:userId/copy-permissions", authenticateToken, requireSuperAdmin, async (req: any, res) => {
     try {
       const groupId = await myGroup(req);

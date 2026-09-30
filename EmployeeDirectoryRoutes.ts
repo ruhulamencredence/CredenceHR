@@ -23,6 +23,7 @@
 // that a plain 'user' account has no business seeing about a colleague.
 
 import type { Express } from "express";
+import { companyStore } from "./companyContext";
 
 interface EmployeeDirectoryRouteDeps {
   authenticateToken: any;
@@ -32,12 +33,23 @@ interface EmployeeDirectoryRouteDeps {
 export function registerEmployeeDirectoryRoutes(app: Express, deps: EmployeeDirectoryRouteDeps) {
   const { authenticateToken, queryDB } = deps;
 
-  app.get("/api/employee-directory", authenticateToken, async (_req, res) => {
+  // Multi-company: normally the roster of the company being worked in. An
+  // account allowed the whole group's directory (users.can_view_group_directory,
+  // set in Admin Panel -> Companies -> Who can work where) and the Superadmin
+  // see every company of the group at once — mother and sister companies —
+  // without switching company. Never another group's.
+  app.get("/api/employee-directory", authenticateToken, async (req: any, res) => {
     try {
-      const rows = await queryDB(
+      const ctx = companyStore.getStore();
+      let wholeGroup = req.user?.role === "superadmin";
+      if (!wholeGroup && ctx) {
+        const me: any[] = (await queryDB("SELECT can_view_group_directory FROM users WHERE id = ?", [req.user.id]).catch(() => [])) || [];
+        wholeGroup = !!Number(me[0]?.can_view_group_directory || 0);
+      }
+      const load = () => queryDB(
         `SELECT e.id, e.employee_id, e.name, e.designation, e.department, e.department_id,
                 e.email, e.phone, e.mobile, e.telephone, e.branch, e.division, e.unit,
-                e.is_active, e.user_id,
+                e.is_active, e.user_id, e.company_id,
                 sup.name AS supervisor_name
          FROM all_employees e
          LEFT JOIN (
@@ -57,6 +69,9 @@ export function registerEmployeeDirectoryRoutes(app: Express, deps: EmployeeDire
          LEFT JOIN all_employees sup ON sup.id = cur.supervisor_id
          ORDER BY e.name ASC`
       );
+      const rows: any[] = wholeGroup && ctx ? await companyStore.run({ ...ctx, wholeGroup: true }, load) : await load();
+      const companies: any[] = (await queryDB("SELECT * FROM companies").catch(() => [])) || [];
+      const companyOf = new Map(companies.map((c: any) => [Number(c.id), c]));
       res.json(
         rows.map((r: any) => ({
           id: r.id,
@@ -74,7 +89,10 @@ export function registerEmployeeDirectoryRoutes(app: Express, deps: EmployeeDire
           unit: r.unit,
           is_active: !!Number(r.is_active),
           user_id: r.user_id,
-          supervisor_name: r.supervisor_name || null
+          supervisor_name: r.supervisor_name || null,
+          company_id: r.company_id != null ? Number(r.company_id) : null,
+          company_name: companyOf.get(Number(r.company_id ?? 1))?.name || null,
+          company_code: companyOf.get(Number(r.company_id ?? 1))?.short_code || null
         }))
       );
     } catch (err: any) {
