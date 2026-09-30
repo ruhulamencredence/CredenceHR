@@ -34,7 +34,7 @@
 // Everything that existed before multi-company is company 1, so company 1 sees
 // exactly what it saw before.
 
-import { companyStore } from "./companyContext";
+import { companyStore, type CompanyContext } from "./companyContext";
 
 // Tables with their own company_id column.
 const COMPANY_TABLES = new Set(["all_employees", "departments", "branches", "projects"]);
@@ -83,7 +83,37 @@ const USER_TABLES = new Set([
   "location_pings"
 ]);
 
-const ALL_TABLES = [...COMPANY_TABLES, ...EMPLOYEE_TABLES, ...USER_TABLES, "users"];
+// Company settings a sister company may use from its mother company instead
+// of keeping its own (Admin Panel -> Companies -> the company -> "Uses the
+// mother company's…"). A company always sees its own rows; with a kind shared
+// it also sees the mother company's rows of those tables, read-only.
+export const SHARE_KINDS: { key: string; label: string; tables: string[] }[] = [
+  { key: "holidays", label: "Holiday calendar", tables: ["holiday_calendar"] },
+  { key: "leave_policy", label: "Leave types & rules", tables: ["leave_categories", "leave_category_policies"] },
+  { key: "late_policy", label: "Late attendance policy", tables: ["late_policy_settings"] },
+  { key: "payroll_setup", label: "Salary components & pay grades", tables: ["salary_components", "pay_grades"] },
+  { key: "hr_templates", label: "Letter templates, onboarding tasks, increment policies & HR settings", tables: ["hr_letter_templates", "hr_onboarding_tasks", "hr_increment_policies", "hr_ops_settings"] },
+  { key: "approvals", label: "Approval templates & clearance approvers", tables: ["approval_templates", "access_templates", "exit_clearance_approvers"] },
+  { key: "notices", label: "Notices", tables: ["notices"] },
+  { key: "assets", label: "Asset inventory", tables: ["assets"] },
+  { key: "vehicles", label: "Vehicles", tables: ["vehicles"] },
+  { key: "recruitment", label: "Job postings", tables: ["job_postings"] },
+  { key: "performance", label: "Performance cycles", tables: ["performance_cycles"] }
+];
+export const CONFIG_TABLES = new Map<string, string>(SHARE_KINDS.flatMap((k) => k.tables.map((t) => [t, k.key] as [string, string])));
+
+// Company-owned records that are never shared.
+export const OWN_TABLES = new Set([
+  "site_attendance_teams",
+  "site_attendance_settings",
+  "zk_devices",
+  "hr_saved_reports",
+  "asset_requisitions",
+  "vehicle_requisitions",
+  "grievances"
+]);
+
+const ALL_TABLES = [...COMPANY_TABLES, ...EMPLOYEE_TABLES, ...USER_TABLES, ...CONFIG_TABLES.keys(), ...OWN_TABLES, "users"];
 const TABLE_RE = new RegExp(`\\b(FROM|JOIN)\\s+\`?(${ALL_TABLES.join("|")})\`?(?![\\w\`])(\\s+(?:AS\\s+)?([A-Za-z_][A-Za-z0-9_]*))?`, "gi");
 
 // Words that can follow a table name but are not an alias.
@@ -96,9 +126,9 @@ const SINGLE_LOOKUP_RE = /\b(?:[A-Za-z_][A-Za-z0-9_]*\.)?(?:id|user_id|employee_
 
 const int = (n: number) => String(Math.trunc(Number(n)) || 1);
 
-function scopes(companyId: number, groupId: number, group: boolean) {
-  const cid = int(companyId);
-  const gid = int(groupId);
+function scopes(ctx: CompanyContext, group: boolean) {
+  const cid = int(ctx.companyId);
+  const gid = int(ctx.groupId);
   const groupCompanies = `SELECT id FROM companies WHERE group_id = ${gid}`;
   const employees = group
     ? `SELECT * FROM all_employees WHERE company_id IN (${groupCompanies})`
@@ -110,12 +140,28 @@ function scopes(companyId: number, groupId: number, group: boolean) {
     : `SELECT user_id FROM (${employees}) se WHERE se.user_id IS NOT NULL
        UNION SELECT a.user_id FROM user_company_access a
          WHERE a.company_id = ${cid} AND a.user_id NOT IN (SELECT user_id FROM all_employees WHERE user_id IS NOT NULL)`;
+  const shared = new Set(ctx.shared || []);
+  const mother = ctx.motherId && ctx.motherId !== ctx.companyId ? int(ctx.motherId) : null;
   return {
     company: (table: string) => (group ? `SELECT * FROM ${table} WHERE company_id IN (${groupCompanies})` : `SELECT * FROM ${table} WHERE company_id = ${cid}`),
+    config: (table: string) =>
+      mother && shared.has(CONFIG_TABLES.get(table) || "")
+        ? `SELECT * FROM ${table} WHERE company_id IN (${cid}, ${mother})`
+        : `SELECT * FROM ${table} WHERE company_id = ${cid}`,
+    own: (table: string) => `SELECT * FROM ${table} WHERE company_id = ${cid}`,
     employees,
     employeeRows: (table: string) => `SELECT * FROM ${table} WHERE employee_id IN (SELECT id FROM (${employees}) se2)`,
     userRows: (table: string) => `SELECT * FROM ${table} WHERE user_id IN (${users})`,
-    users: `SELECT * FROM users WHERE group_id = ${gid}`
+    // Lists of accounts: the company's employees' logins, anyone given access
+    // to it (e.g. group HR) and the Superadmin; accounts that never signed in
+    // since multi-company count in the mother company. One specific account
+    // (… WHERE id = ?) is found anywhere in the group.
+    users: group
+      ? `SELECT * FROM users WHERE group_id = ${gid}`
+      : `SELECT * FROM users WHERE group_id = ${gid} AND (role = 'superadmin'
+           OR id IN (SELECT user_id FROM (${employees}) su WHERE su.user_id IS NOT NULL)
+           OR id IN (SELECT user_id FROM user_company_access WHERE company_id = ${cid})
+           ${mother ? "" : "OR id NOT IN (SELECT user_id FROM user_company_access)"})`
   };
 }
 
@@ -128,14 +174,17 @@ export function scopeSql(sql: string): string {
   if (!ctx || SCOPE_OFF) return sql;
   const head = sql.trimStart().slice(0, 12).toUpperCase();
   if (head.startsWith("INSERT")) return scopeInsert(sql, ctx.companyId, ctx.groupId);
+  if (head.startsWith("UPDATE") || head.startsWith("DELETE")) return guardWrite(sql, ctx);
   if (!head.startsWith("SELECT") && !head.startsWith("(")) return sql;
-  const s = scopes(ctx.companyId, ctx.groupId, SINGLE_LOOKUP_RE.test(sql));
+  const s = scopes(ctx, SINGLE_LOOKUP_RE.test(sql));
   return sql.replace(TABLE_RE, (match, kw: string, table: string, aliasPart: string | undefined, alias: string | undefined) => {
     const t = table.toLowerCase();
     let sub: string;
     if (t === "all_employees") sub = s.employees;
     else if (t === "users") sub = s.users;
     else if (COMPANY_TABLES.has(t)) sub = s.company(t);
+    else if (CONFIG_TABLES.has(t)) sub = s.config(t);
+    else if (OWN_TABLES.has(t)) sub = s.own(t);
     else if (EMPLOYEE_TABLES.has(t)) sub = s.employeeRows(t);
     else sub = s.userRows(t);
     const hasAlias = !!alias && !NOT_ALIAS.has(alias.toLowerCase());
@@ -143,9 +192,28 @@ export function scopeSql(sql: string): string {
   });
 }
 
+// UPDATE / DELETE on a company's own tables only ever touch that company's
+// rows (settings shared from the mother company are read-only here); employees,
+// departments, branches and projects stay within the group.
+const WRITE_RE = /^\s*(UPDATE\s+`?([A-Za-z_][A-Za-z0-9_]*)`?\s+SET\b[\s\S]*?|DELETE\s+FROM\s+`?([A-Za-z_][A-Za-z0-9_]*)`?\s+)\bWHERE\b([\s\S]*)$/i;
+function guardWrite(sql: string, ctx: CompanyContext): string {
+  const m = sql.match(WRITE_RE);
+  if (!m) return sql;
+  const table = String(m[2] || m[3]).toLowerCase();
+  const cond = m[4];
+  // Leave anything unusual (joins, ORDER/LIMIT, subqueries) exactly as written.
+  if (/\b(ORDER\s+BY|LIMIT|JOIN|SELECT)\b/i.test(cond)) return sql;
+  let extra: string | null = null;
+  if (CONFIG_TABLES.has(table) || OWN_TABLES.has(table)) extra = `company_id = ${int(ctx.companyId)}`;
+  else if (COMPANY_TABLES.has(table)) extra = `company_id IN (SELECT id FROM companies WHERE group_id = ${int(ctx.groupId)})`;
+  if (!extra) return sql;
+  return `${m[1]}WHERE (${cond}) AND ${extra}`;
+}
+
 // INSERT INTO <company table> (cols) VALUES (...) → also sets company_id.
 // New accounts (users) likewise get the active group.
-const INSERT_RE = /^\s*INSERT\s+INTO\s+`?(all_employees|departments|branches|projects|users)`?\s*\(([^)]*)\)\s*VALUES\s*\(([\s\S]*)\)\s*$/i;
+const INSERT_TABLES = [...COMPANY_TABLES, ...CONFIG_TABLES.keys(), ...OWN_TABLES, "users"];
+const INSERT_RE = new RegExp(`^\\s*INSERT\\s+INTO\\s+\`?(${INSERT_TABLES.join("|")})\`?\\s*\\(([^)]*)\\)\\s*VALUES\\s*\\(([\\s\\S]*)\\)\\s*$`, "i");
 function scopeInsert(sql: string, companyId: number, groupId: number): string {
   const m = sql.match(INSERT_RE);
   if (!m) return sql;

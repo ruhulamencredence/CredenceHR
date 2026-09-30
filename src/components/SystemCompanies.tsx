@@ -29,6 +29,7 @@ interface Company {
   website: string | null;
   has_logo: boolean;
   is_active: boolean;
+  shared_settings: string[];
   employee_count: number;
   additional_employee_count: number;
   user_count: number;
@@ -44,7 +45,14 @@ interface AccessUser {
 }
 type Msg = { type: 'success' | 'error'; text: string } | null;
 
-const CompanyForm: React.FC<{ token: string; company: Company | null; onClose: () => void; onSaved: (t: string) => void }> = ({ token, company, onClose, onSaved }) => {
+type ShareKind = { key: string; label: string };
+const CompanyForm: React.FC<{ token: string; company: Company | null; kinds: ShareKind[]; onClose: () => void; onSaved: (t: string) => void }> = ({
+  token,
+  company,
+  kinds,
+  onClose,
+  onSaved
+}) => {
   const api = useHrApi(token);
   const [f, setF] = useState({
     name: company?.name || '',
@@ -57,6 +65,8 @@ const CompanyForm: React.FC<{ token: string; company: Company | null; onClose: (
     is_active: company ? company.is_active : true
   });
   const [logo, setLogo] = useState<{ mime: string; data: string; preview: string } | null>(null);
+  // A new sister company starts with all of the mother company's settings.
+  const [shared, setShared] = useState<Set<string>>(new Set(company ? company.shared_settings : kinds.map((k) => k.key)));
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<Msg>(null);
   const set = (k: string, v: any) => setF((p) => ({ ...p, [k]: v }));
@@ -69,7 +79,7 @@ const CompanyForm: React.FC<{ token: string; company: Company | null; onClose: (
     setBusy(true);
     setMsg(null);
     try {
-      const body = { ...f, logo: logo ? { mime: logo.mime, data: logo.data } : undefined };
+      const body = { ...f, logo: logo ? { mime: logo.mime, data: logo.data } : undefined, shared_settings: f.is_mother ? [] : [...shared] };
       if (company) await api.put(`/api/system/companies/${company.id}`, body);
       else await api.post('/api/system/companies', body);
       onSaved(company ? 'Company updated.' : 'Company added.');
@@ -139,6 +149,34 @@ const CompanyForm: React.FC<{ token: string; company: Company | null; onClose: (
         <label className="flex items-center gap-2 text-xs">
           <input type="checkbox" checked={f.is_mother} onChange={(e) => set('is_mother', e.target.checked)} /> Mother company of the group
         </label>
+        {!f.is_mother && kinds.length > 0 && (
+          <div className="rounded-lg border border-slate-200 p-3">
+            <div className="text-xs font-semibold text-slate-700">Uses the mother company's…</div>
+            <p className="text-[11px] text-slate-500 mb-2">
+              Ticked: this company follows the mother company's settings (read-only here). Unticked: it keeps its own — set them up while this company is selected.
+            </p>
+            <div className="grid sm:grid-cols-2 gap-1.5">
+              {kinds.map((k) => (
+                <label key={k.key} className="flex items-start gap-2 text-xs">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={shared.has(k.key)}
+                    onChange={(e) =>
+                      setShared((p) => {
+                        const n = new Set(p);
+                        if (e.target.checked) n.add(k.key);
+                        else n.delete(k.key);
+                        return n;
+                      })
+                    }
+                  />
+                  {k.label}
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
         {company && !company.is_mother && (
           <label className="flex items-center gap-2 text-xs">
             <input type="checkbox" checked={f.is_active} onChange={(e) => set('is_active', e.target.checked)} /> Active
@@ -234,6 +272,7 @@ export const SystemCompanies: React.FC<{ token: string }> = ({ token }) => {
   const [tab, setTab] = useState<'companies' | 'access' | 'workspaces'>('companies');
   const [platformAdmin, setPlatformAdmin] = useState(false);
   const [workspaceCode, setWorkspaceCode] = useState<string | null>(null);
+  const [shareKinds, setShareKinds] = useState<ShareKind[]>([]);
   const [companies, setCompanies] = useState<Company[] | null>(null);
   const [groupName, setGroupName] = useState('');
   const [users, setUsers] = useState<AccessUser[] | null>(null);
@@ -248,6 +287,7 @@ export const SystemCompanies: React.FC<{ token: string }> = ({ token }) => {
         setCompanies(d.companies);
         setGroupName(d.group?.name || '');
         setWorkspaceCode(d.group?.workspace_code || null);
+        setShareKinds(d.share_kinds || []);
         setPlatformAdmin(!!d.is_platform_admin);
       })
       .catch((e) => setMsg({ type: 'error', text: e.message }));
@@ -296,9 +336,9 @@ export const SystemCompanies: React.FC<{ token: string }> = ({ token }) => {
           </button>
         )}
       </div>
-      <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-        Kept apart per company now: employees, departments, branches, projects, attendance, leave, payroll, claims and HR records. Still shared by the
-        whole group for now (next step): holiday calendar, leave types and policies, letter templates, notices, assets, vehicles, approval templates and chat.
+      <div className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+        Each company keeps its own employees, attendance, leave, payroll and HR records. For settings (holidays, leave rules, templates, notices, assets…) a
+        sister company can use the mother company's — choose per company with the edit button.
       </div>
       <Notice msg={msg} onClose={() => setMsg(null)} />
       <div className="flex gap-1 border-b border-slate-200">
@@ -365,6 +405,18 @@ export const SystemCompanies: React.FC<{ token: string }> = ({ token }) => {
                 </div>
               </div>
               {(c.address || c.phone || c.email) && <div className="text-[11px] text-slate-500 mt-2">{[c.address, c.phone, c.email].filter(Boolean).join(' · ')}</div>}
+              {!c.is_mother && (
+                <div className="text-[11px] text-slate-500 mt-1">
+                  {c.shared_settings.length === 0
+                    ? 'Keeps all its own settings'
+                    : c.shared_settings.length === shareKinds.length
+                    ? "Uses all of the mother company's settings"
+                    : `Uses the mother company's: ${shareKinds
+                        .filter((k) => c.shared_settings.includes(k.key))
+                        .map((k) => k.label.split(/[,&]/)[0].trim().toLowerCase())
+                        .join(', ')}`}
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -461,6 +513,7 @@ export const SystemCompanies: React.FC<{ token: string }> = ({ token }) => {
       {edit && (
         <CompanyForm
           token={token}
+          kinds={shareKinds}
           company={edit === 'new' ? null : edit}
           onClose={() => setEdit(null)}
           onSaved={(t) => {

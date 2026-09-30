@@ -46,6 +46,8 @@ import {
   computeAttendanceDays,
   summarizeDays
 } from "./HrOps360Routes";
+import { companyStore } from "./companyContext";
+import { contextForCompany } from "./CompanyRoutes";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 
@@ -944,7 +946,11 @@ export function registerHrReportsRoutes(app: Express, deps: HrReportsRouteDeps) 
         const created = toDate(r.created_at) || now.date;
         if (period < created) continue;
         await queryDB("UPDATE hr_saved_reports SET last_period = ?, last_run_at = ? WHERE id = ?", [period, new Date(), Number(r.id)]);
-        await executeSaved(r, period, false).catch((e) => console.warn(`⚠️ Scheduled report ${r.id} failed: ${e.message}`));
+        // Runs in the company the report was saved in (multi-company).
+        const ctx = await contextForCompany(queryDB, Number(r.company_id ?? 1));
+        await companyStore
+          .run(ctx, () => executeSaved(r, period, false))
+          .catch((e) => console.warn(`⚠️ Scheduled report ${r.id} failed: ${e.message}`));
       }
     } catch (err: any) {
       console.warn("⚠️ Report scheduler: " + err.message);

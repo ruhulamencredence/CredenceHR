@@ -30,6 +30,7 @@
 import type { Express } from "express";
 import bcrypt from "bcryptjs";
 import { DEFAULT_COMPANY_ID, DEFAULT_GROUP_ID, activeCompanyId, type CompanyContext } from "./companyContext";
+import { SHARE_KINDS, CONFIG_TABLES, OWN_TABLES } from "./companyScope";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 
@@ -169,6 +170,28 @@ export async function ensureCompanySchema(dbPool: any): Promise<void> {
     await run(`${table} old key`, `ALTER TABLE ${table} DROP INDEX ${oldKey}`, ["ER_CANT_DROP_FIELD_OR_KEY"]);
   }
 
+  // Company settings and company-owned records (companyScope.ts): every row so
+  // far is the mother company's (company 1) via the column default.
+  for (const table of [...CONFIG_TABLES.keys(), ...OWN_TABLES]) {
+    await run(`${table}.company_id`, `ALTER TABLE ${table} ADD COLUMN company_id INT NOT NULL DEFAULT 1`, ["ER_DUP_FIELDNAME", "ER_NO_SUCH_TABLE"]);
+    await run(`${table} company index`, `ALTER TABLE ${table} ADD INDEX idx_${table}_company (company_id)`, ["ER_DUP_KEYNAME", "ER_NO_SUCH_TABLE"]);
+  }
+  // Names / keys that only need to be unique within a company.
+  for (const [table, oldKey, cols] of [
+    ["holiday_calendar", "unique_holiday_entry_date_group", "entry_date, applies_to"],
+    ["leave_categories", "unique_leave_category_key", "category_key"],
+    ["leave_category_policies", "uniq_leave_category_policy", "category_key"],
+    ["salary_components", "unique_component_name", "name"],
+    ["pay_grades", "unique_grade_name", "grade_name"],
+    ["hr_ops_settings", "setting_key", "setting_key"],
+    ["exit_clearance_approvers", "department", "department"],
+    ["assets", "asset_tag", "asset_tag"]
+  ]) {
+    await run(`${table} company key`, `ALTER TABLE ${table} ADD UNIQUE KEY ucompany_${oldKey} (company_id, ${cols})`, ["ER_DUP_KEYNAME", "ER_NO_SUCH_TABLE"]);
+    await run(`${table} old key`, `ALTER TABLE ${table} DROP INDEX ${oldKey}`, ["ER_CANT_DROP_FIELD_OR_KEY", "ER_NO_SUCH_TABLE"]);
+  }
+  await run("companies.shared_settings", "ALTER TABLE companies ADD COLUMN shared_settings TEXT NULL", ["ER_DUP_FIELDNAME"]);
+
   // Module Access per company: add the column, widen the unique key to
   // include it (new key first, so the user_id foreign key always has an index),
   // then drop the old one.
@@ -205,6 +228,36 @@ interface AccessInfo {
   groupId: number;
   allowed: number[];
   defaultId: number;
+  motherId: number;
+  shared: Map<number, string[]>;
+}
+
+// Which kinds of settings a company uses from its mother company. Stored as a
+// JSON list in companies.shared_settings; empty (never set) means all of them,
+// so a new sister company starts with the mother company's rules.
+export function sharedKindsOf(c: any, isMother: boolean): string[] {
+  if (isMother) return [];
+  if (c?.shared_settings == null || c.shared_settings === "") return SHARE_KINDS.map((k) => k.key);
+  try {
+    const v = JSON.parse(String(c.shared_settings));
+    return Array.isArray(v) ? v.filter((k) => SHARE_KINDS.some((x) => x.key === k)) : [];
+  } catch {
+    return [];
+  }
+}
+
+// Context for background jobs acting for one company (e.g. a scheduled report).
+export async function contextForCompany(queryDB: QueryDB, companyId: number): Promise<CompanyContext> {
+  const all: any[] = (await queryDB("SELECT * FROM companies").catch(() => [])) || [];
+  const c = all.find((x) => Number(x.id) === Number(companyId)) || all.find((x) => Number(x.id) === DEFAULT_COMPANY_ID);
+  const groupId = Number(c?.group_id ?? DEFAULT_GROUP_ID);
+  const mother = all.find((x) => Number(x.group_id) === groupId && Number(x.is_mother) === 1) || c;
+  return {
+    companyId: Number(c?.id ?? DEFAULT_COMPANY_ID),
+    groupId,
+    motherId: Number(mother?.id ?? DEFAULT_COMPANY_ID),
+    shared: sharedKindsOf(c, Number(c?.id) === Number(mother?.id))
+  };
 }
 const accessCache = new Map<number, AccessInfo>();
 const ACCESS_TTL_MS = 30 * 1000;
@@ -247,7 +300,8 @@ export async function loadCompanyAccess(queryDB: QueryDB, user: { id: number; ro
   if (role === "superadmin") allowed = companies.map((c) => Number(c.id));
   if (!allowed.length) allowed = [mother ? Number(mother.id) : DEFAULT_COMPANY_ID];
   if (!defaultId || !allowed.includes(defaultId)) defaultId = allowed.includes(Number(mother?.id)) ? Number(mother.id) : allowed[0];
-  const info = { at: Date.now(), groupId, allowed, defaultId };
+  const shared = new Map<number, string[]>(companies.map((c) => [Number(c.id), sharedKindsOf(c, Number(c.id) === Number(mother?.id))]));
+  const info = { at: Date.now(), groupId, allowed, defaultId, motherId: Number(mother?.id ?? DEFAULT_COMPANY_ID), shared };
   accessCache.set(Number(user.id), info);
   return info;
 }
@@ -257,7 +311,8 @@ export async function loadCompanyAccess(queryDB: QueryDB, user: { id: number; ro
 export async function resolveCompanyContext(queryDB: QueryDB, user: { id: number; role?: string }, requested: any): Promise<CompanyContext> {
   const info = await loadCompanyAccess(queryDB, user);
   const want = Number(Array.isArray(requested) ? requested[0] : requested);
-  return { companyId: want && info.allowed.includes(want) ? want : info.defaultId, groupId: info.groupId };
+  const companyId = want && info.allowed.includes(want) ? want : info.defaultId;
+  return { companyId, groupId: info.groupId, motherId: info.motherId, shared: info.shared.get(companyId) || [] };
 }
 
 // ---------------------------------------------------------------------------
@@ -317,7 +372,8 @@ export function registerCompanyRoutes(app: Express, deps: CompanyRouteDeps) {
     email: c.email || null,
     website: c.website || null,
     has_logo: !!c.logo_mime,
-    is_active: Number(c.is_active ?? 1) === 1
+    is_active: Number(c.is_active ?? 1) === 1,
+    shared_settings: sharedKindsOf(c, Number(c.is_mother) === 1)
   });
   const groupOf = async (groupId: number) => {
     const rows: any[] = (await queryDB("SELECT * FROM company_groups").catch(() => [])) || [];
@@ -413,6 +469,7 @@ export function registerCompanyRoutes(app: Express, deps: CompanyRouteDeps) {
       res.json({
         group: await groupOf(groupId),
         is_platform_admin: Number(me.find((u) => Number(u.id) === Number(req.user.id))?.is_platform_admin || 0) === 1,
+        share_kinds: SHARE_KINDS.map((k) => ({ key: k.key, label: k.label })),
         companies: companies
           .map((c) => {
             const id = Number(c.id);
@@ -456,7 +513,11 @@ export function registerCompanyRoutes(app: Express, deps: CompanyRouteDeps) {
       email: s(b?.email, 150),
       website: s(b?.website, 150),
       is_active: b?.is_active === undefined ? 1 : b.is_active ? 1 : 0,
-      logo
+      logo,
+      // Kinds of settings used from the mother company (see SHARE_KINDS).
+      shared_settings: Array.isArray(b?.shared_settings)
+        ? JSON.stringify(b.shared_settings.filter((k: any) => SHARE_KINDS.some((x) => x.key === k)))
+        : undefined
     };
   }
 
@@ -475,6 +536,7 @@ export function registerCompanyRoutes(app: Express, deps: CompanyRouteDeps) {
         [groupId, c.name, c.short_code, c.is_mother, c.address, c.phone, c.email, c.website, c.is_active, c.logo?.mime || null, c.logo?.data || null]
       );
       const id = Number(r.insertId);
+      if (c.shared_settings !== undefined) await queryDB("UPDATE companies SET shared_settings = ? WHERE id = ?", [c.shared_settings, id]);
       if (c.is_mother) await setMother(groupId, id);
       invalidateCompanyAccess();
       res.json({ success: true, id });
@@ -504,6 +566,7 @@ export function registerCompanyRoutes(app: Express, deps: CompanyRouteDeps) {
         id
       ]);
       if (c.logo !== undefined) await queryDB("UPDATE companies SET logo_mime = ?, logo_data = ? WHERE id = ?", [c.logo?.mime || null, c.logo?.data || null, id]);
+      if (c.shared_settings !== undefined) await queryDB("UPDATE companies SET shared_settings = ? WHERE id = ?", [c.shared_settings, id]);
       if (c.is_mother) await setMother(groupId, id);
       invalidateCompanyAccess();
       res.json({ success: true });
