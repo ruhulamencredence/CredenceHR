@@ -12,7 +12,8 @@
 //               to others (shared-service HR).
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Building2, Copy, Crown, ImagePlus, Pencil, Plus, Search, Users } from 'lucide-react';
+import { Building2, Copy, Crown, Globe, ImagePlus, Pencil, Plus, Search, Users } from 'lucide-react';
+import { PlatformWorkspaces } from './PlatformWorkspaces';
 import { Spinner } from './Spinner';
 import { readFileBase64 } from './HrOps360Parts';
 import { useHrApi, Modal, Notice, inputCls, labelCls, btnPrimary, btnGhost } from './HrOpsShared';
@@ -230,7 +231,9 @@ const CopyModal: React.FC<{ token: string; user: AccessUser; companies: Company[
 
 export const SystemCompanies: React.FC<{ token: string }> = ({ token }) => {
   const api = useHrApi(token);
-  const [tab, setTab] = useState<'companies' | 'access'>('companies');
+  const [tab, setTab] = useState<'companies' | 'access' | 'workspaces'>('companies');
+  const [platformAdmin, setPlatformAdmin] = useState(false);
+  const [workspaceCode, setWorkspaceCode] = useState<string | null>(null);
   const [companies, setCompanies] = useState<Company[] | null>(null);
   const [groupName, setGroupName] = useState('');
   const [users, setUsers] = useState<AccessUser[] | null>(null);
@@ -244,6 +247,8 @@ export const SystemCompanies: React.FC<{ token: string }> = ({ token }) => {
       .then((d) => {
         setCompanies(d.companies);
         setGroupName(d.group?.name || '');
+        setWorkspaceCode(d.group?.workspace_code || null);
+        setPlatformAdmin(!!d.is_platform_admin);
       })
       .catch((e) => setMsg({ type: 'error', text: e.message }));
     api
@@ -275,7 +280,15 @@ export const SystemCompanies: React.FC<{ token: string }> = ({ token }) => {
           <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
             <Building2 className="w-5 h-5 text-blue-600" /> Companies {groupName && <span className="text-sm font-medium text-slate-500">· {groupName}</span>}
           </h3>
-          <p className="text-xs text-slate-500 mt-0.5">The group's companies, and which accounts may work in each.</p>
+          <p className="text-xs text-slate-500 mt-0.5">
+            The group's companies, and which accounts may work in each.
+            {workspaceCode && (
+              <>
+                {' '}
+                Sign-in workspace: <span className="font-mono font-semibold text-slate-700">{workspaceCode}</span>
+              </>
+            )}
+          </p>
         </div>
         {tab === 'companies' && (
           <button type="button" className={btnPrimary} onClick={() => setEdit('new')}>
@@ -292,7 +305,8 @@ export const SystemCompanies: React.FC<{ token: string }> = ({ token }) => {
         {(
           [
             ['companies', 'Companies', Building2],
-            ['access', 'Who can work where', Users]
+            ['access', 'Who can work where', Users],
+            ...(platformAdmin ? ([['workspaces', 'Workspaces (all groups)', Globe]] as const) : [])
           ] as const
         ).map(([k, label, Icon]) => (
           <button
@@ -305,6 +319,8 @@ export const SystemCompanies: React.FC<{ token: string }> = ({ token }) => {
           </button>
         ))}
       </div>
+
+      {tab === 'workspaces' && platformAdmin && <PlatformWorkspaces token={token} />}
 
       {tab === 'companies' && (
         <div className="grid md:grid-cols-2 gap-3">
