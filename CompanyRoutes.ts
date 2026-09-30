@@ -393,11 +393,10 @@ export async function applyCompanyTransfer(queryDB: QueryDB, employeeId: number,
 // Workspaces (one per group) — used before sign-in
 // ---------------------------------------------------------------------------
 
-// Until every module keeps each company's data apart (multi-company step 2 and
-// on), accounts of any group other than the original one would see its
-// employees, attendance… So sign-in to other workspaces stays closed until
-// then; the workspace, its companies and its Superadmin can already be set up.
-export const OTHER_WORKSPACES_CAN_SIGN_IN = false;
+// Every table is kept inside its group (companyScope.ts, steps 2–4), so other
+// workspaces may sign in. Set to false to close them again (the original
+// workspace is never affected).
+export const OTHER_WORKSPACES_CAN_SIGN_IN = true;
 
 const WORKSPACE_RE = /^[a-z][a-z0-9-]{1,38}[a-z0-9]$/;
 const RESERVED_WORKSPACES = new Set(["www", "api", "admin", "app", "login", "mail", "static"]);
@@ -416,9 +415,14 @@ export async function checkWorkspaceLogin(queryDB: QueryDB, workspace: any, user
   const groupId = Number(user.group_id ?? DEFAULT_GROUP_ID);
   const closed = groupId !== DEFAULT_GROUP_ID && !OTHER_WORKSPACES_CAN_SIGN_IN;
   // Older app builds send no workspace — only the original workspace's
-  // accounts can sign in that way.
-  if (workspace === undefined || workspace === null || workspace === "")
-    return closed ? { status: 403, error: "This workspace is still being set up. Sign-in opens once its data is ready." } : null;
+  // accounts can sign in that way; everyone else types their workspace first
+  // (which also keeps a switched-off workspace closed).
+  if (workspace === undefined || workspace === null || workspace === "") {
+    if (groupId === DEFAULT_GROUP_ID) return null;
+    return closed
+      ? { status: 403, error: "This workspace is still being set up. Sign-in opens once its data is ready." }
+      : { status: 400, error: "Enter your workspace first, then sign in." };
+  }
   const g = await findWorkspace(queryDB, workspace);
   if (!g) return { status: 400, error: "This workspace wasn't found. Check the workspace name." };
   if (Number(user.group_id ?? DEFAULT_GROUP_ID) !== Number(g.id)) return { status: 400, error: "Invalid login ID or password" };
