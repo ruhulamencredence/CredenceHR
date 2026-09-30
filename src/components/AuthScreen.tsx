@@ -60,6 +60,9 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
   // server as a single "identifier" field.
   const [workspace, setWorkspace] = useState<Workspace | null>(readWorkspace);
   const [workspaceInput, setWorkspaceInput] = useState('');
+  // The system owner signs in without typing a workspace (their own is the
+  // original one), then opens any workspace from inside the app.
+  const [ownerMode, setOwnerMode] = useState(false);
   // The web address can name the workspace (credence.example.com) — then the
   // workspace page is skipped.
   const [detecting, setDetecting] = useState(() => !readWorkspace());
@@ -198,6 +201,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
     saveWorkspace(null);
     setWorkspaceInput(workspace?.code || '');
     setWorkspace(null);
+    setOwnerMode(false);
     setError('');
   };
 
@@ -222,8 +226,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(
           coords
-            ? { identifier, password, workspace: workspace?.code, latitude: coords.latitude, longitude: coords.longitude, platform: 'app' }
-            : { identifier, password, workspace: workspace?.code }
+            ? { identifier, password, workspace: ownerMode ? undefined : workspace?.code, latitude: coords.latitude, longitude: coords.longitude, platform: 'app' }
+            : { identifier, password, workspace: ownerMode ? undefined : workspace?.code }
         ),
       });
 
@@ -306,10 +310,10 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
         <div className="lg:w-1/2">
         <div className="text-center lg:text-left mb-3">
           <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight uppercase gemini-gradient-text mb-2">
-            {workspace ? 'Welcome back' : 'Welcome'}
+            {workspace || ownerMode ? 'Welcome back' : 'Welcome'}
           </h1>
           <p className="text-sm" style={{ color: 'var(--g-text-muted)' }}>
-            {workspace ? `Sign in to ${workspace.name}` : "Enter your company's workspace to continue"}
+            {ownerMode ? 'System owner sign-in' : workspace ? `Sign in to ${workspace.name}` : "Enter your company's workspace to continue"}
           </p>
           {workspace?.tagline && (
             <p className="text-xs mt-1" style={{ color: 'var(--g-text-muted)' }}>
@@ -327,7 +331,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
             </div>
           )}
 
-          {!workspace ? (
+          {!workspace && !ownerMode ? (
+            <>
             <form className="space-y-4" onSubmit={handleWorkspace}>
               <div>
                 <label className="block text-xs font-medium mb-1.5 ml-1" style={{ color: 'var(--g-text-muted)' }}>
@@ -368,6 +373,21 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
                 {!loading && <ArrowUp className="w-4 h-4 rotate-90" />}
               </button>
             </form>
+            <p className="mt-4 text-center text-xs" style={{ color: 'var(--g-text-muted)' }}>
+              System owner?{' '}
+              <button
+                type="button"
+                onClick={() => {
+                  setOwnerMode(true);
+                  setError('');
+                }}
+                className="font-semibold underline"
+                style={{ color: 'var(--g-accent)' }}
+              >
+                Sign in without a workspace
+              </button>
+            </p>
+            </>
           ) : (
           <>
           <form className="space-y-4" onSubmit={handleSubmit}>
@@ -438,9 +458,9 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
             Don't have an account? Contact your Admin to get one created.
           </p>
           <p className="mt-2 text-center text-xs" style={{ color: 'var(--g-text-muted)' }}>
-            Not {workspace.short_name || workspace.name}?{' '}
+            {ownerMode ? 'Signing in to a company?' : `Not ${workspace?.short_name || workspace?.name}?`}{' '}
             <button type="button" onClick={changeWorkspace} className="font-semibold underline" style={{ color: 'var(--g-accent)' }}>
-              Change workspace
+              {ownerMode ? 'Enter a workspace' : 'Change workspace'}
             </button>
           </p>
           </>

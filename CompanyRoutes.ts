@@ -474,6 +474,17 @@ export async function findWorkspace(queryDB: QueryDB, code: string): Promise<any
 
 // Checked by POST /api/auth/login when the app sends a workspace: the account
 // must belong to that workspace's group. Returns an error message, or null.
+// The company the system owner starts in after signing in through another
+// group's workspace (its mother company), or undefined for their own default.
+export async function workspaceStartCompany(queryDB: QueryDB, workspace: any, user: any): Promise<number | undefined> {
+  if (Number(user.is_platform_admin || 0) !== 1 || !workspace) return undefined;
+  const g = await findWorkspace(queryDB, workspace);
+  if (!g || Number(g.id) === Number(user.group_id ?? DEFAULT_GROUP_ID)) return undefined;
+  const cs = (await companiesOfGroup(queryDB, Number(g.id))).filter((c) => Number(c.is_active ?? 1) === 1);
+  const mother = cs.find((c) => Number(c.is_mother) === 1) || cs[0];
+  return mother ? Number(mother.id) : undefined;
+}
+
 export async function checkWorkspaceLogin(queryDB: QueryDB, workspace: any, user: any): Promise<{ status: number; error: string } | null> {
   const groupId = Number(user.group_id ?? DEFAULT_GROUP_ID);
   const closed = groupId !== DEFAULT_GROUP_ID && !OTHER_WORKSPACES_CAN_SIGN_IN;
@@ -488,6 +499,8 @@ export async function checkWorkspaceLogin(queryDB: QueryDB, workspace: any, user
   }
   const g = await findWorkspace(queryDB, workspace);
   if (!g) return { status: 400, error: "This workspace wasn't found. Check the workspace name." };
+  // The system owner may sign in through any workspace (they then start inside it).
+  if (Number(user.is_platform_admin || 0) === 1) return null;
   if (Number(user.group_id ?? DEFAULT_GROUP_ID) !== Number(g.id)) return { status: 400, error: "Invalid login ID or password" };
   if (Number(g.id) !== DEFAULT_GROUP_ID && !OTHER_WORKSPACES_CAN_SIGN_IN)
     return { status: 403, error: "This workspace is still being set up. Sign-in opens once its data is ready." };
