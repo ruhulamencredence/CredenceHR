@@ -3602,6 +3602,11 @@ async function seedAdminFromEnv() {
       );
       console.log(`✅ Superadmin account synced from .env: ${adminEmail}`);
     }
+    // Multi-company: the .env account is the system owner — in the original
+    // (Credence) workspace and the one who manages every workspace.
+    await queryDB("UPDATE users SET group_id = 1, is_platform_admin = 1 WHERE email = ?", [adminEmail]).catch((err: any) =>
+      console.warn("⚠️ Could not mark the .env Superadmin as system owner: " + err.message)
+    );
   } else {
     const existing = memoryDb.users.find(u => u.email === adminEmail);
     if (!existing) {
