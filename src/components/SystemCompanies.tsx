@@ -12,11 +12,12 @@
 //               to others (shared-service HR).
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Building2, Copy, Crown, Globe, ImagePlus, Pencil, Plus, Search, Users } from 'lucide-react';
+import { Building2, Copy, Crown, Globe, ImagePlus, Pencil, Plus, Search, Trash2, Users } from 'lucide-react';
 import { PlatformWorkspaces } from './PlatformWorkspaces';
 import { Spinner } from './Spinner';
 import { readFileBase64 } from './HrOps360Parts';
-import { useHrApi, Modal, Notice, inputCls, labelCls, btnPrimary, btnGhost } from './HrOpsShared';
+import { useHrApi, Modal, Notice, TypeToDelete, inputCls, labelCls, btnPrimary, btnGhost } from './HrOpsShared';
+import { useMyCompanies } from '../lib/company';
 
 interface Company {
   id: number;
@@ -279,6 +280,8 @@ export const SystemCompanies: React.FC<{ token: string }> = ({ token }) => {
   const [users, setUsers] = useState<AccessUser[] | null>(null);
   const [edit, setEdit] = useState<Company | 'new' | null>(null);
   const [copyFor, setCopyFor] = useState<AccessUser | null>(null);
+  const [removing, setRemoving] = useState<Company | null>(null);
+  const mine = useMyCompanies(token);
   const [q, setQ] = useState('');
   const [msg, setMsg] = useState<Msg>(null);
   const load = useCallback(() => {
@@ -396,9 +399,16 @@ export const SystemCompanies: React.FC<{ token: string }> = ({ token }) => {
                     <div className="text-[11px] text-slate-500">Code {c.short_code}</div>
                   </div>
                 </div>
-                <button type="button" className={btnGhost} onClick={() => setEdit(c)} aria-label={`Edit ${c.name}`}>
-                  <Pencil className="w-3.5 h-3.5" />
-                </button>
+                <div className="flex gap-1 shrink-0">
+                  <button type="button" className={btnGhost} onClick={() => setEdit(c)} aria-label={`Edit ${c.name}`}>
+                    <Pencil className="w-3.5 h-3.5" />
+                  </button>
+                  {!c.is_mother && (
+                    <button type="button" className={`${btnGhost} text-rose-600`} onClick={() => setRemoving(c)} aria-label={`Delete ${c.name}`} title="Delete this company">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="grid grid-cols-3 gap-2 mt-3 text-center">
                 <div className="rounded-lg bg-slate-50 py-2">
@@ -558,6 +568,34 @@ export const SystemCompanies: React.FC<{ token: string }> = ({ token }) => {
             load();
           }}
         />
+      )}
+      {removing && (
+        <TypeToDelete
+          title={`Delete ${removing.name}`}
+          code={removing.short_code}
+          onClose={() => setRemoving(null)}
+          onDelete={async (typed) => {
+            await api.del(`/api/system/companies/${removing.id}`, { confirm: typed });
+            setRemoving(null);
+            setMsg({ type: 'success', text: `${removing.name} was deleted.` });
+            load();
+          }}
+        >
+          <p>
+            The company goes from the group for good, with its departments, projects, settings, notices and other records. Accounts keep working in the group's
+            other companies. This can't be undone.
+          </p>
+          {removing.employee_count + removing.additional_employee_count > 0 && (
+            <p className="text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              It has employees, so it can't be deleted — move them to another company first, or switch it off instead (edit ✎ → untick Active).
+            </p>
+          )}
+          {mine?.active_company_id === removing.id && (
+            <p className="text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              You are working in this company right now. Switch to another company from the header first.
+            </p>
+          )}
+        </TypeToDelete>
       )}
     </div>
   );
