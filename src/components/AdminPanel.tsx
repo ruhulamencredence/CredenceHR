@@ -3023,7 +3023,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
 
       {/* TAB 0: DASHBOARD — role admin/superadmin, or a granted 'admin_dashboard' module (see canSeeDashboard above) */}
       {activeTab === 'dashboard' && canSeeDashboard && (
-        <AdminDashboard token={token} user={user} />
+        <AdminDashboard
+          token={token}
+          user={user}
+          onNavigate={(tab) => {
+            if (tab === 'companies' || tab === 'permanent_delete_log' ? isSuperAdmin : canSee(tab as AdminModuleKey)) setActiveTab(tab as any);
+          }}
+        />
       )}
 
       {/* TAB 1: REPORTS */}

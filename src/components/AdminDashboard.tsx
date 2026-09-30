@@ -18,20 +18,19 @@
 // same text-xs uppercase tracking-wide label style AdminPanel's own filter
 // bars use elsewhere in this file.
 //
-// Every stat tile/section below is wired to a REAL endpoint this app
-// already has UNLESS explicitly marked comingSoon — those cover concepts
-// from the reference PDF this app has no backing feature for yet
-// (break-time reconciliation, visit applications, on-break tracking,
-// employee status-effective-date, profile-image approval, document
-// requests, and Task management). They render as the same tile shape,
-// greyed out with a "Coming Soon" pill, so the layout already has a slot
-// for them the day those features exist — nothing here is a mocked number.
+// Every stat tile/section below is wired to a REAL endpoint. Birthdays,
+// attendance approvals/corrections, document requests, status-to-be-effective,
+// HR alerts and the Task Status Overview come from /api/admin-dashboard/extras
+// (AdminDashboardRoutes.ts). Tiles from the reference PDF this app has no
+// feature for (visits, breaks, profile-image approval) are left out rather
+// than shown greyed. A tile or task with a screen of its own opens it
+// (onNavigate); one listing people opens a list.
 
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  CalendarClock, CalendarDays, Clock3, Wallet, Banknote, Package, HandCoins,
-  Bell, Users, ListChecks, Gift, Fingerprint, MapPinned, FileQuestion,
-  ImageIcon, ClipboardList, ShieldAlert, UserCog, Search, ChevronLeft, ChevronRight, X,
+  CalendarClock, CalendarDays, Wallet, Banknote, Package, HandCoins,
+  Bell, Users, ListChecks, Gift, Fingerprint,
+  ClipboardList, ShieldAlert, UserCog, Search, ChevronLeft, ChevronRight, X, AlertTriangle, ArrowRight,
 } from 'lucide-react';
 import { User } from '../types';
 import { apiUrl } from '../lib/api';
@@ -39,6 +38,46 @@ import { apiUrl } from '../lib/api';
 interface AdminDashboardProps {
   token: string;
   user: User;
+  // Opens an Admin Panel tab (ignored when this account can't see it).
+  onNavigate?: (tab: string) => void;
+}
+
+// One row of a tile's list (birthdays, pending approvals…).
+interface ListRow {
+  key: string;
+  name: string;
+  sub: string | null;
+  right: string | null;
+}
+interface Person {
+  name: string;
+  employee_code: string | null;
+  department: string | null;
+  designation: string | null;
+}
+interface Extras {
+  today: string;
+  birthdays: (Person & { date: string; days_away: number; turning: number })[];
+  attendance_approvals: (Person & { id: number; date: string | null })[];
+  attendance_corrections: (Person & { id: number; date: string | null })[];
+  documents: (Person & { id: string; kind: string; detail: string; date: string | null })[];
+  status_effective: (Person & { id: number; action: string; date: string | null; status: string })[];
+  tasks: { key: string; label: string; count: number; tab: string | null }[];
+  alerts: (Person & { kind: string; label: string; date: string | null; days: number })[];
+}
+
+const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function shortDate(d: string | null | undefined): string {
+  if (!d) return '—';
+  const [y, m, day] = String(d).slice(0, 10).split('-').map(Number);
+  return y && m && day ? `${day} ${SHORT_MONTHS[m - 1]}` : String(d);
+}
+const personSub = (p: Person) => [p.employee_code, p.designation, p.department].filter(Boolean).join(' · ') || null;
+function inDays(n: number): string {
+  if (n === 0) return 'Today';
+  if (n === 1) return 'Tomorrow';
+  if (n === -1) return 'Yesterday';
+  return n > 0 ? `In ${n} days` : `${-n} days ago`;
 }
 
 // GET helper that never throws into the caller — a 403 (module not granted
@@ -175,7 +214,7 @@ function groupByDepartment(entries: BreakdownEntry[]): DepartmentGroup[] {
     .sort((a, b) => b.entries.length - a.entries.length);
 }
 
-export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user }) => {
+export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onNavigate }) => {
   const authHeaders = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -191,6 +230,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user }) =
   const [attendanceReport, setAttendanceReport] = useState<{ year: number; month: number; days_in_month: number; users: any[] } | null>(null);
   const [holidays, setHolidays] = useState<any[] | null>(null);
   const [latePolicy, setLatePolicy] = useState<any | null>(null);
+  const [extras, setExtras] = useState<Extras | null>(null);
+  const [openList, setOpenList] = useState<{ title: string; rows: ListRow[]; tab?: string | null } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -198,7 +239,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user }) =
       setLoading(true);
       const now0 = new Date();
       const [
-        leaveApps, balances, advances, assetReqs, claims, bills, activeNotices, empDir, monthlyReport, holidayRows, latePolicyRows,
+        leaveApps, balances, advances, assetReqs, claims, bills, activeNotices, empDir, monthlyReport, holidayRows, latePolicyRows, extraRows,
       ] = await Promise.all([
         // /api/leave-applications/report, not the older /api/leave-applications
         // (a real-role-only "Self Service -> Leave Approvals" queue, hard-gated
@@ -220,6 +261,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user }) =
         ),
         safeGet<any[]>('/api/holidays', authHeaders),
         safeGet<any[]>('/api/payroll/late-policy', authHeaders),
+        safeGet<Extras>('/api/admin-dashboard/extras', authHeaders),
       ]);
       if (cancelled) return;
       setLeaveApplications(leaveApps);
@@ -233,6 +275,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user }) =
       setAttendanceReport(monthlyReport);
       setHolidays(holidayRows);
       setLatePolicy(latePolicyRows && latePolicyRows.length > 0 ? latePolicyRows[0] : null);
+      setExtras(extraRows);
       setLoading(false);
     })();
     return () => { cancelled = true; };
@@ -502,6 +545,36 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user }) =
     return map;
   }, [holidays]);
 
+  const go = (tab: string) => (onNavigate ? () => onNavigate(tab) : undefined);
+  // A tile counting people/requests: click opens their list.
+  function listTile<T>(
+    key: string, label: string, icon: StatTile['icon'], list: T[] | undefined, row: (x: T) => ListRow, title: string, tab?: string,
+  ): StatTile {
+    return {
+      key, label, icon,
+      value: list ? String(list.length) : null,
+      onClick: list && list.length > 0 ? () => setOpenList({ title, rows: list.map(row), tab }) : tab ? go(tab) : undefined,
+    };
+  }
+
+  // --- Attendance Missed: nobody checked in today (not on leave or a
+  // holiday), and yesterday's check-ins with no check-out. ---
+  const attendanceMissed = useMemo(() => {
+    if (!quickViewRows || !attendanceReport || !employees) return null;
+    const out: { key: string; name: string; designation: string; what: string }[] = [];
+    for (const r of quickViewRows) if (!r.present && !r.onLeaveToday && !r.holiday) out.push({ key: `t-${r.id}`, name: r.name, designation: r.designation, what: 'No check-in today' });
+    const yDay = new Date().getDate() - 1;
+    if (yDay >= 1) {
+      const byUser = new Map<number, any>(attendanceReport.users.map((u) => [Number(u.user_id), u]));
+      for (const e of employees) {
+        if (!e.is_active || !e.user_id) continue;
+        const d = byUser.get(Number(e.user_id))?.days?.[yDay - 1];
+        if (d?.check_in_at && !d.check_out_at) out.push({ key: `y-${e.id}`, name: e.name, designation: e.designation || '—', what: 'No check-out yesterday' });
+      }
+    }
+    return out;
+  }, [quickViewRows, attendanceReport, employees]);
+
   const statTiles: StatTile[] = [
     {
       key: 'leave_today', label: 'On Leave Today', icon: CalendarClock, value: onLeaveTodayCount != null ? String(onLeaveTodayCount) : null,
@@ -521,21 +594,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user }) =
         ? () => setOpenBreakdown({ title: 'Pending Leave Application', entries: pendingLeaveEntries })
         : undefined
     },
-    { key: 'break_recon', label: 'Pending Break Time Recon.', icon: Clock3, value: null, comingSoon: true },
-    { key: 'birthdays', label: 'Upcoming Birthdays', icon: Gift, value: null, comingSoon: true },
-    { key: 'attendance_approval', label: 'Pending Attendance Approval', icon: Fingerprint, value: null, comingSoon: true },
-    { key: 'claim_amount', label: 'Monthly Claim Amount', icon: Wallet, value: monthlyClaimAmount != null ? formatMoney(monthlyClaimAmount) : null },
-    { key: 'disburse_amount', label: 'Monthly Disburse Amount', icon: Banknote, value: monthlyDisburseAmount != null ? formatMoney(monthlyDisburseAmount) : null },
-    { key: 'attendance_recon', label: 'Pending Attendance Recon.', icon: ShieldAlert, value: null, comingSoon: true },
-    { key: 'visit_today', label: 'On Visit Today', icon: MapPinned, value: null, comingSoon: true },
-    { key: 'visit_tomorrow', label: 'On Visit Tomorrow', icon: MapPinned, value: null, comingSoon: true },
-    { key: 'visit_pending', label: 'Pending Visit Application', icon: FileQuestion, value: null, comingSoon: true },
-    { key: 'on_break', label: 'On Break Now', icon: Clock3, value: null, comingSoon: true },
-    { key: 'status_effective', label: 'Status To Be Effective', icon: UserCog, value: null, comingSoon: true },
+    listTile('birthdays', 'Upcoming Birthdays', Gift, extras?.birthdays, (b) => ({
+      key: `${b.employee_code}-${b.date}`,
+      name: b.name,
+      sub: personSub(b),
+      right: `${b.days_away === 0 ? 'Today' : shortDate(b.date)} · turns ${b.turning}`,
+    }), 'Upcoming Birthdays (next 7 days)'),
+    listTile('attendance_approval', 'Pending Attendance Approval', Fingerprint, extras?.attendance_approvals, (a) => ({
+      key: `a-${a.id}`, name: a.name, sub: personSub(a), right: shortDate(a.date),
+    }), 'Remote check-in/out waiting for approval', 'approvals'),
+    { key: 'claim_amount', label: 'Monthly Claim Amount', icon: Wallet, value: monthlyClaimAmount != null ? formatMoney(monthlyClaimAmount) : null, onClick: go('claims') },
+    { key: 'disburse_amount', label: 'Monthly Disburse Amount', icon: Banknote, value: monthlyDisburseAmount != null ? formatMoney(monthlyDisburseAmount) : null, onClick: go('disbursement') },
+    listTile('attendance_recon', 'Pending Attendance Recon.', ShieldAlert, extras?.attendance_corrections, (c) => ({
+      key: `c-${c.id}`, name: c.name, sub: personSub(c), right: shortDate(c.date),
+    }), 'Attendance corrections waiting for review'),
+    listTile('status_effective', 'Status To Be Effective', UserCog, extras?.status_effective, (a) => ({
+      key: `s-${a.id}`, name: a.name, sub: `${a.action}${a.status === 'pending' ? ' (awaiting approval)' : ''}`, right: shortDate(a.date),
+    }), 'Personnel actions taking effect', 'hr_operations'),
     { key: 'advance_salary', label: 'Pending Advance Salary', icon: HandCoins, value: pendingAdvances ? String(pendingAdvances.length) : null },
-    { key: 'profile_image', label: 'Pending Profile Image', icon: ImageIcon, value: null, comingSoon: true },
-    { key: 'asset_requisition', label: 'Pending Asset Requisition', icon: Package, value: pendingAssetReqs ? String(pendingAssetReqs.length) : null },
-    { key: 'document_request', label: 'Pending Document Request', icon: ClipboardList, value: null, comingSoon: true },
+    { key: 'asset_requisition', label: 'Pending Asset Requisition', icon: Package, value: pendingAssetReqs ? String(pendingAssetReqs.length) : null, onClick: go('asset_management') },
+    listTile('document_request', 'Pending Document Request', ClipboardList, extras?.documents, (d) => ({
+      key: d.id, name: d.name, sub: `${d.kind} · ${d.detail}`, right: shortDate(d.date),
+    }), 'Document requests', 'hr_operations'),
   ];
 
   const maxAttendanceCount = attendanceSummary ? Math.max(1, attendanceSummary.headcount) : 1;
@@ -718,6 +798,35 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user }) =
               })}
             </div>
           </div>
+
+          {/* HR alerts: probation / contract ends and document expiries */}
+          {extras && extras.alerts.length > 0 && (
+            <div className="bg-white border border-amber-200 rounded-2xl p-5 shadow-sm">
+              <h3 className="text-sm font-bold text-slate-900 mb-3 flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-500" /> HR Alerts
+                <span className="text-[11px] font-medium text-slate-400">next 30 days</span>
+              </h3>
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                {extras.alerts.map((a, i) => (
+                  <button
+                    key={`${a.kind}-${a.employee_code}-${a.date}-${i}`}
+                    type="button"
+                    onClick={() => onNavigate?.(a.kind === 'document' ? 'document_vault' : 'hr_operations')}
+                    className={`text-left text-xs px-3 py-2 rounded-lg border ${a.days < 0 ? 'bg-rose-50 border-rose-200' : 'bg-amber-50/60 border-amber-200'} hover:shadow-sm`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-semibold text-slate-800 truncate">{a.name}</span>
+                      <span className={`text-[10px] font-bold shrink-0 ${a.days < 0 ? 'text-rose-600' : 'text-amber-700'}`}>{inDays(a.days)}</span>
+                    </div>
+                    <div className="text-[11px] text-slate-500 truncate">
+                      {a.label} · {shortDate(a.date)}
+                      {a.employee_code ? ` · ${a.employee_code}` : ''}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Quick View + Claim Amount chart */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -940,16 +1049,40 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user }) =
               )}
             </div>
 
-            <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm opacity-70">
+            <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm flex flex-col">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                  <ShieldAlert className="w-4 h-4 text-slate-400" /> Attendance Missed
+                  <ShieldAlert className="w-4 h-4 text-blue-600" /> Attendance Missed
                 </h3>
-                <span className="text-[9px] font-semibold uppercase tracking-wide text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-full">
-                  Coming Soon
-                </span>
+                {attendanceMissed && attendanceMissed.length > 0 && (
+                  <span className="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full bg-rose-500 text-white text-[11px] font-bold">
+                    {attendanceMissed.length}
+                  </span>
+                )}
               </div>
-              <p className="text-xs text-slate-400 py-6 text-center">No data available yet.</p>
+              {!attendanceMissed && <p className="text-xs text-slate-400 py-6 text-center">No data available.</p>}
+              {attendanceMissed && attendanceMissed.length === 0 && <p className="text-xs text-emerald-600 py-6 text-center">Everyone is accounted for.</p>}
+              {attendanceMissed && attendanceMissed.length > 0 && (
+                <div className="space-y-1.5 overflow-y-auto max-h-72 -mr-1 pr-1">
+                  {attendanceMissed.map((m) => (
+                    <div key={m.key} className="flex items-center gap-2 text-xs px-2.5 py-1.5 bg-slate-50 border border-slate-100 rounded-lg">
+                      <span className="w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-bold text-white shrink-0" style={{ background: avatarColorFor(m.name.length) }}>
+                        {initialsOf(m.name)}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-slate-800 font-semibold truncate">{m.name}</span>
+                        <span className="block text-[10px] text-slate-400 truncate">{m.designation}</span>
+                      </span>
+                      <span className={`text-[10px] font-semibold shrink-0 ${m.key.startsWith('t-') ? 'text-rose-600' : 'text-orange-600'}`}>{m.what}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {onNavigate && (
+                <button type="button" onClick={() => onNavigate('attendance_reports')} className="mt-3 self-end text-[11px] font-semibold text-blue-600 hover:underline flex items-center gap-1">
+                  Attendance report <ArrowRight className="w-3 h-3" />
+                </button>
+              )}
             </div>
           </div>
 
@@ -1029,16 +1162,42 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user }) =
               )}
             </div>
 
-            <div className="bg-white border border-slate-100 rounded-2xl p-5 shadow-sm opacity-70">
+            <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                  <ClipboardList className="w-4 h-4 text-slate-400" /> Task Status Overview
+                  <ClipboardList className="w-4 h-4 text-blue-600" /> Task Status Overview
                 </h3>
-                <span className="text-[9px] font-semibold uppercase tracking-wide text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-full">
-                  Coming Soon
-                </span>
+                {extras && (
+                  <span className="text-[11px] font-semibold text-slate-500">{extras.tasks.reduce((n, t) => n + t.count, 0)} waiting</span>
+                )}
               </div>
-              <p className="text-xs text-slate-400 py-10 text-center">No Data Found</p>
+              {!extras && <p className="text-xs text-slate-400 py-10 text-center">No data available.</p>}
+              {extras && (
+                <div className="space-y-1">
+                  {extras.tasks.map((t) => {
+                    const clickable = !!(onNavigate && t.tab && t.count > 0);
+                    return (
+                      <button
+                        key={t.key}
+                        type="button"
+                        disabled={!clickable}
+                        onClick={() => clickable && onNavigate!(t.tab!)}
+                        className={`w-full flex items-center justify-between gap-2 text-xs px-2.5 py-2 rounded-lg border ${t.count > 0 ? 'bg-white border-slate-200' : 'bg-slate-50 border-slate-100'} ${clickable ? 'hover:border-blue-300 hover:bg-blue-50/40' : 'cursor-default'}`}
+                      >
+                        <span className={t.count > 0 ? 'text-slate-700 font-medium' : 'text-slate-400'}>{t.label}</span>
+                        <span className="flex items-center gap-1">
+                          <span
+                            className={`inline-flex items-center justify-center min-w-[1.5rem] h-5 px-1.5 rounded-full text-[11px] font-bold ${t.count > 0 ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-500'}`}
+                          >
+                            {t.count}
+                          </span>
+                          {clickable && <ArrowRight className="w-3 h-3 text-slate-400" />}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
         </>
@@ -1046,6 +1205,56 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user }) =
 
       {/* Department-wise breakdown — opened by clicking On Leave Today/
           Tomorrow or Pending Leave Application above. */}
+      {openList && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4" onClick={() => setOpenList(null)}>
+          <div className="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-md max-h-[80vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 shrink-0">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">{openList.title}</h3>
+                <p className="text-xs text-slate-400 mt-0.5">{openList.rows.length} total</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setOpenList(null)}
+                className="w-7 h-7 rounded-full flex items-center justify-center text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors"
+                aria-label="Close"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="overflow-y-auto px-5 py-4 space-y-1.5">
+              {openList.rows.map((r) => (
+                <div key={r.key} className="flex items-center gap-2 text-xs px-2.5 py-2 bg-slate-50 border border-slate-100 rounded-lg">
+                  <span className="w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-bold text-white shrink-0" style={{ background: avatarColorFor(r.name.length) }}>
+                    {initialsOf(r.name)}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-slate-800 font-semibold truncate">{r.name}</span>
+                    {r.sub && <span className="block text-[10px] text-slate-400 truncate">{r.sub}</span>}
+                  </span>
+                  {r.right && <span className="text-[10px] font-semibold text-blue-600 shrink-0">{r.right}</span>}
+                </div>
+              ))}
+            </div>
+            {openList.tab && onNavigate && (
+              <div className="px-5 py-3 border-t border-slate-100 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const tab = openList.tab!;
+                    setOpenList(null);
+                    onNavigate(tab);
+                  }}
+                  className="text-xs font-semibold text-blue-600 hover:underline flex items-center gap-1"
+                >
+                  Open <ArrowRight className="w-3 h-3" />
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {openBreakdown && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4"

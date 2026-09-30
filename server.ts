@@ -24,6 +24,7 @@ import { registerAssetManagementRoutes, ensureAssetManagementSchema, logAssetReq
 import { registerVehicleManagementRoutes, ensureVehicleManagementSchema } from "./VehicleManagementRoutes";
 import { registerEntriesRoutes } from "./EntriesRoutes";
 import { registerEmployeeTransferRoutes, ensureEmployeeTransferSchema, applyDueEmployeeTransfers, recordEmployeeEditHistory } from "./EmployeeTransferRoutes";
+import { registerAdminDashboardRoutes } from "./AdminDashboardRoutes";
 import { registerEmployeeDirectoryRoutes } from "./EmployeeDirectoryRoutes";
 import { registerExitOffboardingRoutes, ensureExitOffboardingSchema } from "./ExitOffboardingRoutes";
 import { registerPerformanceRoutes, ensurePerformanceSchema } from "./PerformanceRoutes";
@@ -4948,6 +4949,8 @@ async function startServer() {
   // requireModule-gated — every signed-in account can browse the roster; see
   // that file's own comment for why the SELECT stays limited to
   // directory-safe columns.
+  // Admin Dashboard figures with no screen of their own (AdminDashboardRoutes.ts).
+  registerAdminDashboardRoutes(app, { authenticateToken, queryDB, getAdminModules, todayInDhaka });
   registerEmployeeDirectoryRoutes(app, {
     authenticateToken,
     queryDB
