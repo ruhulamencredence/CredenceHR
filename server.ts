@@ -34,7 +34,7 @@ import { registerEmployee360Routes, ensureEmployee360Schema } from "./HrOps360Ro
 import { registerHrReportsRoutes, ensureHrReportsSchema } from "./HrOpsReportsRoutes";
 import { registerInfoRequestRoutes, ensureInfoRequestsSchema } from "./HrOpsInfoRequestsRoutes";
 import { registerSiteAttendanceRoutes, ensureSiteAttendanceSchema } from "./SiteAttendanceRoutes";
-import { registerCompanyRoutes, ensureCompanySchema, resolveCompanyContext } from "./CompanyRoutes";
+import { registerCompanyRoutes, ensureCompanySchema, resolveCompanyContext, checkWorkspaceLogin } from "./CompanyRoutes";
 import { companyStore, activeCompanyId } from "./companyContext";
 import { registerHRAnalyticsRoutes } from "./HRAnalyticsRoutes";
 import { registerDocumentVaultRoutes, ensureDocumentVaultSchema } from "./DocumentVaultRoutes";
@@ -4053,6 +4053,10 @@ async function startServer() {
       if (!validPassword) {
         return res.status(400).json({ error: "Invalid login ID or password" });
       }
+      // Multi-company: the workspace typed before the login form must be this
+      // account's own group (CompanyRoutes.ts). Older app builds send none.
+      const workspaceProblem = await checkWorkspaceLogin(queryDB, req.body.workspace, user);
+      if (workspaceProblem) return res.status(workspaceProblem.status).json({ error: workspaceProblem.error });
 
       // Store only the latest login's coordinates (overwrites any previous value).
       // Web logins don't send coordinates at all, so this is skipped for them —

@@ -28,6 +28,7 @@
 // authenticateToken in server.ts (see companyContext.ts).
 
 import type { Express } from "express";
+import bcrypt from "bcryptjs";
 import { DEFAULT_COMPANY_ID, DEFAULT_GROUP_ID, activeCompanyId, type CompanyContext } from "./companyContext";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
@@ -137,6 +138,22 @@ export async function ensureCompanySchema(dbPool: any): Promise<void> {
 
   // Existing rows belong to company 1 via the column default.
   await run("users.group_id", "ALTER TABLE users ADD COLUMN group_id INT NOT NULL DEFAULT 1", ["ER_DUP_FIELDNAME"]);
+
+  // Workspaces: each group signs in through its own workspace code (typed on
+  // the page before the login form), with its own logo / name there.
+  await run("company_groups.workspace_code", "ALTER TABLE company_groups ADD COLUMN workspace_code VARCHAR(40) NULL", ["ER_DUP_FIELDNAME"]);
+  await run("company_groups workspace key", "ALTER TABLE company_groups ADD UNIQUE KEY unique_workspace_code (workspace_code)", ["ER_DUP_KEYNAME"]);
+  await run("company_groups.tagline", "ALTER TABLE company_groups ADD COLUMN tagline VARCHAR(200) NULL", ["ER_DUP_FIELDNAME"]);
+  await run("company_groups.is_active", "ALTER TABLE company_groups ADD COLUMN is_active TINYINT(1) NOT NULL DEFAULT 1", ["ER_DUP_FIELDNAME"]);
+  await run("group 1 workspace", "UPDATE company_groups SET workspace_code = 'credence' WHERE id = 1 AND workspace_code IS NULL");
+  // The platform owner(s) — who may create new workspaces. On the first run
+  // that's the existing Superadmin(s) of the original group.
+  try {
+    await dbPool.query("ALTER TABLE users ADD COLUMN is_platform_admin TINYINT(1) NOT NULL DEFAULT 0");
+    await dbPool.query("UPDATE users SET is_platform_admin = 1 WHERE role = 'superadmin' AND group_id = 1");
+  } catch (err: any) {
+    if (err.code !== "ER_DUP_FIELDNAME") console.warn("⚠️ Multi-company (users.is_platform_admin): " + err.message);
+  }
   await run("all_employees.company_id", "ALTER TABLE all_employees ADD COLUMN company_id INT NOT NULL DEFAULT 1", ["ER_DUP_FIELDNAME"]);
   await run("all_employees index", "ALTER TABLE all_employees ADD INDEX idx_employee_company (company_id)", ["ER_DUP_KEYNAME"]);
 
@@ -228,6 +245,44 @@ export async function resolveCompanyContext(queryDB: QueryDB, user: { id: number
 }
 
 // ---------------------------------------------------------------------------
+// Workspaces (one per group) — used before sign-in
+// ---------------------------------------------------------------------------
+
+// Until every module keeps each company's data apart (multi-company step 2 and
+// on), accounts of any group other than the original one would see its
+// employees, attendance… So sign-in to other workspaces stays closed until
+// then; the workspace, its companies and its Superadmin can already be set up.
+export const OTHER_WORKSPACES_CAN_SIGN_IN = false;
+
+const WORKSPACE_RE = /^[a-z][a-z0-9-]{1,38}[a-z0-9]$/;
+const RESERVED_WORKSPACES = new Set(["www", "api", "admin", "app", "login", "mail", "static"]);
+export const normalizeWorkspace = (v: any) => String(v || "").trim().toLowerCase();
+
+export async function findWorkspace(queryDB: QueryDB, code: string): Promise<any | null> {
+  const want = normalizeWorkspace(code);
+  if (!want) return null;
+  const rows: any[] = (await queryDB("SELECT * FROM company_groups").catch(() => [])) || [];
+  return rows.find((g) => normalizeWorkspace(g.workspace_code) === want && Number(g.is_active ?? 1) === 1) || null;
+}
+
+// Checked by POST /api/auth/login when the app sends a workspace: the account
+// must belong to that workspace's group. Returns an error message, or null.
+export async function checkWorkspaceLogin(queryDB: QueryDB, workspace: any, user: any): Promise<{ status: number; error: string } | null> {
+  const groupId = Number(user.group_id ?? DEFAULT_GROUP_ID);
+  const closed = groupId !== DEFAULT_GROUP_ID && !OTHER_WORKSPACES_CAN_SIGN_IN;
+  // Older app builds send no workspace — only the original workspace's
+  // accounts can sign in that way.
+  if (workspace === undefined || workspace === null || workspace === "")
+    return closed ? { status: 403, error: "This workspace is still being set up. Sign-in opens once its data is ready." } : null;
+  const g = await findWorkspace(queryDB, workspace);
+  if (!g) return { status: 400, error: "This workspace wasn't found. Check the workspace name." };
+  if (Number(user.group_id ?? DEFAULT_GROUP_ID) !== Number(g.id)) return { status: 400, error: "Invalid login ID or password" };
+  if (Number(g.id) !== DEFAULT_GROUP_ID && !OTHER_WORKSPACES_CAN_SIGN_IN)
+    return { status: 403, error: "This workspace is still being set up. Sign-in opens once its data is ready." };
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // Routes
 // ---------------------------------------------------------------------------
 
@@ -251,7 +306,9 @@ export function registerCompanyRoutes(app: Express, deps: CompanyRouteDeps) {
   const groupOf = async (groupId: number) => {
     const rows: any[] = (await queryDB("SELECT * FROM company_groups").catch(() => [])) || [];
     const g = rows.find((r) => Number(r.id) === groupId);
-    return g ? { id: Number(g.id), name: g.name, short_name: g.short_name || null } : { id: groupId, name: "", short_name: null };
+    return g
+      ? { id: Number(g.id), name: g.name, short_name: g.short_name || null, workspace_code: g.workspace_code || null }
+      : { id: groupId, name: "", short_name: null, workspace_code: null };
   };
 
   // The companies this account can switch between.
@@ -310,8 +367,10 @@ export function registerCompanyRoutes(app: Express, deps: CompanyRouteDeps) {
         queryDB("SELECT * FROM user_company_access").catch(() => []),
         queryDB("SELECT * FROM employee_company_assignments").catch(() => [])
       ]);
+      const me: any[] = (await queryDB("SELECT * FROM users WHERE id = ?", [req.user.id]).catch(() => [])) || [];
       res.json({
         group: await groupOf(groupId),
+        is_platform_admin: Number(me.find((u) => Number(u.id) === Number(req.user.id))?.is_platform_admin || 0) === 1,
         companies: companies
           .map((c) => {
             const id = Number(c.id);
@@ -505,6 +564,179 @@ export function registerCompanyRoutes(app: Express, deps: CompanyRouteDeps) {
       }
       invalidateCompanyAccess(userId);
       res.json({ success: true, modules: src.length, companies: to.length });
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+  // ---------------- Workspace (public, before sign-in) ----------------
+
+  const workspaceLite = (g: any) => ({
+    id: Number(g.id),
+    code: g.workspace_code,
+    name: g.name,
+    short_name: g.short_name || null,
+    tagline: g.tagline || null,
+    has_logo: !!g.logo_mime
+  });
+
+  app.get("/api/public/workspaces/:code", async (req: any, res) => {
+    try {
+      const g = await findWorkspace(queryDB, req.params.code);
+      if (!g) throw bad("This workspace wasn't found. Check the workspace name.", 404);
+      res.json(workspaceLite(g));
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+  app.get("/api/public/workspaces/:code/logo", async (req: any, res) => {
+    try {
+      const g = await findWorkspace(queryDB, req.params.code);
+      if (!g || !g.logo_mime) throw bad("No logo.", 404);
+      res.setHeader("Content-Type", g.logo_mime);
+      res.setHeader("Cache-Control", "public, max-age=3600");
+      res.send(Buffer.isBuffer(g.logo_data) ? g.logo_data : Buffer.from(g.logo_data || ""));
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+  // ---------------- Platform (the system owner) ----------------
+
+  const requirePlatformAdmin = async (req: any, res: any, next: any) => {
+    const rows: any[] = (await queryDB("SELECT * FROM users WHERE id = ?", [req.user?.id]).catch(() => [])) || [];
+    const u = rows.find((r) => Number(r.id) === Number(req.user?.id));
+    if (!u || Number(u.is_platform_admin) !== 1) return res.status(403).json({ error: "Only the system owner can manage workspaces." });
+    next();
+  };
+
+  const cleanLogo = (v: any): { mime: string; data: Buffer } | null | undefined => {
+    if (v === null) return null;
+    if (!v?.data) return undefined;
+    const mime = String(v.mime || "image/png");
+    if (!/^image\//.test(mime)) throw bad("The logo must be an image.");
+    const data = Buffer.from(String(v.data).replace(/^data:[^,]*,/, ""), "base64");
+    if (data.length > MAX_LOGO_BYTES) throw bad("The logo is larger than 2 MB.");
+    return { mime, data };
+  };
+  async function cleanWorkspace(b: any, selfId: number | null) {
+    const name = String(b?.name || "").trim().slice(0, 150);
+    if (!name) throw bad("Enter the group name.");
+    const code = normalizeWorkspace(b?.workspace_code);
+    if (!WORKSPACE_RE.test(code) || RESERVED_WORKSPACES.has(code))
+      throw bad("Workspace: 3–40 small letters, digits or dashes, starting with a letter (e.g. credence). People type this before signing in.");
+    const rows: any[] = (await queryDB("SELECT * FROM company_groups")) || [];
+    if (rows.some((g) => Number(g.id) !== selfId && normalizeWorkspace(g.workspace_code) === code)) throw bad(`The workspace "${code}" is already taken.`);
+    return {
+      name,
+      code,
+      short_name: b?.short_name ? String(b.short_name).trim().slice(0, 50) : null,
+      tagline: b?.tagline ? String(b.tagline).trim().slice(0, 200) : null,
+      is_active: b?.is_active === undefined ? 1 : b.is_active ? 1 : 0,
+      logo: cleanLogo(b?.logo)
+    };
+  }
+
+  app.get("/api/platform/workspaces", authenticateToken, requirePlatformAdmin, async (_req: any, res) => {
+    try {
+      const [groups, companies, users] = await Promise.all([
+        queryDB("SELECT * FROM company_groups"),
+        queryDB("SELECT * FROM companies").catch(() => []),
+        queryDB("SELECT * FROM users").catch(() => [])
+      ]);
+      res.json({
+        can_sign_in_other_workspaces: OTHER_WORKSPACES_CAN_SIGN_IN,
+        workspaces: (groups as any[])
+          .map((g) => {
+            const id = Number(g.id);
+            const cs = (companies as any[]).filter((c) => Number(c.group_id) === id);
+            return {
+              ...workspaceLite(g),
+              is_active: Number(g.is_active ?? 1) === 1,
+              can_sign_in: id === DEFAULT_GROUP_ID || OTHER_WORKSPACES_CAN_SIGN_IN,
+              companies: cs
+                .map((c) => ({ id: Number(c.id), name: c.name, short_code: c.short_code, is_mother: Number(c.is_mother) === 1 }))
+                .sort((a, b) => Number(b.is_mother) - Number(a.is_mother) || a.name.localeCompare(b.name)),
+              superadmins: (users as any[])
+                .filter((u) => Number(u.group_id ?? DEFAULT_GROUP_ID) === id && u.role === "superadmin")
+                .map((u) => ({ id: Number(u.id), name: u.name, email: u.email })),
+              user_count: (users as any[]).filter((u) => Number(u.group_id ?? DEFAULT_GROUP_ID) === id).length
+            };
+          })
+          .sort((a, b) => a.id - b.id)
+      });
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+  // New workspace = group + its companies (first one is the mother) + its own
+  // Superadmin, who then runs it from Admin Panel -> Companies.
+  app.post("/api/platform/workspaces", authenticateToken, requirePlatformAdmin, async (req: any, res) => {
+    try {
+      const w = await cleanWorkspace(req.body, null);
+      const list: any[] = (Array.isArray(req.body?.companies) ? req.body.companies : []).filter((c: any) => String(c?.name || "").trim());
+      if (!list.length) throw bad("Add at least the mother company.");
+      const codes = new Set<string>();
+      const companies = list.map((c, i) => {
+        const name = String(c.name).trim().slice(0, 200);
+        const code = String(c.short_code || "").trim().toUpperCase();
+        if (!CODE_RE.test(code)) throw bad(`Short code for "${name}": 2–8 capital letters or digits, starting with a letter.`);
+        if (codes.has(code)) throw bad(`The code ${code} is used twice.`);
+        codes.add(code);
+        return { name, code, is_mother: i === 0 ? 1 : 0 };
+      });
+      const admin = req.body?.admin || {};
+      const adminName = String(admin.name || "").trim().slice(0, 100);
+      const adminEmail = String(admin.email || "").trim().toLowerCase().slice(0, 150);
+      const adminPassword = String(admin.password || "");
+      if (!adminName || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(adminEmail)) throw bad("Enter the name and a valid email of this workspace's Superadmin.");
+      if (adminPassword.length < 8) throw bad("The Superadmin's password must be at least 8 characters.");
+      const existing: any[] = (await queryDB("SELECT * FROM users WHERE email = ?", [adminEmail])) || [];
+      if (existing.some((u) => String(u.email || "").toLowerCase() === adminEmail)) throw bad("An account with that email already exists.");
+
+      const g: any = await queryDB("INSERT INTO company_groups (name, short_name, workspace_code, tagline, is_active, logo_mime, logo_data) VALUES (?, ?, ?, ?, ?, ?, ?)", [
+        w.name,
+        w.short_name,
+        w.code,
+        w.tagline,
+        w.is_active,
+        w.logo?.mime || null,
+        w.logo?.data || null
+      ]);
+      const groupId = Number(g.insertId);
+      const ids: number[] = [];
+      for (const c of companies) {
+        const r: any = await queryDB("INSERT INTO companies (group_id, name, short_code, is_mother) VALUES (?, ?, ?, ?)", [groupId, c.name, c.code, c.is_mother]);
+        ids.push(Number(r.insertId));
+      }
+      const hash = await bcrypt.hash(adminPassword, 10);
+      const u: any = await queryDB("INSERT INTO users (name, email, password_hash, role, group_id) VALUES (?, ?, ?, 'superadmin', ?)", [adminName, adminEmail, hash, groupId]);
+      await queryDB("INSERT INTO user_company_access (user_id, company_id, is_default) VALUES (?, ?, ?)", [Number(u.insertId), ids[0], 1]);
+      res.json({ success: true, id: groupId, company_ids: ids, superadmin_id: Number(u.insertId) });
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+  app.put("/api/platform/workspaces/:id", authenticateToken, requirePlatformAdmin, async (req: any, res) => {
+    try {
+      const id = Number(req.params.id);
+      const rows: any[] = (await queryDB("SELECT * FROM company_groups")) || [];
+      if (!rows.some((g) => Number(g.id) === id)) throw bad("Workspace not found.", 404);
+      const w = await cleanWorkspace(req.body, id);
+      if (id === DEFAULT_GROUP_ID && !w.is_active) throw bad("Your own workspace can't be switched off.");
+      await queryDB("UPDATE company_groups SET name = ?, short_name = ?, workspace_code = ?, tagline = ?, is_active = ? WHERE id = ?", [
+        w.name,
+        w.short_name,
+        w.code,
+        w.tagline,
+        w.is_active,
+        id
+      ]);
+      if (w.logo !== undefined) await queryDB("UPDATE company_groups SET logo_mime = ?, logo_data = ? WHERE id = ?", [w.logo?.mime || null, w.logo?.data || null, id]);
+      res.json({ success: true });
     } catch (err) {
       fail(res, err);
     }

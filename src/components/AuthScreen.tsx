@@ -1,5 +1,5 @@
 import React, { useState, useEffect, lazy, Suspense } from 'react';
-import { Lock, ArrowUp, MapPin, Download } from 'lucide-react';
+import { Lock, ArrowUp, MapPin, Download, Building2 } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import credenceLogo from '../assets/credence-logo.png';
 import { apiUrl } from '../lib/api';
@@ -12,6 +12,41 @@ import { setActiveCompanyId } from '../lib/company';
 // later once its own chunk is ready.
 const AuthHeroLottie = lazy(() => import('./AuthHeroLottie'));
 
+// Multi-company: which group's sign-in this is. Typed once on the page before
+// the login form (or taken from the web address, e.g. credence.<domain>), then
+// remembered on this device. See /api/public/workspaces in CompanyRoutes.ts.
+interface Workspace {
+  id: number;
+  code: string;
+  name: string;
+  short_name: string | null;
+  tagline: string | null;
+  has_logo: boolean;
+}
+const WORKSPACE_KEY = 'credence_workspace';
+const readWorkspace = (): Workspace | null => {
+  try {
+    const w = JSON.parse(localStorage.getItem(WORKSPACE_KEY) || 'null');
+    return w && w.code ? w : null;
+  } catch {
+    return null;
+  }
+};
+const saveWorkspace = (w: Workspace | null) => {
+  try {
+    if (w) localStorage.setItem(WORKSPACE_KEY, JSON.stringify(w));
+    else localStorage.removeItem(WORKSPACE_KEY);
+  } catch {
+    // storage unavailable — asked again next time
+  }
+};
+const lookupWorkspace = async (code: string): Promise<Workspace> => {
+  const res = await fetch(apiUrl(`/api/public/workspaces/${encodeURIComponent(code.trim().toLowerCase())}`));
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "This workspace wasn't found.");
+  return data as Workspace;
+};
+
 interface AuthScreenProps {
   onLoginSuccess: (token: string, user: any) => void;
 }
@@ -23,6 +58,28 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
   // Accepts either an Email (Admin-created accounts) or a Project Name (bulk-created
   // accounts log in with Project Name + Password, spaces are ignored) — sent to the
   // server as a single "identifier" field.
+  const [workspace, setWorkspace] = useState<Workspace | null>(readWorkspace);
+  const [workspaceInput, setWorkspaceInput] = useState('');
+  // The web address can name the workspace (credence.example.com) — then the
+  // workspace page is skipped.
+  const [detecting, setDetecting] = useState(() => !readWorkspace());
+  useEffect(() => {
+    if (workspace) return;
+    const host = window.location.hostname;
+    const labels = host.split('.');
+    if (labels.length < 3 || /^\d+$/.test(labels[labels.length - 1])) {
+      setDetecting(false);
+      return;
+    }
+    lookupWorkspace(labels[0])
+      .then((w) => {
+        saveWorkspace(w);
+        setWorkspace(w);
+      })
+      .catch(() => {})
+      .finally(() => setDetecting(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -123,6 +180,27 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
     }
   };
 
+  const handleWorkspace = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+    try {
+      const w = await lookupWorkspace(workspaceInput);
+      saveWorkspace(w);
+      setWorkspace(w);
+    } catch (err: any) {
+      setError(err instanceof TypeError ? "Couldn't reach the server. Check your connection and try again." : err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+  const changeWorkspace = () => {
+    saveWorkspace(null);
+    setWorkspaceInput(workspace?.code || '');
+    setWorkspace(null);
+    setError('');
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -144,8 +222,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(
           coords
-            ? { identifier, password, latitude: coords.latitude, longitude: coords.longitude, platform: 'app' }
-            : { identifier, password }
+            ? { identifier, password, workspace: workspace?.code, latitude: coords.latitude, longitude: coords.longitude, platform: 'app' }
+            : { identifier, password, workspace: workspace?.code }
         ),
       });
 
@@ -201,7 +279,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
             centered next to the form. On mobile these stack above the form
             instead — see the lg:hidden duplicate block below. */}
         <div className="hidden lg:flex lg:w-1/2 flex-col items-center text-center">
-          <img src={credenceLogo} alt="Credence" className="h-14 w-auto mb-4" />
+          <BrandLogo workspace={workspace} className="h-14 w-auto mb-4" />
           <div className="w-80 h-80 pointer-events-none">
             <Suspense fallback={<div className="w-full h-full" />}>
               <AuthHeroLottie className="w-full h-full" />
@@ -215,7 +293,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
             bigger animation below doesn't push the card as far down the
             screen — less blank space above the logo instead. */}
         <div className="flex lg:hidden flex-col items-center text-center mb-3 sm:mb-4 -mt-2">
-          <img src={credenceLogo} alt="Credence" className="h-9 sm:h-11 w-auto mb-1.5 sm:mb-2" />
+          <BrandLogo workspace={workspace} className="h-9 sm:h-11 w-auto mb-1.5 sm:mb-2" />
           <div className="w-52 h-52 sm:w-60 sm:h-60 pointer-events-none">
             <Suspense fallback={<div className="w-full h-full" />}>
               <AuthHeroLottie className="w-full h-full" />
@@ -228,11 +306,16 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
         <div className="lg:w-1/2">
         <div className="text-center lg:text-left mb-3">
           <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight uppercase gemini-gradient-text mb-2">
-            Welcome back
+            {workspace ? 'Welcome back' : 'Welcome'}
           </h1>
           <p className="text-sm" style={{ color: 'var(--g-text-muted)' }}>
-            Sign in to CredenceHR to continue
+            {workspace ? `Sign in to ${workspace.name}` : "Enter your company's workspace to continue"}
           </p>
+          {workspace?.tagline && (
+            <p className="text-xs mt-1" style={{ color: 'var(--g-text-muted)' }}>
+              {workspace.tagline}
+            </p>
+          )}
         </div>
         <div className="gemini-card px-6 py-6 sm:px-8 sm:py-8">
           {error && (
@@ -244,6 +327,49 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
             </div>
           )}
 
+          {!workspace ? (
+            <form className="space-y-4" onSubmit={handleWorkspace}>
+              <div>
+                <label className="block text-xs font-medium mb-1.5 ml-1" style={{ color: 'var(--g-text-muted)' }}>
+                  Workspace
+                </label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    required
+                    autoFocus={!detecting}
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    value={workspaceInput}
+                    onChange={(e) => setWorkspaceInput(e.target.value.replace(/\s+/g, '').toLowerCase())}
+                    placeholder="e.g. credence"
+                    className="block w-full pl-5 pr-11 py-3.5 rounded-full text-[15px] placeholder-slate-400 focus:outline-none transition-shadow"
+                    style={{ background: 'var(--g-surface-muted)', border: '1px solid transparent', color: 'var(--g-text)' }}
+                    onFocus={(e) => {
+                      e.currentTarget.style.boxShadow = '0 0 0 2px var(--g-accent)';
+                      scrollFieldIntoView(e.currentTarget);
+                    }}
+                    onBlur={(e) => (e.currentTarget.style.boxShadow = 'none')}
+                  />
+                  <Building2 className="w-4 h-4 absolute right-4 top-1/2 -translate-y-1/2" style={{ color: 'var(--g-text-muted)' }} />
+                </div>
+                <p className="mt-2 ml-1 text-[11px]" style={{ color: 'var(--g-text-muted)' }}>
+                  Your company's short name in this app — ask HR if you don't know it.
+                </p>
+              </div>
+              <button
+                type="submit"
+                disabled={loading || detecting || !workspaceInput.trim()}
+                className="w-full mt-2 flex items-center justify-center gap-2 py-3.5 rounded-full text-white font-medium text-[15px] transition-all disabled:opacity-50"
+                style={{ background: 'var(--g-accent)' }}
+              >
+                <span>{loading ? 'Checking…' : 'Next'}</span>
+                {!loading && <ArrowUp className="w-4 h-4 rotate-90" />}
+              </button>
+            </form>
+          ) : (
+          <>
           <form className="space-y-4" onSubmit={handleSubmit}>
             <div>
               <label className="block text-xs font-medium mb-1.5 ml-1" style={{ color: 'var(--g-text-muted)' }}>
@@ -311,6 +437,14 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
           <p className="mt-2 text-center text-xs" style={{ color: 'var(--g-text-muted)' }}>
             Don't have an account? Contact your Admin to get one created.
           </p>
+          <p className="mt-2 text-center text-xs" style={{ color: 'var(--g-text-muted)' }}>
+            Not {workspace.short_name || workspace.name}?{' '}
+            <button type="button" onClick={changeWorkspace} className="font-semibold underline" style={{ color: 'var(--g-accent)' }}>
+              Change workspace
+            </button>
+          </p>
+          </>
+          )}
 
           {/* APK download — WEB build only. Someone already inside the native
               Android app has no use for this, so it's hidden there the same
@@ -334,6 +468,27 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
         </div>
         </div>
       </div>
+    </div>
+  );
+};
+
+// The workspace's own logo on its sign-in page; the app's logo before a
+// workspace is chosen (and for the original workspace until it uploads one).
+const BrandLogo: React.FC<{ workspace: Workspace | null; className?: string }> = ({ workspace, className }) => {
+  const [failed, setFailed] = useState(false);
+  if (workspace?.has_logo && !failed)
+    return (
+      <img
+        src={apiUrl(`/api/public/workspaces/${encodeURIComponent(workspace.code)}/logo`)}
+        alt={workspace.name}
+        className={`${className || ''} object-contain`}
+        onError={() => setFailed(true)}
+      />
+    );
+  if (!workspace || workspace.id === 1) return <img src={credenceLogo} alt="Credence" className={className} />;
+  return (
+    <div className={`${className || ''} !w-auto flex items-center text-2xl font-bold tracking-tight`} style={{ color: 'var(--g-accent)' }}>
+      {workspace.short_name || workspace.name}
     </div>
   );
 };
