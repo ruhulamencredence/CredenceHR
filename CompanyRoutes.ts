@@ -868,7 +868,10 @@ export function registerCompanyRoutes(app: Express, deps: CompanyRouteDeps) {
       // works in the mother company — show it that way.
       const motherId = Number((groupCompanies.find((c) => Number(c.is_mother) === 1) || groupCompanies[0])?.id || DEFAULT_COMPANY_ID);
       const [users, access, perms] = await Promise.all([
-        queryDB("SELECT * FROM users").catch(() => []),
+        // Every account of the group, whichever company is selected — a
+        // sister company's people must be listable to give them the mother
+        // company too (filtered to the group just below).
+        queryDB("/*unscoped*/ SELECT * FROM users").catch(() => []),
         queryDB("SELECT * FROM user_company_access").catch(() => []),
         queryDB("SELECT * FROM admin_module_permissions").catch(() => [])
       ]);
@@ -904,6 +907,8 @@ export function registerCompanyRoutes(app: Express, deps: CompanyRouteDeps) {
     try {
       const groupId = await myGroup(req);
       const userId = Number(req.params.userId);
+      const target = ((await queryDB("/*unscoped*/ SELECT id, group_id FROM users").catch(() => [])) || []).find((u: any) => Number(u.id) === userId);
+      if (!target || Number(target.group_id ?? DEFAULT_GROUP_ID) !== groupId) throw bad("Account not found.", 404);
       const companyIds = new Set((await companiesOfGroup(queryDB, groupId)).map((c) => Number(c.id)));
       const want: number[] = (Array.isArray(req.body?.company_ids) ? req.body.company_ids : []).map(Number).filter((id: number) => companyIds.has(id));
       if (!want.length) throw bad("An account needs at least one company.");
@@ -932,6 +937,8 @@ export function registerCompanyRoutes(app: Express, deps: CompanyRouteDeps) {
     try {
       const groupId = await myGroup(req);
       const userId = Number(req.params.userId);
+      const target = ((await queryDB("/*unscoped*/ SELECT id, group_id FROM users").catch(() => [])) || []).find((u: any) => Number(u.id) === userId);
+      if (!target || Number(target.group_id ?? DEFAULT_GROUP_ID) !== groupId) throw bad("Account not found.", 404);
       const companyIds = new Set((await companiesOfGroup(queryDB, groupId)).map((c) => Number(c.id)));
       const from = Number(req.body?.from_company_id);
       const to: number[] = (Array.isArray(req.body?.to_company_ids) ? req.body.to_company_ids : []).map(Number).filter((id: number) => companyIds.has(id) && id !== from);
