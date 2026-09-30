@@ -31,6 +31,7 @@ import type { Express } from "express";
 import bcrypt from "bcryptjs";
 import { DEFAULT_COMPANY_ID, DEFAULT_GROUP_ID, activeCompanyId, activeGroupId, companyStore, type CompanyContext } from "./companyContext";
 import { SHARE_KINDS, CONFIG_TABLES, OWN_TABLES, GROUP_TABLES, GROUP_BACKFILL } from "./companyScope";
+import { deleteCompany, deleteWorkspace, type WithTransaction } from "./companyDelete";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 
@@ -39,6 +40,8 @@ interface CompanyRouteDeps {
   requireSuperAdmin: any;
   queryDB: QueryDB;
   getAdminModules: (userId: number) => Promise<string[]>;
+  // One MySQL transaction — for deleting a company or workspace.
+  withTransaction?: WithTransaction;
 }
 
 const MAX_LOGO_BYTES = 2 * 1024 * 1024;
@@ -514,7 +517,11 @@ export async function checkWorkspaceLogin(queryDB: QueryDB, workspace: any, user
 // ---------------------------------------------------------------------------
 
 export function registerCompanyRoutes(app: Express, deps: CompanyRouteDeps) {
-  const { authenticateToken, requireSuperAdmin, queryDB, getAdminModules } = deps;
+  const { authenticateToken, requireSuperAdmin, queryDB, getAdminModules, withTransaction } = deps;
+  const needTx = () => {
+    if (!withTransaction) throw bad("Deleting needs the MySQL database.", 503);
+    return withTransaction;
+  };
   const fail = (res: any, err: any, status = 500) => res.status(err?.statusCode || status).json({ error: err?.message || String(err) });
   const bad = (message: string, statusCode = 400) => Object.assign(new Error(message), { statusCode });
   const lite = (c: any) => ({
@@ -860,6 +867,26 @@ export function registerCompanyRoutes(app: Express, deps: CompanyRouteDeps) {
     }
   });
 
+  // Delete a sister company that has no Employees (see companyDelete.ts). The
+  // Superadmin types its short code to confirm.
+  app.delete("/api/system/companies/:id", authenticateToken, requireSuperAdmin, async (req: any, res) => {
+    try {
+      const groupId = await myGroup(req);
+      const id = Number(req.params.id);
+      const cur = (await companiesOfGroup(queryDB, groupId)).find((x) => Number(x.id) === id);
+      if (!cur) throw bad("Company not found.", 404);
+      if (Number(cur.is_mother) === 1) throw bad("The mother company can't be deleted.");
+      if (id === activeCompanyId()) throw bad("You are working in this company. Switch to another company first.");
+      if (String(req.body?.confirm || "").trim().toUpperCase() !== String(cur.short_code).toUpperCase())
+        throw bad(`Type the short code ${cur.short_code} to confirm.`);
+      const removed = await deleteCompany(needTx(), id, groupId, cur.name);
+      invalidateCompanyAccess();
+      res.json({ success: true, removed });
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
   // Who may enter which company, and what Module Access they hold in each.
   app.get("/api/system/company-access", authenticateToken, requireSuperAdmin, async (req: any, res) => {
     try {
@@ -1154,6 +1181,25 @@ export function registerCompanyRoutes(app: Express, deps: CompanyRouteDeps) {
       fail(res, err);
     }
   });
+  // Delete a workspace that has no Employees: its companies, accounts and
+  // records all go. Never the system owner's own workspace, nor the one they
+  // are working inside right now. Confirmed by typing its workspace name.
+  app.delete("/api/platform/workspaces/:id", authenticateToken, requirePlatformAdmin, async (req: any, res) => {
+    try {
+      const id = Number(req.params.id);
+      const g = ((await queryDB("SELECT * FROM company_groups")) || []).find((r: any) => Number(r.id) === id);
+      if (!g) throw bad("Workspace not found.", 404);
+      if (id === DEFAULT_GROUP_ID) throw bad("Your own workspace can't be deleted.");
+      if (id === activeGroupId()) throw bad("You are working inside this workspace. Go back to your workspace first.");
+      if (normalizeWorkspace(req.body?.confirm) !== normalizeWorkspace(g.workspace_code)) throw bad(`Type the workspace ${g.workspace_code} to confirm.`);
+      const removed = await deleteWorkspace(needTx(), id, g.name);
+      invalidateCompanyAccess();
+      res.json({ success: true, removed });
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
   // ---------------- A workspace's Superadmins (the system owner) ----------------
 
   // Emails are unique across every workspace.

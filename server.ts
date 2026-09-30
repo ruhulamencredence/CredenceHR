@@ -3660,6 +3660,23 @@ function scopedExecute(sql: string, params?: any[]) {
   return dbPool.execute(scopeSql(sql), params);
 }
 
+// One MySQL transaction on its own connection (unscoped — the caller picks
+// the rows).
+const withDbTransaction = async (fn: (q: (sql: string, params?: any[]) => Promise<any>) => Promise<void>) => {
+  if (!isMySQLConnected || !dbPool) throw Object.assign(new Error("Deleting needs the MySQL database."), { statusCode: 503 });
+  const conn = await dbPool.getConnection();
+  try {
+    await conn.beginTransaction();
+    await fn(async (sql, params = []) => (await conn.query(sql, params))[0]);
+    await conn.commit();
+  } catch (err) {
+    await conn.rollback().catch(() => {});
+    throw err;
+  } finally {
+    conn.release();
+  }
+};
+
 async function queryDB(sql: string, params: any[] = []): Promise<any> {
   if (isMySQLConnected && dbPool) {
     // Multi-company: keep each company's rows apart (companyScope.ts).
@@ -4922,7 +4939,7 @@ async function startServer() {
   // Site Attendance — supervisor muster roll for people who never use the app
   // (SiteAttendanceRoutes.ts).
   // Multi-company: companies, who may enter which (CompanyRoutes.ts).
-  registerCompanyRoutes(app, { authenticateToken, requireSuperAdmin, queryDB, getAdminModules });
+  registerCompanyRoutes(app, { authenticateToken, requireSuperAdmin, queryDB, getAdminModules, withTransaction: withDbTransaction });
   registerSiteAttendanceRoutes(app, { authenticateToken, requireModule, queryDB, getAdminModules, todayInDhaka, haversineMeters, createAlert });
 
   // Employee Directory (Self Service -> "Employee Directory") — kept in its

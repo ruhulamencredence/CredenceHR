@@ -87,7 +87,7 @@ export function useHrApi(token: string) {
       get: <T = any,>(path: string) => call<T>('GET', path),
       post: <T = any,>(path: string, body?: any) => call<T>('POST', path, body ?? {}),
       put: <T = any,>(path: string, body?: any) => call<T>('PUT', path, body ?? {}),
-      del: <T = any,>(path: string) => call<T>('DELETE', path)
+      del: <T = any,>(path: string, body?: any) => call<T>('DELETE', path, body)
     };
   }, [token]);
 }
@@ -245,6 +245,62 @@ export const Modal: React.FC<{ title: string; onClose: () => void; wide?: boolea
     </div>
   </div>
 );
+
+// Deleting something that can't be undone: the person types its code first.
+export const TypeToDelete: React.FC<{
+  title: string;
+  code: string;
+  children: React.ReactNode;
+  onClose: () => void;
+  onDelete: (typed: string) => Promise<void>;
+}> = ({ title, code, children, onClose, onDelete }) => {
+  const [typed, setTyped] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const ok = typed.trim().toLowerCase() === code.toLowerCase();
+  const go = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      await onDelete(typed.trim());
+    } catch (e: any) {
+      setErr(e.message);
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal
+      title={title}
+      onClose={onClose}
+      footer={
+        <>
+          <button type="button" className={btnGhost} onClick={onClose}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={!ok || busy}
+            onClick={go}
+            className="inline-flex items-center justify-center gap-1.5 text-xs font-semibold px-3.5 py-2 rounded-lg bg-rose-600 hover:bg-rose-700 text-white disabled:opacity-50"
+          >
+            Delete for good
+          </button>
+        </>
+      }
+    >
+      <div className="space-y-3 text-xs text-slate-600">
+        {err && <div className="px-3 py-2 rounded-lg border bg-rose-50 border-rose-200 text-rose-700">{err}</div>}
+        {children}
+        <div>
+          <label className={labelCls}>
+            Type <span className="font-mono font-bold text-slate-800">{code}</span> to confirm
+          </label>
+          <input className={inputCls} value={typed} onChange={(e) => setTyped(e.target.value)} aria-label="Type to confirm" autoFocus />
+        </div>
+      </div>
+    </Modal>
+  );
+};
 
 export const companyFromSettings = (s: Record<string, string>): LetterPdfCompany => ({
   name: s.company_name,

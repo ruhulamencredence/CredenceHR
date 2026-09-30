@@ -16,7 +16,7 @@ import { Globe, ImagePlus, KeyRound, Lock, LogIn, Pencil, Plus, Trash2, UserPlus
 import { switchCompany } from '../lib/company';
 import { Spinner } from './Spinner';
 import { readFileBase64 } from './HrOps360Parts';
-import { useHrApi, Modal, Notice, inputCls, labelCls, btnPrimary, btnGhost } from './HrOpsShared';
+import { useHrApi, Modal, Notice, TypeToDelete, inputCls, labelCls, btnPrimary, btnGhost } from './HrOpsShared';
 
 interface Workspace {
   id: number;
@@ -32,6 +32,8 @@ interface Workspace {
   user_count: number;
 }
 type Msg = { type: 'success' | 'error'; text: string } | null;
+// The system owner's own workspace — never deleted.
+const HOME_GROUP_ID = 1;
 
 const WorkspaceForm: React.FC<{ token: string; ws: Workspace | null; onClose: () => void; onSaved: (t: string) => void }> = ({ token, ws, onClose, onSaved }) => {
   const api = useHrApi(token);
@@ -313,6 +315,7 @@ export const PlatformWorkspaces: React.FC<{ token: string }> = ({ token }) => {
   const [list, setList] = useState<Workspace[] | null>(null);
   const [edit, setEdit] = useState<Workspace | 'new' | null>(null);
   const [admins, setAdmins] = useState<Workspace | null>(null);
+  const [removing, setRemoving] = useState<Workspace | null>(null);
   const [visits, setVisits] = useState<Visit[]>([]);
   const [msg, setMsg] = useState<Msg>(null);
   const load = useCallback(() => {
@@ -381,6 +384,11 @@ export const PlatformWorkspaces: React.FC<{ token: string }> = ({ token }) => {
               <button type="button" className={btnGhost} onClick={() => setAdmins(w)}>
                 <UserPlus className="w-3.5 h-3.5" /> Superadmins
               </button>
+              {w.id !== HOME_GROUP_ID && (
+                <button type="button" className={`${btnGhost} text-rose-600`} onClick={() => setRemoving(w)} aria-label={`Delete ${w.name}`}>
+                  <Trash2 className="w-3.5 h-3.5" /> Delete
+                </button>
+              )}
             </div>
             {!w.can_sign_in && (
               <div className="mt-2 text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5 flex items-start gap-1.5">
@@ -405,6 +413,28 @@ export const PlatformWorkspaces: React.FC<{ token: string }> = ({ token }) => {
             ))}
           </div>
         </div>
+      )}
+      {removing && (
+        <TypeToDelete
+          title={`Delete workspace ${removing.name}`}
+          code={removing.code}
+          onClose={() => setRemoving(null)}
+          onDelete={async (typed) => {
+            await api.del(`/api/platform/workspaces/${removing.id}`, { confirm: typed });
+            setRemoving(null);
+            setMsg({ type: 'success', text: `Workspace ${removing.name} was deleted.` });
+            load();
+          }}
+        >
+          <p>
+            The whole group goes for good: its companies ({removing.companies.map((c) => c.short_code).join(', ') || '—'}), its {removing.user_count} account(s) and
+            every record in it. Nobody can sign in to <span className="font-mono font-semibold">{removing.code}</span> again. This can't be undone.
+          </p>
+          <p>
+            Only a workspace with no employees can be deleted. One that has employees can be switched off instead (edit ✎ → untick Active). If you are working
+            inside it right now, go back to your workspace first.
+          </p>
+        </TypeToDelete>
       )}
       {admins && <SuperadminsModal token={token} ws={admins} onClose={() => setAdmins(null)} onChanged={load} />}
       {edit && (

@@ -146,7 +146,7 @@ export const GROUP_BACKFILL: [string, string][] = [
 // messages, an account's alerts…): they are seen in the group their parent
 // belongs to. [link column, parent table]. Rows whose link is empty date from
 // before multi-company, so they stay with the original group (1).
-const LINKED_TABLES = new Map<string, [string, string]>([
+export const LINKED_TABLES = new Map<string, [string, string]>([
   ["admin_module_permissions", ["user_id", "users"]],
   ["admin_module_permission_layers", ["user_id", "users"]],
   ["alerts", ["user_id", "users"]],
