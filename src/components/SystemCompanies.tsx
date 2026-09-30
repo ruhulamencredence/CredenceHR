@@ -42,6 +42,7 @@ interface AccessUser {
   company_ids: number[];
   default_company_id: number | null;
   module_counts: Record<number, number>;
+  can_view_group_directory: boolean;
 }
 type Msg = { type: 'success' | 'error'; text: string } | null;
 
@@ -309,6 +310,15 @@ export const SystemCompanies: React.FC<{ token: string }> = ({ token }) => {
     }
   };
 
+  const saveGroupDirectory = async (u: AccessUser, enabled: boolean) => {
+    try {
+      await api.put(`/api/system/company-access/${u.id}/group-directory`, { enabled });
+      setUsers((list) => (list || []).map((x) => (x.id === u.id ? { ...x, can_view_group_directory: enabled } : x)));
+    } catch (e: any) {
+      setMsg({ type: 'error', text: e.message });
+    }
+  };
+
   if (!companies) return <div className="py-10 flex justify-center"><Spinner /></div>;
   const active = companies.filter((c) => c.is_active);
   const shown = (users || []).filter((u) => !q.trim() || [u.name, u.email].some((v) => String(v || '').toLowerCase().includes(q.trim().toLowerCase())));
@@ -439,6 +449,9 @@ export const SystemCompanies: React.FC<{ token: string }> = ({ token }) => {
                     </th>
                   ))}
                   <th className="text-left px-3 py-2">Default</th>
+                  <th className="px-3 py-2 text-center whitespace-nowrap" title="Employee Directory shows every company of the group, without switching company">
+                    Whole-group directory
+                  </th>
                   <th />
                 </tr>
               </thead>
@@ -491,6 +504,15 @@ export const SystemCompanies: React.FC<{ token: string }> = ({ token }) => {
                           </select>
                         )}
                       </td>
+                      <td className="px-3 py-2 text-center">
+                        <input
+                          type="checkbox"
+                          aria-label={`${u.name} sees the whole group's directory`}
+                          checked={isSa || u.can_view_group_directory}
+                          disabled={isSa}
+                          onChange={(e) => saveGroupDirectory(u, e.target.checked)}
+                        />
+                      </td>
                       <td className="px-3 py-2 text-right">
                         {!isSa && active.length > 1 && (
                           <button type="button" className={btnGhost} onClick={() => setCopyFor(u)} title="Copy Module Access to other companies">
@@ -506,6 +528,7 @@ export const SystemCompanies: React.FC<{ token: string }> = ({ token }) => {
           </div>
           <p className="text-[11px] text-slate-500">
             Module Access itself is set per company in Users → Module Access, while that company is selected in the header. The Superadmin can enter every company.
+            “Whole-group directory”: Employee Directory lists the mother and every sister company's employees together, without switching company.
           </p>
         </div>
       )}

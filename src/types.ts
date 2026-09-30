@@ -242,6 +242,10 @@ export interface EmployeeDirectoryEntry {
   is_active: boolean;
   user_id: number | null;
   supervisor_name: string | null;
+  // Multi-company: which company of the group this person belongs to.
+  company_id?: number | null;
+  company_name?: string | null;
+  company_code?: string | null;
 }
 
 // One row of Admin Panel -> Employees -> Edit -> Supervisor tab. The
