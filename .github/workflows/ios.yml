@@ -27,7 +27,7 @@ on:
       server_url:
         description: "Server the app opens (scheme, no trailing slash)"
         required: false
-        default: "http://203.95.222.58:3000"
+        default: "https://hr.credencehousinglimited.com"
   push:
     branches: [main, claude/nice-fermi-0tale9]
     paths:
@@ -38,7 +38,8 @@ on:
       - ".github/workflows/ios.yml"
 
 env:
-  CAP_SERVER_URL: ${{ github.event.inputs.server_url || 'http://203.95.222.58:3000' }}
+  # HTTPS only: iOS blocks plain-http pages (App Transport Security, Info.plist).
+  CAP_SERVER_URL: ${{ github.event.inputs.server_url || 'https://hr.credencehousinglimited.com' }}
 
 jobs:
   simulator:
