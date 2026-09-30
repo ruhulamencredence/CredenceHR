@@ -20,6 +20,11 @@ import { AsyncLocalStorage } from "node:async_hooks";
 export interface CompanyContext {
   companyId: number;
   groupId: number;
+  // The group's mother company, and which kinds of settings (holidays, leave
+  // policy…) this company uses from it instead of its own — see
+  // SHARE_KINDS in companyScope.ts.
+  motherId?: number;
+  shared?: string[];
 }
 
 export const DEFAULT_COMPANY_ID = 1;
