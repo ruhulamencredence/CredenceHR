@@ -54,7 +54,7 @@ export const CompanySwitcher: React.FC<{ token: string; transparent?: boolean }>
         <ChevronDown className="w-3 h-3 opacity-60" />
       </button>
       {open && (
-        <div className="absolute right-0 mt-2 w-72 max-w-[90vw] rounded-xl border border-slate-200 bg-white shadow-lg z-50 overflow-hidden">
+        <div className="absolute right-0 top-full mt-2 w-72 max-w-[90vw] rounded-xl border border-slate-200 bg-white shadow-lg z-50 overflow-hidden">
           <div className="px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-slate-400 border-b border-slate-100">{data.group.name || 'Companies'}</div>
           {data.companies.map((c) => (
             <button
