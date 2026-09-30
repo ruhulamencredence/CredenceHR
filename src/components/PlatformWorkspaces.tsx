@@ -7,10 +7,13 @@
 // using the app. A workspace is what people type on the page before the login
 // form (e.g. "credence"); it shows that group's logo and name on its sign-in
 // page. Creating one also creates its companies (the first is the mother
-// company) and its own Superadmin, who then runs it from Companies.
+// company) and its own Superadmin, who then runs it from Companies. The
+// system owner can open any workspace (working there as its Superadmin — each
+// visit is recorded below) and add, reset or remove a workspace's Superadmins.
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Globe, ImagePlus, Lock, Pencil, Plus, Trash2 } from 'lucide-react';
+import { Globe, ImagePlus, KeyRound, Lock, LogIn, Pencil, Plus, Trash2, UserPlus } from 'lucide-react';
+import { switchCompany } from '../lib/company';
 import { Spinner } from './Spinner';
 import { readFileBase64 } from './HrOps360Parts';
 import { useHrApi, Modal, Notice, inputCls, labelCls, btnPrimary, btnGhost } from './HrOpsShared';
@@ -179,19 +182,154 @@ const WorkspaceForm: React.FC<{ token: string; ws: Workspace | null; onClose: ()
   );
 };
 
+// Add / reset password / remove a workspace's Superadmins.
+const SuperadminsModal: React.FC<{ token: string; ws: Workspace; onClose: () => void; onChanged: () => void }> = ({ token, ws, onClose, onChanged }) => {
+  const api = useHrApi(token);
+  const [add, setAdd] = useState({ name: '', email: '', password: '' });
+  const [reset, setReset] = useState<{ id: number; password: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<Msg>(null);
+  const run = async (fn: () => Promise<any>, ok: string) => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      await fn();
+      setMsg({ type: 'success', text: ok });
+      onChanged();
+    } catch (e: any) {
+      setMsg({ type: 'error', text: e.message });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal
+      title={`Superadmins — ${ws.name}`}
+      onClose={onClose}
+      wide
+      footer={
+        <button type="button" className={btnGhost} onClick={onClose}>
+          Close
+        </button>
+      }
+    >
+      <div className="space-y-4">
+        <Notice msg={msg} onClose={() => setMsg(null)} />
+        <div className="space-y-2">
+          {ws.superadmins.map((u) => (
+            <div key={u.id} className="rounded-lg border border-slate-200 p-2.5">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-slate-800">{u.name}</div>
+                  <div className="text-[11px] text-slate-500">{u.email}</div>
+                </div>
+                <div className="flex gap-1.5">
+                  <button type="button" className={btnGhost} onClick={() => setReset(reset?.id === u.id ? null : { id: u.id, password: '' })}>
+                    <KeyRound className="w-3.5 h-3.5" /> Reset password
+                  </button>
+                  {ws.superadmins.length > 1 && (
+                    <button
+                      type="button"
+                      className={btnGhost}
+                      disabled={busy}
+                      onClick={() => {
+                        if (window.confirm(`Remove ${u.name} as Superadmin? The account stays as an Admin of ${ws.name}.`))
+                          run(() => api.del(`/api/platform/workspaces/${ws.id}/superadmins/${u.id}`), `${u.name} is no longer a Superadmin.`);
+                      }}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" /> Remove
+                    </button>
+                  )}
+                </div>
+              </div>
+              {reset?.id === u.id && (
+                <div className="mt-2 flex gap-2">
+                  <input
+                    className={inputCls}
+                    type="password"
+                    placeholder="New password (8+)"
+                    value={reset.password}
+                    onChange={(e) => setReset({ id: u.id, password: e.target.value })}
+                  />
+                  <button
+                    type="button"
+                    className={btnPrimary}
+                    disabled={busy}
+                    onClick={() =>
+                      run(() => api.put(`/api/platform/workspaces/${ws.id}/superadmins/${u.id}/password`, { password: reset.password }), `Password changed for ${u.name}.`).then(() =>
+                        setReset(null)
+                      )
+                    }
+                  >
+                    Save
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
+          {!ws.superadmins.length && <div className="text-xs text-slate-500">No Superadmin yet — add one below.</div>}
+        </div>
+        <div>
+          <div className="text-xs font-semibold text-slate-700 mb-1">Add a Superadmin</div>
+          <div className="grid sm:grid-cols-3 gap-2">
+            <input className={inputCls} placeholder="Name" value={add.name} onChange={(e) => setAdd((a) => ({ ...a, name: e.target.value }))} />
+            <input className={inputCls} placeholder="Email" value={add.email} onChange={(e) => setAdd((a) => ({ ...a, email: e.target.value }))} />
+            <input
+              className={inputCls}
+              type="password"
+              placeholder="Password (8+)"
+              value={add.password}
+              onChange={(e) => setAdd((a) => ({ ...a, password: e.target.value }))}
+            />
+          </div>
+          <button
+            type="button"
+            className={`${btnPrimary} mt-2`}
+            disabled={busy}
+            onClick={() =>
+              run(() => api.post(`/api/platform/workspaces/${ws.id}/superadmins`, add), `${add.name} can now sign in to "${ws.code}" as Superadmin.`).then(() =>
+                setAdd({ name: '', email: '', password: '' })
+              )
+            }
+          >
+            {busy && <Spinner />} <UserPlus className="w-3.5 h-3.5" /> Add
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+};
+
+interface Visit {
+  id: number;
+  user: string;
+  workspace: string;
+  company: string;
+  visited_at: string;
+}
+
 export const PlatformWorkspaces: React.FC<{ token: string }> = ({ token }) => {
   const api = useHrApi(token);
   const [list, setList] = useState<Workspace[] | null>(null);
   const [edit, setEdit] = useState<Workspace | 'new' | null>(null);
+  const [admins, setAdmins] = useState<Workspace | null>(null);
+  const [visits, setVisits] = useState<Visit[]>([]);
   const [msg, setMsg] = useState<Msg>(null);
   const load = useCallback(() => {
     api
       .get('/api/platform/workspaces')
-      .then((d) => setList(d.workspaces))
+      .then((d) => {
+        setList(d.workspaces);
+        setAdmins((cur) => (cur ? d.workspaces.find((w: Workspace) => w.id === cur.id) || null : null));
+      })
       .catch((e) => {
         setList([]);
         setMsg({ type: 'error', text: e.message });
       });
+    api
+      .get('/api/platform/visits')
+      .then((v) => setVisits(Array.isArray(v) ? v : []))
+      .catch(() => setVisits([]));
   }, [api]);
   useEffect(() => {
     load();
@@ -200,7 +338,9 @@ export const PlatformWorkspaces: React.FC<{ token: string }> = ({ token }) => {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-2 flex-wrap">
-        <p className="text-xs text-slate-500">Each group signs in through its own workspace, typed on the page before the login form.</p>
+        <p className="text-xs text-slate-500">
+          Each group signs in through its own workspace, typed on the page before the login form. As the system owner you can open any of them and work there as its Superadmin.
+        </p>
         <button type="button" className={btnPrimary} onClick={() => setEdit('new')}>
           <Plus className="w-3.5 h-3.5" /> New workspace
         </button>
@@ -227,6 +367,21 @@ export const PlatformWorkspaces: React.FC<{ token: string }> = ({ token }) => {
               <div>Superadmin: {w.superadmins.map((u) => `${u.name} — ${u.email}`).join(', ') || '—'}</div>
               <div>{w.user_count} account(s)</div>
             </div>
+            <div className="mt-3 flex gap-1.5 flex-wrap">
+              {w.is_active && w.companies.length > 0 && (
+                <button
+                  type="button"
+                  className={btnPrimary}
+                  onClick={() => switchCompany((w.companies.find((c) => c.is_mother) || w.companies[0]).id)}
+                  title={`Work inside ${w.name} as its Superadmin`}
+                >
+                  <LogIn className="w-3.5 h-3.5" /> Open
+                </button>
+              )}
+              <button type="button" className={btnGhost} onClick={() => setAdmins(w)}>
+                <UserPlus className="w-3.5 h-3.5" /> Superadmins
+              </button>
+            </div>
             {!w.can_sign_in && (
               <div className="mt-2 text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5 flex items-start gap-1.5">
                 <Lock className="w-3 h-3 mt-0.5 shrink-0" />
@@ -236,6 +391,22 @@ export const PlatformWorkspaces: React.FC<{ token: string }> = ({ token }) => {
           </div>
         ))}
       </div>
+      {visits.length > 0 && (
+        <div className="rounded-xl border border-slate-200 bg-white p-4">
+          <div className="text-sm font-semibold text-slate-800 mb-2">Recent visits by the system owner</div>
+          <div className="divide-y divide-slate-100 text-[11px] text-slate-600">
+            {visits.slice(0, 15).map((v) => (
+              <div key={v.id} className="py-1.5 flex flex-wrap gap-x-3">
+                <span className="font-semibold text-slate-700">{v.workspace}</span>
+                <span>{v.company}</span>
+                <span>{v.user}</span>
+                <span className="text-slate-400">{String(v.visited_at).replace('T', ' ').slice(0, 16)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {admins && <SuperadminsModal token={token} ws={admins} onClose={() => setAdmins(null)} onChanged={load} />}
       {edit && (
         <WorkspaceForm
           token={token}

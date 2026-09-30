@@ -5,10 +5,11 @@
 
 // Header company switcher — only shown to accounts that may work in more than
 // one company of their group (see src/lib/company.ts). Picking a company
-// reloads the app in that company.
+// reloads the app in that company. The system owner also sees every
+// workspace here and can open any of them (working there as its Superadmin).
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Building2, Check, ChevronDown } from 'lucide-react';
+import { Building2, Check, ChevronDown, Globe, LogOut } from 'lucide-react';
 import { useMyCompanies, switchCompany } from '../lib/company';
 
 export const CompanySwitcher: React.FC<{ token: string; transparent?: boolean }> = ({ token, transparent }) => {
@@ -22,10 +23,20 @@ export const CompanySwitcher: React.FC<{ token: string; transparent?: boolean }>
     document.addEventListener('mousedown', onDoc);
     return () => document.removeEventListener('mousedown', onDoc);
   }, []);
-  if (!data || data.companies.length < 2) return null;
+  const workspaces = data?.workspaces || [];
+  if (!data || (data.companies.length < 2 && workspaces.length < 2 && !data.visiting)) return null;
   const active = data.companies.find((c) => c.id === data.active_company_id) || data.companies[0];
+  if (!active) return null;
   return (
-    <div ref={ref} className="relative shrink-0">
+    <div ref={ref} className="relative shrink-0 flex items-center gap-1.5">
+      {data.visiting && (
+        <span
+          title={`You are working inside ${data.group.name} as the system owner`}
+          className="hidden sm:inline-flex items-center gap-1 h-8 px-2.5 rounded-full bg-amber-100 text-amber-900 text-[11px] font-semibold border border-amber-300"
+        >
+          <Globe className="w-3.5 h-3.5" /> {data.group.short_name || data.group.name}
+        </span>
+      )}
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
@@ -60,6 +71,45 @@ export const CompanySwitcher: React.FC<{ token: string; transparent?: boolean }>
               {c.id === active.id && <Check className="w-4 h-4 text-blue-600 shrink-0" />}
             </button>
           ))}
+          {workspaces.length > 1 && (
+            <>
+              <div className="px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-slate-400 border-y border-slate-100 bg-slate-50">
+                Workspaces (system owner)
+              </div>
+              <div className="max-h-64 overflow-y-auto">
+                {workspaces.map((w) => {
+                  const here = w.id === data.group.id;
+                  return (
+                    <button
+                      key={w.id}
+                      type="button"
+                      onClick={() => (here ? setOpen(false) : switchCompany(w.is_home && data.home_company_id ? data.home_company_id : w.company_id))}
+                      className={`w-full text-left px-3 py-2.5 flex items-center gap-2 text-sm hover:bg-slate-50 ${here ? 'bg-blue-50/60' : ''}`}
+                    >
+                      <Globe className="w-4 h-4 text-slate-400 shrink-0" />
+                      <span className="flex-1 min-w-0">
+                        <span className="block truncate font-semibold text-slate-800">{w.name}</span>
+                        <span className="block text-[10px] text-slate-400">
+                          {w.workspace_code || '—'}
+                          {w.is_home ? ' · your workspace' : ''}
+                        </span>
+                      </span>
+                      {here && <Check className="w-4 h-4 text-blue-600 shrink-0" />}
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
+          {data.visiting && data.home_company_id && (
+            <button
+              type="button"
+              onClick={() => switchCompany(data.home_company_id!)}
+              className="w-full text-left px-3 py-2.5 flex items-center gap-2 text-sm font-semibold text-amber-800 hover:bg-amber-50 border-t border-slate-100"
+            >
+              <LogOut className="w-4 h-4 shrink-0" /> Back to my workspace
+            </button>
+          )}
         </div>
       )}
     </div>

@@ -28,6 +28,10 @@ export interface CompanyContext {
   // Background jobs that work on a whole group at once (e.g. the leave-year
   // rollover): every company of the group, never another group.
   wholeGroup?: boolean;
+  // The signed-in account, and whether it is the system owner working inside
+  // another group's workspace (Admin Panel -> Companies -> Workspaces -> Open).
+  userId?: number;
+  visiting?: boolean;
 }
 
 export const DEFAULT_COMPANY_ID = 1;
