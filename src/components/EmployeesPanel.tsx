@@ -453,6 +453,14 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
     setFormHistoryError(null);
     setHistoryFilter('all');
     setShowForm(true);
+    // Multi-company: suggest the next Employee ID of the selected company
+    // (its short code + the next number), editable as before.
+    fetch('/api/companies/next-employee-code', { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d?.code) setForm((f) => (f.employee_id ? f : { ...f, employee_id: d.code }));
+      })
+      .catch(() => {});
   };
 
   const openEditForm = (e: Employee) => {

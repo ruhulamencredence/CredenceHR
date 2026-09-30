@@ -36,6 +36,7 @@ import { registerInfoRequestRoutes, ensureInfoRequestsSchema } from "./HrOpsInfo
 import { registerSiteAttendanceRoutes, ensureSiteAttendanceSchema } from "./SiteAttendanceRoutes";
 import { registerCompanyRoutes, ensureCompanySchema, resolveCompanyContext, checkWorkspaceLogin } from "./CompanyRoutes";
 import { companyStore, activeCompanyId } from "./companyContext";
+import { scopeSql } from "./companyScope";
 import { registerHRAnalyticsRoutes } from "./HRAnalyticsRoutes";
 import { registerDocumentVaultRoutes, ensureDocumentVaultSchema } from "./DocumentVaultRoutes";
 import { registerErp360SsoRoutes } from "./Erp360SsoRoutes";
@@ -3636,6 +3637,8 @@ async function bulkInsert(table: string, columns: string[], rows: any[][], chunk
 
 async function queryDB(sql: string, params: any[] = []): Promise<any> {
   if (isMySQLConnected && dbPool) {
+    // Multi-company: keep each company's rows apart (companyScope.ts).
+    sql = scopeSql(sql);
     try {
       const [rows] = await dbPool.execute(sql, params);
       return rows;

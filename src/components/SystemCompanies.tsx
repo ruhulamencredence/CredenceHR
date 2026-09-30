@@ -297,8 +297,8 @@ export const SystemCompanies: React.FC<{ token: string }> = ({ token }) => {
         )}
       </div>
       <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-        Step 1 of multi-company: companies, access and Module Access per company are live. Employees, attendance, leave, payroll and the other modules are
-        separated company by company in the next steps — until then they still show everyone, whichever company is selected.
+        Kept apart per company now: employees, departments, branches, projects, attendance, leave, payroll, claims and HR records. Still shared by the
+        whole group for now (next step): holiday calendar, leave types and policies, letter templates, notices, assets, vehicles, approval templates and chat.
       </div>
       <Notice msg={msg} onClose={() => setMsg(null)} />
       <div className="flex gap-1 border-b border-slate-200">

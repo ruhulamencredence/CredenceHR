@@ -157,6 +157,18 @@ export async function ensureCompanySchema(dbPool: any): Promise<void> {
   await run("all_employees.company_id", "ALTER TABLE all_employees ADD COLUMN company_id INT NOT NULL DEFAULT 1", ["ER_DUP_FIELDNAME"]);
   await run("all_employees index", "ALTER TABLE all_employees ADD INDEX idx_employee_company (company_id)", ["ER_DUP_KEYNAME"]);
 
+  // Departments, branches and projects belong to a company too; their names
+  // only need to be unique within it (a sister company can also have "Accounts").
+  for (const [table, oldKey, col] of [
+    ["departments", "name", "name"],
+    ["branches", "branch_name", "branch_name"],
+    ["projects", "project_name", "project_name"]
+  ]) {
+    await run(`${table}.company_id`, `ALTER TABLE ${table} ADD COLUMN company_id INT NOT NULL DEFAULT 1`, ["ER_DUP_FIELDNAME"]);
+    await run(`${table} key`, `ALTER TABLE ${table} ADD UNIQUE KEY unique_company_${col} (company_id, ${col})`, ["ER_DUP_KEYNAME"]);
+    await run(`${table} old key`, `ALTER TABLE ${table} DROP INDEX ${oldKey}`, ["ER_CANT_DROP_FIELD_OR_KEY"]);
+  }
+
   // Module Access per company: add the column, widen the unique key to
   // include it (new key first, so the user_id foreign key always has an index),
   // then drop the old one.
@@ -222,11 +234,15 @@ export async function loadCompanyAccess(queryDB: QueryDB, user: { id: number; ro
   let allowed = rows.map((r) => Number(r.company_id)).filter((id) => activeIds.has(id));
   let defaultId = Number(rows.find((r) => Number(r.is_default) === 1 && activeIds.has(Number(r.company_id)))?.company_id || 0);
   if (!rows.length && mother) {
-    // First visit since multi-company: the account works in its group's
-    // mother company, exactly as before.
-    await queryDB("INSERT INTO user_company_access (user_id, company_id, is_default) VALUES (?, ?, ?)", [user.id, Number(mother.id), 1]).catch(() => {});
-    allowed = [Number(mother.id)];
-    defaultId = Number(mother.id);
+    // First visit (an existing account, or one just created): it works in
+    // the company of the Employee it belongs to, else the group's mother
+    // company — exactly as before multi-company.
+    const empRows: any[] = (await queryDB("SELECT * FROM all_employees WHERE user_id = ?", [user.id]).catch(() => [])) || [];
+    const own = Number(empRows.find((e) => Number(e.user_id) === Number(user.id))?.company_id || 0);
+    const home = own && activeIds.has(own) ? own : Number(mother.id);
+    await queryDB("INSERT INTO user_company_access (user_id, company_id, is_default) VALUES (?, ?, ?)", [user.id, home, 1]).catch(() => {});
+    allowed = [home];
+    defaultId = home;
   }
   if (role === "superadmin") allowed = companies.map((c) => Number(c.id));
   if (!allowed.length) allowed = [mother ? Number(mother.id) : DEFAULT_COMPANY_ID];
@@ -340,6 +356,31 @@ export function registerCompanyRoutes(app: Express, deps: CompanyRouteDeps) {
     }
   });
 
+  // Next Employee ID for the active company: its short code + the next number
+  // after the highest one already used with that prefix (CPL-0007 -> CPL-0008).
+  app.get("/api/companies/next-employee-code", authenticateToken, async (req: any, res) => {
+    try {
+      const cid = activeCompanyId();
+      const rows: any[] = (await queryDB("SELECT * FROM companies WHERE id = ?", [cid])) || [];
+      const c = rows.find((r) => Number(r.id) === cid);
+      if (!c) throw bad("Company not found.", 404);
+      const prefix = String(c.short_code).toUpperCase();
+      const employees: any[] = (await queryDB("/*unscoped*/ SELECT employee_id FROM all_employees").catch(() => [])) || [];
+      let max = 0;
+      let width = 4;
+      for (const e of employees) {
+        const m = String(e.employee_id || "").toUpperCase().match(new RegExp(`^${prefix}-(\\d+)$`));
+        if (m) {
+          max = Math.max(max, Number(m[1]));
+          width = Math.max(width, m[1].length);
+        }
+      }
+      res.json({ code: `${prefix}-${String(max + 1).padStart(width, "0")}`, prefix });
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
   app.get("/api/companies/:id/logo", authenticateToken, async (req: any, res) => {
     try {
       const rows: any[] = (await queryDB("SELECT * FROM companies WHERE id = ?", [Number(req.params.id)])) || [];
@@ -363,7 +404,8 @@ export function registerCompanyRoutes(app: Express, deps: CompanyRouteDeps) {
       const groupId = await myGroup(req);
       const companies = await companiesOfGroup(queryDB, groupId);
       const [employees, access, assignments] = await Promise.all([
-        queryDB("SELECT * FROM all_employees").catch(() => []),
+        // Counts for every company of the group, whichever one is selected.
+        queryDB("/*unscoped*/ SELECT * FROM all_employees").catch(() => []),
         queryDB("SELECT * FROM user_company_access").catch(() => []),
         queryDB("SELECT * FROM employee_company_assignments").catch(() => [])
       ]);
@@ -643,7 +685,8 @@ export function registerCompanyRoutes(app: Express, deps: CompanyRouteDeps) {
       const [groups, companies, users] = await Promise.all([
         queryDB("SELECT * FROM company_groups"),
         queryDB("SELECT * FROM companies").catch(() => []),
-        queryDB("SELECT * FROM users").catch(() => [])
+        // Every workspace's accounts — the system owner's view spans groups.
+        queryDB("/*unscoped*/ SELECT * FROM users").catch(() => [])
       ]);
       res.json({
         can_sign_in_other_workspaces: OTHER_WORKSPACES_CAN_SIGN_IN,
