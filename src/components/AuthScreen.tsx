@@ -60,14 +60,18 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
   // server as a single "identifier" field.
   const [workspace, setWorkspace] = useState<Workspace | null>(readWorkspace);
   const [workspaceInput, setWorkspaceInput] = useState('');
-  // The system owner signs in without typing a workspace (their own is the
-  // original one), then opens any workspace from inside the app.
-  const [ownerMode, setOwnerMode] = useState(false);
+  // The system owner's own sign-in page is <address>/system — no workspace to
+  // type (it isn't mentioned anywhere else); they open any workspace from
+  // inside the app.
+  const [ownerMode] = useState(() => /^\/system\/?$/i.test(window.location.pathname));
   // The web address can name the workspace (credence.example.com) — then the
   // workspace page is skipped.
   const [detecting, setDetecting] = useState(() => !readWorkspace());
   useEffect(() => {
-    if (workspace) return;
+    if (workspace || /^\/system\/?$/i.test(window.location.pathname)) {
+      setDetecting(false);
+      return;
+    }
     const host = window.location.hostname;
     const labels = host.split('.');
     if (labels.length < 3 || /^\d+$/.test(labels[labels.length - 1])) {
@@ -201,7 +205,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
     saveWorkspace(null);
     setWorkspaceInput(workspace?.code || '');
     setWorkspace(null);
-    setOwnerMode(false);
     setError('');
   };
 
@@ -226,8 +229,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(
           coords
-            ? { identifier, password, workspace: ownerMode ? undefined : workspace?.code, latitude: coords.latitude, longitude: coords.longitude, platform: 'app' }
-            : { identifier, password, workspace: ownerMode ? undefined : workspace?.code }
+            ? { identifier, password, ...(ownerMode ? { system: true } : { workspace: workspace?.code }), latitude: coords.latitude, longitude: coords.longitude, platform: 'app' }
+            : { identifier, password, ...(ownerMode ? { system: true } : { workspace: workspace?.code }) }
         ),
       });
 
@@ -283,7 +286,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
             centered next to the form. On mobile these stack above the form
             instead — see the lg:hidden duplicate block below. */}
         <div className="hidden lg:flex lg:w-1/2 flex-col items-center text-center">
-          <BrandLogo workspace={workspace} className="h-14 w-auto mb-4" />
+          <BrandLogo workspace={ownerMode ? null : workspace} className="h-14 w-auto mb-4" />
           <div className="w-80 h-80 pointer-events-none">
             <Suspense fallback={<div className="w-full h-full" />}>
               <AuthHeroLottie className="w-full h-full" />
@@ -297,7 +300,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
             bigger animation below doesn't push the card as far down the
             screen — less blank space above the logo instead. */}
         <div className="flex lg:hidden flex-col items-center text-center mb-3 sm:mb-4 -mt-2">
-          <BrandLogo workspace={workspace} className="h-9 sm:h-11 w-auto mb-1.5 sm:mb-2" />
+          <BrandLogo workspace={ownerMode ? null : workspace} className="h-9 sm:h-11 w-auto mb-1.5 sm:mb-2" />
           <div className="w-52 h-52 sm:w-60 sm:h-60 pointer-events-none">
             <Suspense fallback={<div className="w-full h-full" />}>
               <AuthHeroLottie className="w-full h-full" />
@@ -332,7 +335,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
           )}
 
           {!workspace && !ownerMode ? (
-            <>
             <form className="space-y-4" onSubmit={handleWorkspace}>
               <div>
                 <label className="block text-xs font-medium mb-1.5 ml-1" style={{ color: 'var(--g-text-muted)' }}>
@@ -373,21 +375,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
                 {!loading && <ArrowUp className="w-4 h-4 rotate-90" />}
               </button>
             </form>
-            <p className="mt-4 text-center text-xs" style={{ color: 'var(--g-text-muted)' }}>
-              System owner?{' '}
-              <button
-                type="button"
-                onClick={() => {
-                  setOwnerMode(true);
-                  setError('');
-                }}
-                className="font-semibold underline"
-                style={{ color: 'var(--g-accent)' }}
-              >
-                Sign in without a workspace
-              </button>
-            </p>
-            </>
           ) : (
           <>
           <form className="space-y-4" onSubmit={handleSubmit}>
@@ -454,22 +441,26 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
             </p>
           )}
 
-          <p className="mt-2 text-center text-xs" style={{ color: 'var(--g-text-muted)' }}>
-            Don't have an account? Contact your Admin to get one created.
-          </p>
-          <p className="mt-2 text-center text-xs" style={{ color: 'var(--g-text-muted)' }}>
-            {ownerMode ? 'Signing in to a company?' : `Not ${workspace?.short_name || workspace?.name}?`}{' '}
-            <button type="button" onClick={changeWorkspace} className="font-semibold underline" style={{ color: 'var(--g-accent)' }}>
-              {ownerMode ? 'Enter a workspace' : 'Change workspace'}
-            </button>
-          </p>
+          {!ownerMode && (
+            <p className="mt-2 text-center text-xs" style={{ color: 'var(--g-text-muted)' }}>
+              Don't have an account? Contact your Admin to get one created.
+            </p>
+          )}
+          {!ownerMode && (
+            <p className="mt-2 text-center text-xs" style={{ color: 'var(--g-text-muted)' }}>
+              Not {workspace?.short_name || workspace?.name}?{' '}
+              <button type="button" onClick={changeWorkspace} className="font-semibold underline" style={{ color: 'var(--g-accent)' }}>
+                Change workspace
+              </button>
+            </p>
+          )}
           </>
           )}
 
           {/* APK download — WEB build only. Someone already inside the native
               Android app has no use for this, so it's hidden there the same
               way the location notice above is shown only for isNativeApp. */}
-          {!isNativeApp && (
+          {!isNativeApp && !ownerMode && (
             <a
               href="/downloads/CredenceHR.apk"
               download
