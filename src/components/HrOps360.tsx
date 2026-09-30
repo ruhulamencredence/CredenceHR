@@ -13,6 +13,7 @@
 // still apply. "Dossier" exports any mix of sections as PDF or Excel.
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { CompanyAssignmentsModal } from './HrOpsCompanyTools';
 import {
   BookOpen,
   Briefcase,
@@ -40,7 +41,8 @@ import {
   Trash2,
   User,
   Users,
-  Wallet
+  Wallet,
+  Building2
 } from 'lucide-react';
 import { Spinner } from './Spinner';
 import { apiUrl } from '../lib/api';
@@ -231,6 +233,8 @@ export const Employee360: React.FC<{
     | { kind: 'loan' }
     | { kind: 'discipline' }
     | { kind: 'dossier' }
+    | { kind: 'companies' }
+    | { kind: 'transfer' }
   >(null);
   const emp = employees.find((e) => e.id === employeeId) || null;
 
@@ -278,6 +282,7 @@ export const Employee360: React.FC<{
     { group: 'HR', label: 'New HR Action (promotion, increment…)', icon: ClipboardList, run: () => setModal({ kind: 'action' }) },
     { group: 'HR', label: 'Issue Letter', icon: FileText, run: () => setModal({ kind: 'letter' }) },
     { group: 'HR', label: 'Service Details (grade, probation)', icon: Pencil, run: () => setModal({ kind: 'service' }) },
+    { group: 'HR', label: 'Other companies (also works for / transfer)', icon: Building2, run: () => setModal({ kind: 'companies' }) },
     { group: 'Records', label: 'Add Previous Experience', icon: Briefcase, run: () => setModal({ kind: 'record', record: 'experience', row: null }) },
     { group: 'Records', label: 'Add Education', icon: GraduationCap, run: () => setModal({ kind: 'record', record: 'education', row: null }) },
     { group: 'Records', label: 'Add Training', icon: BookOpen, run: () => setModal({ kind: 'record', record: 'training', row: null }) },
@@ -467,6 +472,29 @@ export const Employee360: React.FC<{
             onChanged();
             refresh(st === 'approved' ? 'Saved and approved.' : 'Submitted for approval.');
           }}
+        />
+      )}
+      {modal?.kind === 'transfer' && (
+        <NewActionModal
+          token={token}
+          meta={meta}
+          employees={employees}
+          initialEmployeeId={employeeId}
+          initialType="company_transfer"
+          onClose={() => setModal(null)}
+          onSaved={(st) => {
+            onChanged();
+            refresh(st === 'approved' ? 'Transfer approved.' : 'Transfer submitted for approval.');
+          }}
+        />
+      )}
+      {modal?.kind === 'companies' && employeeId && (
+        <CompanyAssignmentsModal
+          token={token}
+          employeeId={employeeId}
+          employeeName={emp?.name || 'This employee'}
+          onClose={() => setModal(null)}
+          onTransfer={() => setModal({ kind: 'transfer' })}
         />
       )}
       {modal?.kind === 'letter' && (

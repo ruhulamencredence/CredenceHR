@@ -11,6 +11,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Plus, Search, FileText, XCircle, ChevronDown, ChevronRight, Clock, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { Spinner } from './Spinner';
+import { useGroupCompanies } from './HrOpsCompanyTools';
 import { LetterComposer, type ComposerInit } from './HrOpsLetters';
 import {
   useHrApi,
@@ -62,6 +63,7 @@ const FIELDS_FOR: Record<string, string[]> = {
   increment: ['gross_salary'],
   salary_adjustment: ['gross_salary'],
   transfer: ['department_id', 'branch_id', 'supervisor_id'],
+  company_transfer: ['company_id', 'employee_code'],
   confirmation: [],
   designation_change: ['designation'],
   grade_change: ['grade'],
@@ -101,6 +103,15 @@ export const NewActionModal: React.FC<{
   const emp = employees.find((e) => e.id === employeeId) || null;
   const fields = FIELDS_FOR[type] || [];
   const set = (k: string, v: string) => setTo((p) => ({ ...p, [k]: v }));
+  // Company Transfer: the group's companies, and the next Employee ID there.
+  const groupCompanies = useGroupCompanies(token);
+  useEffect(() => {
+    if (type !== 'company_transfer' || !to.company_id) return;
+    api
+      .get<{ code: string }>(`/api/companies/next-employee-code?company_id=${to.company_id}`)
+      .then((d) => setTo((p) => ({ ...p, employee_code: d.code })))
+      .catch(() => {});
+  }, [api, type, to.company_id]);
 
   useEffect(() => {
     setTo({});
@@ -144,6 +155,8 @@ export const NewActionModal: React.FC<{
     supervisor_id: 'New supervisor',
     gross_salary: 'New gross salary (৳ / month)',
     probation_end_date: 'Probation extended until',
+    company_id: 'Move to company',
+    employee_code: 'New Employee ID there',
     contract_end_date: 'Contract extended until'
   };
   const chainNote = meta.action_types.find((a) => a.key === type)?.label;
@@ -200,7 +213,16 @@ export const NewActionModal: React.FC<{
             <label className={labelCls}>
               {LABEL[k]} {emp && <span className="font-normal text-slate-400">· now: {current[k]}</span>}
             </label>
-            {k === 'department_id' ? (
+            {k === 'company_id' ? (
+              <select value={to[k] || ''} onChange={(e) => set(k, e.target.value)} className={inputCls}>
+                <option value="">Pick company…</option>
+                {groupCompanies.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            ) : k === 'department_id' ? (
               <select value={to[k] || ''} onChange={(e) => set(k, e.target.value)} className={inputCls}>
                 <option value="">{type === 'transfer' ? 'Pick department…' : 'No change'}</option>
                 {meta.departments.map((d) => (

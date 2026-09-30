@@ -4886,7 +4886,7 @@ async function startServer() {
   // Site Attendance — supervisor muster roll for people who never use the app
   // (SiteAttendanceRoutes.ts).
   // Multi-company: companies, who may enter which (CompanyRoutes.ts).
-  registerCompanyRoutes(app, { authenticateToken, requireSuperAdmin, queryDB });
+  registerCompanyRoutes(app, { authenticateToken, requireSuperAdmin, queryDB, getAdminModules });
   registerSiteAttendanceRoutes(app, { authenticateToken, requireModule, queryDB, getAdminModules, todayInDhaka, haversineMeters, createAlert });
 
   // Employee Directory (Self Service -> "Employee Directory") — kept in its
