@@ -19,12 +19,18 @@
 // Your PC's LAN IP, for testing on a phone connected to the same WiFi.
 const LOCAL_SERVER_URL = 'http://192.168.66.11:3001';
 
-// Your real deployed domain or public IP — fill this in once it's live, e.g.
-// 'https://mpr.yourcompany.com' or 'http://<public IP>:3000'.
-const REAL_SERVER_URL = 'http://203.95.222.58:3000';
+// The live server. The domain (HTTPS) is the normal address — the iPhone app
+// only loads HTTPS pages, so it always uses this one. The public IP (plain
+// http) is kept as a fallback for the Android APK only.
+const REAL_SERVER_DOMAIN_URL = 'https://hr.credencehousinglimited.com';
+const REAL_SERVER_IP_URL = 'http://203.95.222.58:3000';
 
-// Flip this to true once REAL_SERVER_URL above is filled in and live, then
-// rebuild + re-sync as noted above.
+// Android only: true = build the APK against the IP instead of the domain.
+const USE_IP_INSTEAD_OF_DOMAIN = false;
+const REAL_SERVER_URL = USE_IP_INSTEAD_OF_DOMAIN ? REAL_SERVER_IP_URL : REAL_SERVER_DOMAIN_URL;
+
+// Flip this to true to build against the live server above instead of your
+// PC (LOCAL_SERVER_URL), then rebuild + re-sync as noted above.
 const USE_REAL_SERVER = false;
 
 // CAP_SERVER_URL (set by the cloud iPhone build, .github/workflows/ios.yml)
