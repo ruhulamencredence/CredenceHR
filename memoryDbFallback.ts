@@ -136,6 +136,10 @@ export const memoryDb = {
   siteAttendanceSheets: [] as any[],
   siteAttendanceEntries: [] as any[],
   siteAttendanceSettings: [] as any[],
+  companyGroups: [{ id: 1, name: 'Credence Group', short_name: 'Credence' }] as any[],
+  companies: [{ id: 1, group_id: 1, name: 'Credence Housing Limited', short_code: 'CHL', is_mother: 1, is_active: 1 }] as any[],
+  userCompanyAccess: [] as any[],
+  employeeCompanyAssignments: [] as any[],
   accessTemplates: [] as any[],
   // Chat/Alerts push notification device tokens (ChatRoutes.ts's POST/DELETE
   // /api/chat/push-token, PushNotificationService.ts's sendPushToUserIds/
@@ -279,7 +283,11 @@ const GENERIC_TABLES: [string, any[]][] = [
   ["site_attendance_members", memoryDb.siteAttendanceMembers],
   ["site_attendance_sheets", memoryDb.siteAttendanceSheets],
   ["site_attendance_entries", memoryDb.siteAttendanceEntries],
-  ["site_attendance_settings", memoryDb.siteAttendanceSettings]
+  ["site_attendance_settings", memoryDb.siteAttendanceSettings],
+  ["company_groups", memoryDb.companyGroups],
+  ["companies", memoryDb.companies],
+  ["user_company_access", memoryDb.userCompanyAccess],
+  ["employee_company_assignments", memoryDb.employeeCompanyAssignments]
 ];
 seedHROperationsMemory(memoryDb.hrLetterTemplates, memoryDb.hrOnboardingTasks);
 memoryDb.leaveCategories = [{ id: 1, category_key: "custom_earn_leave", label: "Earn Leave", created_by: null, created_at: new Date() }];

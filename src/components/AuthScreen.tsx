@@ -3,6 +3,7 @@ import { Lock, ArrowUp, MapPin, Download } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import credenceLogo from '../assets/credence-logo.png';
 import { apiUrl } from '../lib/api';
+import { setActiveCompanyId } from '../lib/company';
 
 // Lazy-loaded: keeps lottie-react (a fairly heavy animation library) out of
 // the very first JS chunk the app has to download+parse before anything
@@ -153,6 +154,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
         throw new Error(data.error || 'Authentication failed');
       }
 
+      // Multi-company: start in the account's default company.
+      setActiveCompanyId(data.active_company_id || null);
       onLoginSuccess(data.token, data.user);
     } catch (err: any) {
       setError(

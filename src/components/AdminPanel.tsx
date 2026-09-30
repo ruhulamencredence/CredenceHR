@@ -19,6 +19,7 @@ import { ApprovalTemplateManager } from './ApprovalTemplateManager';
 import { ApprovalBadge } from './ApprovalBadge';
 import { EmployeeTrackingPanel } from './EmployeeTrackingPanel';
 import { OfficeAttendanceHub } from './SiteAttendanceAdmin';
+import { SystemCompanies } from './SystemCompanies';
 import { DeliveryDateConditionsPanel } from './DeliveryDateConditionsPanel';
 import { HolidayCalendarPanel } from './HolidayCalendarPanel';
 import { AssetManagementAdmin } from './AssetManagementAdmin';
@@ -272,7 +273,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // PUT /api/users/:id/module-permissions).
   const canGrantModuleAccess = isSuperAdmin || !!user.can_grant_module_access;
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'my_conveyance' | 'disbursement' | 'holidays' | 'asset_management' | 'vehicle_management' | 'permanent_delete_log' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'hr_operations'>(
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'my_conveyance' | 'disbursement' | 'holidays' | 'asset_management' | 'vehicle_management' | 'permanent_delete_log' | 'companies' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'hr_operations'>(
     () => {
       // Restores whichever tab this Admin was last looking at — see the
       // "pull down to reload" note in App.tsx: since a reload now has to be
@@ -287,7 +288,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         const savedVisible =
           saved === 'dashboard' ? canSeeDashboard :
           saved === 'my_conveyance' ? isSuperAdmin || visibleModules.includes('conveyance') :
-          saved === 'permanent_delete_log' ? isSuperAdmin :
+          saved === 'permanent_delete_log' || saved === 'companies' ? isSuperAdmin :
           isSuperAdmin || visibleModules.includes(saved as AdminModuleKey);
         if (saved && savedVisible) return saved as any;
       } catch {
@@ -335,7 +336,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     // 'permanent_delete_log' isn't an AdminModuleKey/module_permissions
     // entry either — Superadmin-only, same reasoning as 'my_conveyance'
     // below.
-    if (adminNavRequest.target === 'permanent_delete_log') {
+    if (adminNavRequest.target === 'permanent_delete_log' || adminNavRequest.target === 'companies') {
       if (isSuperAdmin) setActiveTab(adminNavRequest.target);
       return;
     }
@@ -352,7 +353,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   useEffect(() => {
     const activeTabStillVisible =
       activeTab === 'dashboard' ? canSeeDashboard :
-      activeTab === 'permanent_delete_log' ? isSuperAdmin :
+      activeTab === 'permanent_delete_log' || activeTab === 'companies' ? isSuperAdmin :
       activeTab === 'my_conveyance' ? canSee('conveyance') : canSee(activeTab);
     if (!activeTabStillVisible && visibleModules.length > 0) {
       setActiveTab(visibleModules[0] as any);
@@ -4013,6 +4014,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           Superadmin's own. Not a grantable AdminModuleKey — gated purely by
           isSuperAdmin in the effects above, same as the "Users" tab's
           role-promotion controls. */}
+      {/* TAB: COMPANIES — multi-company setup, Superadmin only (SystemCompanies.tsx). */}
+      {activeTab === 'companies' && isSuperAdmin && (
+        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6">
+          <SystemCompanies token={token} />
+        </div>
+      )}
+
       {activeTab === 'permanent_delete_log' && (
         <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
           <div className="p-6 border-b border-slate-200">

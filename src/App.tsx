@@ -54,6 +54,7 @@ import { apiUrl } from './lib/api';
 import { startBackgroundTracking, stopBackgroundTracking } from './lib/backgroundTracking';
 import { connectChatSocket, disconnectChatSocket } from './lib/chatSocket';
 import { initPushNotifications, clearPushToken } from './lib/pushNotifications';
+import { setActiveCompanyId } from './lib/company';
 
 export default function App() {
   const [token, setToken] = useState<string | null>(localStorage.getItem('mpr_token'));
@@ -347,6 +348,7 @@ export default function App() {
     if (token) clearPushToken(token);
     localStorage.removeItem('mpr_token');
     localStorage.removeItem('mpr_user');
+    setActiveCompanyId(null);
     setToken(null);
     setUser(null);
     stopBackgroundTracking();
@@ -756,7 +758,7 @@ export default function App() {
       setViewMode('admin');
       setClaimsNavRequest({ target: target === 'claims' ? 'movementClaims' : 'conveyanceBill', ts: Date.now() });
     },
-    onGoToAdminModule: (target: Exclude<AdminModuleKey, 'claims' | 'conveyance'> | 'my_conveyance' | 'dashboard' | 'servers' | 'permanent_delete_log') => {
+    onGoToAdminModule: (target: Exclude<AdminModuleKey, 'claims' | 'conveyance'> | 'my_conveyance' | 'dashboard' | 'servers' | 'permanent_delete_log' | 'companies') => {
       setSelfServiceView(null);
       setShowProfilePage(false);
           setShowChat(false);
