@@ -47,6 +47,7 @@
 import type { Express } from "express";
 import type { AlertType } from "./Alerts";
 import { applyDueEmployeeTransfers } from "./EmployeeTransferRoutes";
+import { applyCompanyTransfer } from "./CompanyRoutes";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 
@@ -71,6 +72,8 @@ export const HR_ACTION_TYPES: { key: string; label: string; letter: string | nul
   { key: "promotion", label: "Promotion", letter: "promotion" },
   { key: "increment", label: "Increment", letter: "increment" },
   { key: "transfer", label: "Transfer", letter: "transfer" },
+  // Moves the Employee to a sister company (multi-company) — see applyCompanyTransfer.
+  { key: "company_transfer", label: "Company Transfer (sister concern)", letter: "transfer" },
   { key: "confirmation", label: "Confirmation", letter: "confirmation" },
   { key: "designation_change", label: "Designation Change", letter: "general" },
   { key: "grade_change", label: "Grade Change", letter: "general" },
@@ -844,6 +847,9 @@ async function applyServicePart(queryDB: QueryDB, action: any, to: any, actorId:
     case "suspension":
       service.service_status = "suspended";
       break;
+    case "company_transfer":
+      if (to.company_id) await applyCompanyTransfer(queryDB, empId, Number(to.company_id), to.employee_code || null);
+      break;
     case "resignation":
     case "termination":
     case "retirement":
@@ -1498,7 +1504,7 @@ export function registerHROperationsRoutes(app: Express, deps: HROperationsRoute
     const world = await loadEmployeeWorld(queryDB);
     const snap = snapshotOf(world, empId);
     if (!snap) throw bad("Employee not found.", 404);
-    const from = currentValues(snap);
+    const from: Record<string, any> = currentValues(snap);
     const raw = body.to || {};
     const to: Record<string, any> = {};
     if (raw.designation) to.designation = String(raw.designation).trim().slice(0, 255);
@@ -1537,6 +1543,20 @@ export function registerHROperationsRoutes(app: Express, deps: HROperationsRoute
     if (type === "promotion" && !to.designation && !to.grade) throw bad("A promotion needs a new designation or grade.");
     if (type === "transfer" && to.department_id === undefined && to.branch_id === undefined && to.supervisor_id === undefined) {
       throw bad("A transfer needs a new department, branch or supervisor.");
+    }
+    if (type === "company_transfer") {
+      const companies: any[] = (await queryDB("SELECT * FROM companies").catch(() => [])) || [];
+      const empRow = world.employees.find((x: any) => Number(x.id) === empId);
+      const current = companies.find((c) => Number(c.id) === Number(empRow?.company_id ?? 1));
+      const target = companies.find((c) => Number(c.id) === Number(raw.company_id));
+      if (!target || Number(target.group_id) !== Number(current?.group_id ?? target?.group_id) || Number(target.is_active ?? 1) !== 1)
+        throw bad("Pick the company to transfer to.");
+      if (Number(target.id) === Number(current?.id)) throw bad("The employee already belongs to that company.");
+      to.company_id = Number(target.id);
+      to.company = target.name;
+      from.company = current?.name || null;
+      if (raw.employee_code) to.employee_code = String(raw.employee_code).trim().slice(0, 50);
+      from.employee_code = empRow?.employee_id || null;
     }
     if (type === "probation_extension" && !to.probation_end_date) throw bad("Enter the new probation end date.");
     if (type === "contract_renewal" && !to.contract_end_date) throw bad("Enter the new contract end date.");

@@ -38,6 +38,7 @@ interface CompanyRouteDeps {
   authenticateToken: any;
   requireSuperAdmin: any;
   queryDB: QueryDB;
+  getAdminModules: (userId: number) => Promise<string[]>;
 }
 
 const MAX_LOGO_BYTES = 2 * 1024 * 1024;
@@ -315,6 +316,58 @@ export async function resolveCompanyContext(queryDB: QueryDB, user: { id: number
   return { companyId, groupId: info.groupId, motherId: info.motherId, shared: info.shared.get(companyId) || [] };
 }
 
+// Next Employee ID for a company: its short code + the next number after the
+// highest already used with that prefix anywhere (CPL-0007 -> CPL-0008).
+export async function nextEmployeeCode(queryDB: QueryDB, companyId: number): Promise<{ code: string; prefix: string }> {
+  const rows: any[] = (await queryDB("SELECT * FROM companies WHERE id = ?", [companyId])) || [];
+  const c = rows.find((r) => Number(r.id) === Number(companyId));
+  if (!c) throw Object.assign(new Error("Company not found."), { statusCode: 404 });
+  const prefix = String(c.short_code).toUpperCase();
+  const employees: any[] = (await queryDB("/*unscoped*/ SELECT employee_id FROM all_employees").catch(() => [])) || [];
+  const assigned: any[] = (await queryDB("SELECT employee_code FROM employee_company_assignments").catch(() => [])) || [];
+  let max = 0;
+  let width = 4;
+  for (const v of [...employees.map((e) => e.employee_id), ...assigned.map((a) => a.employee_code)]) {
+    const m = String(v || "").toUpperCase().match(new RegExp(`^${prefix}-(\\d+)$`));
+    if (m) {
+      max = Math.max(max, Number(m[1]));
+      width = Math.max(width, m[1].length);
+    }
+  }
+  return { code: `${prefix}-${String(max + 1).padStart(width, "0")}`, prefix };
+}
+
+// Company Transfer (an HR Action, HROperationsRoutes.ts): the Employee now
+// belongs to the new company with a new Employee ID; all their records move
+// with them (they're keyed by the Employee). Their login follows: access to
+// the new company becomes their default, and the old one is dropped unless
+// they still work there as well.
+export async function applyCompanyTransfer(queryDB: QueryDB, employeeId: number, companyId: number, employeeCode: string | null) {
+  const emp = ((await queryDB("SELECT * FROM all_employees WHERE id = ?", [employeeId])) || []).find((e: any) => Number(e.id) === employeeId);
+  if (!emp) return;
+  const oldCompany = Number(emp.company_id ?? DEFAULT_COMPANY_ID);
+  if (oldCompany === companyId) return;
+  const code = employeeCode || (await nextEmployeeCode(queryDB, companyId)).code;
+  await queryDB("UPDATE all_employees SET company_id = ?, employee_id = ? WHERE id = ?", [companyId, code, employeeId]);
+  // Working in the new company as an extra is now simply their company.
+  const asg: any[] = ((await queryDB("SELECT * FROM employee_company_assignments WHERE employee_id = ?", [employeeId])) || []).filter(
+    (r: any) => Number(r.employee_id) === employeeId
+  );
+  for (const r of asg) if (Number(r.company_id) === companyId) await queryDB("UPDATE employee_company_assignments SET is_active = ? WHERE id = ?", [0, Number(r.id)]);
+  if (emp.user_id) {
+    const uid = Number(emp.user_id);
+    const acc: any[] = ((await queryDB("SELECT * FROM user_company_access WHERE user_id = ?", [uid])) || []).filter((r: any) => Number(r.user_id) === uid);
+    const stillOld = asg.some((r) => Number(r.company_id) === oldCompany && Number(r.is_active ?? 1) === 1);
+    for (const r of acc) {
+      if (Number(r.company_id) === oldCompany && !stillOld) await queryDB("DELETE FROM user_company_access WHERE id = ?", [Number(r.id)]);
+      else await queryDB("UPDATE user_company_access SET is_default = ? WHERE id = ?", [Number(r.company_id) === companyId ? 1 : 0, Number(r.id)]);
+    }
+    if (!acc.some((r) => Number(r.company_id) === companyId))
+      await queryDB("INSERT INTO user_company_access (user_id, company_id, is_default) VALUES (?, ?, ?)", [uid, companyId, 1]);
+    invalidateCompanyAccess(uid);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Workspaces (one per group) — used before sign-in
 // ---------------------------------------------------------------------------
@@ -358,7 +411,7 @@ export async function checkWorkspaceLogin(queryDB: QueryDB, workspace: any, user
 // ---------------------------------------------------------------------------
 
 export function registerCompanyRoutes(app: Express, deps: CompanyRouteDeps) {
-  const { authenticateToken, requireSuperAdmin, queryDB } = deps;
+  const { authenticateToken, requireSuperAdmin, queryDB, getAdminModules } = deps;
   const fail = (res: any, err: any, status = 500) => res.status(err?.statusCode || status).json({ error: err?.message || String(err) });
   const bad = (message: string, statusCode = 400) => Object.assign(new Error(message), { statusCode });
   const lite = (c: any) => ({
@@ -416,22 +469,129 @@ export function registerCompanyRoutes(app: Express, deps: CompanyRouteDeps) {
   // after the highest one already used with that prefix (CPL-0007 -> CPL-0008).
   app.get("/api/companies/next-employee-code", authenticateToken, async (req: any, res) => {
     try {
-      const cid = activeCompanyId();
-      const rows: any[] = (await queryDB("SELECT * FROM companies WHERE id = ?", [cid])) || [];
-      const c = rows.find((r) => Number(r.id) === cid);
-      if (!c) throw bad("Company not found.", 404);
-      const prefix = String(c.short_code).toUpperCase();
-      const employees: any[] = (await queryDB("/*unscoped*/ SELECT employee_id FROM all_employees").catch(() => [])) || [];
-      let max = 0;
-      let width = 4;
-      for (const e of employees) {
-        const m = String(e.employee_id || "").toUpperCase().match(new RegExp(`^${prefix}-(\\d+)$`));
-        if (m) {
-          max = Math.max(max, Number(m[1]));
-          width = Math.max(width, m[1].length);
-        }
-      }
-      res.json({ code: `${prefix}-${String(max + 1).padStart(width, "0")}`, prefix });
+      const companyId = req.query.company_id ? Number(req.query.company_id) : activeCompanyId();
+      const own = (await companiesOfGroup(queryDB, (await loadCompanyAccess(queryDB, req.user)).groupId)).some((c) => Number(c.id) === companyId);
+      if (!own) throw bad("Company not found.", 404);
+      res.json(await nextEmployeeCode(queryDB, companyId));
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+  // Every company of the account's group (pickers for transfers / assignments).
+  app.get("/api/companies/group", authenticateToken, async (req: any, res) => {
+    try {
+      const info = await loadCompanyAccess(queryDB, req.user);
+      res.json(
+        (await companiesOfGroup(queryDB, info.groupId))
+          .filter((c) => Number(c.is_active ?? 1) === 1)
+          .map((c) => ({ id: Number(c.id), name: c.name, short_code: c.short_code, is_mother: Number(c.is_mother) === 1 }))
+      );
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+  // ---------------- Working in another company as well (additional assignment) ----------------
+
+  const hrGate = async (req: any, res: any, next: any) => {
+    if (req.user?.role === "superadmin") return next();
+    const mods = await getAdminModules(Number(req.user?.id)).catch(() => [] as string[]);
+    if (mods.includes("hr_operations") || mods.includes("employees")) return next();
+    res.status(403).json({ error: "You don't have access to this section." });
+  };
+
+  app.get("/api/companies/assignments", authenticateToken, hrGate, async (req: any, res) => {
+    try {
+      const empId = Number(req.query.employee_id);
+      const info = await loadCompanyAccess(queryDB, req.user);
+      const companies = await companiesOfGroup(queryDB, info.groupId);
+      const byId = new Map(companies.map((c) => [Number(c.id), c]));
+      const emp = ((await queryDB("SELECT * FROM all_employees WHERE id = ?", [empId])) || []).find((e: any) => Number(e.id) === empId);
+      if (!emp) throw bad("Employee not found.", 404);
+      const rows: any[] = ((await queryDB("SELECT * FROM employee_company_assignments WHERE employee_id = ?", [empId])) || []).filter(
+        (r: any) => Number(r.employee_id) === empId && byId.has(Number(r.company_id))
+      );
+      const home = byId.get(Number(emp.company_id ?? DEFAULT_COMPANY_ID));
+      res.json({
+        home_company: home ? { id: Number(home.id), name: home.name, short_code: home.short_code } : null,
+        assignments: rows.map((r) => ({
+          id: Number(r.id),
+          company_id: Number(r.company_id),
+          company_name: byId.get(Number(r.company_id))?.name || "—",
+          short_code: byId.get(Number(r.company_id))?.short_code || "",
+          employee_code: r.employee_code || null,
+          designation: r.designation || null,
+          department: r.department || null,
+          start_date: r.start_date ? String(r.start_date instanceof Date ? r.start_date.toISOString() : r.start_date).slice(0, 10) : null,
+          end_date: r.end_date ? String(r.end_date instanceof Date ? r.end_date.toISOString() : r.end_date).slice(0, 10) : null,
+          is_active: Number(r.is_active ?? 1) === 1,
+          note: r.note || null
+        }))
+      });
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+  // Their login may then switch into that company too.
+  async function syncAssignmentAccess(emp: any, companyId: number, active: boolean) {
+    if (!emp?.user_id) return;
+    const uid = Number(emp.user_id);
+    const acc: any[] = ((await queryDB("SELECT * FROM user_company_access WHERE user_id = ?", [uid])) || []).filter((r: any) => Number(r.user_id) === uid);
+    const has = acc.find((r) => Number(r.company_id) === companyId);
+    if (active && !has) await queryDB("INSERT INTO user_company_access (user_id, company_id, is_default) VALUES (?, ?, ?)", [uid, companyId, 0]);
+    if (!active && has && Number(emp.company_id ?? DEFAULT_COMPANY_ID) !== companyId) await queryDB("DELETE FROM user_company_access WHERE id = ?", [Number(has.id)]);
+    invalidateCompanyAccess(uid);
+  }
+
+  app.post("/api/companies/assignments", authenticateToken, hrGate, async (req: any, res) => {
+    try {
+      const b = req.body || {};
+      const empId = Number(b.employee_id);
+      const companyId = Number(b.company_id);
+      const info = await loadCompanyAccess(queryDB, req.user);
+      const target = (await companiesOfGroup(queryDB, info.groupId)).find((c) => Number(c.id) === companyId && Number(c.is_active ?? 1) === 1);
+      if (!target) throw bad("Pick a company of your group.");
+      const emp = ((await queryDB("SELECT * FROM all_employees WHERE id = ?", [empId])) || []).find((e: any) => Number(e.id) === empId);
+      if (!emp) throw bad("Employee not found.", 404);
+      if (Number(emp.company_id ?? DEFAULT_COMPANY_ID) === companyId) throw bad(`${emp.name} already belongs to ${target.name}.`);
+      const s = (v: any, n: number) => (v == null || String(v).trim() === "" ? null : String(v).trim().slice(0, n));
+      const code = s(b.employee_code, 50) || (await nextEmployeeCode(queryDB, companyId)).code;
+      const existing = ((await queryDB("SELECT * FROM employee_company_assignments WHERE employee_id = ?", [empId])) || []).find(
+        (r: any) => Number(r.employee_id) === empId && Number(r.company_id) === companyId
+      );
+      const vals = [code, s(b.designation, 150), s(b.department, 150), s(b.start_date, 10), s(b.end_date, 10), s(b.note, 500)];
+      if (existing)
+        await queryDB("UPDATE employee_company_assignments SET employee_code = ?, designation = ?, department = ?, start_date = ?, end_date = ?, note = ?, is_active = ? WHERE id = ?", [
+          ...vals,
+          1,
+          Number(existing.id)
+        ]);
+      else
+        await queryDB(
+          "INSERT INTO employee_company_assignments (employee_id, company_id, employee_code, designation, department, start_date, end_date, note, is_active, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          [empId, companyId, ...vals, 1, Number(req.user.id)]
+        );
+      await syncAssignmentAccess(emp, companyId, true);
+      res.json({ success: true, employee_code: code });
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+  app.post("/api/companies/assignments/:id/end", authenticateToken, hrGate, async (req: any, res) => {
+    try {
+      const id = Number(req.params.id);
+      const row = ((await queryDB("SELECT * FROM employee_company_assignments WHERE id = ?", [id])) || []).find((r: any) => Number(r.id) === id);
+      if (!row) throw bad("Not found.", 404);
+      const info = await loadCompanyAccess(queryDB, req.user);
+      if (!(await companiesOfGroup(queryDB, info.groupId)).some((c) => Number(c.id) === Number(row.company_id))) throw bad("Not found.", 404);
+      const end = /^\d{4}-\d{2}-\d{2}$/.test(String(req.body?.end_date || "")) ? String(req.body.end_date) : new Date().toISOString().slice(0, 10);
+      await queryDB("UPDATE employee_company_assignments SET is_active = ?, end_date = ? WHERE id = ?", [0, end, id]);
+      const emp = ((await queryDB("SELECT * FROM all_employees WHERE id = ?", [Number(row.employee_id)])) || [])[0];
+      await syncAssignmentAccess(emp, Number(row.company_id), false);
+      res.json({ success: true });
     } catch (err) {
       fail(res, err);
     }
