@@ -20,6 +20,7 @@ import { ApprovalBadge } from './ApprovalBadge';
 import { EmployeeTrackingPanel } from './EmployeeTrackingPanel';
 import { OfficeAttendanceHub } from './SiteAttendanceAdmin';
 import { SystemCompanies } from './SystemCompanies';
+import { DeviceAccess } from './DeviceAccess';
 import { DeliveryDateConditionsPanel } from './DeliveryDateConditionsPanel';
 import { HolidayCalendarPanel } from './HolidayCalendarPanel';
 import { AssetManagementAdmin } from './AssetManagementAdmin';
@@ -273,7 +274,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // PUT /api/users/:id/module-permissions).
   const canGrantModuleAccess = isSuperAdmin || !!user.can_grant_module_access;
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'my_conveyance' | 'disbursement' | 'holidays' | 'asset_management' | 'vehicle_management' | 'permanent_delete_log' | 'companies' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'hr_operations'>(
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'my_conveyance' | 'disbursement' | 'holidays' | 'asset_management' | 'vehicle_management' | 'permanent_delete_log' | 'companies' | 'devices' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'hr_operations'>(
     () => {
       // Restores whichever tab this Admin was last looking at — see the
       // "pull down to reload" note in App.tsx: since a reload now has to be
@@ -288,7 +289,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         const savedVisible =
           saved === 'dashboard' ? canSeeDashboard :
           saved === 'my_conveyance' ? isSuperAdmin || visibleModules.includes('conveyance') :
-          saved === 'permanent_delete_log' || saved === 'companies' ? isSuperAdmin :
+          saved === 'permanent_delete_log' || saved === 'companies' || saved === 'devices' ? isSuperAdmin :
           isSuperAdmin || visibleModules.includes(saved as AdminModuleKey);
         if (saved && savedVisible) return saved as any;
       } catch {
@@ -336,7 +337,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     // 'permanent_delete_log' isn't an AdminModuleKey/module_permissions
     // entry either — Superadmin-only, same reasoning as 'my_conveyance'
     // below.
-    if (adminNavRequest.target === 'permanent_delete_log' || adminNavRequest.target === 'companies') {
+    if (adminNavRequest.target === 'permanent_delete_log' || adminNavRequest.target === 'companies' || adminNavRequest.target === 'devices') {
       if (isSuperAdmin) setActiveTab(adminNavRequest.target);
       return;
     }
@@ -353,7 +354,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   useEffect(() => {
     const activeTabStillVisible =
       activeTab === 'dashboard' ? canSeeDashboard :
-      activeTab === 'permanent_delete_log' || activeTab === 'companies' ? isSuperAdmin :
+      activeTab === 'permanent_delete_log' || activeTab === 'companies' || activeTab === 'devices' ? isSuperAdmin :
       activeTab === 'my_conveyance' ? canSee('conveyance') : canSee(activeTab);
     if (!activeTabStillVisible && visibleModules.length > 0) {
       setActiveTab(visibleModules[0] as any);
@@ -3027,7 +3028,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           token={token}
           user={user}
           onNavigate={(tab) => {
-            if (tab === 'companies' || tab === 'permanent_delete_log' ? isSuperAdmin : canSee(tab as AdminModuleKey)) setActiveTab(tab as any);
+            if (tab === 'companies' || tab === 'devices' || tab === 'permanent_delete_log' ? isSuperAdmin : canSee(tab as AdminModuleKey)) setActiveTab(tab as any);
           }}
         />
       )}
@@ -4020,6 +4021,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           Superadmin's own. Not a grantable AdminModuleKey — gated purely by
           isSuperAdmin in the effects above, same as the "Users" tab's
           role-promotion controls. */}
+      {/* TAB: DEVICE ACCESS — which phone each account may use the app on, Superadmin only (DeviceAccess.tsx). */}
+      {activeTab === 'devices' && isSuperAdmin && (
+        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6">
+          <DeviceAccess token={token} />
+        </div>
+      )}
+
       {/* TAB: COMPANIES — multi-company setup, Superadmin only (SystemCompanies.tsx). */}
       {activeTab === 'companies' && isSuperAdmin && (
         <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6">

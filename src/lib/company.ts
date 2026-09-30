@@ -14,6 +14,7 @@
 // needing to change.
 
 import { useEffect, useState } from 'react';
+import { DEVICE_REVOKED_EVENT } from './device';
 
 const KEY = 'credence_company_id';
 
@@ -44,10 +45,17 @@ export function installCompanyHeader() {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     const company = getActiveCompanyId();
     const sameOriginApi = url.startsWith('/api/') || url.startsWith(`${window.location.origin}/api/`);
-    if (!company || !sameOriginApi) return original(input, init);
+    // A phone the Superadmin removed from this account is signed out
+    // (DeviceRoutes.ts; App.tsx listens).
+    const watch = (p: Promise<Response>) =>
+      p.then((res) => {
+        if (sameOriginApi && res.status === 401 && res.headers.get('X-Device-Revoked')) window.dispatchEvent(new Event(DEVICE_REVOKED_EVENT));
+        return res;
+      });
+    if (!company || !sameOriginApi) return watch(original(input, init));
     const headers = new Headers(init?.headers || (input instanceof Request ? input.headers : undefined));
     if (!headers.has('X-Company-Id')) headers.set('X-Company-Id', String(company));
-    return original(input, { ...init, headers });
+    return watch(original(input, { ...init, headers }));
   };
 }
 

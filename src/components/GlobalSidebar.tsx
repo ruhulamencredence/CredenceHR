@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   X, LogOut, Home, Wallet, Briefcase, FileText, Edit2, Route, CreditCard,
-  CalendarClock, ListChecks, CheckSquare, ChevronDown, Building2, Users, Users2,
+  CalendarClock, ListChecks, CheckSquare, ChevronDown, Building2, Users, Users2, Smartphone,
   BarChart3, FileSpreadsheet, Upload, History, Recycle, Navigation, Bell, ShieldCheck,
   Contact, Calendar, Clock, Fingerprint, Banknote, Package, LayoutDashboard, Server, MessageSquare,
   ChevronsLeft, ChevronsRight, ShieldAlert, Search,
@@ -58,7 +58,7 @@ interface GlobalSidebarProps {
   // 'my_conveyance' is the one exception below: not its own module_permissions
   // entry, just the "My Conveyance Bill Claim" sub-view shown alongside
   // 'conveyance' in the HR group, gated on the same 'conveyance' grant.
-  onGoToAdminModule: (target: Exclude<AdminModuleKey, 'claims' | 'conveyance'> | 'my_conveyance' | 'dashboard' | 'permanent_delete_log' | 'companies') => void;
+  onGoToAdminModule: (target: Exclude<AdminModuleKey, 'claims' | 'conveyance'> | 'my_conveyance' | 'dashboard' | 'permanent_delete_log' | 'companies' | 'devices') => void;
   // Android APK build info modal — previously a header icon, moved in here so
   // the header itself can stay down to just hamburger + profile + logout.
   onOpenApkInfo: () => void;
@@ -539,6 +539,8 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   if (isSuperAdmin) {
     // Multi-company (SystemCompanies.tsx) — Superadmin-only, like the log below.
     adminFlatItems.push({ key: 'companies', label: 'Companies', icon: Building2, onClick: () => onGoToAdminModule('companies') });
+    // Which phone each account may use the app on (DeviceAccess.tsx).
+    adminFlatItems.push({ key: 'devices', label: 'Device Access', icon: Smartphone, onClick: () => onGoToAdminModule('devices') });
     // Same "not a grantable module" reasoning as Servers above — this exists
     // specifically so a Superadmin can see an Admin's permanent Job Recycle
     // erases too, so it can never be delegated away via module_permissions.
