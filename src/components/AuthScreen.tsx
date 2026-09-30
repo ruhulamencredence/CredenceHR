@@ -4,6 +4,7 @@ import { Capacitor } from '@capacitor/core';
 import credenceLogo from '../assets/credence-logo.png';
 import { apiUrl } from '../lib/api';
 import { setActiveCompanyId } from '../lib/company';
+import { appDeviceInfo, takeSignedOutReason } from '../lib/device';
 
 // Lazy-loaded: keeps lottie-react (a fairly heavy animation library) out of
 // the very first JS chunk the app has to download+parse before anything
@@ -89,7 +90,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
   }, []);
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
+  // A phone removed by the Superadmin lands here with the reason shown.
+  const [error, setError] = useState(() => takeSignedOutReason());
   const [loading, setLoading] = useState(false);
   // Shown while we're specifically waiting on the location permission prompt /
   // GPS fix, distinct from the generic "Signing in…" state so the user knows
@@ -215,6 +217,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
 
     try {
       let coords: { latitude: number; longitude: number } | null = null;
+      const device = await appDeviceInfo();
       if (isNativeApp) {
         setLocating(true);
         try {
@@ -229,7 +232,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(
           coords
-            ? { identifier, password, ...(ownerMode ? { system: true } : { workspace: workspace?.code }), latitude: coords.latitude, longitude: coords.longitude, platform: 'app' }
+            ? { identifier, password, ...(ownerMode ? { system: true } : { workspace: workspace?.code }), latitude: coords.latitude, longitude: coords.longitude, platform: 'app', ...(device || {}) }
             : { identifier, password, ...(ownerMode ? { system: true } : { workspace: workspace?.code }) }
         ),
       });

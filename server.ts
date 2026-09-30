@@ -25,6 +25,7 @@ import { registerVehicleManagementRoutes, ensureVehicleManagementSchema } from "
 import { registerEntriesRoutes } from "./EntriesRoutes";
 import { registerEmployeeTransferRoutes, ensureEmployeeTransferSchema, applyDueEmployeeTransfers, recordEmployeeEditHistory } from "./EmployeeTransferRoutes";
 import { registerAdminDashboardRoutes } from "./AdminDashboardRoutes";
+import { registerDeviceRoutes, ensureDeviceSchema, checkAppDevice, deviceStillAllowed } from "./DeviceRoutes";
 import { registerEmployeeDirectoryRoutes } from "./EmployeeDirectoryRoutes";
 import { registerExitOffboardingRoutes, ensureExitOffboardingSchema } from "./ExitOffboardingRoutes";
 import { registerPerformanceRoutes, ensurePerformanceSchema } from "./PerformanceRoutes";
@@ -249,6 +250,9 @@ async function ensureSchemaMigrations() {
   // Multi-company (CompanyRoutes.ts) — existing data becomes company 1. Runs
   // after every other table exists.
   await ensureCompanySchema(dbPool);
+
+  // Mobile app device access (DeviceRoutes.ts).
+  await ensureDeviceSchema(queryDB).catch((e: any) => console.warn("⚠️ Device access tables: " + e.message));
 
   // Personal Data (ProfilePage.tsx -> PersonalDataForm.tsx) — one row per user,
   // created on first save. Position/Department are deliberately NOT columns
@@ -3759,6 +3763,11 @@ async function startServer() {
 
     jwt.verify(token, JWT_SECRET, async (err: any, user: any) => {
       if (err) return res.status(403).json({ error: "Invalid or expired token" });
+      // A phone the Superadmin removed from this account is signed out.
+      if (user?.dev && !(await deviceStillAllowed(queryDB, Number(user.dev)))) {
+        res.setHeader("X-Device-Revoked", "1");
+        return res.status(401).json({ error: "This phone was removed from your account. Sign in again.", code: "DEVICE_REVOKED" });
+      }
       req.user = user;
       // Multi-company: the rest of this request runs in the company the app
       // asked for (X-Company-Id), if this account may enter it — see
@@ -4111,6 +4120,18 @@ async function startServer() {
       const workspaceProblem = await checkWorkspaceLogin(queryDB, req.body.system ? undefined : req.body.workspace, user);
       if (workspaceProblem) return res.status(workspaceProblem.status).json({ error: workspaceProblem.error });
 
+      // The app signs in on one phone per account unless a Superadmin allows
+      // more (DeviceRoutes.ts). The website isn't limited.
+      let deviceRowId: number | null = null;
+      if (isAppClient) {
+        const device = await checkAppDevice(queryDB, user, req.body);
+        if (!device.ok) {
+          const refused = device as Extract<typeof device, { ok: false }>;
+          return res.status(refused.status).json({ error: refused.error, code: refused.code });
+        }
+        deviceRowId = (device as Extract<typeof device, { ok: true }>).deviceRowId || null;
+      }
+
       // Store only the latest login's coordinates (overwrites any previous value).
       // Web logins don't send coordinates at all, so this is skipped for them —
       // a web login never clears out the last known app-login location.
@@ -4127,7 +4148,7 @@ async function startServer() {
       }
 
       const token = jwt.sign(
-        { id: user.id, email: user.email, username: user.username, role: user.role, name: user.name },
+        { id: user.id, email: user.email, username: user.username, role: user.role, name: user.name, ...(deviceRowId ? { dev: deviceRowId } : {}) },
         JWT_SECRET,
         { expiresIn: "7d" }
       );
@@ -4951,6 +4972,7 @@ async function startServer() {
   // directory-safe columns.
   // Admin Dashboard figures with no screen of their own (AdminDashboardRoutes.ts).
   registerAdminDashboardRoutes(app, { authenticateToken, queryDB, getAdminModules, todayInDhaka });
+  registerDeviceRoutes(app, { authenticateToken, requireSuperAdmin, queryDB });
   registerEmployeeDirectoryRoutes(app, {
     authenticateToken,
     queryDB
