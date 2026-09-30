@@ -315,7 +315,12 @@ export async function loadCompanyAccess(queryDB: QueryDB, user: { id: number; ro
     const empRows: any[] = (await queryDB("SELECT * FROM all_employees WHERE user_id = ?", [user.id]).catch(() => [])) || [];
     const own = Number(empRows.find((e) => Number(e.user_id) === Number(user.id))?.company_id || 0);
     const home = own && activeIds.has(own) ? own : Number(mother.id);
-    await queryDB("INSERT INTO user_company_access (user_id, company_id, is_default) VALUES (?, ?, ?)", [user.id, home, 1]).catch(() => {});
+    // The app's first few requests after sign-in arrive together, so another
+    // one may have added this row already — that's fine.
+    await queryDB(
+      "INSERT INTO user_company_access (user_id, company_id, is_default) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE user_id = user_id",
+      [user.id, home, 1]
+    ).catch(() => {});
     allowed = [home];
     defaultId = home;
   }
