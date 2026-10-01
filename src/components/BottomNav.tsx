@@ -13,6 +13,20 @@ interface BottomNavProps {
   // "Directory" (Employee Directory, ungated for every account — see
   // EmployeeDirectory.tsx) so the bar never collapses down to Home alone.
   canViewLeave?: boolean;
+  // Self Service modules shown in the More popup (Dashboard only).
+  moreItems?: MoreItem[];
+}
+
+// One tile in the More popup — same look as the mobile Dashboard's tile menu.
+export interface MoreItem {
+  key: string;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  // Card tint and icon badge gradient/glow (Tailwind classes).
+  tint: string;
+  iconBg: string;
+  badge?: number;
+  onClick: () => void;
 }
 
 interface NavItem {
@@ -68,7 +82,7 @@ function buildBarPath(dip: { center: number; halfWidth: number; depth: number } 
   return `${topLeft} ${dipPath} ${topRight} ${bottom}`;
 }
 
-export function BottomNav({ active, onChange, canViewMovementClaim = true, canViewTimesheet = true, canViewLeave = true }: BottomNavProps) {
+export function BottomNav({ active, onChange, canViewMovementClaim = true, canViewTimesheet = true, canViewLeave = true, moreItems = [] }: BottomNavProps) {
   const items: NavItem[] = [
     { key: null, label: 'Home', icon: Home },
     ...(canViewMovementClaim ? [{ key: 'claim' as MobileSection, label: 'Claim', icon: Route }] : []),
@@ -150,6 +164,33 @@ export function BottomNav({ active, onChange, canViewMovementClaim = true, canVi
                     <X className="w-4 h-4" />
                   </button>
                 </div>
+                {moreItems.length === 0 ? (
+                  <p className="px-5 pb-5 text-xs text-slate-500">Nothing else to show here.</p>
+                ) : (
+                  <div className="grid grid-cols-3 gap-2.5 px-3 pb-4">
+                    {moreItems.map(({ key, label, icon: Icon, tint, iconBg, badge, onClick }) => (
+                      <button
+                        key={key}
+                        type="button"
+                        onClick={() => {
+                          setMoreOpen(false);
+                          onClick();
+                        }}
+                        className={`relative flex flex-col items-center justify-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 px-2 py-2.5 h-[112px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br ${tint} active:scale-95 transition-all`}
+                      >
+                        <div className={`p-2.5 rounded-2xl bg-gradient-to-br ${iconBg} border border-white/30 relative`}>
+                          <Icon className="w-6 h-6 text-white" />
+                          {!!badge && (
+                            <span className="absolute -top-1.5 -right-1.5 text-[10px] font-semibold bg-rose-600 text-white rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 border border-white/70">
+                              {badge}
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-[11px] font-semibold text-slate-700 text-center leading-tight line-clamp-3">{label}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>,
             document.body
