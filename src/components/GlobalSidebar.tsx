@@ -58,7 +58,7 @@ interface GlobalSidebarProps {
   // 'my_conveyance' is the one exception below: not its own module_permissions
   // entry, just the "My Conveyance Bill Claim" sub-view shown alongside
   // 'conveyance' in the HR group, gated on the same 'conveyance' grant.
-  onGoToAdminModule: (target: Exclude<AdminModuleKey, 'claims' | 'conveyance'> | 'my_conveyance' | 'dashboard' | 'permanent_delete_log' | 'companies' | 'devices') => void;
+  onGoToAdminModule: (target: Exclude<AdminModuleKey, 'claims' | 'conveyance'> | 'my_conveyance' | 'bill_claim_policy' | 'dashboard' | 'permanent_delete_log' | 'companies' | 'devices') => void;
   // Android APK build info modal — previously a header icon, moved in here so
   // the header itself can stay down to just hamburger + profile + logout.
   onOpenApkInfo: () => void;
@@ -364,6 +364,14 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
       label: 'My Conveyance Bill Claim',
       icon: Wallet,
       onClick: () => onGoToAdminModule('my_conveyance')
+    });
+    // "Bill Claim Policy" — rules for Bill Claims (limits, receipts, deadlines…).
+    // Rides along with the 'conveyance' module like My Conveyance Bill Claim.
+    claimsItems.push({
+      key: 'bill_claim_policy',
+      label: 'Bill Claim Policy',
+      icon: ShieldCheck,
+      onClick: () => onGoToAdminModule('bill_claim_policy')
     });
   }
 
