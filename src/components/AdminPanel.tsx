@@ -106,6 +106,48 @@ interface AdminPanelProps {
   onActiveTabChange?: (tab: string) => void;
 }
 
+// Qty as Job Entry Details shows it: this entry's own Qty / the item's imported Qty.
+const reportQty = (ent: Entry): string =>
+  ent.requisitioned_qty !== null && ent.requisitioned_qty !== undefined
+    ? `${ent.requisitioned_qty}${ent.req_qty ? ` / ${ent.req_qty}` : ''}`
+    : String(ent.req_qty || '');
+
+// MPR Entries Report column filters — one box under each header, like Job Entry
+// Details. Text boxes match anywhere in the cell (case-insensitive); Delivery Date
+// is a From/To range.
+type ReportColumnFilterKey =
+  | 'job_no' | 'job_name' | 'project_name' | 'mpr_no' | 'item_name' | 'specification' | 'qty'
+  | 'delivery_from' | 'delivery_to' | 'rate' | 'amount' | 'entry_date' | 'job_duration'
+  | 'head' | 'sub1' | 'sub2' | 'sub3' | 'sector' | 'logged_by' | 'budget';
+const EMPTY_REPORT_COLUMN_FILTERS: Record<ReportColumnFilterKey, string> = {
+  job_no: '', job_name: '', project_name: '', mpr_no: '', item_name: '', specification: '', qty: '',
+  delivery_from: '', delivery_to: '', rate: '', amount: '', entry_date: '', job_duration: '',
+  head: '', sub1: '', sub2: '', sub3: '', sector: '', logged_by: '', budget: ''
+};
+const reportColumnText = (ent: Entry, key: ReportColumnFilterKey): string => {
+  switch (key) {
+    case 'job_no': return ent.job_no;
+    case 'job_name': return ent.job_name;
+    case 'project_name': return ent.project_name;
+    case 'mpr_no': return ent.mpr_no;
+    case 'item_name': return ent.item_name;
+    case 'specification': return ent.specification || '';
+    case 'qty': return reportQty(ent);
+    case 'rate': return ent.matched_rate != null ? String(ent.matched_rate) : '';
+    case 'amount': return ent.matched_rate != null ? String(ent.computed_amount ?? '') : '';
+    case 'entry_date': return `${ent.entry_date || ''} ${formatDate(ent.entry_date) || ''}`;
+    case 'job_duration': return ent.job_duration || '';
+    case 'head': return ent.category_head || '';
+    case 'sub1': return ent.category_sub1 || '';
+    case 'sub2': return ent.category_sub2 || '';
+    case 'sub3': return ent.category_sub3 || '';
+    case 'sector': return ent.category_sector || '';
+    case 'logged_by': return ent.user_name || 'User';
+    case 'budget': return ent.budget_name || '';
+    default: return '';
+  }
+};
+
 // Purely presentational, read-only row — memoized so that typing in the report
 // filter inputs above (Job No, dates, etc.) only re-renders rows whose underlying
 // entry object actually changed, instead of rebuilding every row in a potentially
@@ -130,33 +172,36 @@ const ReportRow = React.memo(function ReportRow({
 }) {
   return (
     <tr className="hover:bg-slate-50/80 transition-colors">
-      <td className="px-4 py-3.5 whitespace-nowrap text-slate-600 text-xs">{formatDate(ent.entry_date)}</td>
+      <td className="px-4 py-3.5 whitespace-nowrap font-semibold text-blue-600 text-xs">{ent.job_no}</td>
       <td className="px-4 py-3.5 whitespace-nowrap font-semibold text-slate-900 text-xs">{ent.job_name}</td>
       <td className="px-4 py-3.5 whitespace-nowrap font-medium text-slate-900 text-xs">{ent.project_name}</td>
-      <td className="px-4 py-3.5 whitespace-nowrap text-xs">
-        <div className="font-semibold text-blue-600">{ent.job_no}</div>
-        <div className="text-[10px] text-slate-400">{ent.job_duration}</div>
-      </td>
       <td className="px-4 py-3.5 whitespace-nowrap text-xs">
         <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 border border-slate-200 font-mono">
           {ent.mpr_no}
         </span>
       </td>
-      <td className="px-4 py-3.5 text-slate-800 text-xs">{ent.item_name}</td>
+      <td className="px-4 py-3.5 text-slate-800 text-xs min-w-[180px]">{ent.item_name}</td>
+      <td className="px-4 py-3.5 text-slate-600 text-xs min-w-[140px]">{ent.specification || <span className="text-slate-300">—</span>}</td>
+      <td className="px-4 py-3.5 whitespace-nowrap text-slate-800 text-xs">{reportQty(ent) || <span className="text-slate-300">—</span>}</td>
+      <td className="px-4 py-3.5 whitespace-nowrap text-slate-600 text-xs">{formatDate(ent.delivery_date)}</td>
       <td className="px-4 py-3.5 whitespace-nowrap text-xs">
         {ent.matched_rate != null ? (
-          <div>
-            <div className="font-semibold text-slate-900">
-              ৳{Number(ent.computed_amount ?? 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}
-            </div>
-            <div className="text-[10px] text-slate-400">@ ৳{Number(ent.matched_rate).toLocaleString(undefined, { maximumFractionDigits: 2 })}</div>
-          </div>
+          <span className="text-slate-900">৳{Number(ent.matched_rate).toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
         ) : ent.rate_calculated_at ? (
           <span className="text-rose-500 text-[10px] font-medium">No rate match</span>
         ) : (
           <span className="text-slate-300">—</span>
         )}
       </td>
+      <td className="px-4 py-3.5 whitespace-nowrap text-xs">
+        {ent.matched_rate != null ? (
+          <span className="font-semibold text-slate-900">৳{Number(ent.computed_amount ?? 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+        ) : (
+          <span className="text-slate-300">—</span>
+        )}
+      </td>
+      <td className="px-4 py-3.5 whitespace-nowrap text-slate-600 text-xs">{formatDate(ent.entry_date)}</td>
+      <td className="px-4 py-3.5 whitespace-nowrap text-slate-600 text-xs">{ent.job_duration || <span className="text-slate-300">—</span>}</td>
       <td className="px-4 py-3.5 whitespace-nowrap text-slate-600 text-xs">{ent.category_head || <span className="text-slate-300">—</span>}</td>
       <td className="px-4 py-3.5 whitespace-nowrap text-slate-600 text-xs">{ent.category_sub1 || <span className="text-slate-300">—</span>}</td>
       <td className="px-4 py-3.5 whitespace-nowrap text-slate-600 text-xs">{ent.category_sub2 || <span className="text-slate-300">—</span>}</td>
@@ -170,7 +215,6 @@ const ReportRow = React.memo(function ReportRow({
         )}
       </td>
       <td className="px-4 py-3.5 whitespace-nowrap text-slate-600 text-xs">{ent.category_sector || <span className="text-slate-300">—</span>}</td>
-      <td className="px-4 py-3.5 whitespace-nowrap text-slate-600 text-xs">{formatDate(ent.delivery_date)}</td>
       <td className="px-4 py-3.5 whitespace-nowrap text-slate-500 text-xs">{ent.user_name || 'User'}</td>
       <td className="px-4 py-3.5 whitespace-nowrap text-xs">
         {ent.budget_name ? (
@@ -2949,14 +2993,33 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // Typing in the Job No filter re-filters a moment later, so the box stays
   // responsive even with thousands of entries.
   const deferredFilterJobNo = React.useDeferredValue(filterJobNo);
-  const filteredEntries = React.useMemo(() => entries.filter((ent) => {
+  const [reportColFilters, setReportColFilters] = useState(EMPTY_REPORT_COLUMN_FILTERS);
+  const deferredReportColFilters = React.useDeferredValue(reportColFilters);
+  const setReportColFilter = (key: ReportColumnFilterKey, value: string) => setReportColFilters((f) => ({ ...f, [key]: value }));
+  const hasReportColFilter = Object.values(reportColFilters).some((v) => v.trim() !== '');
+  const reportItemNameOptions = React.useMemo(
+    () => [...new Set(entries.map((e) => String(e.item_name || '').trim()).filter(Boolean))].sort(),
+    [entries]
+  );
+  const filteredEntries = React.useMemo(() => {
+    const textFilters = (Object.keys(deferredReportColFilters) as ReportColumnFilterKey[])
+      .filter((k) => k !== 'delivery_from' && k !== 'delivery_to' && deferredReportColFilters[k].trim() !== '')
+      .map((k) => [k, deferredReportColFilters[k].trim().toLowerCase()] as const);
+    const deliveryFrom = deferredReportColFilters.delivery_from;
+    const deliveryTo = deferredReportColFilters.delivery_to;
+    return entries.filter((ent) => {
+    for (const [k, q] of textFilters) if (!String(reportColumnText(ent, k) || '').toLowerCase().includes(q)) return false;
+    const delivery = String(ent.delivery_date || '').slice(0, 10);
+    if (deliveryFrom && (!delivery || delivery < deliveryFrom)) return false;
+    if (deliveryTo && (!delivery || delivery > deliveryTo)) return false;
     const matchJob = deferredFilterJobNo ? String(ent.job_no || '').toLowerCase().includes(deferredFilterJobNo.toLowerCase()) : true;
     const matchProj = filterProjectId ? ent.project_id.toString() === filterProjectId : true;
     const matchStart = filterStartDate ? ent.entry_date >= filterStartDate : true;
     const matchEnd = filterEndDate ? ent.entry_date <= filterEndDate : true;
     const matchBudget = filterBudgetId ? String(ent.budget_id ?? '') === filterBudgetId : true;
     return matchJob && matchProj && matchStart && matchEnd && matchBudget;
-  }), [entries, deferredFilterJobNo, filterProjectId, filterStartDate, filterEndDate, filterBudgetId]);
+  });
+  }, [entries, deferredReportColFilters, deferredFilterJobNo, filterProjectId, filterStartDate, filterEndDate, filterBudgetId]);
 
   // The report table shows one page at a time — mounting every entry at once
   // made the Reports tab slow. Excel export still takes every matching entry.
@@ -3034,21 +3097,29 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
 
   const handleDownloadExcel = () => {
     const rows = filteredEntries.map((ent) => ({
-      'Entry Date': ent.entry_date,
-      'Job Name': ent.job_name,
       'Job No': ent.job_no,
-      'Job Duration': ent.job_duration,
+      'Job Name': ent.job_name,
+      'Project Name': ent.project_name,
+      'MPR No': ent.mpr_no,
+      'Description of Material': ent.item_name,
+      Specification: ent.specification || '',
+      Qty: reportQty(ent),
       'Delivery Date': ent.delivery_date,
+      Rate: ent.matched_rate != null ? Number(ent.matched_rate) : '',
+      Amount: ent.matched_rate != null ? Number(ent.computed_amount ?? 0) : '',
+      'Entry Date': ent.entry_date,
+      'Job Duration': ent.job_duration,
+      Head: ent.category_head || '',
+      'Sub-1': ent.category_sub1 || '',
+      'Sub-2': ent.category_sub2 || '',
+      'Sub-3': ent.category_sub3 || '',
+      Sector: ent.category_sector || '',
       'Logged By': ent.user_name || 'User',
       Budget: ent.budget_name || '—',
       'Sl.No.': ent.bi_sl_no || '',
-      'Project Name': ent.project_name,
       'Req. No.': ent.bi_req_no || '',
-      'MRF No': ent.mpr_no,
       Date: ent.bi_item_date || '',
-      'Description of Materials': ent.item_name,
       Unit: ent.unit || '',
-      Specification: ent.specification || '',
       'Req. Qty': ent.req_qty || '',
       'Purchase Order Qty': ent.po_qty || '',
       'Received Qty': ent.received_qty || '',
@@ -3060,7 +3131,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     }));
 
     const worksheet = XLSX.utils.json_to_sheet(rows);
-    worksheet['!cols'] = new Array(23).fill({ wch: 16 });
+    worksheet['!cols'] = new Array(Object.keys(rows[0] || {}).length || 1).fill({ wch: 16 });
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'MPR Entries');
     XLSX.writeFile(workbook, `MPR_Report_${todayDateOnlyString()}.xlsx`);
@@ -3247,7 +3318,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
             {(filterJobNo || filterProjectId || filterStartDate || filterEndDate || filterBudgetId) && (
               <div className="mt-4 flex justify-end">
                 <button
-                  onClick={() => { setFilterJobNo(''); setFilterProjectId(''); setFilterStartDate(''); setFilterEndDate(''); setFilterBudgetId(''); }}
+                  onClick={() => { setFilterJobNo(''); setFilterProjectId(''); setFilterStartDate(''); setFilterEndDate(''); setFilterBudgetId(''); setReportColFilters(EMPTY_REPORT_COLUMN_FILTERS); }}
                   className="text-xs text-blue-600 hover:underline font-medium"
                 >
                   Clear Filters
@@ -3277,28 +3348,106 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
               <table className="min-w-full divide-y divide-slate-200">
                 <thead className="bg-slate-50 text-slate-500 text-[11px] uppercase tracking-wider">
                   <tr>
-                    <th className="px-4 py-3 text-left">Date</th>
-                    <th className="px-4 py-3 text-left">Job Name</th>
-                    <th className="px-4 py-3 text-left">Project</th>
-                    <th className="px-4 py-3 text-left">Job No & Duration</th>
-                    <th className="px-4 py-3 text-left">MPR No</th>
-                    <th className="px-4 py-3 text-left">Item Name</th>
-                    <th className="px-4 py-3 text-left">Rate &amp; Amount</th>
-                    <th className="px-4 py-3 text-left">Head</th>
-                    <th className="px-4 py-3 text-left">Sub-1</th>
-                    <th className="px-4 py-3 text-left">Sub-2</th>
-                    <th className="px-4 py-3 text-left">Sub-3</th>
-                    <th className="px-4 py-3 text-left">Sector</th>
-                    <th className="px-4 py-3 text-left">Delivery Date</th>
-                    <th className="px-4 py-3 text-left">Logged By</th>
-                    <th className="px-4 py-3 text-left">Budget</th>
-                    <th className="px-4 py-3 text-left">History</th>
+                    <th className="px-4 py-3 text-left whitespace-nowrap">Job No</th>
+                    <th className="px-4 py-3 text-left whitespace-nowrap">Job Name</th>
+                    <th className="px-4 py-3 text-left whitespace-nowrap">Project Name</th>
+                    <th className="px-4 py-3 text-left whitespace-nowrap">MPR No</th>
+                    <th className="px-4 py-3 text-left whitespace-nowrap">Description of Material</th>
+                    <th className="px-4 py-3 text-left whitespace-nowrap">Specification</th>
+                    <th className="px-4 py-3 text-left whitespace-nowrap">Qty</th>
+                    <th className="px-4 py-3 text-left whitespace-nowrap">Delivery Date</th>
+                    <th className="px-4 py-3 text-left whitespace-nowrap">Rate</th>
+                    <th className="px-4 py-3 text-left whitespace-nowrap">Amount</th>
+                    <th className="px-4 py-3 text-left whitespace-nowrap">Entry Date</th>
+                    <th className="px-4 py-3 text-left whitespace-nowrap">Job Duration</th>
+                    <th className="px-4 py-3 text-left whitespace-nowrap">Head</th>
+                    <th className="px-4 py-3 text-left whitespace-nowrap">Sub-1</th>
+                    <th className="px-4 py-3 text-left whitespace-nowrap">Sub-2</th>
+                    <th className="px-4 py-3 text-left whitespace-nowrap">Sub-3</th>
+                    <th className="px-4 py-3 text-left whitespace-nowrap">Sector</th>
+                    <th className="px-4 py-3 text-left whitespace-nowrap">Logged By</th>
+                    <th className="px-4 py-3 text-left whitespace-nowrap">Budget</th>
+                    <th className="px-4 py-3 text-left">Actions</th>
+                  </tr>
+                  <tr className="bg-slate-50">
+                    <th className="px-4 pb-2.5">
+                      <input type="text" aria-label="Filter Job No" value={reportColFilters.job_no} onChange={(e) => setReportColFilter('job_no', e.target.value)} placeholder="Filter..." className="w-full min-w-[90px] px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-slate-700 text-[11px] font-normal normal-case tracking-normal focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400" />
+                    </th>
+                    <th className="px-4 pb-2.5">
+                      <input type="text" aria-label="Filter Job Name" value={reportColFilters.job_name} onChange={(e) => setReportColFilter('job_name', e.target.value)} placeholder="Filter..." className="w-full min-w-[90px] px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-slate-700 text-[11px] font-normal normal-case tracking-normal focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400" />
+                    </th>
+                    <th className="px-4 pb-2.5">
+                      <input type="text" aria-label="Filter Project Name" value={reportColFilters.project_name} onChange={(e) => setReportColFilter('project_name', e.target.value)} placeholder="Filter..." className="w-full min-w-[90px] px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-slate-700 text-[11px] font-normal normal-case tracking-normal focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400" />
+                    </th>
+                    <th className="px-4 pb-2.5">
+                      <input type="text" aria-label="Filter MPR No" value={reportColFilters.mpr_no} onChange={(e) => setReportColFilter('mpr_no', e.target.value)} placeholder="Filter..." className="w-full min-w-[90px] px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-slate-700 text-[11px] font-normal normal-case tracking-normal focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400" />
+                    </th>
+                    <th className="px-4 pb-2.5">
+                      <input type="text" list="report-item-name-options" aria-label="Filter Description of Material" value={reportColFilters.item_name} onChange={(e) => setReportColFilter('item_name', e.target.value)} placeholder="Type or select..." className="w-full min-w-[90px] px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-slate-700 text-[11px] font-normal normal-case tracking-normal focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400" />
+                      <datalist id="report-item-name-options">
+                        {reportItemNameOptions.map((n) => (
+                          <option key={n} value={n} />
+                        ))}
+                      </datalist>
+                    </th>
+                    <th className="px-4 pb-2.5">
+                      <input type="text" aria-label="Filter Specification" value={reportColFilters.specification} onChange={(e) => setReportColFilter('specification', e.target.value)} placeholder="Filter..." className="w-full min-w-[90px] px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-slate-700 text-[11px] font-normal normal-case tracking-normal focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400" />
+                    </th>
+                    <th className="px-4 pb-2.5">
+                      <input type="text" aria-label="Filter Qty" value={reportColFilters.qty} onChange={(e) => setReportColFilter('qty', e.target.value)} placeholder="Filter..." className="w-full min-w-[90px] px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-slate-700 text-[11px] font-normal normal-case tracking-normal focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400" />
+                    </th>
+                    <th className="px-4 pb-2.5">
+                      <div className="flex flex-col gap-1">
+                        <input type="date" aria-label="Delivery Date from" title="From" value={reportColFilters.delivery_from} onChange={(e) => setReportColFilter('delivery_from', e.target.value)} className="w-full min-w-[90px] px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-slate-700 text-[11px] font-normal normal-case tracking-normal focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400" />
+                        <input type="date" aria-label="Delivery Date to" title="To" value={reportColFilters.delivery_to} onChange={(e) => setReportColFilter('delivery_to', e.target.value)} className="w-full min-w-[90px] px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-slate-700 text-[11px] font-normal normal-case tracking-normal focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400" />
+                      </div>
+                    </th>
+                    <th className="px-4 pb-2.5">
+                      <input type="text" aria-label="Filter Rate" value={reportColFilters.rate} onChange={(e) => setReportColFilter('rate', e.target.value)} placeholder="Filter..." className="w-full min-w-[90px] px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-slate-700 text-[11px] font-normal normal-case tracking-normal focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400" />
+                    </th>
+                    <th className="px-4 pb-2.5">
+                      <input type="text" aria-label="Filter Amount" value={reportColFilters.amount} onChange={(e) => setReportColFilter('amount', e.target.value)} placeholder="Filter..." className="w-full min-w-[90px] px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-slate-700 text-[11px] font-normal normal-case tracking-normal focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400" />
+                    </th>
+                    <th className="px-4 pb-2.5">
+                      <input type="text" aria-label="Filter Entry Date" value={reportColFilters.entry_date} onChange={(e) => setReportColFilter('entry_date', e.target.value)} placeholder="Filter..." className="w-full min-w-[90px] px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-slate-700 text-[11px] font-normal normal-case tracking-normal focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400" />
+                    </th>
+                    <th className="px-4 pb-2.5">
+                      <input type="text" aria-label="Filter Job Duration" value={reportColFilters.job_duration} onChange={(e) => setReportColFilter('job_duration', e.target.value)} placeholder="Filter..." className="w-full min-w-[90px] px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-slate-700 text-[11px] font-normal normal-case tracking-normal focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400" />
+                    </th>
+                    <th className="px-4 pb-2.5">
+                      <input type="text" aria-label="Filter Head" value={reportColFilters.head} onChange={(e) => setReportColFilter('head', e.target.value)} placeholder="Filter..." className="w-full min-w-[90px] px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-slate-700 text-[11px] font-normal normal-case tracking-normal focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400" />
+                    </th>
+                    <th className="px-4 pb-2.5">
+                      <input type="text" aria-label="Filter Sub-1" value={reportColFilters.sub1} onChange={(e) => setReportColFilter('sub1', e.target.value)} placeholder="Filter..." className="w-full min-w-[90px] px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-slate-700 text-[11px] font-normal normal-case tracking-normal focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400" />
+                    </th>
+                    <th className="px-4 pb-2.5">
+                      <input type="text" aria-label="Filter Sub-2" value={reportColFilters.sub2} onChange={(e) => setReportColFilter('sub2', e.target.value)} placeholder="Filter..." className="w-full min-w-[90px] px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-slate-700 text-[11px] font-normal normal-case tracking-normal focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400" />
+                    </th>
+                    <th className="px-4 pb-2.5">
+                      <input type="text" aria-label="Filter Sub-3" value={reportColFilters.sub3} onChange={(e) => setReportColFilter('sub3', e.target.value)} placeholder="Filter..." className="w-full min-w-[90px] px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-slate-700 text-[11px] font-normal normal-case tracking-normal focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400" />
+                    </th>
+                    <th className="px-4 pb-2.5">
+                      <input type="text" aria-label="Filter Sector" value={reportColFilters.sector} onChange={(e) => setReportColFilter('sector', e.target.value)} placeholder="Filter..." className="w-full min-w-[90px] px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-slate-700 text-[11px] font-normal normal-case tracking-normal focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400" />
+                    </th>
+                    <th className="px-4 pb-2.5">
+                      <input type="text" aria-label="Filter Logged By" value={reportColFilters.logged_by} onChange={(e) => setReportColFilter('logged_by', e.target.value)} placeholder="Filter..." className="w-full min-w-[90px] px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-slate-700 text-[11px] font-normal normal-case tracking-normal focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400" />
+                    </th>
+                    <th className="px-4 pb-2.5">
+                      <input type="text" aria-label="Filter Budget" value={reportColFilters.budget} onChange={(e) => setReportColFilter('budget', e.target.value)} placeholder="Filter..." className="w-full min-w-[90px] px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-slate-700 text-[11px] font-normal normal-case tracking-normal focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400" />
+                    </th>
+                    <th className="px-4 pb-2.5 text-left">
+                      {hasReportColFilter && (
+                        <button type="button" onClick={() => setReportColFilters(EMPTY_REPORT_COLUMN_FILTERS)} className="text-[11px] font-semibold text-blue-600 hover:text-blue-800 normal-case tracking-normal whitespace-nowrap">
+                          Clear
+                        </button>
+                      )}
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200 text-sm">
                   {filteredEntries.length === 0 ? (
                     <tr>
-                      <td colSpan={15} className="px-6 py-12 text-center text-slate-400">
+                      <td colSpan={20} className="px-6 py-12 text-center text-slate-400">
                         No entries found matching the filter criteria.
                       </td>
                     </tr>
