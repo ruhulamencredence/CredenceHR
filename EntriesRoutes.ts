@@ -62,6 +62,37 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
   // Final Submit can be per Budget (budget_submissions — every Job of that
   // Budget) or per Job (job_submissions — that one Job only). An entry is locked
   // when either covers it.
+  // An MPR No belongs to whoever first used it under a Budget: that user may
+  // keep using its other Items / remaining Qty in more of their own Jobs (the
+  // per-item Qty cap still applies); nobody else can use it. Returns true when
+  // another user already has it.
+  const mprTakenByOther = async (mprId: any, budgetId: any, ownerId: any, exceptEntryId?: any): Promise<boolean> => {
+    const rows = await queryDB(
+      "SELECT id FROM entries WHERE mpr_id = ? AND budget_id = ? AND created_by <> ? AND deleted_at IS NULL" + (exceptEntryId ? " AND id <> ?" : ""),
+      exceptEntryId ? [mprId, budgetId, ownerId, exceptEntryId] : [mprId, budgetId, ownerId]
+    );
+    return rows.length > 0;
+  };
+
+  // Next Job No for a user under a Budget: the lowest number not held by one of
+  // their Jobs. A Job whose entries were all permanently deleted (Job Recycle ->
+  // Delete permanently) no longer holds its number: its row is kept (edit history
+  // points at it) but renamed so the number can be given out again.
+  const nextJobNo = async (userId: any, budgetId: any): Promise<string> => {
+    const jobs = await queryDB("SELECT id, job_no FROM jobs WHERE created_by = ? AND budget_id = ?", [userId, budgetId]);
+    const held = new Set<number>();
+    for (const j of jobs) {
+      const n = /^JOB-(\d+)$/.exec(String(j.job_no || ""));
+      if (!n) continue;
+      const any = await queryDB("SELECT id FROM entries WHERE job_id = ? LIMIT 1", [j.id]);
+      if (any.length > 0) held.add(Number(n[1]));
+      else await queryDB("UPDATE jobs SET job_no = ? WHERE id = ?", [`${j.job_no}~${j.id}`, j.id]);
+    }
+    let next = 1;
+    while (held.has(next)) next++;
+    return `JOB-${String(next).padStart(4, "0")}`;
+  };
+
   const isEntryLocked = async (budgetId: any, jobId: any, userId: any): Promise<boolean> => {
     if (budgetId) {
       const b = await queryDB("SELECT id FROM budget_submissions WHERE budget_id = ? AND user_id = ?", [budgetId, userId]);
@@ -180,6 +211,16 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
   // available to every authenticated user (not just Admin), since a User needs this to
   // avoid picking an MPR No someone else already entered. Deliberately leaves out
   // created_by / user_name so it doesn't turn into a way to browse other users' entries.
+  app.get("/api/jobs/next-no", authenticateToken, async (req: any, res) => {
+    try {
+      const budgetId = Number(req.query.budget_id);
+      if (!budgetId) return res.status(400).json({ error: "budget_id is required." });
+      res.json({ job_no: await nextJobNo(req.user.id, budgetId) });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/entries/mpr-usage", authenticateToken, async (req: any, res) => {
     try {
       // used_by_other: whether THIS particular usage row belongs to a DIFFERENT user
@@ -509,14 +550,10 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
       for (const it of items) {
         // Deleted entries free up their MPR No for reuse — only an active (non-deleted)
         // entry counts as "already used".
-        const usedRows = await queryDB(
-          "SELECT id FROM entries WHERE mpr_id = ? AND budget_id = ? AND deleted_at IS NULL",
-          [it.mpr_id, budget_id]
-        );
-        if (usedRows.length > 0) {
+        if (await mprTakenByOther(it.mpr_id, budget_id, req.user.id)) {
           return res.status(400).json({
             warning: true,
-            error: "One of the selected MPR Nos has already been used in another entry under this Budget."
+            error: "One of the selected MPR Nos is already used by another user under this Budget."
           });
         }
       }
@@ -525,12 +562,7 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
       // JOB-0002 ... for THIS user under THIS Budget specifically) — so every user's
       // own submissions start again from JOB-0001 independently of what any other user
       // is on, AND start again from JOB-0001 whenever they move to a different Budget.
-      const jobCountRows = await queryDB("SELECT COUNT(*) as cnt FROM jobs WHERE created_by = ? AND budget_id = ?", [
-        req.user.id,
-        budget_id
-      ]);
-      const nextJobSeq = (jobCountRows[0]?.cnt || 0) + 1;
-      const job_no = `JOB-${String(nextJobSeq).padStart(4, "0")}`;
+      const job_no = await nextJobNo(req.user.id, budget_id);
 
       // 2. Create one Job for this submission (Job No is unique per user PER BUDGET,
       // not globally and not just per user)
@@ -772,15 +804,11 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
         }
       }
 
-      // An MPR No can only ever be used ONCE, system-wide — same rule as creation.
+      // Same MPR ownership rule as creation: the Job owner may reuse their own MPR Nos.
       for (const it of items) {
-        const usedRows = await queryDB(
-          "SELECT id FROM entries WHERE mpr_id = ? AND budget_id = ? AND deleted_at IS NULL",
-          [it.mpr_id, budget_id]
-        );
-        if (usedRows.length > 0) {
+        if (await mprTakenByOther(it.mpr_id, budget_id, job.created_by)) {
           return res.status(400).json({
-            error: "One of the selected MPR Nos has already been used in another entry under this Budget."
+            error: "One of the selected MPR Nos is already used by another user under this Budget."
           });
         }
       }
@@ -997,13 +1025,9 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
       // An MPR No can only ever be used ONCE, system-wide — same rule as POST
       // /api/entries and Add MPR above.
       for (const it of items) {
-        const usedRows = await queryDB(
-          "SELECT id FROM entries WHERE mpr_id = ? AND budget_id = ? AND deleted_at IS NULL",
-          [it.mpr_id, budget_id]
-        );
-        if (usedRows.length > 0) {
+        if (await mprTakenByOther(it.mpr_id, budget_id, req.user.id)) {
           return res.status(400).json({
-            error: "One of the selected MPR Nos has already been used in another entry under this Budget."
+            error: "One of the selected MPR Nos is already used by another user under this Budget."
           });
         }
       }
@@ -1223,12 +1247,8 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
         // its own current MPR No must stay allowed) and any deleted entry (deleted
         // entries free up their MPR No for reuse). Never reusable again afterwards by
         // anyone, including this entry's own owner under a different entry/Job.
-        const usedRows = await queryDB(
-          "SELECT id FROM entries WHERE mpr_id = ? AND budget_id = ? AND id <> ? AND deleted_at IS NULL",
-          [mpr_id, entry.budget_id, id]
-        );
-        if (usedRows.length > 0) {
-          return res.status(400).json({ error: "That MPR No has already been used in another entry under this Budget." });
+        if (await mprTakenByOther(mpr_id, entry.budget_id, entry.created_by, id)) {
+          return res.status(400).json({ error: "That MPR No is already used by another user under this Budget." });
         }
         // Must still belong to the same Budget + Project this entry was created under —
         // blocks smuggling in an MPR No from an unrelated Budget/Project via a direct API call.
@@ -2150,13 +2170,9 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
             });
           }
         }
-        const usedRows = await queryDB(
-          "SELECT id FROM entries WHERE mpr_id = ? AND budget_id = ? AND deleted_at IS NULL",
-          [payload.mpr_id, job.budget_id]
-        );
-        if (usedRows.length > 0) {
+        if (await mprTakenByOther(payload.mpr_id, job.budget_id, request.requested_by)) {
           return res.status(400).json({
-            error: "That MPR No has since been used in another entry under this Budget. This request can no longer be approved as-is."
+            error: "That MPR No has since been used by another user under this Budget. This request can no longer be approved as-is."
           });
         }
 
@@ -2236,13 +2252,9 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
           }
         }
         for (const it of payload.items) {
-          const usedRows = await queryDB(
-            "SELECT id FROM entries WHERE mpr_id = ? AND budget_id = ? AND deleted_at IS NULL",
-            [it.mpr_id, payload.budget_id]
-          );
-          if (usedRows.length > 0) {
+          if (await mprTakenByOther(it.mpr_id, payload.budget_id, request.requested_by)) {
             return res.status(400).json({
-              error: `MPR No "${it.mpr_no}" has since been used in another entry under this Budget. This request can no longer be approved as-is.`
+              error: `MPR No "${it.mpr_no}" has since been used by another user under this Budget. This request can no longer be approved as-is.`
             });
           }
         }
@@ -2250,12 +2262,7 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
         // Auto-generate the Job No exactly like POST /api/entries does — sequential
         // PER USER PER BUDGET, using the requesting user (not the approving Admin)
         // as the owner.
-        const jobCountRows = await queryDB("SELECT COUNT(*) as cnt FROM jobs WHERE created_by = ? AND budget_id = ?", [
-          request.requested_by,
-          payload.budget_id
-        ]);
-        const nextJobSeq = (jobCountRows[0]?.cnt || 0) + 1;
-        const job_no = `JOB-${String(nextJobSeq).padStart(4, "0")}`;
+        const job_no = await nextJobNo(request.requested_by, payload.budget_id);
 
         const jobResult = await queryDB(
           "INSERT INTO jobs (job_no, job_duration, created_by, budget_id) VALUES (?, ?, ?, ?)",
