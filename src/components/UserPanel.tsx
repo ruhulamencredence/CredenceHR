@@ -244,9 +244,9 @@ const EntryRow = React.memo(function EntryRow({
     isEditing ? it.budget_id : null
   );
   return (
-    <tr className="hover:bg-slate-50/80">
-      <td className="px-3 py-2.5 whitespace-nowrap text-slate-500">{idx + 1}</td>
-      <td className="px-3 py-2.5 whitespace-nowrap font-semibold text-blue-600">{it.job_no}</td>
+    <tr className="odd:bg-white even:bg-slate-50/70 hover:bg-blue-50/50 transition-colors">
+      <td className="px-2 py-1.5 border border-slate-200 align-top text-right text-slate-500 tabular-nums">{idx + 1}.</td>
+      <td className="px-2 py-1.5 border border-slate-200 align-top font-semibold text-blue-600 truncate" title={it.job_no}>{it.job_no}</td>
       {/* Job Name, MPR No, Item Name, Qty and Job Duration stay freely editable
           right up until this entry's Budget is Final Submitted — canEdit is false
           (and the Edit button never even renders, see the "Locked" fallback below)
@@ -254,7 +254,7 @@ const EntryRow = React.memo(function EntryRow({
           The one exception is dateOnlyEdit (Job Edit permission on an already-
           locked entry) — isEditing can be true there too, but every field below
           except Delivery Date renders as plain text instead of an input. */}
-      <td className="px-3 py-2.5 min-w-[140px] text-slate-900 font-medium">
+      <td className="px-2 py-1.5 border border-slate-200 align-top break-words text-slate-900 font-medium">
         {isEditing && !dateOnlyEdit ? (
           <input
             type="text"
@@ -266,7 +266,7 @@ const EntryRow = React.memo(function EntryRow({
           it.job_name
         )}
       </td>
-      <td className="px-3 py-2.5 min-w-[150px] text-slate-900">
+      <td className="px-2 py-1.5 border border-slate-200 align-top break-words text-slate-900">
         {isEditing && !dateOnlyEdit ? (
           <div className="relative">
             <input
@@ -309,7 +309,7 @@ const EntryRow = React.memo(function EntryRow({
           it.mpr_no
         )}
       </td>
-      <td className="px-3 py-2.5 min-w-[180px] text-slate-700">
+      <td className="px-2 py-1.5 border border-slate-200 align-top break-words text-slate-700">
         {isEditing && !dateOnlyEdit ? (
           editLoadingOptions ? (
             <span className="text-xs text-slate-400">Loading items...</span>
@@ -334,8 +334,8 @@ const EntryRow = React.memo(function EntryRow({
           it.item_name
         )}
       </td>
-      <td className="px-3 py-2.5 min-w-[150px] text-slate-600">{it.specification || '—'}</td>
-      <td className="px-3 py-2.5 min-w-[110px] text-slate-600 align-top">
+      <td className="px-2 py-1.5 border border-slate-200 align-top text-slate-600" title={it.specification || ''}><div className="line-clamp-2 break-words">{it.specification || '—'}</div></td>
+      <td className="px-2 py-1.5 border border-slate-200 align-top break-words text-slate-600">
         {isEditing && !dateOnlyEdit ? (
           <div className="space-y-1">
             <input
@@ -344,7 +344,7 @@ const EntryRow = React.memo(function EntryRow({
               step="any"
               value={editQty}
               onChange={(e) => setEditQty(e.target.value)}
-              className="w-20 px-2 py-1 bg-white border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-600 focus:outline-none"
+              className="w-full px-2 py-1 bg-white border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-600 focus:outline-none"
             />
             {editSplitRemaining !== null && (
               <button
@@ -361,14 +361,14 @@ const EntryRow = React.memo(function EntryRow({
           </div>
         ) : it.requisitioned_qty !== null && it.requisitioned_qty !== undefined ? (
           <>
-            {it.requisitioned_qty}
-            {it.req_qty ? <span className="text-slate-400"> / {it.req_qty}</span> : null}
+            <div className="tabular-nums">{it.requisitioned_qty}</div>
+            {it.req_qty ? <div className="text-[10px] text-slate-400 tabular-nums">of {it.req_qty}</div> : null}
           </>
         ) : (
           it.req_qty || '—'
         )}
       </td>
-      <td className="px-3 py-2.5 min-w-[110px] text-slate-600">
+      <td className="px-2 py-1.5 border border-slate-200 align-top break-words text-slate-600">
         {isEditing && !dateOnlyEdit ? (
           <input
             type="text"
@@ -376,20 +376,20 @@ const EntryRow = React.memo(function EntryRow({
             pattern="[0-9]*"
             value={editJobDuration}
             onChange={(e) => setEditJobDuration(e.target.value.replace(/\D/g, ''))}
-            className="w-16 px-2 py-1 bg-white border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-600 focus:outline-none"
+            className="w-full px-2 py-1 bg-white border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-600 focus:outline-none"
           />
         ) : (
           it.job_duration
         )}
       </td>
-      <td className="px-3 py-2.5 whitespace-nowrap text-slate-600">
+      <td className="px-2 py-1.5 border border-slate-200 align-top break-words text-slate-600">
         {isEditing ? (
           <>
             {editDeliveryRange.from && editDeliveryRange.to ? (
               <select
                 value={editDeliveryDate}
                 onChange={(e) => setEditDeliveryDate(e.target.value)}
-                className="px-2 py-1 bg-white border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-600 focus:outline-none appearance-none"
+                className="w-full px-1.5 py-1 bg-white border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-600 focus:outline-none appearance-none"
               >
                 <option value="">Select...</option>
                 {dateRangeOptions(editDeliveryRange.from, editDeliveryRange.to).map((d) => {
@@ -412,7 +412,7 @@ const EntryRow = React.memo(function EntryRow({
                     : editDeliveryRange.from || undefined
                 }
                 max={editDeliveryRange.to || undefined}
-                className="px-2 py-1 bg-white border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                className="w-full px-1.5 py-1 bg-white border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-600 focus:outline-none"
               />
             )}
             {(editDeliveryRange.from || editDeliveryRange.to) && (
@@ -425,17 +425,17 @@ const EntryRow = React.memo(function EntryRow({
           formatDate(it.delivery_date)
         )}
       </td>
-      <td className="px-3 py-2.5 min-w-[110px] text-slate-500">
+      <td className="px-2 py-1.5 border border-slate-200 align-top break-words text-slate-500">
         {it.budget_name || '—'}
       </td>
-      <td className="px-3 py-2.5 whitespace-nowrap">
+      <td className="px-2 py-1.5 border border-slate-200 align-top break-words whitespace-nowrap">
         {isEditing ? (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
             <button
               type="button"
               onClick={() => onSaveEdit(it.id)}
               disabled={editSaving}
-              className="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors disabled:opacity-50"
+              className="p-1 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors disabled:opacity-50"
               title="Save"
             >
               <Save className="w-3.5 h-3.5" />
@@ -444,7 +444,7 @@ const EntryRow = React.memo(function EntryRow({
               type="button"
               onClick={onCancelEdit}
               disabled={editSaving}
-              className="p-1.5 text-slate-400 hover:bg-slate-100 rounded-lg transition-colors disabled:opacity-50"
+              className="p-1 text-slate-400 hover:bg-slate-100 rounded-lg transition-colors disabled:opacity-50"
               title="Cancel"
             >
               <X className="w-3.5 h-3.5" />
@@ -455,7 +455,7 @@ const EntryRow = React.memo(function EntryRow({
             <button
               type="button"
               onClick={() => onStartEdit(it)}
-              className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+              className="p-1 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
               title={dateOnlyEdit ? 'Edit Delivery Date' : 'Edit'}
             >
               <Edit2 className="w-3.5 h-3.5" />
@@ -469,7 +469,7 @@ const EntryRow = React.memo(function EntryRow({
                 type="button"
                 onClick={() => onDelete(it.id)}
                 disabled={deletingEntryId === it.id}
-                className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg transition-colors disabled:opacity-50"
+                className="p-1 text-rose-500 hover:bg-rose-50 rounded-lg transition-colors disabled:opacity-50"
                 title="Delete this Job Entry"
               >
                 <Trash2 className="w-3.5 h-3.5" />
@@ -4659,7 +4659,20 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
 
               {/* Desktop / tablet: full table. */}
               <div className="hidden md:block overflow-auto max-h-[32rem]">
-                <table className="min-w-full divide-y divide-slate-200 text-xs">
+                <table className="w-full min-w-[960px] table-fixed border-collapse text-[11px] leading-snug">
+                  <colgroup>
+                    <col style={{ width: '3.33%' }} />
+                    <col style={{ width: '8.52%' }} />
+                    <col style={{ width: '11.11%' }} />
+                    <col style={{ width: '9.26%' }} />
+                    <col style={{ width: '15.74%' }} />
+                    <col style={{ width: '11.11%' }} />
+                    <col style={{ width: '6.85%' }} />
+                    <col style={{ width: '6.67%' }} />
+                    <col style={{ width: '10.37%' }} />
+                    <col style={{ width: '9.26%' }} />
+                    <col style={{ width: '7.78%' }} />
+                  </colgroup>
                   {/*
                     Sticky header fix: previously `sticky top-0` was applied to the whole
                     <thead>, which held BOTH the label row and the filter-input row. Any
@@ -4671,19 +4684,19 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                     context (`z-30`, higher than the in-body dropdowns' `z-20`) and an
                     explicit background so nothing shows through while scrolling.
                   */}
-                  <thead className="bg-slate-50 text-slate-500 uppercase tracking-wider">
-                    <tr className="sticky top-0 z-30 bg-slate-50">
-                      <th className="px-3 py-2.5 text-left">SL</th>
-                      <th className="px-3 py-2.5 text-left">Job No</th>
-                      <th className="px-3 py-2.5 text-left">Job Name</th>
-                      <th className="px-3 py-2.5 text-left">MPR No</th>
-                      <th className="px-3 py-2.5 text-left">Item Name</th>
-                      <th className="px-3 py-2.5 text-left">Specification</th>
-                      <th className="px-3 py-2.5 text-left">Qty</th>
-                      <th className="px-3 py-2.5 text-left">Job Duration</th>
-                      <th className="px-3 py-2.5 text-left">Delivery Date</th>
-                      <th className="px-3 py-2.5 text-left">Budget</th>
-                      <th className="px-3 py-2.5 text-left">Action</th>
+                  <thead className="sticky top-0 z-30 bg-blue-50 text-slate-700">
+                    <tr>
+                      <th className="px-2 py-2 border border-slate-200 text-left font-semibold align-bottom">SL</th>
+                      <th className="px-2 py-2 border border-slate-200 text-left font-semibold align-bottom">Job No</th>
+                      <th className="px-2 py-2 border border-slate-200 text-left font-semibold align-bottom">Job Name</th>
+                      <th className="px-2 py-2 border border-slate-200 text-left font-semibold align-bottom">MPR No</th>
+                      <th className="px-2 py-2 border border-slate-200 text-left font-semibold align-bottom">Item Name</th>
+                      <th className="px-2 py-2 border border-slate-200 text-left font-semibold align-bottom">Specification</th>
+                      <th className="px-2 py-2 border border-slate-200 text-left font-semibold align-bottom">Qty</th>
+                      <th className="px-2 py-2 border border-slate-200 text-left font-semibold align-bottom">Job Duration</th>
+                      <th className="px-2 py-2 border border-slate-200 text-left font-semibold align-bottom">Delivery Date</th>
+                      <th className="px-2 py-2 border border-slate-200 text-left font-semibold align-bottom">Budget</th>
+                      <th className="px-2 py-2 border border-slate-200 text-left font-semibold align-bottom">Action</th>
                     </tr>
                     {/*
                       top-[2.375rem] ≈ the rendered height of the label row above
@@ -4691,36 +4704,36 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                       off by a couple of px after this fix, measure the label row's
                       actual height in devtools and adjust this value to match exactly.
                     */}
-                    <tr className="sticky top-[2.375rem] z-30 bg-white normal-case">
-                      <th className="px-3 pb-2.5"></th>
-                      <th className="px-3 pb-2.5">
+                    <tr className="bg-white">
+                      <th className="px-1.5 py-1 border border-slate-200 font-normal"></th>
+                      <th className="px-1.5 py-1 border border-slate-200 font-normal">
                         <input
                           type="text"
                           value={entryColumnFilters.job_no}
                           onChange={(e) => setEntryColumnFilters((prev) => ({ ...prev, job_no: e.target.value }))}
                           placeholder="Filter..."
-                          className="w-full px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 text-[11px] font-normal focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400"
+                          className="w-full min-w-0 px-1.5 py-1 bg-white border border-slate-300 rounded text-slate-700 text-[10px] font-normal focus:ring-1 focus:ring-blue-600 focus:border-blue-600 focus:outline-none placeholder-slate-400"
                         />
                       </th>
-                      <th className="px-3 pb-2.5">
+                      <th className="px-1.5 py-1 border border-slate-200 font-normal">
                         <input
                           type="text"
                           value={entryColumnFilters.job_name}
                           onChange={(e) => setEntryColumnFilters((prev) => ({ ...prev, job_name: e.target.value }))}
                           placeholder="Filter..."
-                          className="w-full px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 text-[11px] font-normal focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400"
+                          className="w-full min-w-0 px-1.5 py-1 bg-white border border-slate-300 rounded text-slate-700 text-[10px] font-normal focus:ring-1 focus:ring-blue-600 focus:border-blue-600 focus:outline-none placeholder-slate-400"
                         />
                       </th>
-                      <th className="px-3 pb-2.5">
+                      <th className="px-1.5 py-1 border border-slate-200 font-normal">
                         <input
                           type="text"
                           value={entryColumnFilters.mpr_no}
                           onChange={(e) => setEntryColumnFilters((prev) => ({ ...prev, mpr_no: e.target.value }))}
                           placeholder="Filter..."
-                          className="w-full px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 text-[11px] font-normal focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400"
+                          className="w-full min-w-0 px-1.5 py-1 bg-white border border-slate-300 rounded text-slate-700 text-[10px] font-normal focus:ring-1 focus:ring-blue-600 focus:border-blue-600 focus:outline-none placeholder-slate-400"
                         />
                       </th>
-                      <th className="px-3 pb-2.5">
+                      <th className="px-1.5 py-1 border border-slate-200 font-normal">
                         <div className="relative">
                           <input
                             type="text"
@@ -4733,7 +4746,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                             onBlur={() => setTimeout(() => setShowItemNameFilterDropdownDesktop(false), 150)}
                             placeholder="Filter..."
                             autoComplete="off"
-                            className="w-full px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 text-[11px] font-normal focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400"
+                            className="w-full min-w-0 px-1.5 py-1 bg-white border border-slate-300 rounded text-slate-700 text-[10px] font-normal focus:ring-1 focus:ring-blue-600 focus:border-blue-600 focus:outline-none placeholder-slate-400"
                           />
                           {showItemNameFilterDropdownDesktop && filteredItemNameFilterOptions.length > 0 && (
                             <div className="absolute z-20 mt-1 w-48 bg-white border border-slate-200 rounded-lg shadow-md max-h-40 overflow-y-auto normal-case">
@@ -4755,67 +4768,67 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                           )}
                         </div>
                       </th>
-                      <th className="px-3 pb-2.5">
+                      <th className="px-1.5 py-1 border border-slate-200 font-normal">
                         <input
                           type="text"
                           value={entryColumnFilters.specification}
                           onChange={(e) => setEntryColumnFilters((prev) => ({ ...prev, specification: e.target.value }))}
                           placeholder="Filter..."
-                          className="w-full px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 text-[11px] font-normal focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400"
+                          className="w-full min-w-0 px-1.5 py-1 bg-white border border-slate-300 rounded text-slate-700 text-[10px] font-normal focus:ring-1 focus:ring-blue-600 focus:border-blue-600 focus:outline-none placeholder-slate-400"
                         />
                       </th>
-                      <th className="px-3 pb-2.5">
+                      <th className="px-1.5 py-1 border border-slate-200 font-normal">
                         <input
                           type="text"
                           value={entryColumnFilters.req_qty}
                           onChange={(e) => setEntryColumnFilters((prev) => ({ ...prev, req_qty: e.target.value }))}
                           placeholder="Filter..."
-                          className="w-full px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 text-[11px] font-normal focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400"
+                          className="w-full min-w-0 px-1.5 py-1 bg-white border border-slate-300 rounded text-slate-700 text-[10px] font-normal focus:ring-1 focus:ring-blue-600 focus:border-blue-600 focus:outline-none placeholder-slate-400"
                         />
                       </th>
-                      <th className="px-3 pb-2.5">
+                      <th className="px-1.5 py-1 border border-slate-200 font-normal">
                         <input
                           type="text"
                           value={entryColumnFilters.job_duration}
                           onChange={(e) => setEntryColumnFilters((prev) => ({ ...prev, job_duration: e.target.value }))}
                           placeholder="Filter..."
-                          className="w-full px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 text-[11px] font-normal focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400"
+                          className="w-full min-w-0 px-1.5 py-1 bg-white border border-slate-300 rounded text-slate-700 text-[10px] font-normal focus:ring-1 focus:ring-blue-600 focus:border-blue-600 focus:outline-none placeholder-slate-400"
                         />
                       </th>
-                      <th className="px-3 pb-2.5">
-                        <div className="flex items-center gap-1">
+                      <th className="px-1.5 py-1 border border-slate-200 font-normal">
+                        <div className="flex flex-col gap-0.5">
                           <input
                             type="date"
                             value={entryColumnFilters.delivery_date_from}
                             onChange={(e) => setEntryColumnFilters((prev) => ({ ...prev, delivery_date_from: e.target.value }))}
                             title="Delivery Date from"
-                            className="w-full px-1.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 text-[11px] font-normal focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                            className="w-full min-w-0 px-1 py-1 bg-white border border-slate-300 rounded text-slate-700 text-[10px] font-normal focus:ring-1 focus:ring-blue-600 focus:border-blue-600 focus:outline-none"
                           />
                           <input
                             type="date"
                             value={entryColumnFilters.delivery_date_to}
                             onChange={(e) => setEntryColumnFilters((prev) => ({ ...prev, delivery_date_to: e.target.value }))}
                             title="Delivery Date to"
-                            className="w-full px-1.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 text-[11px] font-normal focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                            className="w-full min-w-0 px-1 py-1 bg-white border border-slate-300 rounded text-slate-700 text-[10px] font-normal focus:ring-1 focus:ring-blue-600 focus:border-blue-600 focus:outline-none"
                           />
                         </div>
                       </th>
-                      <th className="px-3 pb-2.5">
+                      <th className="px-1.5 py-1 border border-slate-200 font-normal">
                         <input
                           type="text"
                           value={entryColumnFilters.budget_name}
                           onChange={(e) => setEntryColumnFilters((prev) => ({ ...prev, budget_name: e.target.value }))}
                           placeholder="Filter..."
-                          className="w-full px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-slate-700 text-[11px] font-normal focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400"
+                          className="w-full min-w-0 px-1.5 py-1 bg-white border border-slate-300 rounded text-slate-700 text-[10px] font-normal focus:ring-1 focus:ring-blue-600 focus:border-blue-600 focus:outline-none placeholder-slate-400"
                         />
                       </th>
-                      <th className="px-3 pb-2.5"></th>
+                      <th className="px-1.5 py-1 border border-slate-200 font-normal"></th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100">
+                  <tbody>
                     {filteredEntries.length === 0 ? (
                       <tr>
-                        <td colSpan={11} className="px-3 py-6 text-center text-slate-400">No entries match your filters.</td>
+                        <td colSpan={11} className="px-3 py-6 text-center text-slate-400 border border-slate-200">No entries match your filters.</td>
                       </tr>
                     ) : (
                     filteredEntries.map((it, idx) => {
