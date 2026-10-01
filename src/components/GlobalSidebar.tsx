@@ -55,10 +55,10 @@ interface GlobalSidebarProps {
   onGoToAdminClaims: (target: 'claims' | 'conveyance') => void;
   // Every other Admin Panel module (Reports, Projects, Users, ...) — gated by
   // module_permissions (a Superadmin always sees all of them).
-  // 'my_conveyance' is the one exception below: not its own module_permissions
-  // entry, just the "My Conveyance Bill Claim" sub-view shown alongside
-  // 'conveyance' in the HR group, gated on the same 'conveyance' grant.
-  onGoToAdminModule: (target: Exclude<AdminModuleKey, 'claims' | 'conveyance'> | 'my_conveyance' | 'bill_claim_policy' | 'dashboard' | 'permanent_delete_log' | 'companies' | 'devices') => void;
+  // 'bill_claim_policy' is the one exception below: not its own
+  // module_permissions entry, shown alongside 'conveyance' in the HR group
+  // and gated on the same 'conveyance' grant.
+  onGoToAdminModule: (target: Exclude<AdminModuleKey, 'claims' | 'conveyance'> | 'bill_claim_policy' | 'dashboard' | 'permanent_delete_log' | 'companies' | 'devices') => void;
   // Android APK build info modal — previously a header icon, moved in here so
   // the header itself can stay down to just hamburger + profile + logout.
   onOpenApkInfo: () => void;
@@ -241,7 +241,10 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   if (hasUserPanel && user.can_view_movement_claims) {
     hrmClaimGroup.push({ key: 'userMovementClaims', label: 'Movement Claims', icon: Route, onClick: () => onGoToUserClaims('movementClaims') });
   }
-  if (hasUserPanel && user.can_view_conveyance_claims) {
+  // Holding the Bill Claim ("conveyance") Admin module also brings your OWN
+  // claims here (it used to be a separate "My Conveyance Bill Claim" page
+  // under Claims/Bill/Disbursement).
+  if ((hasUserPanel && user.can_view_conveyance_claims) || canSeeModule('conveyance')) {
     hrmClaimGroup.push({ key: 'userConveyanceClaims', label: 'Conveyance Bill Claim', icon: CreditCard, onClick: () => onGoToUserClaims('conveyanceBill') });
   }
   const hrmAttendanceGroup: NavItem[] = [];
@@ -353,18 +356,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     { key: 'conveyance', label: 'Bill Claim', icon: CreditCard, onClick: () => onGoToAdminClaims('conveyance') },
     { key: 'disbursement', label: 'Bill Disbursement', icon: Banknote, onClick: () => onGoToAdminModule('disbursement') },
   ].filter((i) => canSeeModule(i.key as AdminModuleKey));
-  // "My Conveyance Bill Claim" — an Admin's own Bills/Claims, read-only. Not
-  // a separately-grantable module: shown to anyone who already has the
-  // 'conveyance' module, since that's exactly who has no other way to see
-  // their own record (the tab above shows everyone ELSE's, and this account
-  // may not have User Panel/can_view_conveyance_claims access at all).
   if (canSeeModule('conveyance')) {
-    claimsItems.push({
-      key: 'my_conveyance',
-      label: 'My Conveyance Bill Claim',
-      icon: Wallet,
-      onClick: () => onGoToAdminModule('my_conveyance')
-    });
     // "Bill Claim Policy" — rules for Bill Claims (limits, receipts, deadlines…).
     // Rides along with the 'conveyance' module like My Conveyance Bill Claim.
     claimsItems.push({

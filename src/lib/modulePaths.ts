@@ -31,7 +31,6 @@ export const ADMIN_TAB_PATH: Record<string, string[]> = {
   claims: [...HRM, 'Claims/Bill/Disbursement', 'Movement Claims'],
   conveyance: [...HRM, 'Claims/Bill/Disbursement', 'Bill Claim'],
   disbursement: [...HRM, 'Claims/Bill/Disbursement', 'Bill Disbursement'],
-  my_conveyance: [...HRM, 'Claims/Bill/Disbursement', 'My Conveyance Bill Claim'],
   bill_claim_policy: [...HRM, 'Claims/Bill/Disbursement', 'Bill Claim Policy'],
 
   employees: [...HRM, 'Employee', 'Employees'],
