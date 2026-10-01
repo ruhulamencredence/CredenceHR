@@ -1077,8 +1077,21 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // other section, they only show while they're the active mobileActiveSection);
   // this menu is what puts either one on screen there, exactly like tapping its
   // tile does on mobile — a dedicated page, not a spot to scroll to.
+  // The sidebar's nav requests (claims / leave / jobs / dashboard) stay set
+  // in App.tsx after they're handled, so when this panel mounts again (e.g.
+  // coming back from Timesheet) every one of them re-runs — and an old "Job
+  // Edits" request could override the Movement Claims click that just
+  // happened. Only the newest request is acted on.
+  const latestNavTs = Math.max(
+    claimsNavRequest?.ts || 0,
+    jobsNavRequest?.ts || 0,
+    dashboardNavRequest?.ts || 0,
+    leaveNavRequest?.ts || 0
+  );
+  const isLatestNav = (r?: { ts: number } | null) => !!r && r.ts === latestNavTs;
+
   useEffect(() => {
-    if (!claimsNavRequest) return;
+    if (!claimsNavRequest || !isLatestNav(claimsNavRequest)) return;
     const wantsMovement = claimsNavRequest.target === 'movementClaims';
     if (wantsMovement ? !canSeeMovementClaim : !canSeeConveyanceClaim) return;
     setMobileActiveSection(wantsMovement ? 'claim' : 'conveyanceClaim');
@@ -1091,7 +1104,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // instead of App.tsx rendering a separate component, so there's exactly one
   // Leave Application interface regardless of entry point.
   useEffect(() => {
-    if (!leaveNavRequest) return;
+    if (!isLatestNav(leaveNavRequest)) return;
     if (!canSeeLeave) return;
     setMobileActiveSection('leave');
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -1181,7 +1194,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // Entry/Jobs/Entry Details/Job Edits from the sidebar looked like it did
   // nothing on mobile even though desktop opened correctly.
   useEffect(() => {
-    if (!jobsNavRequest) return;
+    if (!jobsNavRequest || !isLatestNav(jobsNavRequest)) return;
     const map: Record<JobsNavRequest['target'], 'budget' | 'jobs' | 'entries' | 'jobEdit'> = {
       entry: 'budget',
       jobs: 'jobs',
@@ -1203,7 +1216,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // own standalone page) so the dashboard actually comes back on screen,
   // instead of leaving whichever section was active/restored beforehand.
   useEffect(() => {
-    if (!dashboardNavRequest) return;
+    if (!isLatestNav(dashboardNavRequest)) return;
     setMobileActiveSection(null);
     setDesktopActiveSection('dashboard');
     window.scrollTo({ top: 0, behavior: 'smooth' });

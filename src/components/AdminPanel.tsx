@@ -30,6 +30,7 @@ import { HRAnalyticsDashboard } from './HRAnalyticsDashboard';
 import { DocumentVaultPanel } from './DocumentVaultPanel';
 import { ServerProfilesPanel } from './ServerProfilesPanel';
 import { AdminDashboard } from './AdminDashboard';
+import { BudgetSubmissionReport } from './BudgetSubmissionReport';
 import { Spinner } from './Spinner';
 import { apiUrl } from '../lib/api';
 import { formatDate, todayDateOnlyString } from '../lib/formatDate';
@@ -2836,6 +2837,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // for an older entry that predates the Budget feature or doesn't have a matching
   // budget_items row — every other original column comes from that joined row and is
   // blank when there's no match, which is accurate (that import data doesn't exist).
+  // Reports tab: the MPR Entries report or the per-Project Budget
+  // Submission Status (BudgetSubmissionReport).
+  const [reportView, setReportView] = useState<'entries' | 'submission'>('entries');
+
   const handleDownloadExcel = () => {
     const rows = filteredEntries.map((ent) => ({
       'Entry Date': ent.entry_date,
@@ -2943,6 +2948,26 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
 
       {/* TAB 1: REPORTS */}
       {activeTab === 'reports' && (
+        <div className="flex items-center gap-1.5 rounded-full bg-slate-100 p-1.5 text-xs font-semibold w-fit mb-6">
+          {([
+            ['entries', 'MPR Entries Report'],
+            ['submission', 'Budget Submission Status']
+          ] as const).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setReportView(key)}
+              className={`px-4 py-2 rounded-full transition-colors ${reportView === key ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {activeTab === 'reports' && reportView === 'submission' && <BudgetSubmissionReport token={token} budgets={budgets} />}
+
+      {activeTab === 'reports' && reportView === 'entries' && (
         <div className="space-y-6">
           {/* Filters Bar */}
           <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
