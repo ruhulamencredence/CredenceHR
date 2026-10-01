@@ -4,8 +4,9 @@ import { apiUrl, dedupedFetchJson } from '../lib/api';
 import { Spinner } from './Spinner';
 import { AssetFulfillModal } from './AssetFulfillModal';
 import { AssetRequisitionEditItemsModal } from './AssetRequisitionEditItemsModal';
-import { UserClaimReference, ClaimRecord } from '../types';
+import { UserClaimReference, UserClaimItem, ClaimRecord } from '../types';
 import ClaimLocationMap from './ClaimLocationMap';
+import { ClaimBillLines } from './ClaimBillLines';
 
 // One row from GET /api/my-approvals — a trimmed-down ApprovalRequest, just
 // enough for this card (see server.ts for the full shape).
@@ -25,6 +26,8 @@ interface MyApprovalItem {
   // open the full check-in/check-out details (including location) before
   // deciding. See ApproveApplications.tsx for the original of this pattern.
   claim_refs?: UserClaimReference[];
+  // Only on a 'user_claim' item — the claim's bills (category / date / amount).
+  claim_items?: UserClaimItem[];
   source_approved_amount?: number | null;
   // Only present on an 'asset_requisition' item — see
   // ApproveApplications.tsx's identical field for the full shape.
@@ -416,6 +419,7 @@ export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ toke
                       {isAssetRequisition && <span className="text-blue-500 font-medium"> &middot; Tap to view details</span>}
                     </div>
 
+                    {item.source_type === 'user_claim' && <ClaimBillLines items={item.claim_items} compact />}
                     {item.source_type === 'user_claim' && item.claim_refs && item.claim_refs.length > 0 && (
                       <div className="mt-2 space-y-1">
                         {item.claim_refs.map((r) => (

@@ -11,8 +11,9 @@ import { Spinner } from './Spinner';
 import { AssetFulfillModal } from './AssetFulfillModal';
 import { AssetRequisitionEditItemsModal } from './AssetRequisitionEditItemsModal';
 import { ModulePath } from './ModulePath';
-import { UserClaimReference, ClaimRecord } from '../types';
+import { UserClaimReference, UserClaimItem, ClaimRecord } from '../types';
 import ClaimLocationMap from './ClaimLocationMap';
+import { ClaimBillLines } from './ClaimBillLines';
 
 interface ApproveApplicationsProps {
   token: string;
@@ -38,6 +39,8 @@ interface MyApprovalItem {
   // deciding. Empty/absent when the claim has no Movement Claim attached
   // (a plain hand-entered Amount).
   claim_refs?: UserClaimReference[];
+  // Only on a 'user_claim' item — the claim's bills (category / date / amount).
+  claim_items?: UserClaimItem[];
   // Running Approved Amount — set once an EARLIER Layer (e.g. the
   // Department/Direct Supervisor auto-layer at step 1) has already edited
   // it on a still-pending 'user_claim'. Used as this Layer's pre-fill
@@ -484,6 +487,7 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
                           </div>
                         )}
 
+                        {item.source_type === 'user_claim' && <ClaimBillLines items={item.claim_items} compact />}
                         {item.source_type === 'user_claim' && item.claim_refs && item.claim_refs.length > 0 && (
                           <div className="mt-2 space-y-1 max-w-md">
                             {item.claim_refs.map((r) => (

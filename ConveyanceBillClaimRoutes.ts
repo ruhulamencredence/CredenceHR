@@ -27,6 +27,7 @@
 // in server.ts's ensureSchemaMigrations(), same as every other table.
 
 import type { Express } from "express";
+import { checkClaimBills, loadCategories, attachClaimItems } from "./BillClaimPolicy";
 
 interface ConveyanceBillClaimRouteDeps {
   authenticateToken: any;
@@ -71,9 +72,6 @@ interface ConveyanceBillClaimRouteDeps {
   rejectUserClaimRecord: (userClaimId: number, rejectedBy: number, remarks: string | null) => Promise<void>;
   toDateOnlyString: (value: any) => string | null;
   todayInDhaka: () => string;
-  // Valid Category values for a Conveyance Bill Claim — same
-  // USER_CLAIM_CATEGORIES array defined once in server.ts.
-  userClaimCategories: readonly string[];
   // Department-wise scope for the 'conveyance' module (Admin Panel -> Users
   // -> Module Access -> "Conveyance Claim Departments") — same
   // getAttendanceReportDeptScope/getLeaveApplicationDeptScope convention
@@ -102,7 +100,6 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
     rejectUserClaimRecord,
     toDateOnlyString,
     todayInDhaka,
-    userClaimCategories: USER_CLAIM_CATEGORIES,
     getConveyanceClaimDeptScope
   } = deps;
 
@@ -513,18 +510,19 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
 
   app.post("/api/user-claims", authenticateToken, requireConveyanceClaimAccess, async (req: any, res) => {
     try {
-      const { claim_date, from_date, to_date, category, amount, description, file_base64, file_name, file_mimetype, claim_refs } =
+      const { claim_date, from_date, to_date, category, amount, description, file_base64, file_name, file_mimetype, claim_refs, items } =
         req.body || {};
 
-      if (!claim_date) return res.status(400).json({ error: "Claim Date is required." });
-      const from = from_date || claim_date;
-      const to = to_date || claim_date;
+      // A claim is filed today; its bills (items) carry their own dates.
+      // Older app versions still send one Category + Amount instead of
+      // items — that becomes a single bill dated From Date.
+      const today = todayInDhaka();
+      const from = toDateOnlyString(from_date || claim_date || today) || today;
+      const to = toDateOnlyString(to_date || from_date || claim_date || today) || from;
       if (String(to) < String(from)) {
         return res.status(400).json({ error: "To Date can't be before From Date." });
       }
-      if (!(USER_CLAIM_CATEGORIES as readonly string[]).includes(category)) {
-        return res.status(400).json({ error: "Select a valid Category." });
-      }
+      const usesItems = Array.isArray(items);
 
       // Optional Check In/Out references — each one is a completed Movement Claim
       // (claims table) the User owns, carrying its OWN Amount. A given check-in/
@@ -572,12 +570,7 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
         }
       }
 
-      // When references are attached, the Claim Amount is always their sum — a
-      // free-typed Amount is only used when there are none.
-      const amt = refs.length > 0 ? refs.reduce((sum, r) => sum + r.amount, 0) : Number(amount);
-      if (!Number.isFinite(amt) || amt <= 0) {
-        return res.status(400).json({ error: "Claim Amount must be a positive number." });
-      }
+      const refsTotal = refs.reduce((sum, r) => sum + r.amount, 0);
       const desc = typeof description === "string" ? description.trim().slice(0, 1000) : null;
 
       let fileBuffer: Buffer | null = null;
@@ -588,16 +581,41 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
         }
       }
 
+      // Bill Claim Policy (BillClaimPolicy.ts): dates, closed dates, limits,
+      // categories, receipts. When references are attached and no bills, the
+      // Claim Amount is their sum (older app versions).
+      const lines = usesItems ? items : refs.length > 0 ? [] : [{ category, bill_date: from, amount, description: desc }];
+      const checked = await checkClaimBills(queryDB, {
+        userId: req.user.id,
+        today,
+        from,
+        to,
+        lines,
+        extraTotal: refsTotal,
+        hasAttachment: !!fileBuffer
+      });
+      if ("error" in checked) return res.status(400).json({ error: checked.error });
+      let claimCategory = checked.categorySummary;
+      if (!claimCategory) {
+        // References only: the category the older form sent, else "Check In/Out".
+        const known = (await loadCategories(queryDB)).find((c) => c.is_active && c.name.toLowerCase() === String(category || "").toLowerCase());
+        claimCategory = known ? known.name : "Check In/Out";
+      }
+      const amt = checked.total;
+      if (!Number.isFinite(amt) || amt <= 0) {
+        return res.status(400).json({ error: "Claim Amount must be a positive number." });
+      }
+
       const result = await queryDB(
         `INSERT INTO user_claims
            (user_id, claim_date, from_date, to_date, category, amount, description, file_name, file_mimetype, file_data, status)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
         [
           req.user.id,
-          claim_date,
+          today,
           from,
           to,
-          category,
+          claimCategory,
           amt,
           desc,
           fileBuffer ? String(file_name || "attachment").slice(0, 255) : null,
@@ -605,6 +623,18 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
           fileBuffer
         ]
       );
+
+      try {
+        for (const l of checked.lines) {
+          await queryDB(
+            "INSERT INTO user_claim_items (user_claim_id, category_id, category_name, bill_date, amount, description) VALUES (?, ?, ?, ?, ?, ?)",
+            [result.insertId, l.category_id, l.category_name, l.bill_date, l.amount, l.description]
+          );
+        }
+      } catch (itemErr: any) {
+        await queryDB("DELETE FROM user_claims WHERE id = ?", [result.insertId]);
+        throw itemErr;
+      }
 
       if (refs.length > 0) {
         try {
@@ -660,7 +690,7 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
                 userId: approver.user_id,
                 type: "conveyance_approval",
                 title: "New Conveyance Bill Claim Awaiting Your Approval",
-                message: `${req.user.name} submitted a ${category} claim of \u09f3${amt.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (${toDateOnlyString(claim_date)}). Please review it.`,
+                message: `${req.user.name} submitted a ${claimCategory} claim of \u09f3${amt.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (${today}). Please review it.`,
                 relatedType: "user_claim",
                 relatedId: result.insertId
               });
@@ -695,7 +725,7 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
       );
       const withRefs = await attachUserClaimRefs(rows.map((r: any) => ({ ...r, amount: Number(r.amount), has_file: !!r.has_file })));
       const withApproval = await attachUserClaimApproval(withRefs);
-      res.json(withApproval);
+      res.json(await attachClaimItems(queryDB, withApproval));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -754,7 +784,7 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
         }))
       );
       const withApproval = await attachUserClaimApproval(withRefs);
-      res.json(withApproval);
+      res.json(await attachClaimItems(queryDB, withApproval));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -805,13 +835,22 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
       if (String(to) < String(from)) {
         return res.status(400).json({ error: "To Date can't be before From Date." });
       }
-      if (!(USER_CLAIM_CATEGORIES as readonly string[]).includes(category)) {
-        return res.status(400).json({ error: "Select a valid Category." });
+      // A claim with bill lines keeps its categories and total from those
+      // lines; the Admin edits its dates and description here.
+      const itemRows = await queryDB("SELECT amount FROM user_claim_items WHERE user_claim_id = ?", [uc.id]);
+      const hasItems = itemRows.length > 0;
+      const editCategory = hasItems ? uc.category : category;
+      if (!hasItems && editCategory !== uc.category) {
+        const known = (await loadCategories(queryDB)).some((c) => c.is_active && c.name === editCategory);
+        if (!known) return res.status(400).json({ error: "Select a valid Category." });
       }
 
       const refRows = await queryDB("SELECT amount FROM user_claim_references WHERE user_claim_id = ?", [uc.id]);
       let amt: number;
-      if (refRows.length > 0) {
+      if (hasItems) {
+        amt =
+          itemRows.reduce((sum: number, r: any) => sum + Number(r.amount), 0) + refRows.reduce((sum: number, r: any) => sum + Number(r.amount), 0);
+      } else if (refRows.length > 0) {
         // Referenced check-in/outs still drive the total — an Admin edits the
         // date/category/description here, not the Amount itself.
         amt = refRows.reduce((sum: number, r: any) => sum + Number(r.amount), 0);
@@ -825,13 +864,13 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
 
       await queryDB(
         "UPDATE user_claims SET claim_date = ?, from_date = ?, to_date = ?, category = ?, amount = ?, description = ? WHERE id = ?",
-        [claim_date, from, to, category, amt, desc, uc.id]
+        [claim_date, from, to, editCategory, amt, desc, uc.id]
       );
 
       if (uc.status === "approved") {
         const itemRows = await queryDB("SELECT id FROM conveyance_bill_items WHERE user_claim_id = ?", [uc.id]);
         if (itemRows.length > 0) {
-          const particulars = String(desc || `${category} claim`).slice(0, 255);
+          const particulars = String(desc || `${editCategory} claim`).slice(0, 255);
           await queryDB("UPDATE conveyance_bill_items SET entry_date = ?, particulars = ?, amount = ? WHERE id = ?", [
             toDateOnlyString(claim_date),
             particulars,

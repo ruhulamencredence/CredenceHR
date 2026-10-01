@@ -37,6 +37,7 @@ import { registerEmployee360Routes, ensureEmployee360Schema } from "./HrOps360Ro
 import { registerHrReportsRoutes, ensureHrReportsSchema } from "./HrOpsReportsRoutes";
 import { registerInfoRequestRoutes, ensureInfoRequestsSchema } from "./HrOpsInfoRequestsRoutes";
 import { registerSiteAttendanceRoutes, ensureSiteAttendanceSchema } from "./SiteAttendanceRoutes";
+import { registerBillClaimPolicyRoutes, ensureBillClaimPolicySchema } from "./BillClaimPolicy";
 import { registerCompanyRoutes, ensureCompanySchema, resolveCompanyContext, checkWorkspaceLogin, workspaceStartCompany } from "./CompanyRoutes";
 import { companyStore, activeCompanyId, activeGroupId } from "./companyContext";
 import { scopeSql, scopeColumnsFor } from "./companyScope";
@@ -257,6 +258,9 @@ async function ensureSchemaMigrations() {
 
   // Desktop/browser notifications (WebPushService.ts).
   await ensureWebPushSchema(queryDB).catch((e: any) => console.warn("⚠️ Web push tables: " + e.message));
+
+  // Bill Claim Policy: categories, rules and each claim's bill lines (BillClaimPolicy.ts).
+  await ensureBillClaimPolicySchema(queryDB).catch((e: any) => console.warn("⚠️ Bill claim policy tables: " + e.message));
 
   // Personal Data (ProfilePage.tsx -> PersonalDataForm.tsx) — one row per user,
   // created on first save. Position/Department are deliberately NOT columns
@@ -5010,9 +5014,11 @@ async function startServer() {
     rejectUserClaimRecord,
     toDateOnlyString,
     todayInDhaka,
-    userClaimCategories: USER_CLAIM_CATEGORIES,
     getConveyanceClaimDeptScope
   });
+
+  // Bill Claim Policy — rules + categories the Superadmin edits (BillClaimPolicy.ts).
+  registerBillClaimPolicyRoutes(app, { authenticateToken, requireConveyanceClaimAccess, queryDB, getAdminModules, todayInDhaka });
 
   // Approve Applications / generic Approval workflow (chain config, Admin
   // approvals list+act, My Approvals list+act, Approval Templates, Template

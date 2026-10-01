@@ -1283,7 +1283,9 @@ export interface AttendanceCorrection {
 // Movement Claim (ClaimRecord — a live GPS check-in/out) this is filled in by
 // hand after the fact, optionally spanning several days (a multi-day tour) and
 // optionally carrying a receipt/attachment. See POST /api/user-claims.
-export type UserClaimCategory = 'Transport' | 'Fuel' | 'Toll' | 'Parking' | 'Others';
+// Category names come from Bill Claim Policy (bill_claim_categories), so any
+// name is possible; these five are the starting set.
+export type UserClaimCategory = string;
 export type UserClaimStatus = 'pending' | 'approved' | 'rejected';
 
 export const USER_CLAIM_CATEGORIES: UserClaimCategory[] = ['Transport', 'Fuel', 'Toll', 'Parking', 'Others'];
@@ -1311,17 +1313,64 @@ export interface UserClaimReference {
   check_out_approval?: ApprovalStatusSummary | null;
 }
 
+// One bill inside a Conveyance Bill Claim. category_name is kept as it was
+// when filed, so renaming/deleting the category later doesn't change it.
+export interface UserClaimItem {
+  id?: number;
+  category_id: number | null;
+  category_name: string;
+  bill_date: string; // YYYY-MM-DD
+  amount: number;
+  description?: string | null;
+}
+
+// Bill Claim Policy (Admin Panel -> Claims/Bill/Disbursement -> Bill Claim Policy).
+export interface BillClaimCategory {
+  id: number;
+  name: string;
+  description: string | null;
+  is_active: boolean;
+  sort_order: number;
+  max_per_bill: number | null;
+  monthly_limit: number | null;
+  receipt_required: boolean;
+}
+export interface BillClaimPolicyDef {
+  key: string;
+  group: 'dates' | 'amounts' | 'claim';
+  label: string;
+  help: string;
+  type: 'number' | 'boolean';
+  default: number | boolean;
+  min?: number;
+  max?: number;
+  unit?: string;
+}
+export type BillClaimPolicyValues = Record<string, number | boolean>;
+// GET /api/bill-claim-policy/mine — what the New Conveyance Claim form needs.
+export interface MyBillClaimPolicy {
+  today: string;
+  min_date: string;
+  max_date: string;
+  values: BillClaimPolicyValues;
+  categories: BillClaimCategory[];
+  locked_dates: string[];
+}
+
 export interface UserClaim {
   id: number;
   user_id: number;
   claim_date: string; // YYYY-MM-DD
   from_date: string; // YYYY-MM-DD — start of the covered date range (defaults to claim_date)
   to_date: string; // YYYY-MM-DD — end of the covered date range, >= from_date
+  // One category name, or "Fuel, Toll" when the claim's bills span several.
   category: UserClaimCategory;
-  // The total Claim Amount. Whenever claim_refs is non-empty this is always the
-  // SUM of those rows' amounts (computed server-side on submit); otherwise it's
-  // the User's own free-typed figure.
+  // The total Claim Amount: the bills (items) plus any referenced
+  // check-in/outs (claim_refs).
   amount: number;
+  // The claim's bills — one per category/date/amount (empty on claims filed
+  // before bill lines existed).
+  items?: UserClaimItem[];
   // Zero or more completed Movement Claims (check-in/out) this claim references,
   // each with its own amount — see POST /api/user-claims (claim_refs in the
   // request body) and GET /api/claims/available (the picker source). A given

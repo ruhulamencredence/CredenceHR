@@ -5,8 +5,8 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Paperclip, AlertTriangle, CheckCircle2, Route } from 'lucide-react';
-import { UserClaimCategory, USER_CLAIM_CATEGORIES, ClaimRecord } from '../types';
+import { X, Paperclip, AlertTriangle, CheckCircle2, Route, Plus, Trash2, Lock, ShieldCheck } from 'lucide-react';
+import { ClaimRecord, MyBillClaimPolicy } from '../types';
 import { apiUrl } from '../lib/api';
 import { todayDateOnlyString, formatDate } from '../lib/formatDate';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
@@ -29,13 +29,32 @@ const ACCEPTED_TYPES = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'a
 // and an optional Image/PDF attachment up to 5MB — sent as file_base64/file_name/
 // file_mimetype in the JSON body (same FileReader/Base64 pattern as the Budget
 // Excel import), never multipart/multer.
+// One bill line in the form (strings while being typed).
+interface BillDraft {
+  key: number;
+  category_id: string;
+  bill_date: string;
+  amount: string;
+  description: string;
+}
+
+let nextBillKey = 1;
+const newBill = (date: string): BillDraft => ({ key: nextBillKey++, category_id: '', bill_date: date, amount: '', description: '' });
+const money = (n: number) => `৳${n.toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+// Several bills per claim, each with its own Category, Date (inside the
+// claim's From–To range) and Amount. The rules come from Bill Claim Policy
+// (GET /api/bill-claim-policy/mine): how far back a date may go, dates already
+// closed for this user, categories and their limits. The server checks them
+// again on submit.
 export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = ({ token, onClose, onSubmitted }) => {
-  const today = todayDateOnlyString();
-  const [claimDate, setClaimDate] = useState(today);
-  const [fromDate, setFromDate] = useState(today);
-  const [toDate, setToDate] = useState(today);
-  const [category, setCategory] = useState<UserClaimCategory | ''>('');
-  const [amount, setAmount] = useState('');
+  const [policy, setPolicy] = useState<MyBillClaimPolicy | null>(null);
+  const [policyError, setPolicyError] = useState('');
+  const today = policy?.today || todayDateOnlyString();
+  const claimDate = today;
+  const [fromDate, setFromDate] = useState(todayDateOnlyString());
+  const [toDate, setToDate] = useState(todayDateOnlyString());
+  const [bills, setBills] = useState<BillDraft[]>(() => [newBill(todayDateOnlyString())]);
   const [description, setDescription] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [fileError, setFileError] = useState('');
@@ -53,6 +72,46 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
   const [selectedRefs, setSelectedRefs] = useState<Record<number, string>>({});
 
   useBackButtonClose(true, submitting ? () => {} : onClose);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(apiUrl('/api/bill-claim-policy/mine'), { headers: { Authorization: `Bearer ${token}` } });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Could not load the Bill Claim Policy.');
+        if (cancelled) return;
+        setPolicy(data);
+        setFromDate(data.today);
+        setToDate(data.today);
+        setBills([newBill(data.today)]);
+      } catch (err: any) {
+        if (!cancelled) setPolicyError(err.message || 'Could not load the Bill Claim Policy.');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
+
+  const locked = new Set(policy?.locked_dates || []);
+  const minDate = policy?.min_date || today;
+  const maxDate = policy?.max_date || today;
+  const categories = policy?.categories || [];
+  const maxBills = Number(policy?.values.max_bills_per_claim) || 20;
+  const billsTotal = bills.reduce((sum, b) => sum + (Number(b.amount) || 0), 0);
+
+  const updateBill = (key: number, patch: Partial<BillDraft>) => setBills((prev) => prev.map((b) => (b.key === key ? { ...b, ...patch } : b)));
+  const removeBill = (key: number) => setBills((prev) => prev.filter((b) => b.key !== key));
+  const addBill = () =>
+    setBills((prev) => (prev.length >= maxBills ? prev : [...prev, newBill(prev[prev.length - 1]?.bill_date || fromDate)]));
+
+  // Changing the range pulls any bill date that falls outside it back inside.
+  const setRange = (from: string, to: string) => {
+    setFromDate(from);
+    setToDate(to);
+    setBills((prev) => prev.map((b) => ({ ...b, bill_date: b.bill_date < from ? from : b.bill_date > to ? to : b.bill_date })));
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -87,6 +146,11 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
 
   const hasRefs = Object.keys(selectedRefs).length > 0;
   const refsTotal = Object.values(selectedRefs).reduce((sum, v) => sum + (Number(v) || 0), 0);
+  const claimTotal = billsTotal + refsTotal;
+  const receiptAbove = Number(policy?.values.attachment_required_above) || 0;
+  const needsReceipt =
+    (receiptAbove > 0 && claimTotal > receiptAbove) ||
+    (!!policy?.values.enforce_category_limits && bills.some((b) => categories.find((c) => String(c.id) === b.category_id)?.receipt_required));
 
   const handleFilePick = (f: File | null) => {
     setFileError('');
@@ -110,21 +174,33 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
   };
 
   const validate = (): string | null => {
-    if (!claimDate) return 'Claim Date is required.';
+    if (!policy) return policyError || 'Loading the Bill Claim Policy\u2026';
     if (!fromDate || !toDate) return 'From Date and To Date are required.';
     if (toDate < fromDate) return 'To Date can\u2019t be before From Date.';
-    if (!category) return 'Select a Category.';
-    if (hasRefs) {
-      for (const v of Object.values(selectedRefs)) {
-        const amt = Number(v);
-        if (!v || !Number.isFinite(amt) || amt <= 0) return 'Enter an Amount greater than 0 for every referenced check-in/out.';
+    if (fromDate < minDate || toDate > maxDate) return `Bills can only be claimed for dates from ${formatDate(minDate)} to ${formatDate(maxDate)}.`;
+    if (bills.length === 0 && !hasRefs) return 'Add at least one bill.';
+    for (let i = 0; i < bills.length; i++) {
+      const b = bills[i];
+      const n = i + 1;
+      if (!b.category_id) return `Bill ${n}: select a category.`;
+      if (!b.bill_date) return `Bill ${n}: select the bill's date.`;
+      if (b.bill_date < fromDate || b.bill_date > toDate) return `Bill ${n}: the date must be between ${formatDate(fromDate)} and ${formatDate(toDate)}.`;
+      if (locked.has(b.bill_date)) return `Bill ${n}: ${formatDate(b.bill_date)} was already claimed on an earlier day.`;
+      const amt = Number(b.amount);
+      if (!b.amount || !Number.isFinite(amt) || amt <= 0) return `Bill ${n}: enter an amount greater than 0.`;
+      const cat = categories.find((c) => String(c.id) === b.category_id);
+      if (policy.values.enforce_category_limits && cat?.max_per_bill != null && amt > cat.max_per_bill) {
+        return `Bill ${n}: ${cat.name} bills can be at most ${money(cat.max_per_bill)} each.`;
       }
-      if (refsTotal <= 0) return 'Claim Amount must be greater than 0.';
-    } else {
-      const amt = Number(amount);
-      if (!amount || !Number.isFinite(amt) || amt <= 0) return 'Claim Amount must be greater than 0.';
     }
-    if (description.length > 0 && description.length > 500) return 'Description is too long.';
+    for (const v of Object.values(selectedRefs)) {
+      const amt = Number(v);
+      if (!v || !Number.isFinite(amt) || amt <= 0) return 'Enter an Amount greater than 0 for every referenced check-in/out.';
+    }
+    const maxTotal = Number(policy.values.max_claim_total) || 0;
+    if (maxTotal > 0 && claimTotal > maxTotal) return `A claim can add up to at most ${money(maxTotal)}.`;
+    if (needsReceipt && !file) return 'Attach the receipt \u2014 this claim needs one.';
+    if (description.length > 500) return 'Description is too long.';
     return null;
   };
 
@@ -154,8 +230,12 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
           claim_date: claimDate,
           from_date: fromDate,
           to_date: toDate,
-          category,
-          amount: hasRefs ? refsTotal : Number(amount),
+          items: bills.map((b) => ({
+            category_id: Number(b.category_id),
+            bill_date: b.bill_date,
+            amount: Number(b.amount),
+            description: b.description.trim() || undefined
+          })),
           description: description.trim() || undefined,
           ...(hasRefs
             ? { claim_refs: Object.entries(selectedRefs).map(([claim_id, amt]) => ({ claim_id: Number(claim_id), amount: Number(amt) })) }
@@ -206,14 +286,27 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
         </div>
 
         <div className="p-5 space-y-4 overflow-y-auto min-h-0">
-          <div>
-            <label className="block text-[11px] font-semibold text-slate-500 mb-1">Claim Date *</label>
-            <input
-              type="date"
-              value={claimDate}
-              onChange={(e) => setClaimDate(e.target.value)}
-              className="w-full text-sm px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none"
-            />
+          {policyError && (
+            <div className="flex items-center gap-2 text-xs px-3 py-2.5 rounded-xl bg-rose-50 text-rose-700">
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+              <span>{policyError}</span>
+            </div>
+          )}
+          {!policy && !policyError && (
+            <div className="flex items-center gap-2 text-xs text-slate-400">
+              <Spinner size={14} /> Loading the Bill Claim Policy…
+            </div>
+          )}
+
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-slate-500">
+              Claim Date: <span className="font-semibold text-slate-800">{formatDate(claimDate)}</span>
+            </span>
+            {policy && (
+              <span className="inline-flex items-center gap-1 text-slate-400" title="Set by Bill Claim Policy">
+                <ShieldCheck className="w-3.5 h-3.5" /> Dates allowed: {formatDate(minDate)} – {formatDate(maxDate)}
+              </span>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -222,10 +315,9 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
               <input
                 type="date"
                 value={fromDate}
-                onChange={(e) => {
-                  setFromDate(e.target.value);
-                  if (toDate < e.target.value) setToDate(e.target.value);
-                }}
+                min={minDate}
+                max={maxDate}
+                onChange={(e) => e.target.value && setRange(e.target.value, toDate < e.target.value ? e.target.value : toDate)}
                 className="w-full text-sm px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none"
               />
             </div>
@@ -235,27 +327,117 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
                 type="date"
                 value={toDate}
                 min={fromDate}
-                onChange={(e) => setToDate(e.target.value)}
+                max={maxDate}
+                onChange={(e) => e.target.value && setRange(fromDate, e.target.value)}
                 className="w-full text-sm px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none"
               />
             </div>
           </div>
-          <p className="text-[11px] text-slate-400 -mt-2">Useful for multi-day tours — leave both the same for a single-day claim.</p>
+          {locked.size > 0 && (
+            <p className="text-[11px] text-amber-700 -mt-2 flex items-start gap-1">
+              <Lock className="w-3 h-3 mt-0.5 shrink-0" />
+              <span>
+                Already claimed on an earlier day (no more bills): {[...locked].map((d) => formatDate(d)).join(', ')}
+              </span>
+            </p>
+          )}
 
           <div>
-            <label className="block text-[11px] font-semibold text-slate-500 mb-1">Category *</label>
-            <select
-              value={category}
-              onChange={(e) => setCategory(e.target.value as UserClaimCategory)}
-              className="w-full text-sm px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none"
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-[11px] font-semibold text-slate-500">Bills *</label>
+              <span className="text-[11px] text-slate-400">
+                {bills.length} / {maxBills}
+              </span>
+            </div>
+            <div className="space-y-2">
+              {bills.map((b, i) => {
+                const dateClosed = locked.has(b.bill_date);
+                const cat = categories.find((c) => String(c.id) === b.category_id);
+                return (
+                  <div key={b.key} className="border border-slate-200 rounded-xl p-2.5 bg-slate-50/60 space-y-2" aria-label={`Bill ${i + 1}`}>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-semibold text-slate-600">Bill {i + 1}</span>
+                      <button
+                        type="button"
+                        onClick={() => removeBill(b.key)}
+                        disabled={bills.length === 1 && !hasRefs}
+                        className="p-1 text-slate-400 hover:text-rose-600 disabled:opacity-30"
+                        aria-label={`Remove bill ${i + 1}`}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <select
+                        value={b.category_id}
+                        onChange={(e) => updateBill(b.key, { category_id: e.target.value })}
+                        aria-label={`Bill ${i + 1} category`}
+                        className="w-full text-xs px-2.5 py-2 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                      >
+                        <option value="">Category…</option>
+                        {categories.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name}
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        type="date"
+                        value={b.bill_date}
+                        min={fromDate}
+                        max={toDate}
+                        onChange={(e) => updateBill(b.key, { bill_date: e.target.value })}
+                        aria-label={`Bill ${i + 1} date`}
+                        className={`w-full text-xs px-2.5 py-2 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none ${dateClosed ? 'border-rose-400 ring-1 ring-rose-400' : ''}`}
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="relative">
+                        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400">৳</span>
+                        <input
+                          type="number"
+                          min="0.01"
+                          step="0.01"
+                          value={b.amount}
+                          onChange={(e) => updateBill(b.key, { amount: e.target.value })}
+                          placeholder="Amount"
+                          aria-label={`Bill ${i + 1} amount`}
+                          className="w-full text-xs px-2.5 py-2 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none pl-6"
+                        />
+                      </div>
+                      <input
+                        value={b.description}
+                        onChange={(e) => updateBill(b.key, { description: e.target.value })}
+                        maxLength={200}
+                        placeholder="Note (optional)"
+                        aria-label={`Bill ${i + 1} note`}
+                        className="w-full text-xs px-2.5 py-2 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                      />
+                    </div>
+                    {dateClosed && <p className="text-[10px] text-rose-600">This date was already claimed on an earlier day.</p>}
+                    {cat && policy?.values.enforce_category_limits && (cat.max_per_bill != null || cat.monthly_limit != null || cat.receipt_required) && (
+                      <p className="text-[10px] text-slate-400">
+                        {[
+                          cat.max_per_bill != null ? `Up to ${money(cat.max_per_bill)} per bill` : '',
+                          cat.monthly_limit != null ? `${money(cat.monthly_limit)} a month` : '',
+                          cat.receipt_required ? 'receipt needed' : ''
+                        ]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            <button
+              type="button"
+              onClick={addBill}
+              disabled={bills.length >= maxBills}
+              className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-blue-600 hover:text-blue-800 disabled:opacity-40"
             >
-              <option value="">Select a category</option>
-              {USER_CLAIM_CATEGORIES.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
+              <Plus className="w-3.5 h-3.5" /> Add another bill
+            </button>
           </div>
 
           <div>
@@ -317,29 +499,12 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
             )}
           </div>
 
-          <div>
-            <label className="block text-[11px] font-semibold text-slate-500 mb-1">Claim Amount *</label>
-            <div className="relative">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">৳</span>
-              <input
-                type="number"
-                min="0.01"
-                step="0.01"
-                value={hasRefs ? refsTotal.toFixed(2) : amount}
-                onChange={(e) => setAmount(e.target.value)}
-                readOnly={hasRefs}
-                disabled={hasRefs}
-                placeholder="0.00"
-                className={`w-full text-sm pl-7 pr-3 py-2.5 border rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none ${
-                  hasRefs ? 'bg-slate-100 border-slate-200 text-slate-500 cursor-not-allowed' : 'bg-slate-50 border-slate-200'
-                }`}
-              />
-            </div>
-            {hasRefs && (
-              <p className="text-[11px] text-slate-400 mt-1">
-                Auto-calculated from {Object.keys(selectedRefs).length} referenced check-in/out(s) above.
-              </p>
-            )}
+          <div className="flex items-center justify-between px-3 py-2.5 rounded-xl bg-blue-50 text-sm">
+            <span className="text-slate-600">
+              Claim total
+              {hasRefs && <span className="text-[11px] text-slate-400"> (bills {money(billsTotal)} + check-in/out {money(refsTotal)})</span>}
+            </span>
+            <span className="font-bold text-slate-900">{money(claimTotal)}</span>
           </div>
 
           <div>
@@ -355,7 +520,9 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
           </div>
 
           <div>
-            <label className="block text-[11px] font-semibold text-slate-500 mb-1">Attachment (optional, image/PDF, up to 5MB)</label>
+            <label className="block text-[11px] font-semibold text-slate-500 mb-1">
+              {needsReceipt ? 'Receipt * (this claim needs one — image/PDF, up to 5MB)' : 'Attachment (optional, image/PDF, up to 5MB)'}
+            </label>
             <label className="flex items-center gap-2 text-sm px-3 py-2.5 bg-slate-50 border border-dashed border-slate-300 rounded-xl cursor-pointer hover:bg-slate-100 transition-colors">
               <Paperclip className="w-4 h-4 text-slate-400 shrink-0" />
               <span className="text-slate-600 truncate">{file ? file.name : 'Choose a file\u2026'}</span>
@@ -390,7 +557,7 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
           <button
             type="button"
             onClick={handleSubmit}
-            disabled={submitting}
+            disabled={submitting || !policy}
             className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold rounded-xl text-sm transition-all shadow-sm"
           >
             {submitting ? <Spinner size={16} /> : <CheckCircle2 className="w-4 h-4" />}
