@@ -3988,12 +3988,15 @@ async function startServer() {
 
   // Conveyance Bill Claim self-service routes — same pattern as
   // requireMovementClaimAccess above, gated by can_view_conveyance_claims.
+  // Anyone holding the Bill Claim ("conveyance") Admin module also passes, so
+  // they file / see their own claims from Self Service like everyone else.
   const requireConveyanceClaimAccess = async (req: any, res: any, next: any) => {
     if (!req.user) return res.status(401).json({ error: "Access token required" });
     if (req.user.role === "superadmin") return next();
     try {
       const rows: any = await queryDB("SELECT can_view_conveyance_claims FROM users WHERE id = ?", [req.user.id]);
       if (rows.length > 0 && !!Number(rows[0].can_view_conveyance_claims)) return next();
+      if ((await getAdminModules(req.user.id)).includes("conveyance")) return next();
       return res.status(403).json({ error: "You don't have access to Conveyance Bill Claim. Ask your Superadmin to grant it." });
     } catch (err: any) {
       res.status(500).json({ error: err.message });

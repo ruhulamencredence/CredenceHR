@@ -1571,14 +1571,12 @@ export interface ClaimsNavRequest {
 // tab with no User Panel equivalent, unlike Movement Claims/Conveyance Bill
 // Claim above which exist in both panels.
 export interface AdminNavRequest {
-  // 'my_conveyance' is NOT an AdminModuleKey/module_permissions entry — it's
-  // the "My Conveyance Bill Claim" sub-view (an Admin's own Bills/Claims,
-  // read-only), shown alongside the 'conveyance' tab to anyone who already
-  // has that module, not a separately-grantable permission of its own.
+  // 'bill_claim_policy' is NOT an AdminModuleKey/module_permissions entry —
+  // the "Bill Claim Policy" page rides along with the 'conveyance' tab.
   // 'permanent_delete_log' is likewise NOT an AdminModuleKey/module_permissions
   // entry — Superadmin-only, see GET /api/entries/permanent-delete-log in
   // EntriesRoutes.ts.
-  target: 'dashboard' | 'reports' | 'mprs' | 'imports' | 'editlog' | 'recycle' | 'projects' | 'branches' | 'users' | 'notices' | 'approvals' | 'attendance' | 'attendance_reports' | 'employees' | 'departments' | 'tracking' | 'holidays' | 'disbursement' | 'my_conveyance' | 'bill_claim_policy' | 'asset_management' | 'permanent_delete_log' | 'companies' | 'devices' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'hr_operations';
+  target: 'dashboard' | 'reports' | 'mprs' | 'imports' | 'editlog' | 'recycle' | 'projects' | 'branches' | 'users' | 'notices' | 'approvals' | 'attendance' | 'attendance_reports' | 'employees' | 'departments' | 'tracking' | 'holidays' | 'disbursement' | 'bill_claim_policy' | 'asset_management' | 'permanent_delete_log' | 'companies' | 'devices' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'hr_operations';
   ts: number;
 }
 

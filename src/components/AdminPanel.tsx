@@ -12,7 +12,6 @@ import { NoticeManager } from './NoticeManager';
 import { EmployeesPanel } from './EmployeesPanel';
 import { ClaimsPanel } from './ClaimsPanel';
 import { ConveyanceBillPanel } from './ConveyanceBillPanel';
-import { MyConveyanceBillClaimPanel } from './MyConveyanceBillClaimPanel';
 import { DisbursementPanel } from './DisbursementPanel';
 import { ApprovalManager } from './ApprovalManager';
 import { ApprovalTemplateManager } from './ApprovalTemplateManager';
@@ -348,7 +347,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // PUT /api/users/:id/module-permissions).
   const canGrantModuleAccess = isSuperAdmin || !!user.can_grant_module_access;
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'my_conveyance' | 'bill_claim_policy' | 'disbursement' | 'holidays' | 'asset_management' | 'vehicle_management' | 'permanent_delete_log' | 'companies' | 'devices' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'hr_operations'>(
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'bill_claim_policy' | 'disbursement' | 'holidays' | 'asset_management' | 'vehicle_management' | 'permanent_delete_log' | 'companies' | 'devices' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'hr_operations'>(
     () => {
       // Restores whichever tab this Admin was last looking at — see the
       // "pull down to reload" note in App.tsx: since a reload now has to be
@@ -356,13 +355,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       // localStorage (survives a reload) instead of living only in memory.
       try {
         const saved = localStorage.getItem(`mpr_admin_tab_${user.id}`);
-        // 'my_conveyance' isn't its own module_permissions entry — it rides
+        // 'bill_claim_policy' isn't its own module_permissions entry — it rides
         // along with 'conveyance' (see the tab-visibility effect below).
         // 'permanent_delete_log' isn't either — Superadmin-only, never
         // granted via module_permissions (see GET /api/entries/permanent-delete-log).
         const savedVisible =
           saved === 'dashboard' ? canSeeDashboard :
-          saved === 'my_conveyance' || saved === 'bill_claim_policy' ? isSuperAdmin || visibleModules.includes('conveyance') :
+          saved === 'bill_claim_policy' ? isSuperAdmin || visibleModules.includes('conveyance') :
           saved === 'permanent_delete_log' || saved === 'companies' || saved === 'devices' ? isSuperAdmin :
           isSuperAdmin || visibleModules.includes(saved as AdminModuleKey);
         if (saved && savedVisible) return saved as any;
@@ -409,15 +408,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       return;
     }
     // 'permanent_delete_log' isn't an AdminModuleKey/module_permissions
-    // entry either — Superadmin-only, same reasoning as 'my_conveyance'
+    // entry either — Superadmin-only, same reasoning as 'bill_claim_policy'
     // below.
     if (adminNavRequest.target === 'permanent_delete_log' || adminNavRequest.target === 'companies' || adminNavRequest.target === 'devices') {
       if (isSuperAdmin) setActiveTab(adminNavRequest.target);
       return;
     }
-    // 'my_conveyance' isn't its own module_permissions entry — it rides along
-    // with 'conveyance' (see the "My Conveyance Bill Claim" item in GlobalSidebar).
-    const visible = adminNavRequest.target === 'my_conveyance' || adminNavRequest.target === 'bill_claim_policy' ? canSee('conveyance') : canSee(adminNavRequest.target as AdminModuleKey);
+    // 'bill_claim_policy' isn't its own module_permissions entry — it rides along
+    // with 'conveyance' (see the "Bill Claim Policy" item in GlobalSidebar).
+    const visible = adminNavRequest.target === 'bill_claim_policy' ? canSee('conveyance') : canSee(adminNavRequest.target as AdminModuleKey);
     if (visible) setActiveTab(adminNavRequest.target as any);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adminNavRequest]);
@@ -429,7 +428,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     const activeTabStillVisible =
       activeTab === 'dashboard' ? canSeeDashboard :
       activeTab === 'permanent_delete_log' || activeTab === 'companies' || activeTab === 'devices' ? isSuperAdmin :
-      activeTab === 'my_conveyance' || activeTab === 'bill_claim_policy' ? canSee('conveyance') : canSee(activeTab);
+      activeTab === 'bill_claim_policy' ? canSee('conveyance') : canSee(activeTab);
     if (!activeTabStillVisible && visibleModules.length > 0) {
       setActiveTab(visibleModules[0] as any);
     }
@@ -6359,14 +6358,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           hand, then export a printable PDF bill. */}
       {activeTab === 'conveyance' && (
         <ConveyanceBillPanel token={token} users={users} />
-      )}
-
-      {/* TAB: MY CONVEYANCE BILL CLAIM — same "conveyance" module grant as the
-          tab above, but scoped to THIS Admin's own Bills/Claims and read-only
-          (no Approve/Reject/Edit/Delete) — see MyConveyanceBillClaimPanel.tsx
-          for why this exists as a separate page. */}
-      {activeTab === 'my_conveyance' && (
-        <MyConveyanceBillClaimPanel token={token} user={user} />
       )}
 
       {/* TAB: BILL CLAIM POLICY — same "conveyance" grant as above. The policy

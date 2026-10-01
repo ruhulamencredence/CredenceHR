@@ -1027,7 +1027,10 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // tiles, the Navbar's desktop "Claims" menu targets, and to keep either page
   // from opening at all (e.g. a stale nav request) without the grant.
   const canSeeMovementClaim = user.role === 'superadmin' || !!user.can_view_movement_claims;
-  const canSeeConveyanceClaim = user.role === 'superadmin' || !!user.can_view_conveyance_claims;
+  // Holding the Bill Claim ("conveyance") Admin module counts too — that's
+  // where those accounts see their own claims.
+  const canSeeConveyanceClaim =
+    user.role === 'superadmin' || !!user.can_view_conveyance_claims || (user.module_permissions || []).includes('conveyance');
   // Same Superadmin-gated pattern as the two above, but ON by default (see
   // types.ts) — covers the "Select a Budget", "Jobs" and "Job Entry Details"
   // mobile tiles, the matching BottomNav tabs, and the desktop Navbar/
