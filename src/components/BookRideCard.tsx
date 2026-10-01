@@ -5,6 +5,8 @@
 
 import React, { useEffect, useState } from 'react';
 import { Car, MapPin, ChevronRight } from 'lucide-react';
+import { Lottie } from 'lottie-react';
+import rideAnimation from '../assets/hasahar.json';
 import { apiUrl } from '../lib/api';
 import { BookRideTarget } from '../lib/quickAccess';
 
@@ -61,17 +63,23 @@ export const BookRideCard: React.FC<BookRideCardProps> = ({ token, userId, onOpe
   const active = (useActiveRides(token, userId) || []).slice(0, 2);
 
   return (
-    <div className={`bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden flex flex-col ${className}`}>
-      <div className="px-5 pt-5 pb-4 sm:px-6 border-b border-slate-200 flex items-start justify-between gap-3">
-        <div>
+    <div className={`relative bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden flex flex-col ${className}`}>
+      {/* Decorative ride animation tucked into the card's top-right corner
+          (its road runs diagonally across that corner). Purely visual — it
+          never takes a tap. */}
+      <div className="absolute top-0 right-0 w-32 h-[104px] pointer-events-none" aria-hidden="true">
+        <Lottie src={rideAnimation} autoplay loop className="w-full h-full" />
+      </div>
+      <div className="relative px-5 pt-5 pb-4 sm:px-6 pr-32 sm:pr-32 border-b border-slate-200 flex items-start justify-between gap-3">
+        <div className="relative z-10">
           <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
             <Car className="w-4 h-4 text-blue-600" /> Book a Ride
           </h3>
           <p className="text-xs text-slate-500 mt-0.5">Request an office vehicle</p>
+          <button type="button" onClick={() => onOpen('status')} className="mt-1.5 text-xs font-medium text-blue-600 hover:underline">
+            Ride Status
+          </button>
         </div>
-        <button type="button" onClick={() => onOpen('status')} className="text-xs font-medium text-blue-600 hover:underline shrink-0">
-          Ride Status
-        </button>
       </div>
 
       <div className="p-5 sm:px-6 space-y-3 flex-1">
