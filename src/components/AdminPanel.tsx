@@ -2485,18 +2485,27 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // or not they still have active entries under it (the automatic version — see
   // EntriesRoutes.ts unlockBudgetSubmissionIfEmpty — only fires once their entries
   // are all gone; this is the Admin's override for any other reason to reopen it).
-  const handleUnlockSubmission = async (userId: number) => {
+  const handleUnlockSubmission = async (userId: number, job?: { id: number; no: string | null }) => {
     if (!submissionsBudget) return;
-    if (!confirm('Unlock this user\'s Final Submit on this Budget? They will be able to add new entries to it again.')) return;
+    if (
+      !confirm(
+        job
+          ? `Unlock Job ${job.no || job.id} for this user? They will be able to change that Job's entries again.`
+          : 'Unlock this user\'s Final Submit on this Budget? They will be able to add new entries to it again.'
+      )
+    )
+      return;
     setUnlockingUserId(userId);
     try {
-      const res = await fetch(apiUrl(`/api/budgets/${submissionsBudget.id}/submissions/${userId}`), {
+      const res = await fetch(apiUrl(`/api/budgets/${submissionsBudget.id}/submissions/${userId}${job ? `?job_id=${job.id}` : ''}`), {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to unlock');
-      setBudgetSubmissions((prev) => prev.filter((s) => s.user_id !== userId));
+      setBudgetSubmissions((prev) =>
+        prev.filter((s) => !(s.user_id === userId && (job ? s.kind === 'job' && s.job_id === job.id : s.kind !== 'job')))
+      );
       setMessage({ type: 'success', text: 'Submission unlocked — this user can add entries to this Budget again.' });
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message || 'Failed to unlock this submission.' });
@@ -7681,11 +7690,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 <div className="space-y-2">
                   {budgetSubmissions.map((s) => (
                     <div
-                      key={s.user_id}
+                      key={`${s.kind || 'budget'}-${s.user_id}-${s.job_id || 0}`}
                       className="flex items-center justify-between gap-3 border border-slate-200 rounded-xl p-3"
                     >
                       <div className="min-w-0">
-                        <div className="text-sm font-semibold text-slate-900 truncate">{s.user_name || `User #${s.user_id}`}</div>
+                        <div className="text-sm font-semibold text-slate-900 truncate">
+                          {s.user_name || `User #${s.user_id}`}
+                          <span className="ml-1.5 text-[11px] font-medium text-slate-500">
+                            {s.kind === 'job' ? `· Job ${s.job_no || s.job_id} only` : '· Whole Budget'}
+                          </span>
+                        </div>
                         <div className="text-[11px] text-slate-500 mt-0.5">
                           Submitted {formatDate(s.submitted_at)} •{' '}
                           {s.active_entry_count > 0
@@ -7694,7 +7708,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                         </div>
                       </div>
                       <button
-                        onClick={() => handleUnlockSubmission(s.user_id)}
+                        onClick={() => handleUnlockSubmission(s.user_id, s.kind === 'job' && s.job_id ? { id: s.job_id, no: s.job_no || null } : undefined)}
                         disabled={unlockingUserId === s.user_id}
                         className="flex items-center gap-1.5 py-1.5 px-3 bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-700 font-semibold rounded-lg transition-all disabled:opacity-50 whitespace-nowrap text-xs shrink-0"
                       >

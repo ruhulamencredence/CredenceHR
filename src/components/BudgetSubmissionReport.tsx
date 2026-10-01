@@ -23,6 +23,8 @@ interface Submitter {
   name: string;
   job_count: number;
   job_nos: string[];
+  // Jobs this user Final Submitted one by one.
+  submitted_job_nos?: string[];
   final_submitted: boolean;
   final_submitted_at: string | null;
 }
@@ -274,9 +276,20 @@ export function BudgetSubmissionReport({ token, budgets }: BudgetSubmissionRepor
                                 className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border ${
                                   u.final_submitted ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-amber-50 border-amber-200 text-amber-700'
                                 }`}
-                                title={u.final_submitted ? 'Final submitted' : 'Final submit pending'}
+                                title={
+                                  u.final_submitted
+                                    ? 'Final submitted'
+                                    : u.submitted_job_nos && u.submitted_job_nos.length
+                                      ? `Submitted: ${u.submitted_job_nos.join(', ')} — pending: ${u.job_nos.filter((n) => !u.submitted_job_nos!.includes(n)).join(', ')}`
+                                      : 'Final submit pending'
+                                }
                               >
                                 {u.final_submitted && <Lock className="w-2.5 h-2.5" />} {u.name}
+                                {!u.final_submitted && u.submitted_job_nos && u.submitted_job_nos.length > 0 && (
+                                  <span className="text-[10px] opacity-80">
+                                    ({u.submitted_job_nos.length}/{u.job_nos.length})
+                                  </span>
+                                )}
                               </span>
                             ))}
                           </div>

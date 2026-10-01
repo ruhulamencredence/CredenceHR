@@ -59,8 +59,33 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
   // a no-op when no submission row exists yet (the common case — most deletes
   // happen before the user ever submits) or when the user still has other active
   // entries under this Budget.
+  // Final Submit can be per Budget (budget_submissions — every Job of that
+  // Budget) or per Job (job_submissions — that one Job only). An entry is locked
+  // when either covers it.
+  const isEntryLocked = async (budgetId: any, jobId: any, userId: any): Promise<boolean> => {
+    if (budgetId) {
+      const b = await queryDB("SELECT id FROM budget_submissions WHERE budget_id = ? AND user_id = ?", [budgetId, userId]);
+      if (b.length > 0) return true;
+    }
+    if (jobId) {
+      const j = await queryDB("SELECT id FROM job_submissions WHERE job_id = ? AND user_id = ?", [jobId, userId]);
+      if (j.length > 0) return true;
+    }
+    return false;
+  };
+
   const unlockBudgetSubmissionIfEmpty = async (budgetId: number | null | undefined, userId: number | null | undefined) => {
     if (!budgetId || !userId) return;
+    // A Job's own Final Submit lifts the same way once the user has no active entry left in it.
+    try {
+      const jobLocks = await queryDB("SELECT id, job_id FROM job_submissions WHERE budget_id = ? AND user_id = ?", [budgetId, userId]);
+      for (const js of jobLocks) {
+        const left = await queryDB("SELECT id FROM entries WHERE job_id = ? AND created_by = ? AND deleted_at IS NULL LIMIT 1", [js.job_id, userId]);
+        if (left.length === 0) await queryDB("DELETE FROM job_submissions WHERE id = ?", [js.id]);
+      }
+    } catch (err: any) {
+      console.warn("⚠️ Could not auto-unlock Job submissions for budget " + budgetId + ": " + err.message);
+    }
     try {
       const remaining = await queryDB(
         "SELECT id FROM entries WHERE budget_id = ? AND created_by = ? AND deleted_at IS NULL LIMIT 1",
@@ -104,7 +129,11 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
           -- Whether the creating user has already submitted (locked) the Budget this
           -- entry belongs to — the client uses this to decide if editing is allowed.
           (SELECT COUNT(*) FROM budget_submissions bs
-             WHERE bs.budget_id = e.budget_id AND bs.user_id = e.created_by) AS budget_locked
+             WHERE bs.budget_id = e.budget_id AND bs.user_id = e.created_by)
+          + (SELECT COUNT(*) FROM job_submissions js
+             WHERE js.job_id = e.job_id AND js.user_id = e.created_by) AS budget_locked,
+          (SELECT COUNT(*) FROM job_submissions js2
+             WHERE js2.job_id = e.job_id AND js2.user_id = e.created_by) AS job_locked
         FROM entries e
         JOIN projects p ON e.project_id = p.id
         JOIN jobs j ON e.job_id = j.id
@@ -137,6 +166,7 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
         entries.map((e: any) => ({
           ...e,
           budget_locked: !!Number(e.budget_locked),
+          job_locked: !!Number(e.job_locked),
           delivery_date_from: toDateOnlyString(e.delivery_date_from),
           delivery_date_to: toDateOnlyString(e.delivery_date_to)
         }))
@@ -582,11 +612,7 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
         // Only require can_job_edit once the owner has ALREADY Final Submitted this
         // Job's Budget — before that, adding another MPR to your own not-yet-locked
         // Job needs no special permission, same as creating one in the first place.
-        const ownSubmissionRows = await queryDB(
-          "SELECT id FROM budget_submissions WHERE budget_id = ? AND user_id = ?",
-          [job.budget_id, req.user.id]
-        );
-        const budgetAlreadySubmitted = ownSubmissionRows.length > 0;
+        const budgetAlreadySubmitted = await isEntryLocked(job.budget_id, job.id, req.user.id);
         if (budgetAlreadySubmitted) {
           const permRows = await queryDB("SELECT can_job_edit FROM users WHERE id = ?", [req.user.id]);
           const canJobEdit = permRows.length > 0 && !!Number(permRows[0].can_job_edit);
@@ -880,7 +906,11 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
           "SELECT id FROM budget_submissions WHERE budget_id = ? AND user_id = ?",
           [budget_id, req.user.id]
         );
-        if (ownSubmissionRows.length === 0) {
+        const ownJobSubmissionRows = await queryDB("SELECT id FROM job_submissions WHERE budget_id = ? AND user_id = ? LIMIT 1", [
+          budget_id,
+          req.user.id
+        ]);
+        if (ownSubmissionRows.length === 0 && ownJobSubmissionRows.length === 0) {
           return res.status(403).json({ error: "You can only add a new Job through Job Edit for a Budget you've already Final Submitted." });
         }
         const permRows = await queryDB("SELECT can_job_edit FROM users WHERE id = ?", [req.user.id]);
@@ -1113,14 +1143,10 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
       // only if they have NEITHER permission at all.
       let budgetLocked = false;
       if (entry.budget_id && req.user.role !== "admin" && req.user.role !== "superadmin") {
-        const submittedRows = await queryDB(
-          "SELECT id FROM budget_submissions WHERE budget_id = ? AND user_id = ?",
-          [entry.budget_id, entry.created_by]
-        );
-        budgetLocked = submittedRows.length > 0;
+        budgetLocked = await isEntryLocked(entry.budget_id, entry.job_id, entry.created_by);
         if (budgetLocked && !canJobEdit && !canEditDeliveryDate) {
           return res.status(400).json({
-            error: "This entry's Budget has already been submitted. It can no longer be edited."
+            error: "This entry's Job has already been Final Submitted. It can no longer be edited."
           });
         }
       }
@@ -1440,13 +1466,10 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
       }
 
       if (entry.budget_id && req.user.role !== "admin" && req.user.role !== "superadmin") {
-        const submittedRows = await queryDB(
-          "SELECT id FROM budget_submissions WHERE budget_id = ? AND user_id = ?",
-          [entry.budget_id, entry.created_by]
-        );
+        const submittedRows = (await isEntryLocked(entry.budget_id, entry.job_id, entry.created_by)) ? [1] : [];
         if (submittedRows.length > 0) {
           return res.status(400).json({
-            error: "This entry's Budget has already been submitted. It can no longer be split."
+            error: "This entry's Job has already been Final Submitted. It can no longer be split."
           });
         }
       }
@@ -1556,11 +1579,12 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
       const budgetRows = await queryDB("SELECT id, budget_name FROM budgets WHERE id = ?", [budgetId]);
       if (budgetRows.length === 0) return res.status(404).json({ error: "Budget not found" });
 
-      const [items, entries, projects, submissions, users, jobs] = await Promise.all([
+      const [items, entries, projects, submissions, jobSubmissions, users, jobs] = await Promise.all([
         queryDB("SELECT project_name FROM budget_items WHERE budget_id = ?", [budgetId]),
         queryDB("SELECT id, project_id, job_id, created_by, created_at, deleted_at FROM entries WHERE budget_id = ?", [budgetId]),
         queryDB("SELECT id, project_name FROM projects", []),
         queryDB("SELECT user_id, submitted_at FROM budget_submissions WHERE budget_id = ?", [budgetId]),
+        queryDB("SELECT job_id, user_id, submitted_at FROM job_submissions WHERE budget_id = ?", [budgetId]),
         queryDB("SELECT id, name FROM users", []),
         queryDB("SELECT id, job_no FROM jobs WHERE budget_id = ?", [budgetId])
       ]);
@@ -1569,6 +1593,8 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
       const userName = new Map<number, string>(users.map((u: any) => [Number(u.id), u.name]));
       const jobNo = new Map<number, string>(jobs.map((j: any) => [Number(j.id), j.job_no]));
       const submittedAt = new Map<number, any>(submissions.map((s: any) => [Number(s.user_id), s.submitted_at]));
+      // "userId:jobId" -> when that one Job was Final Submitted.
+      const jobSubmittedAt = new Map<string, any>(jobSubmissions.map((s: any) => [`${s.user_id}:${s.job_id}`, s.submitted_at]));
 
       type Row = {
         key: string;
@@ -1629,8 +1655,20 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
           name: userName.get(uid) || `User #${uid}`,
           job_count: jobIds.size,
           job_nos: Array.from(jobIds).map((id) => jobNo.get(id)).filter(Boolean),
-          final_submitted: submittedAt.has(uid),
-          final_submitted_at: submittedAt.get(uid) || null
+          // Final Submitted: the whole Budget, or every one of this user's Jobs here one by one.
+          submitted_job_nos: Array.from(jobIds)
+            .filter((id) => jobSubmittedAt.has(`${uid}:${id}`))
+            .map((id) => jobNo.get(id))
+            .filter(Boolean),
+          final_submitted: submittedAt.has(uid) || (jobIds.size > 0 && Array.from(jobIds).every((id) => jobSubmittedAt.has(`${uid}:${id}`))),
+          final_submitted_at:
+            submittedAt.get(uid) ||
+            Array.from(jobIds)
+              .map((id) => jobSubmittedAt.get(`${uid}:${id}`))
+              .filter(Boolean)
+              .sort()
+              .pop() ||
+            null
         }));
         const status =
           r.entry_count === 0 ? "not_submitted" : submitters.every((s) => s.final_submitted) ? "final_submitted" : "job_submitted";
@@ -1736,16 +1774,13 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
       // Final-Submitted Job — but even then, the delete is QUEUED for Admin approval
       // (job_edit_requests) rather than applied immediately, same as Add MPR above.
       if (entry.budget_id && req.user.role !== "admin" && req.user.role !== "superadmin") {
-        const submittedRows = await queryDB(
-          "SELECT id FROM budget_submissions WHERE budget_id = ? AND user_id = ?",
-          [entry.budget_id, entry.created_by]
-        );
+        const submittedRows = (await isEntryLocked(entry.budget_id, entry.job_id, entry.created_by)) ? [1] : [];
         if (submittedRows.length > 0) {
           const permRows = await queryDB("SELECT can_job_edit FROM users WHERE id = ?", [req.user.id]);
           const canJobEdit = permRows.length > 0 && !!Number(permRows[0].can_job_edit);
           if (!canJobEdit) {
             return res.status(400).json({
-              error: "This entry's Budget has already been submitted. It can no longer be deleted."
+              error: "This entry's Job has already been Final Submitted. It can no longer be deleted."
             });
           }
           // Refuse a second delete request while one against this same entry is

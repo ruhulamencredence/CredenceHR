@@ -790,6 +790,9 @@ export interface Entry {
   site_sup_date?: string | null;
   // Whether the owning user has already submitted (locked) this entry's Budget
   budget_locked?: boolean;
+  // This entry's own Job was Final Submitted on its own (Jobs list -> Submit),
+  // not the whole Budget. budget_locked is true in either case.
+  job_locked?: boolean;
   // Admin-set allowed Delivery Date window for this entry's Budget (both null = no
   // restriction). Pulled straight off GET /api/entries (joined from budgets) instead
   // of GET /api/budgets, because that second endpoint only returns Budgets an admin
@@ -958,6 +961,10 @@ export interface BudgetSubmission {
   user_name: string | null;
   submitted_at: string;
   active_entry_count: number;
+  // 'budget' = the whole Budget was Final Submitted; 'job' = just this one Job.
+  kind?: 'budget' | 'job';
+  job_id?: number | null;
+  job_no?: string | null;
 }
 
 export interface BudgetItem {
