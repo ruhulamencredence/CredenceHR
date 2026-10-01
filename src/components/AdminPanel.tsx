@@ -348,7 +348,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // PUT /api/users/:id/module-permissions).
   const canGrantModuleAccess = isSuperAdmin || !!user.can_grant_module_access;
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'my_conveyance' | 'disbursement' | 'holidays' | 'asset_management' | 'vehicle_management' | 'permanent_delete_log' | 'companies' | 'devices' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'hr_operations'>(
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'my_conveyance' | 'bill_claim_policy' | 'disbursement' | 'holidays' | 'asset_management' | 'vehicle_management' | 'permanent_delete_log' | 'companies' | 'devices' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'hr_operations'>(
     () => {
       // Restores whichever tab this Admin was last looking at — see the
       // "pull down to reload" note in App.tsx: since a reload now has to be
@@ -362,7 +362,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         // granted via module_permissions (see GET /api/entries/permanent-delete-log).
         const savedVisible =
           saved === 'dashboard' ? canSeeDashboard :
-          saved === 'my_conveyance' ? isSuperAdmin || visibleModules.includes('conveyance') :
+          saved === 'my_conveyance' || saved === 'bill_claim_policy' ? isSuperAdmin || visibleModules.includes('conveyance') :
           saved === 'permanent_delete_log' || saved === 'companies' || saved === 'devices' ? isSuperAdmin :
           isSuperAdmin || visibleModules.includes(saved as AdminModuleKey);
         if (saved && savedVisible) return saved as any;
@@ -417,7 +417,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     }
     // 'my_conveyance' isn't its own module_permissions entry — it rides along
     // with 'conveyance' (see the "My Conveyance Bill Claim" item in GlobalSidebar).
-    const visible = adminNavRequest.target === 'my_conveyance' ? canSee('conveyance') : canSee(adminNavRequest.target as AdminModuleKey);
+    const visible = adminNavRequest.target === 'my_conveyance' || adminNavRequest.target === 'bill_claim_policy' ? canSee('conveyance') : canSee(adminNavRequest.target as AdminModuleKey);
     if (visible) setActiveTab(adminNavRequest.target as any);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adminNavRequest]);
@@ -429,7 +429,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     const activeTabStillVisible =
       activeTab === 'dashboard' ? canSeeDashboard :
       activeTab === 'permanent_delete_log' || activeTab === 'companies' || activeTab === 'devices' ? isSuperAdmin :
-      activeTab === 'my_conveyance' ? canSee('conveyance') : canSee(activeTab);
+      activeTab === 'my_conveyance' || activeTab === 'bill_claim_policy' ? canSee('conveyance') : canSee(activeTab);
     if (!activeTabStillVisible && visibleModules.length > 0) {
       setActiveTab(visibleModules[0] as any);
     }
@@ -6367,6 +6367,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           for why this exists as a separate page. */}
       {activeTab === 'my_conveyance' && (
         <MyConveyanceBillClaimPanel token={token} user={user} />
+      )}
+
+      {/* TAB: BILL CLAIM POLICY — same "conveyance" grant as above. The policy
+          rules themselves come later; for now the page just holds the place. */}
+      {activeTab === 'bill_claim_policy' && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-10 text-center shadow-sm">
+          <ShieldCheck className="w-10 h-10 text-blue-600 mx-auto mb-3" />
+          <h3 className="text-lg font-bold text-slate-900">Bill Claim Policy</h3>
+          <p className="text-sm text-slate-500 mt-1 max-w-md mx-auto">
+            Rules for Bill Claims — limits, receipts, deadlines and rates — will be set up here.
+          </p>
+        </div>
       )}
 
       {/* TAB: CONVEYANCE DISBURSEMENT — Superadmin + explicitly-granted Admins

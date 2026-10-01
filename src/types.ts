@@ -1578,7 +1578,7 @@ export interface AdminNavRequest {
   // 'permanent_delete_log' is likewise NOT an AdminModuleKey/module_permissions
   // entry — Superadmin-only, see GET /api/entries/permanent-delete-log in
   // EntriesRoutes.ts.
-  target: 'dashboard' | 'reports' | 'mprs' | 'imports' | 'editlog' | 'recycle' | 'projects' | 'branches' | 'users' | 'notices' | 'approvals' | 'attendance' | 'attendance_reports' | 'employees' | 'departments' | 'tracking' | 'holidays' | 'disbursement' | 'my_conveyance' | 'asset_management' | 'permanent_delete_log' | 'companies' | 'devices' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'hr_operations';
+  target: 'dashboard' | 'reports' | 'mprs' | 'imports' | 'editlog' | 'recycle' | 'projects' | 'branches' | 'users' | 'notices' | 'approvals' | 'attendance' | 'attendance_reports' | 'employees' | 'departments' | 'tracking' | 'holidays' | 'disbursement' | 'my_conveyance' | 'bill_claim_policy' | 'asset_management' | 'permanent_delete_log' | 'companies' | 'devices' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'hr_operations';
   ts: number;
 }
 

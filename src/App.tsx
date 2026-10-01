@@ -796,7 +796,7 @@ export default function App() {
       setViewMode('admin');
       setClaimsNavRequest({ target: target === 'claims' ? 'movementClaims' : 'conveyanceBill', ts: Date.now() });
     },
-    onGoToAdminModule: (target: Exclude<AdminModuleKey, 'claims' | 'conveyance'> | 'my_conveyance' | 'dashboard' | 'servers' | 'permanent_delete_log' | 'companies' | 'devices') => {
+    onGoToAdminModule: (target: Exclude<AdminModuleKey, 'claims' | 'conveyance'> | 'my_conveyance' | 'bill_claim_policy' | 'dashboard' | 'servers' | 'permanent_delete_log' | 'companies' | 'devices') => {
       setSelfServiceView(null);
       setShowProfilePage(false);
           setShowChat(false);
