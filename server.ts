@@ -2293,7 +2293,9 @@ const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports",
 const PERMISSION_LAYER_KEYS = ["read", "edit_add", "entry_upload", "delete_trash", "permanent_delete"] as const;
 // Which modules currently enforce PERMISSION_LAYER_KEYS — mirrors
 // PERMISSION_LAYER_MODULES in src/types.ts. Rolled out module by module.
-const PERMISSION_LAYER_MODULES = ["departments", "projects", "approvals", "users"] as const;
+const PERMISSION_LAYER_MODULES = ["departments", "projects", "approvals", "users", "reports"] as const;
+// PEPM Reports uses four of them: Read Only, Edit, Delete/Trash, Permanent Delete.
+const REPORT_LAYER_KEYS = ["read", "edit_add", "delete_trash", "permanent_delete"] as const;
 
 // Leave Manage's own operation-specific layers — mirrors LeaveManageLayerKey/
 // LEAVE_MANAGE_LAYERS in src/types.ts. Not part of PERMISSION_LAYER_MODULES/
@@ -2314,6 +2316,7 @@ const MODULE_LAYER_KEY_SETS: Record<string, readonly string[]> = {
   projects: PERMISSION_LAYER_KEYS,
   approvals: PERMISSION_LAYER_KEYS,
   users: PERMISSION_LAYER_KEYS,
+  reports: REPORT_LAYER_KEYS,
   leave_manage: LEAVE_MANAGE_LAYER_KEYS,
 };
 
@@ -7282,6 +7285,7 @@ async function startServer() {
     requireAdmin,
     requireSuperAdmin,
     requireModule,
+    requireModuleLayer,
     requireBudgetModuleAccess,
     queryDB,
     todayInDhaka,
