@@ -4,7 +4,7 @@
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { ShieldCheck, Save, Plus, Edit2, Trash2, X, Check, AlertTriangle, CalendarClock, Banknote, Receipt } from 'lucide-react';
+import { ShieldCheck, Save, Plus, Edit2, Trash2, X, Check, AlertTriangle, CalendarClock, Banknote, Receipt, History, Lock, ShieldAlert } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { BillClaimCategory, BillClaimPolicyDef, BillClaimPolicyValues } from '../types';
 import { Spinner } from './Spinner';
@@ -39,6 +39,206 @@ const toDraft = (c: BillClaimCategory): CategoryDraft => ({
   is_active: c.is_active,
   sort_order: String(c.sort_order)
 });
+// ---- Change History (read only; see bill_claim_policy_history in BillClaimPolicy.ts) ----
+interface HistoryRow {
+  id: number;
+  actor_name: string | null;
+  actor_role: string | null;
+  action: string;
+  target_name: string | null;
+  before: any;
+  after: any;
+  ip: string | null;
+  created_at: string;
+  hash: string;
+}
+const ACTION_LABEL: Record<string, string> = {
+  rules_changed: 'Rules changed',
+  category_added: 'Category added',
+  category_changed: 'Category changed',
+  category_deleted: 'Category deleted',
+  categories_seeded: 'Starting categories created',
+  denied: 'Refused (no permission)'
+};
+const ACTION_TONE: Record<string, string> = {
+  rules_changed: 'bg-blue-50 text-blue-700',
+  category_added: 'bg-emerald-50 text-emerald-700',
+  category_changed: 'bg-amber-50 text-amber-700',
+  category_deleted: 'bg-rose-50 text-rose-700',
+  categories_seeded: 'bg-slate-100 text-slate-600',
+  denied: 'bg-rose-100 text-rose-800'
+};
+const CATEGORY_FIELDS: [string, string][] = [
+  ['name', 'Name'],
+  ['description', 'Description'],
+  ['max_per_bill', 'Max per bill'],
+  ['monthly_limit', 'Monthly limit'],
+  ['receipt_required', 'Receipt'],
+  ['is_active', 'Active'],
+  ['sort_order', 'Order']
+];
+const show = (v: any) => (v === true ? 'On' : v === false ? 'Off' : v == null || v === '' ? '—' : String(v));
+
+// "field: old → new" lines for one history row.
+function historyChanges(r: HistoryRow, defs: BillClaimPolicyDef[]): string[] {
+  if (r.action === 'rules_changed') {
+    return Object.keys(r.after || {}).map((k) => `${defs.find((d) => d.key === k)?.label || k}: ${show(r.before?.[k])} → ${show(r.after?.[k])}`);
+  }
+  if (r.action === 'category_changed') {
+    const out = CATEGORY_FIELDS.filter(([k]) => show(r.before?.[k]) !== show(r.after?.[k])).map(([k, l]) => `${l}: ${show(r.before?.[k])} → ${show(r.after?.[k])}`);
+    return out.length ? out : ['Saved without changes'];
+  }
+  if (r.action === 'category_added') {
+    return CATEGORY_FIELDS.filter(([k]) => k !== 'name' && r.after?.[k] != null && r.after?.[k] !== '').map(([k, l]) => `${l}: ${show(r.after[k])}`);
+  }
+  if (r.action === 'categories_seeded') return [(Array.isArray(r.after) ? r.after.map((c: any) => c.name) : []).join(', ')];
+  if (r.action === 'denied' && r.after) {
+    const v = r.after.values;
+    if (v) return Object.keys(v).map((k) => `Tried ${defs.find((d) => d.key === k)?.label || k}: ${show(v[k])}`);
+    if (r.after.name) return [`Tried name: ${r.after.name}`];
+  }
+  return [];
+}
+
+const ChangeHistory: React.FC<{ token: string; defs: BillClaimPolicyDef[]; refreshKey: number }> = ({ token, defs, refreshKey }) => {
+  const headers = { Authorization: `Bearer ${token}` };
+  const [rows, setRows] = useState<HistoryRow[]>([]);
+  const [hasMore, setHasMore] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [check, setCheck] = useState<{ ok: boolean; checked: number; broken_at: number | null; db_guard: boolean } | null>(null);
+  const [err, setErr] = useState('');
+
+  const loadPage = async (beforeId?: number) => {
+    setLoading(true);
+    try {
+      const res = await fetch(apiUrl(`/api/bill-claim-policy/history?limit=50${beforeId ? `&before_id=${beforeId}` : ''}`), { headers });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not load the history.');
+      setRows((prev) => (beforeId ? [...prev, ...data.rows] : data.rows));
+      setHasMore(!!data.has_more);
+      if (!beforeId) {
+        const v = await fetch(apiUrl('/api/bill-claim-policy/history/verify'), { headers });
+        if (v.ok) setCheck(await v.json());
+      }
+      setErr('');
+    } catch (e: any) {
+      setErr(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => {
+    loadPage();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, refreshKey]);
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+      <div className="px-5 py-3.5 border-b border-slate-200 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h3 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
+            <History className="w-4 h-4 text-blue-600" /> Change History
+          </h3>
+          <p className="text-[11px] text-slate-500">Every change and every refused attempt, by anyone. Nobody can edit or delete this history.</p>
+        </div>
+        {check &&
+          (check.ok ? (
+            <span
+              className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700"
+              title={check.db_guard ? 'The database refuses any edit or delete of history rows.' : 'Database lock not installed — see the server log. The chain check still catches tampering.'}
+            >
+              <Lock className="w-3.5 h-3.5" /> Verified · {check.checked} entries{check.db_guard ? ' · database lock on' : ''}
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full bg-rose-100 text-rose-800">
+              <ShieldAlert className="w-3.5 h-3.5" /> History was altered outside the app at entry #{check.broken_at}
+            </span>
+          ))}
+      </div>
+      {check && !check.ok && (
+        <div className="px-5 py-2.5 text-xs bg-rose-50 text-rose-800 border-b border-rose-100">
+          Entry #{check.broken_at} (or the one before it) was changed or removed directly in the database. Entries from there on can't be trusted as shown.
+        </div>
+      )}
+      {err && <div className="px-5 py-2.5 text-xs text-rose-700">{err}</div>}
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[760px] border-collapse text-xs">
+          <thead className="bg-blue-50 text-slate-700">
+            <tr>
+              <th className="px-2 py-2 border border-slate-200 text-left font-semibold w-12">#</th>
+              <th className="px-2 py-2 border border-slate-200 text-left font-semibold w-36">When</th>
+              <th className="px-2 py-2 border border-slate-200 text-left font-semibold w-40">Who</th>
+              <th className="px-2 py-2 border border-slate-200 text-left font-semibold w-44">What</th>
+              <th className="px-2 py-2 border border-slate-200 text-left font-semibold">Details</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 && !loading && (
+              <tr>
+                <td colSpan={5} className="px-3 py-6 text-center text-slate-400 border border-slate-200">
+                  No changes yet.
+                </td>
+              </tr>
+            )}
+            {rows.map((r) => {
+              const lines = historyChanges(r, defs);
+              const broken = check && !check.ok && check.broken_at != null && r.id >= check.broken_at;
+              return (
+                <tr key={r.id} className={`odd:bg-white even:bg-slate-50/70 align-top ${broken ? 'bg-rose-50/60' : ''}`}>
+                  <td className="px-2 py-1.5 border border-slate-200 text-slate-400 tabular-nums" title={`Hash ${r.hash}…`}>
+                    {r.id}
+                  </td>
+                  <td className="px-2 py-1.5 border border-slate-200 whitespace-nowrap text-slate-700">
+                    {new Date(r.created_at).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                  </td>
+                  <td className="px-2 py-1.5 border border-slate-200">
+                    <div className="font-medium text-slate-800">{r.actor_name || '—'}</div>
+                    <div className="text-[10px] text-slate-400 capitalize">
+                      {r.actor_role || ''}
+                      {r.ip ? ` · ${r.ip}` : ''}
+                    </div>
+                  </td>
+                  <td className="px-2 py-1.5 border border-slate-200">
+                    <span className={`inline-block text-[10px] font-semibold px-2 py-0.5 rounded-full ${ACTION_TONE[r.action] || 'bg-slate-100 text-slate-600'}`}>
+                      {ACTION_LABEL[r.action] || r.action}
+                    </span>
+                    {r.target_name && <div className="text-[11px] text-slate-700 mt-1 break-words">{r.target_name}</div>}
+                  </td>
+                  <td className="px-2 py-1.5 border border-slate-200 text-slate-600">
+                    {lines.length ? (
+                      <ul className="space-y-0.5">
+                        {lines.map((l, i) => (
+                          <li key={i} className="break-words">
+                            {l}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      '—'
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <div className="px-5 py-2.5 flex items-center justify-between text-xs text-slate-500">
+        <span>{rows.length} shown</span>
+        {loading ? (
+          <Spinner size={14} />
+        ) : (
+          hasMore && (
+            <button type="button" onClick={() => loadPage(rows[rows.length - 1]?.id)} className="font-semibold text-blue-600 hover:text-blue-800">
+              Show older
+            </button>
+          )
+        )}
+      </div>
+    </div>
+  );
+};
+
 const money = (n: number | null) => (n == null ? '—' : `৳${n.toLocaleString('en-BD', { maximumFractionDigits: 2 })}`);
 const inputCls =
   'w-full text-xs px-2 py-1.5 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none disabled:bg-slate-50 disabled:text-slate-500';
@@ -82,7 +282,9 @@ export const BillClaimPolicyPanel: React.FC<{ token: string }> = ({ token }) => 
   }, [token]);
 
   const dirty = useMemo(() => defs.some((d) => values[d.key] !== saved[d.key]), [defs, values, saved]);
+  const [historyKey, setHistoryKey] = useState(0);
   const flash = (msg: string) => {
+    setHistoryKey((k) => k + 1);
     setNotice(msg);
     setTimeout(() => setNotice(''), 3000);
   };
@@ -363,6 +565,8 @@ export const BillClaimPolicyPanel: React.FC<{ token: string }> = ({ token }) => 
           </table>
         </div>
       </div>
+
+      <ChangeHistory token={token} defs={defs} refreshKey={historyKey} />
     </div>
   );
 };
