@@ -78,7 +78,19 @@ export const PERMISSION_LAYERS: { key: PermissionLayerKey; label: string }[] = [
 // being rolled out one module at a time. A module not listed here still only
 // has the old coarse on/off grant (module_permissions), unaffected by any of
 // this. Start: 'departments', then 'projects', then 'approvals', then 'users'.
-export const PERMISSION_LAYER_MODULES: AdminModuleKey[] = ['departments', 'projects', 'approvals', 'users'];
+export const PERMISSION_LAYER_MODULES: AdminModuleKey[] = ['departments', 'projects', 'approvals', 'users', 'reports'];
+
+// A module that uses only some of the layers, with its own labels. PEPM
+// Reports: Read Only, Edit, Delete/Trash, Permanent Delete.
+export const MODULE_LAYER_OPTIONS: Partial<Record<AdminModuleKey, { key: PermissionLayerKey; label: string }[]>> = {
+  reports: [
+    { key: 'read', label: 'Read Only' },
+    { key: 'edit_add', label: 'Edit' },
+    { key: 'delete_trash', label: 'Delete/Trash' },
+    { key: 'permanent_delete', label: 'Permanent Delete' }
+  ]
+};
+export const layersFor = (moduleKey: AdminModuleKey) => MODULE_LAYER_OPTIONS[moduleKey] || PERMISSION_LAYERS;
 
 // Leave Manage's own operation-specific layers — same independent-checkbox
 // mechanism as PERMISSION_LAYERS above, but named after this module's real

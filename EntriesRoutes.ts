@@ -23,6 +23,9 @@ interface EntriesRouteDeps {
   requireAdmin: any;
   requireSuperAdmin: any;
   requireModule: (moduleKey: string) => any;
+  // Per-module action layers (server.ts) — PEPM Reports: read / edit_add /
+  // delete_trash / permanent_delete.
+  requireModuleLayer: (moduleKey: any, layer: any) => any;
   requireBudgetModuleAccess: any;
   queryDB: (sql: string, params?: any[]) => Promise<any>;
   todayInDhaka: () => string;
@@ -32,6 +35,7 @@ interface EntriesRouteDeps {
 
 export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
   const {
+    requireModuleLayer,
     authenticateToken,
     requireAdmin,
     requireSuperAdmin,
@@ -1545,7 +1549,7 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
   // each got — no Job yet, Jobs submitted but not every submitter has Final
   // Submitted, or Final Submitted. Aggregated in JS from plain SELECTs so it
   // runs the same on MySQL and the in-memory fallback.
-  app.get("/api/reports/budget-submission-status", authenticateToken, requireAdmin, requireModule("reports"), async (req, res) => {
+  app.get("/api/reports/budget-submission-status", authenticateToken, requireAdmin, requireModule("reports"), requireModuleLayer("reports", "read"), async (req, res) => {
     try {
       const budgetId = Number(req.query.budget_id);
       if (!budgetId) return res.status(400).json({ error: "budget_id is required." });
@@ -1781,6 +1785,103 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Failed to delete entry" });
+    }
+  });
+
+  // ---------------- PEPM Reports -> MPR Entries Report row actions ----------------
+  // Gated by the Reports module's permission layers (Admin Panel -> Users ->
+  // Module Access -> Reports): Edit, Delete/Trash, Permanent Delete. Unlike
+  // the Self Service routes above these don't depend on owning the entry.
+  const reportEntry = async (id: any) => {
+    const rows = await queryDB(
+      `SELECT e.*, j.job_no, p.project_name, m.mpr_no,
+              creator.name AS entry_created_by_name, deleter.name AS entry_deleted_by_name
+         FROM entries e
+         LEFT JOIN jobs j ON e.job_id = j.id
+         LEFT JOIN projects p ON e.project_id = p.id
+         LEFT JOIN mpr_numbers m ON e.mpr_id = m.id
+         LEFT JOIN users creator ON e.created_by = creator.id
+         LEFT JOIN users deleter ON e.deleted_by = deleter.id
+        WHERE e.id = ?`,
+      [id]
+    );
+    return rows.length > 0 ? rows[0] : null;
+  };
+
+  // Edit: Item Name and Delivery Date (each change kept in the edit history).
+  app.put("/api/reports/entries/:id", authenticateToken, requireAdmin, requireModuleLayer("reports", "edit_add"), async (req: any, res) => {
+    try {
+      const entry = await reportEntry(req.params.id);
+      if (!entry || entry.deleted_at) return res.status(404).json({ error: "Entry not found" });
+      const itemName = String(req.body?.item_name ?? "").trim();
+      const deliveryDate = toDateOnlyString(req.body?.delivery_date);
+      if (!itemName || !deliveryDate) return res.status(400).json({ error: "Item Name and Delivery Date are required" });
+      const changes: { field: string; oldVal: any; newVal: any }[] = [];
+      if (itemName !== String(entry.item_name ?? "")) changes.push({ field: "item_name", oldVal: entry.item_name, newVal: itemName });
+      const oldDate = toDateOnlyString(entry.delivery_date);
+      if (deliveryDate !== oldDate) changes.push({ field: "delivery_date", oldVal: oldDate, newVal: deliveryDate });
+      if (changes.length === 0) return res.json({ success: true, changed: 0 });
+      await queryDB("UPDATE entries SET item_name = ?, delivery_date = ? WHERE id = ?", [itemName, deliveryDate, entry.id]);
+      for (const c of changes)
+        await queryDB("INSERT INTO entry_edit_history (entry_id, edited_by, field_name, old_value, new_value) VALUES (?, ?, ?, ?, ?)", [
+          entry.id,
+          req.user.id,
+          c.field,
+          c.oldVal == null ? null : String(c.oldVal),
+          String(c.newVal)
+        ]);
+      res.json({ success: true, changed: changes.length });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to update entry" });
+    }
+  });
+
+  // Delete/Trash: moves the entry to the Job Recycle bin (it can be restored there).
+  app.delete("/api/reports/entries/:id", authenticateToken, requireAdmin, requireModuleLayer("reports", "delete_trash"), async (req: any, res) => {
+    try {
+      const entry = await reportEntry(req.params.id);
+      if (!entry || entry.deleted_at) return res.status(404).json({ error: "Entry not found" });
+      await queryDB("UPDATE entries SET deleted_at = NOW(), deleted_by = ? WHERE id = ?", [req.user.id, entry.id]);
+      await unlockBudgetSubmissionIfEmpty(entry.budget_id, entry.created_by);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to delete entry" });
+    }
+  });
+
+  // Permanent Delete: erased for good, straight from the report — recorded in
+  // the Permanent Delete Log like an erase from the Job Recycle bin.
+  app.delete("/api/reports/entries/:id/permanent", authenticateToken, requireAdmin, requireModuleLayer("reports", "permanent_delete"), async (req: any, res) => {
+    try {
+      const entry = await reportEntry(req.params.id);
+      if (!entry) return res.status(404).json({ error: "Entry not found" });
+      await queryDB(
+        `INSERT INTO entry_permanent_delete_log
+           (entry_id, entry_date, job_name, job_no, project_name, mpr_no, item_name, requisitioned_qty,
+            entry_created_by_name, entry_deleted_by_name, entry_deleted_at,
+            permanently_deleted_by, permanently_deleted_by_name)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          entry.id,
+          entry.entry_date,
+          entry.job_name,
+          entry.job_no,
+          entry.project_name,
+          entry.mpr_no,
+          entry.item_name,
+          entry.requisitioned_qty,
+          entry.entry_created_by_name,
+          entry.deleted_at ? entry.entry_deleted_by_name : req.user.name,
+          entry.deleted_at || new Date(),
+          req.user.id,
+          req.user.name
+        ]
+      );
+      await queryDB("DELETE FROM entries WHERE id = ?", [entry.id]);
+      if (!entry.deleted_at) await unlockBudgetSubmissionIfEmpty(entry.budget_id, entry.created_by);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to permanently delete entry" });
     }
   });
 
