@@ -136,7 +136,7 @@ export function BottomNav({ active, onChange, canViewMovementClaim = true, canVi
             <div className="md:hidden fixed inset-0 z-[60]" role="dialog" aria-modal="true" aria-label="More">
               <div className="absolute inset-0 bg-slate-900/25" onClick={() => setMoreOpen(false)} />
               <div
-                className="absolute left-3 right-3 min-h-[45vh] max-h-[70vh] overflow-y-auto rounded-[28px] bg-white/45 backdrop-blur-2xl backdrop-saturate-150 border border-white/70 shadow-[0_16px_40px_-10px_rgba(42,0,85,0.45),inset_0_1px_0_rgba(255,255,255,0.8)] mobile-page-in"
+                className="absolute left-3 right-3 min-h-[45vh] max-h-[70vh] overflow-y-auto rounded-[28px] bg-gradient-to-br from-violet-200/60 via-white/50 to-violet-100/70 backdrop-blur-2xl backdrop-saturate-150 border border-white/70 shadow-[0_16px_40px_-10px_rgba(42,0,85,0.45),inset_0_1px_0_rgba(255,255,255,0.8)] mobile-page-in"
                 style={{ bottom: `calc(${BAR_H + 66}px + var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)))` }}
               >
                 <div className="flex items-center justify-between px-5 pt-4 pb-2">
