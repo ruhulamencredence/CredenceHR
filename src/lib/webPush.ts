@@ -32,33 +32,104 @@ function keyBytes(base64: string): Uint8Array {
   return Uint8Array.from(raw, (c) => c.charCodeAt(0));
 }
 
-async function subscribeAndSave(token: string): Promise<boolean> {
-  const reg = await navigator.serviceWorker.register('/sw.js');
-  await navigator.serviceWorker.ready;
-  let sub = await reg.pushManager.getSubscription();
-  if (!sub) {
-    const res = await fetch(apiUrl('/api/web-push/key'), { headers: { Authorization: `Bearer ${token}` } });
-    if (!res.ok) return false;
-    const { publicKey } = await res.json();
-    sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(publicKey) as BufferSource });
-  }
-  const saved = await fetch(apiUrl('/api/web-push/subscribe'), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ subscription: sub.toJSON() })
+// A step that never answers (a blocked network, a stuck worker) fails
+// instead of leaving the "Turn on" button spinning forever.
+function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(what)), ms);
+    p.then(
+      (v) => {
+        clearTimeout(t);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(t);
+        reject(e);
+      }
+    );
   });
-  return saved.ok;
 }
 
-/** Asks the browser for permission (needs a click) and turns notifications on. */
-export async function enableWebPush(token: string): Promise<'granted' | 'denied' | 'default' | 'unsupported' | 'failed'> {
-  if (!webPushSupported()) return 'unsupported';
-  const permission = await Notification.requestPermission();
-  if (permission !== 'granted') return permission;
+// Reasons shown to the person when turning on fails.
+export const WEB_PUSH_STEP = {
+  worker: "The notification helper (sw.js) didn't load. Reload the page and try again.",
+  key: "Couldn't reach the CredenceHR server. Try again.",
+  subscribe:
+    "The browser couldn't reach its notification service (Google/Microsoft). The office network or a firewall may be blocking it — try again on another network, or ask IT to allow fcm.googleapis.com.",
+  save: "Couldn't save this browser on the server. Try again."
+};
+
+async function subscribeAndSave(token: string): Promise<void> {
+  let reg: ServiceWorkerRegistration;
   try {
-    return (await subscribeAndSave(token)) ? 'granted' : 'failed';
+    reg = await withTimeout(navigator.serviceWorker.register('/sw.js'), 15000, WEB_PUSH_STEP.worker);
+    await withTimeout(navigator.serviceWorker.ready, 15000, WEB_PUSH_STEP.worker);
   } catch {
-    return 'failed';
+    throw new Error(WEB_PUSH_STEP.worker);
+  }
+  let sub = await reg.pushManager.getSubscription();
+  if (!sub) {
+    let publicKey = '';
+    try {
+      const res = await withTimeout(fetch(apiUrl('/api/web-push/key'), { headers: { Authorization: `Bearer ${token}` } }), 15000, WEB_PUSH_STEP.key);
+      if (!res.ok) throw new Error(WEB_PUSH_STEP.key);
+      publicKey = (await res.json()).publicKey;
+    } catch {
+      throw new Error(WEB_PUSH_STEP.key);
+    }
+    try {
+      sub = await withTimeout(
+        reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(publicKey) as BufferSource }),
+        20000,
+        WEB_PUSH_STEP.subscribe
+      );
+    } catch {
+      throw new Error(WEB_PUSH_STEP.subscribe);
+    }
+  }
+  let ok = false;
+  try {
+    const saved = await withTimeout(
+      fetch(apiUrl('/api/web-push/subscribe'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ subscription: sub.toJSON() })
+      }),
+      15000,
+      WEB_PUSH_STEP.save
+    );
+    ok = saved.ok;
+  } catch {}
+  if (!ok) throw new Error(WEB_PUSH_STEP.save);
+}
+
+export type WebPushResult =
+  | { status: 'granted' }
+  | { status: 'denied' | 'default' | 'unsupported' }
+  | { status: 'failed'; reason: string };
+
+/**
+ * Asks the browser for permission (needs a click) and turns notifications on.
+ * onWaiting fires if the browser's own prompt hasn't been answered after a few
+ * seconds — Chrome often shows it only as a small bell in the address bar.
+ */
+export async function enableWebPush(token: string, onWaiting?: () => void): Promise<WebPushResult> {
+  if (!webPushSupported()) return { status: 'unsupported' };
+  let permission: NotificationPermission = Notification.permission;
+  if (permission === 'default') {
+    const hint = setTimeout(() => onWaiting?.(), 4000);
+    try {
+      permission = await Notification.requestPermission();
+    } finally {
+      clearTimeout(hint);
+    }
+  }
+  if (permission !== 'granted') return { status: permission };
+  try {
+    await subscribeAndSave(token);
+    return { status: 'granted' };
+  } catch (e: any) {
+    return { status: 'failed', reason: e?.message || WEB_PUSH_STEP.subscribe };
   }
 }
 
