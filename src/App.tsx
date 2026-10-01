@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect, useRef, Suspense, lazy } from 'react';
 import { Capacitor } from '@capacitor/core';
-import { RefreshCw, ArrowLeft, X } from 'lucide-react';
+import { RefreshCw, ArrowLeft, X, Car } from 'lucide-react';
 import { User, ClaimsNavRequest, AdminNavRequest, JobsNavRequest, AdminModuleKey, DashboardNavRequest, LeaveNavRequest } from './types';
 import { AuthScreen } from './components/AuthScreen';
 import { Navbar } from './components/Navbar';
@@ -1115,7 +1115,7 @@ export default function App() {
         ) : selfServiceView === 'vehicleManagement' ? (
           // VehicleManagement.tsx (Book a Ride/Ride Status) — same header-
           // less wrapper pattern as My Asset just above.
-          <div className="w-full min-h-[calc(100vh-4rem)]" style={{ background: 'var(--g-surface-muted)' }}>
+          <div className="w-full min-h-[calc(100vh-4rem)] [background:var(--g-surface-muted)] max-md:[background:var(--g-bg-gradient)]">
             {/* Web: full content width (map beside the booking panel, Ride Status
                 in two columns) instead of a narrow phone-width column. */}
             <div className={`mx-auto px-4 pt-3 pb-28 ${Capacitor.isNativePlatform() ? 'max-w-3xl' : 'max-w-3xl lg:max-w-none lg:px-8 lg:pb-8'}`}>
@@ -1130,7 +1130,9 @@ export default function App() {
                 >
                   <ArrowLeft className="w-5 h-5" />
                 </button>
-                <h1 className="text-base font-bold">Book a Ride</h1>
+                <h1 className="text-base font-bold flex items-center gap-2">
+                  <Car className="w-5 h-5 text-blue-600 shrink-0" /> Book a Ride
+                </h1>
               </div>
               <VehicleManagement user={user} />
             </div>
