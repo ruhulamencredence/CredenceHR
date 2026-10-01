@@ -38,6 +38,7 @@ import { UserBulkBar } from './UserBulkBar';
 import { ModuleAccessChecklist } from './ModuleAccessChecklist';
 import { AccessTemplatesModal } from './AccessTemplatesModal';
 import { BudgetSubmissionReport } from './BudgetSubmissionReport';
+import { ProgressOverlay, useLongTask, xhrJson } from './ProgressOverlay';
 import { AccessTemplate, applyTemplateToUser, canEditUserFeatures } from '../lib/accessTemplates';
 import { Spinner } from './Spinner';
 import { apiUrl } from '../lib/api';
@@ -1575,6 +1576,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
 
   // Rate File (Excel import, two sheets: "Rate" + "Materials Category") state
   const [importingRateFile, setImportingRateFile] = useState(false);
+  // "% done" loader for the long Data Import jobs (see ProgressOverlay.tsx).
+  const longTask = useLongTask();
   const [rateFileSummary, setRateFileSummary] = useState<{
     rate_count: number;
     category_count: number;
@@ -1776,6 +1779,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const handleApproveBudget = async (budget: Budget) => {
     setApprovingBudgetId(budget.id);
     setMessage(null);
+    longTask.start('Approve & Calculate', 'Matching every entry with the Rate File…');
+    longTask.creep(95);
     try {
       const res = await fetch(apiUrl(`/api/budgets/${budget.id}/approve`), {
         method: 'POST',
@@ -1783,6 +1788,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Approve & Calculate failed');
+      await longTask.finish();
 
       setApproveResult({
         budgetName: budget.budget_name,
@@ -1793,6 +1799,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       });
       fetchAllData(); // refresh budgets (rate_approved_at) + entries (matched_rate/amount/category)
     } catch (err: any) {
+      longTask.close();
       setMessage({ type: 'error', text: err.message || 'Failed to approve & calculate this budget.' });
     } finally {
       setApprovingBudgetId(null);
@@ -2206,12 +2213,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // check. Separate action from the real Delete Budget below.
   const handleRemoveUnusedItems = async (id: number) => {
     if (!confirm("Remove this budget's unused rows? Rows a User has already submitted an entry against will be kept. This cannot be undone.")) return;
+    longTask.start('Removing unused rows', 'Checking every row against the entries…');
+    longTask.creep(95);
     try {
       const res = await fetch(apiUrl(`/api/budgets/${id}/remove-unused-items`), {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await res.json().catch(() => ({}));
+      if (res.ok) await longTask.finish();
+      else longTask.close();
       if (res.ok) {
         fetchAllData();
         setMessage({
@@ -2227,6 +2238,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         setMessage({ type: 'error', text: data.error || 'Could not remove unused rows.' });
       }
     } catch (err) {
+      longTask.close();
       console.error(err);
     }
   };
@@ -2236,11 +2248,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // button from "Remove unused rows" above; this one has no going back.
   const handleDeleteBudget = async (id: number) => {
     if (!confirm('Delete this budget and all its imported rows, Jobs and Entries? This cannot be undone.')) return;
+    longTask.start('Deleting budget', 'Deleting the budget, its imported rows, Jobs and entries…');
+    longTask.creep(95);
     try {
       const res = await fetch(apiUrl(`/api/budgets/${id}`), {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` }
       });
+      if (res.ok) await longTask.finish();
+      else longTask.close();
       if (res.ok) {
         if (activeBudgetId === id) {
           setActiveBudgetId(null);
@@ -2253,6 +2269,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         setMessage({ type: 'error', text: data.error || 'Could not delete this budget.' });
       }
     } catch (err) {
+      longTask.close();
       console.error(err);
     }
   };
@@ -2320,11 +2337,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
 
     setImportingBudgetId(budgetId);
     setMessage(null);
+    let taskDone = false;
+    longTask.start('Importing Budget Excel', `Reading ${file.name}…`);
     try {
       const buf = await file.arrayBuffer();
+      longTask.step(8, 'Opening the workbook…');
+      await new Promise((r) => setTimeout(r, 30)); // let the bar paint before the heavy parse
       const workbook = XLSX.read(buf, { type: 'array', cellDates: true });
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
       const rawRows: any[] = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+      longTask.step(18, `Reading ${rawRows.length.toLocaleString()} rows…`);
 
       if (rawRows.length === 0) {
         setMessage({ type: 'error', text: 'The Excel file has no data rows.' });
@@ -2352,18 +2374,26 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         reader.readAsDataURL(file);
       });
 
-      const res = await fetch(apiUrl(`/api/budgets/${budgetId}/import`), {
+      longTask.step(28, 'Uploading…');
+      longTask.creep(65);
+      const res = await xhrJson(`/api/budgets/${budgetId}/import`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
+        token,
+        body: {
           rows,
           file_base64: fileBase64,
           file_name: file.name,
           file_mimetype: file.type || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-        })
+        },
+        onUpload: (f) => {
+          longTask.step(28 + f * 37, f < 1 ? `Uploading… ${Math.round(f * 100)}%` : undefined);
+          if (f >= 1) longTask.creep(96, `Saving ${rows.length.toLocaleString()} rows on the server…`, rows.length * 4);
+        }
       });
-      const data = await res.json();
+      const data = res.data;
       if (!res.ok) throw new Error(data.error || 'Import failed');
+      await longTask.finish();
+      taskDone = true;
 
       setMessage({
         type: 'success',
@@ -2375,6 +2405,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message || 'Failed to import the Excel file.' });
     } finally {
+      if (!taskDone) longTask.close();
       setImportingBudgetId(null);
       pendingImportBudgetId.current = null;
     }
@@ -2428,9 +2459,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
 
     setImportingRateFile(true);
     setMessage(null);
+    let taskDone = false;
+    longTask.start('Importing Rate File', `Reading ${file.name}…`);
     try {
       const buf = await file.arrayBuffer();
+      longTask.step(8, 'Opening the workbook…');
+      await new Promise((r) => setTimeout(r, 30)); // let the bar paint before the heavy parse
       const workbook = XLSX.read(buf, { type: 'array', cellDates: true });
+      longTask.step(18, 'Reading the Rate and Materials Category sheets…');
 
       const rateSheet = workbook.Sheets['Rate'];
       const categorySheet = workbook.Sheets['Materials Category'];
@@ -2455,19 +2491,27 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         reader.readAsDataURL(file);
       });
 
-      const res = await fetch(apiUrl('/api/rate-file/import'), {
+      longTask.step(28, 'Uploading…');
+      longTask.creep(65);
+      const res = await xhrJson('/api/rate-file/import', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
+        token,
+        body: {
           rate_rows,
           category_rows,
           file_base64: fileBase64,
           file_name: file.name,
           file_mimetype: file.type || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-        })
+        },
+        onUpload: (f) => {
+          longTask.step(28 + f * 37, f < 1 ? `Uploading… ${Math.round(f * 100)}%` : undefined);
+          if (f >= 1) longTask.creep(96, `Saving ${(rate_rows.length + category_rows.length).toLocaleString()} rows on the server…`, (rate_rows.length + category_rows.length) * 2);
+        }
       });
-      const data = await res.json();
+      const data = res.data;
       if (!res.ok) throw new Error(data.error || 'Import failed');
+      await longTask.finish();
+      taskDone = true;
 
       setMessage({
         type: 'success',
@@ -2477,6 +2521,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message || 'Failed to import the Rate file.' });
     } finally {
+      if (!taskDone) longTask.close();
       setImportingRateFile(false);
     }
   };
@@ -7617,6 +7662,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           </div>
         </div>
       )}
+
+      <ProgressOverlay state={longTask.state} />
 
       {/* Budget Submissions modal — every user who has Final Submitted this budget,
           with a manual Unlock per user. See openSubmissionsModal/handleUnlockSubmission
