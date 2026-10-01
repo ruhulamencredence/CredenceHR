@@ -173,6 +173,26 @@ const SPLIT_TONES: Pick<SplitTone, 'row' | 'edge' | 'badge'>[] = [
   { row: 'bg-cyan-50', edge: 'shadow-[inset_4px_0_0_#06b6d4]', badge: 'bg-cyan-100 text-cyan-800 border-cyan-300' }
 ];
 
+// MPR Entry form: items in one MPR row that share a Budget item (split with
+// "Split remaining ... into a new item here") get one colour per split item.
+function formSplitTones(items: { uid: string; budgetItemId: number | null }[]): Map<string, SplitTone> {
+  const groups = new Map<number, string[]>();
+  for (const it of items) {
+    if (it.budgetItemId == null) continue;
+    const list = groups.get(it.budgetItemId);
+    if (list) list.push(it.uid);
+    else groups.set(it.budgetItemId, [it.uid]);
+  }
+  const out = new Map<string, SplitTone>();
+  let gi = 0;
+  for (const uids of groups.values()) {
+    if (uids.length < 2) continue;
+    const tone = SPLIT_TONES[gi++ % SPLIT_TONES.length];
+    uids.forEach((uid, i) => out.set(uid, { ...tone, part: i + 1, total: uids.length }));
+  }
+  return out;
+}
+
 const SplitBadge: React.FC<{ split: SplitTone }> = ({ split }) => (
   <span
     className={`inline-block ml-1 px-1 rounded border text-[9px] font-semibold leading-tight whitespace-nowrap align-middle ${split.badge}`}
@@ -3904,12 +3924,19 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                               carries more than one Item. */}
                           {row.itemNames.length > 0 ? (
                             <div className="space-y-1.5">
-                              {row.itemNames.map((opt) => (
+                              {(() => {
+                                const tones = formSplitTones(row.itemNames);
+                                return row.itemNames.map((opt) => {
+                                const tone = tones.get(opt.uid);
+                                return (
                                 <div
                                   key={opt.uid}
-                                  className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 flex items-center justify-between gap-2"
+                                  className={`${tone ? `${tone.row} ${tone.edge}` : 'bg-slate-50'} border border-slate-200 rounded-lg px-3 py-2 flex items-center justify-between gap-2`}
                                 >
-                                  <span className="text-slate-700 text-sm truncate">{opt.name}</span>
+                                  <span className="min-w-0 flex items-center">
+                                    <span className="text-slate-700 text-sm truncate">{opt.name}</span>
+                                    {tone && <span className="flex-shrink-0"><SplitBadge split={tone} /></span>}
+                                  </span>
                                   <div className="flex items-center gap-3 flex-shrink-0">
                                     <span className="text-xs text-slate-500 whitespace-nowrap">
                                       Qty: <span className="font-medium text-slate-800">{opt.qty || '—'}</span>
@@ -3919,7 +3946,9 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                                     </span>
                                   </div>
                                 </div>
-                              ))}
+                                );
+                                });
+                              })()}
                             </div>
                           ) : (
                             <div className="grid grid-cols-2 gap-3">
@@ -4038,8 +4067,12 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                           </p>
                           {row.itemNames.length > 1 ? (
                             <ul className="border border-slate-200 rounded-lg divide-y divide-slate-200 overflow-hidden">
-                              {row.itemNames.map((opt) => (
-                                <li key={opt.uid} className="bg-slate-50">
+                              {(() => {
+                                const tones = formSplitTones(row.itemNames);
+                                return row.itemNames.map((opt) => {
+                                const tone = tones.get(opt.uid);
+                                return (
+                                <li key={opt.uid} className={tone ? `${tone.row} ${tone.edge}` : 'bg-slate-50'}>
                                   <div className="flex items-center gap-1">
                                     {/* Blue "Info" badge + "Details" label (not just a faint
                                         chevron) so this reads as a tappable control on first
@@ -4057,6 +4090,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                                         <Info className="w-3 h-3" />
                                       </span>
                                       <span className="flex-1 min-w-0 truncate">{opt.name}</span>
+                                      {tone && <span className="flex-shrink-0"><SplitBadge split={tone} /></span>}
                                       <span className="flex-shrink-0 inline-flex items-center gap-0.5 text-[11px] font-medium text-blue-600">
                                         Details
                                         <ChevronRight className="w-3.5 h-3.5" />
@@ -4135,7 +4169,9 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                                     </button>
                                   </div>
                                 </li>
-                              ))}
+                                );
+                                });
+                              })()}
                             </ul>
                           ) : row.itemNames.length === 1 ? (
                             <div className="border border-slate-200 rounded-xl overflow-hidden bg-slate-50">
