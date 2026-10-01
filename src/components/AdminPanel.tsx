@@ -2862,14 +2862,31 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // inputs elsewhere on the page. Scoping recomputation to just these 6 dependencies
   // means unrelated keystrokes no longer re-filter (and, via stableOpenEntryHistory +
   // ReportRow below, no longer re-render) this whole entries table.
+  // Typing in the Job No filter re-filters a moment later, so the box stays
+  // responsive even with thousands of entries.
+  const deferredFilterJobNo = React.useDeferredValue(filterJobNo);
   const filteredEntries = React.useMemo(() => entries.filter((ent) => {
-    const matchJob = filterJobNo ? ent.job_no.toLowerCase().includes(filterJobNo.toLowerCase()) : true;
+    const matchJob = deferredFilterJobNo ? String(ent.job_no || '').toLowerCase().includes(deferredFilterJobNo.toLowerCase()) : true;
     const matchProj = filterProjectId ? ent.project_id.toString() === filterProjectId : true;
     const matchStart = filterStartDate ? ent.entry_date >= filterStartDate : true;
     const matchEnd = filterEndDate ? ent.entry_date <= filterEndDate : true;
     const matchBudget = filterBudgetId ? String(ent.budget_id ?? '') === filterBudgetId : true;
     return matchJob && matchProj && matchStart && matchEnd && matchBudget;
-  }), [entries, filterJobNo, filterProjectId, filterStartDate, filterEndDate, filterBudgetId]);
+  }), [entries, deferredFilterJobNo, filterProjectId, filterStartDate, filterEndDate, filterBudgetId]);
+
+  // The report table shows one page at a time — mounting every entry at once
+  // made the Reports tab slow. Excel export still takes every matching entry.
+  const REPORT_PAGE_SIZES = [50, 100, 200, 500];
+  const [reportPageSize, setReportPageSize] = useState(50);
+  const [reportPage, setReportPage] = useState(1);
+  const reportPageCount = Math.max(1, Math.ceil(filteredEntries.length / reportPageSize));
+  useEffect(() => {
+    setReportPage(1);
+  }, [filteredEntries, reportPageSize]);
+  const pagedEntries = React.useMemo(
+    () => filteredEntries.slice((reportPage - 1) * reportPageSize, reportPage * reportPageSize),
+    [filteredEntries, reportPage, reportPageSize]
+  );
 
   const stableOpenEntryHistory = useStableCallback(openEntryHistory);
   const stableDeleteEntry = useStableCallback(handleDeleteEntry);
@@ -3181,13 +3198,71 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                       </td>
                     </tr>
                   ) : (
-                    filteredEntries.map((ent) => (
+                    pagedEntries.map((ent) => (
                       <ReportRow key={ent.id} ent={ent} onOpenHistory={stableOpenEntryHistory} onDelete={stableDeleteEntry} deletingEntryId={deletingEntryId} />
                     ))
                   )}
                 </tbody>
               </table>
             </div>
+            {filteredEntries.length > 0 && (
+              <div className="px-6 py-3 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600">
+                <div className="flex items-center gap-2">
+                  <span>
+                    {(reportPage - 1) * reportPageSize + 1}–{Math.min(reportPage * reportPageSize, filteredEntries.length)} of {filteredEntries.length}
+                  </span>
+                  <select
+                    aria-label="Rows per page"
+                    value={reportPageSize}
+                    onChange={(e) => setReportPageSize(Number(e.target.value))}
+                    className="px-2 py-1 bg-white border border-slate-200 rounded-lg"
+                  >
+                    {REPORT_PAGE_SIZES.map((n) => (
+                      <option key={n} value={n}>
+                        {n} / page
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setReportPage(1)}
+                    disabled={reportPage === 1}
+                    className="px-2.5 py-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40"
+                  >
+                    « First
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setReportPage((p) => Math.max(1, p - 1))}
+                    disabled={reportPage === 1}
+                    className="px-2.5 py-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40"
+                  >
+                    ‹ Prev
+                  </button>
+                  <span className="px-2 font-semibold">
+                    Page {reportPage} of {reportPageCount}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setReportPage((p) => Math.min(reportPageCount, p + 1))}
+                    disabled={reportPage >= reportPageCount}
+                    className="px-2.5 py-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40"
+                  >
+                    Next ›
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setReportPage(reportPageCount)}
+                    disabled={reportPage >= reportPageCount}
+                    className="px-2.5 py-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40"
+                  >
+                    Last »
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
