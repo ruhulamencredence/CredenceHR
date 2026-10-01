@@ -44,7 +44,11 @@ export async function ensureDeviceSchema(queryDB: QueryDB) {
     UNIQUE KEY uniq_user_device (user_id, device_id),
     KEY idx_user_devices_user (user_id)
   )`);
-  await queryDB("ALTER TABLE users ADD COLUMN max_devices INT NOT NULL DEFAULT 1").catch(() => {});
+  // Only when missing, so a restart doesn't log a duplicate-column error.
+  const has: any[] = await queryDB(
+    "SELECT COUNT(*) AS n FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = 'max_devices'"
+  );
+  if (!Number(has?.[0]?.n || 0)) await queryDB("ALTER TABLE users ADD COLUMN max_devices INT NOT NULL DEFAULT 1").catch(() => {});
 }
 
 const exempt = (u: any) => u?.role === "superadmin" || Number(u?.is_platform_admin || 0) === 1;
