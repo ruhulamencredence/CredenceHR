@@ -6,7 +6,7 @@
 import React, { useEffect, useState } from 'react';
 import { Car, MapPin, ChevronRight } from 'lucide-react';
 import { Lottie } from 'lottie-react';
-import rideAnimation from '../assets/hasahar.json';
+import rideAnimation from '../assets/travel-app.json';
 import { apiUrl } from '../lib/api';
 import { BookRideTarget } from '../lib/quickAccess';
 
@@ -64,13 +64,12 @@ export const BookRideCard: React.FC<BookRideCardProps> = ({ token, userId, onOpe
 
   return (
     <div className={`relative bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden flex flex-col ${className}`}>
-      {/* Decorative ride animation tucked into the card's top-right corner
-          (its road runs diagonally across that corner). Purely visual — it
-          never takes a tap. */}
-      <div className="absolute top-0 right-0 w-32 h-[104px] pointer-events-none" aria-hidden="true">
+      {/* Decorative ride animation (a car driving past a skyline) in the
+          card's top-right corner. Purely visual — it never takes a tap. */}
+      <div className="absolute top-3 right-3 w-44 h-[47px] pointer-events-none" aria-hidden="true">
         <Lottie src={rideAnimation} autoplay loop className="w-full h-full" />
       </div>
-      <div className="relative px-5 pt-5 pb-4 sm:px-6 pr-32 sm:pr-32 border-b border-slate-200 flex items-start justify-between gap-3">
+      <div className="relative px-5 pt-5 pb-4 sm:px-6 pr-48 sm:pr-48 border-b border-slate-200 flex items-start justify-between gap-3">
         <div className="relative z-10">
           <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
             <Car className="w-4 h-4 text-blue-600" /> Book a Ride
