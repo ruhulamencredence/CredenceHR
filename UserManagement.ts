@@ -1,0 +1,1023 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+// User Management (Admin Panel -> Users) routes, split out of server.ts on
+// purpose — same convention as profileRoutes.ts/holidayRoutes.ts/Alerts.ts:
+// server.ts is already huge, so this module goes in its own file instead of
+// growing it further. Registered from inside startServer() via
+// registerUserManagementRoutes(), reusing that same request's
+// `app`/`authenticateToken`/`requireAdmin`/`requireSuperAdmin`/
+// `requireModule`/`queryDB` rather than creating a second Express app or a
+// second DB connection.
+//
+// Extracted as-is from server.ts's "6. User Management (Admin Only)" and
+// "6. User <-> Project Permissions (Admin-only)" sections — no logic
+// changed, only moved.
+
+import type { Express } from "express";
+import bcrypt from "bcryptjs";
+
+interface UserManagementRouteDeps {
+  authenticateToken: any;
+  requireAdmin: any;
+  requireSuperAdmin: any;
+  // Gate for the Module Access endpoints below — a Superadmin always passes;
+  // a plain Admin passes once the Superadmin has switched on their
+  // can_grant_module_access flag (see server.ts's ensureDatabaseSchema for
+  // the full explanation). The handlers themselves still restrict what a
+  // delegated Admin can do with it — see the 'user'-target-only check below.
+  requireModuleGrantAccess: any;
+  // Same requireModule(moduleKey) factory used by every other Admin Panel
+  // module in server.ts — pass "users" through it here so a Superadmin can
+  // grant/revoke the Users module's access independently of every other
+  // module.
+  requireModule: (moduleKey: "users") => any;
+  // Per-module action gate (Read Only/Edit-Add/Entry-Upload/Delete-Trash/
+  // Permanent Delete) — "users" is wired up to it below: create/reset-
+  // password/change-email/feature-permissions/project-assignment need
+  // "edit_add", Bulk Add Users needs "entry_upload", delete needs
+  // "delete_trash". The Module Access / Module Access Layers / role-promote
+  // / per-feature-toggle endpoints further down are deliberately left on
+  // their existing gates (requireModuleGrantAccess / requireSuperAdmin) —
+  // those are separate, stricter permission dimensions, not part of the
+  // "users" module grant. See requireModuleLayer() in server.ts.
+  requireModuleLayer: (moduleKey: "users", layer: "read" | "edit_add" | "entry_upload" | "delete_trash" | "permanent_delete") => any;
+  queryDB: (sql: string, params?: any[]) => Promise<any>;
+  // Valid module keys for the module-permissions PUT below — same
+  // ADMIN_MODULE_KEYS array defined once in server.ts.
+  adminModuleKeys: readonly string[];
+  // Every (module_key -> its allowed layer keys) the module-permission-layers
+  // PUT below validates against — same MODULE_LAYER_KEY_SETS map defined
+  // once in server.ts. Most modules share the generic Read Only/Edit-Add/
+  // Entry-Upload/Delete-Trash/Permanent-Delete set (PERMISSION_LAYER_KEYS in
+  // server.ts/src/types.ts), but a module_key here can point at its own
+  // distinct set instead (e.g. "leave_manage" uses operation-specific
+  // layers — see LEAVE_MANAGE_LAYER_KEYS in server.ts) — this route treats
+  // every module_key the same way regardless, just via a different allowed
+  // set. A module_key not present in this map doesn't support layers yet.
+  moduleLayerKeySets: Record<string, readonly string[]>;
+}
+
+export function registerUserManagementRoutes(app: Express, deps: UserManagementRouteDeps) {
+  const { authenticateToken, requireAdmin, requireSuperAdmin, requireModuleGrantAccess, requireModule, requireModuleLayer, queryDB, adminModuleKeys, moduleLayerKeySets } = deps;
+
+  // 6. User Management (Admin Only)
+  app.post("/api/users", authenticateToken, requireAdmin, requireModule("users"), requireModuleLayer("users", "edit_add"), async (req: any, res) => {
+    try {
+      const { name, email, password, role } = req.body;
+      if (!name || !email || !password) {
+        return res.status(400).json({ error: "Name, email and password are required" });
+      }
+      if (password.length < 6) {
+        return res.status(400).json({ error: "Password must be at least 6 characters" });
+      }
+
+      const existing = await queryDB("SELECT id FROM users WHERE email = ?", [email]);
+      if (existing.length > 0) {
+        return res.status(400).json({ error: "Email already registered" });
+      }
+
+      // Only a Superadmin may hand out the Admin role. A plain Admin creating a new
+      // account (even if they asked for role: "admin") always gets a regular User —
+      // deciding who becomes an Admin is a Superadmin-only power.
+      const userRole = role === "admin" && req.user.role === "superadmin" ? "admin" : "user";
+      const password_hash = await bcrypt.hash(password, 10);
+
+      const result = await queryDB(
+        "INSERT INTO users (name, email, password_hash, role) VALUES (?, ?, ?, ?)",
+        [name, email, password_hash, userRole]
+      );
+
+      res.json({ success: true, id: result.insertId, name, email, role: userRole });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to create user" });
+    }
+  });
+
+  // Superadmin/Admin resets a user's password when they've forgotten it — no old
+  // password needed, unlike a normal self-service "change password" flow (this
+  // app doesn't have one; a forgotten password is always solved by an Admin from
+  // here). Same "can't touch the Superadmin's own account" rule as every other
+  // per-user Admin action.
+  app.put("/api/users/:id/reset-password", authenticateToken, requireAdmin, requireModule("users"), requireModuleLayer("users", "edit_add"), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const { new_password } = req.body;
+      if (!new_password || String(new_password).length < 6) {
+        return res.status(400).json({ error: "New password must be at least 6 characters." });
+      }
+
+      const rows: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (rows.length === 0) return res.status(404).json({ error: "User not found" });
+      // A plain Admin must never be able to reach the Superadmin's account, even by
+      // guessing its id directly — the Users list already hides it from them.
+      if (rows[0].role === "superadmin" && req.user.role !== "superadmin") {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      const password_hash = await bcrypt.hash(String(new_password), 10);
+      await queryDB("UPDATE users SET password_hash = ? WHERE id = ?", [password_hash, id]);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to reset password" });
+    }
+  });
+
+  // Superadmin/Admin changes a user's Login ID (the email address they log in
+  // with) — same idea as reset-password above: the Admin sets it directly, no
+  // confirmation email or old-value check needed. Same "can't touch the
+  // Superadmin's own account" rule as every other per-user Admin action.
+  app.put("/api/users/:id/email", authenticateToken, requireAdmin, requireModule("users"), requireModuleLayer("users", "edit_add"), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const new_email = String(req.body.new_email || "").trim();
+      if (!new_email) {
+        return res.status(400).json({ error: "New Login ID (email) is required." });
+      }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(new_email)) {
+        return res.status(400).json({ error: "Enter a valid email address." });
+      }
+
+      const rows: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (rows.length === 0) return res.status(404).json({ error: "User not found" });
+      // A plain Admin must never be able to reach the Superadmin's account, even by
+      // guessing its id directly — the Users list already hides it from them.
+      if (rows[0].role === "superadmin" && req.user.role !== "superadmin") {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      const dup: any = await queryDB("SELECT id FROM users WHERE email = ? AND id != ?", [new_email, id]);
+      if (dup.length > 0) {
+        return res.status(400).json({ error: "Email already registered" });
+      }
+
+      await queryDB("UPDATE users SET email = ? WHERE id = ?", [new_email, id]);
+      res.json({ success: true, email: new_email });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to update Login ID" });
+    }
+  });
+
+  app.get("/api/users", authenticateToken, requireAdmin, requireModule("users"), async (req: any, res) => {
+    try {
+      const users = await queryDB(
+        "SELECT id, name, email, username, role, created_at, last_login_lat, last_login_lng, last_login_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, can_grant_module_access, attendance_project_id FROM users ORDER BY created_at DESC"
+      );
+      // Attach each Admin's module_permissions so the Superadmin's "Module Access"
+      // UI has them without a separate round trip per row. Only role='admin' rows
+      // carry a real (possibly empty) list — a Superadmin implicitly has every
+      // module and a plain User never opens the Admin Panel, so both get [].
+      const modulePermRows: any = await queryDB("SELECT user_id, module_key FROM admin_module_permissions");
+      const modulesByUser = new Map<number, string[]>();
+      for (const row of modulePermRows) {
+        const list = modulesByUser.get(row.user_id) || [];
+        list.push(row.module_key);
+        modulesByUser.set(row.user_id, list);
+      }
+      // Same idea, one level more granular — see PERMISSION_LAYER_MODULES.
+      const layerRows: any = await queryDB("SELECT user_id, module_key, layer_key FROM admin_module_permission_layers");
+      const layersByUser = new Map<number, Record<string, string[]>>();
+      for (const row of layerRows) {
+        const byModule = layersByUser.get(row.user_id) || {};
+        (byModule[row.module_key] ||= []).push(row.layer_key);
+        layersByUser.set(row.user_id, byModule);
+      }
+
+      // Last Login Location is sensitive (it's a precise coordinate, not just a
+      // name) — only a Superadmin sees it by default. A plain Admin only sees it
+      // if the Superadmin has explicitly switched on can_view_login_location for
+      // THEIR OWN account. Enforced here server-side (not just hidden in the UI)
+      // so a direct API call can't bypass it either.
+      const requester = users.find((u: any) => u.id === req.user.id);
+      const canSeeLocation =
+        req.user.role === "superadmin" || (!!requester && !!Number(requester.can_view_login_location));
+
+      // A plain Admin must never see the Superadmin's account in the Users list —
+      // not even a read-only row. Enforced here server-side (not just hidden in the
+      // UI) so a direct API call can't expose it either. Only the Superadmin itself
+      // sees its own row.
+      const visibleUsers = req.user.role === "superadmin"
+        ? users
+        : users.filter((u: any) => u.role !== "superadmin");
+
+      res.json(visibleUsers.map((u: any) => ({
+        ...u,
+        last_login_lat: canSeeLocation ? u.last_login_lat : undefined,
+        last_login_lng: canSeeLocation ? u.last_login_lng : undefined,
+        last_login_at: canSeeLocation ? u.last_login_at : undefined,
+        can_edit_delivery_date: u.can_edit_delivery_date === undefined ? true : !!Number(u.can_edit_delivery_date),
+        can_job_edit: !!Number(u.can_job_edit),
+        can_use_attendance: u.role === "superadmin" ? true : !!Number(u.can_use_attendance),
+        // Pinned Project for Remote Attendance (Admin Panel -> Users -> "Attend.
+        // Project", right next to can_use_attendance) — null means unrestricted.
+        // Never set for 'superadmin'.
+        attendance_project_id: u.role === "superadmin" ? null : (u.attendance_project_id ?? null),
+        can_use_tracking: u.role === "superadmin" ? true : !!Number(u.can_use_tracking),
+        can_view_login_location: u.role === "superadmin" ? true : !!Number(u.can_view_login_location),
+        can_access_user_panel: u.role === "admin" ? !!Number(u.can_access_user_panel) : false,
+        can_manage_leave: u.role === "superadmin" ? true : !!Number(u.can_manage_leave),
+        can_view_movement_claims: u.role === "superadmin" ? true : !!Number(u.can_view_movement_claims),
+        can_view_conveyance_claims: u.role === "superadmin" ? true : !!Number(u.can_view_conveyance_claims),
+        can_view_budget_module: u.role === "superadmin" ? true : u.can_view_budget_module === undefined ? true : !!Number(u.can_view_budget_module),
+        can_view_leave_summary: u.role === "superadmin" ? true : !!Number(u.can_view_leave_summary),
+        can_view_timesheet: u.role === "superadmin" ? true : !!Number(u.can_view_timesheet),
+        can_view_leave_application: u.role === "superadmin" ? true : !!Number(u.can_view_leave_application),
+        can_view_my_leave: u.role === "superadmin" ? true : !!Number(u.can_view_my_leave),
+        can_grant_module_access: u.role === "admin" ? !!Number(u.can_grant_module_access) : false,
+        module_permissions: (u.role === "admin" || u.role === "user") ? (modulesByUser.get(u.id) || []) : [],
+        module_permission_layers: (u.role === "admin" || u.role === "user") ? (layersByUser.get(u.id) || {}) : {}
+      })));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Bulk User Import (Admin Panel -> Users -> Bulk Add Users): each row is just
+  // { sl, project_name, password }. The Project Name becomes both the account's
+  // display Name and its login ID (Project Name with spaces stripped + lowercased,
+  // stored in users.username) — these users log in with Project Name + Password,
+  // no email. Rules enforced per row, same order as given:
+  //  - Project Name and Password are required.
+  //  - Password must be exactly 6 characters.
+  //  - A row is skipped (not imported) if its Project Name (login ID) is already
+  //    taken by an existing user OR an earlier row in this same import.
+  //  - A row is skipped if its Password matches any OTHER account's password —
+  //    either an existing user's (checked via bcrypt against the stored hash,
+  //    since passwords are never stored in plain text) or an earlier row in this
+  //    same import. This is a deliberate business rule: no two accounts may share
+  //    a password, even though the login ID would still disambiguate them.
+  // Every row is reported back as either created or skipped (with a reason) so the
+  // Admin can see exactly what happened without guessing from a single count.
+  app.post("/api/users/bulk", authenticateToken, requireAdmin, requireModule("users"), requireModuleLayer("users", "entry_upload"), async (req, res) => {
+    try {
+      const rows = req.body?.rows;
+      if (!Array.isArray(rows) || rows.length === 0) {
+        return res.status(400).json({ error: "No rows to import" });
+      }
+
+      const existingUsers = await queryDB("SELECT username, password_hash FROM users");
+      const existingUsernames = new Set(
+        existingUsers.map((u: any) => (u.username || "").toLowerCase()).filter(Boolean)
+      );
+      // Grows as rows are created, so later rows in the same batch are also checked
+      // against passwords created earlier in this same batch (not just pre-existing ones).
+      const hashesToCheck: string[] = existingUsers.map((u: any) => u.password_hash).filter(Boolean);
+      const usedPasswordsInBatch = new Set<string>();
+
+      const created: any[] = [];
+      const skipped: any[] = [];
+
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i] || {};
+        const sl = row.sl ?? i + 1;
+        const projectName = String(row.project_name ?? "").trim();
+        const password = String(row.password ?? "");
+
+        if (!projectName || !password) {
+          skipped.push({ sl, project_name: projectName, reason: "Project Name and Password are required" });
+          continue;
+        }
+        if (password.length !== 6) {
+          skipped.push({ sl, project_name: projectName, reason: "Password must be exactly 6 characters" });
+          continue;
+        }
+
+        const username = projectName.replace(/\s+/g, "").toLowerCase();
+        if (existingUsernames.has(username)) {
+          skipped.push({ sl, project_name: projectName, reason: "A user for this Project Name already exists" });
+          continue;
+        }
+
+        if (usedPasswordsInBatch.has(password)) {
+          skipped.push({ sl, project_name: projectName, reason: "Duplicate password (already used earlier in this import)" });
+          continue;
+        }
+        let passwordReused = false;
+        for (const hash of hashesToCheck) {
+          if (await bcrypt.compare(password, hash)) {
+            passwordReused = true;
+            break;
+          }
+        }
+        if (passwordReused) {
+          skipped.push({ sl, project_name: projectName, reason: "This password is already used by another account" });
+          continue;
+        }
+
+        const password_hash = await bcrypt.hash(password, 10);
+        const result = await queryDB(
+          "INSERT INTO users (name, email, username, password_hash, role) VALUES (?, NULL, ?, ?, 'user')",
+          [projectName, username, password_hash]
+        );
+
+        existingUsernames.add(username);
+        usedPasswordsInBatch.add(password);
+        hashesToCheck.push(password_hash);
+        created.push({ sl, id: result.insertId, project_name: projectName, username });
+      }
+
+      res.json({
+        success: true,
+        created,
+        skipped,
+        created_count: created.length,
+        skipped_count: skipped.length
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Bulk import failed" });
+    }
+  });
+
+  // Promote/demote a User <-> Admin. Superadmin-only — deciding who is an Admin and
+  // who stays a plain User is the whole point of the Superadmin role, so this is
+  // never reachable by a regular Admin even though they can otherwise manage users.
+  app.put("/api/users/:id/role", authenticateToken, requireSuperAdmin, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const { role } = req.body;
+      if (!["admin", "user"].includes(role)) {
+        return res.status(400).json({ error: "Invalid role" });
+      }
+
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role === "superadmin") {
+        return res.status(400).json({ error: "The Superadmin account's role can't be changed here." });
+      }
+
+      await queryDB("UPDATE users SET role = ? WHERE id = ?", [role, id]);
+      // Demoting an Admin back to a plain User clears any module grants they had —
+      // otherwise they'd silently keep them if a Superadmin later re-promotes them
+      // without noticing the stale grants. Same reasoning for the two other
+      // Admin-only toggles (Login Location visibility, User Panel access).
+      if (role === "user") {
+        await queryDB("DELETE FROM admin_module_permissions WHERE user_id = ?", [id]);
+        await queryDB("DELETE FROM admin_module_permission_layers WHERE user_id = ?", [id]);
+        await queryDB("DELETE FROM attendance_report_department_access WHERE user_id = ?", [id]);
+        await queryDB("DELETE FROM leave_application_department_access WHERE user_id = ?", [id]);
+        await queryDB("DELETE FROM conveyance_claim_department_access WHERE user_id = ?", [id]);
+        await queryDB("UPDATE users SET can_view_login_location = 0, can_access_user_panel = 0 WHERE id = ?", [id]);
+      }
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Sets which Admin Panel modules a given Admin or User may access — the tabs
+  // are: projects, mprs, imports, reports, users, recycle, editlog, etc. Normally
+  // Superadmin-only; a plain Admin reaches these two routes only once the
+  // Superadmin has switched on can_grant_module_access for THEIR account (see
+  // requireModuleGrantAccess in server.ts) — and even then, the PUT below still
+  // blocks them from touching another 'admin' account, so a delegated Admin can
+  // only ever grant/revoke Module Access for a plain 'user'.
+  app.get("/api/users/:id/module-permissions", authenticateToken, requireModuleGrantAccess, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const rows: any = await queryDB("SELECT module_key FROM admin_module_permissions WHERE user_id = ?", [id]);
+      res.json({ modules: rows.map((r: any) => r.module_key) });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/users/:id/module-permissions", authenticateToken, requireModuleGrantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const modules: string[] = Array.isArray(req.body?.modules) ? req.body.modules : [];
+      const valid = modules.filter((m) => adminModuleKeys.includes(m));
+
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "Module access only applies to Admin and User accounts." });
+      }
+      // A delegated (non-superadmin) Admin using can_grant_module_access can only
+      // ever reach a role='user' target — promoting what another ADMIN can see in
+      // the Admin Panel stays exclusively the Superadmin's call, same as who gets
+      // promoted to 'admin' in the first place (PUT /api/users/:id/role below).
+      if (req.user.role !== "superadmin" && target[0].role !== "user") {
+        return res.status(403).json({ error: "Only the Superadmin can set another Admin's Module Access." });
+      }
+
+      await queryDB("DELETE FROM admin_module_permissions WHERE user_id = ?", [id]);
+      for (const moduleKey of valid) {
+        await queryDB("INSERT INTO admin_module_permissions (user_id, module_key) VALUES (?, ?)", [id, moduleKey]);
+      }
+      res.json({ success: true, modules: valid });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Granular per-module action layers (Read Only/Edit-Add/Entry-Upload/
+  // Delete-Trash/Permanent Delete) for ONE module at a time — Admin Panel ->
+  // Users -> Module Access shows this checkbox row once a module listed in
+  // PERMISSION_LAYER_MODULES (rolled out module by module — see that
+  // constant in server.ts/src/types.ts for the current list) is itself
+  // ticked above. Layered ON TOP of admin_module_permissions, same
+  // "only meaningful/only saved while the module checkbox is ticked" rule
+  // as the Department-scope endpoints just below. Same gate
+  // (requireModuleGrantAccess) and same delegated-Admin restriction (only a
+  // Superadmin may touch another 'admin' target) as the module-permissions
+  // pair above, since this is just a finer-grained extension of that same
+  // grant.
+  app.get("/api/users/:id/module-permission-layers", authenticateToken, requireModuleGrantAccess, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const moduleKey = String(req.query?.module || "");
+      const rows: any = await queryDB(
+        "SELECT layer_key FROM admin_module_permission_layers WHERE user_id = ? AND module_key = ?",
+        [id, moduleKey]
+      );
+      res.json({ layers: rows.map((r: any) => r.layer_key) });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/users/:id/module-permission-layers", authenticateToken, requireModuleGrantAccess, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const moduleKey = String(req.body?.module || "");
+      const allowedLayerKeys = moduleLayerKeySets[moduleKey];
+      if (!allowedLayerKeys) {
+        return res.status(400).json({ error: "This module doesn't support permission layers yet." });
+      }
+      const layers: string[] = Array.isArray(req.body?.layers) ? req.body.layers : [];
+      const valid = layers.filter((l) => allowedLayerKeys.includes(l));
+
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "Permission layers only apply to Admin and User accounts." });
+      }
+      if (req.user.role !== "superadmin" && target[0].role !== "user") {
+        return res.status(403).json({ error: "Only the Superadmin can set another Admin's permission layers." });
+      }
+
+      await queryDB("DELETE FROM admin_module_permission_layers WHERE user_id = ? AND module_key = ?", [id, moduleKey]);
+      for (const layerKey of valid) {
+        await queryDB(
+          "INSERT INTO admin_module_permission_layers (user_id, module_key, layer_key) VALUES (?, ?, ?)",
+          [id, moduleKey, layerKey]
+        );
+      }
+      res.json({ success: true, module: moduleKey, layers: valid });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Superadmin: department-wise scope for the 'attendance_reports' module
+  // specifically (Admin Panel -> Users -> Module Access -> "Attendance
+  // Report Departments", shown once that module's own checkbox above is
+  // ticked). Layered on TOP of module-permissions, not a replacement for it —
+  // the account still needs 'attendance_reports' granted there for any of
+  // this to matter; see requireModule("attendance_reports") in
+  // AttendanceRoutes.ts and getAttendanceReportDeptScope() in server.ts,
+  // which every GET /api/attendance/report/* route now calls. No rows for a
+  // user means unrestricted — every Department visible, exactly like before
+  // this feature existed — so granting the module alone (leaving this unset)
+  // keeps today's behavior. Applies equally to role 'admin' and role 'user'
+  // accounts, and to accounts that supervise no Department at all — the
+  // Department picker in the modal only uses supervisor_user_id client-side
+  // to pre-tick a sensible starting selection, it isn't required here.
+  app.get("/api/users/:id/attendance-report-departments", authenticateToken, requireSuperAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const rows: any = await queryDB(
+        "SELECT department FROM attendance_report_department_access WHERE user_id = ? ORDER BY department ASC",
+        [id]
+      );
+      res.json({ departments: rows.map((r: any) => r.department) });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/users/:id/attendance-report-departments", authenticateToken, requireSuperAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const requested: string[] = Array.isArray(req.body?.departments) ? req.body.departments : [];
+
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "Attendance Report Department access only applies to Admin and User accounts." });
+      }
+
+      // Only real Department names (Admin Panel -> Departments) can be scoped
+      // to — silently drops anything else (a stale/typo'd name) instead of
+      // rejecting the whole request, same forgiving convention the
+      // module-permissions `valid = modules.filter(...)` above uses.
+      const realDepartments: any = await queryDB("SELECT name FROM departments");
+      const realNames = new Set(realDepartments.map((d: any) => d.name));
+      const valid = Array.from(
+        new Set(requested.map((d) => String(d).trim()).filter((d) => d && realNames.has(d)))
+      );
+
+      await queryDB("DELETE FROM attendance_report_department_access WHERE user_id = ?", [id]);
+      for (const department of valid) {
+        await queryDB("INSERT INTO attendance_report_department_access (user_id, department) VALUES (?, ?)", [id, department]);
+      }
+      res.json({ success: true, departments: valid });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Superadmin: department-wise scope for the 'leave_applications' module —
+  // exact same shape/rules as the 'attendance_report_departments' pair above,
+  // just backed by leave_application_department_access instead (Admin Panel
+  // -> Users -> Module Access -> "Leave Application Departments", shown once
+  // 'leave_applications' is ticked). No rows for a user means unrestricted —
+  // every Department's Leave Applications visible, exactly like granting the
+  // module alone. Applies equally to role 'admin' and role 'user' accounts,
+  // and to accounts that supervise no Department at all — the Department
+  // picker in the modal only uses supervisor_user_id client-side to pre-tick
+  // a sensible starting selection, it isn't required here.
+  app.get("/api/users/:id/leave-application-departments", authenticateToken, requireSuperAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const rows: any = await queryDB(
+        "SELECT department FROM leave_application_department_access WHERE user_id = ? ORDER BY department ASC",
+        [id]
+      );
+      res.json({ departments: rows.map((r: any) => r.department) });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/users/:id/leave-application-departments", authenticateToken, requireSuperAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const requested: string[] = Array.isArray(req.body?.departments) ? req.body.departments : [];
+
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "Leave Application Department access only applies to Admin and User accounts." });
+      }
+
+      // Only real Department names (Admin Panel -> Departments) can be scoped
+      // to — same forgiving convention as attendance-report-departments above.
+      const realDepartments: any = await queryDB("SELECT name FROM departments");
+      const realNames = new Set(realDepartments.map((d: any) => d.name));
+      const valid = Array.from(
+        new Set(requested.map((d) => String(d).trim()).filter((d) => d && realNames.has(d)))
+      );
+
+      await queryDB("DELETE FROM leave_application_department_access WHERE user_id = ?", [id]);
+      for (const department of valid) {
+        await queryDB("INSERT INTO leave_application_department_access (user_id, department) VALUES (?, ?)", [id, department]);
+      }
+      res.json({ success: true, departments: valid });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Superadmin: department-wise scope for the 'conveyance' module — exact
+  // same shape/rules as the 'attendance_report_departments'/'leave_
+  // application_departments' pairs above, just backed by conveyance_claim_
+  // department_access instead (Admin Panel -> Users -> Module Access ->
+  // "Conveyance Claim Departments", shown once 'conveyance' is ticked). No
+  // rows for a user means unrestricted — every Department's Conveyance Bill
+  // Claims visible, exactly like granting the module alone. Applies equally
+  // to role 'admin' and role 'user' accounts, and to accounts that supervise
+  // no Department at all — the Department picker in the modal only uses
+  // supervisor_user_id client-side to pre-tick a sensible starting
+  // selection, it isn't required here.
+  app.get("/api/users/:id/conveyance-claim-departments", authenticateToken, requireSuperAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const rows: any = await queryDB(
+        "SELECT department FROM conveyance_claim_department_access WHERE user_id = ? ORDER BY department ASC",
+        [id]
+      );
+      res.json({ departments: rows.map((r: any) => r.department) });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/users/:id/conveyance-claim-departments", authenticateToken, requireSuperAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const requested: string[] = Array.isArray(req.body?.departments) ? req.body.departments : [];
+
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "Conveyance Claim Department access only applies to Admin and User accounts." });
+      }
+
+      // Only real Department names (Admin Panel -> Departments) can be scoped
+      // to — same forgiving convention as attendance-report-departments above.
+      const realDepartments: any = await queryDB("SELECT name FROM departments");
+      const realNames = new Set(realDepartments.map((d: any) => d.name));
+      const valid = Array.from(
+        new Set(requested.map((d) => String(d).trim()).filter((d) => d && realNames.has(d)))
+      );
+
+      await queryDB("DELETE FROM conveyance_claim_department_access WHERE user_id = ?", [id]);
+      for (const department of valid) {
+        await queryDB("INSERT INTO conveyance_claim_department_access (user_id, department) VALUES (?, ?)", [id, department]);
+      }
+      res.json({ success: true, departments: valid });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Superadmin-only: grant/revoke a given Admin's ability to see OTHER users' Last
+  // Login Location (the exact GPS coordinates captured at login) in Admin Panel ->
+  // Users. OFF by default for every Admin — a Superadmin always sees it and this
+  // never needs to be (and can't be) granted to a plain 'user' account.
+  app.put("/api/users/:id/login-location-access", authenticateToken, requireSuperAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const canView = !!req.body?.can_view_login_location;
+
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin") {
+        return res.status(400).json({ error: "Login Location access only applies to Admin accounts." });
+      }
+
+      await queryDB("UPDATE users SET can_view_login_location = ? WHERE id = ?", [canView ? 1 : 0, id]);
+      res.json({ success: true, can_view_login_location: canView });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Superadmin-only: grant/revoke a given Admin's ability to ALSO use the User
+  // Panel (mark Remote Attendance, submit Claims/Conveyance Bills, enter Job/MPR
+  // data) alongside their normal Admin Panel — the same on/off switch pattern as
+  // login-location-access above. OFF by default for every Admin; never applies to
+  // a plain User (already has it by definition) or to a Superadmin.
+  app.put("/api/users/:id/user-panel-access", authenticateToken, requireSuperAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const canAccess = !!req.body?.can_access_user_panel;
+
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin") {
+        return res.status(400).json({ error: "User Panel access only applies to Admin accounts." });
+      }
+
+      await queryDB("UPDATE users SET can_access_user_panel = ? WHERE id = ?", [canAccess ? 1 : 0, id]);
+      res.json({ success: true, can_access_user_panel: canAccess });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Superadmin-only: grant/revoke a given Admin OR User account's ability to edit
+  // OTHER accounts' Leave balances on Self Service -> Leave Management (see
+  // GET/PUT /api/leave-balances below) — same on/off switch pattern as
+  // user-panel-access above, but (unlike that one) applies to BOTH roles since
+  // Leave Management isn't Admin Panel-only. Never applies to the Superadmin
+  // itself, which always has this implicitly.
+  app.put("/api/users/:id/leave-management-access", authenticateToken, requireSuperAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const canManage = !!req.body?.can_manage_leave;
+
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "Leave Management access only applies to Admin and User accounts." });
+      }
+
+      await queryDB("UPDATE users SET can_manage_leave = ? WHERE id = ?", [canManage ? 1 : 0, id]);
+      res.json({ success: true, can_manage_leave: canManage });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Superadmin-only: grant/revoke a given Admin OR User account's ability to
+  // see/use the Movement Claim (GPS Check In/Out) section on their own User
+  // Panel at all — same on/off switch pattern as leave-management-access above,
+  // applying to BOTH roles. Nothing shows (and the underlying /api/claims/*
+  // self-service routes are blocked server-side too — see requireMovementClaimAccess)
+  // until the Superadmin explicitly grants it, matching every other module in
+  // this app. Never applies to the Superadmin itself, which always has this
+  // implicitly.
+  app.put("/api/users/:id/movement-claim-access", authenticateToken, requireSuperAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const canView = !!req.body?.can_view_movement_claims;
+
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "Movement Claim access only applies to Admin and User accounts." });
+      }
+
+      await queryDB("UPDATE users SET can_view_movement_claims = ? WHERE id = ?", [canView ? 1 : 0, id]);
+      res.json({ success: true, can_view_movement_claims: canView });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Superadmin-only: grant/revoke a given Admin OR User account's ability to
+  // see/use the Conveyance Bill Claim section on their own User Panel at all —
+  // same on/off switch pattern as movement-claim-access above.
+  app.put("/api/users/:id/conveyance-claim-access", authenticateToken, requireSuperAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const canView = !!req.body?.can_view_conveyance_claims;
+
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "Conveyance Bill Claim access only applies to Admin and User accounts." });
+      }
+
+      await queryDB("UPDATE users SET can_view_conveyance_claims = ? WHERE id = ?", [canView ? 1 : 0, id]);
+      res.json({ success: true, can_view_conveyance_claims: canView });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Superadmin-only: grant/revoke a given Admin OR User account's ability to
+  // see/use the core Budget/Jobs/Job Entry Details workflow ("Select a
+  // Budget", "Jobs", "Job Entry Details" — mobile tiles, BottomNav tabs, and
+  // the Navbar/GlobalSidebar "Jobs" menu's Entry/Jobs/Entry Details items) on
+  // their own User Panel at all — same on/off switch pattern as
+  // movement-claim-access above, except ON by default (see the ALTER TABLE),
+  // so this only ever needs to be called to turn it OFF for a given account.
+  app.put("/api/users/:id/budget-module-access", authenticateToken, requireSuperAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const canView = !!req.body?.can_view_budget_module;
+
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "Budget/Jobs access only applies to Admin and User accounts." });
+      }
+
+      await queryDB("UPDATE users SET can_view_budget_module = ? WHERE id = ?", [canView ? 1 : 0, id]);
+      res.json({ success: true, can_view_budget_module: canView });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Superadmin-only: grant/revoke a given Admin OR User account's ability to
+  // see/use Self Service -> Timesheet at all — same on/off switch pattern as
+  // movement-claim-access above.
+  app.put("/api/users/:id/timesheet-access", authenticateToken, requireSuperAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const canView = !!req.body?.can_view_timesheet;
+
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "Timesheet access only applies to Admin and User accounts." });
+      }
+
+      await queryDB("UPDATE users SET can_view_timesheet = ? WHERE id = ?", [canView ? 1 : 0, id]);
+      res.json({ success: true, can_view_timesheet: canView });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Superadmin-only: grant/revoke a given Admin OR User account's ability to
+  // see/use Self Service -> Leave Application at all — same on/off switch
+  // pattern as movement-claim-access above.
+  app.put("/api/users/:id/leave-application-access", authenticateToken, requireSuperAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const canView = !!req.body?.can_view_leave_application;
+
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "Leave Application access only applies to Admin and User accounts." });
+      }
+
+      await queryDB("UPDATE users SET can_view_leave_application = ? WHERE id = ?", [canView ? 1 : 0, id]);
+      res.json({ success: true, can_view_leave_application: canView });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Superadmin-only: grant/revoke a given Admin OR User account's ability to
+  // see/use Self Service -> My Leave at all — same on/off switch pattern as
+  // movement-claim-access above.
+  app.put("/api/users/:id/my-leave-access", authenticateToken, requireSuperAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const canView = !!req.body?.can_view_my_leave;
+
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "My Leave access only applies to Admin and User accounts." });
+      }
+
+      await queryDB("UPDATE users SET can_view_my_leave = ? WHERE id = ?", [canView ? 1 : 0, id]);
+      res.json({ success: true, can_view_my_leave: canView });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Toggle the per-user feature permissions (Admin-only):
+  //  - can_edit_delivery_date: lets the user edit an entry's Delivery Date after it's
+  //    been submitted, AND (unlike can_job_edit) even after the whole Budget is Final
+  //    Submitted. Every other field stays locked either way. ON by default for everyone.
+  //  - can_job_edit: unlocks the "Job Edit" section on the User Page — without it a
+  //    user can't add, edit or delete any MPR inside a Job whose Budget has already
+  //    been Final Submitted. OFF by default; the Admin must switch it on per user.
+  //  - can_use_attendance: shows the Remote Attendance Check In/Out card on the
+  //    User's own Dashboard at all. OFF by default; the Admin must switch it on
+  //    per user. Separate from the "attendance" Admin Panel module (reviewing
+  //    everyone else's records).
+  //  - can_view_leave_summary: shows the Leave Summary card on the User's own
+  //    Dashboard at all. OFF by default; the Admin must switch it on per user.
+  //    Same toggle pattern as can_use_attendance above.
+  //  - attendance_project_id: pins this 'user' OR 'admin' account to exactly one
+  //    Project for Remote Attendance — send a Project id to set it, or null to
+  //    clear it back to unrestricted. Ignored for a 'superadmin' target (never
+  //    pinned). Completely separate from user_project_permissions (the "Projects"
+  //    column/Manage Projects modal), which only ever governs the Budget/Jobs/MPR
+  //    workflow, not Attendance.
+  // Any field can be sent alone; the others keep their current value.
+  app.put("/api/users/:id/feature-permissions", authenticateToken, requireAdmin, requireModule("users"), requireModuleLayer("users", "edit_add"), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const existingRows = await queryDB(
+        "SELECT role, can_edit_delivery_date, can_job_edit, can_use_attendance, can_use_tracking, can_view_leave_summary, attendance_project_id FROM users WHERE id = ?",
+        [id]
+      );
+      if (existingRows.length === 0) return res.status(404).json({ error: "User not found" });
+      // A plain Admin must never be able to reach the Superadmin's account, even by
+      // guessing its id directly — the Users list already hides it from them.
+      if (existingRows[0].role === "superadmin" && req.user.role !== "superadmin") {
+        return res.status(404).json({ error: "User not found" });
+      }
+      // Nor another Admin's account — every OTHER Admin-targeting action in this
+      // file (Change Login ID, Reset Password, Delete) already stops here too;
+      // these feature toggles had been missing the same check, letting any Admin
+      // with the "users" module flip another Admin's own feature flags.
+      if (existingRows[0].role === "admin" && req.user.role !== "superadmin") {
+        return res.status(403).json({ error: "Only the Superadmin can change another Admin's permissions." });
+      }
+      const current = existingRows[0];
+      const can_edit_delivery_date =
+        req.body.can_edit_delivery_date !== undefined
+          ? (req.body.can_edit_delivery_date ? 1 : 0)
+          : (current.can_edit_delivery_date ? 1 : 0);
+      const can_job_edit =
+        req.body.can_job_edit !== undefined
+          ? (req.body.can_job_edit ? 1 : 0)
+          : (current.can_job_edit ? 1 : 0);
+      const can_use_attendance =
+        req.body.can_use_attendance !== undefined
+          ? (req.body.can_use_attendance ? 1 : 0)
+          : (current.can_use_attendance ? 1 : 0);
+      const can_use_tracking =
+        req.body.can_use_tracking !== undefined
+          ? (req.body.can_use_tracking ? 1 : 0)
+          : (current.can_use_tracking ? 1 : 0);
+      const can_view_leave_summary =
+        req.body.can_view_leave_summary !== undefined
+          ? (req.body.can_view_leave_summary ? 1 : 0)
+          : (current.can_view_leave_summary ? 1 : 0);
+      // Never lets a 'superadmin' target end up pinned, no matter what's sent.
+      let attendance_project_id: number | null =
+        current.attendance_project_id != null ? Number(current.attendance_project_id) : null;
+      if (existingRows[0].role !== "superadmin" && req.body.attendance_project_id !== undefined) {
+        attendance_project_id =
+          req.body.attendance_project_id === null || req.body.attendance_project_id === ""
+            ? null
+            : Number(req.body.attendance_project_id);
+        if (attendance_project_id !== null && !Number.isFinite(attendance_project_id)) {
+          return res.status(400).json({ error: "Invalid attendance_project_id" });
+        }
+      }
+      // can_grant_module_access is Superadmin-settable only, even though this
+      // whole endpoint is reachable by any Admin with the "users" module (see
+      // the role check above for why that's safe for the OTHER fields here) —
+      // a delegated Admin granting itself or another Admin this same delegated
+      // power would defeat the point of it. Silently ignored (not an error) from
+      // anyone else, same as every other field here that's simply absent from
+      // req.body keeping its current value.
+      let can_grant_module_access: number | null = null;
+      if (req.user.role === "superadmin" && existingRows[0].role === "admin" && req.body.can_grant_module_access !== undefined) {
+        can_grant_module_access = req.body.can_grant_module_access ? 1 : 0;
+      }
+      if (can_grant_module_access !== null) {
+        await queryDB("UPDATE users SET can_grant_module_access = ? WHERE id = ?", [can_grant_module_access, id]);
+      }
+      await queryDB(
+        "UPDATE users SET can_edit_delivery_date = ?, can_job_edit = ?, can_use_attendance = ?, can_use_tracking = ?, can_view_leave_summary = ?, attendance_project_id = ? WHERE id = ?",
+        [can_edit_delivery_date, can_job_edit, can_use_attendance, can_use_tracking, can_view_leave_summary, attendance_project_id, id]
+      );
+      res.json({
+        success: true,
+        can_edit_delivery_date: !!can_edit_delivery_date,
+        can_job_edit: !!can_job_edit,
+        can_use_attendance: !!can_use_attendance,
+        can_use_tracking: !!can_use_tracking,
+        can_view_leave_summary: !!can_view_leave_summary,
+        attendance_project_id,
+        ...(can_grant_module_access !== null ? { can_grant_module_access: !!can_grant_module_access } : {})
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete("/api/users/:id", authenticateToken, requireAdmin, requireModule("users"), requireModuleLayer("users", "delete_trash"), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      if (Number(id) === req.user.id) {
+        return res.status(400).json({ error: "Cannot delete your own admin account" });
+      }
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role === "superadmin") {
+        return res.status(400).json({ error: "The Superadmin account can't be deleted." });
+      }
+      // Only the Superadmin may remove another Admin account — a plain Admin (even
+      // with the Users module) can only manage/delete regular Users.
+      if (target[0].role === "admin" && req.user.role !== "superadmin") {
+        return res.status(403).json({ error: "Only the Superadmin can remove an Admin account." });
+      }
+      await queryDB("DELETE FROM user_project_permissions WHERE user_id = ?", [id]);
+      await queryDB("DELETE FROM admin_module_permissions WHERE user_id = ?", [id]);
+      await queryDB("DELETE FROM attendance_report_department_access WHERE user_id = ?", [id]);
+      await queryDB("DELETE FROM leave_application_department_access WHERE user_id = ?", [id]);
+      await queryDB("DELETE FROM conveyance_claim_department_access WHERE user_id = ?", [id]);
+      // A deleted user might still be linked from an Employees directory row
+      // (all_employees.user_id — no FK/cascade on that column) — clear it so
+      // the Employee doesn't keep showing a stale "Has Login" badge for an
+      // account that no longer exists.
+      await queryDB("UPDATE all_employees SET user_id = NULL WHERE user_id = ?", [id]);
+      await queryDB("DELETE FROM users WHERE id = ?", [id]);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 6. User <-> Project Permissions (Admin-only)
+  // Which User can see/use which Project — set from the Admin Panel.
+  app.get("/api/permissions", authenticateToken, requireAdmin, requireModule("users"), async (req, res) => {
+    try {
+      const perms = await queryDB("SELECT * FROM user_project_permissions");
+      res.json(perms);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Replaces the full set of Project permissions for one User in one call
+  // (Admin Panel sends the complete list of checked Project IDs each save).
+  app.put("/api/users/:id/projects", authenticateToken, requireAdmin, requireModule("users"), requireModuleLayer("users", "edit_add"), async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const { project_ids } = req.body;
+      if (!Array.isArray(project_ids)) {
+        return res.status(400).json({ error: "project_ids must be an array" });
+      }
+
+      const userRows: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (userRows.length === 0) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      // Same rule as the Users list — a plain Admin can't reach the Superadmin's
+      // account by id even though it's never shown to them.
+      if (userRows[0].role === "superadmin" && req.user.role !== "superadmin") {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      await queryDB("DELETE FROM user_project_permissions WHERE user_id = ?", [id]);
+      const uniqueProjectIds = Array.from(new Set(project_ids.map((pid: any) => Number(pid))));
+      for (const pid of uniqueProjectIds) {
+        await queryDB("INSERT INTO user_project_permissions (user_id, project_id) VALUES (?, ?)", [Number(id), pid]);
+      }
+
+      res.json({ success: true, project_ids: uniqueProjectIds });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+}
