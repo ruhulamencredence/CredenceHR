@@ -195,6 +195,25 @@ async function ensureSchemaMigrations() {
   } catch (err: any) {
     console.warn("⚠️ Could not ensure budget_submissions table exists: " + err.message);
   }
+  // Final Submit of ONE Job (Jobs list -> Submit) — locks just that Job's
+  // entries for that user; budget_submissions above still locks a whole Budget.
+  try {
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS job_submissions (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        job_id INT NOT NULL,
+        budget_id INT NULL,
+        user_id INT NOT NULL,
+        submitted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY unique_job_user (job_id, user_id),
+        KEY idx_job_submissions_budget (budget_id),
+        FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      )
+    `);
+  } catch (err: any) {
+    console.warn("⚠️ Could not ensure job_submissions table exists: " + err.message);
+  }
 
   // Global Calendar (Weekend/Holiday) — table + schema owned by holidayRoutes.ts,
   // only the call site lives here, same as every other self-healing migration
@@ -6325,6 +6344,32 @@ async function startServer() {
     }
   });
 
+  // Final Submit ONE Job — only that Job's entries lock for this user; the
+  // Budget's other Jobs stay open. Needs at least one of the user's own active
+  // entries in the Job.
+  app.post("/api/jobs/:id/submit", authenticateToken, requireBudgetModuleAccess, async (req: any, res) => {
+    try {
+      const jobId = Number(req.params.id);
+      const jobs = await queryDB("SELECT id, budget_id, job_no FROM jobs WHERE id = ?", [jobId]);
+      if (jobs.length === 0) return res.status(404).json({ error: "Job not found" });
+      const job = jobs[0];
+      const own = await queryDB("SELECT id FROM entries WHERE job_id = ? AND created_by = ? AND deleted_at IS NULL LIMIT 1", [
+        jobId,
+        req.user.id
+      ]);
+      if (own.length === 0) return res.status(400).json({ error: "You have no entries in this Job to submit." });
+      const budgetDone = job.budget_id
+        ? await queryDB("SELECT id FROM budget_submissions WHERE budget_id = ? AND user_id = ?", [job.budget_id, req.user.id])
+        : [];
+      const already = await queryDB("SELECT id FROM job_submissions WHERE job_id = ? AND user_id = ?", [jobId, req.user.id]);
+      if (budgetDone.length > 0 || already.length > 0) return res.json({ success: true, already_submitted: true });
+      await queryDB("INSERT INTO job_submissions (job_id, budget_id, user_id) VALUES (?, ?, ?)", [jobId, job.budget_id || null, req.user.id]);
+      res.json({ success: true, job_no: job.job_no });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to submit the Job" });
+    }
+  });
+
   // List everyone who has Final Submitted a given Budget (Admin-only) — feeds the
   // "Submissions" panel on the Data Import page, which is where the manual unlock
   // button below lives. active_entry_count is shown alongside each name so the
@@ -6351,7 +6396,22 @@ async function startServer() {
            ORDER BY bs.submitted_at DESC`,
           [budgetId]
         );
-        res.json(rows.map((r: any) => ({ ...r, active_entry_count: Number(r.active_entry_count) })));
+        const jobRows = await queryDB(
+          `SELECT js.user_id, js.job_id, js.submitted_at, u.name AS user_name, j.job_no,
+             (SELECT COUNT(*) FROM entries e
+                WHERE e.job_id = js.job_id AND e.created_by = js.user_id AND e.deleted_at IS NULL
+             ) AS active_entry_count
+           FROM job_submissions js
+           JOIN users u ON u.id = js.user_id
+           JOIN jobs j ON j.id = js.job_id
+           WHERE js.budget_id = ?
+           ORDER BY js.submitted_at DESC`,
+          [budgetId]
+        );
+        res.json([
+          ...rows.map((r: any) => ({ ...r, kind: "budget", job_id: null, job_no: null, active_entry_count: Number(r.active_entry_count) })),
+          ...jobRows.map((r: any) => ({ ...r, kind: "job", active_entry_count: Number(r.active_entry_count) }))
+        ]);
       } catch (err: any) {
         res.status(500).json({ error: err.message || "Failed to load Budget submissions" });
       }
@@ -6372,7 +6432,10 @@ async function startServer() {
       try {
         const budgetId = Number(req.params.id);
         const userId = Number(req.params.userId);
-        await queryDB("DELETE FROM budget_submissions WHERE budget_id = ? AND user_id = ?", [budgetId, userId]);
+        // ?job_id= unlocks that one Job's Final Submit; without it, the whole Budget's.
+        const jobId = Number(req.query.job_id) || null;
+        if (jobId) await queryDB("DELETE FROM job_submissions WHERE job_id = ? AND user_id = ? AND budget_id = ?", [jobId, userId, budgetId]);
+        else await queryDB("DELETE FROM budget_submissions WHERE budget_id = ? AND user_id = ?", [budgetId, userId]);
         res.json({ success: true });
       } catch (err: any) {
         res.status(500).json({ error: err.message || "Failed to unlock this Budget submission" });
@@ -6697,6 +6760,7 @@ async function startServer() {
       // first, then jobs, then the imported Excel rows, then the submission locks,
       // and finally the Budget itself.
       await queryDB("DELETE FROM entries WHERE budget_id = ?", [budgetId]);
+      await queryDB("DELETE FROM job_submissions WHERE budget_id = ?", [budgetId]);
       await queryDB("DELETE FROM jobs WHERE budget_id = ?", [budgetId]);
       await queryDB("DELETE FROM budget_items WHERE budget_id = ?", [budgetId]);
       await queryDB("DELETE FROM budget_submissions WHERE budget_id = ?", [budgetId]);

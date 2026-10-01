@@ -1278,6 +1278,8 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // this holds a Budget id instead of a single flag to disable only the row whose
   // Submit was actually clicked.
   const [submittingBudgetId, setSubmittingBudgetId] = useState<number | null>(null);
+  // The Job whose own Final Submit is in progress (Jobs list -> Submit).
+  const [submittingJobId, setSubmittingJobId] = useState<number | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error' | 'warning'; text: string } | null>(null);
   // Popup shown right after a Job is successfully saved — separate from the
   // inline Message Banner above (which can be scrolled out of view), so the
@@ -2065,6 +2067,12 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // Jobs stay most-recent-first within each group, matching the flat list's own
   // ordering. A Job somehow left without a Budget (older data) falls into its own
   // "No Budget" group instead of being dropped.
+  // Jobs already Final Submitted (on their own, or with their whole Budget).
+  const lockedJobIds = React.useMemo(
+    () => new Set(entries.filter((e) => e.budget_locked && !e.deleted_at).map((e) => e.job_id)),
+    [entries]
+  );
+
   const jobsByBudget = React.useMemo(() => {
     const groups = new Map<
       string,
@@ -2362,6 +2370,29 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message });
       setSubmittingBudgetId(null);
+    }
+  };
+
+  // Final Submit ONE Job — only this Job locks; the Budget's other Jobs stay open
+  // for more entries and edits (POST /api/jobs/:id/submit).
+  const handleSubmitJob = async (job: { job_id: number; job_no: string }) => {
+    if (!window.confirm(`Final Submit Job ${job.job_no}? After this you can't add to or change this Job's entries (other Jobs stay open).`)) return;
+    setSubmittingJobId(job.job_id);
+    setMessage(null);
+    try {
+      const res = await fetch(apiUrl(`/api/jobs/${job.job_id}/submit`), {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to submit the Job');
+      setMessage({ type: 'success', text: `Job ${job.job_no} Final Submitted.` });
+      if (editingJob && editingJob.jobId === job.job_id) cancelEditJob();
+      fetchEntries();
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message });
+    } finally {
+      setSubmittingJobId(null);
     }
   };
 
@@ -4299,7 +4330,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                               can be added to it, instead of the default flow which always
                               creates a brand-new Job. Only offered before the Budget is
                               Submitted (Finished), and only for users allowed to edit Jobs. */}
-                          {canEditExistingJob && selectedBudget && !selectedBudget.submitted && (
+                          {canEditExistingJob && selectedBudget && !selectedBudget.submitted && !lockedJobIds.has(j.job_id) && (
                             <button
                               type="button"
                               onClick={() => startEditJob(j)}
@@ -4317,25 +4348,29 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                               Job's button is tapped submits the whole Budget group it's
                               listed under. Hidden once that Budget is already submitted, and
                               only shown for Jobs that actually belong to a Budget. */}
+                          {/* Final Submit just THIS Job — the Budget's other Jobs stay
+                              open (POST /api/jobs/:id/submit). A submitted Job shows a lock. */}
                           {group.budget_id !== null &&
-                            !(budgets.find((b) => b.id === group.budget_id)?.submitted) && (
+                            (lockedJobIds.has(j.job_id) ? (
+                              <span
+                                className="flex-shrink-0 flex items-center gap-1 px-2 py-1.5 mr-2 rounded-lg text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200"
+                                title={`${j.job_no} is Final Submitted`}
+                              >
+                                <Lock className="w-3 h-3" /> Submitted
+                              </span>
+                            ) : (
                               <button
                                 type="button"
-                                onClick={() =>
-                                  handleSubmitBudget({
-                                    id: group.budget_id as number,
-                                    budget_name: group.budget_name || 'this Budget',
-                                    submitted: budgets.find((b) => b.id === group.budget_id)?.submitted
-                                  })
-                                }
-                                disabled={submittingBudgetId === group.budget_id}
-                                title={`Submit "${group.budget_name || 'this Budget'}" (Finish)`}
+                                onClick={() => handleSubmitJob({ job_id: j.job_id, job_no: j.job_no })}
+                                disabled={submittingJobId === j.job_id}
+                                title={`Final Submit ${j.job_no} only`}
+                                aria-label={`Submit ${j.job_no}`}
                                 className="flex-shrink-0 flex items-center gap-1 px-2 py-1.5 mr-2 rounded-lg text-[11px] font-semibold text-rose-700 bg-white border border-rose-200 hover:bg-rose-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                               >
                                 <Lock className="w-3 h-3" />
-                                {submittingBudgetId === group.budget_id ? 'Submitting...' : 'Submit'}
+                                {submittingJobId === j.job_id ? 'Submitting...' : 'Submit'}
                               </button>
-                            )}
+                            ))}
                         </div>
                       ))}
                     </div>
