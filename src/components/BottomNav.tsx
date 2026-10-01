@@ -1,5 +1,6 @@
-import React from 'react';
-import { Home, Route, Clock, CalendarClock, Contact } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { Home, Route, Clock, CalendarClock, Contact, LayoutGrid, X } from 'lucide-react';
 
 export type MobileSection = 'budget' | 'jobs' | 'entries' | 'jobEdit' | 'claim' | 'claims' | 'conveyanceClaim' | 'leave' | 'timesheet' | 'employeeDirectory' | null;
 
@@ -94,10 +95,58 @@ export function BottomNav({ active, onChange, canViewMovementClaim = true, canVi
         }
       : null;
   const pathD = buildBarPath(dip);
+  // "More" popup — a liquid glass sheet opened from the round button that
+  // sits on the bar's top-right edge. Empty for now; items get added later.
+  const [moreOpen, setMoreOpen] = useState(false);
+  useEffect(() => {
+    if (!moreOpen) return;
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setMoreOpen(false);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [moreOpen]);
 
   return (
     <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40">
       <div className="relative" style={{ height: BAR_H }}>
+        {/* Half over the bar's top edge, right side — stays clear of the
+            page-level floating buttons that sit at bottom: 6.5rem. */}
+        <button
+          type="button"
+          onClick={() => setMoreOpen((v) => !v)}
+          aria-label="More"
+          aria-expanded={moreOpen}
+          className="absolute right-3 bottom-[58px] z-10 flex flex-col items-center justify-center w-11 h-11 rounded-full bg-white/45 backdrop-blur-xl border border-white/70 shadow-[0_8px_20px_-6px_rgba(42,0,85,0.45),inset_0_1px_0_rgba(255,255,255,0.7)] active:scale-95 transition-transform"
+        >
+          {moreOpen ? (
+            <X className="w-5 h-5" style={{ color: 'var(--g-accent)' }} />
+          ) : (
+            <LayoutGrid className="w-5 h-5" style={{ color: 'var(--g-accent)' }} />
+          )}
+          <span className="sr-only">More</span>
+        </button>
+        {moreOpen &&
+          createPortal(
+            <div className="md:hidden fixed inset-0 z-[60]" role="dialog" aria-modal="true" aria-label="More">
+              <div className="absolute inset-0 bg-slate-900/25" onClick={() => setMoreOpen(false)} />
+              <div
+                className="absolute left-3 right-3 min-h-[45vh] max-h-[70vh] overflow-y-auto rounded-[28px] bg-white/45 backdrop-blur-2xl backdrop-saturate-150 border border-white/70 shadow-[0_16px_40px_-10px_rgba(42,0,85,0.45),inset_0_1px_0_rgba(255,255,255,0.8)] mobile-page-in"
+                style={{ bottom: `calc(${BAR_H + 12}px + var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)))` }}
+              >
+                <div className="flex items-center justify-between px-5 pt-4 pb-2">
+                  <h3 className="text-sm font-bold text-slate-900">More</h3>
+                  <button
+                    type="button"
+                    onClick={() => setMoreOpen(false)}
+                    aria-label="Close"
+                    className="p-1.5 rounded-full text-slate-500 hover:bg-white/60 transition-colors"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body
+          )}
         <svg
           viewBox={`0 0 ${BAR_W} ${BAR_H}`}
           preserveAspectRatio="none"
