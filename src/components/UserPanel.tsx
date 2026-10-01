@@ -150,8 +150,42 @@ const makeEmptyRow = (): MprRow => ({
   collapsed: false
 });
 
+// MPR split colours: every entry carved out of the same Budget item (a split,
+// or that item's remaining Qty added to another Job) shares one colour, and
+// each split item gets its own colour, so it's clear which rows belong together.
+interface SplitTone {
+  row: string;
+  edge: string;
+  badge: string;
+  part: number;
+  total: number;
+}
+const SPLIT_TONES: Pick<SplitTone, 'row' | 'edge' | 'badge'>[] = [
+  { row: 'bg-amber-50', edge: 'shadow-[inset_4px_0_0_#f59e0b]', badge: 'bg-amber-100 text-amber-800 border-amber-300' },
+  { row: 'bg-sky-50', edge: 'shadow-[inset_4px_0_0_#0ea5e9]', badge: 'bg-sky-100 text-sky-800 border-sky-300' },
+  { row: 'bg-emerald-50', edge: 'shadow-[inset_4px_0_0_#10b981]', badge: 'bg-emerald-100 text-emerald-800 border-emerald-300' },
+  { row: 'bg-rose-50', edge: 'shadow-[inset_4px_0_0_#f43f5e]', badge: 'bg-rose-100 text-rose-800 border-rose-300' },
+  { row: 'bg-violet-50', edge: 'shadow-[inset_4px_0_0_#8b5cf6]', badge: 'bg-violet-100 text-violet-800 border-violet-300' },
+  { row: 'bg-lime-50', edge: 'shadow-[inset_4px_0_0_#84cc16]', badge: 'bg-lime-100 text-lime-800 border-lime-300' },
+  { row: 'bg-orange-50', edge: 'shadow-[inset_4px_0_0_#f97316]', badge: 'bg-orange-100 text-orange-800 border-orange-300' },
+  { row: 'bg-teal-50', edge: 'shadow-[inset_4px_0_0_#14b8a6]', badge: 'bg-teal-100 text-teal-800 border-teal-300' },
+  { row: 'bg-fuchsia-50', edge: 'shadow-[inset_4px_0_0_#d946ef]', badge: 'bg-fuchsia-100 text-fuchsia-800 border-fuchsia-300' },
+  { row: 'bg-cyan-50', edge: 'shadow-[inset_4px_0_0_#06b6d4]', badge: 'bg-cyan-100 text-cyan-800 border-cyan-300' }
+];
+
+const SplitBadge: React.FC<{ split: SplitTone }> = ({ split }) => (
+  <span
+    className={`inline-block ml-1 px-1 rounded border text-[9px] font-semibold leading-tight whitespace-nowrap align-middle ${split.badge}`}
+    title={`Split item — part ${split.part} of ${split.total} (same colour = same item)`}
+  >
+    Split {split.part}/{split.total}
+  </span>
+);
+
 interface EntryRowProps {
   it: Entry;
+  // Colour + "Split x/y" badge when this entry is one part of a split item.
+  split?: SplitTone | null;
   // Needed only for this row's own GET /api/delivery-date-conditions/effective
   // lookup (see the useDeliveryLeadTime call below) — fired only while this
   // row isEditing, not for every row in a long list.
@@ -231,7 +265,7 @@ const EntryRow = React.memo(function EntryRow({
   editJobDuration, setEditJobDuration,
   editDeliveryRange, editDeliveryDate, setEditDeliveryDate,
   editSaving,
-  editSplitRemaining, onSplitRemaining, splitSaving, splitError
+  editSplitRemaining, onSplitRemaining, splitSaving, splitError, split
 }: EntryRowProps) {
   // Admin-set Delivery Date "minimum lead time" for changing THIS entry's
   // Delivery Date (Condition Set's "job_edit" type — see
@@ -244,8 +278,8 @@ const EntryRow = React.memo(function EntryRow({
     isEditing ? it.budget_id : null
   );
   return (
-    <tr className="odd:bg-white even:bg-slate-50/70 hover:bg-blue-50/50 transition-colors">
-      <td className="px-2 py-1.5 border border-slate-200 align-top text-right text-slate-500 tabular-nums">{idx + 1}.</td>
+    <tr className={`${split ? split.row : 'odd:bg-white even:bg-slate-50/70'} hover:bg-blue-50/50 transition-colors`}>
+      <td className={`px-2 py-1.5 border border-slate-200 align-top text-right text-slate-500 tabular-nums ${split ? split.edge : ''}`}>{idx + 1}.</td>
       <td className="px-2 py-1.5 border border-slate-200 align-top font-semibold text-blue-600 truncate" title={it.job_no}>{it.job_no}</td>
       {/* Job Name, MPR No, Item Name, Qty and Job Duration stay freely editable
           right up until this entry's Budget is Final Submitted — canEdit is false
@@ -306,7 +340,10 @@ const EntryRow = React.memo(function EntryRow({
             )}
           </div>
         ) : (
-          it.mpr_no
+          <>
+            {it.mpr_no}
+            {split && <SplitBadge split={split} />}
+          </>
         )}
       </td>
       <td className="px-2 py-1.5 border border-slate-200 align-top break-words text-slate-700">
@@ -501,7 +538,7 @@ const EntryCard = React.memo(function EntryCard({
   editJobDuration, setEditJobDuration,
   editDeliveryRange, editDeliveryDate, setEditDeliveryDate,
   editSaving,
-  editSplitRemaining, onSplitRemaining, splitSaving, splitError
+  editSplitRemaining, onSplitRemaining, splitSaving, splitError, split
 }: EntryRowProps) {
   // Same Condition Set lookup as EntryRow above (desktop table vs this mobile
   // card are two separate components rendering the same data).
@@ -532,12 +569,16 @@ const EntryCard = React.memo(function EntryCard({
     // Android WebView's software blur) is what was causing the visible
     // stutter switching into/scrolling this page. A plain semi-opaque
     // background keeps the same glass look without that per-item blur cost.
-    <div className="p-3.5 border border-white/60 rounded-2xl bg-white/80 shadow-[0_4px_14px_-4px_rgba(15,23,42,0.12)]">
+    <div
+      className={`p-3.5 border border-white/60 rounded-2xl ${split ? split.row : 'bg-white/80'} shadow-[0_4px_14px_-4px_rgba(15,23,42,0.12)]`}
+    >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="flex items-center gap-1.5">
+            {split && <span className={`w-1 self-stretch rounded-full ${split.edge}`} aria-hidden="true" />}
             <span className="text-[10px] text-slate-400 flex-shrink-0">#{idx + 1}</span>
             <span className="font-semibold text-blue-600 text-sm truncate">{it.job_no}</span>
+            {split && <SplitBadge split={split} />}
           </div>
         </div>
         {isEditing ? (
@@ -2016,7 +2057,10 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
 
   // Each column filter narrows "Job Entry Details" independently (AND across columns) —
   // case-insensitive substring match, blank filter = no restriction on that column.
+  // Typing a filter stays instant; the (possibly long) table catches up a beat later.
+  const deferredEntryFilters = React.useDeferredValue(entryColumnFilters);
   const filteredEntries: Entry[] = React.useMemo(() => {
+    const entryColumnFilters = deferredEntryFilters;
     const f = {
       job_no: entryColumnFilters.job_no.trim().toLowerCase(),
       job_name: entryColumnFilters.job_name.trim().toLowerCase(),
@@ -2045,7 +2089,50 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
       (!f.delivery_date_to || !ent.delivery_date || ent.delivery_date <= f.delivery_date_to) &&
       (!f.budget_name || (ent.budget_name || '').toLowerCase().includes(f.budget_name))
     );
-  }, [sortedEntries, entryColumnFilters]);
+  }, [sortedEntries, deferredEntryFilters]);
+
+  // Job Entry Details used to render every entry at once (hundreds of rows on a
+  // real budget), which made the whole page slow — even while hidden. Now only
+  // the first ENTRY_PAGE rows render, and more are added as the list scrolls near
+  // its end (or via "Show more"). Filters, totals and PDF still use every row.
+  const ENTRY_PAGE = 50;
+  const [entryRenderLimit, setEntryRenderLimit] = useState(ENTRY_PAGE);
+  useEffect(() => setEntryRenderLimit(ENTRY_PAGE), [deferredEntryFilters]);
+  const visibleEntries = React.useMemo(
+    () => filteredEntries.slice(0, entryRenderLimit),
+    [filteredEntries, entryRenderLimit]
+  );
+  const hasMoreEntries = filteredEntries.length > visibleEntries.length;
+  const showMoreEntries = () => setEntryRenderLimit((n) => n + ENTRY_PAGE);
+  const handleEntriesScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget;
+    if (hasMoreEntries && el.scrollTop + el.clientHeight >= el.scrollHeight - 400) showMoreEntries();
+  };
+  const filteredJobCount = React.useMemo(() => new Set(filteredEntries.map((e) => e.job_no)).size, [filteredEntries]);
+
+  // Split colours (see SPLIT_TONES): entries of the same user that came from the
+  // same Budget item — split in a Job, or its remaining Qty added to another Job.
+  const splitToneByEntryId = React.useMemo(() => {
+    const groups = new Map<string, Entry[]>();
+    for (const e of entries) {
+      const key = `${e.created_by ?? ''}|${
+        e.budget_item_id ? `bi:${e.budget_item_id}` : `m:${e.mpr_id}|${String(e.item_name || '').trim().toLowerCase()}`
+      }`;
+      const list = groups.get(key);
+      if (list) list.push(e);
+      else groups.set(key, [e]);
+    }
+    const split = [...groups.values()]
+      .filter((g) => g.length > 1)
+      .map((g) => [...g].sort((a, b) => a.id - b.id))
+      .sort((a, b) => a[0].id - b[0].id);
+    const out = new Map<number, SplitTone>();
+    split.forEach((g, gi) => {
+      const tone = SPLIT_TONES[gi % SPLIT_TONES.length];
+      g.forEach((e, i) => out.set(e.id, { ...tone, part: i + 1, total: g.length }));
+    });
+    return out;
+  }, [entries]);
 
   // Sum of Qty across whatever "Job Entry Details" currently shows — every entry
   // when no column filter is active, or just the narrowed-down set once one is,
@@ -3695,6 +3782,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                           <EntryCard
                             key={it.id}
                             it={it}
+                            split={splitToneByEntryId.get(it.id) || null}
                             token={token}
                             idx={idx}
                             isEditing={isEditingThis}
@@ -4338,7 +4426,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
             {uniqueJobsList.length === 0 ? (
               <p className="text-sm text-slate-400 px-5 py-4">No Job entries submitted yet.</p>
             ) : (
-              <div className="max-h-64 overflow-y-auto divide-y divide-white/40 md:divide-slate-100">
+              <div className="max-h-[calc(100dvh-13rem)] md:max-h-[calc(100vh-15rem)] overflow-y-auto divide-y divide-white/40 md:divide-slate-100">
                 {jobsByBudget.map((group) => (
                   <div key={group.budget_id !== null ? `id:${group.budget_id}` : `none:${group.budget_name || ''}`}>
                     {/* Budget-wise grouping — a sticky header per Budget so it's clear
@@ -4447,7 +4535,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
                   <span className="text-xs px-2.5 py-1 rounded-full bg-white/50 md:bg-slate-100 backdrop-blur md:backdrop-blur-none text-slate-700 font-medium border border-white/60 md:border-slate-200 whitespace-nowrap">
-                    {new Set(filteredEntries.map((e) => e.job_no)).size} Job{new Set(filteredEntries.map((e) => e.job_no)).size === 1 ? '' : 's'} • {filteredEntries.length} MPR Entr{filteredEntries.length === 1 ? 'y' : 'ies'}
+                    {filteredJobCount} Job{filteredJobCount === 1 ? '' : 's'} • {filteredEntries.length} MPR Entr{filteredEntries.length === 1 ? 'y' : 'ies'}
                   </span>
                   <button
                     type="button"
@@ -4680,11 +4768,11 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
             ) : (
               <>
               {/* Mobile: stacked cards — no horizontal scrolling needed. */}
-              <div className="md:hidden max-h-[36rem] overflow-y-auto p-4 space-y-3">
+              <div onScroll={handleEntriesScroll} className="md:hidden max-h-[calc(100dvh-20rem)] min-h-[18rem] overflow-y-auto p-4 space-y-3">
                 {filteredEntries.length === 0 ? (
                   <p className="text-center text-slate-400 text-sm py-6">No entries match your filters.</p>
                 ) : (
-                  filteredEntries.map((it, idx) => {
+                  visibleEntries.map((it, idx) => {
                     const isEditing = editingEntryId === it.id;
                     const canEdit = isEntryEditable(it);
                     const dateOnlyEdit = isDateOnlyEditableEntry(it);
@@ -4692,6 +4780,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                       <EntryCard
                         key={it.id}
                         it={it}
+                        split={splitToneByEntryId.get(it.id) || null}
                         token={token}
                         idx={idx}
                         isEditing={isEditing}
@@ -4734,12 +4823,21 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                     );
                   })
                 )}
+                {hasMoreEntries && (
+                  <button
+                    type="button"
+                    onClick={showMoreEntries}
+                    className="w-full py-2 text-xs font-semibold text-blue-600 hover:text-blue-800 hover:bg-blue-50/60 rounded-lg transition-colors"
+                  >
+                    Show more ({visibleEntries.length} of {filteredEntries.length})
+                  </button>
+                )}
                 {editError && <p className="text-[11px] text-rose-600">{editError}</p>}
                 {deleteError && <p className="text-[11px] text-rose-600">{deleteError}</p>}
               </div>
 
               {/* Desktop / tablet: full table. */}
-              <div className="hidden md:block overflow-auto max-h-[32rem]">
+              <div onScroll={handleEntriesScroll} className="hidden md:block overflow-auto max-h-[calc(100vh-20rem)] min-h-[24rem]">
                 <table className="w-full min-w-[960px] table-fixed border-collapse text-[11px] leading-snug">
                   <colgroup>
                     <col style={{ width: '3.33%' }} />
@@ -4912,7 +5010,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                         <td colSpan={11} className="px-3 py-6 text-center text-slate-400 border border-slate-200">No entries match your filters.</td>
                       </tr>
                     ) : (
-                    filteredEntries.map((it, idx) => {
+                    visibleEntries.map((it, idx) => {
                       const isEditing = editingEntryId === it.id;
                       const canEdit = isEntryEditable(it);
                       const dateOnlyEdit = isDateOnlyEditableEntry(it);
@@ -4920,6 +5018,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                         <EntryRow
                           key={it.id}
                           it={it}
+                          split={splitToneByEntryId.get(it.id) || null}
                           token={token}
                           idx={idx}
                           isEditing={isEditing}
@@ -4964,6 +5063,15 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                     )}
                   </tbody>
                 </table>
+                {hasMoreEntries && (
+                  <button
+                    type="button"
+                    onClick={showMoreEntries}
+                    className="w-full py-2 text-xs font-semibold text-blue-600 hover:text-blue-800 hover:bg-blue-50/60 rounded-lg transition-colors"
+                  >
+                    Show more ({visibleEntries.length} of {filteredEntries.length})
+                  </button>
+                )}
                 {editError && (
                   <p className="px-3 py-3 text-[11px] text-rose-600">{editError}</p>
                 )}
