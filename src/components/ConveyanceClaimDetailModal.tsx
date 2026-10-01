@@ -10,6 +10,7 @@ import { UserClaim } from '../types';
 import { apiUrl } from '../lib/api';
 import { formatDate } from '../lib/formatDate';
 import { UserClaimStatusBadge } from './UserClaimStatusBadge';
+import { ClaimBillLines } from './ClaimBillLines';
 
 interface ConveyanceClaimDetailModalProps {
   claim: UserClaim;
@@ -83,6 +84,8 @@ export const ConveyanceClaimDetailModal: React.FC<ConveyanceClaimDetailModalProp
               )}
             </div>
           </div>
+
+          <ClaimBillLines items={claim.items} />
 
           {claim.claim_refs && claim.claim_refs.length > 0 && (
             <div>

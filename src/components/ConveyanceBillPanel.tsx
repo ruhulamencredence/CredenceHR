@@ -20,6 +20,8 @@ import { savePdfCrossPlatform } from '../lib/saveFile';
 import { UserClaimStatusBadge } from './UserClaimStatusBadge';
 import ClaimLocationMap from './ClaimLocationMap';
 import { Spinner } from './Spinner';
+import { ClaimBillLines } from './ClaimBillLines';
+import { useBillClaimCategoryNames } from '../lib/billClaimCategories';
 
 interface ConveyanceBillPanelProps {
   token: string;
@@ -1234,6 +1236,8 @@ const UserClaimDetailModal: React.FC<{
   const [viewingRef, setViewingRef] = useState<UserClaimReference | null>(null);
 
   const hasRefs = !!claim.claim_refs && claim.claim_refs.length > 0;
+  const hasItems = !!claim.items && claim.items.length > 0;
+  const categoryNames = useBillClaimCategoryNames(token);
 
   const refToClaimRecord = (ref: UserClaimReference): ClaimRecord => ({
     id: ref.claim_id,
@@ -1396,10 +1400,12 @@ const UserClaimDetailModal: React.FC<{
                   <label className="block text-[10px] font-semibold text-slate-500 mb-1">Category</label>
                   <select
                     value={editDraft.category}
+                    disabled={hasItems}
+                    title={hasItems ? 'Set per bill — not editable here' : undefined}
                     onChange={(e) => setEditDraft((d) => ({ ...d, category: e.target.value as UserClaimCategory }))}
-                    className="w-full text-xs px-2 py-1.5 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                    className="w-full text-xs px-2 py-1.5 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none disabled:opacity-60"
                   >
-                    {USER_CLAIM_CATEGORIES.map((cat) => (
+                    {[...new Set([...categoryNames, editDraft.category])].map((cat) => (
                       <option key={cat} value={cat}>{cat}</option>
                     ))}
                   </select>
@@ -1407,13 +1413,13 @@ const UserClaimDetailModal: React.FC<{
               </div>
               <div>
                 <label className="block text-[10px] font-semibold text-slate-500 mb-1">
-                  Amount {hasRefs && '(derived from referenced check-in/outs — not editable)'}
+                  Amount {hasItems ? '(total of the bills — not editable)' : hasRefs && '(derived from referenced check-in/outs — not editable)'}
                 </label>
                 <input
                   type="number"
                   step="0.01"
                   value={editDraft.amount}
-                  disabled={hasRefs}
+                  disabled={hasRefs || hasItems}
                   onChange={(e) => setEditDraft((d) => ({ ...d, amount: e.target.value }))}
                   className="w-full text-xs px-2 py-1.5 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none disabled:opacity-60"
                 />
@@ -1461,6 +1467,8 @@ const UserClaimDetailModal: React.FC<{
               </div>
 
               {claim.description && <p className="text-xs text-slate-600">{claim.description}</p>}
+
+              <ClaimBillLines items={claim.items} />
 
               {hasRefs && (
                 <div className="space-y-1">

@@ -12,6 +12,7 @@ import { NoticeManager } from './NoticeManager';
 import { EmployeesPanel } from './EmployeesPanel';
 import { ClaimsPanel } from './ClaimsPanel';
 import { ConveyanceBillPanel } from './ConveyanceBillPanel';
+import { BillClaimPolicyPanel } from './BillClaimPolicyPanel';
 import { DisbursementPanel } from './DisbursementPanel';
 import { ApprovalManager } from './ApprovalManager';
 import { ApprovalTemplateManager } from './ApprovalTemplateManager';
@@ -6360,17 +6361,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         <ConveyanceBillPanel token={token} users={users} />
       )}
 
-      {/* TAB: BILL CLAIM POLICY — same "conveyance" grant as above. The policy
-          rules themselves come later; for now the page just holds the place. */}
-      {activeTab === 'bill_claim_policy' && (
-        <div className="bg-white border border-slate-200 rounded-2xl p-10 text-center shadow-sm">
-          <ShieldCheck className="w-10 h-10 text-blue-600 mx-auto mb-3" />
-          <h3 className="text-lg font-bold text-slate-900">Bill Claim Policy</h3>
-          <p className="text-sm text-slate-500 mt-1 max-w-md mx-auto">
-            Rules for Bill Claims — limits, receipts, deadlines and rates — will be set up here.
-          </p>
-        </div>
-      )}
+      {/* TAB: BILL CLAIM POLICY — same "conveyance" grant as the Bill Claim tab;
+          only the Superadmin can change it (BillClaimPolicyPanel.tsx). */}
+      {activeTab === 'bill_claim_policy' && <BillClaimPolicyPanel token={token} />}
 
       {/* TAB: CONVEYANCE DISBURSEMENT — Superadmin + explicitly-granted Admins
           only. Marks a Conveyance Bill's claim(s) as actually paid out (voucher

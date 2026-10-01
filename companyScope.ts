@@ -102,7 +102,8 @@ export const SHARE_KINDS: { key: string; label: string; tables: string[] }[] = [
   { key: "assets", label: "Asset inventory", tables: ["assets"] },
   { key: "vehicles", label: "Vehicles", tables: ["vehicles"] },
   { key: "recruitment", label: "Job postings", tables: ["job_postings"] },
-  { key: "performance", label: "Performance cycles", tables: ["performance_cycles"] }
+  { key: "performance", label: "Performance cycles", tables: ["performance_cycles"] },
+  { key: "bill_claim_policy", label: "Bill claim policy & categories", tables: ["bill_claim_categories", "bill_claim_policy_settings"] }
 ];
 export const CONFIG_TABLES = new Map<string, string>(SHARE_KINDS.flatMap((k) => k.tables.map((t) => [t, k.key] as [string, string])));
 
@@ -187,6 +188,7 @@ export const LINKED_TABLES = new Map<string, [string, string]>([
   ["site_attendance_sheets", ["team_id", "site_attendance_teams"]],
   ["user_access_audit", ["target_user_id", "users"]],
   ["user_claim_references", ["user_claim_id", "user_claims"]],
+  ["user_claim_items", ["user_claim_id", "user_claims"]],
   ["user_profile_details", ["user_id", "users"]],
   ["user_project_permissions", ["user_id", "users"]],
   ["zk_attendance_logs", ["device_id", "zk_devices"]]

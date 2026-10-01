@@ -28,6 +28,7 @@
 // Approval Requests through them), so they're threaded through as deps
 // rather than duplicated or re-imported directly.
 
+import { dhakaDate } from "./BillClaimPolicy";
 import type { Express } from "express";
 import type { AlertType } from "./Alerts";
 import { getMyHrActionApprovals } from "./HROperationsRoutes";
@@ -186,7 +187,27 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
         check_out_approval: rr.check_out_approval
       });
     }
-    return rows.map((r: any) => (r.source_type === "user_claim" ? { ...r, claim_refs: byUserClaim[Number(r.source_id)] || [] } : r));
+    // The claim's bills (category / date / amount) for the approver.
+    const itemRows: any[] =
+      (await queryDB(
+        `SELECT user_claim_id, category_name, bill_date, amount, description FROM user_claim_items
+          WHERE user_claim_id IN (${userClaimIds.map(() => "?").join(",")}) ORDER BY bill_date, id`,
+        userClaimIds
+      ).catch(() => [])) || [];
+    const itemsByClaim: Record<number, any[]> = {};
+    for (const it of itemRows) {
+      (itemsByClaim[Number(it.user_claim_id)] ||= []).push({
+        category_name: it.category_name,
+        bill_date: dhakaDate(it.bill_date),
+        amount: Number(it.amount),
+        description: it.description ?? null
+      });
+    }
+    return rows.map((r: any) =>
+      r.source_type === "user_claim"
+        ? { ...r, claim_refs: byUserClaim[Number(r.source_id)] || [], claim_items: itemsByClaim[Number(r.source_id)] || [] }
+        : r
+    );
   }
 
   // 2c-2. Approval Workflow — a single global, ORDERED chain of Admin/Superadmin
