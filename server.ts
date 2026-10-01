@@ -26,6 +26,7 @@ import { registerEntriesRoutes } from "./EntriesRoutes";
 import { registerEmployeeTransferRoutes, ensureEmployeeTransferSchema, applyDueEmployeeTransfers, recordEmployeeEditHistory } from "./EmployeeTransferRoutes";
 import { registerAdminDashboardRoutes } from "./AdminDashboardRoutes";
 import { registerDeviceRoutes, ensureDeviceSchema, checkAppDevice, deviceStillAllowed } from "./DeviceRoutes";
+import { registerWebPushRoutes, ensureWebPushSchema } from "./WebPushService";
 import { registerEmployeeDirectoryRoutes } from "./EmployeeDirectoryRoutes";
 import { registerExitOffboardingRoutes, ensureExitOffboardingSchema } from "./ExitOffboardingRoutes";
 import { registerPerformanceRoutes, ensurePerformanceSchema } from "./PerformanceRoutes";
@@ -253,6 +254,9 @@ async function ensureSchemaMigrations() {
 
   // Mobile app device access (DeviceRoutes.ts).
   await ensureDeviceSchema(queryDB).catch((e: any) => console.warn("⚠️ Device access tables: " + e.message));
+
+  // Desktop/browser notifications (WebPushService.ts).
+  await ensureWebPushSchema(queryDB).catch((e: any) => console.warn("⚠️ Web push tables: " + e.message));
 
   // Personal Data (ProfilePage.tsx -> PersonalDataForm.tsx) — one row per user,
   // created on first save. Position/Department are deliberately NOT columns
@@ -4973,6 +4977,7 @@ async function startServer() {
   // Admin Dashboard figures with no screen of their own (AdminDashboardRoutes.ts).
   registerAdminDashboardRoutes(app, { authenticateToken, queryDB, getAdminModules, todayInDhaka });
   registerDeviceRoutes(app, { authenticateToken, requireSuperAdmin, queryDB });
+  registerWebPushRoutes(app, { authenticateToken, queryDB });
   registerEmployeeDirectoryRoutes(app, {
     authenticateToken,
     queryDB

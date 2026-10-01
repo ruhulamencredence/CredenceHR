@@ -28,6 +28,7 @@
 // rather than each needing its own.
 
 import admin from "firebase-admin";
+import { sendWebPushToUserIds } from "./WebPushService";
 
 let firebaseApp: admin.app.App | null | undefined;
 
@@ -60,6 +61,8 @@ export async function sendPushToUserIds(
   data: Record<string, string>,
   excludeUserId?: number
 ): Promise<void> {
+  // Browsers too (desktop notifications) — with or without Firebase.
+  void sendWebPushToUserIds(queryDB, userIds, title, body, data, excludeUserId);
   const app = getFirebaseApp();
   if (!app || userIds.length === 0) return;
   try {
@@ -98,6 +101,19 @@ export async function sendPushToRoomMembers(
   body: string,
   data: Record<string, string>
 ): Promise<void> {
+  // Browsers too (desktop notifications) — with or without Firebase.
+  void queryDB("SELECT user_id FROM chat_room_members WHERE room_id = ?", [roomId])
+    .then((members: any[]) =>
+      sendWebPushToUserIds(
+        queryDB,
+        (members || []).map((m: any) => Number(m.user_id)),
+        title,
+        body,
+        data,
+        excludeUserId
+      )
+    )
+    .catch(() => {});
   const app = getFirebaseApp();
   if (!app) return;
   try {

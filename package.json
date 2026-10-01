@@ -59,6 +59,7 @@
     "socket.io": "^4.8.1",
     "socket.io-client": "^4.8.1",
     "vite": "^6.2.3",
+    "web-push": "^3.6.7",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
@@ -72,6 +73,7 @@
     "@types/nodemailer": "^6.4.16",
     "@types/react": "^19.0.10",
     "@types/react-dom": "^19.0.4",
+    "@types/web-push": "^3.6.4",
     "autoprefixer": "^10.4.21",
     "esbuild": "^0.25.0",
     "pm2": "^5.4.3",
