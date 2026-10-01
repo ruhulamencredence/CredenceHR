@@ -5,7 +5,7 @@ import autoTable from 'jspdf-autotable';
 import credenceLogo from '../assets/credence-logo.png';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
 import { savePdfCrossPlatform } from '../lib/saveFile';
-import { Project, Branch, MprNumber, Entry, User, Budget, BudgetItem, BudgetSubmission, UserProjectPermission, EntryEditHistory, EntryPermanentDeleteLog, BulkUserRow, BulkUserResultItem, AdminModuleKey, ADMIN_MODULES, PermissionLayerKey, PERMISSION_LAYERS, PERMISSION_LAYER_MODULES, LeaveManageLayerKey, LEAVE_MANAGE_LAYERS, AttendanceRecord, ClaimsNavRequest, AdminNavRequest, Department, LeaveApplication, PendingJobEdit } from '../types';
+import { Project, Branch, MprNumber, Entry, User, Budget, BudgetItem, BudgetSubmission, UserProjectPermission, EntryEditHistory, EntryPermanentDeleteLog, BulkUserRow, BulkUserResultItem, AdminModuleKey, ADMIN_MODULES, PermissionLayerKey, PERMISSION_LAYERS, PERMISSION_LAYER_MODULES, layersFor, LeaveManageLayerKey, LEAVE_MANAGE_LAYERS, AttendanceRecord, ClaimsNavRequest, AdminNavRequest, Department, LeaveApplication, PendingJobEdit } from '../types';
 import { Building2, FileText, Users, Users2, BarChart3, Plus, Trash2, Edit2, Search, Filter, UserCheck, Calendar, CalendarClock, Download, Upload, FolderPlus, X, Eye, FileSpreadsheet, KeyRound, History, RotateCcw, Recycle, ListChecks, FileDown, MapPin, LayoutGrid, Navigation, LogIn, LogOut, Bell, Route, ShieldCheck, Wallet, Contact, Lock, Unlock, Mail, CheckCircle2, XCircle, Clock3, ShieldAlert, Copy, Eraser } from 'lucide-react';
 import LocationMapPicker from './LocationMapPicker';
 import { NoticeManager } from './NoticeManager';
@@ -102,11 +102,18 @@ const ReportRow = React.memo(function ReportRow({
   ent,
   onOpenHistory,
   onDelete,
+  onEdit,
+  onPermanentDelete,
+  can,
   deletingEntryId
 }: {
   ent: Entry;
   onOpenHistory: (entryId: number) => void;
   onDelete: (entryId: number) => void;
+  onEdit: (ent: Entry) => void;
+  onPermanentDelete: (ent: Entry) => void;
+  // Reports permission layers (Edit / Delete-Trash / Permanent Delete).
+  can: { edit: boolean; trash: boolean; permanent: boolean };
   deletingEntryId: number | null;
 }) {
   return (
@@ -172,15 +179,41 @@ const ReportRow = React.memo(function ReportRow({
           >
             <History className="w-3.5 h-3.5" />
           </button>
-          <button
-            type="button"
-            onClick={() => onDelete(ent.id)}
-            disabled={deletingEntryId === ent.id}
-            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors disabled:opacity-50"
-            title="Delete this entry (moves to Job Recycle bin)"
-          >
-            <Trash2 className="w-3.5 h-3.5" />
-          </button>
+          {can.edit && (
+            <button
+              type="button"
+              onClick={() => onEdit(ent)}
+              className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+              title="Edit this entry"
+              aria-label={`Edit entry ${ent.id}`}
+            >
+              <Edit2 className="w-3.5 h-3.5" />
+            </button>
+          )}
+          {can.trash && (
+            <button
+              type="button"
+              onClick={() => onDelete(ent.id)}
+              disabled={deletingEntryId === ent.id}
+              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors disabled:opacity-50"
+              title="Delete this entry (moves to Job Recycle bin)"
+              aria-label={`Delete entry ${ent.id}`}
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          )}
+          {can.permanent && (
+            <button
+              type="button"
+              onClick={() => onPermanentDelete(ent)}
+              disabled={deletingEntryId === ent.id}
+              className="p-1.5 text-slate-400 hover:text-white hover:bg-rose-600 rounded-lg transition-colors disabled:opacity-50"
+              title="Delete permanently (can't be restored)"
+              aria-label={`Permanently delete entry ${ent.id}`}
+            >
+              <XCircle className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
       </td>
     </tr>
@@ -443,7 +476,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       if (saved && saved.length > 0) {
         initialLayers[moduleKey] = new Set(saved as PermissionLayerKey[]);
       } else if ((u.module_permissions || []).includes(moduleKey)) {
-        initialLayers[moduleKey] = new Set(PERMISSION_LAYERS.map((l) => l.key).filter((k) => k !== 'permanent_delete'));
+        initialLayers[moduleKey] = new Set(layersFor(moduleKey).map((l) => l.key).filter((k) => k !== 'permanent_delete'));
       } else {
         initialLayers[moduleKey] = new Set();
       }
@@ -1750,7 +1783,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     if (!confirm('Delete this entry? It will be moved to the Job Recycle bin.')) return;
     setDeletingEntryId(id);
     try {
-      const res = await fetch(apiUrl(`/api/entries/${id}`), {
+      const res = await fetch(apiUrl(`/api/reports/entries/${id}`), {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -1763,6 +1796,57 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       setMessage({ type: 'error', text: err.message });
     } finally {
       setDeletingEntryId(null);
+    }
+  };
+
+  // Permanent Delete straight from the report (Reports permission layer).
+  const handlePermanentDeleteReportEntry = async (ent: Entry) => {
+    if (!confirm(`Permanently delete this entry (${ent.job_no || ''} · ${ent.item_name})? It can't be restored. It will be recorded in the Permanent Delete Log.`)) return;
+    setDeletingEntryId(ent.id);
+    try {
+      const res = await fetch(apiUrl(`/api/reports/entries/${ent.id}/permanent`), {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Failed to permanently delete entry');
+      setEntries((prev) => prev.filter((e) => e.id !== ent.id));
+      setMessage({ type: 'success', text: 'Entry permanently deleted.' });
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message });
+    } finally {
+      setDeletingEntryId(null);
+    }
+  };
+
+  // Edit from the report: Item Name and Delivery Date.
+  const [editingReportEntry, setEditingReportEntry] = useState<Entry | null>(null);
+  const [reportEditForm, setReportEditForm] = useState({ item_name: '', delivery_date: '' });
+  const [savingReportEdit, setSavingReportEdit] = useState(false);
+  const openReportEdit = (ent: Entry) => {
+    setEditingReportEntry(ent);
+    setReportEditForm({ item_name: ent.item_name || '', delivery_date: String(ent.delivery_date || '').slice(0, 10) });
+  };
+  const saveReportEdit = async () => {
+    if (!editingReportEntry) return;
+    setSavingReportEdit(true);
+    try {
+      const res = await fetch(apiUrl(`/api/reports/entries/${editingReportEntry.id}`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(reportEditForm)
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Failed to update entry');
+      setEntries((prev) =>
+        prev.map((e) => (e.id === editingReportEntry.id ? { ...e, item_name: reportEditForm.item_name.trim(), delivery_date: reportEditForm.delivery_date } : e))
+      );
+      setEditingReportEntry(null);
+      setMessage({ type: 'success', text: data.changed ? 'Entry updated.' : 'Nothing changed.' });
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message });
+    } finally {
+      setSavingReportEdit(false);
     }
   };
 
@@ -2815,6 +2899,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
 
   const stableOpenEntryHistory = useStableCallback(openEntryHistory);
   const stableDeleteEntry = useStableCallback(handleDeleteEntry);
+  const stableEditReportEntry = useStableCallback(openReportEdit);
+  const stablePermanentDeleteReportEntry = useStableCallback(handlePermanentDeleteReportEntry);
+  // PEPM Reports permission layers for this account (Module Access ->
+  // Reports). No saved layers = everything except Permanent Delete, the same
+  // default the server applies (requireModuleLayer).
+  const reportLayer = (key: PermissionLayerKey) => {
+    if (user.role === 'superadmin') return true;
+    const saved = user.module_permission_layers?.reports;
+    return saved && saved.length > 0 ? saved.includes(key) : key !== 'permanent_delete';
+  };
+  const reportCan = React.useMemo(
+    () => ({ read: reportLayer('read'), edit: reportLayer('edit_add'), trash: reportLayer('delete_trash'), permanent: reportLayer('permanent_delete') }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [user.role, user.module_permission_layers]
+  );
 
   // --- Approved Projects / MPR Numbers lists ---
   // These are imported straight from Excel and can run into the hundreds, so by
@@ -2982,9 +3081,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         </div>
       )}
 
-      {activeTab === 'reports' && reportView === 'submission' && <BudgetSubmissionReport token={token} budgets={budgets} />}
+      {activeTab === 'reports' && !reportCan.read && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-10 text-center text-sm text-slate-500 shadow-sm">
+          You don't have Read access to Reports. Ask your Superadmin to tick "Read Only" for Reports in Module Access.
+        </div>
+      )}
 
-      {activeTab === 'reports' && reportView === 'entries' && (
+      {activeTab === 'reports' && reportCan.read && reportView === 'submission' && <BudgetSubmissionReport token={token} budgets={budgets} />}
+
+      {activeTab === 'reports' && reportCan.read && reportView === 'entries' && (
         <div className="space-y-6">
           {/* Filters Bar */}
           <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
@@ -3112,7 +3217,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                     </tr>
                   ) : (
                     pagedEntries.map((ent) => (
-                      <ReportRow key={ent.id} ent={ent} onOpenHistory={stableOpenEntryHistory} onDelete={stableDeleteEntry} deletingEntryId={deletingEntryId} />
+                      <ReportRow
+                        key={ent.id}
+                        ent={ent}
+                        onOpenHistory={stableOpenEntryHistory}
+                        onDelete={stableDeleteEntry}
+                        onEdit={stableEditReportEntry}
+                        onPermanentDelete={stablePermanentDeleteReportEntry}
+                        can={reportCan}
+                        deletingEntryId={deletingEntryId}
+                      />
                     ))
                   )}
                 </tbody>
@@ -3176,6 +3290,58 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Edit an entry from the MPR Entries Report (Reports -> Edit layer) */}
+      {editingReportEntry && (
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setEditingReportEntry(null)}>
+          <div className="bg-white border border-slate-200 rounded-2xl max-w-md w-full shadow-2xl" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Edit entry">
+            <div className="p-5 border-b border-slate-200 flex justify-between items-center">
+              <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                <Edit2 className="w-4 h-4 text-blue-600" /> Edit Entry #{editingReportEntry.id}
+              </h3>
+              <button onClick={() => setEditingReportEntry(null)} className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-colors" aria-label="Close">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-5 space-y-3">
+              <p className="text-xs text-slate-500">
+                {editingReportEntry.project_name} · {editingReportEntry.job_no} · MPR {editingReportEntry.mpr_no}
+              </p>
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-500 mb-1">Item Name *</label>
+                <input
+                  value={reportEditForm.item_name}
+                  onChange={(e) => setReportEditForm((f) => ({ ...f, item_name: e.target.value }))}
+                  className="w-full text-sm px-3 py-2 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-500 mb-1">Delivery Date *</label>
+                <input
+                  type="date"
+                  value={reportEditForm.delivery_date}
+                  onChange={(e) => setReportEditForm((f) => ({ ...f, delivery_date: e.target.value }))}
+                  className="w-full text-sm px-3 py-2 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                />
+              </div>
+              <p className="text-[11px] text-slate-400">Every change is kept in this entry's edit history.</p>
+            </div>
+            <div className="px-5 py-3 border-t border-slate-200 flex justify-end gap-2">
+              <button type="button" onClick={() => setEditingReportEntry(null)} className="text-xs font-semibold px-3 py-2 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50">
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={saveReportEdit}
+                disabled={savingReportEdit || !reportEditForm.item_name.trim() || !reportEditForm.delivery_date}
+                className="text-xs font-semibold px-3.5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50"
+              >
+                Save
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -6945,7 +7111,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                                 itself stays checked above) blocks every action here.
                               </p>
                               <div className="grid grid-cols-2 xl:grid-cols-3 gap-2">
-                                {PERMISSION_LAYERS.map((layer) => (
+                                {layersFor(m.key).map((layer) => (
                                   <label
                                     key={layer.key}
                                     className="flex items-center gap-2 px-2.5 py-1.5 bg-white border border-violet-100 rounded-lg cursor-pointer hover:bg-violet-100/40"
