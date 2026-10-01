@@ -18,7 +18,7 @@ import { RideDetails } from './RideDetails';
 import { RideBookingMap } from './RideBookingMap';
 import { useWideWeb } from '../lib/useWideWeb';
 import { takeQuickAccessTab } from '../lib/quickAccess';
-import { RideDestinationPicker, RidePlaces } from './RideDestinationPicker';
+import { RideDestinationPicker, RidePlaces, GLASS_CARD } from './RideDestinationPicker';
 
 interface Requisition {
   id: number;
@@ -427,18 +427,18 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
           onChange={(e) => setExtendNote(e.target.value)}
           rows={2}
           placeholder="Why will you be late / how much more time do you need?"
-          className="w-full border rounded px-2 py-1.5 text-sm"
+          className="w-full border border-slate-200 rounded-xl bg-white/80 px-2.5 py-1.5 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
         />
         <div className="flex gap-2">
           <button
             onClick={() => requestExtension(r.id)}
-            className="px-3 py-1.5 text-xs font-medium rounded bg-amber-600 text-white hover:bg-amber-700"
+            className="px-3 py-1.5 text-xs font-medium rounded-lg bg-amber-600 text-white hover:bg-amber-700"
           >
             Submit
           </button>
           <button
             onClick={() => setExtendingFor(null)}
-            className="px-3 py-1.5 text-xs font-medium rounded border border-gray-300 text-gray-600 hover:bg-gray-50"
+            className="px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50"
           >
             Cancel
           </button>
@@ -448,7 +448,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
 
   return (
     <div className="w-full">
-      <div className="flex gap-1 border-b border-gray-200 mb-4">
+      <div className={wideWeb ? 'flex gap-1 border-b border-gray-200 mb-4' : 'flex gap-1 p-1 mb-4 rounded-2xl bg-white/60 border border-white/70 shadow-[0_4px_14px_-6px_rgba(15,23,42,0.15)]'}>
         {([
           ['book', 'Book a Ride'],
           ['status', 'Ride Status'],
@@ -458,20 +458,27 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
           <button
             key={key}
             onClick={() => setTab(key)}
-            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
-              tab === key ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-800'
-            }`}
+            className={
+              wideWeb
+                ? `px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                    tab === key ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-800'
+                  }`
+                : `flex-1 min-w-0 px-2 py-2 rounded-xl text-xs font-semibold leading-tight transition-colors ${
+                    tab === key ? 'text-white shadow-sm' : 'text-slate-600'
+                  }`
+            }
+            style={!wideWeb && tab === key ? { background: 'var(--g-accent)' } : undefined}
           >
             {label}
           </button>
         ))}
       </div>
 
-      {error && <div className="mb-3 rounded bg-red-50 text-red-700 text-sm px-3 py-2">{error}</div>}
+      {error && <div className="mb-3 rounded-lg bg-red-50 text-red-700 text-sm px-3 py-2">{error}</div>}
 
       {tab === 'book' && !places && (
         <>
-          {submitMessage && <div className="mb-3 rounded bg-green-50 text-green-800 text-sm px-3 py-2 max-w-xl">{submitMessage}</div>}
+          {submitMessage && <div className="mb-3 rounded-lg bg-green-50 text-green-800 text-sm px-3 py-2 max-w-xl">{submitMessage}</div>}
           <RideDestinationPicker
             initial={lastPlaces}
             onDone={(picked) => {
@@ -494,9 +501,9 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
         )}
         <form
           onSubmit={submitRequisition}
-          className={wideWeb ? 'space-y-4 bg-white rounded-2xl border border-slate-200 shadow-sm p-4' : 'space-y-4 max-w-xl'}
+          className={wideWeb ? 'space-y-4 bg-white rounded-2xl border border-slate-200 shadow-sm p-4' : `space-y-4 max-w-xl p-4 ${GLASS_CARD}`}
         >
-          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 flex items-start justify-between gap-3">
+          <div className={`rounded-xl border p-3 flex items-start justify-between gap-3 ${wideWeb ? 'border-slate-200 bg-slate-50' : 'border-white/70 bg-white/60'}`}>
             <div className="min-w-0 text-sm space-y-1.5">
               <div className="flex items-center gap-2 text-slate-700">
                 <span className="w-2.5 h-2.5 rounded-full bg-blue-600 shrink-0" />
@@ -525,7 +532,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
               onChange={(e) => setForm({ ...form, purpose: e.target.value })}
               rows={2}
               placeholder="Why do you need the ride?"
-              className="w-full border rounded px-3 py-2 text-sm"
+              className="w-full border border-slate-200 rounded-xl bg-white/80 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
             />
           </div>
           <div className={`grid gap-4 ${wideWeb ? 'grid-cols-2' : 'grid-cols-2 sm:grid-cols-3'}`}>
@@ -536,7 +543,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
                 type="date"
                 value={form.ride_date}
                 onChange={(e) => setForm({ ...form, ride_date: e.target.value })}
-                className="w-full border rounded px-3 py-2 text-sm"
+                className="w-full border border-slate-200 rounded-xl bg-white/80 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
               />
             </div>
             <div>
@@ -546,7 +553,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
                 type="time"
                 value={form.start_time}
                 onChange={(e) => setForm({ ...form, start_time: e.target.value })}
-                className="w-full border rounded px-3 py-2 text-sm"
+                className="w-full border border-slate-200 rounded-xl bg-white/80 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
               />
             </div>
             <div>
@@ -558,7 +565,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
                 step="0.5"
                 value={form.estimated_duration_hours}
                 onChange={(e) => setForm({ ...form, estimated_duration_hours: Number(e.target.value) })}
-                className="w-full border rounded px-3 py-2 text-sm"
+                className="w-full border border-slate-200 rounded-xl bg-white/80 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
               />
             </div>
           </div>
@@ -566,7 +573,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
           <button
             type="submit"
             disabled={submitting}
-            className={`${wideWeb ? 'w-full' : 'w-full sm:w-auto'} px-4 py-2.5 text-sm font-medium rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50`}
+            className={`${wideWeb ? 'w-full' : 'w-full sm:w-auto'} px-4 py-2.5 text-sm font-semibold rounded-xl bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50`}
           >
             {submitting ? 'Submitting…' : 'Submit Request'}
           </button>
@@ -646,7 +653,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
                   {r.status === 'pending' && (
                     <button
                       onClick={() => cancelRequisition(r.id)}
-                      className="px-2.5 py-1 text-xs font-medium rounded border border-gray-300 text-gray-600 hover:bg-gray-50"
+                      className="px-2.5 py-1 text-xs font-medium rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50"
                     >
                       Cancel
                     </button>
@@ -654,7 +661,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
                   {r.status === 'completed' && (
                     <button
                       onClick={() => setViewingDetailsFor(r.id)}
-                      className="px-2.5 py-1 text-xs font-medium rounded bg-purple-600 text-white hover:bg-purple-700"
+                      className="px-2.5 py-1 text-xs font-medium rounded-lg bg-purple-600 text-white hover:bg-purple-700"
                     >
                       Details & Map
                     </button>
@@ -664,14 +671,14 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
                       {r.driver_user_id && (
                         <button
                           onClick={() => setViewingMapFor(r.id)}
-                          className="px-2.5 py-1 text-xs font-medium rounded bg-purple-600 text-white hover:bg-purple-700"
+                          className="px-2.5 py-1 text-xs font-medium rounded-lg bg-purple-600 text-white hover:bg-purple-700"
                         >
                           Live Map
                         </button>
                       )}
                       <button
                         onClick={() => completeRide(r.id)}
-                        className="px-2.5 py-1 text-xs font-medium rounded bg-blue-600 text-white hover:bg-blue-700"
+                        className="px-2.5 py-1 text-xs font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700"
                       >
                         Mark Returned
                       </button>
@@ -681,7 +688,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
                             setExtendingFor(extendingFor === r.id ? null : r.id);
                             setExtendNote('');
                           }}
-                          className="px-2.5 py-1 text-xs font-medium rounded border border-amber-300 text-amber-700 hover:bg-amber-50"
+                          className="px-2.5 py-1 text-xs font-medium rounded-lg border border-amber-300 text-amber-700 hover:bg-amber-50"
                         >
                           Running Late
                         </button>
@@ -701,7 +708,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
           {loading && <div className="text-sm text-gray-500">Loading…</div>}
           {!loading && requisitions.length === 0 && <div className="text-sm text-gray-500">No ride requests yet.</div>}
           {requisitions.map((r) => (
-            <div key={r.id} className="border rounded-lg p-4">
+            <div key={r.id} className={wideWeb ? 'border rounded-lg p-4' : `p-4 ${GLASS_CARD}`}>
               <div className="flex items-center justify-between">
                 <div className="font-semibold text-gray-800">
                   {r.pickup_location} → {r.destination}
@@ -724,7 +731,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
               )}
 
               {(r.status === 'ongoing' || r.status === 'completed') && r.vehicle_no && (
-                <div className="mt-2 rounded bg-green-50 text-green-800 text-xs px-3 py-2 space-y-0.5">
+                <div className="mt-2 rounded-lg bg-green-50 text-green-800 text-xs px-3 py-2 space-y-0.5">
                   <div>Vehicle: {r.vehicle_model} ({r.vehicle_no})</div>
                   <div>Driver: {r.driver_name} — {r.driver_mobile}</div>
                   {r.expected_return_at && <div>Expected back by: {new Date(r.expected_return_at).toLocaleString()}</div>}
@@ -748,7 +755,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
               {r.status === 'completed' && (
                 <button
                   onClick={() => setViewingDetailsFor(r.id)}
-                  className="mt-3 px-3 py-1.5 text-xs font-medium rounded bg-purple-600 text-white hover:bg-purple-700"
+                  className="mt-3 px-3 py-1.5 text-xs font-medium rounded-lg bg-purple-600 text-white hover:bg-purple-700"
                 >
                   View Ride Details & Map
                 </button>
@@ -757,7 +764,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
               {r.status === 'pending' && (
                 <button
                   onClick={() => cancelRequisition(r.id)}
-                  className="mt-3 px-3 py-1.5 text-xs font-medium rounded border border-gray-300 text-gray-600 hover:bg-gray-50"
+                  className="mt-3 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50"
                 >
                   Cancel Request
                 </button>
@@ -768,14 +775,14 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
                   {r.driver_user_id && (
                     <button
                       onClick={() => setViewingMapFor(r.id)}
-                      className="px-3 py-1.5 text-xs font-medium rounded bg-purple-600 text-white hover:bg-purple-700"
+                      className="px-3 py-1.5 text-xs font-medium rounded-lg bg-purple-600 text-white hover:bg-purple-700"
                     >
                       View Live Map
                     </button>
                   )}
                   <button
                     onClick={() => completeRide(r.id)}
-                    className="px-3 py-1.5 text-xs font-medium rounded bg-blue-600 text-white hover:bg-blue-700"
+                    className="px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700"
                   >
                     Ride Completed / Vehicle Returned
                   </button>
@@ -785,7 +792,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
                         setExtendingFor(extendingFor === r.id ? null : r.id);
                         setExtendNote('');
                       }}
-                      className="px-3 py-1.5 text-xs font-medium rounded border border-amber-300 text-amber-700 hover:bg-amber-50"
+                      className="px-3 py-1.5 text-xs font-medium rounded-lg border border-amber-300 text-amber-700 hover:bg-amber-50"
                     >
                       Running Late — Request Extension
                     </button>
@@ -801,7 +808,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
 
       {tab === 'assign' && (
         <div className="space-y-3">
-          <div className="rounded bg-blue-50 text-blue-800 text-xs px-3 py-2">
+          <div className="rounded-lg bg-blue-50 text-blue-800 text-xs px-3 py-2">
             Ride requests you approved that are still waiting for a vehicle + driver — the flowchart's own "গাড়ি ও ড্রাইভার
             অ্যাসাইনমেন্ট" step, no Vehicle Management Module Access needed.
           </div>
@@ -810,7 +817,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
             <div className="text-sm text-gray-500">Nothing waiting on you right now.</div>
           )}
           {awaitingAssignment.map((r) => (
-            <div key={r.id} className="border rounded-lg p-4">
+            <div key={r.id} className={wideWeb ? 'border rounded-lg p-4' : `p-4 ${GLASS_CARD}`}>
               <div className="font-semibold text-gray-800">
                 {r.pickup_location} → {r.destination}
               </div>
@@ -846,12 +853,12 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
                         </option>
                       ))}
                     </select>
-                    <button onClick={() => assignVehicle(r.id)} className="px-3 py-1.5 text-xs font-medium rounded bg-blue-600 text-white">
+                    <button onClick={() => assignVehicle(r.id)} className="px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-600 text-white">
                       Confirm Assignment
                     </button>
                     <button
                       onClick={() => setAssigningFor(null)}
-                      className="px-3 py-1.5 text-xs font-medium rounded border border-gray-300 text-gray-600"
+                      className="px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-300 text-gray-600"
                     >
                       Cancel
                     </button>
@@ -862,7 +869,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
                       setAssigningFor(r.id);
                       setAssignForm({ vehicle_id: '', driver_user_id: '' });
                     }}
-                    className="px-3 py-1.5 text-xs font-medium rounded bg-blue-600 text-white hover:bg-blue-700"
+                    className="px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700"
                   >
                     Assign Vehicle &amp; Driver
                   </button>
@@ -875,7 +882,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
 
       {tab === 'maintainer' && isVehicleMaintainer && (
         <div className="space-y-4">
-          <div className="rounded bg-purple-50 text-purple-800 text-xs px-3 py-2">
+          <div className="rounded-lg bg-purple-50 text-purple-800 text-xs px-3 py-2">
             Vehicle Maintainer bypass — books/confirms a ride without going through the Supervisor / HR-Admin
             Approval Workflow. Use "Book New" for a ride nobody has submitted yet, or "Bypass Existing" to push an
             already-submitted request straight to Assigned.
@@ -909,7 +916,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
                   required
                   value={directBookForm.employee_user_id}
                   onChange={(e) => setDirectBookForm({ ...directBookForm, employee_user_id: e.target.value })}
-                  className="w-full border rounded px-3 py-2 text-sm"
+                  className="w-full border border-slate-200 rounded-xl bg-white/80 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
                 >
                   <option value="">Select an employee…</option>
                   {directoryEmployees.map((e) => (
@@ -926,7 +933,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
                   value={directBookForm.purpose}
                   onChange={(e) => setDirectBookForm({ ...directBookForm, purpose: e.target.value })}
                   rows={2}
-                  className="w-full border rounded px-3 py-2 text-sm"
+                  className="w-full border border-slate-200 rounded-xl bg-white/80 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
                 />
               </div>
               <div className="grid grid-cols-2 gap-3">
@@ -936,7 +943,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
                     required
                     value={directBookForm.pickup_location}
                     onChange={(e) => setDirectBookForm({ ...directBookForm, pickup_location: e.target.value })}
-                    className="w-full border rounded px-3 py-2 text-sm"
+                    className="w-full border border-slate-200 rounded-xl bg-white/80 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
                   />
                 </div>
                 <div>
@@ -945,7 +952,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
                     required
                     value={directBookForm.destination}
                     onChange={(e) => setDirectBookForm({ ...directBookForm, destination: e.target.value })}
-                    className="w-full border rounded px-3 py-2 text-sm"
+                    className="w-full border border-slate-200 rounded-xl bg-white/80 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
                   />
                 </div>
               </div>
@@ -957,7 +964,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
                     type="date"
                     value={directBookForm.ride_date}
                     onChange={(e) => setDirectBookForm({ ...directBookForm, ride_date: e.target.value })}
-                    className="w-full border rounded px-3 py-2 text-sm"
+                    className="w-full border border-slate-200 rounded-xl bg-white/80 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
                   />
                 </div>
                 <div>
@@ -967,7 +974,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
                     type="time"
                     value={directBookForm.start_time}
                     onChange={(e) => setDirectBookForm({ ...directBookForm, start_time: e.target.value })}
-                    className="w-full border rounded px-3 py-2 text-sm"
+                    className="w-full border border-slate-200 rounded-xl bg-white/80 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
                   />
                 </div>
                 <div>
@@ -979,7 +986,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
                     step="0.5"
                     value={directBookForm.estimated_duration_hours}
                     onChange={(e) => setDirectBookForm({ ...directBookForm, estimated_duration_hours: Number(e.target.value) })}
-                    className="w-full border rounded px-3 py-2 text-sm"
+                    className="w-full border border-slate-200 rounded-xl bg-white/80 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
                   />
                 </div>
               </div>
@@ -990,7 +997,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
                     required
                     value={directBookForm.vehicle_id}
                     onChange={(e) => setDirectBookForm({ ...directBookForm, vehicle_id: e.target.value })}
-                    className="w-full border rounded px-3 py-2 text-sm"
+                    className="w-full border border-slate-200 rounded-xl bg-white/80 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
                   >
                     <option value="">Pick a vehicle…</option>
                     {availableVehicles.map((v) => (
@@ -1006,7 +1013,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
                     required
                     value={directBookForm.driver_user_id}
                     onChange={(e) => setDirectBookForm({ ...directBookForm, driver_user_id: e.target.value })}
-                    className="w-full border rounded px-3 py-2 text-sm"
+                    className="w-full border border-slate-200 rounded-xl bg-white/80 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
                   >
                     <option value="">Pick a driver…</option>
                     {driverCandidates.map((d) => (
@@ -1022,7 +1029,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
               <button
                 type="submit"
                 disabled={directBookSubmitting}
-                className="px-4 py-2 text-sm font-medium rounded bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50"
+                className="px-4 py-2 text-sm font-medium rounded-lg bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50"
               >
                 {directBookSubmitting ? 'Booking…' : 'Book & Confirm Directly'}
               </button>
@@ -1035,7 +1042,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
                 <div className="text-sm text-gray-500">Nothing pending or approved right now.</div>
               )}
               {bypassCandidates.map((r) => (
-                <div key={r.id} className="border rounded-lg p-4">
+                <div key={r.id} className={wideWeb ? 'border rounded-lg p-4' : `p-4 ${GLASS_CARD}`}>
                   <div className="flex items-center justify-between">
                     <div className="font-semibold text-gray-800">
                       {r.pickup_location} → {r.destination}
@@ -1074,12 +1081,12 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
                             </option>
                           ))}
                         </select>
-                        <button onClick={() => bypassAssign(r.id)} className="px-3 py-1.5 text-xs font-medium rounded bg-purple-600 text-white">
+                        <button onClick={() => bypassAssign(r.id)} className="px-3 py-1.5 text-xs font-medium rounded-lg bg-purple-600 text-white">
                           Confirm Directly
                         </button>
                         <button
                           onClick={() => setBypassingFor(null)}
-                          className="px-3 py-1.5 text-xs font-medium rounded border border-gray-300 text-gray-600"
+                          className="px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-300 text-gray-600"
                         >
                           Cancel
                         </button>
@@ -1090,7 +1097,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
                           setBypassingFor(r.id);
                           setBypassForm({ vehicle_id: '', driver_user_id: '' });
                         }}
-                        className="px-3 py-1.5 text-xs font-medium rounded bg-purple-600 text-white hover:bg-purple-700"
+                        className="px-3 py-1.5 text-xs font-medium rounded-lg bg-purple-600 text-white hover:bg-purple-700"
                       >
                         Bypass & Assign Vehicle
                       </button>
@@ -1107,7 +1114,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
                 <div className="text-sm text-gray-500">No rides ongoing right now.</div>
               )}
               {ongoingRides.map((r) => (
-                <div key={r.id} className="border rounded-lg p-4">
+                <div key={r.id} className={wideWeb ? 'border rounded-lg p-4' : `p-4 ${GLASS_CARD}`}>
                   <div className="flex items-center justify-between">
                     <div className="font-semibold text-gray-800">
                       {r.pickup_location} → {r.destination}
@@ -1121,7 +1128,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
                   <button
                     onClick={() => setViewingMapFor(r.id)}
                     disabled={!r.driver_user_id}
-                    className="mt-3 px-3 py-1.5 text-xs font-medium rounded bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-40"
+                    className="mt-3 px-3 py-1.5 text-xs font-medium rounded-lg bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-40"
                   >
                     View Live Map
                   </button>

@@ -67,6 +67,11 @@ async function getCurrentCoords(): Promise<{ latitude: number; longitude: number
   });
 }
 
+// Mobile: the app's liquid glass card (soft violet-to-white fill, big rounded
+// corners, bright top edge) so Book a Ride matches the rest of the app.
+export const GLASS_CARD =
+  'rounded-[24px] border border-white/70 bg-gradient-to-br from-violet-100/60 via-white/60 to-white/40 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15),inset_0_1px_0_rgba(255,255,255,0.7)]';
+
 interface RideDestinationPickerProps {
   initial?: RidePlaces | null;
   onDone: (places: RidePlaces) => void;
@@ -268,9 +273,9 @@ export function RideDestinationPicker({ initial, onDone }: RideDestinationPicker
           className="h-[calc(100vh-200px)] min-h-[480px]"
         />
       )}
-      <div className={wideWeb ? 'bg-white rounded-2xl border border-slate-200 shadow-sm p-4 lg:max-h-[calc(100vh-200px)] lg:overflow-y-auto' : ''}>
+      <div className={wideWeb ? 'bg-white rounded-2xl border border-slate-200 shadow-sm p-4 lg:max-h-[calc(100vh-200px)] lg:overflow-y-auto' : `p-3 ${GLASS_CARD}`}>
       {wideWeb && <div className="text-base font-bold text-slate-900 mb-3">Where are you going?</div>}
-      <div className="rounded-2xl bg-slate-50 border border-slate-200 p-2 space-y-2">
+      <div className={`rounded-2xl border p-2 space-y-2 ${wideWeb ? 'bg-slate-50 border-slate-200' : 'bg-white/50 border-white/70'}`}>
         <div className="flex items-center gap-3 px-3 py-2.5">
           <Armchair className="w-5 h-5 text-slate-600 shrink-0" />
           <input
@@ -373,7 +378,7 @@ export function RideDestinationPicker({ initial, onDone }: RideDestinationPicker
           Continue <ArrowRight className="w-4 h-4" />
         </button>
       ) : (
-      <div className="mt-4 grid grid-cols-2 rounded-xl border border-slate-200 divide-x divide-slate-200 overflow-hidden">
+      <div className={`mt-4 grid grid-cols-2 rounded-xl border divide-x overflow-hidden ${wideWeb ? 'border-slate-200 divide-slate-200' : 'border-white/70 divide-white/70 bg-white/60'}`}>
         <button
           type="button"
           onClick={() => {
