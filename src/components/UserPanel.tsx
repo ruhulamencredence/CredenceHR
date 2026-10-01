@@ -1203,6 +1203,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
     };
     const wantsJobEdit = jobsNavRequest.target === 'jobEdit';
     if (wantsJobEdit ? !user.can_job_edit : !canSeeBudgetModule) return;
+    if (jobsNavRequest.target === 'entry') showBudgetPicker();
     setDesktopActiveSection(map[jobsNavRequest.target]);
     setMobileActiveSection(map[jobsNavRequest.target]);
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -1375,7 +1376,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
     [budgets]
   );
 
-  const openBudget = async (budget: Budget) => {
+  const openBudget = async (budget: Budget, opts: { restoreDraft?: boolean } = {}) => {
     setSelectedBudget(budget);
     setBudgetItems([]);
     setMessage(null);
@@ -1389,6 +1390,19 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
     setShowProjectDropdown(false);
     setMprRows([makeEmptyRow()]);
     setEditingJob(null);
+    // Picking the Budget a saved draft belongs to brings that half-filled form back.
+    const draft = pendingDraftRef.current;
+    if (opts.restoreDraft !== false && draft && draft.selectedBudgetId === budget.id) {
+      if (draft.editingJob) setEditingJob(draft.editingJob);
+      setJobDetailsConfirmed(!!draft.jobDetailsConfirmed);
+      if (draft.entryDate) setEntryDate(draft.entryDate);
+      if (draft.projectId) setProjectId(draft.projectId);
+      if (draft.projectSearchText) setProjectSearchText(draft.projectSearchText);
+      if (draft.jobName) setJobName(draft.jobName);
+      if (draft.jobDuration) setJobDuration(draft.jobDuration);
+      if (Array.isArray(draft.mprRows) && draft.mprRows.length > 0) setMprRows(draft.mprRows);
+    }
+    pendingDraftRef.current = null;
     setLoadingBudgetItems(true);
     try {
       const res = await fetch(apiUrl(`/api/budgets/${budget.id}/items`), { headers: { Authorization: `Bearer ${token}` } });
@@ -1417,6 +1431,10 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   };
 
   const closeBudget = () => {
+    pendingDraftRef.current = null;
+    try {
+      localStorage.removeItem(draftStorageKey);
+    } catch {}
     setSelectedBudget(null);
     setBudgetItems([]);
     setMessage(null);
@@ -1442,6 +1460,9 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // background reload then costs a re-render, not the user's unsaved work.
   const draftStorageKey = `mpr_draft_v1_${user.id}`;
   const draftRestoredRef = useRef(false);
+  // The saved draft waits here until the user picks its Budget again — Entry
+  // always opens on "Select a Budget" instead of jumping straight into the form.
+  const pendingDraftRef = useRef<any>(null);
 
   // Restore once, as soon as the Budgets list (needed to re-link
   // selectedBudget back to a real Budget object) has loaded.
@@ -1456,21 +1477,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
       if (!draft || typeof draft !== 'object') return;
       const budget = budgets.find((b) => b.id === draft.selectedBudgetId);
       if (!budget) return; // stale draft (Budget no longer visible) — ignore it
-      setSelectedBudget(budget);
-      setLoadingBudgetItems(true);
-      fetch(apiUrl(`/api/budgets/${budget.id}/items`), { headers: { Authorization: `Bearer ${token}` } })
-        .then((res) => (res.ok ? res.json() : []))
-        .then((items) => setBudgetItems(items))
-        .catch(() => {})
-        .finally(() => setLoadingBudgetItems(false));
-      if (draft.editingJob) setEditingJob(draft.editingJob);
-      setJobDetailsConfirmed(!!draft.jobDetailsConfirmed);
-      if (draft.entryDate) setEntryDate(draft.entryDate);
-      if (draft.projectId) setProjectId(draft.projectId);
-      if (draft.projectSearchText) setProjectSearchText(draft.projectSearchText);
-      if (draft.jobName) setJobName(draft.jobName);
-      if (draft.jobDuration) setJobDuration(draft.jobDuration);
-      if (Array.isArray(draft.mprRows) && draft.mprRows.length > 0) setMprRows(draft.mprRows);
+      pendingDraftRef.current = draft;
     } catch (err) {
       console.error('Failed to restore saved MPR draft', err);
     }
@@ -1484,10 +1491,9 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   useEffect(() => {
     if (!draftRestoredRef.current) return;
     try {
-      if (!selectedBudget) {
-        localStorage.removeItem(draftStorageKey);
-        return;
-      }
+      // No Budget open (e.g. back on "Select a Budget") — keep whatever draft is
+      // saved; it comes back when its Budget is picked. closeBudget clears it.
+      if (!selectedBudget) return;
       localStorage.setItem(
         draftStorageKey,
         JSON.stringify({
@@ -1533,7 +1539,12 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // read-only (the server ignores them here regardless, see
   // POST /api/entries/job/:jobId/items — it always keeps what the Job already
   // has), so only the MPR No Entries section below is actually editable.
-  const startEditJob = (j: { job_no: string; job_name: string; job_id: number; project_id: number; job_duration: string }) => {
+  const startEditJob = (j: { job_no: string; job_name: string; job_id: number; project_id: number; job_duration: string; budget_id?: number | null }) => {
+    // Open the Job's own Budget first when another (or none) is open.
+    if (j.budget_id && (!selectedBudget || selectedBudget.id !== j.budget_id)) {
+      const b = budgets.find((x) => x.id === j.budget_id);
+      if (b) openBudget(b, { restoreDraft: false });
+    }
     setEditingJob({ jobId: j.job_id, jobNo: j.job_no });
     setProjectId(String(j.project_id));
     const proj = projects.find((p) => p.id === j.project_id);
@@ -1549,6 +1560,21 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
 
   // Leaves "add MPR to existing Job" mode and resets the form back to a normal
   // brand-new-Job entry.
+  // Back to "Select a Budget" without losing the half-filled form (it's saved
+  // and comes back when this Budget is picked again).
+  const showBudgetPicker = () => {
+    if (!selectedBudget) return;
+    try {
+      pendingDraftRef.current = JSON.parse(localStorage.getItem(draftStorageKey) || 'null');
+    } catch {
+      pendingDraftRef.current = null;
+    }
+    setSelectedBudget(null);
+    setBudgetItems([]);
+    setEditingJob(null);
+    setMessage(null);
+  };
+
   const cancelEditJob = () => {
     setEditingJob(null);
     setProjectId('');
@@ -1580,15 +1606,25 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // become on submit — mirrors the server's own "JOB-000X, sequential per user per
   // budget" logic (COUNT of this user's distinct Jobs under this Budget, + 1) so the
   // Job No field shows something meaningful instead of sitting blank until submit.
-  const nextJobNoPreview = React.useMemo(() => {
-    if (!selectedBudget) return '';
-    const myJobNosInBudget = new Set(
-      entries
-        .filter((e) => e.budget_id === selectedBudget.id && e.created_by === user.id)
-        .map((e) => e.job_no)
-    );
-    return `JOB-${String(myJobNosInBudget.size + 1).padStart(4, '0')}`;
-  }, [entries, selectedBudget, user.id]);
+  // Asked from the server (GET /api/jobs/next-no) — it knows about Jobs in the
+  // Recycle bin and permanently deleted ones, which this panel's entries don't.
+  const [nextJobNoPreview, setNextJobNoPreview] = useState('');
+  useEffect(() => {
+    if (!selectedBudget) {
+      setNextJobNoPreview('');
+      return;
+    }
+    let cancelled = false;
+    fetch(apiUrl(`/api/jobs/next-no?budget_id=${selectedBudget.id}`), { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!cancelled && d?.job_no) setNextJobNoPreview(d.job_no);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedBudget, entries, token]);
 
   // Only Projects that were actually imported into the selected Budget's Excel sheet
   // (and that this User already has access to) may be picked for a new entry.
@@ -1882,7 +1918,9 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
     const usedByOtherRows = new Set(
       mprRows.filter((r) => r.rowId !== row.rowId && r.mprId).map((r) => r.mprId)
     );
-    const usedElsewhere = new Set(mprUsage.map((u) => String(u.mpr_id)));
+    // Only MPR Nos another user already has are off-limits; this user's own stay
+    // pickable for their other Items / remaining Qty (the Qty cap still applies).
+    const usedElsewhere = new Set(mprUsage.filter((u) => u.used_by_other).map((u) => String(u.mpr_id)));
     if (!selectedProjectName) return [];
     return mprNumbers.filter(
       (m) =>
@@ -1901,7 +1939,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   const mprUsageForSearchText = (searchText: string): MprUsage | null => {
     const q = searchText.trim().toLowerCase();
     if (!q) return null;
-    return mprUsage.find((u) => u.mpr_no.trim().toLowerCase() === q) || null;
+    return mprUsage.find((u) => u.used_by_other && u.mpr_no.trim().toLowerCase() === q) || null;
   };
 
   // Looks up whether the MPR No currently typed into a row matches one already
@@ -2488,7 +2526,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // MPR No is always left pickable (re-selecting it must stay allowed).
   const usedElsewhereEntries = new Set(
       mprUsage
-        .filter((u) => String(u.mpr_id) !== String(currentEntry.mpr_id))
+        .filter((u) => u.used_by_other && String(u.mpr_id) !== String(currentEntry.mpr_id))
         .map((u) => String(u.mpr_id))
     );
     return mprNumbers.filter(
@@ -3078,7 +3116,10 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           {canSeeBudgetModule && (
           <button
             type="button"
-            onClick={() => goToMobileSection('budget')}
+            onClick={() => {
+              showBudgetPicker();
+              goToMobileSection('budget');
+            }}
             className="relative flex flex-col items-center justify-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 h-[104px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-blue-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
           >
             <div className="p-2.5 rounded-2xl bg-gradient-to-br from-blue-300 to-blue-500 shadow-[0_6px_16px_-2px_rgba(37,99,235,0.35)] border border-white/30">
@@ -4239,7 +4280,9 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                               can be added to it, instead of the default flow which always
                               creates a brand-new Job. Only offered before the Budget is
                               Submitted (Finished), and only for users allowed to edit Jobs. */}
-                          {canEditExistingJob && selectedBudget && !selectedBudget.submitted && !lockedJobIds.has(j.job_id) && (
+                          {canEditExistingJob &&
+                            !lockedJobIds.has(j.job_id) &&
+                            !(j.budget_id !== null && budgets.find((b) => b.id === j.budget_id)?.submitted) && (
                             <button
                               type="button"
                               onClick={() => startEditJob(j)}
