@@ -1131,28 +1131,28 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // as GlobalSidebar's Self Service list.
   const openSelfService = (target: SelfServiceTarget) => onOpenSelfService?.(target);
   const mobileMoreItems: MoreItem[] = [
-    { key: 'noticeBoard', label: 'Notice Board', icon: Bell, tint: 'from-yellow-100/70 via-white/50 to-amber-50/40', iconBg: 'from-yellow-300 to-amber-400 shadow-[0_6px_16px_-2px_rgba(217,119,6,0.35)]', onClick: () => goToMobileSection('noticeBoard') },
+    { key: 'noticeBoard', label: 'Notice Board', icon: Bell, iconBg: 'from-yellow-300 to-amber-400 shadow-[0_6px_16px_-2px_rgba(217,119,6,0.35)]', onClick: () => goToMobileSection('noticeBoard') },
     ...(onOpenSelfService
       ? ([
           ...(user.role === 'superadmin' || !!user.can_view_leave_application || !!user.can_view_my_leave
-            ? [{ key: 'leaveApplication', label: 'Leave Application', icon: CalendarClock, tint: 'from-violet-100/70 via-white/50 to-purple-50/40', iconBg: 'from-violet-300 to-violet-500 shadow-[0_6px_16px_-2px_rgba(124,58,237,0.35)]', onClick: () => openSelfService('leaveApplication') }]
+            ? [{ key: 'leaveApplication', label: 'Leave Application', icon: CalendarClock, iconBg: 'from-violet-300 to-violet-500 shadow-[0_6px_16px_-2px_rgba(124,58,237,0.35)]', onClick: () => openSelfService('leaveApplication') }]
             : []),
           ...(user.role === 'superadmin' || !!user.can_manage_leave
-            ? [{ key: 'leaveManagement', label: 'Leave Manage', icon: ListChecks, tint: 'from-fuchsia-100/70 via-white/50 to-pink-50/40', iconBg: 'from-fuchsia-300 to-fuchsia-500 shadow-[0_6px_16px_-2px_rgba(192,38,211,0.35)]', onClick: () => openSelfService('leaveManagement') }]
+            ? [{ key: 'leaveManagement', label: 'Leave Manage', icon: ListChecks, iconBg: 'from-fuchsia-300 to-fuchsia-500 shadow-[0_6px_16px_-2px_rgba(192,38,211,0.35)]', onClick: () => openSelfService('leaveManagement') }]
             : []),
           ...(user.role === 'admin' || user.role === 'superadmin'
-            ? [{ key: 'leaveApprovals', label: 'Leave Approvals', icon: CheckSquare, tint: 'from-emerald-100/70 via-white/50 to-teal-50/40', iconBg: 'from-emerald-300 to-emerald-500 shadow-[0_6px_16px_-2px_rgba(5,150,105,0.35)]', onClick: () => openSelfService('leaveApprovals') }]
+            ? [{ key: 'leaveApprovals', label: 'Leave Approvals', icon: CheckSquare, iconBg: 'from-emerald-300 to-emerald-500 shadow-[0_6px_16px_-2px_rgba(5,150,105,0.35)]', onClick: () => openSelfService('leaveApprovals') }]
             : []),
           ...(canSeeTimesheet
-            ? [{ key: 'timesheet', label: 'Timesheet', icon: Clock, tint: 'from-sky-100/70 via-white/50 to-cyan-50/40', iconBg: 'from-sky-300 to-sky-500 shadow-[0_6px_16px_-2px_rgba(2,132,199,0.35)]', onClick: () => openSelfService('timesheet') }]
+            ? [{ key: 'timesheet', label: 'Timesheet', icon: Clock, iconBg: 'from-sky-300 to-sky-500 shadow-[0_6px_16px_-2px_rgba(2,132,199,0.35)]', onClick: () => openSelfService('timesheet') }]
             : []),
-          { key: 'approveApplications', label: 'Approve Application', icon: ShieldCheck, tint: 'from-blue-100/70 via-white/50 to-indigo-50/40', iconBg: 'from-blue-300 to-blue-500 shadow-[0_6px_16px_-2px_rgba(37,99,235,0.35)]', onClick: () => openSelfService('approveApplications') },
-          { key: 'myLetters', label: 'My Letters & Service Record', icon: FileText, tint: 'from-indigo-100/70 via-white/50 to-blue-50/40', iconBg: 'from-indigo-300 to-indigo-500 shadow-[0_6px_16px_-2px_rgba(79,70,229,0.35)]', onClick: () => openSelfService('myLetters') },
-          { key: 'myCases', label: 'Grievance & Disciplinary', icon: Gavel, tint: 'from-orange-100/70 via-white/50 to-amber-50/40', iconBg: 'from-orange-300 to-orange-500 shadow-[0_6px_16px_-2px_rgba(234,88,12,0.35)]', onClick: () => openSelfService('myCases') },
-          { key: 'resignation', label: 'My Resignation', icon: LogOut, tint: 'from-rose-100/70 via-white/50 to-pink-50/40', iconBg: 'from-rose-300 to-rose-500 shadow-[0_6px_16px_-2px_rgba(225,29,72,0.35)]', onClick: () => openSelfService('resignation') },
-          { key: 'chat', label: 'Chat', icon: MessageSquare, tint: 'from-cyan-100/70 via-white/50 to-sky-50/40', iconBg: 'from-cyan-300 to-cyan-500 shadow-[0_6px_16px_-2px_rgba(8,145,178,0.35)]', onClick: () => openSelfService('chat') },
-          { key: 'alerts', label: 'Alerts', icon: Bell, tint: 'from-red-100/70 via-white/50 to-rose-50/40', iconBg: 'from-red-300 to-red-500 shadow-[0_6px_16px_-2px_rgba(220,38,38,0.35)]', onClick: () => openSelfService('alerts') },
-          { key: 'erp360', label: '360 ERP', icon: ExternalLink, tint: 'from-slate-100/70 via-white/50 to-gray-50/40', iconBg: 'from-slate-400 to-slate-600 shadow-[0_6px_16px_-2px_rgba(71,85,105,0.35)]', onClick: () => openSelfService('erp360') }
+          { key: 'approveApplications', label: 'Approve Application', icon: ShieldCheck, iconBg: 'from-blue-300 to-blue-500 shadow-[0_6px_16px_-2px_rgba(37,99,235,0.35)]', onClick: () => openSelfService('approveApplications') },
+          { key: 'myLetters', label: 'My Letters & Service Record', icon: FileText, iconBg: 'from-indigo-300 to-indigo-500 shadow-[0_6px_16px_-2px_rgba(79,70,229,0.35)]', onClick: () => openSelfService('myLetters') },
+          { key: 'myCases', label: 'Grievance & Disciplinary', icon: Gavel, iconBg: 'from-orange-300 to-orange-500 shadow-[0_6px_16px_-2px_rgba(234,88,12,0.35)]', onClick: () => openSelfService('myCases') },
+          { key: 'resignation', label: 'My Resignation', icon: LogOut, iconBg: 'from-rose-300 to-rose-500 shadow-[0_6px_16px_-2px_rgba(225,29,72,0.35)]', onClick: () => openSelfService('resignation') },
+          { key: 'chat', label: 'Chat', icon: MessageSquare, iconBg: 'from-cyan-300 to-cyan-500 shadow-[0_6px_16px_-2px_rgba(8,145,178,0.35)]', onClick: () => openSelfService('chat') },
+          { key: 'alerts', label: 'Alerts', icon: Bell, iconBg: 'from-red-300 to-red-500 shadow-[0_6px_16px_-2px_rgba(220,38,38,0.35)]', onClick: () => openSelfService('alerts') },
+          { key: 'erp360', label: '360 ERP', icon: ExternalLink, iconBg: 'from-slate-400 to-slate-600 shadow-[0_6px_16px_-2px_rgba(71,85,105,0.35)]', onClick: () => openSelfService('erp360') }
         ] as MoreItem[])
       : [])
   ];
