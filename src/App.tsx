@@ -54,6 +54,8 @@ import { apiUrl } from './lib/api';
 import { startBackgroundTracking, stopBackgroundTracking } from './lib/backgroundTracking';
 import { connectChatSocket, disconnectChatSocket } from './lib/chatSocket';
 import { initPushNotifications, clearPushToken } from './lib/pushNotifications';
+import { syncWebPush, disableWebPush, listenWebPushOpens } from './lib/webPush';
+import { WebPushPrompt } from './components/WebPushPrompt';
 import { setActiveCompanyId } from './lib/company';
 import { DEVICE_REVOKED_EVENT, setSignedOutReason } from './lib/device';
 
@@ -347,6 +349,8 @@ export default function App() {
     setShowChat(false);
     setShowAlertsPage(false);
     if (token) clearPushToken(token);
+    // This browser stops getting the signed-out account's desktop notifications.
+    void disableWebPush(token);
     localStorage.removeItem('mpr_token');
     localStorage.removeItem('mpr_user');
     setActiveCompanyId(null);
@@ -401,6 +405,26 @@ export default function App() {
   // an Alerts push (any other alert type — leave decisions, conveyance
   // claims, ...) opens the Alerts page instead, same as GlobalSidebar's own
   // "Alerts" item.
+  // Desktop notifications on the website (webPush.ts): tie this browser to
+  // the account if it already allowed them, and open the chat / Alerts a
+  // clicked notification is about — same as tapping an app push.
+  useEffect(() => {
+    if (!token) return;
+    void syncWebPush(token);
+    return listenWebPushOpens((d) => {
+      setSelfServiceView(null);
+      setShowProfilePage(false);
+      if (d.roomId && Number(d.roomId)) {
+        setShowAlertsPage(false);
+        setPendingChatRoomId(Number(d.roomId));
+        setShowChat(true);
+      } else {
+        setShowChat(false);
+        setShowAlertsPage(true);
+      }
+    });
+  }, [token]);
+
   useEffect(() => {
     if (token) {
       initPushNotifications(token, {
@@ -1176,6 +1200,9 @@ export default function App() {
           Hidden while the native in-app Chat page or this button's own popup
           is already open. */}
       <FloatingChatButton token={token || ''} onOpenChat={openChatPopup} hidden={showChat || showChatPopup} />
+
+      {/* Website only: offer desktop notifications once (WebPushPrompt.tsx). */}
+      {token && user && <WebPushPrompt token={token} userId={user.id} />}
 
       {/* FloatingChatButton's popup — a centered card sized like
           NewLeaveApplicationModal (max-w-3xl, rounded-2xl, its own backdrop)
