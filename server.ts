@@ -260,7 +260,7 @@ async function ensureSchemaMigrations() {
   await ensureWebPushSchema(queryDB).catch((e: any) => console.warn("⚠️ Web push tables: " + e.message));
 
   // Bill Claim Policy: categories, rules and each claim's bill lines (BillClaimPolicy.ts).
-  await ensureBillClaimPolicySchema(queryDB).catch((e: any) => console.warn("⚠️ Bill claim policy tables: " + e.message));
+  await ensureBillClaimPolicySchema(queryDB, (sql) => dbPool.query(sql)).catch((e: any) => console.warn("⚠️ Bill claim policy tables: " + e.message));
 
   // Personal Data (ProfilePage.tsx -> PersonalDataForm.tsx) — one row per user,
   // created on first save. Position/Department are deliberately NOT columns

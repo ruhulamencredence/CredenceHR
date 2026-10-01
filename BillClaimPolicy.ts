@@ -23,12 +23,22 @@
 //                      deleting or renaming one leaves past claims as they were.
 //   user_claim_items   the bill lines of a claim — one per category/date/amount.
 //   checkClaimBills()  applies every rule to a claim being filed.
+//   bill_claim_policy_history
+//                      every change anyone makes here (and every refused
+//                      attempt), who/when/before/after. Append-only: no route
+//                      edits or deletes it, database triggers refuse UPDATE and
+//                      DELETE on it, and each row carries a hash of the row
+//                      before it, so a row altered or removed directly in the
+//                      database shows up as a broken chain (History -> Verify).
+//                      Its company column is company_ref, not company_id, so
+//                      deleting a company (companyDelete.ts) leaves it alone.
 //
 // Sister companies can use the mother company's policy (Companies -> "Uses the
 // mother company's… Bill claim policy & categories"), like the other shared
 // settings in companyScope.ts.
 
 import type { Express } from "express";
+import { createHash } from "crypto";
 import { activeCompanyId } from "./companyContext";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
@@ -129,7 +139,8 @@ export const POLICY_DEFS: PolicyDef[] = [
 
 export const DEFAULT_CATEGORIES = ["Transport", "Fuel", "Toll", "Parking", "Others"];
 
-export async function ensureBillClaimPolicySchema(queryDB: QueryDB) {
+// runPlain: a non-prepared query (CREATE TRIGGER can't go through prepared statements).
+export async function ensureBillClaimPolicySchema(queryDB: QueryDB, runPlain: (sql: string) => Promise<unknown> = queryDB) {
   await queryDB(`CREATE TABLE IF NOT EXISTS bill_claim_categories (
     id INT AUTO_INCREMENT PRIMARY KEY,
     company_id INT NOT NULL DEFAULT 1,
@@ -167,6 +178,49 @@ export async function ensureBillClaimPolicySchema(queryDB: QueryDB) {
     KEY idx_uci_date (bill_date),
     FOREIGN KEY (user_claim_id) REFERENCES user_claims(id) ON DELETE CASCADE
   )`);
+  await queryDB(`CREATE TABLE IF NOT EXISTS bill_claim_policy_history (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    company_ref INT NOT NULL,
+    actor_id INT NULL,
+    actor_name VARCHAR(150) NULL,
+    actor_role VARCHAR(30) NULL,
+    action VARCHAR(40) NOT NULL,
+    target_type VARCHAR(20) NOT NULL,
+    target_id INT NULL,
+    target_name VARCHAR(150) NULL,
+    before_json TEXT NULL,
+    after_json TEXT NULL,
+    ip VARCHAR(64) NULL,
+    user_agent VARCHAR(255) NULL,
+    created_at VARCHAR(30) NOT NULL,
+    prev_hash CHAR(64) NOT NULL,
+    row_hash CHAR(64) NOT NULL,
+    KEY idx_bcph_company (company_ref, id)
+  )`);
+  // The database itself refuses to change or remove history rows.
+  try {
+    const have: any[] =
+      (await queryDB(
+        "SELECT TRIGGER_NAME FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA = DATABASE() AND EVENT_OBJECT_TABLE = 'bill_claim_policy_history'"
+      )) || [];
+    const names = new Set(have.map((t) => t.TRIGGER_NAME));
+    for (const [name, event] of [
+      ["bcph_no_update", "UPDATE"],
+      ["bcph_no_delete", "DELETE"]
+    ]) {
+      if (names.has(name)) continue;
+      await runPlain(
+        `CREATE TRIGGER ${name} BEFORE ${event} ON bill_claim_policy_history FOR EACH ROW
+         SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Bill Claim Policy history cannot be changed or deleted.'`
+      );
+    }
+  } catch (err: any) {
+    console.warn(
+      "⚠️ Could not add the Bill Claim Policy history guard triggers (the app itself never changes history, and the hash chain still shows tampering): " +
+        err.message +
+        " — a MySQL admin can run SET GLOBAL log_bin_trust_function_creators = 1; once (or grant the TRIGGER/SUPER privilege) and restart the app."
+    );
+  }
   // Categories come from bill_claim_categories now, so the claim's own
   // category column holds any name (or "Fuel, Toll" for a multi-category claim).
   const cols: any[] = (await queryDB("SHOW COLUMNS FROM user_claims LIKE 'category'")) || [];
@@ -249,6 +303,116 @@ function toCategory(r: any): BillCategory {
   };
 }
 
+// ---- history (append-only) ----
+
+export interface HistoryActor {
+  id: number | null;
+  name: string | null;
+  role: string | null;
+  ip?: string | null;
+  userAgent?: string | null;
+}
+export const SYSTEM_ACTOR: HistoryActor = { id: null, name: "System", role: "system" };
+export function actorFrom(req: any): HistoryActor {
+  const fwd = String(req.headers?.["x-forwarded-for"] || "").split(",")[0].trim();
+  return {
+    id: req.user?.id ?? null,
+    name: req.user?.name ?? req.user?.email ?? null,
+    role: req.user?.role ?? null,
+    ip: (fwd || req.ip || "").slice(0, 64) || null,
+    userAgent: String(req.headers?.["user-agent"] || "").slice(0, 255) || null
+  };
+}
+
+const GENESIS = "0".repeat(64);
+const hashRow = (r: any) =>
+  createHash("sha256")
+    .update(
+      JSON.stringify([
+        r.prev_hash,
+        Number(r.company_ref),
+        r.actor_id != null ? Number(r.actor_id) : null,
+        r.actor_name ?? null,
+        r.actor_role ?? null,
+        r.action,
+        r.target_type,
+        r.target_id != null ? Number(r.target_id) : null,
+        r.target_name ?? null,
+        r.before_json ?? null,
+        r.after_json ?? null,
+        r.ip ?? null,
+        r.user_agent ?? null,
+        r.created_at
+      ])
+    )
+    .digest("hex");
+
+// One writer at a time, so each row links to the row really before it.
+let historyQueue: Promise<unknown> = Promise.resolve();
+
+/** Appends one history row. Never throws into the caller's request. */
+export function recordHistory(
+  queryDB: QueryDB,
+  actor: HistoryActor,
+  entry: { action: string; targetType: "rule" | "category" | "policy"; targetId?: number | null; targetName?: string | null; before?: any; after?: any },
+  companyRef = activeCompanyId()
+): Promise<void> {
+  const run = async () => {
+    const last: any[] =
+      (await queryDB("SELECT row_hash FROM bill_claim_policy_history WHERE company_ref = ? ORDER BY id DESC LIMIT 1", [companyRef])) || [];
+    const row: any = {
+      company_ref: companyRef,
+      actor_id: actor.id,
+      actor_name: actor.name ? String(actor.name).slice(0, 150) : null,
+      actor_role: actor.role,
+      action: entry.action,
+      target_type: entry.targetType,
+      target_id: entry.targetId ?? null,
+      target_name: entry.targetName ? String(entry.targetName).slice(0, 150) : null,
+      before_json: entry.before === undefined ? null : JSON.stringify(entry.before),
+      after_json: entry.after === undefined ? null : JSON.stringify(entry.after),
+      ip: actor.ip ?? null,
+      user_agent: actor.userAgent ?? null,
+      created_at: new Date().toISOString(),
+      prev_hash: last[0]?.row_hash || GENESIS
+    };
+    row.row_hash = hashRow(row);
+    await queryDB(
+      `INSERT INTO bill_claim_policy_history
+         (company_ref, actor_id, actor_name, actor_role, action, target_type, target_id, target_name, before_json, after_json, ip, user_agent, created_at, prev_hash, row_hash)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        row.company_ref, row.actor_id, row.actor_name, row.actor_role, row.action, row.target_type, row.target_id, row.target_name,
+        row.before_json, row.after_json, row.ip, row.user_agent, row.created_at, row.prev_hash, row.row_hash
+      ]
+    );
+  };
+  const p = historyQueue.then(run, run);
+  historyQueue = p.catch(() => {});
+  return p.catch((err: any) => console.warn("⚠️ Could not record Bill Claim Policy history: " + err.message));
+}
+
+/** Re-checks the hash chain of a company's history. */
+export async function verifyHistory(queryDB: QueryDB, companyRef = activeCompanyId()) {
+  const rows: any[] = (await queryDB("SELECT * FROM bill_claim_policy_history WHERE company_ref = ? ORDER BY id ASC", [companyRef])) || [];
+  let prev = GENESIS;
+  for (const r of rows) {
+    if (r.prev_hash !== prev || hashRow(r) !== r.row_hash) return { ok: false, checked: rows.length, broken_at: Number(r.id) };
+    prev = r.row_hash;
+  }
+  return { ok: true, checked: rows.length, broken_at: null as number | null };
+}
+
+/** Whether the database triggers that refuse UPDATE/DELETE on history are in place. */
+export async function historyGuardActive(queryDB: QueryDB): Promise<boolean> {
+  const t: any[] =
+    (await queryDB(
+      "SELECT TRIGGER_NAME FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA = DATABASE() AND EVENT_OBJECT_TABLE = 'bill_claim_policy_history'"
+    ).catch(() => [])) || [];
+  const names = new Set(t.map((x) => x.TRIGGER_NAME));
+  return names.has("bcph_no_update") && names.has("bcph_no_delete");
+}
+
 /** Categories not deleted (active and inactive). A company that never had any gets the defaults. */
 export async function loadCategories(queryDB: QueryDB): Promise<BillCategory[]> {
   let rows: any[] = (await queryDB("SELECT * FROM bill_claim_categories")) || [];
@@ -257,6 +421,12 @@ export async function loadCategories(queryDB: QueryDB): Promise<BillCategory[]> 
       await queryDB("INSERT INTO bill_claim_categories (name, sort_order) VALUES (?, ?)", [DEFAULT_CATEGORIES[i], i + 1]);
     }
     rows = (await queryDB("SELECT * FROM bill_claim_categories")) || [];
+    await recordHistory(queryDB, SYSTEM_ACTOR, {
+      action: "categories_seeded",
+      targetType: "category",
+      targetName: "Starting categories",
+      after: rows.map(toCategory)
+    });
   }
   return rows
     .filter((r) => !r.deleted_at)
@@ -452,8 +622,16 @@ export function registerBillClaimPolicyRoutes(
       res.status(500).json({ error: err.message });
     }
   };
-  const requireSuper = (req: any, res: any, next: any) =>
-    req.user?.role === "superadmin" ? next() : res.status(403).json({ error: "Only the Superadmin can change the Bill Claim Policy." });
+  // Refused attempts are recorded too.
+  const requireSuper = (req: any, res: any, next: any) => {
+    if (req.user?.role === "superadmin") return next();
+    recordHistory(queryDB, actorFrom(req), {
+      action: "denied",
+      targetType: "policy",
+      targetName: `${req.method} ${req.originalUrl || req.url}`.slice(0, 150),
+      after: req.body && Object.keys(req.body).length ? req.body : undefined
+    }).finally(() => res.status(403).json({ error: "Only the Superadmin can change the Bill Claim Policy." }));
+  };
 
   app.get("/api/bill-claim-policy", authenticateToken, requireView, async (req: any, res) => {
     try {
@@ -471,14 +649,28 @@ export function registerBillClaimPolicyRoutes(
   app.put("/api/bill-claim-policy", authenticateToken, requireSuper, async (req: any, res) => {
     try {
       const incoming = req.body?.values || {};
+      const before = await loadPolicy(queryDB);
+      const changed: Record<string, { from: PolicyValue; to: PolicyValue }> = {};
       for (const def of POLICY_DEFS) {
         if (!(def.key in incoming)) continue;
         const v = parseValue(def, incoming[def.key]);
+        if (v === before[def.key]) continue;
+        changed[def.key] = { from: before[def.key], to: v };
         await queryDB(
           `INSERT INTO bill_claim_policy_settings (policy_key, policy_value, updated_by) VALUES (?, ?, ?)
            ON DUPLICATE KEY UPDATE policy_value = VALUES(policy_value), updated_by = VALUES(updated_by)`,
           [def.key, String(v === true ? 1 : v === false ? 0 : v), req.user.id]
         );
+      }
+      const keys = Object.keys(changed);
+      if (keys.length) {
+        await recordHistory(queryDB, actorFrom(req), {
+          action: "rules_changed",
+          targetType: "rule",
+          targetName: keys.map((k) => POLICY_DEFS.find((d) => d.key === k)?.label || k).join("; "),
+          before: Object.fromEntries(keys.map((k) => [k, changed[k].from])),
+          after: Object.fromEntries(keys.map((k) => [k, changed[k].to]))
+        });
       }
       res.json({ success: true, values: await loadPolicy(queryDB) });
     } catch (err: any) {
@@ -522,6 +714,14 @@ export function registerBillClaimPolicyRoutes(
         "INSERT INTO bill_claim_categories (name, description, is_active, sort_order, max_per_bill, monthly_limit, receipt_required) VALUES (?, ?, ?, ?, ?, ?, ?)",
         r.v
       );
+      const created = (await loadCategories(queryDB)).find((c) => c.id === Number(result.insertId));
+      await recordHistory(queryDB, actorFrom(req), {
+        action: "category_added",
+        targetType: "category",
+        targetId: Number(result.insertId),
+        targetName: r.v[0],
+        after: created
+      });
       res.status(201).json({ success: true, id: result.insertId });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -542,6 +742,15 @@ export function registerBillClaimPolicyRoutes(
         "UPDATE bill_claim_categories SET name = ?, description = ?, is_active = ?, sort_order = ?, max_per_bill = ?, monthly_limit = ?, receipt_required = ? WHERE id = ?",
         [...r.v, id]
       );
+      const updated = (await loadCategories(queryDB)).find((c) => c.id === id);
+      await recordHistory(queryDB, actorFrom(req), {
+        action: "category_changed",
+        targetType: "category",
+        targetId: id,
+        targetName: current.name === r.v[0] ? current.name : `${current.name} → ${r.v[0]}`,
+        before: current,
+        after: updated
+      });
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -552,10 +761,69 @@ export function registerBillClaimPolicyRoutes(
   app.delete("/api/bill-claim-categories/:id", authenticateToken, requireSuper, async (req: any, res) => {
     try {
       const id = Number(req.params.id);
-      const active = (await loadCategories(queryDB)).filter((c) => c.is_active);
+      const all = await loadCategories(queryDB);
+      const current = all.find((c) => c.id === id);
+      if (!current) return res.status(404).json({ error: "Category not found." });
+      const active = all.filter((c) => c.is_active);
       if (active.length === 1 && active[0].id === id) return res.status(400).json({ error: "Keep at least one active category." });
       await queryDB("UPDATE bill_claim_categories SET deleted_at = NOW(), is_active = 0 WHERE id = ?", [id]);
+      await recordHistory(queryDB, actorFrom(req), {
+        action: "category_deleted",
+        targetType: "category",
+        targetId: id,
+        targetName: current.name,
+        before: current
+      });
       res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // History — read only. There is no route that changes or deletes it.
+  app.get("/api/bill-claim-policy/history", authenticateToken, requireView, async (req: any, res) => {
+    try {
+      const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 100));
+      const beforeId = Number(req.query.before_id) || null;
+      const rows: any[] =
+        (await queryDB(
+          `SELECT id, actor_id, actor_name, actor_role, action, target_type, target_id, target_name, before_json, after_json, ip, created_at, row_hash
+             FROM bill_claim_policy_history WHERE company_ref = ?${beforeId ? " AND id < ?" : ""} ORDER BY id DESC LIMIT ${limit + 1}`,
+          beforeId ? [activeCompanyId(), beforeId] : [activeCompanyId()]
+        )) || [];
+      const parse = (v: any) => {
+        try {
+          return v == null ? null : JSON.parse(v);
+        } catch {
+          return v;
+        }
+      };
+      res.json({
+        rows: rows.slice(0, limit).map((r) => ({
+          id: Number(r.id),
+          actor_id: r.actor_id != null ? Number(r.actor_id) : null,
+          actor_name: r.actor_name,
+          actor_role: r.actor_role,
+          action: r.action,
+          target_type: r.target_type,
+          target_id: r.target_id != null ? Number(r.target_id) : null,
+          target_name: r.target_name,
+          before: parse(r.before_json),
+          after: parse(r.after_json),
+          ip: r.ip,
+          created_at: r.created_at,
+          hash: String(r.row_hash).slice(0, 12)
+        })),
+        has_more: rows.length > limit
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/bill-claim-policy/history/verify", authenticateToken, requireView, async (_req: any, res) => {
+    try {
+      res.json({ ...(await verifyHistory(queryDB)), db_guard: await historyGuardActive(queryDB) });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
