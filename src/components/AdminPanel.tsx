@@ -106,11 +106,11 @@ const reportQty = (ent: Entry): string =>
 type ReportColumnFilterKey =
   | 'job_no' | 'job_name' | 'project_name' | 'mpr_no' | 'item_name' | 'specification' | 'qty'
   | 'delivery_from' | 'delivery_to' | 'rate' | 'amount' | 'entry_date' | 'job_duration'
-  | 'head' | 'sub1' | 'sub2' | 'sub3' | 'sector' | 'logged_by' | 'budget';
+  | 'category' | 'logged_by' | 'budget';
 const EMPTY_REPORT_COLUMN_FILTERS: Record<ReportColumnFilterKey, string> = {
   job_no: '', job_name: '', project_name: '', mpr_no: '', item_name: '', specification: '', qty: '',
   delivery_from: '', delivery_to: '', rate: '', amount: '', entry_date: '', job_duration: '',
-  head: '', sub1: '', sub2: '', sub3: '', sector: '', logged_by: '', budget: ''
+  category: '', logged_by: '', budget: ''
 };
 const reportColumnText = (ent: Entry, key: ReportColumnFilterKey): string => {
   switch (key) {
@@ -125,11 +125,8 @@ const reportColumnText = (ent: Entry, key: ReportColumnFilterKey): string => {
     case 'amount': return ent.matched_rate != null ? String(ent.computed_amount ?? '') : '';
     case 'entry_date': return `${ent.entry_date || ''} ${formatDate(ent.entry_date) || ''}`;
     case 'job_duration': return ent.job_duration || '';
-    case 'head': return ent.category_head || '';
-    case 'sub1': return ent.category_sub1 || '';
-    case 'sub2': return ent.category_sub2 || '';
-    case 'sub3': return ent.category_sub3 || '';
-    case 'sector': return ent.category_sector || '';
+    case 'category':
+      return [ent.category_head, ent.category_sub1, ent.category_sub2, ent.category_sub3, ent.category_sector].filter(Boolean).join(' ');
     case 'logged_by': return ent.user_name || 'User';
     case 'budget': return ent.budget_name || '';
     default: return '';
@@ -147,9 +144,11 @@ const ReportRow = React.memo(function ReportRow({
   onEdit,
   onPermanentDelete,
   can,
-  deletingEntryId
+  deletingEntryId,
+  sl
 }: {
   ent: Entry;
+  sl: number;
   onOpenHistory: (entryId: number) => void;
   onDelete: (entryId: number) => void;
   onEdit: (ent: Entry) => void;
@@ -158,68 +157,66 @@ const ReportRow = React.memo(function ReportRow({
   can: { edit: boolean; trash: boolean; permanent: boolean };
   deletingEntryId: number | null;
 }) {
+  const dash = <span className="text-slate-300">—</span>;
+  const categoryPath = [ent.category_head, ent.category_sub1, ent.category_sub2, ent.category_sub3].filter(Boolean);
   return (
-    <tr className="hover:bg-slate-50/80 transition-colors">
-      <td className="px-4 py-3.5 whitespace-nowrap font-semibold text-blue-600 text-xs">{ent.job_no}</td>
-      <td className="px-4 py-3.5 whitespace-nowrap font-semibold text-slate-900 text-xs">{ent.job_name}</td>
-      <td className="px-4 py-3.5 whitespace-nowrap font-medium text-slate-900 text-xs">{ent.project_name}</td>
-      <td className="px-4 py-3.5 whitespace-nowrap text-xs">
-        <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 border border-slate-200 font-mono">
-          {ent.mpr_no}
-        </span>
+    <tr className="odd:bg-white even:bg-slate-50/70 hover:bg-blue-50/50 transition-colors">
+      <td className="px-1.5 py-1.5 border border-slate-200 align-top text-right text-slate-500 tabular-nums">{sl}.</td>
+      <td className="px-1.5 py-1.5 border border-slate-200 align-top font-semibold text-blue-600 truncate" title={ent.job_no}>{ent.job_no}</td>
+      <td className="px-1.5 py-1.5 border border-slate-200 align-top font-medium text-slate-900" title={ent.job_name}><div className="line-clamp-2 break-words">{ent.job_name}</div></td>
+      <td className="px-1.5 py-1.5 border border-slate-200 align-top text-slate-700" title={ent.project_name}><div className="line-clamp-2 break-words">{ent.project_name}</div></td>
+      <td className="px-1.5 py-1.5 border border-slate-200 align-top text-slate-700 truncate" title={ent.mpr_no}>{ent.mpr_no}</td>
+      <td className="px-1.5 py-1.5 border border-slate-200 align-top text-slate-800" title={ent.item_name}><div className="line-clamp-2 break-words">{ent.item_name}</div></td>
+      <td className="px-1.5 py-1.5 border border-slate-200 align-top text-slate-600" title={ent.specification || ''}><div className="line-clamp-2 break-words">{ent.specification || dash}</div></td>
+      <td className="px-1.5 py-1.5 border border-slate-200 align-top text-right text-slate-800 tabular-nums" title={reportQty(ent)}>
+        {ent.requisitioned_qty !== null && ent.requisitioned_qty !== undefined ? (
+          <>
+            <div className="truncate">{ent.requisitioned_qty}</div>
+            {ent.req_qty && <div className="truncate text-[10px] text-slate-400">of {ent.req_qty}</div>}
+          </>
+        ) : (
+          ent.req_qty || dash
+        )}
       </td>
-      <td className="px-4 py-3.5 text-slate-800 text-xs min-w-[180px]">{ent.item_name}</td>
-      <td className="px-4 py-3.5 text-slate-600 text-xs min-w-[140px]">{ent.specification || <span className="text-slate-300">—</span>}</td>
-      <td className="px-4 py-3.5 whitespace-nowrap text-slate-800 text-xs">{reportQty(ent) || <span className="text-slate-300">—</span>}</td>
-      <td className="px-4 py-3.5 whitespace-nowrap text-slate-600 text-xs">{formatDate(ent.delivery_date)}</td>
-      <td className="px-4 py-3.5 whitespace-nowrap text-xs">
+      <td className="px-1.5 py-1.5 border border-slate-200 align-top whitespace-nowrap text-slate-700">{formatDate(ent.delivery_date)}</td>
+      <td className="px-1.5 py-1.5 border border-slate-200 align-top text-right tabular-nums whitespace-nowrap">
         {ent.matched_rate != null ? (
-          <span className="text-slate-900">৳{Number(ent.matched_rate).toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+          <span className="text-slate-900">{Number(ent.matched_rate).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
         ) : ent.rate_calculated_at ? (
-          <span className="text-rose-500 text-[10px] font-medium">No rate match</span>
+          <span className="text-rose-500 text-[10px] font-medium" title="No rate match">No match</span>
         ) : (
-          <span className="text-slate-300">—</span>
+          dash
         )}
       </td>
-      <td className="px-4 py-3.5 whitespace-nowrap text-xs">
+      <td className="px-1.5 py-1.5 border border-slate-200 align-top text-right tabular-nums">
         {ent.matched_rate != null ? (
-          <span className="font-semibold text-slate-900">৳{Number(ent.computed_amount ?? 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+          <span className="font-semibold text-slate-900">{Number(ent.computed_amount ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
         ) : (
-          <span className="text-slate-300">—</span>
+          dash
         )}
       </td>
-      <td className="px-4 py-3.5 whitespace-nowrap text-slate-600 text-xs">{formatDate(ent.entry_date)}</td>
-      <td className="px-4 py-3.5 whitespace-nowrap text-slate-600 text-xs">{ent.job_duration || <span className="text-slate-300">—</span>}</td>
-      <td className="px-4 py-3.5 whitespace-nowrap text-slate-600 text-xs">{ent.category_head || <span className="text-slate-300">—</span>}</td>
-      <td className="px-4 py-3.5 whitespace-nowrap text-slate-600 text-xs">{ent.category_sub1 || <span className="text-slate-300">—</span>}</td>
-      <td className="px-4 py-3.5 whitespace-nowrap text-slate-600 text-xs">{ent.category_sub2 || <span className="text-slate-300">—</span>}</td>
-      <td className="px-4 py-3.5 whitespace-nowrap text-xs">
-        {ent.category_sub3 ? (
-          <span className="text-slate-600">{ent.category_sub3}</span>
-        ) : ent.rate_calculated_at && !ent.category_head ? (
-          <span className="text-amber-500 text-[10px] font-medium">No category match</span>
+      <td className="px-1.5 py-1.5 border border-slate-200 align-top whitespace-nowrap text-slate-600">{formatDate(ent.entry_date)}</td>
+      <td className="px-1.5 py-1.5 border border-slate-200 align-top text-center text-slate-600">{ent.job_duration || dash}</td>
+      <td className="px-1.5 py-1.5 border border-slate-200 align-top text-slate-600 truncate" title={[categoryPath.join(' › '), ent.category_sector ? `Sector: ${ent.category_sector}` : ''].filter(Boolean).join(' · ')}>
+        {categoryPath.length ? (
+          <span>{categoryPath.join(' › ')}</span>
+        ) : ent.rate_calculated_at ? (
+          <span className="text-amber-500 text-[10px] font-medium">No match</span>
         ) : (
-          <span className="text-slate-300">—</span>
+          dash
         )}
+        {ent.category_sector && <span className="text-slate-400"> · {ent.category_sector}</span>}
       </td>
-      <td className="px-4 py-3.5 whitespace-nowrap text-slate-600 text-xs">{ent.category_sector || <span className="text-slate-300">—</span>}</td>
-      <td className="px-4 py-3.5 whitespace-nowrap text-slate-500 text-xs">{ent.user_name || 'User'}</td>
-      <td className="px-4 py-3.5 whitespace-nowrap text-xs">
-        {ent.budget_name ? (
-          <span className="px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-100 font-medium">
-            {ent.budget_name}
-          </span>
-        ) : (
-          <span className="text-slate-400">—</span>
-        )}
-      </td>
-      <td className="px-4 py-3.5 whitespace-nowrap text-xs">
-        <div className="flex items-center gap-1">
+      <td className="px-1.5 py-1.5 border border-slate-200 align-top text-slate-500" title={ent.user_name || 'User'}><div className="line-clamp-2 break-words">{ent.user_name || 'User'}</div></td>
+      <td className="px-1.5 py-1.5 border border-slate-200 align-top text-blue-700 truncate" title={ent.budget_name || ''}>{ent.budget_name || dash}</td>
+      <td className="px-1.5 py-1.5 border border-slate-200 align-top">
+        <div className="flex items-center justify-center">
           <button
             type="button"
             onClick={() => onOpenHistory(ent.id)}
-            className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+            className="p-0.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
             title="View edit history"
+            aria-label={`History of entry ${ent.id}`}
           >
             <History className="w-3.5 h-3.5" />
           </button>
@@ -227,7 +224,7 @@ const ReportRow = React.memo(function ReportRow({
             <button
               type="button"
               onClick={() => onEdit(ent)}
-              className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+              className="p-0.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
               title="Edit this entry"
               aria-label={`Edit entry ${ent.id}`}
             >
@@ -239,7 +236,7 @@ const ReportRow = React.memo(function ReportRow({
               type="button"
               onClick={() => onDelete(ent.id)}
               disabled={deletingEntryId === ent.id}
-              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors disabled:opacity-50"
+              className="p-0.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-md transition-colors disabled:opacity-50"
               title="Delete this entry (moves to Job Recycle bin)"
               aria-label={`Delete entry ${ent.id}`}
             >
@@ -251,7 +248,7 @@ const ReportRow = React.memo(function ReportRow({
               type="button"
               onClick={() => onPermanentDelete(ent)}
               disabled={deletingEntryId === ent.id}
-              className="p-1.5 text-slate-400 hover:text-white hover:bg-rose-600 rounded-lg transition-colors disabled:opacity-50"
+              className="p-0.5 text-slate-400 hover:text-white hover:bg-rose-600 rounded-md transition-colors disabled:opacity-50"
               title="Delete permanently (can't be restored)"
               aria-label={`Permanently delete entry ${ent.id}`}
             >
@@ -2959,6 +2956,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     () => filteredEntries.slice((reportPage - 1) * reportPageSize, reportPage * reportPageSize),
     [filteredEntries, reportPage, reportPageSize]
   );
+  // Footer totals over every matching entry (all pages), not just this page.
+  const reportTotals = React.useMemo(() => {
+    let qty = 0;
+    let amount = 0;
+    for (const ent of filteredEntries) {
+      const q = Number(ent.requisitioned_qty ?? parseFloat(String(ent.req_qty || '')));
+      if (Number.isFinite(q)) qty += q;
+      if (ent.matched_rate != null) amount += Number(ent.computed_amount ?? 0) || 0;
+    }
+    return { qty, amount };
+  }, [filteredEntries]);
 
   const stableOpenEntryHistory = useStableCallback(openEntryHistory);
   const stableDeleteEntry = useStableCallback(handleDeleteEntry);
@@ -3257,117 +3265,123 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
               </button>
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-slate-200">
-                <thead className="bg-slate-50 text-slate-500 text-[11px] uppercase tracking-wider">
+            <div className="overflow-auto max-h-[75vh]">
+              <table className="w-full min-w-[1280px] table-fixed border-collapse text-[11px] leading-snug">
+                <colgroup>
+                  <col style={{ width: '2.34%' }} />
+                  <col style={{ width: '6.33%' }} />
+                  <col style={{ width: '6.33%' }} />
+                  <col style={{ width: '7.43%' }} />
+                  <col style={{ width: '6.60%' }} />
+                  <col style={{ width: '8.94%' }} />
+                  <col style={{ width: '6.33%' }} />
+                  <col style={{ width: '4.68%' }} />
+                  <col style={{ width: '7.70%' }} />
+                  <col style={{ width: '4.40%' }} />
+                  <col style={{ width: '5.50%' }} />
+                  <col style={{ width: '5.50%' }} />
+                  <col style={{ width: '4.68%' }} />
+                  <col style={{ width: '6.19%' }} />
+                  <col style={{ width: '4.81%' }} />
+                  <col style={{ width: '5.36%' }} />
+                  <col style={{ width: '6.88%' }} />
+                </colgroup>
+                <thead className="sticky top-0 z-10 bg-blue-50">
                   <tr>
-                    <th className="px-4 py-3 text-left whitespace-nowrap">Job No</th>
-                    <th className="px-4 py-3 text-left whitespace-nowrap">Job Name</th>
-                    <th className="px-4 py-3 text-left whitespace-nowrap">Project Name</th>
-                    <th className="px-4 py-3 text-left whitespace-nowrap">MPR No</th>
-                    <th className="px-4 py-3 text-left whitespace-nowrap">Description of Material</th>
-                    <th className="px-4 py-3 text-left whitespace-nowrap">Specification</th>
-                    <th className="px-4 py-3 text-left whitespace-nowrap">Qty</th>
-                    <th className="px-4 py-3 text-left whitespace-nowrap">Delivery Date</th>
-                    <th className="px-4 py-3 text-left whitespace-nowrap">Rate</th>
-                    <th className="px-4 py-3 text-left whitespace-nowrap">Amount</th>
-                    <th className="px-4 py-3 text-left whitespace-nowrap">Entry Date</th>
-                    <th className="px-4 py-3 text-left whitespace-nowrap">Job Duration</th>
-                    <th className="px-4 py-3 text-left whitespace-nowrap">Head</th>
-                    <th className="px-4 py-3 text-left whitespace-nowrap">Sub-1</th>
-                    <th className="px-4 py-3 text-left whitespace-nowrap">Sub-2</th>
-                    <th className="px-4 py-3 text-left whitespace-nowrap">Sub-3</th>
-                    <th className="px-4 py-3 text-left whitespace-nowrap">Sector</th>
-                    <th className="px-4 py-3 text-left whitespace-nowrap">Logged By</th>
-                    <th className="px-4 py-3 text-left whitespace-nowrap">Budget</th>
-                    <th className="px-4 py-3 text-left">Actions</th>
+                    <th className="px-1.5 py-2 border border-slate-200 font-semibold text-slate-700 align-bottom text-right">Sl</th>
+                    <th className="px-1.5 py-2 border border-slate-200 font-semibold text-slate-700 align-bottom text-left">Job No</th>
+                    <th className="px-1.5 py-2 border border-slate-200 font-semibold text-slate-700 align-bottom text-left">Job Name</th>
+                    <th className="px-1.5 py-2 border border-slate-200 font-semibold text-slate-700 align-bottom text-left">Project Name</th>
+                    <th className="px-1.5 py-2 border border-slate-200 font-semibold text-slate-700 align-bottom text-left">MPR No</th>
+                    <th className="px-1.5 py-2 border border-slate-200 font-semibold text-slate-700 align-bottom text-left">Description of Material</th>
+                    <th className="px-1.5 py-2 border border-slate-200 font-semibold text-slate-700 align-bottom text-left">Specification</th>
+                    <th className="px-1.5 py-2 border border-slate-200 font-semibold text-slate-700 align-bottom text-right">Qty</th>
+                    <th className="px-1.5 py-2 border border-slate-200 font-semibold text-slate-700 align-bottom text-left">Delivery Date</th>
+                    <th className="px-1.5 py-2 border border-slate-200 font-semibold text-slate-700 align-bottom text-right">Rate</th>
+                    <th className="px-1.5 py-2 border border-slate-200 font-semibold text-slate-700 align-bottom text-right">Amount</th>
+                    <th className="px-1.5 py-2 border border-slate-200 font-semibold text-slate-700 align-bottom text-left">Entry Date</th>
+                    <th className="px-1.5 py-2 border border-slate-200 font-semibold text-slate-700 align-bottom text-center">Duration</th>
+                    <th className="px-1.5 py-2 border border-slate-200 font-semibold text-slate-700 align-bottom text-left">Category / Sector</th>
+                    <th className="px-1.5 py-2 border border-slate-200 font-semibold text-slate-700 align-bottom text-left">Logged By</th>
+                    <th className="px-1.5 py-2 border border-slate-200 font-semibold text-slate-700 align-bottom text-left">Budget</th>
+                    <th className="px-1.5 py-2 border border-slate-200 font-semibold text-slate-700 align-bottom text-center">Actions</th>
                   </tr>
-                  <tr className="bg-slate-50">
-                    <th className="px-4 pb-2.5">
-                      <input type="text" aria-label="Filter Job No" value={reportColFilters.job_no} onChange={(e) => setReportColFilter('job_no', e.target.value)} placeholder="Filter..." className="w-full min-w-[90px] px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-slate-700 text-[11px] font-normal normal-case tracking-normal focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400" />
+                  <tr>
+                    <th className="px-1.5 py-1 border border-slate-200 bg-white"></th>
+                    <th className="px-1.5 py-1 border border-slate-200 bg-white">
+                      <input type="text" aria-label="Filter Job No" value={reportColFilters.job_no} onChange={(e) => setReportColFilter('job_no', e.target.value)} placeholder="Filter..." className="w-full min-w-0 px-1.5 py-1 bg-white border border-slate-300 rounded text-slate-700 text-[10px] font-normal focus:ring-1 focus:ring-blue-600 focus:border-blue-600 focus:outline-none placeholder-slate-400" />
                     </th>
-                    <th className="px-4 pb-2.5">
-                      <input type="text" aria-label="Filter Job Name" value={reportColFilters.job_name} onChange={(e) => setReportColFilter('job_name', e.target.value)} placeholder="Filter..." className="w-full min-w-[90px] px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-slate-700 text-[11px] font-normal normal-case tracking-normal focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400" />
+                    <th className="px-1.5 py-1 border border-slate-200 bg-white">
+                      <input type="text" aria-label="Filter Job Name" value={reportColFilters.job_name} onChange={(e) => setReportColFilter('job_name', e.target.value)} placeholder="Filter..." className="w-full min-w-0 px-1.5 py-1 bg-white border border-slate-300 rounded text-slate-700 text-[10px] font-normal focus:ring-1 focus:ring-blue-600 focus:border-blue-600 focus:outline-none placeholder-slate-400" />
                     </th>
-                    <th className="px-4 pb-2.5">
-                      <input type="text" aria-label="Filter Project Name" value={reportColFilters.project_name} onChange={(e) => setReportColFilter('project_name', e.target.value)} placeholder="Filter..." className="w-full min-w-[90px] px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-slate-700 text-[11px] font-normal normal-case tracking-normal focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400" />
+                    <th className="px-1.5 py-1 border border-slate-200 bg-white">
+                      <input type="text" aria-label="Filter Project Name" value={reportColFilters.project_name} onChange={(e) => setReportColFilter('project_name', e.target.value)} placeholder="Filter..." className="w-full min-w-0 px-1.5 py-1 bg-white border border-slate-300 rounded text-slate-700 text-[10px] font-normal focus:ring-1 focus:ring-blue-600 focus:border-blue-600 focus:outline-none placeholder-slate-400" />
                     </th>
-                    <th className="px-4 pb-2.5">
-                      <input type="text" aria-label="Filter MPR No" value={reportColFilters.mpr_no} onChange={(e) => setReportColFilter('mpr_no', e.target.value)} placeholder="Filter..." className="w-full min-w-[90px] px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-slate-700 text-[11px] font-normal normal-case tracking-normal focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400" />
+                    <th className="px-1.5 py-1 border border-slate-200 bg-white">
+                      <input type="text" aria-label="Filter MPR No" value={reportColFilters.mpr_no} onChange={(e) => setReportColFilter('mpr_no', e.target.value)} placeholder="Filter..." className="w-full min-w-0 px-1.5 py-1 bg-white border border-slate-300 rounded text-slate-700 text-[10px] font-normal focus:ring-1 focus:ring-blue-600 focus:border-blue-600 focus:outline-none placeholder-slate-400" />
                     </th>
-                    <th className="px-4 pb-2.5">
-                      <input type="text" list="report-item-name-options" aria-label="Filter Description of Material" value={reportColFilters.item_name} onChange={(e) => setReportColFilter('item_name', e.target.value)} placeholder="Type or select..." className="w-full min-w-[90px] px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-slate-700 text-[11px] font-normal normal-case tracking-normal focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400" />
+                    <th className="px-1.5 py-1 border border-slate-200 bg-white">
+                      <input type="text" list="report-item-name-options" aria-label="Filter Description of Material" value={reportColFilters.item_name} onChange={(e) => setReportColFilter('item_name', e.target.value)} placeholder="Type or select..." className="w-full min-w-0 px-1.5 py-1 bg-white border border-slate-300 rounded text-slate-700 text-[10px] font-normal focus:ring-1 focus:ring-blue-600 focus:border-blue-600 focus:outline-none placeholder-slate-400" />
                       <datalist id="report-item-name-options">
                         {reportItemNameOptions.map((n) => (
                           <option key={n} value={n} />
                         ))}
                       </datalist>
                     </th>
-                    <th className="px-4 pb-2.5">
-                      <input type="text" aria-label="Filter Specification" value={reportColFilters.specification} onChange={(e) => setReportColFilter('specification', e.target.value)} placeholder="Filter..." className="w-full min-w-[90px] px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-slate-700 text-[11px] font-normal normal-case tracking-normal focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400" />
+                    <th className="px-1.5 py-1 border border-slate-200 bg-white">
+                      <input type="text" aria-label="Filter Specification" value={reportColFilters.specification} onChange={(e) => setReportColFilter('specification', e.target.value)} placeholder="Filter..." className="w-full min-w-0 px-1.5 py-1 bg-white border border-slate-300 rounded text-slate-700 text-[10px] font-normal focus:ring-1 focus:ring-blue-600 focus:border-blue-600 focus:outline-none placeholder-slate-400" />
                     </th>
-                    <th className="px-4 pb-2.5">
-                      <input type="text" aria-label="Filter Qty" value={reportColFilters.qty} onChange={(e) => setReportColFilter('qty', e.target.value)} placeholder="Filter..." className="w-full min-w-[90px] px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-slate-700 text-[11px] font-normal normal-case tracking-normal focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400" />
+                    <th className="px-1.5 py-1 border border-slate-200 bg-white">
+                      <input type="text" aria-label="Filter Qty" value={reportColFilters.qty} onChange={(e) => setReportColFilter('qty', e.target.value)} placeholder="Filter..." className="w-full min-w-0 px-1.5 py-1 bg-white border border-slate-300 rounded text-slate-700 text-[10px] font-normal focus:ring-1 focus:ring-blue-600 focus:border-blue-600 focus:outline-none placeholder-slate-400" />
                     </th>
-                    <th className="px-4 pb-2.5">
-                      <div className="flex flex-col gap-1">
-                        <input type="date" aria-label="Delivery Date from" title="From" value={reportColFilters.delivery_from} onChange={(e) => setReportColFilter('delivery_from', e.target.value)} className="w-full min-w-[90px] px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-slate-700 text-[11px] font-normal normal-case tracking-normal focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400" />
-                        <input type="date" aria-label="Delivery Date to" title="To" value={reportColFilters.delivery_to} onChange={(e) => setReportColFilter('delivery_to', e.target.value)} className="w-full min-w-[90px] px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-slate-700 text-[11px] font-normal normal-case tracking-normal focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400" />
+                    <th className="px-1.5 py-1 border border-slate-200 bg-white">
+                      <div className="flex flex-col gap-0.5">
+                        <input type="date" aria-label="Delivery Date from" title="From" value={reportColFilters.delivery_from} onChange={(e) => setReportColFilter('delivery_from', e.target.value)} className="w-full min-w-0 px-1.5 py-1 bg-white border border-slate-300 rounded text-slate-700 text-[10px] font-normal focus:ring-1 focus:ring-blue-600 focus:border-blue-600 focus:outline-none placeholder-slate-400" />
+                        <input type="date" aria-label="Delivery Date to" title="To" value={reportColFilters.delivery_to} onChange={(e) => setReportColFilter('delivery_to', e.target.value)} className="w-full min-w-0 px-1.5 py-1 bg-white border border-slate-300 rounded text-slate-700 text-[10px] font-normal focus:ring-1 focus:ring-blue-600 focus:border-blue-600 focus:outline-none placeholder-slate-400" />
                       </div>
                     </th>
-                    <th className="px-4 pb-2.5">
-                      <input type="text" aria-label="Filter Rate" value={reportColFilters.rate} onChange={(e) => setReportColFilter('rate', e.target.value)} placeholder="Filter..." className="w-full min-w-[90px] px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-slate-700 text-[11px] font-normal normal-case tracking-normal focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400" />
+                    <th className="px-1.5 py-1 border border-slate-200 bg-white">
+                      <input type="text" aria-label="Filter Rate" value={reportColFilters.rate} onChange={(e) => setReportColFilter('rate', e.target.value)} placeholder="Filter..." className="w-full min-w-0 px-1.5 py-1 bg-white border border-slate-300 rounded text-slate-700 text-[10px] font-normal focus:ring-1 focus:ring-blue-600 focus:border-blue-600 focus:outline-none placeholder-slate-400" />
                     </th>
-                    <th className="px-4 pb-2.5">
-                      <input type="text" aria-label="Filter Amount" value={reportColFilters.amount} onChange={(e) => setReportColFilter('amount', e.target.value)} placeholder="Filter..." className="w-full min-w-[90px] px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-slate-700 text-[11px] font-normal normal-case tracking-normal focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400" />
+                    <th className="px-1.5 py-1 border border-slate-200 bg-white">
+                      <input type="text" aria-label="Filter Amount" value={reportColFilters.amount} onChange={(e) => setReportColFilter('amount', e.target.value)} placeholder="Filter..." className="w-full min-w-0 px-1.5 py-1 bg-white border border-slate-300 rounded text-slate-700 text-[10px] font-normal focus:ring-1 focus:ring-blue-600 focus:border-blue-600 focus:outline-none placeholder-slate-400" />
                     </th>
-                    <th className="px-4 pb-2.5">
-                      <input type="text" aria-label="Filter Entry Date" value={reportColFilters.entry_date} onChange={(e) => setReportColFilter('entry_date', e.target.value)} placeholder="Filter..." className="w-full min-w-[90px] px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-slate-700 text-[11px] font-normal normal-case tracking-normal focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400" />
+                    <th className="px-1.5 py-1 border border-slate-200 bg-white">
+                      <input type="text" aria-label="Filter Entry Date" value={reportColFilters.entry_date} onChange={(e) => setReportColFilter('entry_date', e.target.value)} placeholder="Filter..." className="w-full min-w-0 px-1.5 py-1 bg-white border border-slate-300 rounded text-slate-700 text-[10px] font-normal focus:ring-1 focus:ring-blue-600 focus:border-blue-600 focus:outline-none placeholder-slate-400" />
                     </th>
-                    <th className="px-4 pb-2.5">
-                      <input type="text" aria-label="Filter Job Duration" value={reportColFilters.job_duration} onChange={(e) => setReportColFilter('job_duration', e.target.value)} placeholder="Filter..." className="w-full min-w-[90px] px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-slate-700 text-[11px] font-normal normal-case tracking-normal focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400" />
+                    <th className="px-1.5 py-1 border border-slate-200 bg-white">
+                      <input type="text" aria-label="Filter Duration" value={reportColFilters.job_duration} onChange={(e) => setReportColFilter('job_duration', e.target.value)} placeholder="Filter..." className="w-full min-w-0 px-1.5 py-1 bg-white border border-slate-300 rounded text-slate-700 text-[10px] font-normal focus:ring-1 focus:ring-blue-600 focus:border-blue-600 focus:outline-none placeholder-slate-400" />
                     </th>
-                    <th className="px-4 pb-2.5">
-                      <input type="text" aria-label="Filter Head" value={reportColFilters.head} onChange={(e) => setReportColFilter('head', e.target.value)} placeholder="Filter..." className="w-full min-w-[90px] px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-slate-700 text-[11px] font-normal normal-case tracking-normal focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400" />
+                    <th className="px-1.5 py-1 border border-slate-200 bg-white">
+                      <input type="text" aria-label="Filter Category" value={reportColFilters.category} onChange={(e) => setReportColFilter('category', e.target.value)} placeholder="Filter..." className="w-full min-w-0 px-1.5 py-1 bg-white border border-slate-300 rounded text-slate-700 text-[10px] font-normal focus:ring-1 focus:ring-blue-600 focus:border-blue-600 focus:outline-none placeholder-slate-400" />
                     </th>
-                    <th className="px-4 pb-2.5">
-                      <input type="text" aria-label="Filter Sub-1" value={reportColFilters.sub1} onChange={(e) => setReportColFilter('sub1', e.target.value)} placeholder="Filter..." className="w-full min-w-[90px] px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-slate-700 text-[11px] font-normal normal-case tracking-normal focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400" />
+                    <th className="px-1.5 py-1 border border-slate-200 bg-white">
+                      <input type="text" aria-label="Filter Logged By" value={reportColFilters.logged_by} onChange={(e) => setReportColFilter('logged_by', e.target.value)} placeholder="Filter..." className="w-full min-w-0 px-1.5 py-1 bg-white border border-slate-300 rounded text-slate-700 text-[10px] font-normal focus:ring-1 focus:ring-blue-600 focus:border-blue-600 focus:outline-none placeholder-slate-400" />
                     </th>
-                    <th className="px-4 pb-2.5">
-                      <input type="text" aria-label="Filter Sub-2" value={reportColFilters.sub2} onChange={(e) => setReportColFilter('sub2', e.target.value)} placeholder="Filter..." className="w-full min-w-[90px] px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-slate-700 text-[11px] font-normal normal-case tracking-normal focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400" />
+                    <th className="px-1.5 py-1 border border-slate-200 bg-white">
+                      <input type="text" aria-label="Filter Budget" value={reportColFilters.budget} onChange={(e) => setReportColFilter('budget', e.target.value)} placeholder="Filter..." className="w-full min-w-0 px-1.5 py-1 bg-white border border-slate-300 rounded text-slate-700 text-[10px] font-normal focus:ring-1 focus:ring-blue-600 focus:border-blue-600 focus:outline-none placeholder-slate-400" />
                     </th>
-                    <th className="px-4 pb-2.5">
-                      <input type="text" aria-label="Filter Sub-3" value={reportColFilters.sub3} onChange={(e) => setReportColFilter('sub3', e.target.value)} placeholder="Filter..." className="w-full min-w-[90px] px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-slate-700 text-[11px] font-normal normal-case tracking-normal focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400" />
-                    </th>
-                    <th className="px-4 pb-2.5">
-                      <input type="text" aria-label="Filter Sector" value={reportColFilters.sector} onChange={(e) => setReportColFilter('sector', e.target.value)} placeholder="Filter..." className="w-full min-w-[90px] px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-slate-700 text-[11px] font-normal normal-case tracking-normal focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400" />
-                    </th>
-                    <th className="px-4 pb-2.5">
-                      <input type="text" aria-label="Filter Logged By" value={reportColFilters.logged_by} onChange={(e) => setReportColFilter('logged_by', e.target.value)} placeholder="Filter..." className="w-full min-w-[90px] px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-slate-700 text-[11px] font-normal normal-case tracking-normal focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400" />
-                    </th>
-                    <th className="px-4 pb-2.5">
-                      <input type="text" aria-label="Filter Budget" value={reportColFilters.budget} onChange={(e) => setReportColFilter('budget', e.target.value)} placeholder="Filter..." className="w-full min-w-[90px] px-2 py-1.5 bg-white border border-slate-200 rounded-lg text-slate-700 text-[11px] font-normal normal-case tracking-normal focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400" />
-                    </th>
-                    <th className="px-4 pb-2.5 text-left">
+                    <th className="px-1.5 py-1 border border-slate-200 bg-white text-center">
                       {hasReportColFilter && (
-                        <button type="button" onClick={() => setReportColFilters(EMPTY_REPORT_COLUMN_FILTERS)} className="text-[11px] font-semibold text-blue-600 hover:text-blue-800 normal-case tracking-normal whitespace-nowrap">
+                        <button type="button" onClick={() => setReportColFilters(EMPTY_REPORT_COLUMN_FILTERS)} className="text-[10px] font-semibold text-blue-600 hover:text-blue-800">
                           Clear
                         </button>
                       )}
                     </th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-200 text-sm">
+                <tbody>
                   {filteredEntries.length === 0 ? (
                     <tr>
-                      <td colSpan={20} className="px-6 py-12 text-center text-slate-400">
+                      <td colSpan={17} className="px-6 py-12 text-center text-slate-400 border border-slate-200">
                         No entries found matching the filter criteria.
                       </td>
                     </tr>
                   ) : (
-                    pagedEntries.map((ent) => (
+                    pagedEntries.map((ent, i) => (
                       <ReportRow
                         key={ent.id}
+                        sl={(reportPage - 1) * reportPageSize + i + 1}
                         ent={ent}
                         onOpenHistory={stableOpenEntryHistory}
                         onDelete={stableDeleteEntry}
@@ -3379,6 +3393,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                     ))
                   )}
                 </tbody>
+                {filteredEntries.length > 0 && (
+                  <tfoot className="sticky bottom-0 bg-blue-50 font-semibold text-slate-800">
+                    <tr>
+                      <td colSpan={7} className="px-2 py-2 border border-slate-200">
+                        Total <span className="font-normal text-slate-500">({filteredEntries.length} matching)</span>
+                      </td>
+                      <td className="px-2 py-2 border border-slate-200 text-right tabular-nums">{reportTotals.qty.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
+                      <td colSpan={2} className="px-2 py-2 border border-slate-200"></td>
+                      <td className="px-2 py-2 border border-slate-200 text-right tabular-nums">{reportTotals.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                      <td colSpan={6} className="px-2 py-2 border border-slate-200"></td>
+                    </tr>
+                  </tfoot>
+                )}
               </table>
             </div>
             {filteredEntries.length > 0 && (
