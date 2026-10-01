@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Capacitor } from '@capacitor/core';
 import { Project, MprNumber, Entry, Budget, BudgetItem, User, MprUsage, ClaimsNavRequest, JobsNavRequest, DashboardNavRequest, LeaveNavRequest } from '../types';
+import { CalendarClock, CheckSquare, ExternalLink, Gavel, LogOut, MessageSquare, ShieldCheck } from 'lucide-react';
+import type { MoreItem } from './BottomNav';
 import { Calendar, Building2, FileText, Package, Clock, Plus, AlertTriangle, CheckCircle2, ChevronRight, X, Trash2, Edit2, Lock, Wallet, ArrowLeft, FolderOpen, ListChecks, Search, Save, Briefcase, FileDown, Scissors, Route, Info, Contact, Bell, Car, ClipboardCheck } from 'lucide-react';
 import { useSiteSupervisor } from './TeamAttendance';
 import { apiUrl } from '../lib/api';
@@ -72,7 +74,14 @@ interface UserPanelProps {
   onOpenBookRide?: (tab: BookRideTarget) => void;
   // Dashboard's My Asset quick access card/tile -> Self Service -> My Asset.
   onOpenMyAsset?: (target: MyAssetTarget) => void;
+  // Mobile More popup -> the rest of Self Service (App.tsx routes it the
+  // same way GlobalSidebar does).
+  onOpenSelfService?: (target: SelfServiceTarget) => void;
 }
+
+export type SelfServiceTarget =
+  | 'leaveApplication' | 'leaveManagement' | 'leaveApprovals' | 'timesheet' | 'approveApplications'
+  | 'resignation' | 'myCases' | 'myLetters' | 'chat' | 'alerts' | 'erp360';
 
 // Unique id for one Item entry within an MPR row's itemNames list — see the uid field
 // on MprItemOption for why this is needed separately from budgetItemId.
@@ -918,7 +927,7 @@ const EntryCard = React.memo(function EntryCard({
   );
 });
 
-export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequest, jobsNavRequest, dashboardNavRequest, leaveNavRequest, onActiveSectionChange, onOpenBookRide, onOpenMyAsset }) => {
+export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequest, jobsNavRequest, dashboardNavRequest, leaveNavRequest, onActiveSectionChange, onOpenBookRide, onOpenMyAsset, onOpenSelfService }) => {
   const [projects, setProjects] = useState<Project[]>([]);
   // True once the initial Project list fetch (fetchMasterData below) has
   // resolved (success or failure) — lets AttendanceCard tell "still loading"
@@ -1115,6 +1124,38 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // account already granted either older flag doesn't lose access to the
   // page its own sidebar item points at.
   const canSeeLeave = user.role === 'superadmin' || !!user.can_view_leave_summary || !!user.can_view_leave_application || !!user.can_view_my_leave;
+
+  // Mobile More popup: every Self Service module that isn't a Dashboard tile
+  // (PEPM + Movement/Conveyance Claim, Employee Directory, Book a Ride,
+  // My Asset, Team Attendance stay on the Dashboard). Same permission rules
+  // as GlobalSidebar's Self Service list.
+  const openSelfService = (target: SelfServiceTarget) => onOpenSelfService?.(target);
+  const mobileMoreItems: MoreItem[] = [
+    { key: 'noticeBoard', label: 'Notice Board', icon: Bell, tint: 'from-yellow-100/70 via-white/50 to-amber-50/40', iconBg: 'from-yellow-300 to-amber-400 shadow-[0_6px_16px_-2px_rgba(217,119,6,0.35)]', onClick: () => goToMobileSection('noticeBoard') },
+    ...(onOpenSelfService
+      ? ([
+          ...(user.role === 'superadmin' || !!user.can_view_leave_application || !!user.can_view_my_leave
+            ? [{ key: 'leaveApplication', label: 'Leave Application', icon: CalendarClock, tint: 'from-violet-100/70 via-white/50 to-purple-50/40', iconBg: 'from-violet-300 to-violet-500 shadow-[0_6px_16px_-2px_rgba(124,58,237,0.35)]', onClick: () => openSelfService('leaveApplication') }]
+            : []),
+          ...(user.role === 'superadmin' || !!user.can_manage_leave
+            ? [{ key: 'leaveManagement', label: 'Leave Manage', icon: ListChecks, tint: 'from-fuchsia-100/70 via-white/50 to-pink-50/40', iconBg: 'from-fuchsia-300 to-fuchsia-500 shadow-[0_6px_16px_-2px_rgba(192,38,211,0.35)]', onClick: () => openSelfService('leaveManagement') }]
+            : []),
+          ...(user.role === 'admin' || user.role === 'superadmin'
+            ? [{ key: 'leaveApprovals', label: 'Leave Approvals', icon: CheckSquare, tint: 'from-emerald-100/70 via-white/50 to-teal-50/40', iconBg: 'from-emerald-300 to-emerald-500 shadow-[0_6px_16px_-2px_rgba(5,150,105,0.35)]', onClick: () => openSelfService('leaveApprovals') }]
+            : []),
+          ...(canSeeTimesheet
+            ? [{ key: 'timesheet', label: 'Timesheet', icon: Clock, tint: 'from-sky-100/70 via-white/50 to-cyan-50/40', iconBg: 'from-sky-300 to-sky-500 shadow-[0_6px_16px_-2px_rgba(2,132,199,0.35)]', onClick: () => openSelfService('timesheet') }]
+            : []),
+          { key: 'approveApplications', label: 'Approve Application', icon: ShieldCheck, tint: 'from-blue-100/70 via-white/50 to-indigo-50/40', iconBg: 'from-blue-300 to-blue-500 shadow-[0_6px_16px_-2px_rgba(37,99,235,0.35)]', onClick: () => openSelfService('approveApplications') },
+          { key: 'myLetters', label: 'My Letters & Service Record', icon: FileText, tint: 'from-indigo-100/70 via-white/50 to-blue-50/40', iconBg: 'from-indigo-300 to-indigo-500 shadow-[0_6px_16px_-2px_rgba(79,70,229,0.35)]', onClick: () => openSelfService('myLetters') },
+          { key: 'myCases', label: 'Grievance & Disciplinary', icon: Gavel, tint: 'from-orange-100/70 via-white/50 to-amber-50/40', iconBg: 'from-orange-300 to-orange-500 shadow-[0_6px_16px_-2px_rgba(234,88,12,0.35)]', onClick: () => openSelfService('myCases') },
+          { key: 'resignation', label: 'My Resignation', icon: LogOut, tint: 'from-rose-100/70 via-white/50 to-pink-50/40', iconBg: 'from-rose-300 to-rose-500 shadow-[0_6px_16px_-2px_rgba(225,29,72,0.35)]', onClick: () => openSelfService('resignation') },
+          { key: 'chat', label: 'Chat', icon: MessageSquare, tint: 'from-cyan-100/70 via-white/50 to-sky-50/40', iconBg: 'from-cyan-300 to-cyan-500 shadow-[0_6px_16px_-2px_rgba(8,145,178,0.35)]', onClick: () => openSelfService('chat') },
+          { key: 'alerts', label: 'Alerts', icon: Bell, tint: 'from-red-100/70 via-white/50 to-rose-50/40', iconBg: 'from-red-300 to-red-500 shadow-[0_6px_16px_-2px_rgba(220,38,38,0.35)]', onClick: () => openSelfService('alerts') },
+          { key: 'erp360', label: '360 ERP', icon: ExternalLink, tint: 'from-slate-100/70 via-white/50 to-gray-50/40', iconBg: 'from-slate-400 to-slate-600 shadow-[0_6px_16px_-2px_rgba(71,85,105,0.35)]', onClick: () => openSelfService('erp360') }
+        ] as MoreItem[])
+      : [])
+  ];
   // Guards a section restored from localStorage (see the lazy initializer above,
   // which runs before these grants are known) or a permission the Superadmin
   // revokes mid-session — bounces back to the tile menu instead of leaving a
@@ -3352,16 +3393,6 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
             </div>
             <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">Employee Directory</span>
           </button>
-          <button
-            type="button"
-            onClick={() => goToMobileSection('noticeBoard')}
-            className="relative flex flex-col items-center justify-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 h-[104px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-yellow-100/70 via-white/50 to-amber-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
-          >
-            <div className="p-2.5 rounded-2xl bg-gradient-to-br from-yellow-300 to-amber-400 shadow-[0_6px_16px_-2px_rgba(217,119,6,0.35)] border border-white/30">
-              <Bell className="w-6 h-6 text-white" />
-            </div>
-            <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">Notice Board</span>
-          </button>
           {/* Book a Ride / My Asset quick access — same tile as the rest of
               this menu. Badges: rides still in progress, and assets waiting
               for this account's acknowledgement. */}
@@ -5480,6 +5511,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
         canViewMovementClaim={canSeeMovementClaim}
         canViewTimesheet={canSeeTimesheet}
         canViewLeave={canSeeLeave}
+        moreItems={mobileMoreItems}
       />
     </div>
   );

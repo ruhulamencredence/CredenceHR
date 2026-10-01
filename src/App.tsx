@@ -1168,6 +1168,12 @@ export default function App() {
                 requestQuickAccessTab('myAsset', target);
                 sidebarNavProps.onGoToSelfServiceTab('assetManagement');
               }}
+              onOpenSelfService={(target) => {
+                if (target === 'chat') sidebarNavProps.onOpenChat();
+                else if (target === 'alerts') sidebarNavProps.onOpenAlerts();
+                else if (target === 'erp360') sidebarNavProps.onOpenErp360();
+                else sidebarNavProps.onGoToSelfServiceTab(target);
+              }}
             />
             {/* Superadmin/Admin-authored Notice popup — only shown on the plain
                 User's dashboard, right after they land here post-login. */}
