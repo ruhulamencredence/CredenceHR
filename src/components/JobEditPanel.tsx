@@ -5,7 +5,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Plus, Trash2, Save, X, Briefcase, Lock, ChevronDown, ChevronRight, Pencil, Calendar, Hash, Scissors } from 'lucide-react';
+import { Plus, Trash2, Save, X, Briefcase, Lock, ChevronDown, ChevronRight, Pencil, Calendar, Hash, Scissors, Info } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { formatDate, todayDateOnlyString, dateRangeOptions, formatDateLabel, latestDateStr, isDateBlockedByLeadTime } from '../lib/formatDate';
 import { Entry, BudgetItem, MprNumber, PendingJobEdit } from '../types';
@@ -84,6 +84,64 @@ interface JobGroup {
 // only ever creates a brand-new Job), and edit/delete the MPR rows already in it.
 // Jobs whose Budget ISN'T Final Submitted yet are left out here on purpose — those
 // are still edited the normal way from the "Job Entry Details" section above.
+// An Item name in "Add MPR to this Job" / "Add New Job" — a link that opens the
+// imported Budget Excel row behind it (BudgetItemDetails below), so the item can
+// be checked before it's added.
+const ItemNameLink: React.FC<{ name: string; onOpen: () => void; className?: string }> = ({ name, onOpen, className = '' }) => (
+  <button
+    type="button"
+    onClick={onOpen}
+    title={`${name} — view item details`}
+    aria-label={`View details of ${name}`}
+    className={`min-w-0 inline-flex items-center gap-1 text-left text-xs text-blue-600 hover:text-blue-800 underline decoration-dotted underline-offset-2 ${className}`}
+  >
+    <Info className="w-3 h-3 flex-shrink-0" />
+    <span className="truncate">{name}</span>
+  </button>
+);
+
+const BudgetItemDetails: React.FC<{ item: BudgetItem; mprNo?: string; onClose: () => void }> = ({ item, mprNo, onClose }) => {
+  const consumed = Number(item.requisitioned_by_me || 0);
+  const reqNum = parseFloat(String(item.req_qty ?? '').replace(/[^0-9.]/g, ''));
+  const rows: [string, React.ReactNode][] = [
+    ['MPR No', mprNo || item.mrf_no || '—'],
+    ['Description of Materials', item.description || '—'],
+    ['Specification', item.specification || '—'],
+    ['Unit', item.unit || '—'],
+    ['Requisitioned Qty', item.req_qty || '—'],
+    ['Already requisitioned by you', consumed ? String(consumed) : '0'],
+    ['Remaining for you', Number.isFinite(reqNum) ? String(Math.max(0, reqNum - consumed)) : '—'],
+    ['Req. No.', item.req_no || '—'],
+    ['Date', item.item_date || '—'],
+    ['Purchase Order Qty', item.po_qty || '—'],
+    ['Received Qty', item.received_qty || '—'],
+    ['Balance Qty', item.balance_qty || '—'],
+    ['Project', item.project_name || '—']
+  ];
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center sm:justify-center" role="dialog" aria-modal="true" aria-label="Item details">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="relative w-full sm:max-w-md max-h-[85vh] overflow-y-auto bg-white rounded-t-2xl sm:rounded-2xl p-5 pb-6 shadow-xl">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-sm font-bold text-slate-900">Item Details</h3>
+          <button type="button" onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600" aria-label="Close item details">
+            <X className="w-4.5 h-4.5" />
+          </button>
+        </div>
+        <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+          {rows.map(([label, value]) => (
+            <div key={label} className={label === 'Description of Materials' || label === 'Specification' ? 'col-span-2' : ''}>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">{label}</p>
+              <p className="text-sm text-slate-800 mt-0.5 break-words">{value}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+};
+
 export const JobEditPanel: React.FC<JobEditPanelProps> = ({ token }) => {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
@@ -354,6 +412,8 @@ const JobEditRow: React.FC<JobEditRowProps> = ({ job, token, mprNumbers, isOpen,
   const [showAddForm, setShowAddForm] = useState(false);
   const [budgetItems, setBudgetItems] = useState<BudgetItem[]>([]);
   const [loadingItems, setLoadingItems] = useState(false);
+  // The Item whose details popup is open (Add MPR to this Job).
+  const [viewingAddItemId, setViewingAddItemId] = useState<number | null>(null);
   const [addMprNo, setAddMprNo] = useState('');
   // Whether the MPR No dropdown below is open — a native <datalist> doesn't show a
   // dropdown on the Capacitor Android WebView (see UserPanel.tsx's identical note),
@@ -1170,7 +1230,7 @@ const JobEditRow: React.FC<JobEditRowProps> = ({ job, token, mprNumbers, isOpen,
                         </p>
                       ) : addItems.length === 1 ? (
                         <div className="border border-slate-200 rounded-lg bg-white p-2.5 space-y-2">
-                          <p className="text-xs text-slate-700 truncate" title={addItems[0].name}>{addItems[0].name}</p>
+                          <ItemNameLink name={addItems[0].name} onOpen={() => setViewingAddItemId(addItems[0].budgetItemId)} className="max-w-full" />
                           <div className="flex items-center gap-2">
                             <label className="text-[11px] text-slate-500 whitespace-nowrap">Qty *</label>
                             <input
@@ -1210,9 +1270,7 @@ const JobEditRow: React.FC<JobEditRowProps> = ({ job, token, mprNumbers, isOpen,
                           {addItems.map((opt) => (
                             <li key={opt.uid} className="p-2.5 space-y-2">
                               <div className="flex items-center gap-1.5">
-                                <span className="flex-1 min-w-0 text-xs text-slate-700 truncate" title={opt.name}>
-                                  {opt.name}
-                                </span>
+                                <ItemNameLink name={opt.name} onOpen={() => setViewingAddItemId(opt.budgetItemId)} className="flex-1" />
                                 <button
                                   type="button"
                                   onClick={() => removeItemFromAdd(opt.uid)}
@@ -1505,6 +1563,11 @@ const JobEditRow: React.FC<JobEditRowProps> = ({ job, token, mprNumbers, isOpen,
           </div>,
           document.body
         )}
+      {viewingAddItemId !== null &&
+        (() => {
+          const bi = budgetItems.find((b) => b.id === viewingAddItemId);
+          return bi ? <BudgetItemDetails item={bi} mprNo={addMprNo} onClose={() => setViewingAddItemId(null)} /> : null;
+        })()}
     </div>
   );
 };
@@ -1619,6 +1682,8 @@ const NewJobRequestForm: React.FC<NewJobRequestFormProps> = ({ token, jobs, mprN
   const [budgetItems, setBudgetItems] = useState<BudgetItem[]>([]);
   const [loadingItems, setLoadingItems] = useState(false);
   const [rows, setRows] = useState<NewJobItemRow[]>([]);
+  // The added row whose Item details popup is open.
+  const [viewingRow, setViewingRow] = useState<NewJobItemRow | null>(null);
   const [mprNoInput, setMprNoInput] = useState('');
   // Whether the MPR No dropdown below is open — see showAddMprDropdown in
   // JobEditRow above for why this can't just be a native <datalist>.
@@ -1999,7 +2064,7 @@ const NewJobRequestForm: React.FC<NewJobRequestFormProps> = ({ token, jobs, mprN
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 text-[11px] font-semibold">
                             {row.mprNo}
                           </span>
-                          <p className="text-xs text-slate-700 font-medium leading-snug break-words mt-1.5">{row.name}</p>
+                          <ItemNameLink name={row.name} onOpen={() => setViewingRow(row)} className="mt-1.5 max-w-full" />
                         </div>
                         <button
                           type="button"
@@ -2068,7 +2133,9 @@ const NewJobRequestForm: React.FC<NewJobRequestFormProps> = ({ token, jobs, mprN
                       {rows.map((row) => (
                         <tr key={row.uid}>
                           <td className="px-3 py-2 font-medium text-slate-800 whitespace-nowrap">{row.mprNo}</td>
-                          <td className="px-3 py-2 text-slate-600 max-w-[220px] truncate" title={row.name}>{row.name}</td>
+                          <td className="px-3 py-2 max-w-[220px]">
+                            <ItemNameLink name={row.name} onOpen={() => setViewingRow(row)} className="max-w-full" />
+                          </td>
                           <td className="px-3 py-2">
                             <input
                               type="number"
@@ -2137,6 +2204,11 @@ const NewJobRequestForm: React.FC<NewJobRequestFormProps> = ({ token, jobs, mprN
           </div>
         )
       )}
+      {viewingRow &&
+        (() => {
+          const bi = budgetItems.find((b) => b.id === viewingRow.budgetItemId);
+          return bi ? <BudgetItemDetails item={bi} mprNo={viewingRow.mprNo} onClose={() => setViewingRow(null)} /> : null;
+        })()}
     </div>
   );
 };
