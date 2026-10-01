@@ -253,7 +253,7 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
     // actual fix for that.
     <div
       style={{ transform: 'translateZ(0)', WebkitTransform: 'translateZ(0)' }}
-      className={`glass-mask-fix relative rounded-[24px] overflow-hidden border border-white/70 p-4 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15),inset_0_1px_0_rgba(255,255,255,0.7)] bg-gradient-to-br from-blue-200/80 via-white/40 to-indigo-100/60 hover:shadow-lg hover:border-white transition-all md:bg-white md:from-transparent md:via-transparent md:to-transparent md:border-slate-200 md:rounded-2xl md:shadow-sm md:hover:shadow-sm md:hover:border-slate-200 ${isNativeApp ? '' : 'backdrop-blur-xl md:backdrop-blur-none'}`}
+      className={`glass-mask-fix relative rounded-[28px] overflow-hidden border border-white/70 p-4 bg-white/45 shadow-[0_16px_40px_-10px_rgba(42,0,85,0.45),inset_0_1px_0_rgba(255,255,255,0.8)] transition-all md:bg-white md:border-slate-200 md:rounded-2xl md:shadow-sm ${isNativeApp ? '' : 'backdrop-blur-2xl backdrop-saturate-150 md:backdrop-blur-none md:backdrop-saturate-100'}`}
     >
       {/* The inner tiles below (In Time/Out Time) keep their own bg-white/70
           — that opacity alone already reads as a distinct panel with or
