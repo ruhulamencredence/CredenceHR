@@ -42,17 +42,22 @@ export const WebPushPrompt: React.FC<{ token: string; userId: number }> = ({ tok
   };
   const turnOn = async () => {
     setBusy(true);
-    const r = await enableWebPush(token);
+    setNote('Turning on…');
+    const r = await enableWebPush(token, () =>
+      setNote('Waiting for your browser — click "Allow". No box? Click the bell or lock icon at the right/left of the address bar and allow notifications.')
+    );
     setBusy(false);
-    if (r === 'granted') {
+    if (r.status === 'granted') {
       setNote('Done — you will get desktop notifications, even with this tab closed.');
-      setTimeout(() => setShow(false), 3500);
-    } else if (r === 'denied') {
-      setNote('Notifications are blocked for this site. Allow them from the lock icon next to the address.');
-    } else if (r === 'default') {
+      setTimeout(() => setShow(false), 3000);
+    } else if (r.status === 'denied') {
+      setNote('Notifications are blocked for this site. Allow them from the lock icon next to the address, then reload.');
+    } else if (r.status === 'default') {
       later();
+    } else if (r.status === 'failed') {
+      setNote((r as { reason: string }).reason);
     } else {
-      setNote("Couldn't turn notifications on. Try again later.");
+      setNote("This browser can't show desktop notifications here (it needs the HTTPS address).");
     }
   };
 
@@ -76,9 +81,8 @@ export const WebPushPrompt: React.FC<{ token: string; userId: number }> = ({ tok
           </p>
         </div>
       </div>
-      {note ? (
-        <p className="text-xs text-slate-700 mt-3">{note}</p>
-      ) : (
+      {note && <p className="text-xs text-slate-700 mt-3">{note}</p>}
+      {!busy && !note?.startsWith('Done') && (
         <div className="flex justify-end gap-2 mt-3">
           <button type="button" onClick={later} className="text-xs font-semibold px-3 py-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">
             Not now
@@ -89,7 +93,7 @@ export const WebPushPrompt: React.FC<{ token: string; userId: number }> = ({ tok
             disabled={busy}
             className="text-xs font-semibold px-3.5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50"
           >
-            Turn on
+            {note ? 'Try again' : 'Turn on'}
           </button>
         </div>
       )}
