@@ -22,8 +22,7 @@ export interface MoreItem {
   key: string;
   label: string;
   icon: React.ComponentType<{ className?: string }>;
-  // Card tint and icon badge gradient/glow (Tailwind classes).
-  tint: string;
+  // Icon badge gradient/glow (Tailwind classes).
   iconBg: string;
   badge?: number;
   onClick: () => void;
@@ -167,8 +166,8 @@ export function BottomNav({ active, onChange, canViewMovementClaim = true, canVi
                 {moreItems.length === 0 ? (
                   <p className="px-5 pb-5 text-xs text-slate-500">Nothing else to show here.</p>
                 ) : (
-                  <div className="grid grid-cols-3 gap-2.5 px-3 pb-4">
-                    {moreItems.map(({ key, label, icon: Icon, tint, iconBg, badge, onClick }) => (
+                  <div className="grid grid-cols-3 gap-x-2 gap-y-3 px-3 pb-5">
+                    {moreItems.map(({ key, label, icon: Icon, iconBg, badge, onClick }) => (
                       <button
                         key={key}
                         type="button"
@@ -176,7 +175,7 @@ export function BottomNav({ active, onChange, canViewMovementClaim = true, canVi
                           setMoreOpen(false);
                           onClick();
                         }}
-                        className={`relative flex flex-col items-center justify-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 px-2 py-2.5 h-[112px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br ${tint} active:scale-95 transition-all`}
+                        className="relative flex flex-col items-center justify-start gap-1.5 px-1 py-2 rounded-2xl active:scale-95 active:bg-white/40 transition-all"
                       >
                         <div className={`p-2.5 rounded-2xl bg-gradient-to-br ${iconBg} border border-white/30 relative`}>
                           <Icon className="w-6 h-6 text-white" />
