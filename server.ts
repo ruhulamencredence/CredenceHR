@@ -26,6 +26,7 @@ import { registerEntriesRoutes } from "./EntriesRoutes";
 import { registerEmployeeTransferRoutes, ensureEmployeeTransferSchema, applyDueEmployeeTransfers, recordEmployeeEditHistory } from "./EmployeeTransferRoutes";
 import { registerAdminDashboardRoutes } from "./AdminDashboardRoutes";
 import { registerDeviceRoutes, ensureDeviceSchema, checkAppDevice, deviceStillAllowed } from "./DeviceRoutes";
+import { registerActiveUsersRoutes, ensureActiveUsersSchema, touchSession } from "./ActiveUsersRoutes";
 import { registerWebPushRoutes, ensureWebPushSchema } from "./WebPushService";
 import { registerEmployeeDirectoryRoutes } from "./EmployeeDirectoryRoutes";
 import { registerExitOffboardingRoutes, ensureExitOffboardingSchema } from "./ExitOffboardingRoutes";
@@ -275,6 +276,7 @@ async function ensureSchemaMigrations() {
 
   // Mobile app device access (DeviceRoutes.ts).
   await ensureDeviceSchema(queryDB).catch((e: any) => console.warn("⚠️ Device access tables: " + e.message));
+  await ensureActiveUsersSchema(queryDB).catch((e: any) => console.warn("⚠️ Active users table: " + e.message));
 
   // Desktop/browser notifications (WebPushService.ts).
   await ensureWebPushSchema(queryDB).catch((e: any) => console.warn("⚠️ Web push tables: " + e.message));
@@ -3800,6 +3802,8 @@ async function startServer() {
         return res.status(401).json({ error: "This phone was removed from your account. Sign in again.", code: "DEVICE_REVOKED" });
       }
       req.user = user;
+      // Admin Panel -> Active Users: this sign-in's IP, device and last use.
+      touchSession(queryDB, req, token, user);
       // Multi-company: the rest of this request runs in the company the app
       // asked for (X-Company-Id), if this account may enter it — see
       // companyContext.ts / CompanyRoutes.ts.
@@ -5022,6 +5026,7 @@ async function startServer() {
   // Admin Dashboard figures with no screen of their own (AdminDashboardRoutes.ts).
   registerAdminDashboardRoutes(app, { authenticateToken, queryDB, getAdminModules, todayInDhaka });
   registerDeviceRoutes(app, { authenticateToken, requireSuperAdmin, queryDB });
+  registerActiveUsersRoutes(app, { authenticateToken, requireSuperAdmin, queryDB });
   registerWebPushRoutes(app, { authenticateToken, queryDB });
   registerEmployeeDirectoryRoutes(app, {
     authenticateToken,

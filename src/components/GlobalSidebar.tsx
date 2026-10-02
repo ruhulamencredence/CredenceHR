@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
   X, LogOut, Home, Wallet, Briefcase, FileText, Edit2, Route, CreditCard,
-  CalendarClock, ListChecks, CheckSquare, ChevronDown, Building2, Users, Users2, Smartphone,
+  CalendarClock, ListChecks, CheckSquare, ChevronDown, Building2, Users, Users2, Smartphone, Activity,
   BarChart3, FileSpreadsheet, Upload, History, Recycle, Navigation, Bell, ShieldCheck,
   Contact, Calendar, Clock, Fingerprint, Banknote, Package, LayoutDashboard, Server, MessageSquare,
   ChevronsLeft, ChevronsRight, ShieldAlert, Search, PieChart,
@@ -58,7 +58,7 @@ interface GlobalSidebarProps {
   // 'bill_claim_policy' is the one exception below: not its own
   // module_permissions entry, shown alongside 'conveyance' in the HR group
   // and gated on the same 'conveyance' grant.
-  onGoToAdminModule: (target: Exclude<AdminModuleKey, 'claims' | 'conveyance'> | 'bill_claim_policy' | 'reports_insights' | 'dashboard' | 'permanent_delete_log' | 'companies' | 'devices') => void;
+  onGoToAdminModule: (target: Exclude<AdminModuleKey, 'claims' | 'conveyance'> | 'bill_claim_policy' | 'reports_insights' | 'dashboard' | 'permanent_delete_log' | 'companies' | 'devices' | 'active_users') => void;
   // Android APK build info modal — previously a header icon, moved in here so
   // the header itself can stay down to just hamburger + profile + logout.
   onOpenApkInfo: () => void;
@@ -547,6 +547,8 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     adminFlatItems.push({ key: 'companies', label: 'Companies', icon: Building2, onClick: () => onGoToAdminModule('companies') });
     // Which phone each account may use the app on (DeviceAccess.tsx).
     adminFlatItems.push({ key: 'devices', label: 'Device Access', icon: Smartphone, onClick: () => onGoToAdminModule('devices') });
+    // Who is signed in right now, with IP and device (ActiveUsers.tsx).
+    adminFlatItems.push({ key: 'active_users', label: 'Active Users', icon: Activity, onClick: () => onGoToAdminModule('active_users') });
     // Same "not a grantable module" reasoning as Servers above — this exists
     // specifically so a Superadmin can see an Admin's permanent Job Recycle
     // erases too, so it can never be delegated away via module_permissions.
