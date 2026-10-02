@@ -80,7 +80,7 @@ interface UserPanelProps {
 }
 
 export type SelfServiceTarget =
-  | 'leaveApplication' | 'leaveManagement' | 'leaveApprovals' | 'timesheet' | 'approveApplications'
+  | 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications'
   | 'resignation' | 'myCases' | 'myLetters' | 'chat' | 'alerts' | 'erp360';
 
 // Unique id for one Item entry within an MPR row's itemNames list — see the uid field
@@ -1136,12 +1136,6 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
       ? ([
           ...(user.role === 'superadmin' || !!user.can_view_leave_application || !!user.can_view_my_leave
             ? [{ key: 'leaveApplication', label: 'Leave Application', icon: CalendarClock, iconBg: 'from-violet-300 to-violet-500 shadow-[0_6px_16px_-2px_rgba(124,58,237,0.35)]', onClick: () => openSelfService('leaveApplication') }]
-            : []),
-          ...(user.role === 'superadmin' || !!user.can_manage_leave
-            ? [{ key: 'leaveManagement', label: 'Leave Manage', icon: ListChecks, iconBg: 'from-fuchsia-300 to-fuchsia-500 shadow-[0_6px_16px_-2px_rgba(192,38,211,0.35)]', onClick: () => openSelfService('leaveManagement') }]
-            : []),
-          ...(user.role === 'admin' || user.role === 'superadmin'
-            ? [{ key: 'leaveApprovals', label: 'Leave Approvals', icon: CheckSquare, iconBg: 'from-emerald-300 to-emerald-500 shadow-[0_6px_16px_-2px_rgba(5,150,105,0.35)]', onClick: () => openSelfService('leaveApprovals') }]
             : []),
           ...(canSeeTimesheet
             ? [{ key: 'timesheet', label: 'Timesheet', icon: Clock, iconBg: 'from-sky-300 to-sky-500 shadow-[0_6px_16px_-2px_rgba(2,132,199,0.35)]', onClick: () => openSelfService('timesheet') }]

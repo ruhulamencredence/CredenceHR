@@ -12,7 +12,7 @@ import { ClaimBillLines } from './ClaimBillLines';
 // enough for this card (see server.ts for the full shape).
 interface MyApprovalItem {
   id: number;
-  source_type: 'attendance' | 'claim' | 'user_claim' | 'attendance_correction' | 'leave_application' | 'leave_reliever' | 'exit_clearance' | 'asset_requisition' | 'vehicle_requisition' | 'hr_action';
+  source_type: 'attendance' | 'claim' | 'user_claim' | 'attendance_correction' | 'leave_application' | 'leave_reliever' | 'leave_direct' | 'exit_clearance' | 'asset_requisition' | 'vehicle_requisition' | 'hr_action';
   source_id: number;
   source_label: string;
   source_amount: number | null;
@@ -71,6 +71,8 @@ const sourceTitle = (t: MyApprovalItem['source_type']) =>
     ? 'Leave Application'
     : t === 'leave_reliever'
     ? 'Leave Application — Reliever Review'
+    : t === 'leave_direct'
+    ? 'Leave Application'
     : t === 'attendance'
     ? 'Remote Attendance'
     : t === 'exit_clearance'
@@ -203,6 +205,8 @@ export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ toke
       const url =
         item.source_type === 'leave_reliever'
           ? apiUrl(`/api/leave-applications/${id}/reliever-decision`)
+          : item.source_type === 'leave_direct'
+          ? apiUrl(`/api/leave-applications/${id}/decision`)
           : item.source_type === 'exit_clearance'
           ? apiUrl(`/api/exit-clearance-items/${id}/decision`)
           : item.source_type === 'hr_action'
@@ -303,6 +307,7 @@ export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ toke
     'user_claim',
     'leave_application',
     'leave_reliever',
+    'leave_direct',
     'attendance',
     'attendance_correction',
     'asset_requisition',

@@ -24,7 +24,7 @@ interface ApproveApplicationsProps {
 // original, narrower version of this same shape.
 interface MyApprovalItem {
   id: number;
-  source_type: 'attendance' | 'claim' | 'user_claim' | 'attendance_correction' | 'leave_application' | 'leave_reliever' | 'exit_clearance' | 'asset_requisition' | 'vehicle_requisition' | 'hr_action';
+  source_type: 'attendance' | 'claim' | 'user_claim' | 'attendance_correction' | 'leave_application' | 'leave_reliever' | 'leave_direct' | 'exit_clearance' | 'asset_requisition' | 'vehicle_requisition' | 'hr_action';
   source_id: number;
   source_label: string;
   source_amount: number | null;
@@ -124,6 +124,8 @@ const sourceTitle = (t: MyApprovalItem['source_type']) =>
     ? 'Leave Application'
     : t === 'leave_reliever'
     ? 'Leave Application \u2014 Reliever Review'
+    : t === 'leave_direct'
+    ? 'Leave Application'
     : t === 'attendance'
     ? 'Remote Attendance'
     : t === 'exit_clearance'
@@ -154,7 +156,7 @@ const sourceTitle = (t: MyApprovalItem['source_type']) =>
 // neither is an approval_requests row — see the design note on GET
 // /api/my-approvals server-side.
 export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token, onBack }) => {
-  // Same isNativeApp split as LeaveManagement.tsx / LeaveApprovals.tsx: the
+  // Same isNativeApp split as LeaveManagement.tsx / LeaveManage.tsx: the
   // web build keeps the module-path breadcrumb + Back button, the Android
   // APK build hides both — the bottom nav is the only way to leave this
   // section there.
@@ -260,6 +262,8 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
       const url =
         item.source_type === 'leave_reliever'
           ? apiUrl(`/api/leave-applications/${item.id}/reliever-decision`)
+          : item.source_type === 'leave_direct'
+          ? apiUrl(`/api/leave-applications/${item.id}/decision`)
           : item.source_type === 'exit_clearance'
           ? apiUrl(`/api/exit-clearance-items/${item.id}/decision`)
           : item.source_type === 'hr_action'
