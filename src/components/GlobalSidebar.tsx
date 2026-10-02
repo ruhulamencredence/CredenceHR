@@ -4,11 +4,11 @@ import {
   CalendarClock, ListChecks, CheckSquare, ChevronDown, Building2, Users, Users2, Smartphone,
   BarChart3, FileSpreadsheet, Upload, History, Recycle, Navigation, Bell, ShieldCheck,
   Contact, Calendar, Clock, Fingerprint, Banknote, Package, LayoutDashboard, Server, MessageSquare,
-  ChevronsLeft, ChevronsRight, ShieldAlert, Search,
+  ChevronsLeft, ChevronsRight, ShieldAlert, Search, PieChart,
   Target, UserPlus, Gavel, FolderLock, Sparkles, ExternalLink, Car,
   ClipboardList, BookOpen, ClipboardCheck, TrendingUp, Settings,
 } from 'lucide-react';
-import { User, AdminModuleKey } from '../types';
+import { User, AdminModuleKey, REPORTS_INSIGHTS_MODULES } from '../types';
 import credenceLogo from '../assets/credence-logo.png';
 import { useProfilePhoto } from '../lib/useProfilePhoto';
 import { useSiteSupervisor } from './TeamAttendance';
@@ -58,7 +58,7 @@ interface GlobalSidebarProps {
   // 'bill_claim_policy' is the one exception below: not its own
   // module_permissions entry, shown alongside 'conveyance' in the HR group
   // and gated on the same 'conveyance' grant.
-  onGoToAdminModule: (target: Exclude<AdminModuleKey, 'claims' | 'conveyance'> | 'bill_claim_policy' | 'dashboard' | 'permanent_delete_log' | 'companies' | 'devices') => void;
+  onGoToAdminModule: (target: Exclude<AdminModuleKey, 'claims' | 'conveyance'> | 'bill_claim_policy' | 'reports_insights' | 'dashboard' | 'permanent_delete_log' | 'companies' | 'devices') => void;
   // Android APK build info modal — previously a header icon, moved in here so
   // the header itself can stay down to just hamburger + profile + logout.
   onOpenApkInfo: () => void;
@@ -335,6 +335,11 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   const adminDashboardItem: NavItem | null = isAdminRole || canSeeModule('admin_dashboard')
     ? { key: 'admin_dashboard', label: 'Admin Dashboard', icon: LayoutDashboard, onClick: () => onGoToAdminModule('dashboard') }
     : null;
+  // Reports & Insights — every operational report in one place; shown to
+  // anyone holding at least one of the modules its reports come from.
+  const reportsInsightsItem: NavItem | null = REPORTS_INSIGHTS_MODULES.some((m) => canSeeModule(m))
+    ? { key: 'reports_insights', label: 'Reports & Insights', icon: PieChart, onClick: () => onGoToAdminModule('reports_insights') }
+    : null;
 
   // "Admin Panel" — PEPM Management group (expandable) + flat items, same
   // grouping the old AdminSidebar used, each filtered by canSeeModule.
@@ -513,6 +518,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     }
     if (selfServiceItems.some((i) => i.key === activeKey)) setSelfServiceOpen(true);
     if (adminDashboardItem && adminDashboardItem.key === activeKey) setAdminPanelOpen(true);
+    if (reportsInsightsItem && reportsInsightsItem.key === activeKey) setAdminPanelOpen(true);
     if (reportsGroup.some((i) => i.key === activeKey)) { setAdminPanelOpen(true); setReportsOpen(true); }
     if (hrGroup.some((i) => i.key === activeKey)) { setAdminPanelOpen(true); setHrOpen(true); }
     const activeHrSub = hrSubGroups.find((g) => g.items.some((i) => i.key === activeKey));
@@ -566,6 +572,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     ...hrmSubGroups.flatMap((g) => g.items),
     ...selfServiceItems,
     ...(adminDashboardItem ? [adminDashboardItem] : []),
+    ...(reportsInsightsItem ? [reportsInsightsItem] : []),
     ...reportsGroup,
     ...hrGroup,
     ...hrSubGroups.flatMap((g) => g.items),
@@ -993,7 +1000,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
             </>
           )}
 
-          {(!!adminDashboardItem || reportsGroup.length > 0 ||
+          {(!!adminDashboardItem || !!reportsInsightsItem || reportsGroup.length > 0 ||
             hrGroup.length > 0 || hrSubGroups.length > 0 || misGroup.length > 0 || adminFlatItems.length > 0) && (
             <>
               {!collapsed && (
@@ -1009,6 +1016,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
               {(collapsed || adminPanelOpen) && (
                 <>
               {adminDashboardItem && renderItem(adminDashboardItem)}
+              {reportsInsightsItem && renderItem(reportsInsightsItem)}
 
               {renderGroup(reportsGroup, 'PEPM Management', BarChart3, reportsOpen, setReportsOpen)}
               {renderNestedGroup(hrSubGroups, 'HRM', ShieldCheck, hrOpen, setHrOpen, hrSubOpenKeys, toggleHrSub, hrGroup)}
