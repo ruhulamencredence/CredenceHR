@@ -1290,7 +1290,9 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
       if (req.user.role !== "admin" && req.user.role !== "superadmin") {
         return res.status(403).json({ error: "Admin access required" });
       }
-      const { action, remarks } = req.body || {};
+      const { remarks } = req.body || {};
+      // "approved"/"rejected" is what the Approve Application queue sends.
+      const action = req.body?.action === "approved" ? "approve" : req.body?.action === "rejected" ? "reject" : req.body?.action;
       if (action !== "approve" && action !== "reject") {
         return res.status(400).json({ error: "action must be 'approve' or 'reject'" });
       }

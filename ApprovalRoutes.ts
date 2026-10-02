@@ -456,7 +456,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       // The reliever query is similarly scoped directly in SQL instead of
       // pulling every Leave Application ever filed — see the old version's
       // comment (now below) on why this exists.
-      const [pendingRequests, templateStepApproverRows, templateSteps, chain, relieverRows, allClearanceItems, allExitRequests] = await Promise.all([
+      const [pendingRequests, templateStepApproverRows, templateSteps, chain, relieverRows, allClearanceItems, allExitRequests, directLeaveRows] = await Promise.all([
         queryDB("SELECT * FROM approval_requests WHERE status = 'pending' ORDER BY id ASC"),
         queryDB(
           `SELECT s.template_id, s.step_order, sa.user_id
@@ -486,8 +486,18 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
         // generic-table simulator actually understands (it pattern-matches
         // `SELECT * FROM <table>` verbatim, not an arbitrary WHERE clause).
         queryDB("SELECT * FROM exit_clearance_items"),
-        queryDB("SELECT * FROM exit_requests")
+        queryDB("SELECT * FROM exit_requests"),
+        // Leave Applications from before the Approval Workflow, where the
+        // applicant picked this account as their Approver directly
+        // (approver_id set). They used to be decided only on the old
+        // Self Service -> Leave Approvals page; listed here so this one
+        // queue covers them too. Decided via POST
+        // /api/leave-applications/:id/decision.
+        queryDB("SELECT * FROM leave_applications WHERE approver_id = ? AND status = 'pending'", [myId]).catch(() => [])
       ]);
+      const directLeaveItems = ((directLeaveRows || []) as any[]).filter(
+        (la: any) => Number(la.approver_id) === myId && la.status === "pending" && la.reliever_status !== "pending"
+      );
       const templateStepApproverIds = new Map<string, number[]>();
       for (const r of templateStepApproverRows) {
         const key = `${r.template_id}:${r.step_order}`;
@@ -557,6 +567,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
         new Set([
           ...mine.map((r: any) => Number(r.requested_by)),
           ...relieverItems.map((la: any) => Number(la.user_id)),
+          ...directLeaveItems.map((la: any) => Number(la.user_id)),
           ...clearanceItems.map((ci: any) => Number(clearanceExitById.get(Number(ci.exit_id))!.user_id))
         ])
       );
@@ -713,6 +724,21 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
           return {
             id: la.id,
             source_type: "leave_reliever",
+            source_id: la.id,
+            source_label: `${leaveTypeLabel} \u2014 ${toDateOnlyString(la.start_date)} to ${toDateOnlyString(la.end_date)} (${Number(la.day_count)} day${Number(la.day_count) === 1 ? "" : "s"})`,
+            source_amount: null,
+            requested_by: la.user_id,
+            requested_by_name: requesterMap.get(Number(la.user_id))?.name || null,
+            current_step: null,
+            total_steps: null,
+            created_at: la.created_at
+          };
+        }),
+        ...directLeaveItems.map((la: any) => {
+          const leaveTypeLabel = la.leave_type === "casual" ? "Casual" : la.leave_type === "sick" ? "Sick" : "Leave Without Pay";
+          return {
+            id: la.id,
+            source_type: "leave_direct",
             source_id: la.id,
             source_label: `${leaveTypeLabel} \u2014 ${toDateOnlyString(la.start_date)} to ${toDateOnlyString(la.end_date)} (${Number(la.day_count)} day${Number(la.day_count) === 1 ? "" : "s"})`,
             source_amount: null,

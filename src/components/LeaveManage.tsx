@@ -12,7 +12,7 @@ interface LeaveManageProps {
   onBack: () => void;
 }
 
-// "Self Service" > "Leave Manage" — reachable only for a Superadmin, or any
+// Admin Panel > HRM > Leave > "Leave Manage" — reachable only for a Superadmin, or any
 // Admin/User the Superadmin has granted can_manage_leave to (Admin Panel ->
 // Users -> Module Access -> "Also allow editing Leave balances"); see
 // GlobalSidebar.tsx's canManageLeave gate on this menu item. Split out of the
@@ -652,7 +652,7 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
       <div className="w-full px-4 sm:px-6 lg:px-8 pt-3 pb-8">
         {!isNativeApp && (
           <>
-            <ModulePath path={['Self Service', 'My HR', 'Leave Manage', 'Leave Manage']} />
+            <ModulePath path={['Admin Panel', 'HRM', 'Leave', 'Leave Manage']} />
             <button
               type="button"
               onClick={onBack}

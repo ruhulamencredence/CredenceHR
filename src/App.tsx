@@ -33,7 +33,6 @@ import { Spinner } from './components/Spinner';
 import { ApkModal } from './components/ApkModal';
 import { FloatingChatButton } from './components/FloatingChatButton';
 import { LeaveManage } from './components/LeaveManage';
-import { LeaveApprovals } from './components/LeaveApprovals';
 import { ApproveApplications } from './components/ApproveApplications';
 import { Timesheet } from './components/Timesheet';
 import { PayrollModule } from './components/PayrollModule';
@@ -103,10 +102,10 @@ export default function App() {
   // this account was actually looking at, instead of resetting to the
   // Admin/User Panel default every time.
   const selfServiceViewStorageKey = user ? `mpr_self_service_view_${user.id}` : null;
-  const [selfServiceView, setSelfServiceView] = useState<'leaveApplication' | 'leaveManagement' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | null>(() => {
+  const [selfServiceView, setSelfServiceView] = useState<'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | null>(() => {
     try {
       const saved = selfServiceViewStorageKey ? localStorage.getItem(selfServiceViewStorageKey) : null;
-      if (saved === 'leaveApplication' || saved === 'leaveManagement' || saved === 'leaveApprovals' || saved === 'timesheet' || saved === 'approveApplications' || saved === 'employeeDirectory' || saved === 'resignation') {
+      if (saved === 'leaveApplication' || saved === 'leaveManagement' || saved === 'timesheet' || saved === 'approveApplications' || saved === 'employeeDirectory' || saved === 'resignation') {
         return saved;
       }
     } catch {
@@ -804,7 +803,7 @@ export default function App() {
       setViewMode('admin');
       setAdminNavRequest({ target, ts: Date.now() });
     },
-    onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance') => {
+    onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance') => {
       setShowProfilePage(false);
           setShowChat(false);
           setShowAlertsPage(false);
@@ -1087,8 +1086,6 @@ export default function App() {
           />
         ) : selfServiceView === 'leaveManagement' ? (
           <LeaveManage token={token} user={user} onBack={() => setSelfServiceView(null)} />
-        ) : selfServiceView === 'leaveApprovals' ? (
-          <LeaveApprovals token={token} user={user} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'approveApplications' ? (
           <ApproveApplications token={token} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'timesheet' ? (

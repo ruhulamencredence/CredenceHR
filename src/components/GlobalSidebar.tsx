@@ -48,7 +48,7 @@ interface GlobalSidebarProps {
   onGoToUserClaims: (target: 'movementClaims' | 'conveyanceBill') => void;
   // Everyday employee self-service items — not Admin-gated, shown to every
   // account regardless of role/module access.
-  onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance') => void;
+  onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance') => void;
   // Admin Panel's own Movement Claims / Conveyance Bill Claim review tabs —
   // separate feature from onGoToUserClaims above, gated by module_permissions
   // like every other Admin Panel module.
@@ -261,16 +261,14 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   if (canSeeLeaveApplication || canSeeMyLeave) {
     hrmLeaveGroup.push({ key: 'leaveApplication', label: 'Leave Application', icon: CalendarClock, onClick: () => onGoToSelfServiceTab('leaveApplication') });
   }
-  if (canManageLeave) {
-    hrmLeaveGroup.push({ key: 'leaveManagement', label: 'Leave Manage', icon: ListChecks, onClick: () => onGoToSelfServiceTab('leaveManagement') });
-  }
-  if (user.role === 'admin' || user.role === 'superadmin') {
-    hrmLeaveGroup.push({ key: 'leaveApprovals', label: 'Leave Approvals', icon: CheckSquare, onClick: () => onGoToSelfServiceTab('leaveApprovals') });
-  }
+  // "Leave Manage" (every account's balances, Year Settings, Balance
+  // Workflows) is HR's work, so it lives in Admin Panel -> HRM -> Leave
+  // (hrLeaveItems below). Approving a Leave Application happens in
+  // "Approve Application", the one queue for everything waiting on you.
   const hrmSubGroups: { key: string; label: string; icon: React.ComponentType<{ className?: string }>; items: NavItem[] }[] = [
     { key: 'my_claim_bill', label: 'My Claim/Bill', icon: Wallet, items: hrmClaimGroup },
     { key: 'hrm_attendance', label: 'Attendance', icon: Clock, items: hrmAttendanceGroup },
-    { key: 'hrm_leave_manage', label: 'Leave Manage', icon: ListChecks, items: hrmLeaveGroup },
+    { key: 'hrm_leave_manage', label: 'Leave', icon: CalendarClock, items: hrmLeaveGroup },
   ].filter((g) => g.items.length > 0);
 
   const selfServiceItems: NavItem[] = [];
@@ -427,11 +425,6 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     { key: 'approvals', label: 'Approval Chain', icon: ShieldCheck, onClick: () => onGoToAdminModule('approvals') },
     { key: 'notices', label: 'Notices', icon: Bell, onClick: () => onGoToAdminModule('notices') },
     { key: 'holidays', label: 'Holidays', icon: Calendar, onClick: () => onGoToAdminModule('holidays') },
-    // Read-only "who applied for Leave" report, gated by its own
-    // 'leave_applications' module (separate from can_manage_leave's "Leave
-    // Manage" item and from the "Leave Approvals" item above) — see
-    // ADMIN_MODULES in types.ts.
-    { key: 'leave_applications', label: 'Monthly Leave Application', icon: CalendarClock, onClick: () => onGoToAdminModule('leave_applications') },
     ...departmentsItem,
   ].filter((i) => canSeeModule(i.key as AdminModuleKey));
 
@@ -492,8 +485,21 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
       ]
     : [];
 
+  // "Leave" — every account's Leave Applications (the 'leave_applications'
+  // module) and "Leave Manage" (balances, Year Settings, Balance Workflows;
+  // a Superadmin or anyone granted can_manage_leave). Leave Manage still
+  // opens through onGoToSelfServiceTab like Payroll above — only its menu
+  // moved here from Self Service.
+  const hrLeaveItems: NavItem[] = [
+    ...(canSeeModule('leave_applications')
+      ? [{ key: 'leave_applications', label: 'Leave Applications', icon: CalendarClock, onClick: () => onGoToAdminModule('leave_applications') }]
+      : []),
+    ...(canManageLeave ? [{ key: 'leaveManagement', label: 'Leave Manage', icon: ListChecks, onClick: () => onGoToSelfServiceTab('leaveManagement') }] : []),
+  ];
+
   const hrSubGroups: { key: string; label: string; icon: React.ComponentType<{ className?: string }>; items: NavItem[] }[] = [
     { key: 'hr_operations', label: 'HR Operations', icon: Briefcase, items: hrOperationsItems },
+    { key: 'hr_leave', label: 'Leave', icon: CalendarClock, items: hrLeaveItems },
     { key: 'hr_attendance', label: 'Attendance', icon: Fingerprint, items: attendanceItems },
     { key: 'hr_claims_bill', label: 'Claims/Bill/Disbursement', icon: CreditCard, items: claimsItems },
     { key: 'hr_employee', label: 'Employee', icon: Contact, items: employeeItems },
