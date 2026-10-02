@@ -31,6 +31,7 @@ interface Session {
 interface Data {
   range: Range;
   online_minutes: number;
+  proxy_hides_ip?: boolean;
   summary: { online_users: number; online_app: number; online_web: number; today_users: number; week_users: number; total_accounts: number };
   sessions: Session[];
 }
@@ -137,6 +138,14 @@ export const ActiveUsers: React.FC<{ token: string }> = ({ token }) => {
         </button>
       </div>
       <Notice msg={msg} onClose={() => setMsg(null)} />
+      {data.proxy_hides_ip && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-xs text-amber-900">
+          The IP shows as <span className="font-mono">127.0.0.1</span> because the web server in front of this app isn't passing on the visitor's
+          address. Ask whoever manages the hosting to forward it — on Nginx:{' '}
+          <span className="font-mono">proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;</span> and{' '}
+          <span className="font-mono">proxy_set_header X-Real-IP $remote_addr;</span> — then sign in again.
+        </div>
+      )}
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5">
         {cards.map(([label, n, icon, tone]) => (

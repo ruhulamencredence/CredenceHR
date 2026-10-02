@@ -49,9 +49,48 @@ export async function ensureActiveUsersSchema(queryDB: QueryDB) {
   )`);
 }
 
+const bareIp = (v: any) => {
+  let ip = String(v ?? "").trim().replace(/^"|"$/g, "");
+  if (ip.startsWith("::ffff:")) ip = ip.slice(7);
+  // "1.2.3.4:5678" (some proxies keep the port) and "[::1]:80"
+  const v4port = ip.match(/^(\d{1,3}(?:\.\d{1,3}){3}):\d+$/);
+  if (v4port) ip = v4port[1];
+  const v6port = ip.match(/^\[([^\]]+)\](?::\d+)?$/);
+  if (v6port) ip = v6port[1];
+  return ip.slice(0, 64);
+};
+export const isLoopbackIp = (ip: string | null) => !ip || ip === "::1" || ip.startsWith("127.") || ip === "localhost" || ip === "0.0.0.0";
+const isPrivateIp = (ip: string) =>
+  isLoopbackIp(ip) ||
+  /^10\./.test(ip) ||
+  /^192\.168\./.test(ip) ||
+  /^172\.(1[6-9]|2\d|3[01])\./.test(ip) ||
+  /^169\.254\./.test(ip) ||
+  /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(ip) ||
+  /^(fc|fd|fe80)/i.test(ip);
+
+// The visitor's address. Behind a web server / panel proxy the connection
+// itself comes from 127.0.0.1, so read what the proxy passed along: the
+// nearest public address in X-Forwarded-For (right to left — the left end is
+// whatever the visitor claimed), X-Real-IP, or a CDN's own header. A private
+// address is kept only when nothing public is there (an office-LAN server).
 export const clientIp = (req: any) => {
-  const ip = String(req.ip || req.socket?.remoteAddress || "").trim();
-  return (ip.startsWith("::ffff:") ? ip.slice(7) : ip).slice(0, 64) || null;
+  const h = req.headers || {};
+  const xff = String(h["x-forwarded-for"] || "")
+    .split(",")
+    .map(bareIp)
+    .filter(Boolean)
+    .reverse();
+  const candidates = [
+    ...xff,
+    bareIp(h["x-real-ip"]),
+    bareIp(h["cf-connecting-ip"]),
+    bareIp(h["true-client-ip"]),
+    bareIp(h["x-client-ip"]),
+    bareIp(req.ip),
+    bareIp(req.socket?.remoteAddress)
+  ].filter(Boolean);
+  return candidates.find((ip) => !isPrivateIp(ip)) || candidates.find((ip) => !isLoopbackIp(ip)) || candidates[0] || null;
 };
 
 // key -> { at: last write, ip } so most requests never touch the database.
@@ -176,6 +215,9 @@ export function registerActiveUsersRoutes(app: Express, deps: ActiveUsersDeps) {
       res.json({
         range,
         online_minutes: ONLINE_MS / 60000,
+        // Every address is the server's own: the proxy in front isn't
+        // passing the visitor's address on (X-Forwarded-For / X-Real-IP).
+        proxy_hides_ip: sessions.length > 0 && sessions.every((x) => isLoopbackIp(x.ip)),
         summary: {
           online_users: usersIn(now - ONLINE_MS),
           online_app: usersIn(now - ONLINE_MS, "app"),
