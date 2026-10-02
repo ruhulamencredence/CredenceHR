@@ -5,7 +5,7 @@ import autoTable from 'jspdf-autotable';
 import credenceLogo from '../assets/credence-logo.png';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
 import { savePdfCrossPlatform } from '../lib/saveFile';
-import { Project, Branch, MprNumber, Entry, User, Budget, BudgetItem, BudgetSubmission, UserProjectPermission, EntryEditHistory, EntryPermanentDeleteLog, BulkUserRow, BulkUserResultItem, AdminModuleKey, ADMIN_MODULES, PermissionLayerKey, PERMISSION_LAYERS, PERMISSION_LAYER_MODULES, layersFor, LeaveManageLayerKey, LEAVE_MANAGE_LAYERS, AttendanceRecord, ClaimsNavRequest, AdminNavRequest, Department, LeaveApplication, PendingJobEdit } from '../types';
+import { Project, Branch, MprNumber, Entry, User, Budget, BudgetItem, BudgetSubmission, UserProjectPermission, EntryEditHistory, EntryPermanentDeleteLog, BulkUserRow, BulkUserResultItem, AdminModuleKey, ADMIN_MODULES, REPORTS_INSIGHTS_MODULES, PermissionLayerKey, PERMISSION_LAYERS, PERMISSION_LAYER_MODULES, layersFor, LeaveManageLayerKey, LEAVE_MANAGE_LAYERS, AttendanceRecord, ClaimsNavRequest, AdminNavRequest, Department, LeaveApplication, PendingJobEdit } from '../types';
 import { Building2, FileText, Users, Users2, BarChart3, Plus, Trash2, Edit2, Search, Filter, UserCheck, Calendar, CalendarClock, Download, Upload, FolderPlus, X, Eye, FileSpreadsheet, KeyRound, History, RotateCcw, Recycle, ListChecks, FileDown, MapPin, LayoutGrid, Navigation, LogIn, LogOut, Bell, Route, ShieldCheck, Wallet, Contact, Lock, Unlock, Mail, CheckCircle2, XCircle, Clock3, ShieldAlert, Copy, Eraser, LayoutTemplate } from 'lucide-react';
 import LocationMapPicker from './LocationMapPicker';
 import { NoticeManager } from './NoticeManager';
@@ -30,6 +30,7 @@ import { PerformanceManagementPanel } from './PerformanceManagementPanel';
 import { RecruitmentPanel } from './RecruitmentPanel';
 import { GrievanceDisciplinaryPanel } from './GrievanceDisciplinaryPanel';
 import { HRAnalyticsDashboard } from './HRAnalyticsDashboard';
+import { ReportsInsights } from './ReportsInsights';
 import { DocumentVaultPanel } from './DocumentVaultPanel';
 import { HROperationsPanel } from './HROperationsPanel';
 import { AdminDashboard } from './AdminDashboard';
@@ -337,6 +338,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // canSee below).
   const isAdminRole = user.role === 'admin' || user.role === 'superadmin';
   const canSeeDashboard = isAdminRole || canSee('admin_dashboard');
+  const canSeeReportsInsights = isSuperAdmin || REPORTS_INSIGHTS_MODULES.some((m) => visibleModules.includes(m));
   // Whether THIS logged-in Admin/Superadmin can see the "Last Login Location"
   // column. Always true for a Superadmin; a plain Admin needs the Superadmin to
   // have explicitly granted user.can_view_login_location.
@@ -349,7 +351,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // PUT /api/users/:id/module-permissions).
   const canGrantModuleAccess = isSuperAdmin || !!user.can_grant_module_access;
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'bill_claim_policy' | 'disbursement' | 'holidays' | 'asset_management' | 'vehicle_management' | 'permanent_delete_log' | 'companies' | 'devices' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'hr_operations'>(
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'reports_insights' | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'bill_claim_policy' | 'disbursement' | 'holidays' | 'asset_management' | 'vehicle_management' | 'permanent_delete_log' | 'companies' | 'devices' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'hr_operations'>(
     () => {
       // Restores whichever tab this Admin was last looking at — see the
       // "pull down to reload" note in App.tsx: since a reload now has to be
@@ -363,6 +365,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         // granted via module_permissions (see GET /api/entries/permanent-delete-log).
         const savedVisible =
           saved === 'dashboard' ? canSeeDashboard :
+          saved === 'reports_insights' ? canSeeReportsInsights :
           saved === 'bill_claim_policy' ? isSuperAdmin || visibleModules.includes('conveyance') :
           saved === 'permanent_delete_log' || saved === 'companies' || saved === 'devices' ? isSuperAdmin :
           isSuperAdmin || visibleModules.includes(saved as AdminModuleKey);
@@ -409,6 +412,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       if (canSeeDashboard) setActiveTab('dashboard');
       return;
     }
+    if (adminNavRequest.target === 'reports_insights') {
+      if (canSeeReportsInsights) setActiveTab('reports_insights');
+      return;
+    }
     // 'permanent_delete_log' isn't an AdminModuleKey/module_permissions
     // entry either — Superadmin-only, same reasoning as 'bill_claim_policy'
     // below.
@@ -429,6 +436,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   useEffect(() => {
     const activeTabStillVisible =
       activeTab === 'dashboard' ? canSeeDashboard :
+      activeTab === 'reports_insights' ? canSeeReportsInsights :
       activeTab === 'permanent_delete_log' || activeTab === 'companies' || activeTab === 'devices' ? isSuperAdmin :
       activeTab === 'bill_claim_policy' ? canSee('conveyance') : canSee(activeTab);
     if (!activeTabStillVisible && visibleModules.length > 0) {
@@ -4482,6 +4490,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       {activeTab === 'recruitment' && <RecruitmentPanel token={token} />}
       {activeTab === 'grievance_disciplinary' && <GrievanceDisciplinaryPanel token={token} />}
       {activeTab === 'hr_analytics' && <HRAnalyticsDashboard token={token} />}
+      {activeTab === 'reports_insights' && <ReportsInsights token={token} />}
       {activeTab === 'document_vault' && <DocumentVaultPanel token={token} />}
       {activeTab === 'hr_operations' && <HROperationsPanel token={token} />}
 

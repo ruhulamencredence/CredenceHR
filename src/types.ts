@@ -5,6 +5,14 @@ export type UserRole = 'superadmin' | 'admin' | 'user';
 // PUT /api/users/:id/module-permissions. Mirrors ADMIN_MODULE_KEYS in server.ts.
 export type AdminModuleKey = 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'recycle' | 'editlog' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'disbursement' | 'employees' | 'departments' | 'tracking' | 'office_attendance' | 'holidays' | 'payroll' | 'asset_management' | 'vehicle_management' | 'vehicle_maintainer' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'hr_operations' | 'admin_dashboard';
 
+// Admin Panel -> Reports & Insights is not its own module grant: it shows for
+// anyone holding at least one of the modules its reports come from (each
+// report inside is gated by its own module — see ReportsInsightsRoutes.ts).
+export const REPORTS_INSIGHTS_MODULES: AdminModuleKey[] = [
+  'attendance_reports', 'attendance', 'office_attendance', 'claims', 'conveyance',
+  'disbursement', 'leave_applications', 'asset_management', 'vehicle_management'
+];
+
 export const ADMIN_MODULES: { key: AdminModuleKey; label: string }[] = [
   // Every role==='admin'|'superadmin' account already gets this as their own
   // home screen (see GlobalSidebar.tsx's isAdminRole) — listed here so a
@@ -1632,7 +1640,7 @@ export interface AdminNavRequest {
   // 'permanent_delete_log' is likewise NOT an AdminModuleKey/module_permissions
   // entry — Superadmin-only, see GET /api/entries/permanent-delete-log in
   // EntriesRoutes.ts.
-  target: 'dashboard' | 'reports' | 'mprs' | 'imports' | 'editlog' | 'recycle' | 'projects' | 'branches' | 'users' | 'notices' | 'approvals' | 'attendance' | 'attendance_reports' | 'employees' | 'departments' | 'tracking' | 'holidays' | 'disbursement' | 'bill_claim_policy' | 'asset_management' | 'permanent_delete_log' | 'companies' | 'devices' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'hr_operations';
+  target: 'dashboard' | 'reports_insights' | 'reports' | 'mprs' | 'imports' | 'editlog' | 'recycle' | 'projects' | 'branches' | 'users' | 'notices' | 'approvals' | 'attendance' | 'attendance_reports' | 'employees' | 'departments' | 'tracking' | 'holidays' | 'disbursement' | 'bill_claim_policy' | 'asset_management' | 'permanent_delete_log' | 'companies' | 'devices' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'hr_operations';
   ts: number;
 }
 

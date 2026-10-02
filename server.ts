@@ -35,6 +35,7 @@ import { registerGrievanceRoutes, ensureGrievanceSchema } from "./GrievanceRoute
 import { registerHROperationsRoutes, ensureHROperationsSchema, applyDueHrActions } from "./HROperationsRoutes";
 import { registerEmployee360Routes, ensureEmployee360Schema } from "./HrOps360Routes";
 import { registerHrReportsRoutes, ensureHrReportsSchema } from "./HrOpsReportsRoutes";
+import { registerReportsInsightsRoutes } from "./ReportsInsightsRoutes";
 import { registerInfoRequestRoutes, ensureInfoRequestsSchema } from "./HrOpsInfoRequestsRoutes";
 import { registerSiteAttendanceRoutes, ensureSiteAttendanceSchema } from "./SiteAttendanceRoutes";
 import { registerBillClaimPolicyRoutes, ensureBillClaimPolicySchema } from "./BillClaimPolicy";
@@ -4988,6 +4989,21 @@ async function startServer() {
   // Employee Reports: every Employee's 360 facts in one table, saved and
   // scheduled reports, previous-company name matching.
   registerHrReportsRoutes(app, { authenticateToken, requireModule, queryDB, getAdminModules, todayInDhaka, createAlert });
+  // Reports & Insights: Attendance / Leave / Claim / Bill / Asset / Vehicle
+  // reports in one place (ReportsInsightsRoutes.ts).
+  registerReportsInsightsRoutes(app, {
+    authenticateToken,
+    requireAdmin,
+    queryDB,
+    getAdminModules,
+    todayInDhaka,
+    getDeptScope: (kind, userId) =>
+      kind === "attendance"
+        ? getAttendanceReportDeptScope(userId)
+        : kind === "leave"
+          ? getLeaveApplicationDeptScope(userId)
+          : getConveyanceClaimDeptScope(userId)
+  });
   // Information requests: ask employees for missing documents / nominee /
   // emergency contact; HR approves each submission before it is recorded.
   registerInfoRequestRoutes(app, { authenticateToken, requireModule, queryDB, getAdminModules, todayInDhaka, createAlert });
