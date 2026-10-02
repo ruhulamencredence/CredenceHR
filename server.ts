@@ -20,6 +20,7 @@ import { registerAttendanceRoutes } from "./AttendanceRoutes";
 import { registerApprovalRoutes } from "./ApprovalRoutes";
 import { registerLeaveRoutes } from "./LeaveRoutes";
 import { registerPayrollRoutes, ensurePayrollSchema } from "./PayrollRoutes";
+import { registerPayrollItemsRoutes, ensurePayrollItemsSchema } from "./PayrollItemsRoutes";
 import { registerAssetManagementRoutes, ensureAssetManagementSchema, logAssetRequisitionEvent } from "./AssetManagementRoutes";
 import { registerVehicleManagementRoutes, ensureVehicleManagementSchema } from "./VehicleManagementRoutes";
 import { registerEntriesRoutes } from "./EntriesRoutes";
@@ -231,6 +232,9 @@ async function ensureSchemaMigrations() {
   // table + schema owned by PayrollRoutes.ts, only the call site lives here,
   // same as every other self-healing migration in this function.
   await ensurePayrollSchema(dbPool);
+  // Payroll -> Allowance & Adjustment (PayrollItemsRoutes.ts) — after
+  // ensurePayrollSchema, since its tables point at payrolls.
+  await ensurePayrollItemsSchema(dbPool);
 
   // Asset Management (Employee Profile -> My Assets / New Requisition /
   // Requisition Status, plus Admin Panel -> Asset Management) — table +
@@ -4907,6 +4911,9 @@ async function startServer() {
   // admin_module_permissions (Admin Panel -> Users -> Module Access);
   // requireAdmin is layered in front of it the same way every other
   // Admin-Panel-gated module route in this file does.
+  // Registered first: its /api/payroll/pay-items and /api/payroll/adjustments
+  // would otherwise be caught by PayrollRoutes' GET /api/payroll/:id.
+  registerPayrollItemsRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB });
   registerPayrollRoutes(app, {
     authenticateToken,
     requireAdmin,

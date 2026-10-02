@@ -23,6 +23,8 @@ import {
   AlertTriangle
 } from 'lucide-react';
 import { apiUrl } from '../lib/api';
+import { payslipRows, pdfMoney, PayslipLine } from '../lib/payslipRows';
+import { PayrollAdjustmentsPanel } from './PayrollAdjustmentsPanel';
 import { ModulePath } from './ModulePath';
 import { Spinner } from './Spinner';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
@@ -101,6 +103,9 @@ interface PayrollRecord {
   pf_deduction: number;
   advance_deduction: number;
   other_deduction: number;
+  item_earnings?: number;
+  item_deductions?: number;
+  pay_lines?: PayslipLine[];
   total_deduction: number;
   net_salary: number;
   payment_status: 'unpaid' | 'processed' | 'paid';
@@ -309,14 +314,8 @@ const GeneratePayslipModal: React.FC<{ token: string; monthYear: string; onClose
         startY,
         margin: { top: startY, left: 14, right: 14 },
         head: [['Earnings', 'Amount', 'Deductions', 'Amount']],
-        body: [
-          ['Basic Salary', money(record.basic_amount), 'Absent / LWP / Late Deduction', money(record.absent_deduction)],
-          ['Allowances', money(record.allowances_total), 'Tax Deduction', money(record.tax_deduction)],
-          ['Overtime', money(record.overtime_amount), 'Provident Fund', money(record.pf_deduction)],
-          ['Bonus', money(record.bonus_amount), 'Advance Recovery', money(record.advance_deduction)],
-          ['', '', 'Other Deduction', money(record.other_deduction)]
-        ],
-        foot: [['Gross Earned', money(record.gross_earned), 'Total Deduction', money(record.total_deduction)]],
+        body: payslipRows(record, pdfMoney),
+        foot: [['Gross Earned', pdfMoney(record.gross_earned), 'Total Deduction', pdfMoney(record.total_deduction)]],
         theme: 'grid',
         styles: { fontSize: 9, cellPadding: 2.5 },
         headStyles: { fillColor: [37, 99, 235], textColor: 255 },
@@ -327,7 +326,7 @@ const GeneratePayslipModal: React.FC<{ token: string; monthYear: string; onClose
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(12.5);
       doc.setTextColor(15, 23, 42);
-      doc.text(`Net Salary: ${money(record.net_salary)}`, 14, finalY);
+      doc.text(`Net Salary: ${pdfMoney(record.net_salary)}`, 14, finalY);
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(8.5);
       doc.setTextColor(100, 116, 139);
@@ -442,6 +441,9 @@ const DownloadReportsModal: React.FC<{ token: string; monthYear: string; onClose
         Allowances: r.allowances_total,
         Overtime: r.overtime_amount,
         Bonus: r.bonus_amount,
+        'Extra Pay (Allowance/Arrear)': Number(r.item_earnings) || 0,
+        'Extra Deduction (Deduction/Recovery)': Number(r.item_deductions) || 0,
+        'Extra Lines': (r.pay_lines || []).map((l) => `${l.name} ${l.kind === 'earning' ? '+' : '-'}${l.amount}`).join('; '),
         'Gross Earned': r.gross_earned,
         'Total Deduction': r.total_deduction,
         'Net Salary': r.net_salary,
@@ -542,7 +544,7 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({ token, onBack }) =
   const authHeaders = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
   const [activeTab, setActiveTab] = useState<
-    'dashboard' | 'list' | 'attendance' | 'payslips' | 'loans' | 'bonus' | 'setup'
+    'dashboard' | 'list' | 'attendance' | 'payslips' | 'loans' | 'bonus' | 'adjustments' | 'setup'
   >('dashboard');
   const [monthYear, setMonthYear] = useState(currentMonthYear());
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
@@ -633,7 +635,7 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({ token, onBack }) =
         </div>
 
         {/* Dashboard / Payroll List tabs */}
-        <div className="flex items-center gap-1 mb-4 bg-white border border-slate-200 rounded-xl p-1 w-fit">
+        <div className="flex items-center gap-1 mb-4 bg-white border border-slate-200 rounded-xl p-1 w-fit max-w-full overflow-x-auto [&>button]:whitespace-nowrap [&>button]:shrink-0">
           <button
             onClick={() => setActiveTab('dashboard')}
             className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
@@ -683,6 +685,14 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({ token, onBack }) =
             Bonus & Incentive
           </button>
           <button
+            onClick={() => setActiveTab('adjustments')}
+            className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+              activeTab === 'adjustments' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-blue-600'
+            }`}
+          >
+            Allowance & Adjustment
+          </button>
+          <button
             onClick={() => setActiveTab('setup')}
             className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
               activeTab === 'setup' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-blue-600'
@@ -702,6 +712,8 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({ token, onBack }) =
           <LoanAdvanceManagementPanel token={token} />
         ) : activeTab === 'bonus' ? (
           <BonusIncentiveManagementPanel token={token} />
+        ) : activeTab === 'adjustments' ? (
+          <PayrollAdjustmentsPanel token={token} />
         ) : activeTab === 'setup' ? (
           <SalaryStructureSetupPanel token={token} />
         ) : forbidden ? (

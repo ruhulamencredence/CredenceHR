@@ -92,6 +92,8 @@ interface PreviewResult {
   total_deduction?: number;
   net_salary?: number;
   payment_split?: PaymentSplitLine[];
+  // Allowance & Adjustment lines this run will carry.
+  pay_lines?: { name: string; kind: 'earning' | 'deduction'; amount: number }[];
 }
 
 interface SubmitResult {
@@ -578,6 +580,21 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
                                         className="inline-flex items-center text-[10px] font-normal px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-700"
                                       >
                                         {s.account_label} {s.percentage}%
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                                {p && !p.error && p.pay_lines && p.pay_lines.length > 0 && (
+                                  <div className="mt-0.5 flex flex-wrap gap-1">
+                                    {p.pay_lines.map((l, i) => (
+                                      <span
+                                        key={i}
+                                        className={`inline-flex items-center text-[10px] font-normal px-1.5 py-0.5 rounded-full ${
+                                          l.kind === 'earning' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
+                                        }`}
+                                      >
+                                        {l.name} {l.kind === 'earning' ? '+' : '−'}
+                                        {money(l.amount)}
                                       </span>
                                     ))}
                                   </div>

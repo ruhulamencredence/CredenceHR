@@ -42,6 +42,7 @@ import { getHolidayMap, getHolidayMapsByGroup, getEmployeeBranchTypeMap, getEmpl
 import { loadSiteEntries } from "./SiteAttendanceRoutes";
 import { activeCompanyId } from "./companyContext";
 import { isMailerConfigured, sendMail } from "./mailer";
+import { computePayLines, savePayLines, loadPayLines } from "./PayrollItemsRoutes";
 
 interface PayrollRouteDeps {
   authenticateToken: any;
@@ -353,9 +354,14 @@ export async function ensurePayrollSchema(dbPool: any): Promise<void> {
 
 const MONTH_YEAR_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 
-function num(v: any, fallback = 0): number {
+function num(v: any, fallback: any = 0): number {
   const n = Number(v);
-  return Number.isFinite(n) ? n : fallback;
+  if (Number.isFinite(n)) return n;
+  // The fallback is often a DECIMAL column, which the pool hands back as a
+  // string ("0.00") — returned as-is it turned PUT /api/payroll/:id's sums
+  // into NaN for every field the request left out.
+  const f = Number(fallback);
+  return Number.isFinite(f) ? f : 0;
 }
 
 // Rounds to 2 decimals the same way every DECIMAL(10,2) column here stores.
@@ -408,6 +414,24 @@ function buildPayslipEmailHtml(record: any): string {
           <td style="padding:6px 8px;">Bonus</td><td style="padding:6px 8px; text-align:right;">${fmtMoney(record.bonus_amount)}</td>
           <td style="padding:6px 8px;">Advance Recovery</td><td style="padding:6px 8px; text-align:right;">${fmtMoney(record.advance_deduction)}</td>
         </tr>
+        ${(() => {
+          const lines: any[] = Array.isArray(record.pay_lines) ? record.pay_lines : [];
+          const earn = lines.filter((l) => l.kind === "earning");
+          const ded = lines.filter((l) => l.kind === "deduction");
+          const rows = Math.max(earn.length, ded.length);
+          let html = "";
+          for (let i = 0; i < rows; i++) {
+            const e = earn[i];
+            const d = ded[i];
+            html += `<tr>
+          <td style="${cell}">${e ? e.name : ""}</td><td style="${cell} text-align:right;">${e ? fmtMoney(e.amount) : ""}</td>
+          <td style="${cell}">${d ? d.name : ""}</td><td style="${cell} text-align:right;">${d ? fmtMoney(d.amount) : ""}</td>
+        </tr>`;
+          }
+          if (Number(record.other_deduction) > 0)
+            html += `<tr><td style="${cell}"></td><td style="${cell}"></td><td style="${cell}">Other Deduction</td><td style="${cell} text-align:right;">${fmtMoney(record.other_deduction)}</td></tr>`;
+          return html;
+        })()}
         <tr style="background:#f1f5f9; font-weight:bold;">
           <td style="padding:6px 8px;">Gross Earned</td><td style="padding:6px 8px; text-align:right;">${fmtMoney(record.gross_earned)}</td>
           <td style="padding:6px 8px;">Total Deduction</td><td style="padding:6px 8px; text-align:right;">${fmtMoney(record.total_deduction)}</td>
@@ -608,7 +632,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         `SELECT p.id, p.employee_id, p.month_year, p.total_working_days, p.present_days,
                 p.basic_amount, p.allowances_total, p.tax_deduction, p.pf_deduction,
                 p.advance_deduction, p.other_deduction, p.absent_deduction, p.total_deduction,
-                p.net_salary, p.payment_status,
+                p.net_salary, p.payment_status, p.item_earnings, p.item_deductions,
                 e.name AS employee_name, e.employee_id AS employee_code, e.designation, e.department
          FROM payrolls p
          JOIN all_employees e ON e.id = p.employee_id
@@ -660,6 +684,8 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
           tax_deduction: num(r.tax_deduction),
           pf_deduction: num(r.pf_deduction),
           other_deduction: money(num(r.other_deduction) + num(r.advance_deduction) + num(r.absent_deduction)),
+          item_earnings: num(r.item_earnings),
+          item_deductions: num(r.item_deductions),
           total_deduction: num(r.total_deduction),
           net_salary: num(r.net_salary),
           payment_status: r.payment_status
@@ -1379,7 +1405,8 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
          ORDER BY p.month_year DESC, e.name ASC`,
         params
       );
-      res.json(rows);
+      const lines = await loadPayLines(queryDB, rows.map((r: any) => Number(r.id)));
+      res.json(rows.map((r: any) => ({ ...r, pay_lines: lines.get(Number(r.id)) || [] })));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -1422,7 +1449,12 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       // buildPaymentSplit/generate-bulk) — [] for a run predating this
       // feature, or one where the employee had no split configured.
       const splitRows = await queryDB("SELECT * FROM payroll_payment_splits WHERE payroll_id = ?", [req.params.id]);
-      res.json({ ...rows[0], payment_split: splitRows.map((s: any) => ({ ...s, percentage: Number(s.percentage), amount: Number(s.amount) })) });
+      const lines = await loadPayLines(queryDB, [Number(rows[0].id)]);
+      res.json({
+        ...rows[0],
+        pay_lines: lines.get(Number(rows[0].id)) || [],
+        payment_split: splitRows.map((s: any) => ({ ...s, percentage: Number(s.percentage), amount: Number(s.amount) }))
+      });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -1447,6 +1479,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       );
       if (rows.length === 0) return res.status(404).json({ error: "Payroll record not found." });
       const record = rows[0];
+      record.pay_lines = (await loadPayLines(queryDB, [Number(record.id)])).get(Number(record.id)) || [];
       const to = record.employee_email || record.employee_personal_email;
       if (!to) return res.status(400).json({ error: `${record.employee_name} has no email on file in the Employee Directory.` });
 
@@ -1472,7 +1505,9 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         [monthYear]
       );
       const results: any[] = [];
+      const linesByRun = await loadPayLines(queryDB, rows.map((r: any) => Number(r.id)));
       for (const record of rows) {
+        record.pay_lines = linesByRun.get(Number(record.id)) || [];
         const to = record.employee_email || record.employee_personal_email;
         if (!to) {
           results.push({ employee_id: record.employee_id, employee_name: record.employee_name, success: false, error: "No email on file." });
@@ -2364,8 +2399,11 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         }
         advanceDeduction = money(advanceDeduction);
 
-        const totalDeduction = money(absentDeduction + taxDeduction + pfDeduction + advanceDeduction + otherDed);
-        const netSalary = money(grossEarned - totalDeduction);
+        // Allowance & Adjustment lines (PayrollItemsRoutes.ts).
+        const pay = await computePayLines(queryDB, employeeId, monthYear);
+        const grossWithItems = money(grossEarned + pay.earnings);
+        const totalDeduction = money(absentDeduction + taxDeduction + pfDeduction + advanceDeduction + otherDed + pay.deductions);
+        const netSalary = money(grossWithItems - totalDeduction);
         const paymentSplit = await buildPaymentSplit(employeeId, netSalary);
 
         results.push({
@@ -2374,7 +2412,10 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
           allowances_earned: allowancesEarned,
           overtime_amount: otAmount,
           bonus_amount: bonus,
-          gross_earned: grossEarned,
+          item_earnings: pay.earnings,
+          item_deductions: pay.deductions,
+          pay_lines: pay.lines,
+          gross_earned: grossWithItems,
           absent_deduction: absentDeduction,
           late_count: lateCount,
           late_deduction_days: lateDeductionDays,
@@ -2482,8 +2523,11 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
           }
           advanceDeduction = money(advanceDeduction);
 
-          const totalDeduction = money(absentDeduction + taxDeduction + pfDeduction + advanceDeduction + otherDed);
-          const netSalary = money(grossEarned - totalDeduction);
+          // Allowance & Adjustment lines (PayrollItemsRoutes.ts).
+          const pay = await computePayLines(queryDB, employeeId, monthYear);
+          const grossWithItems = money(grossEarned + pay.earnings);
+          const totalDeduction = money(absentDeduction + taxDeduction + pfDeduction + advanceDeduction + otherDed + pay.deductions);
+          const netSalary = money(grossWithItems - totalDeduction);
           const paymentSplit = await buildPaymentSplit(employeeId, netSalary);
           // An employee with a configured Bank/MFS split is paid out that
           // way regardless of the run's single global Payment Method
@@ -2497,16 +2541,17 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
                 basic_amount, allowances_total, overtime_amount, bonus_amount, gross_earned,
                 absent_deduction, late_count, late_deduction_days, late_deduction_amount,
                 tax_deduction, pf_deduction, advance_deduction, other_deduction, total_deduction,
-                net_salary, payment_status, payment_method, remarks, generated_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unpaid', ?, ?, ?)`,
+                net_salary, payment_status, payment_method, remarks, generated_by, item_earnings, item_deductions)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unpaid', ?, ?, ?, ?, ?)`,
             [
               employeeId, monthYear, workingDays, present, absent, leave, lwp, otHours,
-              basicAmount, allowancesEarned, otAmount, bonus, grossEarned,
+              basicAmount, allowancesEarned, otAmount, bonus, grossWithItems,
               absentDeduction, lateCount, lateDeductionDays, lateDeductionAmount,
               taxDeduction, pfDeduction, advanceDeduction, otherDed, totalDeduction,
-              netSalary, effectiveMethod, note, req.user.id
+              netSalary, effectiveMethod, note, req.user.id, pay.earnings, pay.deductions
             ]
           );
+          await savePayLines(queryDB, Number(result.insertId), employeeId, monthYear, pay.lines);
           for (const split of paymentSplit) {
             await queryDB(
               `INSERT INTO payroll_payment_splits
@@ -2636,8 +2681,11 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       }
       advanceDeduction = money(advanceDeduction);
 
-      const totalDeduction = money(absentDeduction + taxDeduction + pfDeduction + advanceDeduction + otherDed);
-      const netSalary = money(grossEarned - totalDeduction);
+      // Allowance & Adjustment lines (PayrollItemsRoutes.ts).
+      const pay = await computePayLines(queryDB, Number(employee_id), String(month_year));
+      const grossWithItems = money(grossEarned + pay.earnings);
+      const totalDeduction = money(absentDeduction + taxDeduction + pfDeduction + advanceDeduction + otherDed + pay.deductions);
+      const netSalary = money(grossWithItems - totalDeduction);
 
       const result = await queryDB(
         `INSERT INTO payrolls
@@ -2645,16 +2693,17 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
             basic_amount, allowances_total, overtime_amount, bonus_amount, gross_earned,
             absent_deduction, late_count, late_deduction_days, late_deduction_amount,
             tax_deduction, pf_deduction, advance_deduction, other_deduction, total_deduction,
-            net_salary, payment_status, payment_method, remarks, generated_by)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unpaid', ?, ?, ?)`,
+            net_salary, payment_status, payment_method, remarks, generated_by, item_earnings, item_deductions)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unpaid', ?, ?, ?, ?, ?)`,
         [
           Number(employee_id), month_year, workingDays, present, absent, leave, lwp, otHours,
-          basicAmount, allowancesEarned, otAmount, bonus, grossEarned,
+          basicAmount, allowancesEarned, otAmount, bonus, grossWithItems,
           absentDeduction, lateCount, lateDeductionDays, lateDeductionAmount,
           taxDeduction, pfDeduction, advanceDeduction, otherDed, totalDeduction,
-          netSalary, method, note, req.user.id
+          netSalary, method, note, req.user.id, pay.earnings, pay.deductions
         ]
       );
+      await savePayLines(queryDB, Number(result.insertId), Number(employee_id), String(month_year), pay.lines);
       // Consume any staged bonus for this employee/month now that a real
       // run exists — prevents it from being offered/applied again.
       await queryDB("DELETE FROM pending_bonuses WHERE employee_id = ? AND month_year = ?", [Number(employee_id), month_year]);
@@ -2733,23 +2782,28 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       }
       advanceDeduction = money(advanceDeduction);
 
-      const totalDeduction = money(absentDeduction + taxDeduction + pfDeduction + advanceDeduction + otherDed);
-      const netSalary = money(grossEarned - totalDeduction);
+      // Allowance & Adjustment lines, worked out again for this run (its own
+      // earlier lines don't count against an adjustment's balance).
+      const pay = await computePayLines(queryDB, Number(existing.employee_id), String(existing.month_year), Number(existing.id));
+      const grossWithItems = money(grossEarned + pay.earnings);
+      const totalDeduction = money(absentDeduction + taxDeduction + pfDeduction + advanceDeduction + otherDed + pay.deductions);
+      const netSalary = money(grossWithItems - totalDeduction);
 
       await queryDB(
         `UPDATE payrolls SET
            total_working_days = ?, present_days = ?, absent_days = ?, leave_days = ?, lwp_days = ?, overtime_hours = ?,
            basic_amount = ?, allowances_total = ?, overtime_amount = ?, bonus_amount = ?, gross_earned = ?,
            absent_deduction = ?, tax_deduction = ?, pf_deduction = ?, advance_deduction = ?, other_deduction = ?, total_deduction = ?,
-           net_salary = ?, payment_method = ?, remarks = ?
+           net_salary = ?, payment_method = ?, remarks = ?, item_earnings = ?, item_deductions = ?
          WHERE id = ?`,
         [
           workingDays, present, absent, leave, lwp, otHours,
-          basicAmount, allowancesEarned, otAmount, bonus, grossEarned,
+          basicAmount, allowancesEarned, otAmount, bonus, grossWithItems,
           absentDeduction, taxDeduction, pfDeduction, advanceDeduction, otherDed, totalDeduction,
-          netSalary, method, note, req.params.id
+          netSalary, method, note, pay.earnings, pay.deductions, req.params.id
         ]
       );
+      await savePayLines(queryDB, Number(existing.id), Number(existing.employee_id), String(existing.month_year), pay.lines);
       res.json({ success: true, net_salary: netSalary });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Failed to update payroll." });

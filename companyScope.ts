@@ -44,6 +44,7 @@ const EMPLOYEE_TABLES = new Set([
   "advance_requests",
   "employee_advances",
   "employee_change_log",
+  "employee_pay_items",
   "employee_payment_accounts",
   "employee_supervisors",
   "employee_transfers",
@@ -58,8 +59,10 @@ const EMPLOYEE_TABLES = new Set([
   "hr_letters",
   "hr_onboarding_items",
   "late_waivers",
+  "payroll_line_items",
   "payrolls",
   "pending_bonuses",
+  "salary_adjustments",
   "salary_structures",
   "site_attendance_entries"
 ]);

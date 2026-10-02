@@ -27,6 +27,9 @@ interface PayrollListRecord {
   tax_deduction: number;
   pf_deduction: number;
   other_deduction: number;
+  // Allowance & Adjustment lines (Payroll -> Allowance & Adjustment).
+  item_earnings?: number;
+  item_deductions?: number;
   total_deduction: number;
   net_salary: number;
   payment_status: 'unpaid' | 'processed' | 'paid';
@@ -266,9 +269,11 @@ export const PayrollListPanel: React.FC<PayrollListPanelProps> = ({ token }) => 
                 <th className="px-2.5 py-2.5 text-right">House Rent</th>
                 <th className="px-2.5 py-2.5 text-right">Medical</th>
                 <th className="px-2.5 py-2.5 text-right">Other Allow.</th>
+                <th className="px-2.5 py-2.5 text-right" title="Monthly allowances and arrears (Allowance & Adjustment)">Extra Pay</th>
                 <th className="px-2.5 py-2.5 text-right">Tax</th>
                 <th className="px-2.5 py-2.5 text-right">PF</th>
                 <th className="px-2.5 py-2.5 text-right">Other Ded.</th>
+                <th className="px-2.5 py-2.5 text-right" title="Monthly deductions and recoveries (Allowance & Adjustment)">Extra Ded.</th>
                 <th className="px-2.5 py-2.5 text-right">Net Salary</th>
                 <th className="px-2.5 py-2.5 text-left">Status</th>
                 <th className="px-2.5 py-2.5 text-right">Actions</th>
@@ -288,9 +293,11 @@ export const PayrollListPanel: React.FC<PayrollListPanelProps> = ({ token }) => 
                   <td className="px-2.5 py-2.5 whitespace-nowrap text-right text-slate-700">{money(r.house_rent)}</td>
                   <td className="px-2.5 py-2.5 whitespace-nowrap text-right text-slate-700">{money(r.medical_allowance)}</td>
                   <td className="px-2.5 py-2.5 whitespace-nowrap text-right text-slate-700">{money(r.other_allowance)}</td>
+                  <td className="px-2.5 py-2.5 whitespace-nowrap text-right text-emerald-700">{money(r.item_earnings)}</td>
                   <td className="px-2.5 py-2.5 whitespace-nowrap text-right text-rose-600">{money(r.tax_deduction)}</td>
                   <td className="px-2.5 py-2.5 whitespace-nowrap text-right text-rose-600">{money(r.pf_deduction)}</td>
                   <td className="px-2.5 py-2.5 whitespace-nowrap text-right text-rose-600">{money(r.other_deduction)}</td>
+                  <td className="px-2.5 py-2.5 whitespace-nowrap text-right text-rose-600">{money(r.item_deductions)}</td>
                   <td className="px-2.5 py-2.5 whitespace-nowrap text-right font-semibold text-slate-900">{money(r.net_salary)}</td>
                   <td className="px-2.5 py-2.5 whitespace-nowrap"><StatusBadge status={r.payment_status} /></td>
                   <td className="px-2.5 py-2.5 whitespace-nowrap text-right">
