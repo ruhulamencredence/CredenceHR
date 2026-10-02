@@ -34,6 +34,7 @@ import {
   Layers
 } from 'lucide-react';
 import { apiUrl } from '../lib/api';
+import { payslipRows, pdfMoney, PayslipLine } from '../lib/payslipRows';
 import { Spinner } from './Spinner';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
 import { savePdfCrossPlatform } from '../lib/saveFile';
@@ -67,6 +68,9 @@ interface PayrollRecord {
   pf_deduction: number;
   advance_deduction: number;
   other_deduction: number;
+  item_earnings?: number;
+  item_deductions?: number;
+  pay_lines?: PayslipLine[];
   total_deduction: number;
   net_salary: number;
   payment_status: 'unpaid' | 'processed' | 'paid';
@@ -103,14 +107,8 @@ const drawPayslipPage = (doc: jsPDF, logoImg: HTMLImageElement, record: PayrollR
     startY,
     margin: { top: startY, left: 14, right: 14 },
     head: [['Earnings', 'Amount', 'Deductions', 'Amount']],
-    body: [
-      ['Basic Salary', money(record.basic_amount), 'Absent / LWP / Late Deduction', money(record.absent_deduction)],
-      ['Allowances', money(record.allowances_total), 'Tax Deduction', money(record.tax_deduction)],
-      ['Overtime', money(record.overtime_amount), 'Provident Fund', money(record.pf_deduction)],
-      ['Bonus', money(record.bonus_amount), 'Advance Recovery', money(record.advance_deduction)],
-      ['', '', 'Other Deduction', money(record.other_deduction)]
-    ],
-    foot: [['Gross Earned', money(record.gross_earned), 'Total Deduction', money(record.total_deduction)]],
+    body: payslipRows(record, pdfMoney),
+    foot: [['Gross Earned', pdfMoney(record.gross_earned), 'Total Deduction', pdfMoney(record.total_deduction)]],
     theme: 'grid',
     styles: { fontSize: 9, cellPadding: 2.5 },
     headStyles: { fillColor: [37, 99, 235], textColor: 255 },
@@ -121,7 +119,7 @@ const drawPayslipPage = (doc: jsPDF, logoImg: HTMLImageElement, record: PayrollR
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(12.5);
   doc.setTextColor(15, 23, 42);
-  doc.text(`Net Salary: ${money(record.net_salary)}`, 14, finalY);
+  doc.text(`Net Salary: ${pdfMoney(record.net_salary)}`, 14, finalY);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8.5);
   doc.setTextColor(100, 116, 139);
