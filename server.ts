@@ -1160,6 +1160,28 @@ async function ensureSchemaMigrations() {
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
       )
     `);
+    // Notices sent from Employee Tracking -> "Currently Not Tracked": one row
+    // per recipient, with why they weren't tracked at that moment — the
+    // month-end Tracking Notice Report reads these.
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS tracking_notice_recipients (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        notice_id INT NOT NULL,
+        user_id INT NOT NULL,
+        employee_pk INT NULL,
+        reason VARCHAR(80) NULL,
+        last_ping DATETIME NULL,
+        sent_by INT NULL,
+        sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_tnr_sent (sent_at),
+        INDEX idx_tnr_user (user_id),
+        FOREIGN KEY (notice_id) REFERENCES notices(id) ON DELETE CASCADE,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      )
+    `).catch((e: any) => console.warn("⚠️ Could not ensure tracking_notice_recipients table exists: " + e.message));
+    await dbPool.query(`ALTER TABLE notices ADD COLUMN source VARCHAR(30) NULL`).catch((e: any) => {
+      if (e.code !== "ER_DUP_FIELDNAME") console.warn("⚠️ Could not add notices.source: " + e.message);
+    });
   } catch (err: any) {
     console.warn("⚠️ Could not ensure notices/notice_targets/notice_dismissals tables exist: " + err.message);
   }
@@ -3953,53 +3975,150 @@ async function startServer() {
   // employee of the company, split by whether their phone has sent a location
   // in the last TRACKING_LIVE_MIN minutes (same 20 min the Live map uses
   // before a dot turns grey). Anyone not tracked gets the reason.
-  app.get("/api/tracking/status", authenticateToken, requireAdmin, requireModule("tracking"), async (_req: any, res) => {
+  const TRACKING_LIVE_MIN = 20;
+  const trackingStatusRows = async () => {
+    const employees: any[] = (await queryDB(
+      `SELECT e.id, e.employee_id, e.name, e.designation, e.department, e.user_id, u.can_use_tracking
+         FROM all_employees e LEFT JOIN users u ON u.id = e.user_id
+        WHERE e.is_active = 1`,
+      []
+    )) || [];
+    const pings: any[] = (await queryDB(
+      `SELECT user_id, MAX(recorded_at) AS last_ping, TIMESTAMPDIFF(MINUTE, MAX(recorded_at), NOW()) AS minutes_ago
+         FROM location_pings GROUP BY user_id`,
+      []
+    )) || [];
+    const byUser = new Map<number, any>(pings.map((p) => [Number(p.user_id), p]));
+    return employees.map((e) => {
+      const p = e.user_id ? byUser.get(Number(e.user_id)) : null;
+      const minutesAgo = p && p.minutes_ago != null ? Number(p.minutes_ago) : null;
+      const enabled = !!e.user_id && !!Number(e.can_use_tracking);
+      const tracked = enabled && minutesAgo != null && minutesAgo <= TRACKING_LIVE_MIN;
+      const reason = tracked
+        ? null
+        : !e.user_id
+        ? "No login account"
+        : !enabled
+        ? "Tracking not turned on"
+        : minutesAgo == null
+        ? "Never sent a location"
+        : "No location in the last 20 min";
+      return {
+        employee_pk: e.id,
+        employee_id: e.employee_id || "",
+        name: e.name,
+        designation: e.designation || "",
+        department: e.department || "Unassigned",
+        user_id: e.user_id || null,
+        tracking_enabled: enabled,
+        tracked,
+        last_ping: p?.last_ping || null,
+        minutes_ago: minutesAgo,
+        reason
+      };
+    });
+  };
+  // Sending a notice from the Not Tracked list needs the Notices module too.
+  const canSendTrackingNotice = async (user: any) =>
+    user.role === "superadmin" || (await getAdminModules(user.id)).includes("notices");
+
+  app.get("/api/tracking/status", authenticateToken, requireAdmin, requireModule("tracking"), async (req: any, res) => {
     try {
-      const TRACKING_LIVE_MIN = 20;
-      const employees: any[] = (await queryDB(
-        `SELECT e.id, e.employee_id, e.name, e.designation, e.department, e.user_id, u.can_use_tracking
-           FROM all_employees e LEFT JOIN users u ON u.id = e.user_id
-          WHERE e.is_active = 1`,
-        []
-      )) || [];
-      const pings: any[] = (await queryDB(
-        `SELECT user_id, MAX(recorded_at) AS last_ping, TIMESTAMPDIFF(MINUTE, MAX(recorded_at), NOW()) AS minutes_ago
-           FROM location_pings GROUP BY user_id`,
-        []
-      )) || [];
-      const byUser = new Map<number, any>(pings.map((p) => [Number(p.user_id), p]));
-      const rows = employees.map((e) => {
-        const p = e.user_id ? byUser.get(Number(e.user_id)) : null;
-        const minutesAgo = p && p.minutes_ago != null ? Number(p.minutes_ago) : null;
-        const enabled = !!e.user_id && !!Number(e.can_use_tracking);
-        const tracked = enabled && minutesAgo != null && minutesAgo <= TRACKING_LIVE_MIN;
-        const reason = tracked
-          ? null
-          : !e.user_id
-          ? "No login account"
-          : !enabled
-          ? "Tracking not turned on"
-          : minutesAgo == null
-          ? "Never sent a location"
-          : "No location in the last 20 min";
-        return {
-          employee_pk: e.id,
-          employee_id: e.employee_id || "",
-          name: e.name,
-          designation: e.designation || "",
-          department: e.department || "Unassigned",
-          user_id: e.user_id || null,
-          tracking_enabled: enabled,
-          tracked,
-          last_ping: p?.last_ping || null,
-          minutes_ago: minutesAgo,
-          reason
-        };
-      });
+      const rows = await trackingStatusRows();
       res.json({
         live_minutes: TRACKING_LIVE_MIN,
         tracked: rows.filter((r) => r.tracked).length,
         not_tracked: rows.filter((r) => !r.tracked).length,
+        can_send_notice: await canSendTrackingNotice(req.user),
+        employees: rows
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Employee Tracking -> Currently Not Tracked -> Send Notice. Saved as an
+  // ordinary Notice for the picked accounts (Admin Panel -> Notices lists it,
+  // marked "Employee Tracking", with who has seen it), plus one
+  // tracking_notice_recipients row per person recording why they weren't
+  // tracked right then. Only people currently not tracked who have a login.
+  app.post("/api/tracking/notices", authenticateToken, requireAdmin, requireModule("tracking"), requireModule("notices"), async (req: any, res) => {
+    try {
+      const title = String(req.body?.title || "").trim();
+      const message = String(req.body?.message || "").trim();
+      if (!title) return res.status(400).json({ error: "Title is required." });
+      if (!message) return res.status(400).json({ error: "Message is required." });
+      const wanted = new Set<number>((Array.isArray(req.body?.user_ids) ? req.body.user_ids : []).map(Number).filter((n: number) => Number.isFinite(n) && n > 0));
+      if (wanted.size === 0) return res.status(400).json({ error: "Pick at least one employee." });
+      const rows = (await trackingStatusRows()).filter((r) => !r.tracked && r.user_id && wanted.has(Number(r.user_id)));
+      if (rows.length === 0) return res.status(400).json({ error: "None of the picked employees is currently not tracked." });
+      const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      const html = message.split(/\n{2,}/).map((p) => `<p>${esc(p).replace(/\n/g, "<br/>")}</p>`).join("");
+      const result = await queryDB(
+        "INSERT INTO notices (title, content_html, target_type, is_active, created_by, source) VALUES (?, ?, 'specific', 1, ?, 'tracking')",
+        [title.slice(0, 200), html, req.user.id]
+      );
+      const noticeId = result.insertId;
+      for (const r of rows) {
+        await queryDB("INSERT IGNORE INTO notice_targets (notice_id, user_id) VALUES (?, ?)", [noticeId, r.user_id]);
+        await queryDB(
+          "INSERT INTO tracking_notice_recipients (notice_id, user_id, employee_pk, reason, last_ping, sent_by) VALUES (?, ?, ?, ?, ?, ?)",
+          [noticeId, r.user_id, r.employee_pk, r.reason, r.last_ping || null, req.user.id]
+        );
+      }
+      res.status(201).json({ id: noticeId, sent_to: rows.length, skipped: wanted.size - rows.length });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Month-end Tracking Notice Report: everyone sent a not-tracked notice in
+  // the month (YYYY-MM), how many times, when, why, and whether they opened it.
+  app.get("/api/tracking/notice-report", authenticateToken, requireAdmin, requireModule("tracking"), async (req: any, res) => {
+    try {
+      const month = /^\d{4}-\d{2}$/.test(String(req.query.month || "")) ? String(req.query.month) : null;
+      if (!month) return res.status(400).json({ error: "month=YYYY-MM is required." });
+      const [y, m] = month.split("-").map(Number);
+      const from = `${month}-01 00:00:00`;
+      const next = m === 12 ? `${y + 1}-01-01 00:00:00` : `${y}-${String(m + 1).padStart(2, "0")}-01 00:00:00`;
+      const sends: any[] = (await queryDB(
+        `SELECT r.notice_id, r.user_id, r.employee_pk, r.reason, r.sent_at, n.title, s.name AS sent_by_name,
+                (SELECT d.dismissed_at FROM notice_dismissals d WHERE d.notice_id = r.notice_id AND d.user_id = r.user_id LIMIT 1) AS seen_at
+           FROM tracking_notice_recipients r
+           JOIN notices n ON n.id = r.notice_id
+           LEFT JOIN users s ON s.id = r.sent_by
+          WHERE r.sent_at >= ? AND r.sent_at < ?
+          ORDER BY r.sent_at`,
+        [from, next]
+      )) || [];
+      const employees: any[] = (await queryDB("SELECT id, employee_id, name, designation, department, user_id FROM all_employees", [])) || [];
+      const empByUser = new Map<number, any>(employees.filter((e) => e.user_id).map((e) => [Number(e.user_id), e]));
+      const users: any[] = (await queryDB("SELECT id, name FROM users", [])) || [];
+      const userName = new Map<number, string>(users.map((u) => [Number(u.id), u.name]));
+      const byUser = new Map<number, any>();
+      for (const s of sends) {
+        const uid = Number(s.user_id);
+        const e = empByUser.get(uid);
+        const row = byUser.get(uid) || {
+          user_id: uid,
+          employee_id: e?.employee_id || "",
+          name: e?.name || userName.get(uid) || "Unknown",
+          designation: e?.designation || "",
+          department: e?.department || "Unassigned",
+          notices: 0,
+          seen: 0,
+          sends: [] as any[]
+        };
+        row.notices += 1;
+        if (s.seen_at) row.seen += 1;
+        row.sends.push({ notice_id: s.notice_id, title: s.title, sent_at: s.sent_at, reason: s.reason, sent_by: s.sent_by_name || null, seen_at: s.seen_at || null });
+        byUser.set(uid, row);
+      }
+      const rows = Array.from(byUser.values()).sort((a, b) => b.notices - a.notices || a.department.localeCompare(b.department) || a.name.localeCompare(b.name));
+      res.json({
+        month,
+        total_notices: new Set(sends.map((s) => s.notice_id)).size,
+        total_sends: sends.length,
         employees: rows
       });
     } catch (err: any) {
@@ -4540,6 +4659,7 @@ async function startServer() {
             lottie_json: n.lottie_json || null,
             lottie_url: n.lottie_url || null,
             target_type: n.target_type,
+            source: n.source || null,
             is_active: !!Number(n.is_active),
             created_by: n.created_by,
             created_by_name: userMap.get(n.created_by)?.name || null,

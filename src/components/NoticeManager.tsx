@@ -275,6 +275,11 @@ export const NoticeManager: React.FC<NoticeManagerProps> = ({ token, user }) => 
                         {n.target_type === 'all' ? <Globe className="w-2.5 h-2.5" /> : <UsersIcon className="w-2.5 h-2.5" />}
                         {n.target_type === 'all' ? 'All Users' : `${n.target_users?.length || 0} selected user${(n.target_users?.length || 0) === 1 ? '' : 's'}`}
                       </span>
+                      {n.source === 'tracking' && (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                          Employee Tracking
+                        </span>
+                      )}
                     </div>
                     <p className="text-xs text-slate-500 mt-1 line-clamp-2 break-words">
                       {n.content_html.replace(/<[^>]+>/g, ' ').trim().slice(0, 160) || '—'}
