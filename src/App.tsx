@@ -32,6 +32,7 @@ import { UserDashboardSkeleton } from './components/UserDashboardSkeleton';
 import { Spinner } from './components/Spinner';
 import { ApkModal } from './components/ApkModal';
 import { FloatingChatButton } from './components/FloatingChatButton';
+import { CallLayer } from './components/CallLayer';
 import { LeaveManage } from './components/LeaveManage';
 import { ApproveApplications } from './components/ApproveApplications';
 import { Timesheet } from './components/Timesheet';
@@ -1205,6 +1206,10 @@ export default function App() {
           Hidden while the native in-app Chat page or this button's own popup
           is already open. */}
       <FloatingChatButton token={token || ''} onOpenChat={openChatPopup} hidden={showChat || showChatPopup} />
+
+      {/* Chat audio/video calls — rings on any page; only for accounts with
+          Calls access (Module Access -> "Also allow Audio / Video Calls"). */}
+      {token && user && (user.role === 'superadmin' || user.can_use_calls) && <CallLayer token={token} />}
 
       {/* Website only: offer desktop notifications once (WebPushPrompt.tsx). */}
       {token && user && <WebPushPrompt token={token} userId={user.id} />}

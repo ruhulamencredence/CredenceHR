@@ -601,6 +601,8 @@ export interface User {
   // Service -> Employee Directory deliberately has NO such flag — every
   // account keeps seeing it regardless (see GlobalSidebar.tsx).
   can_view_timesheet?: boolean;
+  // Chat audio/video calls (CallLayer.tsx) — Self Service switch, off by default.
+  can_use_calls?: boolean;
   can_view_leave_application?: boolean;
   can_view_my_leave?: boolean;
 }

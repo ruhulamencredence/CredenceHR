@@ -524,6 +524,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // One switch for Self Service -> Leave Application (apply + own balance —
   // the old separate "My Leave" page is part of it now).
   const [leaveApplicationAccessEnabled, setLeaveApplicationAccessEnabled] = useState(false);
+  // Chat audio/video calls (CallLayer.tsx) — off by default.
+  const [callsAccessEnabled, setCallsAccessEnabled] = useState(false);
   const [savingModules, setSavingModules] = useState(false);
 
   // Populates every Module Access form field (User Module toggles, Admin
@@ -545,6 +547,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     setBudgetModuleAccessEnabled(u.can_view_budget_module !== false);
     setTimesheetAccessEnabled(!!u.can_view_timesheet);
     setLeaveApplicationAccessEnabled(!!u.can_view_leave_application || !!u.can_view_my_leave);
+    setCallsAccessEnabled(!!u.can_use_calls);
     // Permission layers — one Set per module in PERMISSION_LAYER_MODULES.
     // Explicit saved rows win; a module this account already has granted
     // (u.module_permissions) but with NO saved layer rows yet falls back to
@@ -918,6 +921,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         });
         const laaData = await laaRes.json();
         if (!laaRes.ok) throw new Error(laaData.error || 'Failed to update Leave Application access');
+      }
+
+      if (callsAccessEnabled !== !!managingModulesFor.can_use_calls) {
+        const caRes = await fetch(apiUrl(`/api/users/${managingModulesFor.id}/calls-access`), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ can_use_calls: callsAccessEnabled })
+        });
+        const caData = await caRes.json();
+        if (!caRes.ok) throw new Error(caData.error || 'Failed to update Calls access');
       }
 
       setManagingModulesFor(null);
@@ -7242,6 +7255,31 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   <span
                     className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
                       leaveApplicationAccessEnabled ? 'translate-x-[18px]' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </label>
+              <label
+                className="flex items-center justify-between gap-3 p-3.5 mb-3 bg-sky-50 border border-sky-200 rounded-xl cursor-pointer"
+              >
+                <span>
+                  <span className="text-sm font-semibold text-slate-900 block">Also allow Audio / Video Calls</span>
+                  <span className="text-[11px] text-slate-500">
+                    Lets this {managingModulesFor.role === 'user' ? 'User' : 'Admin'} call, and be called by, other accounts
+                    with Calls from a one-to-one Chat. Off by default, like every other module here.
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setCallsAccessEnabled((v) => !v)}
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${
+                    callsAccessEnabled ? 'bg-emerald-500' : 'bg-slate-300'
+                  }`}
+                  title={callsAccessEnabled ? 'On — click to turn off' : 'Off — click to turn on'}
+                >
+                  <span
+                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                      callsAccessEnabled ? 'translate-x-[18px]' : 'translate-x-1'
                     }`}
                   />
                 </button>

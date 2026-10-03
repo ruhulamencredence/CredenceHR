@@ -67,4 +67,9 @@
          for RESOURCE_AUDIO_CAPTURE automatically once this manifest
          permission is granted at runtime, no custom native code needed. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Chat audio/video calls (CallLayer.tsx): camera for video calls, and
+         audio routing during a call. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
 </manifest>
