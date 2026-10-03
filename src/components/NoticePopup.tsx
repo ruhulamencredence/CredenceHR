@@ -1,9 +1,10 @@
-import React, { Suspense, lazy, useEffect, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { Lottie } from 'lottie-react';
 import { Bell, X } from 'lucide-react';
 import { ActiveNotice, User } from '../types';
 import { apiUrl } from '../lib/api';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
+import { NOTICES_CHANGED_EVENT } from '../lib/noticesLive';
 // Loaded only when a tracking notice is shown (it carries the journey
 // animation), so it stays out of the main bundle.
 const TrackingNoticeCard = lazy(() => import('./TrackingNoticeCard').then((m) => ({ default: m.TrackingNoticeCard })));
@@ -14,33 +15,53 @@ interface NoticePopupProps {
 }
 
 // Shows any Notice(s) a Superadmin/Admin has published for THIS user, as a modal
-// right after they land on their dashboard post-login. Fetches once per app
-// session (not on every navigation) and walks through the queue one at a time —
+// right after they land on their dashboard post-login, and live while the app
+// is open (fetched again on 'notices:changed'). Walks through the queue one at a time —
 // dismissing one immediately reveals the next, if there is one, without another
 // server round trip.
 export const NoticePopup: React.FC<NoticePopupProps> = ({ token, user }) => {
   const [queue, setQueue] = useState<ActiveNotice[]>([]);
   const [dismissing, setDismissing] = useState(false);
 
+  // Notices this session already closed (their dismiss call may still be on
+  // its way), so a refresh racing it doesn't bring one back.
+  const closedIds = useRef(new Set<number>());
+
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    const load = async () => {
       try {
         const res = await fetch(apiUrl('/api/notices/active'), {
           headers: { Authorization: `Bearer ${token}` }
         });
         if (!res.ok || cancelled) return;
         const data = await res.json();
-        if (!cancelled && Array.isArray(data) && data.length > 0) setQueue(data);
+        if (cancelled || !Array.isArray(data)) return;
+        const fresh = (data as ActiveNotice[]).filter((n) => !closedIds.current.has(n.id));
+        // Keep the one on screen where it is; new ones join the queue.
+        setQueue((prev) => {
+          const kept = prev.filter((p) => fresh.some((n) => n.id === p.id));
+          const added = fresh.filter((n) => !kept.some((p) => p.id === n.id));
+          return added.length === 0 && kept.length === prev.length ? prev : [...kept, ...added];
+        });
       } catch {
-        // Offline or server unreachable — silently skip; not worth blocking the
-        // dashboard over, and it'll be checked again next login.
+        // Offline or server unreachable — silently skip; checked again on the
+        // next refresh (socket reconnect, app back in front) or login.
       }
-    })();
+    };
+    void load();
+    // Live: a Notice published while the app is open (Socket.IO, see
+    // chatSocket.ts), a tapped notice push, or the app coming back to front.
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void load();
+    };
+    window.addEventListener(NOTICES_CHANGED_EVENT, load);
+    document.addEventListener('visibilitychange', onVisible);
     return () => {
       cancelled = true;
+      window.removeEventListener(NOTICES_CHANGED_EVENT, load);
+      document.removeEventListener('visibilitychange', onVisible);
     };
-    // Runs once per mount (i.e. once per login), not on every user/token change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -52,6 +73,7 @@ export const NoticePopup: React.FC<NoticePopupProps> = ({ token, user }) => {
   const handleDismiss = async (noticeId: number) => {
     if (dismissing) return;
     setDismissing(true);
+    closedIds.current.add(noticeId);
     // Optimistically advance the queue immediately — a failed dismiss call just
     // means this same notice may show again next login, which is harmless.
     setQueue((prev) => prev.slice(1));

@@ -58,6 +58,7 @@ import { syncWebPush, disableWebPush, listenWebPushOpens } from './lib/webPush';
 import { WebPushPrompt } from './components/WebPushPrompt';
 import { setActiveCompanyId } from './lib/company';
 import { DEVICE_REVOKED_EVENT, setSignedOutReason } from './lib/device';
+import { refreshNotices } from './lib/noticesLive';
 
 export default function App() {
   const [token, setToken] = useState<string | null>(localStorage.getItem('mpr_token'));
@@ -414,6 +415,13 @@ export default function App() {
     return listenWebPushOpens((d) => {
       setSelfServiceView(null);
       setShowProfilePage(false);
+      // A Notice: back to the dashboard, where its popup shows.
+      if (d.type === 'notice') {
+        setShowAlertsPage(false);
+        setShowChat(false);
+        refreshNotices();
+        return;
+      }
       if (d.roomId && Number(d.roomId)) {
         setShowAlertsPage(false);
         setPendingChatRoomId(Number(d.roomId));
@@ -435,10 +443,16 @@ export default function App() {
           setPendingChatRoomId(roomId);
           setShowChat(true);
         },
-        onAlertTap: () => {
+        onAlertTap: (a) => {
           setSelfServiceView(null);
           setShowProfilePage(false);
           setShowChat(false);
+          // A Notice: back to the dashboard, where its popup shows.
+          if (a.type === 'notice') {
+            setShowAlertsPage(false);
+            refreshNotices();
+            return;
+          }
           setShowAlertsPage(true);
         }
       });

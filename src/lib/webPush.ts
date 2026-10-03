@@ -171,15 +171,15 @@ export interface WebPushOpen {
 
 /**
  * Clicking a notification: an open CredenceHR tab gets a message from
- * public/sw.js; a new tab opens with ?open=chat&room=… or ?open=alerts.
+ * public/sw.js; a new tab opens with ?open=chat&room=…, ?open=notice or ?open=alerts.
  */
 export function listenWebPushOpens(onOpen: (d: WebPushOpen) => void): () => void {
   if (typeof window === 'undefined') return () => {};
   try {
     const q = new URLSearchParams(window.location.search);
     const open = q.get('open');
-    if (open === 'chat' || open === 'alerts') {
-      onOpen(open === 'chat' ? { roomId: q.get('room') || undefined } : {});
+    if (open === 'chat' || open === 'alerts' || open === 'notice') {
+      onOpen(open === 'chat' ? { roomId: q.get('room') || undefined } : open === 'notice' ? { type: 'notice' } : {});
       q.delete('open');
       q.delete('room');
       const rest = q.toString();

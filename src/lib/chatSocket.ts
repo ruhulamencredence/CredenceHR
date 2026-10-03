@@ -19,6 +19,7 @@
 // SocketIOServer(httpServer, ...)`), so this needs no separate host/port.
 
 import { io, Socket } from 'socket.io-client';
+import { refreshNotices } from './noticesLive';
 
 let socket: Socket | null = null;
 let connectedToken: string | null = null;
@@ -41,6 +42,10 @@ export function connectChatSocket(token: string): Socket {
     reconnectionDelay: 2000,
     reconnectionDelayMax: 15000
   });
+  // Notices (NoticePopup): a new one shows at once; after a reconnect, one
+  // published while the app was asleep/offline does too.
+  socket.on('notices:changed', refreshNotices);
+  socket.io.on('reconnect', refreshNotices);
   return socket;
 }
 
