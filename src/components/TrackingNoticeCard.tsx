@@ -15,7 +15,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { App } from '@capacitor/app';
-import { BatteryCharging, CheckCircle2, ChevronDown, ChevronUp, Circle, LocateFixed, MapPin, Smartphone, X } from 'lucide-react';
+import { BatteryCharging, Check, CheckCircle2, ChevronDown, ChevronUp, Circle, LocateFixed, MapPin, Smartphone, X } from 'lucide-react';
 import { Lottie } from 'lottie-react';
 import { ActiveNotice } from '../types';
 import journeyAnimation from '../assets/journey.json';
@@ -48,6 +48,20 @@ const STEPS: { icon: React.ComponentType<{ className?: string }>; title: string;
   { icon: Smartphone, title: 'Open CredenceHR', text: 'Come back to the CredenceHR app and stay signed in during working hours.' }
 ];
 
+// Shown once location is allowed all the time and tracking is running.
+const ThankYou: React.FC = () => (
+  <div className="overflow-y-auto px-6 pt-10 pb-2 flex flex-col items-center text-center">
+    <div className="liquid-glass-pop relative w-24 h-24 rounded-full flex items-center justify-center bg-gradient-to-b from-emerald-300 to-emerald-500 text-white shadow-[0_14px_30px_-10px_rgba(16,185,129,0.7),inset_0_2px_0_rgba(255,255,255,0.6)] ring-8 ring-white/50">
+      <Check className="w-12 h-12" strokeWidth={3} />
+    </div>
+    <h3 className="mt-6 text-2xl font-bold text-slate-900">Thank you!</h3>
+    <p className="mt-2 text-sm text-slate-700 leading-relaxed">
+      Location is now allowed <span className="font-semibold">all the time</span> and Employee Tracking is on. Thanks for setting it up so quickly.
+    </p>
+    <p className="mt-3 text-xs text-slate-500">Keep Location (GPS) on and stay signed in to CredenceHR during working hours.</p>
+  </div>
+);
+
 interface Props {
   notice: ActiveNotice;
   remaining: number;
@@ -66,6 +80,8 @@ export const TrackingNoticeCard: React.FC<Props> = ({ notice, remaining, busy, o
   // Set after an attempt that came back without "Allow all the time".
   const [stillMissing, setStillMissing] = useState(false);
   const allSet = !!access && access.foreground && access.background && access.locationOn;
+  // "Allow all the time" (and the rest) is on: the card turns into a thank-you.
+  const thanked = allSet;
 
   const refresh = useCallback(async () => {
     const s = await getLocationAccess();
@@ -147,26 +163,29 @@ export const TrackingNoticeCard: React.FC<Props> = ({ notice, remaining, busy, o
         : 'Set up Now';
 
   return (
-    <div className="fixed inset-0 z-[90] bg-slate-950/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-3 sm:p-4">
+    <div className="fixed inset-0 z-[90] liquid-glass-backdrop flex items-end sm:items-center justify-center p-3 sm:p-4">
       <div
         role="dialog"
         aria-label={notice.title}
-        className="bg-white rounded-[28px] max-w-sm w-full max-h-[92vh] flex flex-col overflow-hidden shadow-2xl relative"
+        className="liquid-glass liquid-glass-in rounded-[32px] max-w-sm w-full max-h-[92vh] flex flex-col overflow-hidden"
       >
         <button
           type="button"
           onClick={onDone}
-          className="absolute top-3 right-3 z-10 p-1.5 text-slate-500 bg-white/80 hover:bg-white rounded-full shadow-sm"
+          className="liquid-glass-chip absolute top-3.5 right-3.5 z-10 p-1.5 text-slate-600 hover:text-slate-900 rounded-full"
           aria-label="Close notice"
         >
           <X className="w-4 h-4" />
         </button>
 
+        {thanked ? (
+          <ThankYou />
+        ) : (
         <div className="overflow-y-auto">
           {/* Map */}
           <div className="p-3 pb-0">
             {/* Journey animation (src/assets/journey.json, 16:9). */}
-            <div className="aspect-video rounded-[22px] overflow-hidden border border-violet-100 bg-violet-50/40 pointer-events-none">
+            <div className="liquid-glass-inset aspect-video rounded-[24px] overflow-hidden pointer-events-none">
               <Lottie src={journeyAnimation as any} autoplay loop className="w-full h-full" />
             </div>
           </div>
@@ -175,7 +194,7 @@ export const TrackingNoticeCard: React.FC<Props> = ({ notice, remaining, busy, o
           <div className="px-6 pt-5">
             <h3 className="text-lg font-bold text-slate-900 leading-snug">{notice.title}</h3>
             <div
-              className="mt-2 text-sm text-slate-600 leading-relaxed [&_p+p]:mt-2"
+              className="mt-2 text-sm text-slate-700 leading-relaxed [&_p+p]:mt-2"
               dangerouslySetInnerHTML={{ __html: notice.content_html }}
             />
           </div>
@@ -183,7 +202,7 @@ export const TrackingNoticeCard: React.FC<Props> = ({ notice, remaining, busy, o
           {/* Android app: what's done so far */}
           {access && (
             <div className="px-6 pt-4">
-              <ul className="rounded-2xl border border-slate-200 divide-y divide-slate-100">
+              <ul className="liquid-glass-inset rounded-2xl divide-y divide-white/70">
                 {[
                   { ok: access.foreground, label: 'Location permission' },
                   { ok: access.background, label: 'Allow all the time' },
@@ -195,11 +214,6 @@ export const TrackingNoticeCard: React.FC<Props> = ({ notice, remaining, busy, o
                   </li>
                 ))}
               </ul>
-              {allSet && (
-                <p className="mt-3 text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
-                  All set — location tracking is on.{!access.precise && ' For better accuracy, also turn on "Use precise location".'}
-                </p>
-              )}
               {!allSet && stillMissing && (
                 <p className="mt-3 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
                   {access.foreground
@@ -224,7 +238,7 @@ export const TrackingNoticeCard: React.FC<Props> = ({ notice, remaining, busy, o
               <ol className="mt-3 space-y-3">
                 {(access ? APP_STEPS : STEPS).map((s, i) => (
                   <li key={s.title} className="flex gap-3">
-                    <span className="relative shrink-0 w-9 h-9 rounded-xl bg-violet-50 text-violet-700 flex items-center justify-center">
+                    <span className="liquid-glass-inset relative shrink-0 w-9 h-9 rounded-xl text-violet-700 flex items-center justify-center">
                       <s.icon className="w-4 h-4" />
                       <span className="absolute -top-1.5 -left-1.5 w-4 h-4 rounded-full bg-violet-600 text-white text-[9px] font-bold flex items-center justify-center">
                         {i + 1}
@@ -244,12 +258,13 @@ export const TrackingNoticeCard: React.FC<Props> = ({ notice, remaining, busy, o
               </p>
             )}
             {!isAndroidApp && (
-              <p className="mt-3 text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+              <p className="liquid-glass-inset mt-3 text-xs text-slate-600 rounded-lg px-3 py-2">
                 Tracking runs from the CredenceHR app on your phone. Open the app there and tap “Set up Now” to go straight to its location settings.
               </p>
             )}
           </div>
         </div>
+        )}
 
         {/* Action */}
         <div className="px-6 pt-4 pb-5 shrink-0">
@@ -257,8 +272,7 @@ export const TrackingNoticeCard: React.FC<Props> = ({ notice, remaining, busy, o
             type="button"
             onClick={setUpNow}
             disabled={busy || working}
-            className="w-full py-3 rounded-2xl text-white font-semibold shadow-[0_8px_20px_-6px_rgba(127,0,255,0.55)] disabled:opacity-50"
-            style={{ background: 'var(--g-accent, #7F00FF)' }}
+            className="liquid-glass-button w-full py-3 rounded-full font-semibold disabled:opacity-50"
           >
             {buttonLabel}
           </button>
@@ -268,7 +282,7 @@ export const TrackingNoticeCard: React.FC<Props> = ({ notice, remaining, busy, o
             </button>
           )}
           {remaining > 0 && (
-            <p className="mt-1.5 text-center text-[11px] text-slate-400">
+            <p className="mt-1.5 text-center text-[11px] text-slate-500">
               {remaining} more notice{remaining === 1 ? '' : 's'} waiting
             </p>
           )}
