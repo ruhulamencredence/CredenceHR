@@ -553,8 +553,11 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
          LEFT JOIN chat_messages rt ON rt.id = cm.reply_to_id
          LEFT JOIN users rtu ON rtu.id = rt.sender_id
          WHERE cm.room_id = ? AND cm.deleted_at IS NULL ${beforeId ? "AND cm.id < ?" : ""}
-         ORDER BY cm.id DESC LIMIT ?`,
-        beforeId ? [roomId, beforeId, limit] : [roomId, limit]
+         ORDER BY cm.id DESC LIMIT ${limit}`,
+        // LIMIT is written in (an integer clamped above) rather than bound:
+        // MySQL 8.0.22+ refuses a bound LIMIT that the driver sends as a
+        // double ("Incorrect arguments to mysqld_stmt_execute").
+        beforeId ? [roomId, beforeId] : [roomId]
       );
       res.json(rows.reverse()); // oldest-first, ready to append/prepend in the UI
     } catch (err: any) {

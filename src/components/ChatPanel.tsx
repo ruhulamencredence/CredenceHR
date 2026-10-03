@@ -14,6 +14,7 @@
 // see profileRoutes.ts). Either path ends up broadcasting the same
 // 'receive_message' socket event to every member's open ChatPanel.
 
+import { CHAT_CONVERSATION_BACKGROUND } from '../lib/backgroundTheme';
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { VoiceRecorder } from 'capacitor-voice-recorder';
@@ -1023,7 +1024,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
               )}
             </div>
 
-            <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-4 space-y-2">
+            <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-4 space-y-2" style={{ background: CHAT_CONVERSATION_BACKGROUND }}>
               {loadingMessages && <div className="text-center text-xs text-slate-400 py-4">Loading...</div>}
               {messages.map((msg) => {
                 const isMe = msg.sender_id === user.id;
