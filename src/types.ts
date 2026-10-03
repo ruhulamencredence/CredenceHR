@@ -1542,7 +1542,10 @@ export interface ActiveNotice {
   title: string;
   content_html: string;
   lottie_json?: string | null;
-  lottie_url?: string | null;
+ lottie_url?: string | null;
+  // 'tracking' = an Employee Tracking "turn on location" notice (NoticePopup
+  // shows it as the location set-up card).
+  source?: string | null;
   created_at?: string;
 }
 

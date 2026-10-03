@@ -238,6 +238,18 @@ export async function stopBackgroundTracking(): Promise<void> {
   mode = 'active';
 }
 
+// Opens this app's own page in the phone's Settings (Permissions -> Location),
+// for the Employee Tracking set-up card. Android app only; false elsewhere.
+export async function openAppLocationSettings(): Promise<boolean> {
+  if (!Capacitor.isNativePlatform() || Capacitor.getPlatform() !== 'android') return false;
+  try {
+    await BackgroundGeolocation.openSettings();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function isBackgroundTrackingActive(): boolean {
   return watcherId !== null;
 }
