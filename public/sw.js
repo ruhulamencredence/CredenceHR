@@ -41,7 +41,11 @@ self.addEventListener('notificationclick', (event) => {
           return;
         }
       }
-      const query = data.roomId ? `?open=chat&room=${encodeURIComponent(data.roomId)}` : '?open=alerts';
+      const query = data.roomId
+        ? `?open=chat&room=${encodeURIComponent(data.roomId)}`
+        : data.type === 'notice'
+          ? '?open=notice'
+          : '?open=alerts';
       await self.clients.openWindow('/' + query);
     })()
   );

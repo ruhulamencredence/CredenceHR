@@ -31,6 +31,7 @@ import { registerActiveUsersRoutes, ensureActiveUsersSchema, touchSession } from
 import { registerDataImportRoutes } from "./DataImportRoutes";
 import { registerCallRoutes, setupCallSocket } from "./CallRoutes";
 import { registerWebPushRoutes, ensureWebPushSchema } from "./WebPushService";
+import { sendPushToUserIds } from "./PushNotificationService";
 import { registerEmployeeDirectoryRoutes } from "./EmployeeDirectoryRoutes";
 import { registerExitOffboardingRoutes, ensureExitOffboardingSchema } from "./ExitOffboardingRoutes";
 import { registerPerformanceRoutes, ensurePerformanceSchema } from "./PerformanceRoutes";
@@ -125,6 +126,9 @@ function parseQtyNumber(value: any): number | null {
 }
 
 let dbPool: mysql.Pool | null = null;
+// Socket.IO server, set once it starts (see httpServer below); used to tell
+// open apps that a Notice was published.
+let liveIo: SocketIOServer | null = null;
 let isMySQLConnected = false;
 
 async function initDB() {
@@ -4685,6 +4689,33 @@ async function startServer() {
   // marked "Employee Tracking", with who has seen it), plus one
   // tracking_notice_recipients row per person recording why they weren't
   // tracked right then. Only people currently not tracked who have a login.
+  // A Notice was published (or brought back): open apps of its audience fetch
+  // /api/notices/active again and show the popup at once (Socket.IO), and a
+  // push notification reaches phones/browsers where the app isn't open —
+  // tapping it opens the app on the popup. "all" pings every open app (the
+  // fetch decides who actually sees it) and pushes to this company's users.
+  async function announceNotice(noticeId: number, title: string, audience: number[] | "all", senderId: number) {
+    try {
+      if (liveIo) {
+        if (audience === "all") liveIo.emit("notices:changed");
+        else for (const uid of audience) liveIo.to(`user:${uid}`).emit("notices:changed");
+      }
+      const ids =
+        audience === "all" ? ((await queryDB("SELECT id FROM users", [])) || []).map((u: any) => Number(u.id)) : audience.map(Number);
+      if (ids.length === 0) return;
+      await sendPushToUserIds(
+        queryDB,
+        ids,
+        "New notice",
+        String(title || "").slice(0, 120),
+        { type: "notice", relatedType: "notice", relatedId: String(noticeId) },
+        senderId
+      );
+    } catch (err: any) {
+      console.warn("⚠️ Notice announce failed: " + err.message);
+    }
+  }
+
   app.post("/api/tracking/notices", authenticateToken, requireAdmin, requireModule("tracking"), requireModule("notices"), async (req: any, res) => {
     try {
       const title = String(req.body?.title || "").trim();
@@ -4709,6 +4740,7 @@ async function startServer() {
           [noticeId, r.user_id, r.employee_pk, r.reason, r.last_ping || null, req.user.id]
         );
       }
+      void announceNotice(noticeId, title, rows.map((r) => Number(r.user_id)), req.user.id);
       res.status(201).json({ id: noticeId, sent_to: rows.length, skipped: wanted.size - rows.length });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -5542,6 +5574,10 @@ async function startServer() {
         }
       }
 
+      if (is_active !== false) {
+        const audience = resolvedTargetType === "specific" ? (Array.isArray(target_user_ids) ? target_user_ids.map(Number).filter(Number.isFinite) : []) : "all";
+        void announceNotice(noticeId, String(title).trim(), audience, req.user.id);
+      }
       res.status(201).json({ id: noticeId });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -5597,6 +5633,11 @@ async function startServer() {
       const existing = await queryDB("SELECT * FROM notices WHERE id = ?", [id]);
       if (existing.length === 0) return res.status(404).json({ error: "Notice not found" });
       await queryDB("UPDATE notices SET is_active = ? WHERE id = ?", [req.body.is_active ? 1 : 0, id]);
+      // Published again: show it live and push it, like a new one.
+      if (req.body.is_active && !Number(existing[0].is_active)) {
+        const targets: any[] = existing[0].target_type === "specific" ? (await queryDB("SELECT user_id FROM notice_targets WHERE notice_id = ?", [id])) || [] : [];
+        void announceNotice(id, existing[0].title, existing[0].target_type === "specific" ? targets.map((t) => Number(t.user_id)) : "all", req.user.id);
+      }
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -7687,6 +7728,7 @@ async function startServer() {
   // member management) come from registerChatRoutes; setupChatSocket wires
   // the live 'send_message'/'typing'/'presence_change' events on top of it.
   const io = new SocketIOServer(httpServer, { cors: { origin: "*" } });
+  liveIo = io;
 
   // Step 1 of making this app safe to run as more than one server process
   // behind a load balancer (needed once usage grows past what a single
