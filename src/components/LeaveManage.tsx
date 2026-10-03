@@ -15,11 +15,9 @@ interface LeaveManageProps {
 // Admin Panel > HRM > Leave > "Leave Manage" — reachable only for a Superadmin, or any
 // Admin/User the Superadmin has granted can_manage_leave to (Admin Panel ->
 // Users -> Module Access -> "Also allow editing Leave balances"); see
-// GlobalSidebar.tsx's canManageLeave gate on this menu item. Split out of the
-// old combined LeaveManagement.tsx — the plain "view only my own balance"
-// case that file used to also handle now lives in its own always-available
-// MyLeave.tsx page instead, so this page no longer needs (or renders) that
-// branch at all.
+// GlobalSidebar.tsx's canManageLeave gate on this menu item. An account's
+// own balance (view only) is on Self Service -> Leave Application
+// (LeaveReviewPage.tsx), so this page only ever manages everyone's.
 export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack }) => {
   const canManageAll = user.role === 'superadmin' || !!user.can_manage_leave;
   // Same isNativeApp split JobEditPanel.tsx already uses: the web build keeps

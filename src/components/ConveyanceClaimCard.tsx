@@ -38,7 +38,7 @@ const TABS: { key: ClaimTab; label: string }[] = [
 // submission history with status badges. Top header carries the "+ New Claim"
 // action; the body is the "My Conveyance Claims" history list.
 export const ConveyanceClaimCard: React.FC<ConveyanceClaimCardProps> = ({ token, onBack }) => {
-  // Same isNativeApp split as Timesheet.tsx/LeaveApplication.tsx — the
+  // Same isNativeApp split as Timesheet.tsx/LeaveManage.tsx — the
   // "Main / Conveyance Bill Claim" module-path breadcrumb is a web-only
   // affordance (native app users navigate this same page via the mobile
   // tile menu/bottom nav, so a breadcrumb trail above it is redundant there).

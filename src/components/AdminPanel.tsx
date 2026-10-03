@@ -518,11 +518,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // a Superadmin explicitly turns this off for one.
   const [budgetModuleAccessEnabled, setBudgetModuleAccessEnabled] = useState(true);
   // OFF by default, same pattern as movement/conveyance claim access above —
-  // gates Self Service -> Timesheet / Leave Application / My Leave. Employee
+  // gates Self Service -> Timesheet / Leave Application. Employee
   // Directory has no such toggle; every account keeps seeing it.
   const [timesheetAccessEnabled, setTimesheetAccessEnabled] = useState(false);
+  // One switch for Self Service -> Leave Application (apply + own balance —
+  // the old separate "My Leave" page is part of it now).
   const [leaveApplicationAccessEnabled, setLeaveApplicationAccessEnabled] = useState(false);
-  const [myLeaveAccessEnabled, setMyLeaveAccessEnabled] = useState(false);
   const [savingModules, setSavingModules] = useState(false);
 
   // Populates every Module Access form field (User Module toggles, Admin
@@ -543,8 +544,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     setConveyanceClaimAccessEnabled(!!u.can_view_conveyance_claims);
     setBudgetModuleAccessEnabled(u.can_view_budget_module !== false);
     setTimesheetAccessEnabled(!!u.can_view_timesheet);
-    setLeaveApplicationAccessEnabled(!!u.can_view_leave_application);
-    setMyLeaveAccessEnabled(!!u.can_view_my_leave);
+    setLeaveApplicationAccessEnabled(!!u.can_view_leave_application || !!u.can_view_my_leave);
     // Permission layers — one Set per module in PERMISSION_LAYER_MODULES.
     // Explicit saved rows win; a module this account already has granted
     // (u.module_permissions) but with NO saved layer rows yet falls back to
@@ -893,7 +893,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         if (!bmaRes.ok) throw new Error(bmaData.error || 'Failed to update Budget/Jobs access');
       }
 
-      // Also save the Timesheet / Leave Application / My Leave access toggles,
+      // Also save the Timesheet / Leave Application access toggles,
       // only if each changed — same "Superadmin-only, off by default" pattern
       // as Movement Claim/Conveyance Bill Claim above.
       if (timesheetAccessEnabled !== !!managingModulesFor.can_view_timesheet) {
@@ -905,7 +905,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         const tsaData = await tsaRes.json();
         if (!tsaRes.ok) throw new Error(tsaData.error || 'Failed to update Timesheet access');
       }
-      if (leaveApplicationAccessEnabled !== !!managingModulesFor.can_view_leave_application) {
+      // Saved whenever it differs from either old column, so an account that
+      // had only one of Leave Application / My Leave ends up with both.
+      if (
+        leaveApplicationAccessEnabled !== !!managingModulesFor.can_view_leave_application ||
+        leaveApplicationAccessEnabled !== !!managingModulesFor.can_view_my_leave
+      ) {
         const laaRes = await fetch(apiUrl(`/api/users/${managingModulesFor.id}/leave-application-access`), {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -913,15 +918,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         });
         const laaData = await laaRes.json();
         if (!laaRes.ok) throw new Error(laaData.error || 'Failed to update Leave Application access');
-      }
-      if (myLeaveAccessEnabled !== !!managingModulesFor.can_view_my_leave) {
-        const mlaRes = await fetch(apiUrl(`/api/users/${managingModulesFor.id}/my-leave-access`), {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ can_view_my_leave: myLeaveAccessEnabled })
-        });
-        const mlaData = await mlaRes.json();
-        if (!mlaRes.ok) throw new Error(mlaData.error || 'Failed to update My Leave access');
       }
 
       setManagingModulesFor(null);
@@ -7220,7 +7216,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   <span className="text-sm font-semibold text-slate-900 block">Also allow Leave Application</span>
                   <span className="text-[11px] text-slate-500">
                     Lets this {managingModulesFor.role === 'user' ? 'User' : 'Admin'} see and use Self Service → Leave
-                    Application (submit a new Leave request). Off by default, like every other module here.
+                    Application — apply for leave, follow their applications and see their own leave balance. Off by default,
+                    like every other module here.
                   </span>
                 </span>
                 <button
@@ -7234,31 +7231,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   <span
                     className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
                       leaveApplicationAccessEnabled ? 'translate-x-[18px]' : 'translate-x-1'
-                    }`}
-                  />
-                </button>
-              </label>
-              <label
-                className="flex items-center justify-between gap-3 p-3.5 mb-3 bg-sky-50 border border-sky-200 rounded-xl cursor-pointer"
-              >
-                <span>
-                  <span className="text-sm font-semibold text-slate-900 block">Also allow My Leave</span>
-                  <span className="text-[11px] text-slate-500">
-                    Lets this {managingModulesFor.role === 'user' ? 'User' : 'Admin'} see Self Service → My Leave (own
-                    Casual/Sick/Leave-without-Pay balance, read-only). Off by default, like every other module here.
-                  </span>
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setMyLeaveAccessEnabled((v) => !v)}
-                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${
-                    myLeaveAccessEnabled ? 'bg-emerald-500' : 'bg-slate-300'
-                  }`}
-                  title={myLeaveAccessEnabled ? 'On — click to turn off' : 'Off — click to turn on'}
-                >
-                  <span
-                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                      myLeaveAccessEnabled ? 'translate-x-[18px]' : 'translate-x-1'
                     }`}
                   />
                 </button>
@@ -7285,7 +7257,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   <span className="text-sm font-semibold text-slate-900 block">Also allow editing Leave balances</span>
                   <span className="text-[11px] text-slate-500">
                     Lets this {managingModulesFor.role === 'user' ? 'User' : 'Admin'} edit everyone's Casual/Sick/Leave-without-Pay
-                    balance on Self Service → Leave Management, the same as the Superadmin can.
+                    balance on Admin Panel → HRM → Leave → Leave Manage, the same as the Superadmin can.
                   </span>
                 </span>
                 <button

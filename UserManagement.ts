@@ -982,7 +982,9 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
 
   // Superadmin-only: grant/revoke a given Admin OR User account's ability to
   // see/use Self Service -> Leave Application at all — same on/off switch
-  // pattern as movement-claim-access above.
+  // pattern as movement-claim-access above. Leave Application and the old
+  // "My Leave" are one page now (LeaveReviewPage.tsx: apply + own balance),
+  // so this one switch sets both columns.
   app.put("/api/users/:id/leave-application-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
     try {
       const { id } = req.params;
@@ -994,16 +996,15 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
         return res.status(400).json({ error: "Leave Application access only applies to Admin and User accounts." });
       }
 
-      await queryDB("UPDATE users SET can_view_leave_application = ? WHERE id = ?", [canView ? 1 : 0, id]);
+      await queryDB("UPDATE users SET can_view_leave_application = ?, can_view_my_leave = ? WHERE id = ?", [canView ? 1 : 0, canView ? 1 : 0, id]);
       res.json({ success: true, can_view_leave_application: canView });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
   });
 
-  // Superadmin-only: grant/revoke a given Admin OR User account's ability to
-  // see/use Self Service -> My Leave at all — same on/off switch pattern as
-  // movement-claim-access above.
+  // Kept for older app builds that still send the separate "My Leave"
+  // switch — it now sets the same Leave Application access as the route above.
   app.put("/api/users/:id/my-leave-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
     try {
       const { id } = req.params;
@@ -1015,7 +1016,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
         return res.status(400).json({ error: "My Leave access only applies to Admin and User accounts." });
       }
 
-      await queryDB("UPDATE users SET can_view_my_leave = ? WHERE id = ?", [canView ? 1 : 0, id]);
+      await queryDB("UPDATE users SET can_view_leave_application = ?, can_view_my_leave = ? WHERE id = ?", [canView ? 1 : 0, canView ? 1 : 0, id]);
       res.json({ success: true, can_view_my_leave: canView });
     } catch (err: any) {
       res.status(500).json({ error: err.message });

@@ -785,6 +785,18 @@ async function ensureSchemaMigrations() {
     if (err.code !== 'ER_DUP_FIELDNAME') console.warn("⚠️ Could not add users.can_view_timesheet/can_view_leave_application/can_view_my_leave columns: " + err.message);
   }
   try {
+    // Leave Application and "My Leave" became one page with one access
+    // switch: an account that had either one has both (it could already open
+    // the page, and now can also submit from it). Only touches rows where the
+    // two differ, so it's a no-op on every restart after the first.
+    await dbPool.query(
+      `UPDATE users SET can_view_leave_application = 1, can_view_my_leave = 1
+       WHERE can_view_leave_application <> can_view_my_leave`
+    );
+  } catch (err: any) {
+    console.warn("⚠️ Could not merge Leave Application / My Leave access: " + err.message);
+  }
+  try {
     // Admin/Superadmin-granted per account (Admin Panel -> Users -> "Attend.
     // Project", right next to can_use_attendance): pins a 'user' OR 'admin'
     // account to exactly one Project for Remote Attendance. NULL by default
