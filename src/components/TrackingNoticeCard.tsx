@@ -5,7 +5,7 @@
 
 // The "turn on location tracking" notice (sent from Employee Tracking ->
 // Currently Not Tracked), shown by NoticePopup in place of the plain notice:
-// a map with a route on top, the message, step-by-step instructions for the
+// the journey animation on top, the message, step-by-step instructions for the
 // phone, and "Set up Now" — which in the Android app opens CredenceHR's own
 // page in the phone's Settings (Permissions -> Location). Same card on the
 // web, where the steps tell them what to do on the phone.
@@ -13,64 +13,10 @@
 import React, { useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { BatteryCharging, ChevronDown, ChevronUp, LocateFixed, MapPin, Smartphone, X } from 'lucide-react';
+import { Lottie } from 'lottie-react';
 import { ActiveNotice } from '../types';
+import journeyAnimation from '../assets/journey.json';
 import { openAppLocationSettings } from '../lib/backgroundTracking';
-
-// Map with a winding route from a start point to a location pin (the sketch).
-const RouteMap: React.FC = () => (
-  <svg viewBox="0 0 320 170" preserveAspectRatio="xMidYMid slice" className="w-full h-full" role="img" aria-label="Map with a route">
-    <defs>
-      <linearGradient id="tn-land" x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0" stopColor="#ecfdf5" />
-        <stop offset="1" stopColor="#e0f2fe" />
-      </linearGradient>
-      <filter id="tn-shadow" x="-50%" y="-50%" width="200%" height="200%">
-        <feDropShadow dx="0" dy="3" stdDeviation="3" floodColor="#7F00FF" floodOpacity="0.35" />
-      </filter>
-    </defs>
-    <rect width="320" height="170" fill="url(#tn-land)" />
-    {/* blocks and streets */}
-    <g fill="#ffffff" opacity="0.9">
-      <rect x="14" y="14" width="64" height="40" rx="6" />
-      <rect x="92" y="14" width="88" height="40" rx="6" />
-      <rect x="194" y="14" width="44" height="40" rx="6" />
-      <rect x="14" y="68" width="40" height="48" rx="6" />
-      <rect x="150" y="68" width="60" height="44" rx="6" />
-      <rect x="252" y="96" width="54" height="60" rx="6" />
-      <rect x="70" y="128" width="96" height="30" rx="6" />
-    </g>
-    <path d="M0 62 H320 M0 122 H320 M86 0 V170 M244 0 V170" stroke="#dbeafe" strokeWidth="6" />
-    <circle cx="214" cy="140" r="14" fill="#bbf7d0" opacity="0.8" />
-    <circle cx="40" cy="146" r="10" fill="#bbf7d0" opacity="0.8" />
-    {/* route */}
-    <path
-      d="M38 132 C 60 132, 62 92, 92 92 S 126 132, 150 128 S 176 74, 206 82 S 236 120, 262 74"
-      fill="none"
-      stroke="#7F00FF"
-      strokeOpacity="0.18"
-      strokeWidth="12"
-      strokeLinecap="round"
-    />
-    <path
-      d="M38 132 C 60 132, 62 92, 92 92 S 126 132, 150 128 S 176 74, 206 82 S 236 120, 262 74"
-      fill="none"
-      stroke="#7F00FF"
-      strokeWidth="4"
-      strokeLinecap="round"
-      strokeDasharray="2 9"
-    >
-      <animate attributeName="stroke-dashoffset" from="22" to="0" dur="1.2s" repeatCount="indefinite" />
-    </path>
-    {/* start */}
-    <circle cx="38" cy="132" r="9" fill="#ffffff" stroke="#7F00FF" strokeWidth="4" />
-    {/* pin */}
-    <g filter="url(#tn-shadow)" transform="translate(262 74)">
-      <path d="M0 0 C -14 -16, -16 -24, -16 -32 A16 16 0 1 1 16 -32 C 16 -24, 14 -16, 0 0 Z" fill="#7F00FF" />
-      <circle cx="0" cy="-32" r="6.5" fill="#ffffff" />
-    </g>
-    <ellipse cx="262" cy="76" rx="9" ry="3" fill="#7F00FF" opacity="0.25" />
-  </svg>
-);
 
 const STEPS: { icon: React.ComponentType<{ className?: string }>; title: string; text: string }[] = [
   { icon: LocateFixed, title: 'Turn on Location', text: "Swipe down from the top of the phone and tap Location (GPS) so it's on." },
@@ -126,8 +72,9 @@ export const TrackingNoticeCard: React.FC<Props> = ({ notice, remaining, busy, o
         <div className="overflow-y-auto">
           {/* Map */}
           <div className="p-3 pb-0">
-            <div className="h-40 rounded-[22px] overflow-hidden border border-violet-100">
-              <RouteMap />
+            {/* Journey animation (src/assets/journey.json, 16:9). */}
+            <div className="aspect-video rounded-[22px] overflow-hidden border border-violet-100 bg-violet-50/40 pointer-events-none">
+              <Lottie src={journeyAnimation as any} autoplay loop className="w-full h-full" />
             </div>
           </div>
 
