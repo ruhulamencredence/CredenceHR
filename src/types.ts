@@ -13,6 +13,11 @@ export const REPORTS_INSIGHTS_MODULES: AdminModuleKey[] = [
   'disbursement', 'leave_applications', 'asset_management', 'vehicle_management'
 ];
 
+// Admin Panel -> Data Import: shows for anyone holding at least one of the
+// modules its imports write into (each import is gated by its own module —
+// see DataImportRoutes.ts).
+export const DATA_IMPORT_MODULES: AdminModuleKey[] = ['employees', 'leave_applications', 'claims', 'conveyance', 'attendance', 'office_attendance'];
+
 export const ADMIN_MODULES: { key: AdminModuleKey; label: string }[] = [
   // Every role==='admin'|'superadmin' account already gets this as their own
   // home screen (see GlobalSidebar.tsx's isAdminRole) — listed here so a
@@ -1640,7 +1645,7 @@ export interface AdminNavRequest {
   // 'permanent_delete_log' is likewise NOT an AdminModuleKey/module_permissions
   // entry — Superadmin-only, see GET /api/entries/permanent-delete-log in
   // EntriesRoutes.ts.
-  target: 'dashboard' | 'reports_insights' | 'reports' | 'mprs' | 'imports' | 'editlog' | 'recycle' | 'projects' | 'branches' | 'users' | 'notices' | 'approvals' | 'attendance' | 'attendance_reports' | 'employees' | 'departments' | 'tracking' | 'holidays' | 'disbursement' | 'bill_claim_policy' | 'asset_management' | 'permanent_delete_log' | 'companies' | 'devices' | 'active_users' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'hr_operations';
+  target: 'dashboard' | 'reports_insights' | 'data_import' | 'reports' | 'mprs' | 'imports' | 'editlog' | 'recycle' | 'projects' | 'branches' | 'users' | 'notices' | 'approvals' | 'attendance' | 'attendance_reports' | 'employees' | 'departments' | 'tracking' | 'holidays' | 'disbursement' | 'bill_claim_policy' | 'asset_management' | 'permanent_delete_log' | 'companies' | 'devices' | 'active_users' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'hr_operations';
   ts: number;
 }
 
