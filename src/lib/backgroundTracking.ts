@@ -90,6 +90,10 @@ let pingTimer: ReturnType<typeof setInterval> | null = null;
 let idleCheckTimer: ReturnType<typeof setInterval> | null = null;
 let latestFix: BGLocation | null = null;
 let currentToken: string | null = null;
+// The token tracking was last asked to run for, kept even when starting
+// failed (no permission yet), so the set-up card can start it once the
+// permission is given.
+let requestedToken: string | null = null;
 let mode: 'active' | 'idle' = 'active';
 let lastFixAt = 0;
 let switchingMode = false;
@@ -188,6 +192,10 @@ async function switchMode(next: 'active' | 'idle') {
 // build or if tracking is already running for this token.
 export async function startBackgroundTracking(token: string): Promise<void> {
   if (!Capacitor.isNativePlatform()) return;
+  // Android only — the iPhone app is built without the background-location
+  // plugin (capacitor.config.ts -> ios.includePlugins).
+  if (Capacitor.getPlatform() === 'ios') return;
+  requestedToken = token;
   if (watcherId && currentToken === token) return; // already running for this account
   if (watcherId) await stopBackgroundTracking();
 
@@ -232,7 +240,17 @@ export async function stopBackgroundTracking(): Promise<void> {
   }
   latestFix = null;
   currentToken = null;
+  requestedToken = null;
   mode = 'active';
+}
+
+// Restarts tracking for the signed-in account after the set-up card got
+// "Allow all the time". No-op when tracking isn't on for this account.
+export async function restartBackgroundTracking(): Promise<void> {
+  const token = requestedToken;
+  if (!token) return;
+  await stopBackgroundTracking();
+  await startBackgroundTracking(token);
 }
 
 // Opens this app's own page in the phone's Settings (Permissions -> Location),
@@ -245,6 +263,65 @@ export async function openAppLocationSettings(): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+// Location access (LocationAccessPlugin.java, Android app only).
+export interface LocationAccessStatus {
+  foreground: boolean; // any location permission ("While using the app")
+  background: boolean; // "Allow all the time"
+  precise: boolean;
+  locationOn: boolean; // the phone's Location (GPS) switch
+}
+
+interface LocationAccessPlugin {
+  getStatus(): Promise<LocationAccessStatus>;
+  requestForeground(): Promise<LocationAccessStatus>;
+  requestBackground(): Promise<LocationAccessStatus>;
+  openAppSettings(): Promise<void>;
+  openLocationSettings(): Promise<void>;
+}
+
+const LocationAccess = registerPlugin<LocationAccessPlugin>('LocationAccess');
+
+const isAndroidApp = () => Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android';
+
+// null on the web/iPhone, or on an APK built before the plugin existed.
+export async function getLocationAccess(): Promise<LocationAccessStatus | null> {
+  if (!isAndroidApp()) return null;
+  try {
+    return await LocationAccess.getStatus();
+  } catch {
+    return null;
+  }
+}
+
+// Android answers at once, showing nothing, when the person has refused
+// this permission too often; then the only way left is the App info page.
+const NO_PROMPT_MS = 700;
+
+async function requestOrOpenSettings(
+  request: () => Promise<LocationAccessStatus>,
+  done: (s: LocationAccessStatus) => boolean
+): Promise<{ status: LocationAccessStatus; openedSettings: boolean }> {
+  const startedAt = Date.now();
+  const status = await request();
+  if (!done(status) && Date.now() - startedAt < NO_PROMPT_MS) {
+    await LocationAccess.openAppSettings();
+    return { status, openedSettings: true };
+  }
+  return { status, openedSettings: false };
+}
+
+// Step 1: the in-app dialog ("While using the app").
+export const requestForegroundLocation = () =>
+  requestOrOpenSettings(() => LocationAccess.requestForeground(), (s) => s.foreground);
+
+// Step 2: opens CredenceHR's Location permission page ("Allow all the time").
+export const requestAllTheTimeLocation = () =>
+  requestOrOpenSettings(() => LocationAccess.requestBackground(), (s) => s.background);
+
+export async function openPhoneLocationSwitch(): Promise<void> {
+  await LocationAccess.openLocationSettings();
 }
 
 export function isBackgroundTrackingActive(): boolean {
