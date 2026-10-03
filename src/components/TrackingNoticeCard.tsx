@@ -6,17 +6,36 @@
 // The "turn on location tracking" notice (sent from Employee Tracking ->
 // Currently Not Tracked), shown by NoticePopup in place of the plain notice:
 // the journey animation on top, the message, step-by-step instructions for the
-// phone, and "Set up Now" — which in the Android app opens CredenceHR's own
-// page in the phone's Settings (Permissions -> Location). Same card on the
-// web, where the steps tell them what to do on the phone.
+// phone, and "Set up Now". In the Android app that button walks through the
+// permission itself: the in-app dialog ("While using the app"), then
+// CredenceHR's Location permission page ("Allow all the time"), and checks
+// again when the person comes back, starting tracking once it's all there.
+// Same card on the web, where the steps tell them what to do on the phone.
 
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
-import { BatteryCharging, ChevronDown, ChevronUp, LocateFixed, MapPin, Smartphone, X } from 'lucide-react';
+import { App } from '@capacitor/app';
+import { BatteryCharging, CheckCircle2, ChevronDown, ChevronUp, Circle, LocateFixed, MapPin, Smartphone, X } from 'lucide-react';
 import { Lottie } from 'lottie-react';
 import { ActiveNotice } from '../types';
 import journeyAnimation from '../assets/journey.json';
-import { openAppLocationSettings } from '../lib/backgroundTracking';
+import {
+  getLocationAccess,
+  LocationAccessStatus,
+  openAppLocationSettings,
+  openPhoneLocationSwitch,
+  requestAllTheTimeLocation,
+  requestForegroundLocation,
+  restartBackgroundTracking
+} from '../lib/backgroundTracking';
+
+// In the Android app "Set up Now" does steps 1–2 itself.
+const APP_STEPS: { icon: React.ComponentType<{ className?: string }>; title: string; text: string }[] = [
+  { icon: MapPin, title: 'Tap Set up Now', text: 'Choose "While using the app" in the box that appears.' },
+  { icon: MapPin, title: 'Choose "Allow all the time"', text: 'The Location page for CredenceHR opens — tap "Allow all the time", turn on "Use precise location", then go back.' },
+  { icon: LocateFixed, title: 'Turn on Location', text: "If the phone's Location (GPS) is off, turn it on." },
+  { icon: BatteryCharging, title: 'Let it run in the background', text: 'Settings → Apps → CredenceHR → Battery → "Unrestricted", so the phone doesn\'t stop tracking.' }
+];
 
 const STEPS: { icon: React.ComponentType<{ className?: string }>; title: string; text: string }[] = [
   { icon: LocateFixed, title: 'Turn on Location', text: "Swipe down from the top of the phone and tap Location (GPS) so it's on." },
@@ -38,20 +57,94 @@ interface Props {
 
 export const TrackingNoticeCard: React.FC<Props> = ({ notice, remaining, busy, onDone }) => {
   const isAndroidApp = Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android';
-  const [showSteps, setShowSteps] = useState(true);
+  const [showSteps, setShowSteps] = useState(!isAndroidApp);
   const [settingsFailed, setSettingsFailed] = useState(false);
+  // Android app: what the phone has now. undefined = not read yet; null = an
+  // APK without the LocationAccess plugin (falls back to opening Settings).
+  const [access, setAccess] = useState<LocationAccessStatus | null | undefined>(isAndroidApp ? undefined : null);
+  const [working, setWorking] = useState(false);
+  // Set after an attempt that came back without "Allow all the time".
+  const [stillMissing, setStillMissing] = useState(false);
+  const allSet = !!access && access.foreground && access.background && access.locationOn;
 
-  const setUpNow = async () => {
-    if (isAndroidApp) {
-      const opened = await openAppLocationSettings();
-      if (!opened) {
-        setSettingsFailed(true);
-        setShowSteps(true);
-        return;
-      }
+  const refresh = useCallback(async () => {
+    const s = await getLocationAccess();
+    setAccess(s);
+    return s;
+  }, []);
+
+  useEffect(() => {
+    if (!isAndroidApp) return;
+    void refresh();
+    // Back from Settings (App info page or the Location switch): read again.
+    const sub = App.addListener('resume', () => void refresh());
+    return () => {
+      void sub.then((h) => h.remove());
+    };
+  }, [isAndroidApp, refresh]);
+
+  // Once "All the time" is there, (re)start tracking with it.
+  const [restarted, setRestarted] = useState(false);
+  useEffect(() => {
+    if (!allSet || restarted) return;
+    setRestarted(true);
+    setStillMissing(false);
+    void restartBackgroundTracking();
+  }, [allSet, restarted]);
+
+  const oldApkSetUp = async () => {
+    const opened = await openAppLocationSettings();
+    if (!opened) {
+      setSettingsFailed(true);
+      setShowSteps(true);
+      return;
     }
     onDone();
   };
+
+  const setUpNow = async () => {
+    if (!isAndroidApp) return onDone();
+    if (access === null) return oldApkSetUp();
+    if (!access || allSet) return onDone();
+    setWorking(true);
+    try {
+      let s: LocationAccessStatus = access;
+      // 1. The in-app dialog: "While using the app".
+      if (!s.foreground) {
+        const r = await requestForegroundLocation();
+        if (r.openedSettings) return; // read again on 'resume'
+        s = r.status;
+        if (!s.foreground) {
+          setAccess(s);
+          setStillMissing(true);
+          return;
+        }
+      }
+      // 2. CredenceHR's Location permission page: "Allow all the time".
+      if (!s.background) {
+        const r = await requestAllTheTimeLocation();
+        if (r.openedSettings) return;
+        s = r.status;
+        if (!s.background) setStillMissing(true);
+      }
+      // 3. The phone's Location switch.
+      if (s.background && !s.locationOn) await openPhoneLocationSwitch();
+      setAccess(s);
+    } catch {
+      setSettingsFailed(true);
+      setShowSteps(true);
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  const buttonLabel = !isAndroidApp
+    ? 'OK, I’ll set it up on my phone'
+    : allSet
+      ? 'Done'
+      : access && access.foreground && access.background && !access.locationOn
+        ? 'Turn on Location'
+        : 'Set up Now';
 
   return (
     <div className="fixed inset-0 z-[90] bg-slate-950/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-3 sm:p-4">
@@ -87,6 +180,36 @@ export const TrackingNoticeCard: React.FC<Props> = ({ notice, remaining, busy, o
             />
           </div>
 
+          {/* Android app: what's done so far */}
+          {access && (
+            <div className="px-6 pt-4">
+              <ul className="rounded-2xl border border-slate-200 divide-y divide-slate-100">
+                {[
+                  { ok: access.foreground, label: 'Location permission' },
+                  { ok: access.background, label: 'Allow all the time' },
+                  { ok: access.locationOn, label: 'Location (GPS) on' }
+                ].map((r) => (
+                  <li key={r.label} className="flex items-center gap-2.5 px-3 py-2 text-sm">
+                    {r.ok ? <CheckCircle2 className="w-4 h-4 text-emerald-600" /> : <Circle className="w-4 h-4 text-slate-300" />}
+                    <span className={r.ok ? 'text-slate-800 font-medium' : 'text-slate-500'}>{r.label}</span>
+                  </li>
+                ))}
+              </ul>
+              {allSet && (
+                <p className="mt-3 text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+                  All set — location tracking is on.{!access.precise && ' For better accuracy, also turn on "Use precise location".'}
+                </p>
+              )}
+              {!allSet && stillMissing && (
+                <p className="mt-3 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                  {access.foreground
+                    ? 'Location is still not set to "Allow all the time". Tap Set up Now again and choose "Allow all the time" on the page that opens.'
+                    : 'Location permission was not given. Tap Set up Now again and choose "While using the app".'}
+                </p>
+              )}
+            </div>
+          )}
+
           {/* Tutorial */}
           <div className="px-6 pt-4">
             <button
@@ -99,7 +222,7 @@ export const TrackingNoticeCard: React.FC<Props> = ({ notice, remaining, busy, o
             </button>
             {showSteps && (
               <ol className="mt-3 space-y-3">
-                {STEPS.map((s, i) => (
+                {(access ? APP_STEPS : STEPS).map((s, i) => (
                   <li key={s.title} className="flex gap-3">
                     <span className="relative shrink-0 w-9 h-9 rounded-xl bg-violet-50 text-violet-700 flex items-center justify-center">
                       <s.icon className="w-4 h-4" />
@@ -133,13 +256,13 @@ export const TrackingNoticeCard: React.FC<Props> = ({ notice, remaining, busy, o
           <button
             type="button"
             onClick={setUpNow}
-            disabled={busy}
+            disabled={busy || working}
             className="w-full py-3 rounded-2xl text-white font-semibold shadow-[0_8px_20px_-6px_rgba(127,0,255,0.55)] disabled:opacity-50"
             style={{ background: 'var(--g-accent, #7F00FF)' }}
           >
-            {isAndroidApp ? 'Set up Now' : 'OK, I’ll set it up on my phone'}
+            {buttonLabel}
           </button>
-          {isAndroidApp && (
+          {isAndroidApp && !allSet && (
             <button type="button" onClick={onDone} className="w-full mt-2 py-1.5 text-xs font-semibold text-slate-500">
               Later
             </button>
