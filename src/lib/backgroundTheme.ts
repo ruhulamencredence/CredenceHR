@@ -17,7 +17,7 @@
 // background-attachment: fixed (already set on body in index.css) keeps it
 // anchored to the viewport either way, rather than scrolling with content.
 
-export type BackgroundThemeId = 'default' | 'violet' | 'deep-violet' | 'sunset' | 'frosted-glass';
+export type BackgroundThemeId = 'default' | 'violet' | 'deep-violet' | 'sunset' | 'frosted-glass' | 'apple-glow';
 
 export interface BackgroundTheme {
   id: BackgroundThemeId;
@@ -77,6 +77,22 @@ export const BACKGROUND_THEMES: BackgroundTheme[] = [
       'radial-gradient(ellipse 70% 30% at 50% 0%, rgba(255,255,255,0.75) 0%, rgba(255,255,255,0) 70%)',
       `${FROSTED_GLASS_STRIPS} center top / 312px 760px repeat-x`,
       'linear-gradient(180deg, #e8eae9 0%, #cdd1cf 45%, #b6bbb9 100%)'
+    ].join(', ')
+  },
+  {
+    // Apple-style light glow: an almost white page with soft lavender and
+    // violet light pooling at the corners and a bright white bloom in the
+    // middle, so cards read cleanly on top.
+    id: 'apple-glow',
+    label: 'Apple Glow',
+    swatch: '#EFE7FF',
+    gradient: [
+      'radial-gradient(ellipse 55% 45% at 50% 38%, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0) 70%)',
+      'radial-gradient(ellipse 60% 50% at 0% 0%, rgba(196,170,255,0.55) 0%, rgba(196,170,255,0) 65%)',
+      'radial-gradient(ellipse 55% 45% at 100% 8%, rgba(232,206,255,0.7) 0%, rgba(232,206,255,0) 65%)',
+      'radial-gradient(ellipse 70% 45% at 85% 100%, rgba(170,140,255,0.4) 0%, rgba(170,140,255,0) 70%)',
+      'radial-gradient(ellipse 60% 40% at 10% 95%, rgba(240,220,255,0.75) 0%, rgba(240,220,255,0) 70%)',
+      'linear-gradient(180deg, #fdfcff 0%, #f7f3ff 55%, #f2ecff 100%)'
     ].join(', ')
   }
 ];
