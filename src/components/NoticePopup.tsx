@@ -1,10 +1,12 @@
-import React, { useEffect, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useState } from 'react';
 import { Lottie } from 'lottie-react';
 import { Bell, X } from 'lucide-react';
 import { ActiveNotice, User } from '../types';
 import { apiUrl } from '../lib/api';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
-import { TrackingNoticeCard } from './TrackingNoticeCard';
+// Loaded only when a tracking notice is shown (it carries the journey
+// animation), so it stays out of the main bundle.
+const TrackingNoticeCard = lazy(() => import('./TrackingNoticeCard').then((m) => ({ default: m.TrackingNoticeCard })));
 
 interface NoticePopupProps {
   token: string;
@@ -69,7 +71,11 @@ export const NoticePopup: React.FC<NoticePopupProps> = ({ token, user }) => {
 
   // Employee Tracking "turn on location" notices get their own set-up card.
   if (current.source === 'tracking') {
-    return <TrackingNoticeCard notice={current} remaining={queue.length - 1} busy={dismissing} onDone={() => handleDismiss(current.id)} />;
+    return (
+      <Suspense fallback={null}>
+        <TrackingNoticeCard notice={current} remaining={queue.length - 1} busy={dismissing} onDone={() => handleDismiss(current.id)} />
+      </Suspense>
+    );
   }
 
   const lottieSrc: any = current.lottie_json
