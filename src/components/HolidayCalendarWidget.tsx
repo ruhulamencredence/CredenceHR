@@ -7,6 +7,21 @@ import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react';
 import { HolidayEntry } from '../types';
 import { apiUrl, dedupedFetchJson } from '../lib/api';
+import {
+  BENGALI_GREGORIAN_MONTHS,
+  BENGALI_WEEKDAYS_SHORT,
+  CalendarSystem,
+  altMonthTitle,
+  toBengaliDate,
+  toBengaliDigits,
+  toHijriDate
+} from '../lib/altCalendars';
+
+const CALENDAR_SYSTEMS: { id: CalendarSystem; label: string }[] = [
+  { id: 'english', label: 'English' },
+  { id: 'bengali', label: 'বাংলা' },
+  { id: 'hijri', label: 'Hijri' }
+];
 
 interface HolidayCalendarWidgetProps {
   token: string;
@@ -77,6 +92,23 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
   const [calYear, setCalYear] = useState(now.getFullYear());
   const [calMonth, setCalMonth] = useState(now.getMonth()); // 0-indexed
   const todayStr = toDateStr(now.getFullYear(), now.getMonth(), now.getDate());
+  // English / বাংলা / Hijri — always opens on English.
+  const [system, setSystem] = useState<CalendarSystem>('english');
+  const bn = system === 'bengali';
+
+  // The big number in a day cell is that calendar's own date; under
+  // বাংলা / Hijri the English date sits small beneath it.
+  const cellDates = (cell: GridCell): { main: string; sub: string | null } => {
+    if (system === 'english') return { main: String(cell.day), sub: null };
+    const [y, m, d] = cell.dateStr.split('-').map(Number);
+    const alt = bn ? toBengaliDate(y, m - 1, d) : toHijriDate(y, m - 1, d);
+    if (!alt) return { main: String(cell.day), sub: null };
+    return bn ? { main: toBengaliDigits(alt.day), sub: String(cell.day) } : { main: String(alt.day), sub: String(cell.day) };
+  };
+  const dayTypeLabel = (t: string) => (t === 'weekend' ? (bn ? 'সাপ্তাহিক' : 'Weekend') : bn ? 'ছুটি' : 'Holiday');
+  const weekdayLabels = bn ? BENGALI_WEEKDAYS_SHORT : WEEKDAY_LABELS;
+  const altTitle = altMonthTitle(system, calYear, calMonth);
+  const englishTitle = bn ? `${BENGALI_GREGORIAN_MONTHS[calMonth]} ${toBengaliDigits(calYear)}` : `${MONTH_LABELS[calMonth]} ${calYear}`;
 
   const fetchHolidays = useCallback(async () => {
     setLoading(true);
@@ -174,13 +206,16 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
             : 'flex items-center justify-between border-b border-white/50 px-4 py-3'
         }
       >
-        <div className="flex items-center gap-2">
-          <CalendarDays className={large ? 'w-5 h-5 text-blue-600' : 'w-4 h-4 text-blue-600'} />
-          <span className={large ? 'text-lg font-bold text-slate-900' : 'text-sm font-bold text-slate-900'}>
-            {MONTH_LABELS[calMonth]} {calYear}
-          </span>
+        <div className="flex items-center gap-2 min-w-0">
+          <CalendarDays className={`shrink-0 ${large ? 'w-5 h-5 text-blue-600' : 'w-4 h-4 text-blue-600'}`} />
+          <div className="min-w-0">
+            <div className={large ? 'text-lg font-bold text-slate-900 leading-tight' : 'text-sm font-bold text-slate-900 leading-tight'}>
+              {altTitle || englishTitle}
+            </div>
+            {altTitle && <div className={`text-slate-500 font-medium ${large ? 'text-xs' : 'text-[10px]'}`}>{englishTitle}</div>}
+          </div>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1 shrink-0">
           <button
             type="button"
             onClick={goPrevMonth}
@@ -204,10 +239,29 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
         </div>
       </div>
 
+      <div className={`flex justify-center ${large ? 'px-6 pt-3' : 'px-4 pt-2.5 pb-2.5 border-b border-white/40'}`}>
+        <div className="inline-flex rounded-full bg-slate-100/80 p-0.5" role="tablist" aria-label="Calendar">
+          {CALENDAR_SYSTEMS.map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              role="tab"
+              aria-selected={system === c.id}
+              onClick={() => setSystem(c.id)}
+              className={`rounded-full font-semibold transition-colors ${large ? 'px-4 py-1.5 text-xs' : 'px-3 py-1 text-[11px]'} ${
+                system === c.id ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              {c.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {large ? (
         <div className="px-5 pt-4">
           <div className="grid grid-cols-7">
-            {WEEKDAY_LABELS.map((w, i) => (
+            {weekdayLabels.map((w, i) => (
               <div key={i} className="text-center font-bold uppercase tracking-wide text-slate-400 text-xs pb-2">
                 {w}
               </div>
@@ -217,12 +271,13 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
             {gridCells.map((cell) => {
               const entry = entryByDate.get(cell.dateStr);
               const isToday = cell.dateStr === todayStr;
+              const dates = cellDates(cell);
               // Bigger square cells with room for a day-type label under the
               // number, same look HolidayCalendarPanel's own Admin grid uses.
               return (
                 <div
                   key={cell.dateStr}
-                  title={entry ? `${entry.title} (${entry.day_type === 'weekend' ? 'Weekend' : 'Holiday'})` : undefined}
+                  title={entry ? `${entry.title} (${dayTypeLabel(entry.day_type)})` : undefined}
                   className={`h-16 flex flex-col items-center justify-center gap-0.5 rounded-xl text-sm ${
                     !cell.inCurrentMonth
                       ? 'text-slate-200'
@@ -235,10 +290,11 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
                           : 'text-slate-700 hover:bg-slate-50'
                   }`}
                 >
-                  <span className="font-semibold">{cell.day}</span>
+                  <span className="font-semibold leading-none">{dates.main}</span>
+                  {dates.sub && <span className={`text-[10px] leading-none ${isToday && cell.inCurrentMonth ? 'text-white/80' : 'opacity-60'}`}>{dates.sub}</span>}
                   {entry && cell.inCurrentMonth && (
                     <span className="text-[10px] font-bold uppercase tracking-wide">
-                      {entry.day_type === 'weekend' ? 'Weekend' : 'Holiday'}
+                      {dayTypeLabel(entry.day_type)}
                     </span>
                   )}
                 </div>
@@ -257,7 +313,7 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
         // Admin grid reaching its bordered container's edges.
         <div onTouchStart={onGridTouchStart} onTouchEnd={onGridTouchEnd}>
           <div className="grid grid-cols-7 bg-white/30 backdrop-blur border-b border-white/40">
-            {WEEKDAY_LABELS.map((w, i) => (
+            {weekdayLabels.map((w, i) => (
               <div key={i} className="py-2 text-center text-[10px] font-bold uppercase tracking-wide text-slate-500">
                 {w}
               </div>
@@ -267,11 +323,12 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
             {gridCells.map((cell) => {
               const entry = entryByDate.get(cell.dateStr);
               const isToday = cell.dateStr === todayStr;
+              const dates = cellDates(cell);
               return (
                 <div
                   key={cell.dateStr}
-                  title={entry ? `${entry.title} (${entry.day_type === 'weekend' ? 'Weekend' : 'Holiday'})` : undefined}
-                  className={`relative h-12 flex flex-col items-center justify-center gap-0.5 border-b border-r border-white/40 text-[11px] backdrop-blur transition-colors ${
+                  title={entry ? `${entry.title} (${dayTypeLabel(entry.day_type)})` : undefined}
+                  className={`relative ${dates.sub ? 'h-14' : 'h-12'} flex flex-col items-center justify-center gap-0.5 border-b border-r border-white/40 text-[11px] backdrop-blur transition-colors ${
                     !cell.inCurrentMonth
                       ? 'text-slate-300'
                       : entry
@@ -286,11 +343,12 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
                       isToday && cell.inCurrentMonth ? 'w-5 h-5 rounded-full bg-blue-600 text-white flex items-center justify-center' : ''
                     }`}
                   >
-                    {cell.day}
+                    {dates.main}
                   </span>
+                  {dates.sub && <span className="text-[8px] leading-none opacity-60">{dates.sub}</span>}
                   {entry && cell.inCurrentMonth && (
                     <span className="text-[7px] font-bold uppercase tracking-wide truncate max-w-[90%]">
-                      {entry.day_type === 'weekend' ? 'Weekend' : 'Holiday'}
+                      {dayTypeLabel(entry.day_type)}
                     </span>
                   )}
                 </div>
@@ -308,10 +366,10 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
         }
       >
         <span className="flex items-center gap-1.5">
-          <span className="w-2.5 h-2.5 rounded-full bg-amber-400" /> Holiday
+          <span className="w-2.5 h-2.5 rounded-full bg-amber-400" /> {dayTypeLabel('holiday')}
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="w-2.5 h-2.5 rounded-full bg-sky-400" /> Weekend
+          <span className="w-2.5 h-2.5 rounded-full bg-sky-400" /> {dayTypeLabel('weekend')}
         </span>
         {loading && <span className="ml-auto text-slate-300">Loading…</span>}
       </div>
