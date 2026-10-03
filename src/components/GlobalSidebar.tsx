@@ -48,7 +48,7 @@ interface GlobalSidebarProps {
   onGoToUserClaims: (target: 'movementClaims' | 'conveyanceBill') => void;
   // Everyday employee self-service items — not Admin-gated, shown to every
   // account regardless of role/module access.
-  onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance') => void;
+  onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks') => void;
   // Admin Panel's own Movement Claims / Conveyance Bill Claim review tabs —
   // separate feature from onGoToUserClaims above, gated by module_permissions
   // like every other Admin Panel module.
@@ -318,6 +318,11 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   selfServiceItems.push({ key: 'myLetters', label: 'My Letters & Service Record', icon: FileText, onClick: () => onGoToSelfServiceTab('myLetters') });
   // Team Attendance (TeamAttendance.tsx) — only for accounts HR made the
   // supervisor (or backup) of a Site Attendance team.
+  // My Tasks (MyTasks.tsx) — tasks given to me, requests to HR, a
+  // department head's team tasks. Off until turned on in Module Access.
+  if (isSuperAdmin || !!user.can_view_tasks || canSeeModule('task_management')) {
+    selfServiceItems.push({ key: 'myTasks', label: 'My Tasks', icon: ListChecks, onClick: () => onGoToSelfServiceTab('myTasks') });
+  }
   if (siteSupervisor.teams > 0) {
     selfServiceItems.push({ key: 'teamAttendance', label: 'Team Attendance', icon: ClipboardCheck, onClick: () => onGoToSelfServiceTab('teamAttendance') });
   }
@@ -430,6 +435,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     { key: 'approvals', label: 'Approval Chain', icon: ShieldCheck, onClick: () => onGoToAdminModule('approvals') },
     { key: 'notices', label: 'Notices', icon: Bell, onClick: () => onGoToAdminModule('notices') },
     { key: 'holidays', label: 'Holidays', icon: Calendar, onClick: () => onGoToAdminModule('holidays') },
+    { key: 'task_management', label: 'Task Management', icon: ClipboardList, onClick: () => onGoToAdminModule('task_management') },
     ...departmentsItem,
   ].filter((i) => canSeeModule(i.key as AdminModuleKey));
 
