@@ -34,6 +34,7 @@ import {
 } from 'lucide-react';
 import { User } from '../types';
 import { apiUrl } from '../lib/api';
+import { useMyCompanies } from '../lib/company';
 
 interface AdminDashboardProps {
   token: string;
@@ -239,6 +240,18 @@ function groupByDepartment(entries: BreakdownEntry[]): DepartmentGroup[] {
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onNavigate }) => {
   const authHeaders = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
+  // Employees, attendance and leave: in the mother company the server answers
+  // these for the whole group (mother + sister companies); in a sister
+  // company, for that company only.
+  const groupHeaders = useMemo(() => ({ ...authHeaders, 'X-Company-Scope': 'group' }), [authHeaders]);
+  // In a sister company Quick View lists only that company's own employees
+  // (not someone from another company who may also sign in to it).
+  const myCompanies = useMyCompanies(token);
+  const sisterCompanyId = useMemo(() => {
+    if (!myCompanies) return null;
+    const active = myCompanies.companies.find((c) => c.id === myCompanies.active_company_id);
+    return active && !active.is_mother ? active.id : null;
+  }, [myCompanies]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [quickViewDetail, setQuickViewDetail] = useState<QuickViewFilter | null>(null);
@@ -278,17 +291,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
         // report is the one already gated by the grantable 'leave_applications'
         // module, so an account granted Admin Dashboard + Monthly Leave
         // Application sees real figures here too, not just a Superadmin.
-        safeGet<any[]>('/api/leave-applications/report', authHeaders),
+        safeGet<any[]>('/api/leave-applications/report', groupHeaders),
         safeGet<any[]>('/api/leave-balances', authHeaders),
         safeGet<any[]>('/api/payroll/advance-requests?status=pending', authHeaders),
         safeGet<any[]>('/api/assets/requisitions?status=pending', authHeaders),
         safeGet<any[]>('/api/user-claims', authHeaders),
         safeGet<any[]>('/api/conveyance-bills', authHeaders),
         safeGet<any[]>('/api/notices/active', authHeaders),
-        safeGet<any[]>('/api/employee-directory', authHeaders),
+        safeGet<any[]>('/api/employee-directory', groupHeaders),
         safeGet<{ year: number; month: number; days_in_month: number; users: any[] }>(
           `/api/attendance/report/monthly?year=${now0.getFullYear()}&month=${now0.getMonth() + 1}`,
-          authHeaders
+          groupHeaders
         ),
         safeGet<any[]>('/api/holidays', authHeaders),
         safeGet<any[]>('/api/payroll/late-policy', authHeaders),
@@ -456,8 +469,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
       thresholdMinutes = h * 60 + m + Number(latePolicy.grace_minutes || 0);
       extremeThresholdMinutes = h * 60 + m + Number(latePolicy.extreme_grace_minutes || 60);
     }
+    // Only the employees the attendance report covers — the company (or, in
+    // the mother company, the whole group). The directory can be wider: it
+    // shows a Superadmin the whole group from any company.
     const rows = employees
-      .filter((e) => e.is_active && e.user_id)
+      .filter((e) => e.is_active && e.user_id && byUser.has(Number(e.user_id)))
+      .filter((e) => sisterCompanyId == null || e.company_id == null || Number(e.company_id) === sisterCompanyId)
       .map((e) => {
         const u = byUser.get(Number(e.user_id));
         const d = u?.days?.[todayDay - 1];
@@ -507,7 +524,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
     });
     const q = search.trim().toLowerCase();
     return q ? withLeave.filter((r) => r.name.toLowerCase().includes(q) || r.designation.toLowerCase().includes(q)) : withLeave;
-  }, [employees, attendanceReport, latePolicy, leaveApplications, today, search, onLeaveTodayEntries]);
+  }, [employees, attendanceReport, latePolicy, leaveApplications, today, search, onLeaveTodayEntries, sisterCompanyId]);
 
   // Summary badges above the Quick View table — Total/Present/Absent/Leave/
   // Delay/Extreme Delay are all real counts from the data above.

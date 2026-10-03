@@ -44,7 +44,7 @@ import { registerInfoRequestRoutes, ensureInfoRequestsSchema } from "./HrOpsInfo
 import { registerSiteAttendanceRoutes, ensureSiteAttendanceSchema } from "./SiteAttendanceRoutes";
 import { registerBillClaimPolicyRoutes, ensureBillClaimPolicySchema } from "./BillClaimPolicy";
 import { registerCompanyRoutes, ensureCompanySchema, resolveCompanyContext, checkWorkspaceLogin, workspaceStartCompany } from "./CompanyRoutes";
-import { companyStore, activeCompanyId, activeGroupId } from "./companyContext";
+import { companyStore, activeCompanyId, activeGroupId, type CompanyContext } from "./companyContext";
 import { scopeSql, scopeColumnsFor } from "./companyScope";
 import { registerHRAnalyticsRoutes } from "./HRAnalyticsRoutes";
 import { registerDocumentVaultRoutes, ensureDocumentVaultSchema } from "./DocumentVaultRoutes";
@@ -3719,6 +3719,13 @@ const PEPM_GROUP_ID = 1;
 function pepmEnabled(groupId: number) {
   return Number(groupId) === PEPM_GROUP_ID;
 }
+// Admin Dashboard (Quick View, attendance and leave figures) in the mother
+// company covers every company of its group: the dashboard asks for these
+// reads with "X-Company-Scope: group", honoured only for an account that may
+// open the Admin Dashboard and only while working in the mother company.
+// Each route still applies its own module checks.
+const DASHBOARD_GROUP_SCOPE_PATHS = new Set(["/api/employee-directory", "/api/attendance/report/monthly", "/api/leave-applications/report"]);
+
 const PEPM_API_RE = /^\/api\/(budgets|budget-items|entries|jobs|job-edits|mpr-numbers|rate-file|rate-list|delivery-date-conditions|reports\/budget-submission-status)(\/|$)/;
 
 // dbPool.execute with the same multi-company separation as queryDB.
@@ -3835,7 +3842,7 @@ async function startServer() {
       // Multi-company: the rest of this request runs in the company the app
       // asked for (X-Company-Id), if this account may enter it — see
       // companyContext.ts / CompanyRoutes.ts.
-      let ctx = { companyId: 1, groupId: 1 };
+      let ctx: CompanyContext = { companyId: 1, groupId: 1 };
       try {
         ctx = await resolveCompanyContext(queryDB, user, req.headers["x-company-id"]);
       } catch {
@@ -3845,6 +3852,16 @@ async function startServer() {
       req.groupId = ctx.groupId;
       if (!pepmEnabled(ctx.groupId) && PEPM_API_RE.test(String(req.originalUrl || req.url || "").split("?")[0])) {
         return res.status(403).json({ error: "PEPM is not available in this workspace." });
+      }
+      if (
+        req.method === "GET" &&
+        req.headers["x-company-scope"] === "group" &&
+        ctx.motherId &&
+        ctx.companyId === ctx.motherId &&
+        DASHBOARD_GROUP_SCOPE_PATHS.has(String(req.originalUrl || req.url || "").split("?")[0]) &&
+        (user.role === "superadmin" || user.role === "admin" || (user.role === "user" && (await getAdminModules(user.id).catch(() => [] as string[])).includes("admin_dashboard")))
+      ) {
+        ctx = { ...ctx, wholeGroup: true };
       }
       companyStore.run(ctx, () => next());
     });

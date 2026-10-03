@@ -30,6 +30,7 @@
 
 import type { Express } from "express";
 import { recordEmployeeEditHistory } from "./EmployeeTransferRoutes";
+import { activeCompanyId } from "./companyContext";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 
@@ -633,7 +634,8 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
         if (fresh.length === 0) return { status: "skip", message: `Punches on ${date} are already there.`, employee: who };
         if (!ctx.dryRun) {
           if (!prep.device) {
-            const r = await queryDB("INSERT INTO zk_devices (name, ip_address, port, is_active) VALUES (?, 'import', 0, 0)", [IMPORT_DEVICE_NAME]);
+            // One per company; the port keeps (ip, port) unique across companies.
+            const r = await queryDB("INSERT INTO zk_devices (name, ip_address, port, is_active) VALUES (?, 'import', ?, 0)", [IMPORT_DEVICE_NAME, activeCompanyId()]);
             prep.device = { id: r.insertId };
           }
           for (const t of fresh) {
