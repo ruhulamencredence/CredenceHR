@@ -37,6 +37,7 @@ import { registerExitOffboardingRoutes, ensureExitOffboardingSchema } from "./Ex
 import { registerPerformanceRoutes, ensurePerformanceSchema } from "./PerformanceRoutes";
 import { registerRecruitmentRoutes, ensureRecruitmentSchema } from "./RecruitmentRoutes";
 import { registerGrievanceRoutes, ensureGrievanceSchema } from "./GrievanceRoutes";
+import { registerTaskRoutes, ensureTaskSchema } from "./TaskRoutes";
 import { registerHROperationsRoutes, ensureHROperationsSchema, applyDueHrActions } from "./HROperationsRoutes";
 import { registerEmployee360Routes, ensureEmployee360Schema } from "./HrOps360Routes";
 import { registerHrReportsRoutes, ensureHrReportsSchema } from "./HrOpsReportsRoutes";
@@ -267,6 +268,7 @@ async function ensureSchemaMigrations() {
   await ensurePerformanceSchema(dbPool);
   await ensureRecruitmentSchema(dbPool);
   await ensureGrievanceSchema(dbPool);
+  await ensureTaskSchema(dbPool);
   await ensureDocumentVaultSchema(dbPool);
   // HR Operations (personnel actions, letters, onboarding, service book) —
   // HROperationsRoutes.ts.
@@ -795,6 +797,13 @@ async function ensureSchemaMigrations() {
     await dbPool.query(`ALTER TABLE users ADD COLUMN can_use_calls TINYINT(1) NOT NULL DEFAULT 0`);
   } catch (err: any) {
     if (err.code !== 'ER_DUP_FIELDNAME') console.warn("⚠️ Could not add users.can_use_calls column: " + err.message);
+  }
+  try {
+    // Self Service -> My Tasks (TaskRoutes.ts) — OFF until turned on per
+    // account in Module Access.
+    await dbPool.query(`ALTER TABLE users ADD COLUMN can_view_tasks TINYINT(1) NOT NULL DEFAULT 0`);
+  } catch (err: any) {
+    if (err.code !== 'ER_DUP_FIELDNAME') console.warn("⚠️ Could not add users.can_view_tasks column: " + err.message);
   }
   try {
     // Admin Dashboard "See all companies (group view)" — OFF until turned on
@@ -2368,7 +2377,7 @@ const USER_CLAIM_CATEGORIES = ["Transport", "Fuel", "Toll", "Parking", "Others"]
 // running day-to-day without also giving them the full Admin Panel ->
 // Vehicle Management tab (fleet CRUD, the Approval Workflow's own queue,
 // etc.). See the two routes' own comments for what the bypass does.
-const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports", "users", "attendance", "attendance_reports", "leave_applications", "recycle", "editlog", "notices", "claims", "approvals", "conveyance", "disbursement", "employees", "departments", "tracking", "office_attendance", "holidays", "payroll", "asset_management", "vehicle_management", "vehicle_maintainer", "exit_offboarding", "performance_management", "recruitment", "grievance_disciplinary", "hr_analytics", "document_vault", "hr_operations", "admin_dashboard"] as const;
+const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports", "users", "attendance", "attendance_reports", "leave_applications", "recycle", "editlog", "notices", "claims", "approvals", "conveyance", "disbursement", "employees", "departments", "tracking", "office_attendance", "holidays", "payroll", "asset_management", "vehicle_management", "vehicle_maintainer", "exit_offboarding", "performance_management", "recruitment", "grievance_disciplinary", "hr_analytics", "document_vault", "hr_operations", "admin_dashboard", "task_management"] as const;
 
 // Granular per-module action layers — mirrors PermissionLayerKey/
 // PERMISSION_LAYERS in src/types.ts (single source of truth is duplicated
@@ -4350,6 +4359,7 @@ async function startServer() {
           // default — same pattern as can_view_movement_claims above.
           can_view_timesheet: user.role === "superadmin" ? true : !!Number(user.can_view_timesheet),
           can_use_calls: user.role === "superadmin" ? true : !!Number(user.can_use_calls),
+          can_view_tasks: user.role === "superadmin" ? true : !!Number(user.can_view_tasks),
           can_view_leave_application: user.role === "superadmin" ? true : !!Number(user.can_view_leave_application),
           can_view_my_leave: user.role === "superadmin" ? true : !!Number(user.can_view_my_leave),
           // Superadmin-granted, only ever meaningful for role='admin': can this
@@ -4373,7 +4383,7 @@ async function startServer() {
   app.get("/api/auth/me", authenticateToken, async (req: any, res) => {
     try {
       const users = await queryDB(
-        "SELECT id, name, email, role, created_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, can_use_calls, can_grant_module_access, attendance_project_id FROM users WHERE id = ?",
+        "SELECT id, name, email, role, created_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, can_use_calls, can_view_tasks, can_grant_module_access, attendance_project_id FROM users WHERE id = ?",
         [req.user.id]
       );
       if (users.length === 0) return res.status(404).json({ error: "User not found" });
@@ -4396,6 +4406,7 @@ async function startServer() {
         can_view_leave_summary: u.role === "superadmin" ? true : !!Number(u.can_view_leave_summary),
         can_view_timesheet: u.role === "superadmin" ? true : !!Number(u.can_view_timesheet),
         can_use_calls: u.role === "superadmin" ? true : !!Number(u.can_use_calls),
+        can_view_tasks: u.role === "superadmin" ? true : !!Number(u.can_view_tasks),
         can_view_leave_application: u.role === "superadmin" ? true : !!Number(u.can_view_leave_application),
         can_view_my_leave: u.role === "superadmin" ? true : !!Number(u.can_view_my_leave),
         can_grant_module_access: u.role === "admin" ? !!Number(u.can_grant_module_access) : false,
@@ -5263,6 +5274,7 @@ async function startServer() {
   registerPerformanceRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB, getAdminModules });
   registerRecruitmentRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB });
   registerGrievanceRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB, getAdminModules, createAlert });
+  registerTaskRoutes(app, { authenticateToken, queryDB, getAdminModules, createAlert });
   registerHRAnalyticsRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB });
   registerDocumentVaultRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB, getAdminModules });
   registerHROperationsRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB, getAdminModules, todayInDhaka, createAlert });

@@ -3,7 +3,7 @@ export type UserRole = 'superadmin' | 'admin' | 'user';
 // Every Admin Panel tab. A Superadmin implicitly has all of these; a plain Admin
 // only sees/uses the ones the Superadmin has explicitly granted via
 // PUT /api/users/:id/module-permissions. Mirrors ADMIN_MODULE_KEYS in server.ts.
-export type AdminModuleKey = 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'recycle' | 'editlog' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'disbursement' | 'employees' | 'departments' | 'tracking' | 'office_attendance' | 'holidays' | 'payroll' | 'asset_management' | 'vehicle_management' | 'vehicle_maintainer' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'hr_operations' | 'admin_dashboard';
+export type AdminModuleKey = 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'recycle' | 'editlog' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'disbursement' | 'employees' | 'departments' | 'tracking' | 'office_attendance' | 'holidays' | 'payroll' | 'asset_management' | 'vehicle_management' | 'vehicle_maintainer' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'hr_operations' | 'admin_dashboard' | 'task_management';
 
 // Admin Panel -> Reports & Insights is not its own module grant: it shows for
 // anyone holding at least one of the modules its reports come from (each
@@ -69,7 +69,10 @@ export const ADMIN_MODULES: { key: AdminModuleKey; label: string }[] = [
   { key: 'grievance_disciplinary', label: 'Grievance & Disciplinary' },
   { key: 'hr_analytics', label: 'HR Analytics' },
   { key: 'document_vault', label: 'Document Vault' },
-  { key: 'hr_operations', label: 'HR Operations' }
+  { key: 'hr_operations', label: 'HR Operations' },
+  // Tasks (TaskManagement.tsx): give tasks to anyone, employees' requests to
+  // HR, repeating tasks, monthly report.
+  { key: 'task_management', label: 'Task Management' }
 ];
 
 // Granular per-module action layers, layered on top of the coarse module
@@ -605,6 +608,8 @@ export interface User {
   can_use_calls?: boolean;
   // Admin Dashboard in the mother company shows every company of the group.
   can_view_group_dashboard?: boolean;
+  // Self Service -> My Tasks (MyTasks.tsx) — off until turned on in Module Access.
+  can_view_tasks?: boolean;
   can_view_leave_application?: boolean;
   can_view_my_leave?: boolean;
 }
@@ -1522,7 +1527,10 @@ export type AlertType =
   // for the supervisor — opens Self Service -> Team Attendance.
   | 'site_attendance'
   // Superadmin: a new phone is waiting for approval (Admin Panel -> Device Access).
-  | 'device_request';
+  | 'device_request'
+  // Tasks (TaskRoutes.ts): a task given / started / done / overdue, or a new
+  // request to HR — opens the task in My Tasks or Task Management.
+  | 'task';
 
 export interface Alert {
   id: number;

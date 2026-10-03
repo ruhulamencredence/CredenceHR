@@ -206,6 +206,16 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
             (onOpenHrOperations || (() => window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'hr_operations' }))))();
             setTimeout(() => window.dispatchEvent(new CustomEvent('credence:hr-ops-tab', { detail: 'reports' })), 0);
           }
+        : alert.type === 'task'
+        ? // My Tasks / Task Management, with this task open (App.tsx).
+          () => {
+            try {
+              if (alert.related_id) sessionStorage.setItem('open_task_id', String(alert.related_id));
+            } catch {
+              // storage unavailable — the page opens without the task
+            }
+            window.dispatchEvent(new CustomEvent('credence:open-task', { detail: { title: alert.title } }));
+          }
         : alert.type === 'device_request'
         ? // Superadmin: Admin Panel -> Device Access, to approve the new phone.
           () => window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'devices' }))

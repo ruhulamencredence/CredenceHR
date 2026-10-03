@@ -119,7 +119,9 @@ export const OWN_TABLES = new Set([
   "hr_saved_reports",
   "asset_requisitions",
   "vehicle_requisitions",
-  "grievances"
+  "grievances",
+  "tasks",
+  "task_recurrences"
 ]);
 
 // Shared by every company of a group (PEPM budgets & rate file, chat…) but
@@ -190,6 +192,8 @@ export const LINKED_TABLES = new Map<string, [string, string]>([
   ["pay_grade_components", ["pay_grade_id", "pay_grades"]],
   ["payroll_payment_splits", ["payroll_id", "payrolls"]],
   ["site_attendance_members", ["team_id", "site_attendance_teams"]],
+  ["task_assignees", ["task_id", "tasks"]],
+  ["task_comments", ["task_id", "tasks"]],
   ["site_attendance_sheets", ["team_id", "site_attendance_teams"]],
   ["user_access_audit", ["target_user_id", "users"]],
   ["user_claim_references", ["user_claim_id", "user_claims"]],

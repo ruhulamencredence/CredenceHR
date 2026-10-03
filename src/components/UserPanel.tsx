@@ -87,7 +87,7 @@ interface UserPanelProps {
 
 export type SelfServiceTarget =
   | 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications'
-  | 'resignation' | 'myCases' | 'myLetters' | 'chat' | 'alerts' | 'erp360';
+  | 'resignation' | 'myCases' | 'myLetters' | 'myTasks' | 'chat' | 'alerts' | 'erp360';
 
 // Unique id for one Item entry within an MPR row's itemNames list — see the uid field
 // on MprItemOption for why this is needed separately from budgetItemId.
@@ -1152,6 +1152,9 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
             ? [{ key: 'timesheet', label: 'Timesheet', icon: Clock, iconBg: 'from-sky-300 to-sky-500 shadow-[0_6px_16px_-2px_rgba(2,132,199,0.35)]', onClick: () => openSelfService('timesheet') }]
             : []),
           { key: 'approveApplications', label: 'Approve Application', icon: ShieldCheck, iconBg: 'from-blue-300 to-blue-500 shadow-[0_6px_16px_-2px_rgba(37,99,235,0.35)]', onClick: () => openSelfService('approveApplications') },
+          ...(user.role === 'superadmin' || !!user.can_view_tasks || (user.module_permissions || []).includes('task_management')
+            ? [{ key: 'myTasks', label: 'My Tasks', icon: ListChecks, iconBg: 'from-violet-300 to-violet-500 shadow-[0_6px_16px_-2px_rgba(124,58,237,0.35)]', onClick: () => openSelfService('myTasks') }]
+            : []),
           { key: 'myLetters', label: 'My Letters & Service Record', icon: FileText, iconBg: 'from-indigo-300 to-indigo-500 shadow-[0_6px_16px_-2px_rgba(79,70,229,0.35)]', onClick: () => openSelfService('myLetters') },
           { key: 'myCases', label: 'Grievance & Disciplinary', icon: Gavel, iconBg: 'from-orange-300 to-orange-500 shadow-[0_6px_16px_-2px_rgba(234,88,12,0.35)]', onClick: () => openSelfService('myCases') },
           { key: 'resignation', label: 'My Resignation', icon: LogOut, iconBg: 'from-rose-300 to-rose-500 shadow-[0_6px_16px_-2px_rgba(225,29,72,0.35)]', onClick: () => openSelfService('resignation') },

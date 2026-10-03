@@ -41,6 +41,7 @@ import { EmployeeDirectory } from './components/EmployeeDirectory';
 import { MyResignation } from './components/MyResignation';
 import { AssetManagement } from './components/AssetManagement';
 import { MyCases } from './components/MyCases';
+import { MyTasks } from './components/MyTasks';
 import { MyLetters } from './components/MyLetters';
 import { TeamAttendance } from './components/TeamAttendance';
 import { VehicleManagement } from './components/VehicleManagement';
@@ -104,7 +105,7 @@ export default function App() {
   // this account was actually looking at, instead of resetting to the
   // Admin/User Panel default every time.
   const selfServiceViewStorageKey = user ? `mpr_self_service_view_${user.id}` : null;
-  const [selfServiceView, setSelfServiceView] = useState<'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | null>(() => {
+  const [selfServiceView, setSelfServiceView] = useState<'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | null>(() => {
     try {
       const saved = selfServiceViewStorageKey ? localStorage.getItem(selfServiceViewStorageKey) : null;
       if (saved === 'leaveApplication' || saved === 'leaveManagement' || saved === 'timesheet' || saved === 'approveApplications' || saved === 'employeeDirectory' || saved === 'resignation') {
@@ -664,6 +665,29 @@ export default function App() {
     window.addEventListener('credence:open-self-service', onOpen);
     return () => window.removeEventListener('credence:open-self-service', onOpen);
   }, []);
+  // A task alert (TaskRoutes.ts): one about work given to this account opens
+  // My Tasks; anything else (a request to HR, a task they gave) opens Task
+  // Management for HR. The page then opens the task itself.
+  useEffect(() => {
+    const onOpen = (e: Event) => {
+      if (!user) return;
+      const title = String((e as CustomEvent).detail?.title || '');
+      const isHr = user.role === 'superadmin' || (user.module_permissions || []).includes('task_management');
+      const hasMyTasks = user.role === 'superadmin' || !!user.can_view_tasks || isHr;
+      setShowProfilePage(false);
+      setShowChat(false);
+      setShowAlertsPage(false);
+      const forMe = ['New task for you', 'Task assigned to you', 'Task due today'].includes(title);
+      if (isHr && (!forMe || !user.can_view_tasks)) {
+        setSelfServiceView(null);
+        window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'task_management' }));
+      } else if (hasMyTasks) {
+        setSelfServiceView('myTasks');
+      }
+    };
+    window.addEventListener('credence:open-task', onOpen);
+    return () => window.removeEventListener('credence:open-task', onOpen);
+  }, [user]);
 
   if (!token || !user) {
     return (
@@ -818,7 +842,7 @@ export default function App() {
       setViewMode('admin');
       setAdminNavRequest({ target, ts: Date.now() });
     },
-    onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance') => {
+    onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks') => {
       setShowProfilePage(false);
           setShowChat(false);
           setShowAlertsPage(false);
@@ -1120,6 +1144,8 @@ export default function App() {
           <AssetManagement onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'myCases' ? (
           <MyCases token={token} onBack={() => setSelfServiceView(null)} />
+        ) : selfServiceView === 'myTasks' ? (
+          <MyTasks token={token} user={user} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'myLetters' ? (
           <MyLetters token={token} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'teamAttendance' ? (
