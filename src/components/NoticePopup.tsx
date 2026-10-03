@@ -89,12 +89,12 @@ export const NoticePopup: React.FC<NoticePopupProps> = ({ token, user }) => {
     : current.lottie_url || null;
 
   return (
-    <div className="fixed inset-0 z-[90] bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-white rounded-3xl max-w-md w-full max-h-[88vh] overflow-y-auto shadow-2xl relative">
+    <div className="fixed inset-0 z-[90] liquid-glass-backdrop flex items-center justify-center p-4">
+      <div role="dialog" aria-label={current.title} className="liquid-glass liquid-glass-in rounded-[32px] max-w-md w-full max-h-[88vh] overflow-y-auto">
         <button
           type="button"
           onClick={() => handleDismiss(current.id)}
-          className="absolute top-3 right-3 z-10 p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-full transition-colors"
+          className="liquid-glass-chip absolute top-3.5 right-3.5 z-10 p-1.5 text-slate-600 hover:text-slate-900 rounded-full transition-colors"
           aria-label="Close notice"
         >
           <X className="w-4.5 h-4.5" />
@@ -106,7 +106,7 @@ export const NoticePopup: React.FC<NoticePopupProps> = ({ token, user }) => {
               <Lottie src={lottieSrc} autoplay loop className="w-full h-full" />
             </div>
           ) : (
-            <div className="w-16 h-16 mb-3 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center">
+            <div className="liquid-glass-inset w-16 h-16 mb-3 rounded-[22px] text-[color:var(--g-accent,#7F00FF)] flex items-center justify-center">
               <Bell className="w-7 h-7" />
             </div>
           )}
@@ -115,7 +115,7 @@ export const NoticePopup: React.FC<NoticePopupProps> = ({ token, user }) => {
 
         <div className="px-6 pb-6 pt-2">
           <div
-            className="text-sm text-slate-700 leading-relaxed [&_a]:text-blue-600 [&_a]:underline [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5"
+            className="text-sm text-slate-800 leading-relaxed [&_a]:text-blue-700 [&_a]:underline [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5"
             dangerouslySetInnerHTML={{ __html: current.content_html }}
           />
 
@@ -123,13 +123,13 @@ export const NoticePopup: React.FC<NoticePopupProps> = ({ token, user }) => {
             type="button"
             onClick={() => handleDismiss(current.id)}
             disabled={dismissing}
-            className="w-full mt-5 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl shadow-sm transition-all disabled:opacity-50"
+            className="liquid-glass-button w-full mt-5 py-3 font-semibold rounded-full disabled:opacity-50"
           >
             Got it
           </button>
 
           {queue.length > 1 && (
-            <p className="mt-2.5 text-center text-[11px] text-slate-400">
+            <p className="mt-2.5 text-center text-[11px] text-slate-500">
               {queue.length - 1} more notice{queue.length - 1 === 1 ? '' : 's'} waiting
             </p>
           )}
