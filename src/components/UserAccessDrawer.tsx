@@ -55,6 +55,7 @@ const FEATURE_NAME: Record<string, string> = {
   can_view_conveyance_claims: 'Conveyance Claim',
   can_view_budget_module: 'Budget / Jobs / MPR',
   can_view_timesheet: 'Timesheet',
+  can_use_calls: 'Audio / Video Calls',
   can_view_leave_application: 'Leave Application',
   can_view_my_leave: 'My Leave'
 };
@@ -310,6 +311,7 @@ export function UserAccessDrawer({
     { label: 'Leave Application', on: !!u.can_view_leave_application },
     { label: 'Leave balance edit', on: !!u.can_manage_leave },
     { label: 'Timesheet', on: !!u.can_view_timesheet },
+    { label: 'Audio / Video Calls', on: !!u.can_use_calls },
     { label: 'Movement Claim', on: !!u.can_view_movement_claims },
     { label: 'Conveyance Claim', on: !!u.can_view_conveyance_claims },
     { label: 'Budget / Jobs / MPR', on: u.can_view_budget_module ?? true }

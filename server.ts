@@ -29,6 +29,7 @@ import { registerAdminDashboardRoutes } from "./AdminDashboardRoutes";
 import { registerDeviceRoutes, ensureDeviceSchema, checkAppDevice, deviceStillAllowed } from "./DeviceRoutes";
 import { registerActiveUsersRoutes, ensureActiveUsersSchema, touchSession } from "./ActiveUsersRoutes";
 import { registerDataImportRoutes } from "./DataImportRoutes";
+import { registerCallRoutes, setupCallSocket } from "./CallRoutes";
 import { registerWebPushRoutes, ensureWebPushSchema } from "./WebPushService";
 import { registerEmployeeDirectoryRoutes } from "./EmployeeDirectoryRoutes";
 import { registerExitOffboardingRoutes, ensureExitOffboardingSchema } from "./ExitOffboardingRoutes";
@@ -783,6 +784,13 @@ async function ensureSchemaMigrations() {
     await dbPool.query(`ALTER TABLE users ADD COLUMN can_view_my_leave TINYINT(1) NOT NULL DEFAULT 0`);
   } catch (err: any) {
     if (err.code !== 'ER_DUP_FIELDNAME') console.warn("⚠️ Could not add users.can_view_timesheet/can_view_leave_application/can_view_my_leave columns: " + err.message);
+  }
+  try {
+    // Chat audio/video calls (CallRoutes.ts) — a Self Service switch, OFF
+    // until a Superadmin turns it on per account in Module Access.
+    await dbPool.query(`ALTER TABLE users ADD COLUMN can_use_calls TINYINT(1) NOT NULL DEFAULT 0`);
+  } catch (err: any) {
+    if (err.code !== 'ER_DUP_FIELDNAME') console.warn("⚠️ Could not add users.can_use_calls column: " + err.message);
   }
   try {
     // Leave Application and "My Leave" became one page with one access
@@ -4279,6 +4287,7 @@ async function startServer() {
           // Leave at all? Applies to both 'admin' and 'user' roles, OFF by
           // default — same pattern as can_view_movement_claims above.
           can_view_timesheet: user.role === "superadmin" ? true : !!Number(user.can_view_timesheet),
+          can_use_calls: user.role === "superadmin" ? true : !!Number(user.can_use_calls),
           can_view_leave_application: user.role === "superadmin" ? true : !!Number(user.can_view_leave_application),
           can_view_my_leave: user.role === "superadmin" ? true : !!Number(user.can_view_my_leave),
           // Superadmin-granted, only ever meaningful for role='admin': can this
@@ -4302,7 +4311,7 @@ async function startServer() {
   app.get("/api/auth/me", authenticateToken, async (req: any, res) => {
     try {
       const users = await queryDB(
-        "SELECT id, name, email, role, created_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, can_grant_module_access, attendance_project_id FROM users WHERE id = ?",
+        "SELECT id, name, email, role, created_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, can_use_calls, can_grant_module_access, attendance_project_id FROM users WHERE id = ?",
         [req.user.id]
       );
       if (users.length === 0) return res.status(404).json({ error: "User not found" });
@@ -4324,6 +4333,7 @@ async function startServer() {
         can_view_budget_module: u.role === "superadmin" ? true : u.can_view_budget_module === undefined ? true : !!Number(u.can_view_budget_module),
         can_view_leave_summary: u.role === "superadmin" ? true : !!Number(u.can_view_leave_summary),
         can_view_timesheet: u.role === "superadmin" ? true : !!Number(u.can_view_timesheet),
+        can_use_calls: u.role === "superadmin" ? true : !!Number(u.can_use_calls),
         can_view_leave_application: u.role === "superadmin" ? true : !!Number(u.can_view_leave_application),
         can_view_my_leave: u.role === "superadmin" ? true : !!Number(u.can_view_my_leave),
         can_grant_module_access: u.role === "admin" ? !!Number(u.can_grant_module_access) : false,
@@ -7502,6 +7512,9 @@ async function startServer() {
 
   registerChatRoutes(app, io, { authenticateToken, queryDB });
   setupChatSocket(io, { queryDB, jwtSecret: JWT_SECRET });
+  // Chat audio/video calls — WebRTC signaling on the same socket (CallRoutes.ts).
+  registerCallRoutes(app, { authenticateToken, queryDB });
+  setupCallSocket(io, { queryDB });
 
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

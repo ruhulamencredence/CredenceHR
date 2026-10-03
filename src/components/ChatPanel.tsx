@@ -19,7 +19,7 @@ import { Capacitor } from '@capacitor/core';
 import { VoiceRecorder } from 'capacitor-voice-recorder';
 import {
   ArrowLeft, Search, Plus, X, Send, Paperclip, Check, CheckCheck,
-  Users, UserPlus, Shield, LogOut, Trash2, MessageSquare, Link as LinkIcon, Mic
+  Users, UserPlus, Shield, LogOut, Trash2, MessageSquare, Link as LinkIcon, Mic, Phone, Video
 } from 'lucide-react';
 import { User, ChatRoom, ChatMessage, ChatRoomMember, ChatDirectoryUser, ChatReadReceipt } from '../types';
 import { apiUrl } from '../lib/api';
@@ -367,7 +367,13 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
     socket.on('message_read', onRead);
     socket.on('presence_change', onPresence);
     socket.on('members_changed', onMembersChanged);
+    // Who is online right now — presence_change only reports changes, and
+    // the socket is usually connected (for calls) before Chat opens.
+    const askPresence = () => socket.emit('presence_list', (ids: number[]) => Array.isArray(ids) && setOnlineUserIds(new Set(ids.map(Number))));
+    askPresence();
+    socket.on('connect', askPresence);
     return () => {
+      socket.off('connect', askPresence);
       socket.off('receive_message', onReceive);
       socket.off('user_typing', onTyping);
       socket.off('message_read', onRead);
@@ -952,7 +958,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
           </div>
         ) : (
           <>
-            <div className="p-3 bg-white border-b border-slate-200 flex items-center gap-3">
+            {/* In the docked popup (variant 'modal') its own close button sits
+                over the top-right corner, so the header keeps clear of it. */}
+            <div className={`p-3 bg-white border-b border-slate-200 flex items-center gap-3 ${variant === 'modal' ? 'pr-12' : ''}`}>
               <button type="button" onClick={() => setActiveRoomId(null)} className="p-1.5 -ml-1 text-slate-500 hover:bg-slate-100 rounded-lg md:hidden">
                 <ArrowLeft className="w-5 h-5" />
               </button>
@@ -985,6 +993,34 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                   </span>
                 </div>
               </button>
+              {/* Audio / video call (CallLayer.tsx) — one-to-one chats, for
+                  accounts with Calls access. */}
+              {activeRoom.type === 'direct' && activeRoom.other_participant && (user.role === 'superadmin' || user.can_use_calls) && (
+                <div className="flex items-center gap-1 shrink-0">
+                  {(['audio', 'video'] as const).map((k) => (
+                    <button
+                      key={k}
+                      type="button"
+                      onClick={() =>
+                        window.dispatchEvent(
+                          new CustomEvent('credence:start-call', {
+                            detail: {
+                              roomId: activeRoom.id,
+                              peer: { id: activeRoom.other_participant!.id, name: roomDisplayName(activeRoom, user.id) },
+                              kind: k,
+                            },
+                          })
+                        )
+                      }
+                      className="p-2 rounded-full text-violet-600 hover:bg-violet-50"
+                      aria-label={k === 'audio' ? 'Audio call' : 'Video call'}
+                      title={k === 'audio' ? 'Audio call' : 'Video call'}
+                    >
+                      {k === 'audio' ? <Phone className="w-5 h-5" /> : <Video className="w-5 h-5" />}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-4 space-y-2">

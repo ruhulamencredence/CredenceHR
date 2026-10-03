@@ -64,7 +64,7 @@ interface ChatRouteDeps {
 // 'send_message' handler right after a message is persisted+broadcast —
 // never awaited there, so a slow/failed push never delays message delivery
 // to the people actually online.
-async function notifyNewMessage(queryDB: ChatRouteDeps["queryDB"], message: any): Promise<void> {
+export async function notifyNewMessage(queryDB: ChatRouteDeps["queryDB"], message: any): Promise<void> {
   try {
     const roomRows = await queryDB("SELECT type, title FROM chat_rooms WHERE id = ?", [message.room_id]);
     const room = roomRows[0];
@@ -233,7 +233,7 @@ async function findOrCreateDirectRoom(queryDB: ChatRouteDeps["queryDB"], userAId
 // Shared by the REST POST /messages route and the socket 'send_message'
 // handler — see the module comment above for why text vs attachment
 // messages take different transports to get here.
-async function insertChatMessage(
+export async function insertChatMessage(
   queryDB: ChatRouteDeps["queryDB"],
   params: {
     roomId: number;
@@ -750,6 +750,12 @@ export function setupChatSocket(io: SocketIOServer, deps: ChatSocketDeps) {
       // Best-effort — a room missed here still gets joined the next time
       // GET /api/chat/rooms is called and the UI opens it (join_room below).
     }
+
+    // Everyone online right now (ChatPanel asks when it opens, since
+    // presence_change only reports changes).
+    socket.on("presence_list", (ack?: (ids: number[]) => void) => {
+      if (typeof ack === "function") ack(Array.from(onlineSockets.keys()));
+    });
 
     socket.on("join_room", async (roomId: number) => {
       try {
