@@ -16,8 +16,14 @@
 // Capacitor's server.url silently fails to load ("webpage not available")
 // without a valid scheme.
 
-// Your PC's LAN IP, for testing on a phone connected to the same WiFi.
-const LOCAL_SERVER_URL = 'http://192.168.66.11:3001';
+// Local testing on a phone. localhost (not the PC's LAN IP) because the
+// WebView only allows the microphone / camera (chat calls, voice messages) on
+// https:// or localhost — connect the phone by USB and run
+//   adb reverse tcp:3000 tcp:3000
+// so the phone's localhost:3000 reaches the server on this PC. (The old LAN
+// address, http://192.168.66.11:3001, still loads the app over WiFi but
+// calls can't get the microphone there.)
+const LOCAL_SERVER_URL = 'http://localhost:3000';
 
 // The live server. The domain (HTTPS) is the normal address — the iPhone app
 // only loads HTTPS pages, so it always uses this one. The public IP (plain
