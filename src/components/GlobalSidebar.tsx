@@ -735,6 +735,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
           type="button"
           title={g.label}
           aria-label={g.label}
+          data-gsidebar-group
           onClick={(e) => {
             if (flyout?.key === g.key) return setFlyout(null);
             const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -810,7 +811,9 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     if (!flyout) return;
     const onDown = (e: MouseEvent) => {
       const t = e.target as HTMLElement;
-      if (!t.closest('[data-gsidebar-flyout]') && !t.closest('aside')) setFlyout(null);
+      // Anywhere but the popup itself or a group icon (which toggles it):
+      // the page, the header, or another sidebar item.
+      if (!t.closest('[data-gsidebar-flyout]') && !t.closest('[data-gsidebar-group]')) setFlyout(null);
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setFlyout(null);
@@ -825,6 +828,10 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   useEffect(() => {
     if (!collapsed) setFlyout(null);
   }, [collapsed]);
+  // Another page opened (from anywhere): the popup goes away.
+  useEffect(() => {
+    setFlyout(null);
+  }, [activeKey]);
 
   return (
     <div>
@@ -850,7 +857,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
       <aside
         className={
           isPersistent
-            ? `hidden md:flex sticky top-16 z-10 flex-col shrink-0 self-start h-[calc(100vh-4rem)] transition-[width] duration-200 ${
+            ? `hidden md:flex sticky top-16 z-10 flex-col shrink-0 self-start h-[calc(100vh-4rem)] ${
                 collapsed ? 'w-[64px]' : 'w-[264px]'
               }`
             : `fixed left-0 top-0 bottom-0 z-[1200] flex flex-col w-[264px] max-w-[85vw] transition-transform duration-300 ease-out ${
