@@ -28,6 +28,7 @@ import { registerEmployeeTransferRoutes, ensureEmployeeTransferSchema, applyDueE
 import { registerAdminDashboardRoutes } from "./AdminDashboardRoutes";
 import { registerDeviceRoutes, ensureDeviceSchema, checkAppDevice, deviceStillAllowed } from "./DeviceRoutes";
 import { registerActiveUsersRoutes, ensureActiveUsersSchema, touchSession } from "./ActiveUsersRoutes";
+import { registerDataImportRoutes } from "./DataImportRoutes";
 import { registerWebPushRoutes, ensureWebPushSchema } from "./WebPushService";
 import { registerEmployeeDirectoryRoutes } from "./EmployeeDirectoryRoutes";
 import { registerExitOffboardingRoutes, ensureExitOffboardingSchema } from "./ExitOffboardingRoutes";
@@ -5002,6 +5003,11 @@ async function startServer() {
   registerHrReportsRoutes(app, { authenticateToken, requireModule, queryDB, getAdminModules, todayInDhaka, createAlert });
   // Reports & Insights: Attendance / Leave / Claim / Bill / Asset / Vehicle
   // reports in one place (ReportsInsightsRoutes.ts).
+  // Admin Panel -> Data Import (DataImportRoutes.ts): employees, leave,
+  // claims and attendance history from an Excel/CSV sheet; each kind needs
+  // its own module (a Superadmin has them all).
+  registerDataImportRoutes(app, { authenticateToken, requireAdmin, queryDB, getAdminModules, today: todayInDhaka });
+
   registerReportsInsightsRoutes(app, {
     authenticateToken,
     requireAdmin,

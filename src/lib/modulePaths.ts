@@ -12,6 +12,7 @@ const HRM = ['Admin Panel', 'HRM'];
 export const ADMIN_TAB_PATH: Record<string, string[]> = {
   dashboard: ['Admin Panel', 'Admin Dashboard'],
   reports_insights: ['Admin Panel', 'Reports & Insights'],
+  data_import: ['Admin Panel', 'HR Data Import'],
 
   reports: ['Admin Panel', 'PEPM Management', 'Reports'],
   mprs: ['Admin Panel', 'PEPM Management', 'MPR Nos'],
