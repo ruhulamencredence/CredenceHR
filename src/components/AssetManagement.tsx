@@ -13,7 +13,7 @@
 // Web: same page design as Book a Ride (VehicleManagement.tsx) — round back
 // arrow + title, underline tabs, full width, table-style lists on desktop.
 // Native app: page chrome (blue-tinted background, white rounded-2xl card,
-// icon/title header) mirrors LeaveApplication.tsx's
+// icon/title header) mirrors the Leave Application page's
 // design exactly, so "My Asset" feels like the same product as "Leave
 // Application" instead of an older, plainer screen. Tabs use the same
 // rounded-full segmented control as Leave Application's Review/Approved/

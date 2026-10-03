@@ -792,7 +792,7 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
   });
 
   // GET: the current account's own submitted Leave Applications, newest first,
-  // with the Approver's name attached — see LeaveApplication.tsx. For legacy
+  // with the Approver's name attached — see LeaveReviewPage.tsx. For legacy
   // rows (approver_id set, pre-Part-5) that's the applicant's own pick, same
   // as always; for new Template-driven rows (approver_id NULL) it's instead
   // whoever the Dynamic Approval Engine currently has it waiting on (Part 3's

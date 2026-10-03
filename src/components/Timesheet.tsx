@@ -252,7 +252,7 @@ const CountsLegend: React.FC<{
 // drawer, and (in future) a Dashboard tile — same "Back" pattern as
 // LeaveApplication/LeaveManagement.
 export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceProjectId }) => {
-  // Same isNativeApp split as LeaveManagement.tsx / LeaveApplication.tsx: the
+  // Same isNativeApp split as LeaveManage.tsx / LeaveReviewPage.tsx: the
   // web build keeps the "Self Service / Timesheet" module-path breadcrumb,
   // the Android APK build hides it — the bottom nav is the only way to leave
   // this section there, matching onBack no longer being rendered above.
