@@ -22,6 +22,7 @@ import { PendingApprovalsCard } from './PendingApprovalsCard';
 import { MyRequestsCard } from './MyRequestsCard';
 import { MyMonthAttendanceCard } from './MyMonthAttendanceCard';
 import { TodayOverviewCard } from './TodayOverviewCard';
+import { TrackingStatusCards } from './TrackingStatusCards';
 import { NoticePreviewCard } from './NoticePreviewCard';
 import { HolidayCalendarWidget } from './HolidayCalendarWidget';
 import { LeaveReviewPage } from './LeaveReviewPage';
@@ -3016,6 +3017,10 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
             sits at the bottom of the Dashboard for browsing actual dates. */}
         <TodayOverviewCard token={token} />
 
+        {/* Employee Tracking quick access — only for accounts with the
+            'tracking' module (renders nothing otherwise; its API refuses). */}
+        {!Capacitor.isNativePlatform() && <TrackingStatusCards token={token} variant="card" />}
+
         {/* Takes the full row at md, where there are only two columns to
             share — it's an actionable list (remarks input + Approve/Reject
             per row), so it earns the width over sitting half-empty. */}
@@ -3327,6 +3332,8 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
             </div>
             <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">Notice Board</span>
           </button>
+          {/* Employee Tracking — only for accounts with the 'tracking' module. */}
+          <TrackingStatusCards token={token} variant="tile" />
         </div>
       )}
 
