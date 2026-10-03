@@ -5,7 +5,7 @@ import autoTable from 'jspdf-autotable';
 import credenceLogo from '../assets/credence-logo.png';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
 import { savePdfCrossPlatform } from '../lib/saveFile';
-import { Project, Branch, MprNumber, Entry, User, Budget, BudgetItem, BudgetSubmission, UserProjectPermission, EntryEditHistory, EntryPermanentDeleteLog, BulkUserRow, BulkUserResultItem, AdminModuleKey, ADMIN_MODULES, REPORTS_INSIGHTS_MODULES, DATA_IMPORT_MODULES, PermissionLayerKey, PERMISSION_LAYERS, PERMISSION_LAYER_MODULES, layersFor, LeaveManageLayerKey, LEAVE_MANAGE_LAYERS, AttendanceRecord, ClaimsNavRequest, AdminNavRequest, Department, LeaveApplication, PendingJobEdit } from '../types';
+import { Project, Branch, MprNumber, Entry, User, Budget, BudgetItem, BudgetSubmission, UserProjectPermission, EntryEditHistory, EntryPermanentDeleteLog, BulkUserRow, BulkUserResultItem, AdminModuleKey, ADMIN_MODULES, REPORTS_INSIGHTS_MODULES, DATA_IMPORT_MODULES, PermissionLayerKey, PERMISSION_LAYERS, PERMISSION_LAYER_MODULES, EXPLICIT_ONLY_LAYERS, layersFor, LeaveManageLayerKey, LEAVE_MANAGE_LAYERS, AttendanceRecord, ClaimsNavRequest, AdminNavRequest, Department, LeaveApplication, PendingJobEdit } from '../types';
 import { Building2, FileText, Users, Users2, BarChart3, Plus, Trash2, Edit2, Search, Filter, UserCheck, Calendar, CalendarClock, Download, Upload, FolderPlus, X, Eye, FileSpreadsheet, KeyRound, History, RotateCcw, Recycle, ListChecks, FileDown, MapPin, LayoutGrid, Navigation, LogIn, LogOut, Bell, Route, ShieldCheck, Wallet, Contact, Lock, Unlock, Mail, CheckCircle2, XCircle, Clock3, ShieldAlert, Copy, Eraser, LayoutTemplate } from 'lucide-react';
 import LocationMapPicker from './LocationMapPicker';
 import { NoticeManager } from './NoticeManager';
@@ -558,7 +558,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       if (saved && saved.length > 0) {
         initialLayers[moduleKey] = new Set(saved as PermissionLayerKey[]);
       } else if ((u.module_permissions || []).includes(moduleKey)) {
-        initialLayers[moduleKey] = new Set(layersFor(moduleKey).map((l) => l.key).filter((k) => k !== 'permanent_delete'));
+        initialLayers[moduleKey] = new Set(layersFor(moduleKey).map((l) => l.key).filter((k) => !EXPLICIT_ONLY_LAYERS.includes(k)));
       } else {
         initialLayers[moduleKey] = new Set();
       }
@@ -3120,10 +3120,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const reportLayer = (key: PermissionLayerKey) => {
     if (user.role === 'superadmin') return true;
     const saved = user.module_permission_layers?.reports;
-    return saved && saved.length > 0 ? saved.includes(key) : key !== 'permanent_delete';
+    return saved && saved.length > 0 ? saved.includes(key) : !EXPLICIT_ONLY_LAYERS.includes(key);
   };
   const reportCan = React.useMemo(
-    () => ({ read: reportLayer('read'), edit: reportLayer('edit_add'), trash: reportLayer('delete_trash'), permanent: reportLayer('permanent_delete') }),
+    () => ({
+      read: reportLayer('read'),
+      edit: reportLayer('edit_add'),
+      trash: reportLayer('delete_trash'),
+      permanent: reportLayer('permanent_delete'),
+      // Budget Submission Status — its own tick in Module Access -> Reports.
+      submission: reportLayer('submission_status')
+    }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [user.role, user.module_permission_layers]
   );
@@ -3296,7 +3303,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       )}
 
       {/* TAB 1: REPORTS */}
-      {activeTab === 'reports' && (
+      {activeTab === 'reports' && reportCan.read && reportCan.submission && (
         <div className="flex items-center gap-1.5 rounded-full bg-slate-100 p-1.5 text-xs font-semibold w-fit mb-6">
           {([
             ['entries', 'MPR Entries Report'],
@@ -3314,15 +3321,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         </div>
       )}
 
-      {activeTab === 'reports' && !reportCan.read && (
+      {activeTab === 'reports' && !reportCan.read && !reportCan.submission && (
         <div className="bg-white border border-slate-200 rounded-2xl p-10 text-center text-sm text-slate-500 shadow-sm">
           You don't have Read access to Reports. Ask your Superadmin to tick "Read Only" for Reports in Module Access.
         </div>
       )}
 
-      {activeTab === 'reports' && reportCan.read && reportView === 'submission' && <BudgetSubmissionReport token={token} budgets={budgets} />}
+      {/* Each report shows only with its own tick: MPR Entries needs Read Only,
+          Budget Submission Status needs Budget Submission Status. */}
+      {activeTab === 'reports' && reportCan.submission && (reportView === 'submission' || !reportCan.read) && (
+        <BudgetSubmissionReport token={token} budgets={budgets} />
+      )}
 
-      {activeTab === 'reports' && reportCan.read && reportView === 'entries' && (
+      {activeTab === 'reports' && reportCan.read && (reportView === 'entries' || !reportCan.submission) && (
         <div className="space-y-6">
           {/* Filters Bar */}
           <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
