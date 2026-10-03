@@ -52,7 +52,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
   const [username, setUsername] = useState(user.username || '');
   const [bgTheme, setBgTheme] = useState<BackgroundThemeId>(getSavedBackgroundTheme());
   const handlePickBackgroundTheme = (id: BackgroundThemeId) => {
-    applyBackgroundTheme(id);
+    applyBackgroundTheme(id, true);
     setBgTheme(id);
   };
   const initial = (user.name || user.username || '?').trim().charAt(0).toUpperCase();

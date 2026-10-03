@@ -40,11 +40,10 @@ const FROSTED_GLASS_STRIPS =
 export const BACKGROUND_THEMES: BackgroundTheme[] = [
   {
     // The app's original background (index.css's own --g-bg-gradient
-    // default, before this picker existed) — kept as its own selectable
-    // option, and the one every account starts on, rather than switching
-    // everyone over to one of the 3 new looks by default.
+    // default, before this picker existed) — still selectable as "Classic".
+    // Accounts that never picked one now start on Apple Glow.
     id: 'default',
-    label: 'Default',
+    label: 'Classic',
     swatch: '#DBEEFF',
     gradient: 'linear-gradient(160deg, #eaf6ff 0%, #dbeeff 30%, #e7dcff 65%, #ede0ff 100%)'
   },
@@ -84,7 +83,7 @@ export const BACKGROUND_THEMES: BackgroundTheme[] = [
     // violet light pooling at the corners and a bright white bloom in the
     // middle, so cards read cleanly on top.
     id: 'apple-glow',
-    label: 'Apple Glow',
+    label: 'Apple Glow (Default)',
     swatch: '#EFE7FF',
     gradient: [
       'radial-gradient(ellipse 55% 45% at 50% 38%, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0) 70%)',
@@ -101,26 +100,35 @@ export const BACKGROUND_THEMES: BackgroundTheme[] = [
 // whatever app background the account picked.
 export const CHAT_CONVERSATION_BACKGROUND = BACKGROUND_THEMES.find((t) => t.id === 'frosted-glass')!.gradient;
 
-const STORAGE_KEY = 'mpr_bg_theme';
-const DEFAULT_THEME: BackgroundThemeId = 'default';
+// Only a background the account picked in Profile -> Appearance is
+// remembered (mpr_bg_theme_v2). The old key was also written at every start,
+// so a stored "Default" there was never a real choice and is ignored; any
+// other value there was picked, and is kept.
+const STORAGE_KEY = 'mpr_bg_theme_v2';
+const OLD_STORAGE_KEY = 'mpr_bg_theme';
+const DEFAULT_THEME: BackgroundThemeId = 'apple-glow';
+const isTheme = (v: string | null): v is BackgroundThemeId => BACKGROUND_THEMES.some((t) => t.id === v);
 
 export function getSavedBackgroundTheme(): BackgroundThemeId {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
-    if (BACKGROUND_THEMES.some((t) => t.id === saved)) return saved as BackgroundThemeId;
+    if (isTheme(saved)) return saved;
+    const old = localStorage.getItem(OLD_STORAGE_KEY);
+    if (isTheme(old) && old !== 'default') return old;
   } catch {
     // localStorage unavailable — fall through to the default.
   }
   return DEFAULT_THEME;
 }
 
-// Applies the theme's gradient to the document root and remembers the
-// choice. Called once at boot (see main.tsx, before the first paint so
-// there's no flash of the old default) and again whenever the account
-// picks a different one from ProfilePage.tsx.
-export function applyBackgroundTheme(id: BackgroundThemeId): void {
+// Applies the theme's gradient to the document root. Called once at boot
+// (see main.tsx, before the first paint so there's no flash of the old
+// default) and again — with remember — whenever the account picks a
+// different one from ProfilePage.tsx.
+export function applyBackgroundTheme(id: BackgroundThemeId, remember = false): void {
   const theme = BACKGROUND_THEMES.find((t) => t.id === id) || BACKGROUND_THEMES[0];
   document.documentElement.style.setProperty('--g-bg-gradient', theme.gradient);
+  if (!remember) return;
   try {
     localStorage.setItem(STORAGE_KEY, theme.id);
   } catch {
