@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   X, LogOut, Home, Wallet, Briefcase, FileText, Edit2, Route, CreditCard,
   CalendarClock, ListChecks, CheckSquare, ChevronDown, Building2, Users, Users2, Smartphone, Activity,
@@ -6,7 +7,7 @@ import {
   Contact, Calendar, Clock, Fingerprint, Banknote, Package, LayoutDashboard, Server, MessageSquare,
   ChevronsLeft, ChevronsRight, ShieldAlert, Search, PieChart, FileUp,
   Target, UserPlus, Gavel, FolderLock, Sparkles, ExternalLink, Car,
-  ClipboardList, BookOpen, ClipboardCheck, TrendingUp, Settings,
+  ClipboardList, BookOpen, ClipboardCheck, TrendingUp, Settings, Pencil, Check,
 } from 'lucide-react';
 import { User, AdminModuleKey, REPORTS_INSIGHTS_MODULES, DATA_IMPORT_MODULES } from '../types';
 import credenceLogo from '../assets/credence-logo.png';
@@ -96,34 +97,12 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   onGoToSelfServiceTab, onGoToAdminClaims, onGoToAdminModule, onOpenProfile, onOpenChat, onOpenAlerts, onOpenErp360, activeKey,
 }) => {
   const isPersistent = variant === 'persistent';
-  // Closed by default — a group only opens when the user explicitly taps its
-  // header, or (see the effect below, once every group's items are known)
-  // when the item currently on screen turns out to live inside one, so its
-  // highlight is never hidden behind a collapsed group.
-  const [jobEntryOpen, setJobEntryOpen] = useState(false);
-  const [hrmOpen, setHrmOpen] = useState(false);
-  // HRM's own sub-groups (My Claim/Bill, Attendance, Leave Manage) each
-  // toggle independently — keyed by hrmSubGroups[].key rather than one
-  // useState per sub-group, since which sub-groups even exist depends on
-  // this account's permissions (see hrmSubGroups below).
-  const [hrmSubOpenKeys, setHrmSubOpenKeys] = useState<Record<string, boolean>>({});
-  const toggleHrmSub = (key: string) => setHrmSubOpenKeys((prev) => ({ ...prev, [key]: !prev[key] }));
-  const [reportsOpen, setReportsOpen] = useState(false);
-  const [hrOpen, setHrOpen] = useState(false);
-  // HR's own sub-groups (Attendance, Claims/Bill/Disbursement, Employee) —
-  // same independent-toggle pattern as hrmSubOpenKeys above, kept as its own
-  // state so HR's and HRM's sub-group keys never collide.
-  const [hrSubOpenKeys, setHrSubOpenKeys] = useState<Record<string, boolean>>({});
-  const toggleHrSub = (key: string) => setHrSubOpenKeys((prev) => ({ ...prev, [key]: !prev[key] }));
-  const [misOpen, setMisOpen] = useState(false);
-  // "SELF SERVICE" / "ADMIN PANEL" — the two top-level section headers
-  // above, now clickable the same way every group inside them already is:
-  // tap the header to reveal its groups/items, tap a group inside to reveal
-  // its own items. Closed by default, same convention as every group below
-  // (see the auto-reveal effect further down for the one exception: whatever
-  // section holds the currently-active item always opens).
-  const [selfServiceOpen, setSelfServiceOpen] = useState(false);
-  const [adminPanelOpen, setAdminPanelOpen] = useState(false);
+  // One group open at a time (tap another and the first closes); the group
+  // holding the page on screen opens by itself (see the effect further down).
+  const [openGroup, setOpenGroup] = useState<string | null>(null);
+  // Minimized column: the group whose popup is showing beside its icon.
+  const [flyout, setFlyout] = useState<{ key: string; top: number; bottom: number; left: number } | null>(null);
+  const [editingFavs, setEditingFavs] = useState(false);
   const photoUrl = useProfilePhoto(token, photoVersion);
   // Site Attendance supervisor? (shows Self Service -> Team Attendance)
   const siteSupervisor = useSiteSupervisor(token);
@@ -518,38 +497,6 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     { key: 'hr_advanced', label: 'HR Advanced', icon: Sparkles, items: hrAdvancedItems },
   ].filter((g) => g.items.length > 0);
 
-  // Auto-reveal whichever group the currently-active item lives in — every
-  // group above starts collapsed (the user has to tap to open one), but that
-  // must never hide the "you are here" highlight for whatever's actually on
-  // screen right now (e.g. picked from the search results below, or just
-  // landed on directly/after a reload) inside a still-closed group. Only
-  // ever opens a group, never closes one the user already opened by hand.
-  useEffect(() => {
-    if (!activeKey) return;
-    if (jobEntryGroup.some((i) => i.key === activeKey)) { setSelfServiceOpen(true); setJobEntryOpen(true); }
-    const activeHrmSub = hrmSubGroups.find((g) => g.items.some((i) => i.key === activeKey));
-    if (activeHrmSub) {
-      setSelfServiceOpen(true);
-      setHrmOpen(true);
-      setHrmSubOpenKeys((prev) => (prev[activeHrmSub.key] ? prev : { ...prev, [activeHrmSub.key]: true }));
-    }
-    if (selfServiceItems.some((i) => i.key === activeKey)) setSelfServiceOpen(true);
-    if (adminDashboardItem && adminDashboardItem.key === activeKey) setAdminPanelOpen(true);
-    if (reportsInsightsItem && reportsInsightsItem.key === activeKey) setAdminPanelOpen(true);
-    if (dataImportItem && dataImportItem.key === activeKey) setAdminPanelOpen(true);
-    if (reportsGroup.some((i) => i.key === activeKey)) { setAdminPanelOpen(true); setReportsOpen(true); }
-    if (hrGroup.some((i) => i.key === activeKey)) { setAdminPanelOpen(true); setHrOpen(true); }
-    const activeHrSub = hrSubGroups.find((g) => g.items.some((i) => i.key === activeKey));
-    if (activeHrSub) {
-      setAdminPanelOpen(true);
-      setHrOpen(true);
-      setHrSubOpenKeys((prev) => (prev[activeHrSub.key] ? prev : { ...prev, [activeHrSub.key]: true }));
-    }
-    if (misGroup.some((i) => i.key === activeKey)) { setAdminPanelOpen(true); setMisOpen(true); }
-    if (adminFlatItems.some((i) => i.key === activeKey)) setAdminPanelOpen(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeKey]);
-
   // "MIS" — Users, plus Projects/Branches (from the dissolved Organization
   // group). Everything here keeps its normal canSeeModule gate.
   const misGroup: NavItem[] = [
@@ -578,16 +525,23 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     });
   }
 
-  // Sidebar-wide menu search — flattens every item this account can actually
-  // see (Dashboard + Main + Self Service + every Admin Panel group/flat item)
-  // into one searchable list, so a menu buried a few groups deep is still one
-  // search away instead of needing to expand each group to find it. Hidden
-  // while the desktop column is minimized (collapsed) — no room for typed
-  // input there, same as every other label in that mode.
-  const [sidebarSearch, setSidebarSearch] = useState('');
-  const dashboardSearchItem: NavItem = { key: 'dashboard', label: 'Dashboard', icon: Home, onClick: onGoToDashboard };
-  const allSearchableItems: NavItem[] = [
-    dashboardSearchItem,
+
+  // ---- How the menu is laid out ---------------------------------------
+  // Every item above keeps its own permission gate; this only decides which
+  // group it sits in. Self Service: Work & Approvals, PEPM Operation, Leave &
+  // Attendance, Requests & Claims, Others. Admin Panel: the three dashboards
+  // on show, then Employee Management, Attendance & Leave, Payroll & Claims,
+  // HR Operations, Settings & Administration, PEPM Management. A
+  // { heading } entry is a small title inside a group (dropped when nothing
+  // follows it).
+  type Entry = NavItem | { heading: string };
+  interface MenuGroup {
+    key: string;
+    label: string;
+    icon: React.ComponentType<{ className?: string }>;
+    entries: Entry[];
+  }
+  const allItems: NavItem[] = [
     ...jobEntryGroup,
     ...hrmSubGroups.flatMap((g) => g.items),
     ...selfServiceItems,
@@ -598,8 +552,117 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     ...hrGroup,
     ...hrSubGroups.flatMap((g) => g.items),
     ...misGroup,
-    ...adminFlatItems,
+    ...adminFlatItems
   ];
+  const itemByKey = new Map<string, NavItem>(allItems.map((i) => [i.key, i]));
+  const pick = (...keys: (string | { heading: string })[]): Entry[] => {
+    const out: Entry[] = [];
+    for (const k of keys) {
+      if (typeof k !== 'string') out.push(k);
+      else if (itemByKey.has(k)) out.push(itemByKey.get(k)!);
+    }
+    // Drop headings with nothing under them.
+    return out.filter((e, i) => !('heading' in e) || (i + 1 < out.length && !('heading' in out[i + 1])));
+  };
+  const isItem = (e: Entry): e is NavItem => !('heading' in e);
+  const makeGroups = (list: MenuGroup[]) => list.filter((g) => g.entries.some(isItem));
+  const selfGroups = makeGroups([
+    { key: 'g_work', label: 'Work & Approvals', icon: ListChecks, entries: pick('myTasks', 'approveApplications', 'teamAttendance') },
+    { key: 'g_pepm_op', label: 'PEPM Operation', icon: Briefcase, entries: pick('entry', 'jobs', 'entryDetails', 'jobEdit') },
+    { key: 'g_leave_att', label: 'Leave & Attendance', icon: CalendarClock, entries: pick('leaveApplication', 'timesheet') },
+    { key: 'g_requests', label: 'Requests & Claims', icon: Wallet, entries: pick('userMovementClaims', 'userConveyanceClaims', 'vehicleManagement', 'assetManagement', 'myLetters') },
+    { key: 'g_others', label: 'Others', icon: Users2, entries: pick('chat', 'alerts', 'erp360', 'employeeDirectory', 'myCases', 'resignation') }
+  ]);
+  const hrAnalyticsItem = itemByKey.get('hr_analytics') || null;
+  const adminTopItems: NavItem[] = [adminDashboardItem, reportsInsightsItem, hrAnalyticsItem].filter((i): i is NavItem => !!i);
+  const adminGroups = makeGroups([
+    {
+      key: 'g_employees',
+      label: 'Employee Management',
+      icon: Contact,
+      entries: pick('employees', 'departments', 'tracking', 'recruitment', 'performance_management', 'exit_offboarding', 'grievance_disciplinary', 'document_vault')
+    },
+    {
+      key: 'g_attendance',
+      label: 'Attendance & Leave',
+      icon: Fingerprint,
+      entries: pick('attendance', 'office_attendance', 'site_attendance', 'attendance_reports', 'leave_applications', 'leaveManagement', 'holidays')
+    },
+    { key: 'g_payroll', label: 'Payroll & Claims', icon: Banknote, entries: pick('payroll', 'claims', 'conveyance', 'disbursement', 'bill_claim_policy') },
+    {
+      key: 'g_hr_ops',
+      label: 'HR Operations',
+      icon: Briefcase,
+      entries: pick(
+        { heading: 'Daily' }, 'task_management', 'notices', 'approvals',
+        { heading: 'Employee records' }, 'hr_operations_actions', 'hr_operations_letters', 'hr_operations_service_book', 'hr_operations_onboarding', 'hr_operations_increments',
+        { heading: 'Reports' }, 'hr_operations_reports', 'hr_operations',
+        { heading: 'Facilities' }, 'asset_management', 'vehicle_management',
+        { heading: 'Settings' }, 'hr_operations_settings'
+      )
+    },
+    {
+      key: 'g_settings',
+      label: 'Settings & Administration',
+      icon: Server,
+      entries: pick('users', 'projects', 'branches', 'companies', 'devices', 'active_users', 'data_import', 'permanent_delete_log')
+    },
+    { key: 'g_pepm', label: 'PEPM Management', icon: BarChart3, entries: pick('reports', 'mprs', 'imports', 'recycle', 'editlog') }
+  ]);
+  const allGroups = [...selfGroups, ...adminGroups];
+  // Which group an item lives in (search shows it beside the name).
+  const groupLabelOf = new Map<string, string>();
+  for (const g of allGroups) for (const e of g.entries) if (isItem(e)) groupLabelOf.set(e.key, g.label);
+  for (const i of adminTopItems) groupLabelOf.set(i.key, 'Admin Panel');
+
+  // The group holding the page on screen opens by itself, so its highlight
+  // is never hidden.
+  useEffect(() => {
+    if (!activeKey) return;
+    const g = allGroups.find((x) => x.entries.some((e) => isItem(e) && e.key === activeKey));
+    if (g) setOpenGroup(g.key);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeKey]);
+
+  // Favourites: up to four shortcuts at the top, chosen per account (kept in
+  // this browser). Defaults to the most used pages this account can open.
+  const favStoreKey = `gsidebar_favs_${user.id}`;
+  const [favKeys, setFavKeys] = useState<string[] | null>(() => {
+    try {
+      const v = localStorage.getItem(favStoreKey);
+      return v ? (JSON.parse(v) as string[]) : null;
+    } catch {
+      return null;
+    }
+  });
+  const defaultFavs = (isAdminRole
+    ? ['myTasks', 'approveApplications', 'userMovementClaims', 'employees', 'admin_dashboard', 'leaveApplication']
+    : ['myTasks', 'userMovementClaims', 'leaveApplication', 'vehicleManagement', 'approveApplications', 'assetManagement']
+  ).filter((k) => itemByKey.has(k));
+  const favItems = (favKeys || defaultFavs).map((k) => itemByKey.get(k)).filter((i): i is NavItem => !!i).slice(0, 4);
+  const saveFavs = (keys: string[]) => {
+    setFavKeys(keys);
+    try {
+      localStorage.setItem(favStoreKey, JSON.stringify(keys));
+    } catch {
+      // storage unavailable — kept for this session only
+    }
+  };
+  const toggleFav = (key: string) => {
+    const cur = favItems.map((i) => i.key);
+    if (cur.includes(key)) saveFavs(cur.filter((k) => k !== key));
+    else if (cur.length < 4) saveFavs([...cur, key]);
+  };
+
+  // Sidebar-wide menu search — flattens every item this account can actually
+  // see (Dashboard + Main + Self Service + every Admin Panel group/flat item)
+  // into one searchable list, so a menu buried a few groups deep is still one
+  // search away instead of needing to expand each group to find it. Hidden
+  // while the desktop column is minimized (collapsed) — no room for typed
+  // input there, same as every other label in that mode.
+  const [sidebarSearch, setSidebarSearch] = useState('');
+  const dashboardSearchItem: NavItem = { key: 'dashboard', label: 'Dashboard', icon: Home, onClick: onGoToDashboard };
+  const allSearchableItems: NavItem[] = [dashboardSearchItem, ...adminTopItems, ...allGroups.flatMap((g) => g.entries.filter(isItem))];
   const searchQuery = sidebarSearch.trim().toLowerCase();
   const searchResults = searchQuery ? allSearchableItems.filter((i) => i.label.toLowerCase().includes(searchQuery)) : [];
   const selectSearchResult = (fn: () => void) => {
@@ -658,173 +721,110 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     );
   };
 
-  // Shared renderer for the collapsible category groups (PEPM Manage,
-  // Claims, Attendance, Organization, Workforce, HR): a toggle header +
-  // indented items when expanded. While the sidebar itself is minimized,
-  // grouping into a flyout isn't worth the complexity, so it just falls
-  // back to the same flat icon list every other item uses.
-  const renderGroup = (
-    items: NavItem[],
-    label: string,
-    icon: React.ComponentType<{ className?: string }>,
-    isOpen: boolean,
-    setOpen: (fn: (o: boolean) => boolean) => void,
-  ) => {
-    if (items.length === 0) return null;
-    if (collapsed) {
-      return <div key={label} className="space-y-0.5">{items.map(renderItem)}</div>;
-    }
-    const GroupIcon = icon;
-    // Highlights the group's own header whenever the currently-active item
-    // lives inside it — so "where am I" is visible even while the group
-    // sits collapsed, not just once it's opened and the leaf item itself
-    // lights up below.
+  // One group: header (tap to open/close; one open at a time) and its items.
+  // While the column is minimized it's a single icon that opens the group as
+  // a popup beside it (see the flyout below).
+  const renderMenuGroup = (g: MenuGroup) => {
+    const items = g.entries.filter(isItem);
     const groupActive = items.some((i) => i.key === activeKey);
-    return (
-      <div key={label}>
+    const GroupIcon = g.icon;
+    if (collapsed) {
+      return (
         <button
+          key={g.key}
           type="button"
-          onClick={() => setOpen((o) => !o)}
-          className={`w-full flex items-center gap-2.5 rounded-xl px-2.5 py-2.5 transition-colors ${
-            groupActive ? 'bg-white/10 text-white' : 'text-white/85 hover:bg-white/10'
+          title={g.label}
+          aria-label={g.label}
+          onClick={(e) => {
+            if (flyout?.key === g.key) return setFlyout(null);
+            const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+            const asideRight = (e.currentTarget.closest('aside') as HTMLElement | null)?.getBoundingClientRect().right ?? r.right;
+            setFlyout({ key: g.key, top: r.top, bottom: r.bottom, left: asideRight + 8 });
+          }}
+          className={`w-full flex items-center justify-center rounded-xl px-0 py-2.5 transition-colors ${
+            groupActive || flyout?.key === g.key ? 'bg-white/15 text-white shadow-sm' : 'text-white/85 hover:bg-white/10'
           }`}
         >
           <GroupIcon className="w-[18px] h-[18px] shrink-0" />
-          <span className={`text-[13px] flex-1 text-left ${groupActive ? 'font-bold' : 'font-semibold'}`}>{label}</span>
-          <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
+        </button>
+      );
+    }
+    const isOpen = openGroup === g.key;
+    return (
+      <div key={g.key}>
+        <button
+          type="button"
+          onClick={() => setOpenGroup(isOpen ? null : g.key)}
+          aria-expanded={isOpen}
+          className={`w-full flex items-center gap-2.5 rounded-xl px-2.5 py-2.5 transition-colors ${
+            groupActive || isOpen ? 'bg-white/10 text-white' : 'text-white/85 hover:bg-white/10'
+          }`}
+        >
+          <GroupIcon className="w-[18px] h-[18px] shrink-0" />
+          <span className={`text-[13px] flex-1 text-left truncate ${groupActive ? 'font-bold' : 'font-semibold'}`}>{g.label}</span>
+          {isOpen ? (
+            <ChevronDown className="w-3.5 h-3.5 shrink-0 rotate-180 transition-transform duration-200" />
+          ) : (
+            <span className="text-[10.5px] font-semibold px-1.5 rounded-full bg-white/15 text-white/80">{items.length}</span>
+          )}
         </button>
         {isOpen && (
-          <div className="mt-0.5 ml-[13px] pl-3.5 border-l border-white/15 space-y-0.5">
-            {items.map((item) => {
-              const active = item.key === activeKey;
-              return (
-                <button
-                  key={item.key}
-                  type="button"
-                  onClick={() => selectAndClose(item.onClick)}
-                  className={`w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-left transition-colors ${
-                    active ? 'bg-white/15 text-white font-semibold' : 'text-white/70 hover:bg-white/10 hover:text-white'
-                  }`}
-                >
-                  <item.icon className="w-3.5 h-3.5 shrink-0" />
-                  <span className="text-[12.5px] truncate">{item.label}</span>
-                </button>
-              );
-            })}
-          </div>
+          <div className="mt-0.5 ml-[13px] pl-3.5 border-l border-white/15 space-y-0.5">{renderEntries(g.entries)}</div>
         )}
       </div>
     );
   };
 
-  // "HRM"/"HR" — same idea as renderGroup above, one level deeper: the group
-  // itself expands to a list of further collapsible sub-groups (HRM: My
-  // Claim/Bill, Attendance, Leave Manage, Payroll; HR: Attendance,
-  // Claims/Bill/Disbursement), each toggled independently via its own
-  // subOpenKeys/toggleSub pair (kept separate per parent group so their sub-
-  // group keys never collide). `flatItems`, when given, renders as plain
-  // leaf buttons above the sub-groups — HR's own Approvals/Notices/Holidays/
-  // Monthly Leave Application/Departments stay flat inside HR rather than
-  // needing a sub-group of their own. While collapsed (desktop minimized
-  // column), falls back to every flat item + sub-group item as one flat icon
-  // list, same as renderGroup's own collapsed fallback.
-  const renderNestedGroup = (
-    subGroups: { key: string; label: string; icon: React.ComponentType<{ className?: string }>; items: NavItem[] }[],
-    label: string,
-    icon: React.ComponentType<{ className?: string }>,
-    isOpen: boolean,
-    setOpen: (fn: (o: boolean) => boolean) => void,
-    subOpenKeys: Record<string, boolean>,
-    toggleSub: (key: string) => void,
-    flatItems: NavItem[] = [],
-  ) => {
-    if (subGroups.length === 0 && flatItems.length === 0) return null;
-    if (collapsed) {
-      return <div key={label} className="space-y-0.5">{[...flatItems, ...subGroups.flatMap((g) => g.items)].map(renderItem)}</div>;
-    }
-    const GroupIcon = icon;
-    // Same "highlight the header whenever the active item lives inside"
-    // behavior as renderGroup above, checked across both flatItems and every
-    // sub-group's items — the outer HRM/HR header lights up whichever level
-    // the active item sits at, and each sub-group's own header lights up too
-    // when it's specifically that sub-group holding the active item.
-    const groupActive = flatItems.some((i) => i.key === activeKey) || subGroups.some((g) => g.items.some((i) => i.key === activeKey));
-    return (
-      <div key={label}>
+  // A group's items (and small headings), as rows.
+  const renderEntries = (entries: Entry[], onPicked?: () => void) =>
+    entries.map((e, idx) => {
+      if (!isItem(e)) {
+        return (
+          <p key={`h-${idx}`} className="px-2.5 pt-2.5 pb-0.5 text-[9.5px] font-semibold uppercase tracking-wider text-white/45">
+            {e.heading}
+          </p>
+        );
+      }
+      const active = e.key === activeKey;
+      return (
         <button
+          key={e.key}
           type="button"
-          onClick={() => setOpen((o) => !o)}
-          className={`w-full flex items-center gap-2.5 rounded-xl px-2.5 py-2.5 transition-colors ${
-            groupActive ? 'bg-white/10 text-white' : 'text-white/85 hover:bg-white/10'
+          onClick={() => {
+            onPicked?.();
+            selectAndClose(e.onClick);
+          }}
+          className={`w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-left transition-colors ${
+            active ? 'bg-white/15 text-white font-semibold' : 'text-white/75 hover:bg-white/10 hover:text-white'
           }`}
         >
-          <GroupIcon className="w-[18px] h-[18px] shrink-0" />
-          <span className={`text-[13px] flex-1 text-left ${groupActive ? 'font-bold' : 'font-semibold'}`}>{label}</span>
-          <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
+          <e.icon className="w-3.5 h-3.5 shrink-0" />
+          <span className="text-[12.5px] truncate">{e.label}</span>
         </button>
-        {isOpen && (
-          <div className="mt-0.5 ml-[13px] pl-3.5 border-l border-white/15 space-y-0.5">
-            {flatItems.map((item) => {
-              const active = item.key === activeKey;
-              return (
-                <button
-                  key={item.key}
-                  type="button"
-                  onClick={() => selectAndClose(item.onClick)}
-                  className={`w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-left transition-colors ${
-                    active ? 'bg-white/15 text-white font-semibold' : 'text-white/70 hover:bg-white/10 hover:text-white'
-                  }`}
-                >
-                  <item.icon className="w-3.5 h-3.5 shrink-0" />
-                  <span className="text-[12.5px] truncate">{item.label}</span>
-                </button>
-              );
-            })}
-            {subGroups.map((g) => {
-              const subOpen = !!subOpenKeys[g.key];
-              const subActive = g.items.some((i) => i.key === activeKey);
-              const SubIcon = g.icon;
-              return (
-                <div key={g.key}>
-                  <button
-                    type="button"
-                    onClick={() => toggleSub(g.key)}
-                    className={`w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-left transition-colors ${
-                      subActive ? 'bg-white/10 text-white' : 'text-white/70 hover:bg-white/10 hover:text-white'
-                    }`}
-                  >
-                    <SubIcon className="w-3.5 h-3.5 shrink-0" />
-                    <span className={`text-[12.5px] flex-1 text-left truncate ${subActive ? 'font-bold' : 'font-semibold'}`}>{g.label}</span>
-                    <ChevronDown className={`w-3 h-3 shrink-0 transition-transform duration-200 ${subOpen ? 'rotate-180' : ''}`} />
-                  </button>
-                  {subOpen && (
-                    <div className="mt-0.5 ml-[11px] pl-3 border-l border-white/10 space-y-0.5">
-                      {g.items.map((item) => {
-                        const active = item.key === activeKey;
-                        return (
-                          <button
-                            key={item.key}
-                            type="button"
-                            onClick={() => selectAndClose(item.onClick)}
-                            className={`w-full flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-left transition-colors ${
-                              active ? 'bg-white/15 text-white font-semibold' : 'text-white/60 hover:bg-white/10 hover:text-white'
-                            }`}
-                          >
-                            <item.icon className="w-3 h-3 shrink-0" />
-                            <span className="text-[12px] truncate">{item.label}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    );
-  };
+      );
+    });
+
+  // Minimized column: the open group's popup, beside its icon.
+  const flyGroup = flyout ? allGroups.find((g) => g.key === flyout.key) || null : null;
+  useEffect(() => {
+    if (!flyout) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as HTMLElement;
+      if (!t.closest('[data-gsidebar-flyout]') && !t.closest('aside')) setFlyout(null);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setFlyout(null);
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [flyout]);
+  useEffect(() => {
+    if (!collapsed) setFlyout(null);
+  }, [collapsed]);
 
   return (
     <div>
@@ -963,6 +963,9 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
                         >
                           <item.icon className="w-4 h-4 shrink-0" />
                           <span className="text-[13px] truncate">{item.label}</span>
+                          {groupLabelOf.get(item.key) && (
+                            <span className="ml-auto pl-2 text-[10px] text-white/45 whitespace-nowrap">{groupLabelOf.get(item.key)}</span>
+                          )}
                         </button>
                       ))
                     ) : (
@@ -1003,50 +1006,75 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
             )}
           </button>
 
-          {!collapsed && (
-            <button
-              type="button"
-              onClick={() => setSelfServiceOpen((o) => !o)}
-              className="w-full flex items-center justify-between px-2.5 mt-3 mb-1.5 py-1 rounded-lg hover:bg-white/10 transition-colors"
-            >
-              <span className="text-[10px] font-semibold tracking-wide text-white/50">SELF SERVICE</span>
-              <ChevronDown className={`w-3 h-3 text-white/50 transition-transform duration-200 ${selfServiceOpen ? 'rotate-180' : ''}`} />
-            </button>
-          )}
-          {(collapsed || selfServiceOpen) && (
+          {/* Favourites — up to four shortcuts, chosen with the pencil. */}
+          {!collapsed && (favItems.length > 0 || editingFavs) && (
             <>
-              {renderGroup(jobEntryGroup, 'PEPM Operation', Briefcase, jobEntryOpen, setJobEntryOpen)}
-              {renderNestedGroup(hrmSubGroups, 'My HR', Users2, hrmOpen, setHrmOpen, hrmSubOpenKeys, toggleHrmSub)}
-              {selfServiceItems.map(renderItem)}
+              <div className="flex items-center justify-between px-2.5 mt-3 mb-1.5">
+                <span className="text-[10px] font-semibold tracking-wide text-white/50">FAVOURITES</span>
+                <button
+                  type="button"
+                  onClick={() => setEditingFavs((v) => !v)}
+                  className="text-white/50 hover:text-white p-0.5 rounded"
+                  aria-label={editingFavs ? 'Done choosing favourites' : 'Choose favourites'}
+                  title={editingFavs ? 'Done' : 'Choose favourites (up to 4)'}
+                >
+                  {editingFavs ? <Check className="w-3.5 h-3.5" /> : <Pencil className="w-3 h-3" />}
+                </button>
+              </div>
+              {editingFavs ? (
+                <div className="rounded-xl bg-black/15 p-1.5 max-h-64 overflow-y-auto">
+                  <p className="px-2 pb-1 text-[10.5px] text-white/55">Pick up to 4 ({favItems.length}/4)</p>
+                  {[...adminTopItems, ...allGroups.flatMap((g) => g.entries.filter(isItem))]
+                    .filter((i, idx, arr) => arr.findIndex((x) => x.key === i.key) === idx)
+                    .map((i) => {
+                      const on = favItems.some((f) => f.key === i.key);
+                      return (
+                        <label key={i.key} className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-[12px] text-white/85 hover:bg-white/10 cursor-pointer">
+                          <input type="checkbox" checked={on} disabled={!on && favItems.length >= 4} onChange={() => toggleFav(i.key)} className="accent-white" />
+                          <i.icon className="w-3.5 h-3.5 shrink-0" />
+                          <span className="truncate">{i.label}</span>
+                        </label>
+                      );
+                    })}
+                </div>
+              ) : (
+                <div className="grid grid-cols-4 gap-1.5">
+                  {favItems.map((i) => (
+                    <button
+                      key={i.key}
+                      type="button"
+                      title={i.label}
+                      onClick={() => selectAndClose(i.onClick)}
+                      className={`flex flex-col items-center gap-1 rounded-xl px-1 py-2 text-[10px] leading-tight text-center transition-colors ${
+                        i.key === activeKey ? 'bg-white/25 text-white' : 'bg-white/10 text-white/85 hover:bg-white/20'
+                      }`}
+                    >
+                      <i.icon className="w-[18px] h-[18px]" />
+                      <span className="line-clamp-2">{i.label.replace(' Application', '')}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </>
           )}
 
-          {(!!adminDashboardItem || !!reportsInsightsItem || !!dataImportItem || reportsGroup.length > 0 ||
-            hrGroup.length > 0 || hrSubGroups.length > 0 || misGroup.length > 0 || adminFlatItems.length > 0) && (
+          {selfGroups.length > 0 &&
+            (collapsed ? (
+              <div className="h-px mx-2 my-2 bg-white/15" />
+            ) : (
+              <p className="px-2.5 mt-3 mb-1.5 text-[10px] font-semibold tracking-wide text-white/50">SELF SERVICE</p>
+            ))}
+          {selfGroups.map(renderMenuGroup)}
+
+          {(adminTopItems.length > 0 || adminGroups.length > 0) && (
             <>
-              {!collapsed && (
-                <button
-                  type="button"
-                  onClick={() => setAdminPanelOpen((o) => !o)}
-                  className="w-full flex items-center justify-between px-2.5 mt-3 mb-1.5 py-1 rounded-lg hover:bg-white/10 transition-colors"
-                >
-                  <span className="text-[10px] font-semibold tracking-wide text-white/50">ADMIN PANEL</span>
-                  <ChevronDown className={`w-3 h-3 text-white/50 transition-transform duration-200 ${adminPanelOpen ? 'rotate-180' : ''}`} />
-                </button>
+              {collapsed ? (
+                <div className="h-px mx-2 my-2 bg-white/15" />
+              ) : (
+                <p className="px-2.5 mt-3 mb-1.5 text-[10px] font-semibold tracking-wide text-white/50">ADMIN PANEL</p>
               )}
-              {(collapsed || adminPanelOpen) && (
-                <>
-              {adminDashboardItem && renderItem(adminDashboardItem)}
-              {reportsInsightsItem && renderItem(reportsInsightsItem)}
-              {dataImportItem && renderItem(dataImportItem)}
-
-              {renderGroup(reportsGroup, 'PEPM Management', BarChart3, reportsOpen, setReportsOpen)}
-              {renderNestedGroup(hrSubGroups, 'HRM', ShieldCheck, hrOpen, setHrOpen, hrSubOpenKeys, toggleHrSub, hrGroup)}
-              {renderGroup(misGroup, 'MIS', Server, misOpen, setMisOpen)}
-
-              {adminFlatItems.map(renderItem)}
-                </>
-              )}
+              {adminTopItems.map(renderItem)}
+              {adminGroups.map(renderMenuGroup)}
             </>
           )}
 
@@ -1064,6 +1092,29 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
           </button>
         </div>
       </aside>
+
+      {collapsed && flyGroup && flyout &&
+        createPortal(
+          <div
+            data-gsidebar-flyout
+            className="fixed z-[1300] w-[250px] max-h-[70vh] overflow-y-auto rounded-2xl p-2 shadow-2xl border border-white/15"
+            style={{
+              // Opens downward from its icon in the top half of the screen,
+              // upward in the bottom half, so it always fits.
+              ...(flyout.top < window.innerHeight / 2 ? { top: Math.max(8, flyout.top - 6) } : { bottom: Math.max(8, window.innerHeight - flyout.bottom - 6) }),
+              left: flyout.left,
+              background: '#3a0d70'
+            }}
+            role="menu"
+            aria-label={flyGroup.label}
+          >
+            <p className="flex items-center gap-2 px-2 pt-1 pb-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-white/55">
+              <flyGroup.icon className="w-3.5 h-3.5" /> {flyGroup.label}
+            </p>
+            <div className="space-y-0.5">{renderEntries(flyGroup.entries, () => setFlyout(null))}</div>
+          </div>,
+          document.body
+        )}
     </div>
   );
 };
