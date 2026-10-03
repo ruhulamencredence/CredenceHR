@@ -1520,7 +1520,9 @@ export type AlertType =
   | 'hr_request'
   // Site Attendance (supervisor muster roll): a reminder / review outcome
   // for the supervisor — opens Self Service -> Team Attendance.
-  | 'site_attendance';
+  | 'site_attendance'
+  // Superadmin: a new phone is waiting for approval (Admin Panel -> Device Access).
+  | 'device_request';
 
 export interface Alert {
   id: number;
