@@ -17,6 +17,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Mic, MicOff, Phone, PhoneOff, Video, VideoOff } from 'lucide-react';
+import { Capacitor } from '@capacitor/core';
 import { apiUrl } from '../lib/api';
 import { connectChatSocket, getChatSocket } from '../lib/chatSocket';
 
@@ -157,16 +158,37 @@ export const CallLayer: React.FC<{ token: string }> = ({ token }) => {
   }, []);
 
   const getMedia = async (k: Kind) => {
+    // Browsers only offer the microphone on https:// pages (or localhost).
+    if (!navigator.mediaDevices?.getUserMedia) {
+      throw new Error(
+        window.isSecureContext
+          ? "This device or browser doesn't support calls."
+          : `Calls need the secure (https://) address — this page is open on ${window.location.host}.`
+      );
+    }
+    const audio = { echoCancellation: true, noiseSuppression: true };
     try {
       return await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true },
+        audio,
         video: k === 'video' ? { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } } : false,
       });
     } catch (e: any) {
+      // A video call still goes ahead on the microphone alone when the camera
+      // is refused, missing or busy.
+      if (k === 'video') {
+        try {
+          return await navigator.mediaDevices.getUserMedia({ audio, video: false });
+        } catch {
+          /* fall through to the message below */
+        }
+      }
+      const name = String(e?.name || '');
+      if (name === 'NotFoundError' || name === 'OverconstrainedError') throw new Error('No microphone found on this device.');
+      if (name === 'NotReadableError' || name === 'AbortError') throw new Error('The microphone is in use by another app — close it and try again.');
       throw new Error(
-        k === 'video'
-          ? 'Allow the microphone and camera for CredenceHR to make a video call.'
-          : 'Allow the microphone for CredenceHR to make a call.'
+        Capacitor.isNativePlatform()
+          ? 'Microphone permission is off for CredenceHR. Turn it on in phone Settings → Apps → CredenceHR → Permissions (Microphone, Camera), then try again.'
+          : 'Allow the microphone (and camera for video) for this site in the browser, then try again.'
       );
     }
   };
@@ -216,6 +238,7 @@ export const CallLayer: React.FC<{ token: string }> = ({ token }) => {
       setPhase('outgoing');
       try {
         localRef.current = await getMedia(d.kind);
+        if (d.kind === 'video' && !localRef.current.getVideoTracks().length) setCameraOff(true);
         if (localVideo.current) localVideo.current.srcObject = localRef.current;
       } catch (e: any) {
         return cleanup(e.message);
@@ -321,6 +344,7 @@ export const CallLayer: React.FC<{ token: string }> = ({ token }) => {
     setPhase('connecting');
     try {
       localRef.current = await getMedia(kind);
+      if (kind === 'video' && !localRef.current.getVideoTracks().length) setCameraOff(true);
     } catch (e: any) {
       getChatSocket()?.emit('call:decline', { callId });
       return cleanup(e.message);

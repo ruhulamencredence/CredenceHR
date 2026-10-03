@@ -1,19 +1,26 @@
 package com.mprtracker.app;
 
+import android.Manifest;
+import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.WindowManager;
+import android.webkit.PermissionRequest;
 import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebView;
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
+import androidx.core.content.ContextCompat;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import com.getcapacitor.BridgeActivity;
+import com.getcapacitor.BridgeWebChromeClient;
 import com.getcapacitor.BridgeWebViewClient;
 
 public class MainActivity extends BridgeActivity {
@@ -24,6 +31,16 @@ public class MainActivity extends BridgeActivity {
     // of guessing the URL.
     private String appServerUrl;
     private WebView webView;
+
+    // Microphone / camera for the page (chat calls in CallLayer.tsx, voice
+    // messages on the web path). Capacitor's own BridgeWebChromeClient also
+    // asks for MODIFY_AUDIO_SETTINGS, and treats it like a runtime
+    // permission: on any build whose manifest lacks it the whole request is
+    // denied even after the user allows the microphone. MODIFY_AUDIO_SETTINGS
+    // is an install-time permission, so only the real runtime ones (camera,
+    // microphone) are asked for here, and the page gets whatever was granted.
+    private PermissionRequest pendingMediaRequest;
+    private ActivityResultLauncher<String[]> mediaPermissionLauncher;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -48,6 +65,17 @@ public class MainActivity extends BridgeActivity {
 
         webView = this.bridge.getWebView();
         appServerUrl = this.bridge.getServerUrl();
+
+        mediaPermissionLauncher = registerForActivityResult(
+            new ActivityResultContracts.RequestMultiplePermissions(),
+            result -> answerMediaRequest()
+        );
+        webView.setWebChromeClient(new BridgeWebChromeClient(this.bridge) {
+            @Override
+            public void onPermissionRequest(final PermissionRequest request) {
+                runOnUiThread(() -> handleMediaRequest(request));
+            }
+        });
 
         // Wrap Capacitor's own WebViewClient so its bridge/plugin handling
         // (shouldOverrideUrlLoading, shouldInterceptRequest, etc.) keeps
@@ -154,6 +182,46 @@ public class MainActivity extends BridgeActivity {
             return insets;
         });
         ViewCompat.requestApplyInsets(webView);
+    }
+
+    private String permissionFor(String resource) {
+        if (PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(resource)) return Manifest.permission.RECORD_AUDIO;
+        if (PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(resource)) return Manifest.permission.CAMERA;
+        return null;
+    }
+
+    private void handleMediaRequest(PermissionRequest request) {
+        if (pendingMediaRequest != null) pendingMediaRequest.deny();
+        pendingMediaRequest = request;
+        java.util.List<String> missing = new java.util.ArrayList<>();
+        for (String resource : request.getResources()) {
+            String perm = permissionFor(resource);
+            if (perm != null && ContextCompat.checkSelfPermission(this, perm) != PackageManager.PERMISSION_GRANTED) {
+                missing.add(perm);
+            }
+        }
+        if (missing.isEmpty() || Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            answerMediaRequest();
+        } else {
+            mediaPermissionLauncher.launch(missing.toArray(new String[0]));
+        }
+    }
+
+    // Grants the page the resources whose Android permission is now held;
+    // denies the request only when none of them are.
+    private void answerMediaRequest() {
+        PermissionRequest request = pendingMediaRequest;
+        pendingMediaRequest = null;
+        if (request == null) return;
+        java.util.List<String> granted = new java.util.ArrayList<>();
+        for (String resource : request.getResources()) {
+            String perm = permissionFor(resource);
+            if (perm == null || ContextCompat.checkSelfPermission(this, perm) == PackageManager.PERMISSION_GRANTED) {
+                granted.add(resource);
+            }
+        }
+        if (granted.isEmpty()) request.deny();
+        else request.grant(granted.toArray(new String[0]));
     }
 
     private void showOfflinePage(WebView view) {
