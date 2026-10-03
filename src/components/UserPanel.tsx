@@ -4,7 +4,12 @@ import { Capacitor } from '@capacitor/core';
 import { Project, MprNumber, Entry, Budget, BudgetItem, User, MprUsage, ClaimsNavRequest, JobsNavRequest, DashboardNavRequest, LeaveNavRequest } from '../types';
 import { CalendarClock, CheckSquare, ExternalLink, Gavel, LogOut, MessageSquare, ShieldCheck } from 'lucide-react';
 import type { MoreItem } from './BottomNav';
-import { Calendar, Building2, FileText, Package, Clock, Plus, AlertTriangle, CheckCircle2, ChevronRight, X, Trash2, Edit2, Lock, Wallet, ArrowLeft, FolderOpen, ListChecks, Search, Save, Briefcase, FileDown, Scissors, Route, Info, Contact, Bell, Car, ClipboardCheck } from 'lucide-react';
+
+// Mobile Dashboard: at most this many quick access tiles; the rest go to the
+// bottom bar's More popup.
+const MAX_DASHBOARD_TILES = 9;
+type DashboardTile = MoreItem & { tileBg: string; badgeBg?: string };
+import { Navigation, Calendar, Building2, FileText, Package, Clock, Plus, AlertTriangle, CheckCircle2, ChevronRight, X, Trash2, Edit2, Lock, Wallet, ArrowLeft, FolderOpen, ListChecks, Search, Save, Briefcase, FileDown, Scissors, Route, Info, Contact, Bell, Car, ClipboardCheck } from 'lucide-react';
 import { useSiteSupervisor } from './TeamAttendance';
 import { apiUrl } from '../lib/api';
 import { formatDate, todayDateOnlyString, dateRangeOptions, formatDateLabel, latestDateStr, isDateBlockedByLeadTime } from '../lib/formatDate';
@@ -27,7 +32,7 @@ import { MyMonthAttendanceCard } from './MyMonthAttendanceCard';
 import { TodayOverviewCard } from './TodayOverviewCard';
 import { BookRideCard, useActiveRides } from './BookRideCard';
 import { MyAssetCard, useMyAssetSummary } from './MyAssetCard';
-import { TrackingStatusCards } from './TrackingStatusCards';
+import { TrackingStatusCards, useTrackingStatus } from './TrackingStatusCards';
 import { BookRideTarget, MyAssetTarget } from '../lib/quickAccess';
 import { NoticePreviewCard } from './NoticePreviewCard';
 import { HolidayCalendarWidget } from './HolidayCalendarWidget';
@@ -1008,6 +1013,10 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   const activeRides = useActiveRides(token, user.id) || [];
   const assetSummary = useMyAssetSummary(token);
   const siteSupervisor = useSiteSupervisor(token);
+  // Employee Tracking tile (mobile) — counts only for accounts with the
+  // 'tracking' module; its popup opens from the tile.
+  const trackingStatus = useTrackingStatus(token);
+  const [trackingChooserOpen, setTrackingChooserOpen] = useState(false);
 
   const [mobileActiveSection, setMobileActiveSection] = useState<'budget' | 'jobs' | 'entries' | 'jobEdit' | 'claim' | 'claims' | 'conveyanceClaim' | 'leave' | 'timesheet' | 'employeeDirectory' | 'noticeBoard' | null>(
     () => {
@@ -2974,6 +2983,30 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
     ? projects.filter((p) => p.id === user.attendance_project_id)
     : projects;
 
+
+  // Mobile Dashboard quick access tiles, in order, each only when this
+  // account may use it. The first MAX_DASHBOARD_TILES sit on the Dashboard;
+  // the rest go to the bottom bar's More popup (mobileMoreItems).
+  const dashboardTiles: DashboardTile[] = [
+    ...(canSeeBudgetModule
+      ? [
+          { key: 'budget', label: selectedBudget ? 'MPR Entry' : 'Select a Budget', icon: Wallet, tileBg: 'from-blue-100/70 via-white/50 to-indigo-50/40', iconBg: 'from-blue-300 to-blue-500 shadow-[0_6px_16px_-2px_rgba(37,99,235,0.35)]', onClick: () => { showBudgetPicker(); goToMobileSection('budget'); } },
+          { key: 'jobs', label: 'Jobs', icon: Briefcase, badge: totalJobsCount, badgeBg: 'bg-violet-600', tileBg: 'from-violet-100/70 via-white/50 to-fuchsia-50/40', iconBg: 'from-violet-300 to-violet-500 shadow-[0_6px_16px_-2px_rgba(124,58,237,0.35)]', onClick: () => goToMobileSection('jobs') },
+          { key: 'entries', label: 'Job Entry Details', icon: FileText, badge: filteredEntries.length, badgeBg: 'bg-rose-600', tileBg: 'from-rose-100/70 via-white/50 to-pink-50/40', iconBg: 'from-rose-300 to-rose-500 shadow-[0_6px_16px_-2px_rgba(225,29,72,0.35)]', onClick: () => goToMobileSection('entries') }
+        ]
+      : []),
+    ...(user.can_job_edit ? [{ key: 'jobEdit', label: 'Job Edit', icon: Edit2, tileBg: 'from-cyan-100/70 via-white/50 to-sky-50/40', iconBg: 'from-cyan-300 to-cyan-500 shadow-[0_6px_16px_-2px_rgba(8,145,178,0.35)]', onClick: () => goToMobileSection('jobEdit') }] : []),
+    ...(canSeeMovementClaim ? [{ key: 'claim', label: 'Movement Claim', icon: Route, tileBg: 'from-emerald-100/70 via-white/50 to-teal-50/40', iconBg: 'from-emerald-300 to-emerald-500 shadow-[0_6px_16px_-2px_rgba(5,150,105,0.35)]', onClick: () => goToMobileSection('claim') }] : []),
+    ...(canSeeConveyanceClaim ? [{ key: 'conveyanceClaim', label: 'Conveyance Bill Claim', icon: Wallet, tileBg: 'from-amber-100/70 via-white/50 to-orange-50/40', iconBg: 'from-amber-300 to-orange-400 shadow-[0_6px_16px_-2px_rgba(217,119,6,0.35)]', onClick: () => goToMobileSection('conveyanceClaim') }] : []),
+    { key: 'employeeDirectory', label: 'Employee Directory', icon: Contact, tileBg: 'from-indigo-100/70 via-white/50 to-blue-50/40', iconBg: 'from-indigo-300 to-indigo-500 shadow-[0_6px_16px_-2px_rgba(79,70,229,0.35)]', onClick: () => goToMobileSection('employeeDirectory') },
+    ...(onOpenBookRide ? [{ key: 'bookRide', label: 'Book a Ride', icon: Car, badge: activeRides.length, badgeBg: 'bg-sky-600', tileBg: 'from-sky-100/70 via-white/50 to-cyan-50/40', iconBg: 'from-sky-300 to-sky-500 shadow-[0_6px_16px_-2px_rgba(2,132,199,0.35)]', onClick: () => onOpenBookRide(activeRides.length > 0 ? 'status' : 'book') }] : []),
+    ...(onOpenMyAsset ? [{ key: 'myAsset', label: 'My Asset', icon: Package, badge: assetSummary?.awaitingAck || 0, badgeBg: 'bg-green-600', tileBg: 'from-lime-100/70 via-white/50 to-green-50/40', iconBg: 'from-lime-400 to-green-500 shadow-[0_6px_16px_-2px_rgba(22,163,74,0.35)]', onClick: () => onOpenMyAsset('my-assets') }] : []),
+    // Only for accounts with the 'tracking' module (trackingStatus is null otherwise).
+    ...(trackingStatus ? [{ key: 'tracking', label: 'Employee Tracking', icon: Navigation, badge: trackingStatus.tracked, badgeBg: 'bg-emerald-600', tileBg: 'from-emerald-100/70 via-white/50 to-teal-50/40', iconBg: 'from-emerald-400 to-teal-500 shadow-[0_6px_16px_-2px_rgba(5,150,105,0.35)]', onClick: () => setTrackingChooserOpen(true) }] : []),
+    ...(siteSupervisor.teams > 0 ? [{ key: 'teamAttendance', label: 'Team Attendance', icon: ClipboardCheck, badge: siteSupervisor.notSubmitted, badgeBg: 'bg-rose-600', tileBg: 'from-teal-100/70 via-white/50 to-emerald-50/40', iconBg: 'from-teal-400 to-emerald-500 shadow-[0_6px_16px_-2px_rgba(13,148,136,0.35)]', onClick: () => window.dispatchEvent(new CustomEvent('credence:open-self-service', { detail: 'teamAttendance' })) }] : [])
+  ];
+  const bottomNavMoreItems: MoreItem[] = [...dashboardTiles.slice(MAX_DASHBOARD_TILES), ...mobileMoreItems];
+
   return (
     <div className="relative w-full min-h-[calc(100vh-4rem)] min-h-[calc(100dvh-4rem)] text-slate-900 overflow-hidden" style={{ background: 'var(--g-bg-gradient)' }}>
       {/* Violet gradient welcome banner — now sits flush directly under the
@@ -3294,162 +3327,35 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           flat white icon box, so it reads at a glance like a home-screen app icon. */}
       {mobileActiveSection === null && (
         <div className="md:hidden grid grid-cols-3 gap-2.5 mobile-page-in">
-          {canSeeBudgetModule && (
-          <button
-            type="button"
-            onClick={() => {
-              showBudgetPicker();
-              goToMobileSection('budget');
-            }}
-            className="relative flex flex-col items-center justify-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 h-[104px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-blue-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
-          >
-            <div className="p-2.5 rounded-2xl bg-gradient-to-br from-blue-300 to-blue-500 shadow-[0_6px_16px_-2px_rgba(37,99,235,0.35)] border border-white/30">
-              <Wallet className="w-6 h-6 text-white" />
-            </div>
-            <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">
-              {selectedBudget ? 'MPR Entry' : 'Select a Budget'}
-            </span>
-          </button>
-          )}
-          {canSeeBudgetModule && (
-          <button
-            type="button"
-            onClick={() => goToMobileSection('jobs')}
-            className="relative flex flex-col items-center justify-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 h-[104px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-violet-100/70 via-white/50 to-fuchsia-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
-          >
-            <div className="p-2.5 rounded-2xl bg-gradient-to-br from-violet-300 to-violet-500 shadow-[0_6px_16px_-2px_rgba(124,58,237,0.35)] border border-white/30 relative">
-              <Briefcase className="w-6 h-6 text-white" />
-              {totalJobsCount > 0 && (
-                <span className="absolute -top-1.5 -right-1.5 text-[10px] font-semibold bg-violet-600 text-white rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 border border-white/70">
-                  {totalJobsCount}
-                </span>
-              )}
-            </div>
-            <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">Jobs</span>
-          </button>
-          )}
-          {canSeeBudgetModule && (
-          <button
-            type="button"
-            onClick={() => goToMobileSection('entries')}
-            className="relative flex flex-col items-center justify-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 h-[104px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-rose-100/70 via-white/50 to-pink-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
-          >
-            <div className="p-2.5 rounded-2xl bg-gradient-to-br from-rose-300 to-rose-500 shadow-[0_6px_16px_-2px_rgba(225,29,72,0.35)] border border-white/30 relative">
-              <FileText className="w-6 h-6 text-white" />
-              {filteredEntries.length > 0 && (
-                <span className="absolute -top-1.5 -right-1.5 text-[10px] font-semibold bg-rose-600 text-white rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 border border-white/70">
-                  {filteredEntries.length}
-                </span>
-              )}
-            </div>
-            <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">Job Entry Details</span>
-          </button>
-          )}
-          {user.can_job_edit && (
+          {dashboardTiles.slice(0, MAX_DASHBOARD_TILES).map((t) => (
             <button
+              key={t.key}
               type="button"
-              onClick={() => goToMobileSection('jobEdit')}
-              className="relative flex flex-col items-center justify-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 h-[104px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-cyan-100/70 via-white/50 to-sky-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
+              onClick={t.onClick}
+              className={`relative flex flex-col items-center justify-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 h-[104px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br ${t.tileBg} backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all`}
             >
-              <div className="p-2.5 rounded-2xl bg-gradient-to-br from-cyan-300 to-cyan-500 shadow-[0_6px_16px_-2px_rgba(8,145,178,0.35)] border border-white/30">
-                <Edit2 className="w-6 h-6 text-white" />
-              </div>
-              <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">Job Edit</span>
-            </button>
-          )}
-          {canSeeMovementClaim && (
-            <button
-              type="button"
-              onClick={() => goToMobileSection('claim')}
-              className="relative flex flex-col items-center justify-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 h-[104px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-emerald-100/70 via-white/50 to-teal-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
-            >
-              <div className="p-2.5 rounded-2xl bg-gradient-to-br from-emerald-300 to-emerald-500 shadow-[0_6px_16px_-2px_rgba(5,150,105,0.35)] border border-white/30">
-                <Route className="w-6 h-6 text-white" />
-              </div>
-              <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">Movement Claim</span>
-            </button>
-          )}
-          {canSeeConveyanceClaim && (
-            <button
-              type="button"
-              onClick={() => goToMobileSection('conveyanceClaim')}
-              className="relative flex flex-col items-center justify-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 h-[104px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-amber-100/70 via-white/50 to-orange-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
-            >
-              <div className="p-2.5 rounded-2xl bg-gradient-to-br from-amber-300 to-orange-400 shadow-[0_6px_16px_-2px_rgba(217,119,6,0.35)] border border-white/30">
-                <Wallet className="w-6 h-6 text-white" />
-              </div>
-              <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">Conveyance Bill Claim</span>
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={() => goToMobileSection('employeeDirectory')}
-            className="relative flex flex-col items-center justify-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 h-[104px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-indigo-100/70 via-white/50 to-blue-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
-          >
-            <div className="p-2.5 rounded-2xl bg-gradient-to-br from-indigo-300 to-indigo-500 shadow-[0_6px_16px_-2px_rgba(79,70,229,0.35)] border border-white/30">
-              <Contact className="w-6 h-6 text-white" />
-            </div>
-            <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">Employee Directory</span>
-          </button>
-          {/* Book a Ride / My Asset quick access — same tile as the rest of
-              this menu. Badges: rides still in progress, and assets waiting
-              for this account's acknowledgement. */}
-          {onOpenBookRide && (
-            <button
-              type="button"
-              onClick={() => onOpenBookRide(activeRides.length > 0 ? 'status' : 'book')}
-              className="relative flex flex-col items-center justify-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 h-[104px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-sky-100/70 via-white/50 to-cyan-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
-            >
-              <div className="p-2.5 rounded-2xl bg-gradient-to-br from-sky-300 to-sky-500 shadow-[0_6px_16px_-2px_rgba(2,132,199,0.35)] border border-white/30 relative">
-                <Car className="w-6 h-6 text-white" />
-                {activeRides.length > 0 && (
-                  <span className="absolute -top-1.5 -right-1.5 text-[10px] font-semibold bg-sky-600 text-white rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 border border-white/70">
-                    {activeRides.length}
+              <div className={`p-2.5 rounded-2xl bg-gradient-to-br ${t.iconBg} border border-white/30 relative`}>
+                <t.icon className="w-6 h-6 text-white" />
+                {!!t.badge && (
+                  <span className={`absolute -top-1.5 -right-1.5 text-[10px] font-semibold ${t.badgeBg || 'bg-rose-600'} text-white rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 border border-white/70`}>
+                    {t.badge}
                   </span>
                 )}
               </div>
-              <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">Book a Ride</span>
+              <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">{t.label}</span>
             </button>
-          )}
-          {onOpenMyAsset && (
-            <button
-              type="button"
-              onClick={() => onOpenMyAsset('my-assets')}
-              className="relative flex flex-col items-center justify-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 h-[104px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-lime-100/70 via-white/50 to-green-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
-            >
-              <div className="p-2.5 rounded-2xl bg-gradient-to-br from-lime-400 to-green-500 shadow-[0_6px_16px_-2px_rgba(22,163,74,0.35)] border border-white/30 relative">
-                <Package className="w-6 h-6 text-white" />
-                {!!assetSummary?.awaitingAck && (
-                  <span className="absolute -top-1.5 -right-1.5 text-[10px] font-semibold bg-green-600 text-white rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 border border-white/70">
-                    {assetSummary.awaitingAck}
-                  </span>
-                )}
-              </div>
-              <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">My Asset</span>
-            </button>
-          )}
-          {/* Employee Tracking — only for accounts with the 'tracking' module. */}
-          <TrackingStatusCards token={token} variant="tile" />
-          {/* Team Attendance — only for Site Attendance supervisors
-              (TeamAttendance.tsx); badge = teams not submitted today. */}
-          {siteSupervisor.teams > 0 && (
-            <button
-              type="button"
-              onClick={() => window.dispatchEvent(new CustomEvent('credence:open-self-service', { detail: 'teamAttendance' }))}
-              className="relative flex flex-col items-center justify-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 h-[104px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-teal-100/70 via-white/50 to-emerald-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
-            >
-              <div className="p-2.5 rounded-2xl bg-gradient-to-br from-teal-400 to-emerald-500 shadow-[0_6px_16px_-2px_rgba(13,148,136,0.35)] border border-white/30 relative">
-                <ClipboardCheck className="w-6 h-6 text-white" />
-                {siteSupervisor.notSubmitted > 0 && (
-                  <span className="absolute -top-1.5 -right-1.5 text-[10px] font-semibold bg-rose-600 text-white rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 border border-white/70">
-                    {siteSupervisor.notSubmitted}
-                  </span>
-                )}
-              </div>
-              <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">Team Attendance</span>
-            </button>
-          )}
+          ))}
         </div>
+      )}
+      {/* Employee Tracking tile's popup (both numbers -> department lists). */}
+      {trackingStatus && (
+        <TrackingStatusCards
+          token={token}
+          variant="chooser"
+          status={trackingStatus}
+          chooserOpen={trackingChooserOpen}
+          onChooserClose={() => setTrackingChooserOpen(false)}
+        />
       )}
 
 
@@ -5511,7 +5417,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
         canViewMovementClaim={canSeeMovementClaim}
         canViewTimesheet={canSeeTimesheet}
         canViewLeave={canSeeLeave}
-        moreItems={mobileMoreItems}
+        moreItems={bottomNavMoreItems}
       />
     </div>
   );
