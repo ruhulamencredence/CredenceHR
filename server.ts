@@ -5256,6 +5256,7 @@ async function startServer() {
           content_html: n.content_html,
           lottie_json: n.lottie_json || null,
           lottie_url: n.lottie_url || null,
+          source: n.source || null,
           created_at: n.created_at
         }))
       );
