@@ -27,6 +27,7 @@ import { MyMonthAttendanceCard } from './MyMonthAttendanceCard';
 import { TodayOverviewCard } from './TodayOverviewCard';
 import { BookRideCard, useActiveRides } from './BookRideCard';
 import { MyAssetCard, useMyAssetSummary } from './MyAssetCard';
+import { TrackingStatusCards } from './TrackingStatusCards';
 import { BookRideTarget, MyAssetTarget } from '../lib/quickAccess';
 import { NoticePreviewCard } from './NoticePreviewCard';
 import { HolidayCalendarWidget } from './HolidayCalendarWidget';
@@ -3074,6 +3075,9 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
             Dashboard has the mobile tiles above. */}
         {!Capacitor.isNativePlatform() && onOpenBookRide && <BookRideCard token={token} userId={user.id} onOpen={onOpenBookRide} />}
         {!Capacitor.isNativePlatform() && onOpenMyAsset && <MyAssetCard token={token} onOpen={onOpenMyAsset} />}
+        {/* Employee Tracking quick access — only for accounts with the
+            'tracking' module (renders nothing otherwise; its API refuses). */}
+        {!Capacitor.isNativePlatform() && <TrackingStatusCards token={token} variant="card" />}
 
         {/* Takes the full row at md, where there are only two columns to
             share — it's an actionable list (remarks input + Approve/Reject
@@ -3424,6 +3428,8 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
               <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">My Asset</span>
             </button>
           )}
+          {/* Employee Tracking — only for accounts with the 'tracking' module. */}
+          <TrackingStatusCards token={token} variant="tile" />
           {/* Team Attendance — only for Site Attendance supervisors
               (TeamAttendance.tsx); badge = teams not submitted today. */}
           {siteSupervisor.teams > 0 && (

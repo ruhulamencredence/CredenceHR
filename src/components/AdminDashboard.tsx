@@ -35,7 +35,6 @@ import {
 import { User } from '../types';
 import { apiUrl } from '../lib/api';
 import { useMyCompanies } from '../lib/company';
-import { TrackingStatusCards } from './TrackingStatusCards';
 
 interface AdminDashboardProps {
   token: string;
@@ -890,10 +889,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
               </div>
             </div>
           )}
-
-          {/* Employee Tracking quick card — renders only for accounts with the
-              'tracking' module (its API refuses everyone else). */}
-          <TrackingStatusCards token={token} variant="card" onOpenTracking={onNavigate ? () => onNavigate('tracking') : undefined} />
 
           {/* Quick View + Claim Amount chart */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">

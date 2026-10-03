@@ -4,13 +4,15 @@
  */
 
 // Employee Tracking -> "Currently Under Tracking" / "Currently Not Tracked".
-// Shown at the top of Admin Panel -> Employee Tracking and as a quick card on
-// the Admin Dashboard. Each number opens its employees, grouped by
+// Shown at the top of Admin Panel -> Employee Tracking and as a quick access
+// card (web) / tile (app) on the user Dashboard, next to Book a Ride and My
+// Asset. Each number opens its employees, grouped by
 // Department, with a search box. GET /api/tracking/status needs the
 // 'tracking' module, so without it this renders nothing (and the API refuses).
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { ArrowRight, Navigation, Search, X } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { Navigation, Search, X } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 
 interface TrackingRow {
@@ -52,13 +54,18 @@ function initials(name: string): string {
 interface Props {
   token: string;
   // 'panel': two big tiles (Admin Panel -> Employee Tracking).
-  // 'card': one Admin Dashboard quick card holding both numbers.
-  variant?: 'panel' | 'card';
-  // Dashboard card only: opens Admin Panel -> Employee Tracking.
-  onOpenTracking?: () => void;
+  // 'card': the web Dashboard's quick access card (like My Asset).
+  // 'tile': the app Dashboard's quick access tile (like Book a Ride); tapping
+  // it shows both numbers.
+  variant?: 'panel' | 'card' | 'tile';
+  className?: string;
 }
 
-export const TrackingStatusCards: React.FC<Props> = ({ token, variant = 'panel', onOpenTracking }) => {
+// Admin Panel -> Employee Tracking (the live map).
+const openTrackingMap = () => window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'tracking' }));
+
+export const TrackingStatusCards: React.FC<Props> = ({ token, variant = 'panel', className = '' }) => {
+  const [chooser, setChooser] = useState(false);
   const [data, setData] = useState<TrackingStatus | null>(null);
   const [open, setOpen] = useState<'tracked' | 'not_tracked' | null>(null);
   const [query, setQuery] = useState('');
@@ -105,6 +112,7 @@ export const TrackingStatusCards: React.FC<Props> = ({ token, variant = 'panel',
   if (!data) return null;
 
   const openList = (which: 'tracked' | 'not_tracked') => {
+    setChooser(false);
     setQuery('');
     setOpen(which);
   };
@@ -135,32 +143,79 @@ export const TrackingStatusCards: React.FC<Props> = ({ token, variant = 'panel',
             </button>
           ))}
         </div>
-      ) : (
-        <div className="bg-white/80 border border-slate-200 rounded-2xl p-4 shadow-sm">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-              <Navigation className="w-4 h-4 text-emerald-600" /> Employee Tracking
-            </h3>
-            {onOpenTracking && (
-              <button type="button" onClick={onOpenTracking} className="text-[11px] font-semibold text-blue-600 hover:underline flex items-center gap-1">
-                Open map <ArrowRight className="w-3 h-3" />
-              </button>
-            )}
+      ) : variant === 'card' ? (
+        <div className={`bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden flex flex-col ${className}`}>
+          <div className="px-5 pt-5 pb-4 sm:px-6 border-b border-slate-200 flex items-start justify-between gap-3">
+            <div>
+              <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                <Navigation className="w-4 h-4 text-blue-600" /> Employee Tracking
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">Who is sending their location right now</p>
+            </div>
+            <button type="button" onClick={openTrackingMap} className="text-xs font-medium text-blue-600 hover:underline shrink-0">
+              Open map
+            </button>
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            <button type="button" onClick={() => openList('tracked')} className="text-left rounded-xl bg-emerald-50 border border-emerald-100 px-3 py-2.5 hover:bg-emerald-100/70 transition-colors">
-              <div className="text-2xl font-bold text-emerald-700">{data.tracked}</div>
-              <div className="text-[11px] font-semibold text-emerald-700">Currently Under Tracking</div>
-            </button>
-            <button type="button" onClick={() => openList('not_tracked')} className="text-left rounded-xl bg-slate-50 border border-slate-100 px-3 py-2.5 hover:bg-slate-100 transition-colors">
-              <div className="text-2xl font-bold text-slate-700">{data.not_tracked}</div>
-              <div className="text-[11px] font-semibold text-slate-600">Currently Not Tracked</div>
-            </button>
+          <div className="p-5 sm:px-6 flex-1">
+            <div className="grid grid-cols-2 gap-2">
+              <button type="button" onClick={() => openList('tracked')} className="rounded-xl border border-slate-200 px-2 py-2.5 text-center hover:bg-slate-50 transition-colors">
+                <div className="text-lg font-bold text-emerald-600">{data.tracked}</div>
+                <div className="text-[11px] text-slate-500 leading-tight">Currently Under Tracking</div>
+              </button>
+              <button type="button" onClick={() => openList('not_tracked')} className="rounded-xl border border-slate-200 px-2 py-2.5 text-center hover:bg-slate-50 transition-colors">
+                <div className="text-lg font-bold text-slate-900">{data.not_tracked}</div>
+                <div className="text-[11px] text-slate-500 leading-tight">Currently Not Tracked</div>
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-400 mt-3">Under tracking = a location in the last {data.live_minutes} min. Tap a number to see who, by Department.</p>
           </div>
         </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setChooser(true)}
+          className="relative flex flex-col items-center justify-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 h-[104px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-emerald-100/70 via-white/50 to-teal-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
+        >
+          <div className="p-2.5 rounded-2xl bg-gradient-to-br from-emerald-400 to-teal-500 shadow-[0_6px_16px_-2px_rgba(5,150,105,0.35)] border border-white/30 relative">
+            <Navigation className="w-6 h-6 text-white" />
+            <span className="absolute -top-1.5 -right-1.5 text-[10px] font-semibold bg-emerald-600 text-white rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 border border-white/70">
+              {data.tracked}
+            </span>
+          </div>
+          <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">Employee Tracking</span>
+        </button>
       )}
 
-      {open && (
+      {/* Portalled to <body>: the Dashboard's glass tiles use backdrop-blur,
+          which would otherwise trap these fixed overlays inside the tile. */}
+      {chooser && createPortal(
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4" onClick={() => setChooser(false)}>
+          <div role="dialog" aria-label="Employee Tracking" className="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-sm p-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                <Navigation className="w-4 h-4 text-emerald-600" /> Employee Tracking
+              </h3>
+              <button type="button" onClick={() => setChooser(false)} className="w-7 h-7 rounded-full flex items-center justify-center text-slate-400 hover:bg-slate-100" aria-label="Close">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <button type="button" onClick={() => openList('tracked')} className="rounded-xl bg-emerald-50 border border-emerald-100 px-3 py-3 text-left">
+                <div className="text-2xl font-bold text-emerald-700">{data.tracked}</div>
+                <div className="text-[11px] font-semibold text-emerald-700">Currently Under Tracking</div>
+              </button>
+              <button type="button" onClick={() => openList('not_tracked')} className="rounded-xl bg-slate-50 border border-slate-100 px-3 py-3 text-left">
+                <div className="text-2xl font-bold text-slate-700">{data.not_tracked}</div>
+                <div className="text-[11px] font-semibold text-slate-600">Currently Not Tracked</div>
+              </button>
+            </div>
+            <p className="text-[11px] text-slate-400 mt-3">Under tracking = a location in the last {data.live_minutes} min. Tap a number to see who, by Department.</p>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {open && createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4" onClick={() => setOpen(null)}>
           <div
             role="dialog"
@@ -225,7 +280,8 @@ export const TrackingStatusCards: React.FC<Props> = ({ token, variant = 'panel',
               ))}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </>
   );
