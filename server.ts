@@ -3948,6 +3948,65 @@ async function startServer() {
     }
   });
 
+  // Employee Tracking -> "Currently Under Tracking" / "Currently Not Tracked"
+  // (and the same pair on the Admin Dashboard's quick card): every active
+  // employee of the company, split by whether their phone has sent a location
+  // in the last TRACKING_LIVE_MIN minutes (same 20 min the Live map uses
+  // before a dot turns grey). Anyone not tracked gets the reason.
+  app.get("/api/tracking/status", authenticateToken, requireAdmin, requireModule("tracking"), async (_req: any, res) => {
+    try {
+      const TRACKING_LIVE_MIN = 20;
+      const employees: any[] = (await queryDB(
+        `SELECT e.id, e.employee_id, e.name, e.designation, e.department, e.user_id, u.can_use_tracking
+           FROM all_employees e LEFT JOIN users u ON u.id = e.user_id
+          WHERE e.is_active = 1`,
+        []
+      )) || [];
+      const pings: any[] = (await queryDB(
+        `SELECT user_id, MAX(recorded_at) AS last_ping, TIMESTAMPDIFF(MINUTE, MAX(recorded_at), NOW()) AS minutes_ago
+           FROM location_pings GROUP BY user_id`,
+        []
+      )) || [];
+      const byUser = new Map<number, any>(pings.map((p) => [Number(p.user_id), p]));
+      const rows = employees.map((e) => {
+        const p = e.user_id ? byUser.get(Number(e.user_id)) : null;
+        const minutesAgo = p && p.minutes_ago != null ? Number(p.minutes_ago) : null;
+        const enabled = !!e.user_id && !!Number(e.can_use_tracking);
+        const tracked = enabled && minutesAgo != null && minutesAgo <= TRACKING_LIVE_MIN;
+        const reason = tracked
+          ? null
+          : !e.user_id
+          ? "No login account"
+          : !enabled
+          ? "Tracking not turned on"
+          : minutesAgo == null
+          ? "Never sent a location"
+          : "No location in the last 20 min";
+        return {
+          employee_pk: e.id,
+          employee_id: e.employee_id || "",
+          name: e.name,
+          designation: e.designation || "",
+          department: e.department || "Unassigned",
+          user_id: e.user_id || null,
+          tracking_enabled: enabled,
+          tracked,
+          last_ping: p?.last_ping || null,
+          minutes_ago: minutesAgo,
+          reason
+        };
+      });
+      res.json({
+        live_minutes: TRACKING_LIVE_MIN,
+        tracked: rows.filter((r) => r.tracked).length,
+        not_tracked: rows.filter((r) => !r.tracked).length,
+        employees: rows
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Path history for ONE user (Admin Panel -> Employee Tracking -> click a user
   // -> "View path today"), optionally bounded by from/to — lets an Admin/
   // Superadmin play back where that user actually went, not just their latest dot.

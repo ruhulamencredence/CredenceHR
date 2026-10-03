@@ -11,6 +11,7 @@ import autoTable from 'jspdf-autotable';
 import { Navigation, RefreshCw, Route, X, BatteryMedium, Clock, MapPin, Search, FileDown } from 'lucide-react';
 import { LocationPing } from '../types';
 import { apiUrl } from '../lib/api';
+import { TrackingStatusCards } from './TrackingStatusCards';
 import { formatDate } from '../lib/formatDate';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
 import { savePdfCrossPlatform } from '../lib/saveFile';
@@ -376,6 +377,8 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
           </button>
         </div>
       </div>
+
+      {!selectedUser && <TrackingStatusCards token={token} />}
 
       {selectedUser && (
         <div className="flex flex-wrap items-center gap-2 bg-violet-50 border border-violet-200 rounded-lg px-3 py-2">
