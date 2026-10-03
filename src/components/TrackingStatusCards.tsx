@@ -28,7 +28,7 @@ interface TrackingRow {
   minutes_ago: number | null;
   reason: string | null;
 }
-interface TrackingStatus {
+export interface TrackingStatus {
   live_minutes: number;
   tracked: number;
   not_tracked: number;
@@ -36,6 +36,27 @@ interface TrackingStatus {
 }
 
 const REFRESH_MS = 60_000;
+
+// The counts, refreshed every minute; null without the tracking module.
+export function useTrackingStatus(token: string, enabled = true): TrackingStatus | null {
+  const [data, setData] = useState<TrackingStatus | null>(null);
+  useEffect(() => {
+    if (!enabled) return;
+    let alive = true;
+    const load = () =>
+      fetch(apiUrl('/api/tracking/status'), { headers: { Authorization: `Bearer ${token}` } })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => alive && setData(d))
+        .catch(() => {});
+    load();
+    const t = setInterval(load, REFRESH_MS);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, [token, enabled]);
+  return data;
+}
 
 function ago(min: number | null): string {
   if (min == null) return '';
@@ -55,35 +76,29 @@ interface Props {
   token: string;
   // 'panel': two big tiles (Admin Panel -> Employee Tracking).
   // 'card': the web Dashboard's quick access card (like My Asset).
-  // 'tile': the app Dashboard's quick access tile (like Book a Ride); tapping
-  // it shows both numbers.
-  variant?: 'panel' | 'card' | 'tile';
+  // 'chooser': no tile of its own — the app Dashboard's quick access tile
+  // (UserPanel.tsx) opens it via chooserOpen; it shows both numbers.
+  variant?: 'panel' | 'card' | 'chooser';
   className?: string;
+  // Counts already loaded by the caller (useTrackingStatus) — skips this
+  // component's own fetch.
+  status?: TrackingStatus | null;
+  chooserOpen?: boolean;
+  onChooserClose?: () => void;
 }
 
 // Admin Panel -> Employee Tracking (the live map).
 const openTrackingMap = () => window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'tracking' }));
 
-export const TrackingStatusCards: React.FC<Props> = ({ token, variant = 'panel', className = '' }) => {
-  const [chooser, setChooser] = useState(false);
-  const [data, setData] = useState<TrackingStatus | null>(null);
+export const TrackingStatusCards: React.FC<Props> = ({ token, variant = 'panel', className = '', status, chooserOpen = false, onChooserClose }) => {
+  const own = useTrackingStatus(token, status === undefined);
+  const data = status === undefined ? own : status;
+  const chooser = chooserOpen;
+  const setChooser = (v: boolean) => {
+    if (!v) onChooserClose?.();
+  };
   const [open, setOpen] = useState<'tracked' | 'not_tracked' | null>(null);
   const [query, setQuery] = useState('');
-
-  useEffect(() => {
-    let alive = true;
-    const load = () =>
-      fetch(apiUrl('/api/tracking/status'), { headers: { Authorization: `Bearer ${token}` } })
-        .then((r) => (r.ok ? r.json() : null))
-        .then((d) => alive && setData(d))
-        .catch(() => {});
-    load();
-    const t = setInterval(load, REFRESH_MS);
-    return () => {
-      alive = false;
-      clearInterval(t);
-    };
-  }, [token]);
 
   useEffect(() => {
     if (!open) return;
@@ -170,21 +185,7 @@ export const TrackingStatusCards: React.FC<Props> = ({ token, variant = 'panel',
             <p className="text-[11px] text-slate-400 mt-3">Under tracking = a location in the last {data.live_minutes} min. Tap a number to see who, by Department.</p>
           </div>
         </div>
-      ) : (
-        <button
-          type="button"
-          onClick={() => setChooser(true)}
-          className="relative flex flex-col items-center justify-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 h-[104px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-emerald-100/70 via-white/50 to-teal-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
-        >
-          <div className="p-2.5 rounded-2xl bg-gradient-to-br from-emerald-400 to-teal-500 shadow-[0_6px_16px_-2px_rgba(5,150,105,0.35)] border border-white/30 relative">
-            <Navigation className="w-6 h-6 text-white" />
-            <span className="absolute -top-1.5 -right-1.5 text-[10px] font-semibold bg-emerald-600 text-white rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 border border-white/70">
-              {data.tracked}
-            </span>
-          </div>
-          <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">Employee Tracking</span>
-        </button>
-      )}
+      ) : null}
 
       {/* Portalled to <body>: the Dashboard's glass tiles use backdrop-blur,
           which would otherwise trap these fixed overlays inside the tile. */}
