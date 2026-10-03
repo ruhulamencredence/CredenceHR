@@ -119,6 +119,29 @@ function formatTime(ts: string | null | undefined): string {
   }
 }
 
+function formatShortDate(d: string | null | undefined): string {
+  if (!d) return '';
+  const dt = new Date(`${String(d).slice(0, 10)}T00:00:00`);
+  return Number.isNaN(dt.getTime()) ? String(d) : dt.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+}
+
+function formatLate(min: number): string {
+  if (min <= 0) return '';
+  const h = Math.floor(min / 60);
+  return h ? `${h}h ${min % 60}m late` : `${min}m late`;
+}
+
+// Quick View summary badges -> the employee list each one opens.
+type QuickViewFilter = 'total' | 'present' | 'absent' | 'leave' | 'delay' | 'extremeDelay';
+const QUICK_VIEW_FILTER_TITLES: Record<QuickViewFilter, string> = {
+  total: 'All Employees',
+  present: 'Present Today',
+  absent: 'Absent Today',
+  leave: 'On Leave Today',
+  delay: 'Delay Today',
+  extremeDelay: 'Extreme Delay Today'
+};
+
 function initialsOf(name: string): string {
   return name.split(' ').filter(Boolean).slice(0, 2).map((p) => p[0]?.toUpperCase()).join('') || '?';
 }
@@ -218,6 +241,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
   const authHeaders = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [quickViewDetail, setQuickViewDetail] = useState<QuickViewFilter | null>(null);
+  const [quickViewDetailSearch, setQuickViewDetailSearch] = useState('');
+  useEffect(() => {
+    if (!quickViewDetail) return;
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setQuickViewDetail(null);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [quickViewDetail]);
 
   const [leaveApplications, setLeaveApplications] = useState<any[] | null>(null);
   const [leaveBalances, setLeaveBalances] = useState<any[] | null>(null);
@@ -432,16 +463,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
         const d = u?.days?.[todayDay - 1];
         let isDelay = false;
         let isExtremeDelay = false;
+        let lateMinutes = 0;
         if (d?.check_in_at && thresholdMinutes != null) {
           const ci = new Date(d.check_in_at);
           const minutesOfDay = ci.getHours() * 60 + ci.getMinutes();
           if (extremeThresholdMinutes != null && minutesOfDay > extremeThresholdMinutes) isExtremeDelay = true;
           else if (minutesOfDay > thresholdMinutes) isDelay = true;
+          if (isDelay || isExtremeDelay) lateMinutes = minutesOfDay - (thresholdMinutes - Number(latePolicy?.grace_minutes || 0));
         }
         return {
           id: e.id,
           name: e.name,
           designation: e.designation || '—',
+          department: e.department || 'Unassigned',
+          employeeCode: e.employee_id || '',
+          lateMinutes,
           inTime: d?.check_in_at ? formatTime(d.check_in_at) : '—',
           outTime: d?.check_out_at ? formatTime(d.check_out_at) : null,
           present: !!d?.present,
@@ -455,10 +491,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
     // instead of "Absent" — same supervisor_layer_approved set the "On Leave
     // Today" stat tile above already computes (see its comment).
     const onLeaveUserIds = new Set<number>(onLeaveTodayEntries?.map((e) => e.user_id) || []);
+    // Today's leave (type and dates) per user, for the Leave detail list.
+    const leaveByUser = new Map<number, string>();
+    for (const a of leaveApplications || []) {
+      if (!a.supervisor_layer_approved || a.start_date > today || a.end_date < today) continue;
+      const uid = Number(a.user_id);
+      if (leaveByUser.has(uid)) continue;
+      const dates = a.start_date === a.end_date ? formatShortDate(a.start_date) : `${formatShortDate(a.start_date)} – ${formatShortDate(a.end_date)}`;
+      leaveByUser.set(uid, `${a.leave_type_label || a.leave_type || 'Leave'} · ${dates}`);
+    }
     const withLeave = rows.map((r) => {
       const e = employees.find((emp) => emp.id === r.id);
       const onLeave = e?.user_id ? onLeaveUserIds.has(Number(e.user_id)) : false;
-      return { ...r, onLeaveToday: onLeave };
+      return { ...r, onLeaveToday: onLeave, leaveInfo: onLeave && e?.user_id ? leaveByUser.get(Number(e.user_id)) || null : null };
     });
     const q = search.trim().toLowerCase();
     return q ? withLeave.filter((r) => r.name.toLowerCase().includes(q) || r.designation.toLowerCase().includes(q)) : withLeave;
@@ -847,35 +892,34 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
               </div>
 
               {quickViewSummary && (
-                <div className="flex flex-wrap items-center gap-3 mb-4 pb-4 border-b border-slate-100">
-                  <span className="flex items-center gap-1.5 text-[11px] font-semibold text-slate-600">
-                    <span className="w-6 h-6 rounded-full bg-slate-800 text-white flex items-center justify-center text-[10px] font-bold">{quickViewSummary.total}</span>
-                    Total Employee
-                  </span>
-                  <span className="flex items-center gap-1.5 text-[11px] font-semibold text-emerald-600">
-                    <span className="w-6 h-6 rounded-full bg-emerald-500 text-white flex items-center justify-center text-[10px] font-bold">{quickViewSummary.present}</span>
-                    Present
-                  </span>
-                  <span className="flex items-center gap-1.5 text-[11px] font-semibold text-rose-600">
-                    <span className="w-6 h-6 rounded-full bg-rose-500 text-white flex items-center justify-center text-[10px] font-bold">{quickViewSummary.absent}</span>
-                    Absent
-                  </span>
-                  <span className="flex items-center gap-1.5 text-[11px] font-semibold text-blue-600">
-                    <span className="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px] font-bold">{quickViewSummary.onLeave}</span>
-                    Leave
-                  </span>
-                  <span className={`flex items-center gap-1.5 text-[11px] font-semibold ${quickViewSummary.delay != null ? 'text-orange-600' : 'text-slate-300'}`}>
-                    <span className={`w-6 h-6 rounded-full text-white flex items-center justify-center text-[10px] font-bold ${quickViewSummary.delay != null ? 'bg-orange-500' : 'bg-slate-200'}`}>
-                      {quickViewSummary.delay != null ? quickViewSummary.delay : '—'}
-                    </span>
-                    Delay
-                  </span>
-                  <span className={`flex items-center gap-1.5 text-[11px] font-semibold ${quickViewSummary.extremeDelay != null ? 'text-rose-600' : 'text-slate-300'}`}>
-                    <span className={`w-6 h-6 rounded-full text-white flex items-center justify-center text-[10px] font-bold ${quickViewSummary.extremeDelay != null ? 'bg-rose-600' : 'bg-slate-200'}`}>
-                      {quickViewSummary.extremeDelay != null ? quickViewSummary.extremeDelay : '—'}
-                    </span>
-                    Extreme Delay
-                  </span>
+                <div className="flex flex-wrap items-center gap-1.5 mb-4 pb-4 border-b border-slate-100">
+                  {([
+                    ['total', quickViewSummary.total, 'Total Employee', 'text-slate-600', 'bg-slate-800'],
+                    ['present', quickViewSummary.present, 'Present', 'text-emerald-600', 'bg-emerald-500'],
+                    ['absent', quickViewSummary.absent, 'Absent', 'text-rose-600', 'bg-rose-500'],
+                    ['leave', quickViewSummary.onLeave, 'Leave', 'text-blue-600', 'bg-blue-600'],
+                    ['delay', quickViewSummary.delay, 'Delay', 'text-orange-600', 'bg-orange-500'],
+                    ['extremeDelay', quickViewSummary.extremeDelay, 'Extreme Delay', 'text-rose-600', 'bg-rose-600'],
+                  ] as [QuickViewFilter, number | null, string, string, string][]).map(([key, count, label, text, bg]) => (
+                    <button
+                      key={key}
+                      type="button"
+                      disabled={count == null}
+                      onClick={() => {
+                        setQuickViewDetailSearch('');
+                        setQuickViewDetail(key);
+                      }}
+                      title={count == null ? 'Set a late policy to count delays' : `See ${label.toLowerCase()} list`}
+                      className={`flex items-center gap-1.5 text-[11px] font-semibold rounded-full pl-1 pr-2.5 py-1 transition-colors ${
+                        count == null ? 'text-slate-300 cursor-default' : `${text} hover:bg-slate-100`
+                      }`}
+                    >
+                      <span className={`w-6 h-6 rounded-full text-white flex items-center justify-center text-[10px] font-bold ${count == null ? 'bg-slate-200' : bg}`}>
+                        {count == null ? '—' : count}
+                      </span>
+                      {label}
+                    </button>
+                  ))}
                 </div>
               )}
 
@@ -1202,6 +1246,122 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
           </div>
         </>
       )}
+
+      {/* Quick View detail — opened by clicking one of the Quick View
+          summary badges (Total / Present / Absent / Leave / Delay / Extreme
+          Delay): every employee in that group, today. */}
+      {quickViewDetail && quickViewRows && (() => {
+        const match = (r: (typeof quickViewRows)[number]) =>
+          quickViewDetail === 'total' ? true :
+          quickViewDetail === 'present' ? r.present && !r.onLeaveToday :
+          quickViewDetail === 'absent' ? !r.present && !r.onLeaveToday && !r.holiday :
+          quickViewDetail === 'leave' ? r.onLeaveToday :
+          quickViewDetail === 'delay' ? r.isDelay : r.isExtremeDelay;
+        const q = quickViewDetailSearch.trim().toLowerCase();
+        const rows = quickViewRows
+          .filter(match)
+          .filter((r) => !q || [r.name, r.designation, r.department, r.employeeCode].some((v) => String(v || '').toLowerCase().includes(q)))
+          .sort((a, b) =>
+            quickViewDetail === 'delay' || quickViewDetail === 'extremeDelay'
+              ? b.lateMinutes - a.lateMinutes
+              : a.department.localeCompare(b.department) || a.name.localeCompare(b.name)
+          );
+        const total = quickViewRows.filter(match).length;
+        const statusOf = (r: (typeof quickViewRows)[number]) =>
+          r.holiday ? { label: r.holiday, cls: 'bg-amber-50 text-amber-600' } :
+          r.onLeaveToday ? { label: 'Leave', cls: 'bg-blue-50 text-blue-600' } :
+          r.present ? { label: 'Present', cls: 'bg-emerald-50 text-emerald-700' } : { label: 'Absent', cls: 'bg-rose-50 text-rose-600' };
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4" onClick={() => setQuickViewDetail(null)}>
+            <div className="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-3xl max-h-[85vh] flex flex-col overflow-hidden" role="dialog" aria-label={QUICK_VIEW_FILTER_TITLES[quickViewDetail]} onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between gap-3 px-5 py-4 border-b border-slate-100 shrink-0">
+                <div className="min-w-0">
+                  <h3 className="text-sm font-bold text-slate-900">{QUICK_VIEW_FILTER_TITLES[quickViewDetail]}</h3>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    {total} employee{total === 1 ? '' : 's'} &middot; {formatShortDate(today)}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <div className="relative hidden sm:block">
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                    <input
+                      value={quickViewDetailSearch}
+                      onChange={(e) => setQuickViewDetailSearch(e.target.value)}
+                      placeholder="Search"
+                      className="pl-7 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-full focus:outline-none focus:ring-2 focus:ring-blue-600 w-44"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setQuickViewDetail(null)}
+                    className="w-7 h-7 rounded-full flex items-center justify-center text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors"
+                    aria-label="Close"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+              <div className="sm:hidden px-5 pt-3">
+                <input
+                  value={quickViewDetailSearch}
+                  onChange={(e) => setQuickViewDetailSearch(e.target.value)}
+                  placeholder="Search"
+                  className="w-full px-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-full focus:outline-none focus:ring-2 focus:ring-blue-600"
+                />
+              </div>
+              <div className="overflow-auto px-3 py-3">
+                {rows.length === 0 ? (
+                  <p className="text-xs text-slate-400 py-8 text-center">{total === 0 ? 'Nobody in this list today.' : 'No matching employees.'}</p>
+                ) : (
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-left text-[10px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
+                        <th className="px-2 py-2 font-semibold">Employee</th>
+                        <th className="px-2 py-2 font-semibold">Department</th>
+                        <th className="px-2 py-2 font-semibold">In</th>
+                        <th className="px-2 py-2 font-semibold">Out</th>
+                        <th className="px-2 py-2 font-semibold">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((r, i) => {
+                        const st = statusOf(r);
+                        return (
+                          <tr key={r.id} className="border-b border-slate-50 last:border-0 align-top">
+                            <td className="px-2 py-2.5">
+                              <div className="flex items-center gap-2">
+                                <span className="w-7 h-7 rounded-full flex items-center justify-center text-[9px] font-bold text-white shrink-0" style={{ background: avatarColorFor(i) }}>
+                                  {initialsOf(r.name)}
+                                </span>
+                                <div className="min-w-0">
+                                  <div className="font-semibold text-slate-900">{r.name}</div>
+                                  <div className="text-[10px] text-slate-400">
+                                    {[r.employeeCode, r.designation !== '—' ? r.designation : ''].filter(Boolean).join(' · ') || '—'}
+                                  </div>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="px-2 py-2.5 text-slate-600">{r.department}</td>
+                            <td className="px-2 py-2.5 text-slate-700 whitespace-nowrap">{r.inTime}</td>
+                            <td className="px-2 py-2.5 text-slate-700 whitespace-nowrap">{r.outTime || '—'}</td>
+                            <td className="px-2 py-2.5">
+                              <span className={`px-2 py-0.5 rounded-md font-medium ${st.cls}`}>{st.label}</span>
+                              {r.isDelay && <span className="ml-1 px-1.5 py-0.5 rounded-md font-medium bg-orange-50 text-orange-600">Delay</span>}
+                              {r.isExtremeDelay && <span className="ml-1 px-1.5 py-0.5 rounded-md font-medium bg-rose-50 text-rose-600">Extreme Delay</span>}
+                              {r.lateMinutes > 0 && <div className="text-[10px] text-orange-600 mt-1">{formatLate(r.lateMinutes)}</div>}
+                              {r.leaveInfo && <div className="text-[10px] text-blue-600 mt-1">{r.leaveInfo}</div>}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Department-wise breakdown — opened by clicking On Leave Today/
           Tomorrow or Pending Leave Application above. */}
