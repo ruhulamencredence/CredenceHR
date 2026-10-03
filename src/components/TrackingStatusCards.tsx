@@ -37,9 +37,10 @@ export interface TrackingStatus {
 
 const REFRESH_MS = 60_000;
 
-// The counts, refreshed every minute; null without the tracking module.
-export function useTrackingStatus(token: string, enabled = true): TrackingStatus | null {
-  const [data, setData] = useState<TrackingStatus | null>(null);
+// The counts, refreshed every minute: undefined while the first load is on
+// its way, null without the tracking module (the API refuses).
+export function useTrackingStatus(token: string, enabled = true): TrackingStatus | null | undefined {
+  const [data, setData] = useState<TrackingStatus | null | undefined>(enabled ? undefined : null);
   useEffect(() => {
     if (!enabled) return;
     let alive = true;
@@ -80,8 +81,9 @@ interface Props {
   // (UserPanel.tsx) opens it via chooserOpen; it shows both numbers.
   variant?: 'panel' | 'card' | 'chooser';
   className?: string;
-  // Counts already loaded by the caller (useTrackingStatus) — skips this
-  // component's own fetch.
+  // Counts loaded by the caller (useTrackingStatus) — set `external` and this
+  // component skips its own fetch. undefined = still loading.
+  external?: boolean;
   status?: TrackingStatus | null;
   chooserOpen?: boolean;
   onChooserClose?: () => void;
@@ -90,9 +92,9 @@ interface Props {
 // Admin Panel -> Employee Tracking (the live map).
 const openTrackingMap = () => window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'tracking' }));
 
-export const TrackingStatusCards: React.FC<Props> = ({ token, variant = 'panel', className = '', status, chooserOpen = false, onChooserClose }) => {
-  const own = useTrackingStatus(token, status === undefined);
-  const data = status === undefined ? own : status;
+export const TrackingStatusCards: React.FC<Props> = ({ token, variant = 'panel', className = '', external = false, status, chooserOpen = false, onChooserClose }) => {
+  const own = useTrackingStatus(token, !external);
+  const data = external ? status : own;
   const chooser = chooserOpen;
   const setChooser = (v: boolean) => {
     if (!v) onChooserClose?.();
@@ -124,6 +126,38 @@ export const TrackingStatusCards: React.FC<Props> = ({ token, variant = 'panel',
       .sort((a, b) => (a.department === 'Unassigned' ? 1 : b.department === 'Unassigned' ? -1 : a.department.localeCompare(b.department)));
   }, [data, open, query]);
 
+  // First load: a placeholder of the same size, so the card doesn't pop in.
+  if (data === undefined && variant === 'card') {
+    return (
+      <div className={`bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden animate-pulse ${className}`} aria-label="Loading Employee Tracking">
+        <div className="px-5 pt-5 pb-4 sm:px-6 border-b border-slate-200 flex items-start justify-between gap-3">
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <div className="w-4 h-4 rounded bg-slate-200" />
+              <div className="h-4 w-36 rounded bg-slate-200/80" />
+            </div>
+            <div className="h-3 w-44 rounded bg-slate-100" />
+          </div>
+          <div className="h-3 w-16 rounded bg-slate-100" />
+        </div>
+        <div className="p-5 sm:px-6 space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            <div className="h-[62px] rounded-xl border border-slate-200 bg-slate-50" />
+            <div className="h-[62px] rounded-xl border border-slate-200 bg-slate-50" />
+          </div>
+          <div className="h-3 w-3/4 rounded bg-slate-100" />
+        </div>
+      </div>
+    );
+  }
+  if (data === undefined && variant === 'panel') {
+    return (
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 animate-pulse">
+        <div className="h-[106px] rounded-2xl border border-emerald-100 bg-emerald-50/60" />
+        <div className="h-[106px] rounded-2xl border border-slate-200 bg-slate-50" />
+      </div>
+    );
+  }
   if (!data) return null;
 
   const openList = (which: 'tracked' | 'not_tracked') => {
