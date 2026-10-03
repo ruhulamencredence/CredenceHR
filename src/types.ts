@@ -603,6 +603,8 @@ export interface User {
   can_view_timesheet?: boolean;
   // Chat audio/video calls (CallLayer.tsx) — Self Service switch, off by default.
   can_use_calls?: boolean;
+  // Admin Dashboard in the mother company shows every company of the group.
+  can_view_group_dashboard?: boolean;
   can_view_leave_application?: boolean;
   can_view_my_leave?: boolean;
 }
