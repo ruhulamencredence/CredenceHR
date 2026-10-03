@@ -81,6 +81,10 @@ export const BACKGROUND_THEMES: BackgroundTheme[] = [
   }
 ];
 
+// Chat conversations always show Frosted Glass behind the messages,
+// whatever app background the account picked.
+export const CHAT_CONVERSATION_BACKGROUND = BACKGROUND_THEMES.find((t) => t.id === 'frosted-glass')!.gradient;
+
 const STORAGE_KEY = 'mpr_bg_theme';
 const DEFAULT_THEME: BackgroundThemeId = 'default';
 
