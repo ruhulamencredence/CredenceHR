@@ -8,9 +8,10 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { Navigation, RefreshCw, Route, X, BatteryMedium, Clock, MapPin, Search, FileDown } from 'lucide-react';
+import { Navigation, RefreshCw, Route, X, BatteryMedium, Clock, MapPin, Search, FileDown, FileText } from 'lucide-react';
 import { LocationPing } from '../types';
 import { apiUrl } from '../lib/api';
+import { reverseGeocode } from '../lib/reverseGeocode';
 import { TrackingStatusCards } from './TrackingStatusCards';
 import { formatDate } from '../lib/formatDate';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
@@ -22,6 +23,11 @@ import credenceLogo from '../assets/credence-logo.png';
 // matters. Reads local (not UTC) components, same reasoning as
 // todayDateOnlyString in formatDate.ts — a ping's clock time is what an Admin
 // pointing at a report row actually cares about.
+// Points within ~10 m share one address lookup (Nominatim allows about one
+// request a second, and a phone standing still sends many near-identical
+// points).
+const addressKey = (p: { lat: any; lng: any }) => `${Number(p.lat).toFixed(4)},${Number(p.lng).toFixed(4)}`;
+
 function formatDateTime(iso: string): string {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return iso;
@@ -128,6 +134,9 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
   const [toTime, setToTime] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [exportingReport, setExportingReport] = useState(false);
+  // History report: previewed on screen first, then downloaded as PDF.
+  const [showReport, setShowReport] = useState(false);
+  const [addresses, setAddresses] = useState<Record<string, string | null>>({});
 
   // user_id -> object URL of their Personal Data profile photo, or null once
   // we've confirmed they have none on file (so the marker/list fall back to
@@ -237,6 +246,33 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
     }
   }, [token, fromDate, toDate, fromTime, toTime]);
 
+  const reportRows = useMemo(() => [...history].sort((a, b) => (a.recorded_at < b.recorded_at ? -1 : 1)), [history]);
+
+  // While the report is open, look up the address of every distinct spot
+  // (cached across openings; one request at a time, see reverseGeocode.ts).
+  useEffect(() => {
+    if (!showReport) return;
+    let alive = true;
+    const keys = Array.from(new Set(reportRows.map(addressKey))).filter((k) => !(k in addresses));
+    for (const k of keys) {
+      const [lat, lng] = k.split(',').map(Number);
+      reverseGeocode(lat, lng, 'en', true).then((addr) => {
+        if (alive) setAddresses((prev) => (k in prev ? prev : { ...prev, [k]: addr }));
+      });
+    }
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showReport, reportRows]);
+
+  const addressOf = (p: LocationPing): string => {
+    const a = addresses[addressKey(p)];
+    return a || `${Number(p.lat).toFixed(6)}, ${Number(p.lng).toFixed(6)}`;
+  };
+  const addressKeys = useMemo(() => Array.from(new Set(reportRows.map(addressKey))), [reportRows]);
+  const addressesFound = addressKeys.filter((k) => k in addresses).length;
+
   // Exports whatever's currently loaded in `history` (already scoped to
   // selectedUser + the date/time filters above) as a printable PDF — oldest
   // point first, one row per ping, so an Admin can hand someone "where was
@@ -248,7 +284,7 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
     try {
       const logoImg = await loadImageElement(credenceLogo);
       const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-      const sorted = [...history].sort((a, b) => (a.recorded_at < b.recorded_at ? -1 : 1));
+      const sorted = reportRows;
 
       const letterheadOptions = {
         reportTitle: 'Employee Tracking History Report',
@@ -264,16 +300,16 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
       autoTable(doc, {
         startY: contentStartY,
         margin: { top: contentStartY, left: 8, right: 8 },
-        head: [['SL', 'Date & Time', 'Latitude', 'Longitude', 'Accuracy (m)', 'Battery']],
+        head: [['SL', 'Date & Time', 'Location', 'Accuracy (m)', 'Battery']],
         body: sorted.map((p, idx) => [
           String(idx + 1),
           formatDateTime(p.recorded_at),
-          Number(p.lat).toFixed(6),
-          Number(p.lng).toFixed(6),
+          addressOf(p),
           p.accuracy_m != null ? String(p.accuracy_m) : '—',
           p.battery_pct != null ? `${p.battery_pct}%` : '—'
         ]),
         styles: { fontSize: 8, cellPadding: 1.5, overflow: 'linebreak' },
+        columnStyles: { 0: { cellWidth: 10 }, 1: { cellWidth: 38 }, 3: { cellWidth: 22 }, 4: { cellWidth: 16 } },
         headStyles: { fillColor: [5, 150, 105], textColor: 255, fontSize: 8 },
         alternateRowStyles: { fillColor: [248, 250, 252] },
         didDrawPage: () => { drawPdfLetterhead(doc, logoImg, letterheadOptions); }
@@ -287,7 +323,8 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
     } finally {
       setExportingReport(false);
     }
-  }, [selectedUser, history, fromDate, toDate, fromTime, toTime]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedUser, reportRows, addresses, fromDate, toDate, fromTime, toTime]);
 
   useEffect(() => {
     if (selectedUser) fetchHistory(selectedUser.id);
@@ -399,11 +436,11 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
           {historyLoading && <span className="text-xs text-slate-400">Loading…</span>}
           {!historyLoading && <span className="text-xs text-slate-500">{history.length} point{history.length === 1 ? '' : 's'}</span>}
           <button
-            onClick={handleExportReport}
-            disabled={history.length === 0 || exportingReport}
+            onClick={() => setShowReport(true)}
+            disabled={history.length === 0}
             className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed ml-auto"
           >
-            <FileDown className="w-3.5 h-3.5" /> {exportingReport ? 'Exporting…' : 'Export Report (PDF)'}
+            <FileText className="w-3.5 h-3.5" /> View Report
           </button>
         </div>
       )}
@@ -497,6 +534,85 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
           </div>
         </div>
       </div>
+
+      {/* History report preview — read it on screen, then download the PDF. */}
+      {showReport && selectedUser && (
+        <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-3 sm:p-6" onClick={() => setShowReport(false)}>
+          <div
+            role="dialog"
+            aria-label="Employee Tracking History Report"
+            className="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-4xl max-h-[92vh] flex flex-col overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex flex-wrap items-start justify-between gap-3 px-5 py-4 border-b border-slate-100 shrink-0">
+              <div className="min-w-0">
+                <h3 className="text-sm font-bold text-slate-900">Employee Tracking History Report</h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {selectedUser.name} · {fromDate || toDate ? `${fromDate || 'Any'} to ${toDate || 'Any'}` : 'All dates'} ·{' '}
+                  {fromTime || toTime ? `${fromTime || '00:00'}–${toTime || '23:59'}` : 'All day'} · {reportRows.length} point{reportRows.length === 1 ? '' : 's'}
+                </p>
+                {addressesFound < addressKeys.length && (
+                  <p className="text-[11px] text-amber-600 mt-1">
+                    Finding addresses… {addressesFound} of {addressKeys.length} places. Places not found yet show their coordinates.
+                  </p>
+                )}
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={handleExportReport}
+                  disabled={exportingReport}
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+                >
+                  <FileDown className="w-3.5 h-3.5" /> {exportingReport ? 'Preparing…' : 'Download PDF'}
+                </button>
+                <button
+                  onClick={() => setShowReport(false)}
+                  className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+                  aria-label="Close"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+            <div className="overflow-auto">
+              <table className="w-full text-xs">
+                <thead className="sticky top-0 bg-emerald-600 text-white">
+                  <tr className="text-left">
+                    <th className="px-3 py-2 font-semibold w-10">SL</th>
+                    <th className="px-3 py-2 font-semibold whitespace-nowrap">Date &amp; Time</th>
+                    <th className="px-3 py-2 font-semibold">Location</th>
+                    <th className="px-3 py-2 font-semibold whitespace-nowrap">Accuracy (m)</th>
+                    <th className="px-3 py-2 font-semibold">Battery</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {reportRows.map((p, i) => {
+                    const k = addressKey(p);
+                    const found = k in addresses;
+                    return (
+                      <tr key={p.id ?? i} className="border-b border-slate-100 odd:bg-white even:bg-slate-50 align-top">
+                        <td className="px-3 py-2 text-slate-500">{i + 1}</td>
+                        <td className="px-3 py-2 text-slate-700 whitespace-nowrap">{formatDateTime(p.recorded_at)}</td>
+                        <td className="px-3 py-2 text-slate-800">
+                          <span className="flex items-start gap-1.5">
+                            <MapPin className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
+                            <span>
+                              {addressOf(p)}
+                              {!found && <span className="block text-[10px] text-slate-400">finding address…</span>}
+                            </span>
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-slate-600">{p.accuracy_m != null ? p.accuracy_m : '—'}</td>
+                        <td className="px-3 py-2 text-slate-600">{p.battery_pct != null ? `${p.battery_pct}%` : '—'}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

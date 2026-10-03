@@ -25,16 +25,21 @@ function coordKey(lat: number, lng: number): string {
 // Zafrabad, Mohammadpur, Dhaka District, Dhaka Division, 1207, Bangladesh")
 // — keep only the first few comma-separated parts so it reads like a place
 // name rather than a full mailing address.
-function shorten(displayName: string, parts = 3): string {
+function shorten(displayName: string, parts = 3, dropPostcodeAndCountry = false): string {
   return displayName
     .split(',')
-    .slice(0, parts)
     .map((p) => p.trim())
     .filter(Boolean)
+    .filter((p) => !dropPostcodeAndCountry || !(/^\d{3,6}$/.test(p) || /^bangladesh$/i.test(p)))
+    .slice(0, parts)
     .join(', ');
 }
 
-export function reverseGeocode(lat: number, lng: number): Promise<string | null> {
+// `lang` (e.g. 'en') asks for the address in that language — the PDF reports'
+// font can't draw Bangla script, so they ask for English. `full` keeps up to
+// six parts (house, road, area, city…) without the postcode and country,
+// for reports where the area matters.
+export function reverseGeocode(lat: number, lng: number, lang?: string, full = false): Promise<string | null> {
   // Defensive: callers occasionally pass through a DB-sourced DECIMAL field that
   // arrived over JSON as a numeric string (see MyClaimsCard.tsx) — coerce here too
   // so a slip at a call site degrades to "no address found" instead of crashing
@@ -43,18 +48,18 @@ export function reverseGeocode(lat: number, lng: number): Promise<string | null>
   lng = Number(lng);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return Promise.resolve(null);
 
-  const key = coordKey(lat, lng);
+  const key = `${coordKey(lat, lng)}${lang ? `|${lang}` : ''}${full ? '|full' : ''}`;
   const cached = cache.get(key);
   if (cached) return cached;
 
   const result = queue.then(async () => {
     try {
       const res = await fetch(
-        `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&zoom=18`
+        `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&zoom=18${lang ? `&accept-language=${encodeURIComponent(lang)}` : ''}`
       );
       if (!res.ok) return null;
       const data = await res.json();
-      return typeof data?.display_name === 'string' ? shorten(data.display_name) : null;
+      return typeof data?.display_name === 'string' ? (full ? shorten(data.display_name, 6, true) : shorten(data.display_name)) : null;
     } catch {
       return null;
     }
