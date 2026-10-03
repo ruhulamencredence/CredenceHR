@@ -2081,8 +2081,11 @@ const PERMISSION_LAYER_KEYS = ["read", "edit_add", "entry_upload", "delete_trash
 // Which modules currently enforce PERMISSION_LAYER_KEYS — mirrors
 // PERMISSION_LAYER_MODULES in src/types.ts. Rolled out module by module.
 const PERMISSION_LAYER_MODULES = ["departments", "projects", "approvals", "users", "reports"] as const;
-// PEPM Reports uses four of them: Read Only, Edit, Delete/Trash, Permanent Delete.
-const REPORT_LAYER_KEYS = ["read", "edit_add", "delete_trash", "permanent_delete"] as const;
+// PEPM Reports uses four of them: Read Only, Edit, Delete/Trash, Permanent Delete
+// — plus its own "Budget Submission Status" (the second report on that page),
+// which, like Permanent Delete, is never part of the no-saved-rows default:
+// only an account it's explicitly ticked for can open it.
+const REPORT_LAYER_KEYS = ["read", "edit_add", "delete_trash", "permanent_delete", "submission_status"] as const;
 
 // Leave Manage's own operation-specific layers — mirrors LeaveManageLayerKey/
 // LEAVE_MANAGE_LAYERS in src/types.ts. Not part of PERMISSION_LAYER_MODULES/
@@ -3376,7 +3379,7 @@ async function startServer() {
   // on for a module is never a silent regression; a Superadmin only actually
   // restricts anything once they explicitly save a narrower set in the
   // Module Access modal.
-  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number]) =>
+  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status") =>
     async (req: any, res: any, next: any) => {
       if (!req.user) return res.status(401).json({ error: "Access token required" });
       if (req.user.role === "superadmin") return next();
@@ -3388,7 +3391,7 @@ async function startServer() {
         }
         if (!(PERMISSION_LAYER_MODULES as readonly string[]).includes(moduleKey)) return next();
         const grantedLayers = await getModulePermissionLayersForModule(req.user.id, moduleKey);
-        const effectiveLayers = grantedLayers.length > 0
+        const effectiveLayers: string[] = grantedLayers.length > 0
           ? grantedLayers
           : PERMISSION_LAYER_KEYS.filter((k) => k !== "permanent_delete");
         if (!effectiveLayers.includes(layer)) {

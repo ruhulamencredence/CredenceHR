@@ -1592,7 +1592,7 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
   // each got — no Job yet, Jobs submitted but not every submitter has Final
   // Submitted, or Final Submitted. Aggregated in JS from plain SELECTs so it
   // runs the same on MySQL and the in-memory fallback.
-  app.get("/api/reports/budget-submission-status", authenticateToken, requireAdmin, requireModule("reports"), requireModuleLayer("reports", "read"), async (req, res) => {
+  app.get("/api/reports/budget-submission-status", authenticateToken, requireAdmin, requireModule("reports"), requireModuleLayer("reports", "submission_status"), async (req, res) => {
     try {
       const budgetId = Number(req.query.budget_id);
       if (!budgetId) return res.status(400).json({ error: "budget_id is required." });
