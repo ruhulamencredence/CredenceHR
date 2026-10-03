@@ -793,6 +793,13 @@ async function ensureSchemaMigrations() {
     if (err.code !== 'ER_DUP_FIELDNAME') console.warn("⚠️ Could not add users.can_use_calls column: " + err.message);
   }
   try {
+    // Admin Dashboard "See all companies (group view)" — OFF until turned on
+    // per account in Module Access (under Admin Dashboard).
+    await dbPool.query(`ALTER TABLE users ADD COLUMN can_view_group_dashboard TINYINT(1) NOT NULL DEFAULT 0`);
+  } catch (err: any) {
+    if (err.code !== 'ER_DUP_FIELDNAME') console.warn("⚠️ Could not add users.can_view_group_dashboard column: " + err.message);
+  }
+  try {
     // Leave Application and "My Leave" became one page with one access
     // switch: an account that had either one has both (it could already open
     // the page, and now can also submit from it). Only touches rows where the
@@ -3721,10 +3728,22 @@ function pepmEnabled(groupId: number) {
 }
 // Admin Dashboard (Quick View, attendance and leave figures) in the mother
 // company covers every company of its group: the dashboard asks for these
-// reads with "X-Company-Scope: group", honoured only for an account that may
-// open the Admin Dashboard and only while working in the mother company.
-// Each route still applies its own module checks.
+// reads with "X-Company-Scope: group", honoured only while working in the
+// mother company, and only for a Superadmin or an account given "See all
+// companies (group view)" (users.can_view_group_dashboard, Module Access ->
+// under Admin Dashboard) that may open the Admin Dashboard. Each route still
+// applies its own module checks.
 const DASHBOARD_GROUP_SCOPE_PATHS = new Set(["/api/employee-directory", "/api/attendance/report/monthly", "/api/leave-applications/report"]);
+async function canViewGroupDashboard(userId: number, role: string): Promise<boolean> {
+  try {
+    const rows: any[] = (await queryDB("SELECT can_view_group_dashboard FROM users WHERE id = ?", [userId])) || [];
+    if (!Number(rows[0]?.can_view_group_dashboard || 0)) return false;
+    if (role === "admin") return true;
+    return role === "user" && (await getAdminModules(userId)).includes("admin_dashboard");
+  } catch {
+    return false;
+  }
+}
 
 const PEPM_API_RE = /^\/api\/(budgets|budget-items|entries|jobs|job-edits|mpr-numbers|rate-file|rate-list|delivery-date-conditions|reports\/budget-submission-status)(\/|$)/;
 
@@ -3859,7 +3878,7 @@ async function startServer() {
         ctx.motherId &&
         ctx.companyId === ctx.motherId &&
         DASHBOARD_GROUP_SCOPE_PATHS.has(String(req.originalUrl || req.url || "").split("?")[0]) &&
-        (user.role === "superadmin" || user.role === "admin" || (user.role === "user" && (await getAdminModules(user.id).catch(() => [] as string[])).includes("admin_dashboard")))
+        (user.role === "superadmin" || (await canViewGroupDashboard(Number(user.id), user.role)))
       ) {
         ctx = { ...ctx, wholeGroup: true };
       }

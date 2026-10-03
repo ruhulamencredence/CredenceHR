@@ -526,6 +526,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [leaveApplicationAccessEnabled, setLeaveApplicationAccessEnabled] = useState(false);
   // Chat audio/video calls (CallLayer.tsx) — off by default.
   const [callsAccessEnabled, setCallsAccessEnabled] = useState(false);
+  const [groupDashboardEnabled, setGroupDashboardEnabled] = useState(false);
   const [savingModules, setSavingModules] = useState(false);
 
   // Populates every Module Access form field (User Module toggles, Admin
@@ -548,6 +549,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     setTimesheetAccessEnabled(!!u.can_view_timesheet);
     setLeaveApplicationAccessEnabled(!!u.can_view_leave_application || !!u.can_view_my_leave);
     setCallsAccessEnabled(!!u.can_use_calls);
+    setGroupDashboardEnabled(!!u.can_view_group_dashboard);
     // Permission layers — one Set per module in PERMISSION_LAYER_MODULES.
     // Explicit saved rows win; a module this account already has granted
     // (u.module_permissions) but with NO saved layer rows yet falls back to
@@ -921,6 +923,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         });
         const laaData = await laaRes.json();
         if (!laaRes.ok) throw new Error(laaData.error || 'Failed to update Leave Application access');
+      }
+
+      if (groupDashboardEnabled !== !!managingModulesFor.can_view_group_dashboard) {
+        const gdRes = await fetch(apiUrl(`/api/users/${managingModulesFor.id}/group-dashboard-access`), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ can_view_group_dashboard: groupDashboardEnabled })
+        });
+        const gdData = await gdRes.json();
+        if (!gdRes.ok) throw new Error(gdData.error || 'Failed to update group view access');
       }
 
       if (callsAccessEnabled !== !!managingModulesFor.can_use_calls) {
@@ -7388,6 +7400,33 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                                 searchPlaceholder="Search actions…"
                               />
                             </div>
+                          )}
+                          {m.key === 'admin_dashboard' && (selectedModules.has('admin_dashboard') || managingModulesFor?.role === 'admin') && (
+                            <label className="ml-2 mt-1 mb-1 flex items-center justify-between gap-3 p-3 bg-violet-50 border border-violet-200 rounded-xl cursor-pointer">
+                              <span>
+                                <span className="text-xs font-semibold text-slate-800 block">See all companies (group view)</span>
+                                <span className="text-[11px] text-slate-500">
+                                  While working in the mother company, Quick View, attendance and leave on the Admin Dashboard
+                                  cover the mother and every sister company. Off: only the company being worked in.
+                                  Attendance and leave still need Attendance Reports / Leave Applications.
+                                </span>
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => setGroupDashboardEnabled((v) => !v)}
+                                className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${
+                                  groupDashboardEnabled ? 'bg-emerald-500' : 'bg-slate-300'
+                                }`}
+                                title={groupDashboardEnabled ? 'On — click to turn off' : 'Off — click to turn on'}
+                                aria-label="See all companies (group view)"
+                              >
+                                <span
+                                  className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                                    groupDashboardEnabled ? 'translate-x-[18px]' : 'translate-x-1'
+                                  }`}
+                                />
+                              </button>
+                            </label>
                           )}
                           {m.key === 'attendance_reports' && selectedModules.has('attendance_reports') && (
                             <div className="ml-2 mt-1 mb-1 p-3 bg-amber-50 border border-amber-200 rounded-xl">
