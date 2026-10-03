@@ -1468,6 +1468,8 @@ export interface Notice {
   lottie_json?: string | null;
   lottie_url?: string | null;
   target_type: 'all' | 'specific';
+  // 'tracking' = sent from Employee Tracking -> Currently Not Tracked.
+  source?: string | null;
   is_active: boolean;
   created_by?: number | null;
   created_by_name?: string | null;

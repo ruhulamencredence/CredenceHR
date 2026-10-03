@@ -83,7 +83,8 @@ const USER_TABLES = new Set([
   "performance_reviews",
   "disciplinary_actions",
   "employee_documents",
-  "location_pings"
+  "location_pings",
+  "tracking_notice_recipients"
 ]);
 
 // Company settings a sister company may use from its mother company instead
