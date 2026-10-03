@@ -1015,7 +1015,8 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   const siteSupervisor = useSiteSupervisor(token);
   // Employee Tracking tile (mobile) — counts only for accounts with the
   // 'tracking' module; its popup opens from the tile.
-  const trackingStatus = useTrackingStatus(token);
+  const canSeeTracking = user.role === 'superadmin' || (user.module_permissions || []).includes('tracking');
+  const trackingStatus = useTrackingStatus(token, canSeeTracking);
   const [trackingChooserOpen, setTrackingChooserOpen] = useState(false);
 
   const [mobileActiveSection, setMobileActiveSection] = useState<'budget' | 'jobs' | 'entries' | 'jobEdit' | 'claim' | 'claims' | 'conveyanceClaim' | 'leave' | 'timesheet' | 'employeeDirectory' | 'noticeBoard' | null>(
@@ -3002,7 +3003,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
     ...(onOpenBookRide ? [{ key: 'bookRide', label: 'Book a Ride', icon: Car, badge: activeRides.length, badgeBg: 'bg-sky-600', tileBg: 'from-sky-100/70 via-white/50 to-cyan-50/40', iconBg: 'from-sky-300 to-sky-500 shadow-[0_6px_16px_-2px_rgba(2,132,199,0.35)]', onClick: () => onOpenBookRide(activeRides.length > 0 ? 'status' : 'book') }] : []),
     ...(onOpenMyAsset ? [{ key: 'myAsset', label: 'My Asset', icon: Package, badge: assetSummary?.awaitingAck || 0, badgeBg: 'bg-green-600', tileBg: 'from-lime-100/70 via-white/50 to-green-50/40', iconBg: 'from-lime-400 to-green-500 shadow-[0_6px_16px_-2px_rgba(22,163,74,0.35)]', onClick: () => onOpenMyAsset('my-assets') }] : []),
     // Only for accounts with the 'tracking' module (trackingStatus is null otherwise).
-    ...(trackingStatus ? [{ key: 'tracking', label: 'Employee Tracking', icon: Navigation, badge: trackingStatus.tracked, badgeBg: 'bg-emerald-600', tileBg: 'from-emerald-100/70 via-white/50 to-teal-50/40', iconBg: 'from-emerald-400 to-teal-500 shadow-[0_6px_16px_-2px_rgba(5,150,105,0.35)]', onClick: () => setTrackingChooserOpen(true) }] : []),
+    ...(canSeeTracking && trackingStatus !== null ? [{ key: 'tracking', label: 'Employee Tracking', icon: Navigation, badge: trackingStatus?.tracked || 0, badgeBg: 'bg-emerald-600', tileBg: 'from-emerald-100/70 via-white/50 to-teal-50/40', iconBg: 'from-emerald-400 to-teal-500 shadow-[0_6px_16px_-2px_rgba(5,150,105,0.35)]', onClick: () => trackingStatus && setTrackingChooserOpen(true) }] : []),
     ...(siteSupervisor.teams > 0 ? [{ key: 'teamAttendance', label: 'Team Attendance', icon: ClipboardCheck, badge: siteSupervisor.notSubmitted, badgeBg: 'bg-rose-600', tileBg: 'from-teal-100/70 via-white/50 to-emerald-50/40', iconBg: 'from-teal-400 to-emerald-500 shadow-[0_6px_16px_-2px_rgba(13,148,136,0.35)]', onClick: () => window.dispatchEvent(new CustomEvent('credence:open-self-service', { detail: 'teamAttendance' })) }] : [])
   ];
   const bottomNavMoreItems: MoreItem[] = [...dashboardTiles.slice(MAX_DASHBOARD_TILES), ...mobileMoreItems];
@@ -3110,7 +3111,9 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
         {!Capacitor.isNativePlatform() && onOpenMyAsset && <MyAssetCard token={token} onOpen={onOpenMyAsset} />}
         {/* Employee Tracking quick access — only for accounts with the
             'tracking' module (renders nothing otherwise; its API refuses). */}
-        {!Capacitor.isNativePlatform() && <TrackingStatusCards token={token} variant="card" />}
+        {!Capacitor.isNativePlatform() && canSeeTracking && trackingStatus !== null && (
+          <TrackingStatusCards token={token} variant="card" external status={trackingStatus} />
+        )}
 
         {/* Takes the full row at md, where there are only two columns to
             share — it's an actionable list (remarks input + Approve/Reject
@@ -3352,6 +3355,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
         <TrackingStatusCards
           token={token}
           variant="chooser"
+          external
           status={trackingStatus}
           chooserOpen={trackingChooserOpen}
           onChooserClose={() => setTrackingChooserOpen(false)}

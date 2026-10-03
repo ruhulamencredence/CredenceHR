@@ -1008,7 +1008,7 @@ export default function App() {
         <Suspense
           fallback={
             !showChat && !showAlertsPage && !showProfilePage && !selfServiceView && !isAdminView ? (
-              <UserDashboardSkeleton showAttendance={!!user?.can_use_attendance} showLeaveSummary={!!user?.can_view_leave_summary} />
+              <UserDashboardSkeleton showAttendance={!!user?.can_use_attendance} showLeaveSummary={!!user?.can_view_leave_summary} showTracking={user?.role === 'superadmin' || (user?.module_permissions || []).includes('tracking')} />
             ) : (
               <AppLoader />
             )

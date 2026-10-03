@@ -62,9 +62,10 @@ interface Props {
   // Only the cards this account actually gets (UserPanel's own gates).
   showAttendance?: boolean;
   showLeaveSummary?: boolean;
+  showTracking?: boolean;
 }
 
-export const UserDashboardSkeleton: React.FC<Props> = ({ showAttendance = true, showLeaveSummary = true }) => (
+export const UserDashboardSkeleton: React.FC<Props> = ({ showAttendance = true, showLeaveSummary = true, showTracking = false }) => (
   <div
     className="relative w-full min-h-[calc(100vh-4rem)] text-slate-900 overflow-hidden animate-pulse"
     style={{ background: 'var(--g-bg-gradient)' }}
@@ -208,6 +209,24 @@ export const UserDashboardSkeleton: React.FC<Props> = ({ showAttendance = true, 
             <div className="h-11 rounded-xl bg-slate-100 border border-slate-200" />
           </div>
         </WhiteCard>
+
+        {/* Employee Tracking (tracking module only) */}
+        {showTracking && (
+          <WhiteCard>
+            <CardHeader link />
+            <div className="p-5 sm:px-6 space-y-3">
+              <div className="grid grid-cols-2 gap-2">
+                {[0, 1].map((i) => (
+                  <div key={i} className="h-[62px] rounded-xl border border-slate-200 flex flex-col items-center justify-center gap-2">
+                    <Bar className="h-4 w-5" />
+                    <Bar className="h-2.5 w-20 bg-slate-100" />
+                  </div>
+                ))}
+              </div>
+              <Bar className="h-3 w-3/4 bg-slate-100" />
+            </div>
+          </WhiteCard>
+        )}
 
         {/* My Requests */}
         <WhiteCard className="md:col-span-2 xl:col-span-3">
