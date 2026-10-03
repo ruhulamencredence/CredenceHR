@@ -4,6 +4,7 @@ import { Bell, X } from 'lucide-react';
 import { ActiveNotice, User } from '../types';
 import { apiUrl } from '../lib/api';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
+import { TrackingNoticeCard } from './TrackingNoticeCard';
 
 interface NoticePopupProps {
   token: string;
@@ -65,6 +66,11 @@ export const NoticePopup: React.FC<NoticePopupProps> = ({ token, user }) => {
   };
 
   if (!current) return null;
+
+  // Employee Tracking "turn on location" notices get their own set-up card.
+  if (current.source === 'tracking') {
+    return <TrackingNoticeCard notice={current} remaining={queue.length - 1} busy={dismissing} onDone={() => handleDismiss(current.id)} />;
+  }
 
   const lottieSrc: any = current.lottie_json
     ? (() => {
