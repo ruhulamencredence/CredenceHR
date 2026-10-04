@@ -19,9 +19,9 @@ import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import { BarChart3, CheckCircle2, FileDown, FileSpreadsheet, Inbox, Pencil, Plus, Receipt, Search, Smartphone, SlidersHorizontal, Trash2, Upload } from 'lucide-react';
 import { Spinner } from './Spinner';
-import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
+import { finalizePdfPageNumbers } from '../lib/pdfLetterhead';
+import { drawStandardHeader, loadPdfCompany, pdfMoney, standardTable } from '../lib/pdfStandard';
 import { savePdfCrossPlatform } from '../lib/saveFile';
-import credenceLogo from '../assets/credence-logo.png';
 import {
   fmtDate,
   findHeaderRow,
@@ -198,48 +198,34 @@ const BillsTab: React.FC<{ token: string }> = ({ token }) => {
   const pdf = async () => {
     setBusy(true);
     try {
-      const logoImg = await loadImageElement(credenceLogo);
+      const co = await loadPdfCompany(token);
       const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-      const opts = {
-        reportTitle: 'Mobile Bill Payment Sheet',
-        filters: [
-          ['Month', monthLabel(month)],
-          ['Operator', operator || 'All'],
-          ['Numbers', String(billed.length)],
-          // The PDF font has no ৳ — "Tk" there.
-          ['Total bill', `Tk ${num(sum('amount'))}`],
-          ['Company pays', `Tk ${num(sum('payable'))}`],
-          ['Excess', `Tk ${num(sum('excess'))}`]
-        ] as [string, string][]
-      };
-      const startY = drawPdfLetterhead(doc, logoImg, opts);
+      const paid = billed.filter((r) => r.paid_at).length;
+      const startY = drawStandardHeader(doc, co, 'Mobile Bill Payment Sheet', [
+        ['Bill Month', monthLabel(month)],
+        ['Operator', operator || 'All Operators'],
+        ['Numbers Billed', String(billed.length)],
+        ['Payment Status', paid === 0 ? 'Unpaid' : paid === billed.length ? 'Paid' : `${paid} of ${billed.length} paid`]
+      ]);
       autoTable(doc, {
-        startY,
-        margin: { top: startY, left: 8, right: 8 },
-        head: [['SL', 'Name', 'Emp. ID', 'Designation', 'Department', 'Duty Location', 'Mobile', 'Operator', 'Ceiling', 'Bill', 'Company Pays', 'Excess']],
+        ...standardTable(startY),
+        head: [['Serial', 'Name', 'Emp. ID', 'Designation', 'Department', 'Duty Location', 'Mobile Number', 'Operator', 'Official Ceiling', 'Bill Amount', 'Company Pays', 'Excess Amount']],
         body: billed.map((r, i) => [
           String(i + 1),
-          r.employee?.name || '—',
+          r.employee?.name || '-',
           r.employee?.employee_code || '',
           r.employee?.designation || '',
           r.employee?.department || '',
           r.duty_location || '',
           r.phone_number,
           r.operator,
-          num(r.limit_amount),
-          num(r.amount),
-          num(r.payable),
-          r.excess ? num(r.excess) : '—'
+          pdfMoney(r.limit_amount),
+          pdfMoney(r.amount),
+          pdfMoney(r.payable),
+          pdfMoney(r.excess, true)
         ]),
-        foot: [['', 'Total', '', '', '', '', '', '', '', num(sum('amount')), num(sum('payable')), num(sum('excess'))]],
-        styles: { fontSize: 7.5, cellPadding: 1.4 },
-        headStyles: { fillColor: [13, 148, 136], textColor: 255, fontSize: 7.5 },
-        footStyles: { fillColor: [241, 245, 249], textColor: [15, 23, 42], fontStyle: 'bold' },
-        columnStyles: { 8: { halign: 'right' }, 9: { halign: 'right' }, 10: { halign: 'right' }, 11: { halign: 'right' } },
-        alternateRowStyles: { fillColor: [248, 250, 252] },
-        didDrawPage: () => {
-          drawPdfLetterhead(doc, logoImg, opts);
-        }
+        foot: [[{ content: 'Total', colSpan: 8 }, pdfMoney(billed.reduce((a, r) => a + r.limit_amount, 0)), pdfMoney(sum('amount')), pdfMoney(sum('payable')), pdfMoney(sum('excess'))]],
+        columnStyles: { 0: { halign: 'center', cellWidth: 12 }, 8: { halign: 'right' }, 9: { halign: 'right' }, 10: { halign: 'right' }, 11: { halign: 'right' } }
       });
       finalizePdfPageNumbers(doc);
       await savePdfCrossPlatform(doc, `Mobile-Bill-${month}${operator ? `-${operator}` : ''}.pdf`);

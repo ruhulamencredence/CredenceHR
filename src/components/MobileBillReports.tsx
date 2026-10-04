@@ -19,9 +19,9 @@ import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import { FileDown, FileSpreadsheet } from 'lucide-react';
 import { Spinner } from './Spinner';
-import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
+import { finalizePdfPageNumbers } from '../lib/pdfLetterhead';
+import { drawStandardHeader, loadPdfCompany, pdfMoney, standardTable } from '../lib/pdfStandard';
 import { savePdfCrossPlatform } from '../lib/saveFile';
-import credenceLogo from '../assets/credence-logo.png';
 import { inputCls, labelCls, MbSim, mbApi, monthLabel, monthsBetween, num, OperatorBadge, shiftMonth, thisMonth, tk } from './MobileBillParts';
 
 type View = 'matrix' | 'operator' | 'usage' | 'excess';
@@ -179,6 +179,14 @@ export const MobileBillReports: React.FC<{ token: string }> = ({ token }) => {
   };
 
   const current = view === 'matrix' ? matrix : view === 'operator' ? operatorTable : view === 'usage' ? usageTable : excessTable;
+  // PDF: which columns are taka amounts (2 decimals, right-aligned), and
+  // whether the last body row is the Total (printed as the table's footer).
+  const pdfShape = {
+    matrix: { moneyFrom: 9, moneyTo: 99, total: false },
+    operator: { moneyFrom: 2, moneyTo: 99, total: true },
+    usage: { moneyFrom: 7, moneyTo: 8, total: false },
+    excess: { moneyFrom: 8, moneyTo: 99, total: excessRows.length > 0 }
+  }[view];
 
   const excel = () => {
     const wb = XLSX.utils.book_new();
@@ -189,27 +197,33 @@ export const MobileBillReports: React.FC<{ token: string }> = ({ token }) => {
   const pdf = async () => {
     setBusy(true);
     try {
-      const logoImg = await loadImageElement(credenceLogo);
+      const co = await loadPdfCompany(token);
       const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-      const opts = { reportTitle: current.title, filters: filterText };
-      const startY = drawPdfLetterhead(doc, logoImg, opts);
+      const startY = drawStandardHeader(doc, co, current.title, filterText);
+      const isMoney = (j: number) => j >= pdfShape.moneyFrom && j <= pdfShape.moneyTo;
+      // An empty amount reads "-" in the rows; the Total row leaves it blank.
+      const fmt = (r: (string | number)[], total = false) =>
+        r.map((c, j) => (typeof c === 'number' && isMoney(j) ? pdfMoney(c) : c === '' && isMoney(j) && !total ? '-' : String(c)));
+      const body = pdfShape.total ? current.body.slice(0, -1) : current.body;
+      const totalRow = pdfShape.total ? current.body[current.body.length - 1] : null;
+      const columnStyles: Record<number, any> = current.head[0] === 'SL' ? { 0: { halign: 'center' } } : {};
+      current.head.forEach((_, j) => {
+        if (isMoney(j)) columnStyles[j] = { halign: 'right' };
+      });
       autoTable(doc, {
-        startY,
-        margin: { top: startY, left: 6, right: 6 },
+        ...standardTable(startY),
         head: [current.head],
-        body: current.body.map((r) => r.map((c) => (typeof c === 'number' ? num(c) : String(c)))),
-        styles: { fontSize: current.head.length > 14 ? 6.5 : 7.5, cellPadding: 1.2 },
-        headStyles: { fillColor: [13, 148, 136], textColor: 255 },
-        alternateRowStyles: { fillColor: [248, 250, 252] },
-        didDrawPage: () => {
-          drawPdfLetterhead(doc, logoImg, opts);
-        }
+        body: body.map((r) => fmt(r)),
+        foot: totalRow ? [fmt(totalRow, true)] : undefined,
+        styles: { ...standardTable(startY).styles, fontSize: current.head.length > 14 ? 6.3 : 7 },
+        columnStyles
       });
       if (view === 'excess') {
         const y = (doc as any).lastAutoTable?.finalY || startY;
-        doc.setFontSize(8);
-        doc.setTextColor(100);
-        doc.text('Excess = bill over the official ceiling. Report only — not deducted from salary.', 8, y + 6);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(7.5);
+        doc.setTextColor(90);
+        doc.text('Excess = bill over the official ceiling. Report only - not deducted from salary.', 8, y + 6);
       }
       finalizePdfPageNumbers(doc);
       await savePdfCrossPlatform(doc, `${current.title.replace(/[^\w]+/g, '-')}-${to}.pdf`);
