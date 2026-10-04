@@ -2,13 +2,76 @@ import React, { useEffect, useMemo, useState } from 'react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { Banknote, Filter, Printer, CheckSquare, Square, RotateCcw, X, ReceiptText } from 'lucide-react';
-import { ConveyanceBill, User } from '../types';
+import { ConveyanceBill, ConveyanceBillItem, User } from '../types';
 import { apiUrl } from '../lib/api';
 import { formatDate, todayDateOnlyString } from '../lib/formatDate';
 import { finalizePdfPageNumbers } from '../lib/pdfLetterhead';
 import { drawStandardHeader, loadPdfCompany, pdfMoney, standardTable } from '../lib/pdfStandard';
 import { savePdfCrossPlatform } from '../lib/saveFile';
 import { Spinner } from './Spinner';
+
+// ---- Voucher sections ----
+// The Payment Voucher groups a Bill's lines by category, each with the
+// columns it needs: travel categories (and Movement Claim / manual items,
+// which are trips) show From / To / Distance; any other category shows a
+// Description. An item from a Conveyance Bill Claim is split into that
+// claim's own category lines; if it was approved for less than those lines
+// add up to, the difference is an Adjustment line so the total is what was
+// paid.
+interface VoucherLine {
+  date: string | null;
+  particulars: string;
+  from?: string | null;
+  to?: string | null;
+  km?: number | null;
+  amount: number;
+}
+interface VoucherSection {
+  category: string;
+  kind: 'travel' | 'other' | 'adjustment';
+  lines: VoucherLine[];
+  total: number;
+}
+const TRAVEL_CATEGORY = /convey|transport|travel|movement|rickshaw|cng|bus|taxi|ride|uber|pathao/i;
+
+function voucherSections(items: ConveyanceBillItem[]): VoucherSection[] {
+  const byCategory = new Map<string, VoucherSection>();
+  const add = (category: string, kind: VoucherSection['kind'], line: VoucherLine) => {
+    const key = kind === 'adjustment' ? '__adjustment' : category.trim().toLowerCase();
+    if (!byCategory.has(key)) byCategory.set(key, { category, kind, lines: [], total: 0 });
+    const sec = byCategory.get(key)!;
+    sec.lines.push(line);
+    sec.total = Math.round((sec.total + line.amount) * 100) / 100;
+  };
+  const kindOf = (category: string) => (TRAVEL_CATEGORY.test(category) ? 'travel' : 'other');
+  for (const it of items) {
+    const amount = Number(it.amount);
+    if (it.source !== 'user_claim') {
+      add('Conveyance', 'travel', { date: it.entry_date, particulars: it.particulars || '', from: it.from_location, to: it.to_location, km: it.distance_km, amount });
+      continue;
+    }
+    const lines = it.claim_lines || [];
+    if (!lines.length) {
+      const category = it.claim_category || 'Others';
+      add(category, kindOf(category), { date: it.entry_date, particulars: it.particulars || '', amount });
+      continue;
+    }
+    for (const l of lines) {
+      add(l.category, kindOf(l.category), { date: l.bill_date, particulars: l.description || it.particulars || '', amount: Number(l.amount) });
+    }
+    const claimed = lines.reduce((s, l) => s + Number(l.amount), 0);
+    const diff = Math.round((amount - claimed) * 100) / 100;
+    if (Math.abs(diff) >= 0.01) {
+      add('Adjustment', 'adjustment', {
+        date: it.entry_date,
+        particulars: `${diff < 0 ? 'Deducted at approval' : 'Added at approval'} — claim of ${formatDate(it.entry_date)} (claimed ${pdfMoney(claimed)}, approved ${pdfMoney(amount)})`,
+        amount: diff
+      });
+    }
+  }
+  const order = (sec: VoucherSection) => (sec.kind === 'travel' ? 0 : sec.kind === 'other' ? 1 : 2);
+  return [...byCategory.values()].sort((a, b) => order(a) - order(b));
+}
 
 interface DisbursementPanelProps {
   token: string;
@@ -115,10 +178,12 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
 
     const co = await loadPdfCompany(token);
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-    const items = bill.items || [];
-    const total = items.reduce((s, it) => s + Number(it.amount), 0);
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const sections = voucherSections(bill.items || []);
+    const total = sections.reduce((s, sec) => s + sec.total, 0);
 
-    const contentStartY = drawStandardHeader(doc, co, 'Conveyance Payment Voucher', [
+    let y = drawStandardHeader(doc, co, 'Conveyance Payment Voucher', [
       ['Voucher No', bill.voucher_no || '-'],
       ['Employee Name', bill.user_name || '-'],
       ['Employee Code', bill.employee_code || '-'],
@@ -126,48 +191,76 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
       ['Department', bill.department || '-'],
       ['Bill No', `CB-${bill.id}`],
       ['Bill Date', formatDate(bill.bill_date) || '-'],
+      ['Claim Category', sections.filter((sec) => sec.kind !== 'adjustment').map((sec) => sec.category).join(', ') || '-'],
       ['Status', bill.is_disbursed ? `Disbursed${bill.disbursed_at ? ` on ${formatDate(bill.disbursed_at)}` : ''}${bill.disbursed_by_name ? ` by ${bill.disbursed_by_name}` : ''}` : 'Not disbursed']
     ]);
-
-    autoTable(doc, {
-      ...standardTable(contentStartY),
-      head: [['Serial', 'Date', 'Particulars', 'From', 'To', 'Distance (KM)', 'Amount']],
-      body: items.map((it, idx) => [
-        String(idx + 1),
-        formatDate(it.entry_date) || '',
-        it.particulars || '',
-        it.from_location || '',
-        it.to_location || '',
-        it.distance_km != null ? String(it.distance_km) : '-',
-        pdfMoney(it.amount)
-      ]),
-      foot: [[{ content: 'Total', colSpan: 6, styles: { halign: 'left' } }, pdfMoney(total)]],
-      columnStyles: {
-        0: { cellWidth: 13, halign: 'center' },
-        1: { cellWidth: 20, halign: 'center' },
-        2: { cellWidth: 'auto' },
-        3: { cellWidth: 28 },
-        4: { cellWidth: 28 },
-        5: { cellWidth: 20, halign: 'right' },
-        6: { cellWidth: 24, halign: 'right' }
+    const roomFor = (h: number) => {
+      if (y + h > pageHeight - 18) {
+        doc.addPage();
+        y = 14;
       }
-    });
+    };
+    const left = { halign: 'left' as const };
 
-    const finalY = (doc as any).lastAutoTable.finalY;
-    const pageWidth = doc.internal.pageSize.getWidth();
+    // One table per category, each with the columns that category needs.
+    for (const sec of sections) {
+      roomFor(22);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor(40, 40, 40);
+      doc.text(sec.kind === 'adjustment' ? 'Adjustment' : sec.category, 8, y + 2);
+      const base = standardTable(y + 4);
+      if (sec.kind === 'travel') {
+        autoTable(doc, {
+          ...base,
+          head: [['Serial', 'Date', 'Particulars', 'From', 'To', 'Distance (KM)', 'Amount']],
+          body: sec.lines.map((l, i) => [String(i + 1), formatDate(l.date) || '', l.particulars, l.from || '-', l.to || '-', l.km != null ? String(l.km) : '-', pdfMoney(l.amount)]),
+          foot: [[{ content: 'Subtotal', colSpan: 6, styles: left }, pdfMoney(sec.total)]],
+          columnStyles: { 0: { cellWidth: 13, halign: 'center' }, 1: { cellWidth: 22, halign: 'center' }, 3: { cellWidth: 30 }, 4: { cellWidth: 30 }, 5: { cellWidth: 20, halign: 'right' }, 6: { cellWidth: 24, halign: 'right' } }
+        });
+      } else if (sec.kind === 'adjustment') {
+        autoTable(doc, {
+          ...base,
+          head: [['Serial', 'Particulars', 'Amount']],
+          body: sec.lines.map((l, i) => [String(i + 1), l.particulars, pdfMoney(l.amount)]),
+          columnStyles: { 0: { cellWidth: 13, halign: 'center' }, 2: { cellWidth: 24, halign: 'right' } }
+        });
+      } else {
+        autoTable(doc, {
+          ...base,
+          head: [['Serial', 'Date', 'Description', 'Amount']],
+          body: sec.lines.map((l, i) => [String(i + 1), formatDate(l.date) || '', l.particulars, pdfMoney(l.amount)]),
+          foot: [[{ content: 'Subtotal', colSpan: 3, styles: left }, pdfMoney(sec.total)]],
+          columnStyles: { 0: { cellWidth: 13, halign: 'center' }, 1: { cellWidth: 22, halign: 'center' }, 3: { cellWidth: 24, halign: 'right' } }
+        });
+      }
+      y = (doc as any).lastAutoTable.finalY + 7;
+    }
+
+    // Category summary and the amount paid.
+    roomFor(20 + sections.length * 6);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.text('Summary', 8, y + 2);
+    autoTable(doc, {
+      ...standardTable(y + 4),
+      tableWidth: 110,
+      head: [['Category', 'Amount']],
+      body: sections.map((sec) => [sec.kind === 'adjustment' ? 'Adjustment' : sec.category, pdfMoney(sec.total)]),
+      foot: [[{ content: 'Total Amount', styles: left }, pdfMoney(total)]],
+      columnStyles: { 1: { cellWidth: 30, halign: 'right' } }
+    });
+    y = (doc as any).lastAutoTable.finalY;
+
+    roomFor(45);
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8);
     doc.setTextColor(40, 40, 40);
-    doc.text(
-      `Received Tk ${pdfMoney(total)} in full settlement of the conveyance claim referenced above.`,
-      8,
-      finalY + 8,
-      { maxWidth: pageWidth - 16 }
-    );
+    doc.text(`Received Tk ${pdfMoney(total)} in full settlement of the conveyance claim referenced above.`, 8, y + 8, { maxWidth: pageWidth - 16 });
 
     // Signature lines — a Voucher is a physical payout receipt, so leave room
     // for both the person disbursing and the claimant receiving to sign.
-    const sigY = finalY + 32;
+    const sigY = y + 32;
     doc.setDrawColor(120, 120, 120);
     doc.setLineWidth(0.2);
     doc.line(8, sigY, 62, sigY);
