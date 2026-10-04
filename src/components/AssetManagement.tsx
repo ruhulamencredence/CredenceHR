@@ -408,7 +408,7 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
     // design below.
     <div
       className="w-full min-h-[calc(100vh-4rem)] text-slate-900"
-      style={{ background: phoneUI ? 'var(--g-bg-gradient)' : 'var(--g-surface-muted)' }}
+      style={{ background: phoneUI ? 'transparent' : 'var(--g-surface-muted)' }}
     >
       <div className={isNativeApp ? 'w-full px-4 sm:px-6 lg:px-8 pt-3 pb-8' : 'w-full px-4 lg:px-8 pt-3 pb-28 md:pb-8'}>
         {!isNativeApp && <ModulePath path={['Self Service', 'My Asset']} />}

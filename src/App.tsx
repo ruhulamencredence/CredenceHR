@@ -901,7 +901,7 @@ export default function App() {
   return (
     <div
       className="min-h-screen flex flex-col selection:bg-indigo-500 selection:text-white"
-      style={{ background: 'var(--g-bg-gradient)', color: 'var(--g-text)' }}
+      style={{ color: 'var(--g-text)' }}
     >
       {pullToRefreshIndicator}
       {pullToRefreshFullscreenLoader}
@@ -1176,7 +1176,7 @@ export default function App() {
         ) : selfServiceView === 'vehicleManagement' ? (
           // VehicleManagement.tsx (Book a Ride/Ride Status) — same header-
           // less wrapper pattern as My Asset just above.
-          <div className="w-full min-h-[calc(100vh-4rem)] [background:var(--g-surface-muted)] max-md:[background:var(--g-bg-gradient)]">
+          <div className="w-full min-h-[calc(100vh-4rem)] [background:var(--g-surface-muted)] max-md:[background:transparent]">
             {/* Web: full content width (map beside the booking panel, Ride Status
                 in two columns) instead of a narrow phone-width column. */}
             <div className={`mx-auto px-4 pt-3 pb-28 ${Capacitor.isNativePlatform() ? 'max-w-3xl' : 'max-w-3xl lg:max-w-none lg:px-8 lg:pb-8'}`}>

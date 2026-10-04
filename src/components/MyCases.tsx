@@ -311,7 +311,7 @@ export const MyCases: React.FC<{ token: string; onBack?: () => void }> = ({ toke
     : [];
 
   return (
-    <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900" style={{ background: 'var(--g-bg-gradient)' }}>
+    <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900">
       <div className="w-full px-3 sm:px-6 lg:px-8 pt-3 pb-28 md:pb-8 max-w-4xl mx-auto">
         {!isNativeApp && <ModulePath path={['Self Service', 'Grievance & Disciplinary']} />}
         <div className="flex items-center justify-between gap-3 mb-4 mt-2">

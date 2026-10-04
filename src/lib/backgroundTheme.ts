@@ -14,7 +14,7 @@
 // Percentage-based radial-gradient stops (not fixed pixel ellipses) so the
 // glow scales consistently whether it's sitting behind a single short
 // screen (Login) or a long scrollable one (Dashboard, Admin Panel tables) —
-// background-attachment: fixed (already set on body in index.css) keeps it
+// index.css's body::before (a position: fixed, window-sized layer) keeps it
 // anchored to the viewport either way, rather than scrolling with content.
 
 export type BackgroundThemeId = 'default' | 'violet' | 'deep-violet' | 'sunset' | 'frosted-glass' | 'apple-glow';

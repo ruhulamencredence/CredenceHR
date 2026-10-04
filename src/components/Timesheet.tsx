@@ -475,7 +475,7 @@ export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceP
     'text-sm px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none';
 
   return (
-    <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900" style={{ background: 'var(--g-bg-gradient)' }}>
+    <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900">
       <div className="w-full px-2 sm:px-6 lg:px-8 pt-3 pb-8">
         {/* Breadcrumb is desktop-only: hidden on the APK (isNativeApp) and,
             via hidden md:block, on a narrow browser window too — the mobile

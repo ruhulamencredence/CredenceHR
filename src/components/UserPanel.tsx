@@ -3015,7 +3015,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   const bottomNavMoreItems: MoreItem[] = [...dashboardTiles.slice(MAX_DASHBOARD_TILES), ...mobileMoreItems];
 
   return (
-    <div className="relative w-full min-h-[calc(100vh-4rem)] min-h-[calc(100dvh-4rem)] text-slate-900 overflow-hidden" style={{ background: 'var(--g-bg-gradient)' }}>
+    <div className="relative w-full min-h-[calc(100vh-4rem)] min-h-[calc(100dvh-4rem)] text-slate-900 overflow-hidden">
       {/* Violet gradient welcome banner — now sits flush directly under the
           header (no gap/margin above it, unlike before) so it reads as part
           of the header instead of a separate card further down the page.
