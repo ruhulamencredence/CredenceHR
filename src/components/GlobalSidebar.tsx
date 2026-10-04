@@ -576,7 +576,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     { key: 'g_work', label: 'Work & Approvals', icon: ListChecks, entries: pick('myTasks', 'approveApplications', 'teamAttendance') },
     { key: 'g_pepm_op', label: 'PEPM Operation', icon: Briefcase, entries: pick('entry', 'jobs', 'entryDetails', 'jobEdit') },
     { key: 'g_leave_att', label: 'Leave & Attendance', icon: CalendarClock, entries: pick('leaveApplication', 'timesheet') },
-    { key: 'g_requests', label: 'Requests & Claims', icon: Wallet, entries: pick('userMovementClaims', 'userConveyanceClaims', 'vehicleManagement', 'assetManagement', 'myLetters') },
+    { key: 'g_requests', label: 'Requests & Claims', icon: Wallet, entries: pick('userMovementClaims', 'userConveyanceClaims', 'vehicleManagement', 'assetManagement', 'myMobileSim', 'myLetters') },
     { key: 'g_others', label: 'Others', icon: Users2, entries: pick('chat', 'alerts', 'erp360', 'employeeDirectory', 'myCases', 'resignation') }
   ]);
   const hrAnalyticsItem = itemByKey.get('hr_analytics') || null;
@@ -603,7 +603,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
         { heading: 'Daily' }, 'task_management', 'notices', 'approvals',
         { heading: 'Employee records' }, 'hr_operations_actions', 'hr_operations_letters', 'hr_operations_service_book', 'hr_operations_onboarding', 'hr_operations_increments',
         { heading: 'Reports' }, 'hr_operations_reports', 'hr_operations',
-        { heading: 'Facilities' }, 'asset_management', 'vehicle_management',
+        { heading: 'Facilities' }, 'asset_management', 'vehicle_management', 'mobile_bill',
         { heading: 'Settings' }, 'hr_operations_settings'
       )
     },
