@@ -95,7 +95,7 @@ export const SHARE_KINDS: { key: string; label: string; tables: string[] }[] = [
   { key: "holidays", label: "Holiday calendar", tables: ["holiday_calendar"] },
   { key: "leave_policy", label: "Leave types & rules", tables: ["leave_categories", "leave_category_policies"] },
   { key: "late_policy", label: "Late attendance policy", tables: ["late_policy_settings"] },
-  { key: "payroll_setup", label: "Salary components & pay grades", tables: ["salary_components", "pay_grades"] },
+  { key: "payroll_setup", label: "Salary components, pay grades & salary month", tables: ["salary_components", "pay_grades", "salary_month_settings"] },
   { key: "hr_templates", label: "Letter templates, onboarding tasks, increment policies & HR settings", tables: ["hr_letter_templates", "hr_onboarding_tasks", "hr_increment_policies", "hr_ops_settings"] },
   {
     key: "approvals",

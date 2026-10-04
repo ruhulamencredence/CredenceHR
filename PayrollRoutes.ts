@@ -52,6 +52,10 @@ interface PayrollRouteDeps {
   // uses (server.ts) — a Superadmin always passes; an Admin/User needs the
   // 'payroll' key granted via Admin Panel -> Users -> Module Access.
   requireModule: (moduleKey: "payroll") => any;
+  // Payroll's permission layers (server.ts PAYROLL_LAYER_KEYS) — used for
+  // the salary month setting, which needs "salary_month" ticked.
+  requireModuleLayer: (moduleKey: "payroll", layer: "salary_month") => any;
+  hasModuleLayer: (user: any, moduleKey: "payroll", layer: "salary_month") => Promise<boolean>;
 }
 
 // Self-healing migration — same pattern as ensureHolidayCalendarSchema in
@@ -312,6 +316,27 @@ export async function ensurePayrollSchema(dbPool: any): Promise<void> {
          VALUES ('09:00:00', 10, 3, 60, 1, '2000-01-01')`
       );
     }
+    // ---- Salary month ---------------------------------------------------------
+    // salary_month_settings — the day a salary month starts. 1 = the calendar
+    // month; 26 = "26 to 25", where the September salary month runs from
+    // 26 August to 25 September (named after the month it ends in). Same
+    // never-update-in-place history as late_policy_settings: a change inserts
+    // a row with the first salary month it applies to (effective_month), so
+    // re-running an old month keeps that month's own period. A company
+    // setting (companyScope.ts SHARE_KINDS "payroll_setup") — a sister company
+    // may use the mother company's.
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS salary_month_settings (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        company_id INT NOT NULL DEFAULT 1,
+        start_day TINYINT NOT NULL DEFAULT 1,
+        effective_month CHAR(7) NOT NULL,
+        created_by INT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_salary_month_company (company_id),
+        INDEX idx_salary_month_effective (effective_month)
+      )
+    `);
     // late_waivers — HR/Admin excusing one specific (employee, date) late
     // mark so it's dropped from that month's late count before the "3 lates =
     // 1 day" threshold is evaluated. A row here means "don't count this day",
@@ -353,6 +378,27 @@ export async function ensurePayrollSchema(dbPool: any): Promise<void> {
 }
 
 const MONTH_YEAR_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
+
+// "YYYY-MM" plus n months.
+function shiftMonthYear(monthYear: string, n: number): string {
+  const [y, m] = monthYear.split("-").map(Number);
+  const d = new Date(Date.UTC(y, m - 1 + n, 1));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+// The dates a salary month covers. startDay 1 is the calendar month; any
+// other day D runs from D of the month before to D-1 of the named month
+// (startDay 26: "2026-09" = 2026-08-26 .. 2026-09-25). D is kept to 2..28 so
+// every month has that day.
+export function salaryPeriodFor(monthYear: string, startDay: number): { start: string; end: string; dates: string[] } {
+  const sd = Math.min(28, Math.max(1, Math.round(Number(startDay) || 1)));
+  const [y, m] = monthYear.split("-").map(Number);
+  const startUtc = sd === 1 ? Date.UTC(y, m - 1, 1) : Date.UTC(y, m - 2, sd);
+  const endUtc = sd === 1 ? Date.UTC(y, m, 0) : Date.UTC(y, m - 1, sd - 1);
+  const dates: string[] = [];
+  for (let t = startUtc; t <= endUtc; t += 86400000) dates.push(new Date(t).toISOString().slice(0, 10));
+  return { start: dates[0], end: dates[dates.length - 1], dates };
+}
 
 function num(v: any, fallback: any = 0): number {
   const n = Number(v);
@@ -448,7 +494,7 @@ function buildPayslipEmailHtml(record: any): string {
 }
 
 export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
-  const { authenticateToken, requireAdmin, requireModule, queryDB } = deps;
+  const { authenticateToken, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer, queryDB } = deps;
 
   // Builds one employee's payroll disbursement split for a given Net Salary,
   // from that employee's active employee_payment_accounts rows (Admin Panel
@@ -1435,6 +1481,54 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
     }
   });
 
+  // ---- Salary month setting (Payroll -> Salary Structure Setup) -------------
+  // GET: the start day in force now, the current salary month and its dates,
+  // and the change history. Anyone with Payroll can read it.
+  app.get("/api/payroll/salary-month", authenticateToken, requireAdmin, requireModule("payroll"), async (req: any, res) => {
+    try {
+      const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Dhaka" });
+      const current = await salaryMonthOf(today);
+      const period = await getSalaryPeriod(current);
+      const history = await queryDB(
+        `SELECT s.id, s.start_day, s.effective_month, s.created_at, u.name AS changed_by_name
+         FROM salary_month_settings s LEFT JOIN users u ON u.id = s.created_by
+         ORDER BY s.effective_month DESC, s.id DESC`
+      );
+      res.json({
+        can_edit: await hasModuleLayer(req.user, "payroll", "salary_month"),
+        start_day: period.startDay,
+        current_month: current,
+        current_period: { start: period.start, end: period.end, days: period.dates.length },
+        history
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to load the salary month setting." });
+    }
+  });
+
+  // POST { start_day: 1-28, effective_month: "YYYY-MM" } — from that salary
+  // month on, a month runs from start_day of the month before to the day
+  // before start_day (1 = calendar month). Needs Payroll's "Salary Month
+  // Setting" layer (server.ts PAYROLL_LAYER_KEYS).
+  app.post("/api/payroll/salary-month", authenticateToken, requireAdmin, requireModuleLayer("payroll", "salary_month"), async (req: any, res) => {
+    try {
+      const startDay = Math.round(num(req.body?.start_day, NaN));
+      const effectiveMonth = typeof req.body?.effective_month === "string" ? req.body.effective_month.trim() : "";
+      if (!Number.isFinite(startDay) || startDay < 1 || startDay > 28) {
+        return res.status(400).json({ error: "The start day must be between 1 and 28." });
+      }
+      if (!MONTH_YEAR_RE.test(effectiveMonth)) return res.status(400).json({ error: "Pick the first salary month it applies to." });
+      const result = await queryDB(
+        "INSERT INTO salary_month_settings (start_day, effective_month, created_by) VALUES (?, ?, ?)",
+        [startDay, effectiveMonth, req.user.id]
+      );
+      const period = await getSalaryPeriod(effectiveMonth);
+      res.json({ success: true, id: result.insertId, period: { start: period.start, end: period.end, days: period.dates.length } });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to save the salary month setting." });
+    }
+  });
+
   app.get("/api/payroll/:id", authenticateToken, requireAdmin, requireModule("payroll"), async (req: any, res) => {
     try {
       const rows = await queryDB(
@@ -1527,6 +1621,43 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
   // given month (most recent effective_date on or before that month's 1st) —
   // same "look back to what was true then" resolution salary_structures uses,
   // so re-running payroll math for an old month never picks up today's policy.
+  // ---- Salary month helpers -------------------------------------------------
+  // Start day in force for a salary month (latest setting whose
+  // effective_month is on or before it); 1 = calendar month when none is set.
+  async function getSalaryMonthStartDay(monthYear: string): Promise<number> {
+    const rows = await queryDB(
+      "SELECT start_day FROM salary_month_settings WHERE effective_month <= ? ORDER BY effective_month DESC, id DESC LIMIT 1",
+      [monthYear]
+    );
+    return Math.min(28, Math.max(1, Number(rows?.[0]?.start_day) || 1));
+  }
+  // A salary month always starts the day after the previous one ended, so
+  // the month a new start day takes effect is a one-off shorter (or longer)
+  // month — e.g. calendar months until August, then a 26th start from
+  // September: August is 1–31 Aug and September 1–25 Sep — and no day is
+  // ever counted in two salary months or in none.
+  async function getSalaryPeriod(monthYear: string) {
+    const startDay = await getSalaryMonthStartDay(monthYear);
+    const own = salaryPeriodFor(monthYear, startDay);
+    const prev = shiftMonthYear(monthYear, -1);
+    const prevEnd = salaryPeriodFor(prev, await getSalaryMonthStartDay(prev)).end;
+    const startUtc = Date.parse(`${prevEnd}T00:00:00Z`) + 86400000;
+    const endUtc = Date.parse(`${own.end}T00:00:00Z`);
+    const dates: string[] = [];
+    for (let t = startUtc; t <= endUtc; t += 86400000) dates.push(new Date(t).toISOString().slice(0, 10));
+    return { startDay, start: dates[0], end: own.end, dates };
+  }
+  // The salary month a date falls in: with a 26th start, 26 Sep belongs to
+  // the October salary month.
+  async function salaryMonthOf(dateStr: string): Promise<string> {
+    const calMonth = dateStr.slice(0, 7);
+    for (const m of [calMonth, shiftMonthYear(calMonth, 1)]) {
+      const p = await getSalaryPeriod(m);
+      if (p.start <= dateStr && dateStr <= p.end) return m;
+    }
+    return calMonth;
+  }
+
   async function getLatePolicyForMonth(monthYear: string) {
     const rows = await queryDB(
       `SELECT * FROM late_policy_settings WHERE effective_date <= ? ORDER BY effective_date DESC, id DESC LIMIT 1`,
@@ -1744,10 +1875,11 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       const employeeId = Number(req.params.employeeId);
       const requested = req.query.month_year ? String(req.query.month_year) : "";
       const monthYear = MONTH_YEAR_RE.test(requested) ? requested : new Date().toISOString().slice(0, 7);
-      const [yy, mm] = monthYear.split("-").map(Number);
-      const daysInMonth = new Date(yy, mm, 0).getDate();
-      const monthStart = `${monthYear}-01`;
-      const monthEnd = `${monthYear}-${String(daysInMonth).padStart(2, "0")}`;
+      // The salary month's own dates (1st..last day, or e.g. 26 Aug..25 Sep
+      // with a 26th start — see salary_month_settings).
+      const period = await getSalaryPeriod(monthYear);
+      const monthStart = period.start;
+      const monthEnd = period.end;
 
       const empRows = await queryDB(
         "SELECT id, name, employee_id AS employee_code, user_id, zk_device_pin FROM all_employees WHERE id = ?",
@@ -1794,6 +1926,8 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       res.json({
         employee_id: employeeId,
         month_year: monthYear,
+        period_start: monthStart,
+        period_end: monthEnd,
         policy: {
           shift_start_time: policy.shift_start_time,
           grace_minutes: policy.grace_minutes,
@@ -1830,11 +1964,16 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
   app.get("/api/my-attendance-summary", authenticateToken, async (req: any, res) => {
     try {
       const requested = req.query.month_year ? String(req.query.month_year) : "";
-      const monthYear = MONTH_YEAR_RE.test(requested) ? requested : new Date().toISOString().slice(0, 7);
-      const [yy, mm] = monthYear.split("-").map(Number);
-      const daysInMonth = new Date(yy, mm, 0).getDate();
-      const monthStart = `${monthYear}-01`;
-      const monthEnd = `${monthYear}-${String(daysInMonth).padStart(2, "0")}`;
+      // Default: the salary month today falls in (with a 26th start, 26 Sep
+      // onwards is already the October salary month).
+      const monthYear = MONTH_YEAR_RE.test(requested)
+        ? requested
+        : await salaryMonthOf(new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Dhaka" }));
+      // The salary month's own dates (1st..last day, or e.g. 26 Aug..25 Sep
+      // with a 26th start — see salary_month_settings).
+      const period = await getSalaryPeriod(monthYear);
+      const monthStart = period.start;
+      const monthEnd = period.end;
 
       const empRows = await queryDB(
         "SELECT id, user_id, zk_device_pin, joining_date FROM all_employees WHERE user_id = ? LIMIT 1",
@@ -1855,8 +1994,8 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       const joiningDate = employee.joining_date ? String(employee.joining_date).slice(0, 10) : null;
       const isWorkingDay = (dateStr: string) => !holidayMap.has(dateStr) && (!joiningDate || dateStr >= joiningDate);
       let workingDays = 0;
-      for (let d = 1; d <= daysInMonth; d++) {
-        if (isWorkingDay(`${monthYear}-${String(d).padStart(2, "0")}`)) workingDays++;
+      for (const dateStr of period.dates) {
+        if (isWorkingDay(dateStr)) workingDays++;
       }
       if (!joiningDate) workingDays = Math.max(1, workingDays);
 
@@ -1929,8 +2068,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       let workingDaysSoFar = workingDays;
       if (today >= monthStart && today <= monthEnd) {
         let elapsed = 0;
-        for (let d = 1; d <= daysInMonth; d++) {
-          const dateStr = `${monthYear}-${String(d).padStart(2, "0")}`;
+        for (const dateStr of period.dates) {
           if (dateStr > today) break;
           if (isWorkingDay(dateStr)) elapsed++;
         }
@@ -1948,6 +2086,8 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       res.json({
         linked: true,
         month_year: monthYear,
+        period_start: monthStart,
+        period_end: monthEnd,
         working_days: workingDays,
         working_days_so_far: workingDaysSoFar,
         present_days: presentDays.size,
@@ -1990,16 +2130,14 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       const myGroup: HolidayAppliesTo = branchTypeByUserId.get(Number(employee.user_id)) || "head_office";
 
       const days: Record<string, "delay" | "extreme"> = {};
-      let [y, m] = from.slice(0, 7).split("-").map(Number);
-      // Policy can change month to month, so resolve each month on its own
-      // (capped at 13 months — the Timesheet range is at most a year).
-      for (let i = 0; i < 13; i++) {
-        const monthYear = `${y}-${String(m).padStart(2, "0")}`;
-        if (`${monthYear}-01` > to) break;
-        const daysInMonth = new Date(y, m, 0).getDate();
-        const monthStart = `${monthYear}-01` < from ? from : `${monthYear}-01`;
-        const lastDay = `${monthYear}-${String(daysInMonth).padStart(2, "0")}`;
-        const monthEnd = lastDay > to ? to : lastDay;
+      // Policy can change month to month, so resolve each salary month on its
+      // own (capped at 14 — the Timesheet range is at most a year).
+      let monthYear = await salaryMonthOf(from);
+      for (let i = 0; i < 14; i++) {
+        const period = await getSalaryPeriod(monthYear);
+        if (period.start > to) break;
+        const monthStart = period.start < from ? from : period.start;
+        const monthEnd = period.end > to ? to : period.end;
         const holidayMap = await getHolidayMap(queryDB, monthStart, monthEnd, myGroup);
         const policy = await getLatePolicyForMonth(monthYear);
         const { lateDatesByEmployee, extremeLateDatesByEmployee } = await computeLateDatesByEmployee(
@@ -2007,11 +2145,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         );
         for (const d of lateDatesByEmployee.get(Number(employee.id)) || []) days[d] = "delay";
         for (const d of extremeLateDatesByEmployee.get(Number(employee.id)) || []) days[d] = "extreme";
-        m++;
-        if (m > 12) {
-          m = 1;
-          y++;
-        }
+        monthYear = shiftMonthYear(monthYear, 1);
       }
       res.json({ linked: true, days });
     } catch (err: any) {
@@ -2072,10 +2206,12 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
     try {
       const requested = req.query.month_year ? String(req.query.month_year) : "";
       const monthYear = MONTH_YEAR_RE.test(requested) ? requested : new Date().toISOString().slice(0, 7);
-      const [yy, mm] = monthYear.split("-").map(Number);
-      const daysInMonth = new Date(yy, mm, 0).getDate();
-      const monthStart = `${monthYear}-01`;
-      const monthEnd = `${monthYear}-${String(daysInMonth).padStart(2, "0")}`;
+      // The salary month's own dates (1st..last day, or e.g. 26 Aug..25 Sep
+      // with a 26th start — see salary_month_settings).
+      const period = await getSalaryPeriod(monthYear);
+      const daysInMonth = period.dates.length;
+      const monthStart = period.start;
+      const monthEnd = period.end;
 
       // Head Office and Project-site Employees can each have their own
       // Weekend/Holiday calendar — every per-employee figure below (working
@@ -2251,8 +2387,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       const upcomingDaysByGroup: Record<string, number> = {};
       for (const group of Object.keys(holidayMapsByGroup)) {
         let n = 0;
-        for (let d = 1; d <= daysInMonth; d++) {
-          const dateStr = `${monthYear}-${String(d).padStart(2, "0")}`;
+        for (const dateStr of period.dates) {
           if (dateStr > todayStr && !(holidayMapsByGroup as any)[group].has(dateStr)) n++;
         }
         upcomingDaysByGroup[group] = n;
@@ -2305,6 +2440,8 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
 
       res.json({
         month_year: monthYear,
+        period_start: monthStart,
+        period_end: monthEnd,
         days_in_month: daysInMonth,
         working_days: workingDaysDisplay,
         late_policy: {

@@ -2408,11 +2408,17 @@ const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports",
 const PERMISSION_LAYER_KEYS = ["read", "edit_add", "entry_upload", "delete_trash", "permanent_delete"] as const;
 // Which modules currently enforce PERMISSION_LAYER_KEYS — mirrors
 // PERMISSION_LAYER_MODULES in src/types.ts. Rolled out module by module.
-const PERMISSION_LAYER_MODULES = ["departments", "projects", "approvals", "users", "reports", "tracking"] as const;
+const PERMISSION_LAYER_MODULES = ["departments", "projects", "approvals", "users", "reports", "tracking", "payroll"] as const;
 // Employee Tracking's layers: "read" = the live map, history and status
 // cards; "stay_report" = the Stay Report (TrackingStayReport.ts). Both are
 // reading, so an account with Employee Tracking and no saved layers has both.
 const TRACKING_LAYER_KEYS = ["read", "stay_report"] as const;
+// Payroll's layers: "read" = the whole Payroll module as it was (runs,
+// payslips, salary setup, late policy…); "salary_month" = changing the day
+// a salary month starts (26 -> "26 to 25"). salary_month changes every
+// payroll figure, so it is never part of the no-saved-layers default: only
+// an account it is ticked for (and the Superadmin) can change it.
+const PAYROLL_LAYER_KEYS = ["read", "salary_month"] as const;
 // PEPM Reports uses four of them: Read Only, Edit, Delete/Trash, Permanent Delete
 // — plus its own "Budget Submission Status" (the second report on that page),
 // which, like Permanent Delete, is never part of the no-saved-rows default:
@@ -2440,6 +2446,7 @@ const MODULE_LAYER_KEY_SETS: Record<string, readonly string[]> = {
   users: PERMISSION_LAYER_KEYS,
   reports: REPORT_LAYER_KEYS,
   tracking: TRACKING_LAYER_KEYS,
+  payroll: PAYROLL_LAYER_KEYS,
   leave_manage: LEAVE_MANAGE_LAYER_KEYS,
 };
 
@@ -4069,7 +4076,7 @@ async function startServer() {
   // on for a module is never a silent regression; a Superadmin only actually
   // restricts anything once they explicitly save a narrower set in the
   // Module Access modal.
-  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "stay_report") =>
+  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "stay_report" | "salary_month") =>
     async (req: any, res: any, next: any) => {
       if (!req.user) return res.status(401).json({ error: "Access token required" });
       if (req.user.role === "superadmin") return next();
@@ -4085,7 +4092,9 @@ async function startServer() {
           ? grantedLayers
           : moduleKey === "tracking"
             ? [...TRACKING_LAYER_KEYS]
-            : PERMISSION_LAYER_KEYS.filter((k) => k !== "permanent_delete");
+            : moduleKey === "payroll"
+              ? ["read"]
+              : PERMISSION_LAYER_KEYS.filter((k) => k !== "permanent_delete");
         if (!effectiveLayers.includes(layer)) {
           return res.status(403).json({ error: "You don't have permission to do this. Ask your Superadmin to grant it." });
         }
@@ -4094,6 +4103,21 @@ async function startServer() {
         res.status(500).json({ error: err.message });
       }
     };
+
+  // Same rule as requireModuleLayer, as a yes/no for a page that shows or
+  // hides a control (e.g. Payroll's salary month setting).
+  const hasModuleLayer = async (user: any, moduleKey: AdminModuleKey, layer: string): Promise<boolean> => {
+    if (!user) return false;
+    if (user.role === "superadmin") return true;
+    if (user.role !== "admin" && user.role !== "user") return false;
+    const modules = await getAdminModules(user.id);
+    if (!modules.includes(moduleKey)) return false;
+    if (!(PERMISSION_LAYER_MODULES as readonly string[]).includes(moduleKey)) return true;
+    const granted = await getModulePermissionLayersForModule(user.id, moduleKey);
+    if (granted.length > 0) return granted.includes(layer);
+    const defaults: readonly string[] = moduleKey === "tracking" ? TRACKING_LAYER_KEYS : moduleKey === "payroll" ? ["read"] : PERMISSION_LAYER_KEYS.filter((k) => k !== "permanent_delete");
+    return defaults.includes(layer);
+  };
 
   // Personal Data / profile-photo routes — kept in their own file
   // (profileRoutes.ts) instead of growing this already-huge file further.
@@ -5241,11 +5265,15 @@ async function startServer() {
   // Admin-Panel-gated module route in this file does.
   // Registered first: its /api/payroll/pay-items and /api/payroll/adjustments
   // would otherwise be caught by PayrollRoutes' GET /api/payroll/:id.
-  registerPayrollItemsRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB });
+  registerPayrollItemsRoutes(app, { authenticateToken, requireAdmin, requireModule: (k: "payroll") => requireModuleLayer(k, "read"), queryDB });
+  // Every existing payroll route needs the module's "read" layer (on by
+  // default); the salary month setting needs "salary_month" (ticked only).
   registerPayrollRoutes(app, {
     authenticateToken,
     requireAdmin,
-    requireModule,
+    requireModule: (k: "payroll") => requireModuleLayer(k, "read"),
+    requireModuleLayer,
+    hasModuleLayer,
     queryDB
   });
 

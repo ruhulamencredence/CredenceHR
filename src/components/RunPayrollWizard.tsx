@@ -152,6 +152,9 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
     extreme_lates_per_deduction_day: number;
   } | null>(null);
   const [viewingLateFor, setViewingLateFor] = useState<WizardRow | null>(null);
+  // The salary month's own dates (Salary Setup -> Salary Month), e.g.
+  // 26 Aug – 25 Sep for September with a 26th start.
+  const [period, setPeriod] = useState<{ start: string; end: string } | null>(null);
 
   const [paymentMethod, setPaymentMethod] = useState('Bank Transfer');
   const [submitting, setSubmitting] = useState(false);
@@ -169,6 +172,7 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
         return;
       }
       setLatePolicy(data.late_policy || null);
+      setPeriod(data.period_start && data.period_end ? { start: data.period_start, end: data.period_end } : null);
       setRows(
         (data.employees || []).map((e: any) => ({
           ...e,
@@ -373,7 +377,14 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
               <div className="flex items-center justify-between mb-3">
                 <div>
                   <p className="text-xs text-slate-500">
-                    Present/Absent/Leave days for {monthLabel(monthYear)}, auto-filled where attendance data exists — edit any row as needed.
+                    Present/Absent/Leave days for {monthLabel(monthYear)}
+                    {period && (
+                      <span className="font-semibold text-slate-700">
+                        {' '}({new Date(`${period.start}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} –{' '}
+                        {new Date(`${period.end}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })})
+                      </span>
+                    )}
+                    , auto-filled where attendance data exists — edit any row as needed.
                   </p>
                   {latePolicy && (
                     <p className="text-[10px] text-slate-400 mt-0.5">

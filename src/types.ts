@@ -83,7 +83,7 @@ export const ADMIN_MODULES: { key: AdminModuleKey; label: string }[] = [
 // combination of these per (Admin/User account, module) via Admin Panel ->
 // Users -> Module Access. Independent checkboxes, not hierarchical: having
 // 'delete_trash' does NOT imply 'edit_add' is also granted.
-export type PermissionLayerKey = 'read' | 'edit_add' | 'entry_upload' | 'delete_trash' | 'permanent_delete' | 'submission_status' | 'stay_report';
+export type PermissionLayerKey = 'read' | 'edit_add' | 'entry_upload' | 'delete_trash' | 'permanent_delete' | 'submission_status' | 'stay_report' | 'salary_month';
 
 export const PERMISSION_LAYERS: { key: PermissionLayerKey; label: string }[] = [
   { key: 'read', label: 'Read Only' },
@@ -97,7 +97,7 @@ export const PERMISSION_LAYERS: { key: PermissionLayerKey; label: string }[] = [
 // being rolled out one module at a time. A module not listed here still only
 // has the old coarse on/off grant (module_permissions), unaffected by any of
 // this. Start: 'departments', then 'projects', then 'approvals', then 'users'.
-export const PERMISSION_LAYER_MODULES: AdminModuleKey[] = ['departments', 'projects', 'approvals', 'users', 'reports', 'tracking'];
+export const PERMISSION_LAYER_MODULES: AdminModuleKey[] = ['departments', 'projects', 'approvals', 'users', 'reports', 'tracking', 'payroll'];
 
 // A module that uses only some of the layers, with its own labels. PEPM
 // Reports: Read Only, Edit, Delete/Trash, Permanent Delete, and Budget
@@ -115,11 +115,17 @@ export const MODULE_LAYER_OPTIONS: Partial<Record<AdminModuleKey, { key: Permiss
   tracking: [
     { key: 'read', label: 'Live Map & History' },
     { key: 'stay_report', label: 'Stay Report' }
+  ],
+  // Payroll -> the day a salary month starts (26 = "26 to 25"); only for
+  // accounts it is ticked for (EXPLICIT_ONLY_LAYERS).
+  payroll: [
+    { key: 'read', label: 'Payroll' },
+    { key: 'salary_month', label: 'Salary Month Setting' }
   ]
 };
 // Layers an account has only when explicitly ticked — never part of the
 // "module granted, no layers saved yet" default (requireModuleLayer).
-export const EXPLICIT_ONLY_LAYERS: PermissionLayerKey[] = ['permanent_delete', 'submission_status'];
+export const EXPLICIT_ONLY_LAYERS: PermissionLayerKey[] = ['permanent_delete', 'submission_status', 'salary_month'];
 export const layersFor = (moduleKey: AdminModuleKey) => MODULE_LAYER_OPTIONS[moduleKey] || PERMISSION_LAYERS;
 
 // Leave Manage's own operation-specific layers — same independent-checkbox
