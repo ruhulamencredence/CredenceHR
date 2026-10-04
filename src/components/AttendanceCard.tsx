@@ -137,6 +137,28 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
 
   const selectedProject = projects.find((p) => String(p.id) === projectId) || null;
   const hasCheckedIn = !!status?.check_in_at;
+
+  // Late warning: this month's own Delay / Extreme Delay counts against the
+  // Late Attendance Policy (same /api/my-attendance-summary figures the
+  // This Month card and payroll use). When one more late would cost a day's
+  // salary — e.g. 2 lates under "3 lates = 1 day" — a rose pill says so.
+  // Read again after each check-in, since that's what can add a late.
+  const [lateSummary, setLateSummary] = useState<{
+    linked: boolean;
+    late_count: number;
+    extreme_late_count: number;
+    policy: { lates_per_deduction_day: number; extreme_lates_per_deduction_day: number } | null;
+  } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    dedupedFetchJson(apiUrl('/api/my-attendance-summary'), token).then((d) => {
+      if (!cancelled) setLateSummary(d && d.linked ? d : null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [token, status?.check_in_at]);
+
   const hasCheckedOut = !!status?.check_out_at;
 
   // Step 1: get a GPS fix and open the map confirm modal — nothing is sent to
@@ -227,6 +249,19 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
   const inParts = status?.check_in_at ? formatTimeParts(status.check_in_at as string) : null;
   const outParts = status?.check_out_at ? formatTimeParts(status.check_out_at as string) : null;
   const busy = working !== null || !!pending || loadingStatus;
+
+  const lateWarnings: string[] = [];
+  if (lateSummary?.policy) {
+    const oneShort = (count: number, per: number) => per > 1 && count % per === per - 1;
+    const per = Number(lateSummary.policy.lates_per_deduction_day) || 0;
+    const xPer = Number(lateSummary.policy.extreme_lates_per_deduction_day) || 0;
+    if (oneShort(Number(lateSummary.late_count) || 0, per)) {
+      lateWarnings.push(`${lateSummary.late_count} Delay this month — 1 more and a day's salary will be deducted (${per} Delay = 1 day).`);
+    }
+    if (oneShort(Number(lateSummary.extreme_late_count) || 0, xPer)) {
+      lateWarnings.push(`${lateSummary.extreme_late_count} Extreme Delay this month — 1 more and a day's salary will be deducted (${xPer} Extreme Delay = 1 day).`);
+    }
+  }
 
   return (
     // Liquid glass on mobile, matching the rest of the mobile Dashboard's
@@ -331,6 +366,13 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
           )}
         </div>
       </div>
+
+      {lateWarnings.map((w) => (
+        <div key={w} role="alert" className="mt-2 flex items-start gap-2 text-[11px] font-semibold leading-snug px-3 py-2 rounded-2xl bg-rose-500 text-white shadow-[0_6px_16px_-6px_rgba(244,63,94,0.6)]">
+          <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" />
+          <span>{w}</span>
+        </div>
+      ))}
 
       {selectedProject && !loadingStatus && (
         <div className="mt-2 pt-2 border-t border-white/50 space-y-1 text-[11px] text-slate-500">
