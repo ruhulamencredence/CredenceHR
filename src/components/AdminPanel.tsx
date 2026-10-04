@@ -3341,20 +3341,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           <ModulePath path={ADMIN_TAB_PATH[activeTab]} />
         </div>
       )}
-      {/* Violet gradient welcome banner — same brand gradient as the logo/hero
-          text elsewhere (see --g-gradient in index.css), sitting right below the
-          title the way the reference dashboard's "Welcome Back" card does.
-          Hidden on mobile for Monthly Leave Application specifically — that
-          report's own header (title + search/filter row) already needs the
-          space on a small screen, and this repeated greeting doesn't add
-          anything there; desktop keeps it, and every other tab keeps it on
-          both mobile and desktop, unchanged. */}
-      {/* Only on the Admin Dashboard and HR Analytics — every other Admin
-          Panel page goes straight to its own content, web and mobile. */}
+      {/* Welcome greeting — plain text straight on the page background (no
+          banner card): a small "Hi, Name" line in the accent colour, a large
+          heading, and the overview line under it. Only on the Admin
+          Dashboard and HR Analytics — every other Admin Panel page goes
+          straight to its own content, web and mobile. */}
       {(activeTab === 'dashboard' || activeTab === 'hr_analytics') && (
-      <div className="rounded-2xl px-6 py-5 sm:px-8 sm:py-6 text-white shadow-sm" style={{ background: 'var(--g-gradient)' }}>
-        <h3 className="text-xl sm:text-2xl font-bold">Welcome back, {user.name.split(' ')[0]}!</h3>
-        <p className="mt-1 text-sm text-white/85">
+      <div className="pt-1 pb-1">
+        <p className="text-sm font-semibold" style={{ color: 'var(--g-accent)' }}>Hi {user.name.split(' ')[0]},</p>
+        <h3 className="mt-0.5 text-2xl sm:text-[32px] sm:leading-tight font-bold tracking-tight text-slate-900">Welcome back!</h3>
+        <p className="mt-1 text-sm text-slate-500">
           {isSuperAdmin
             ? "Here's your full overview — projects, reports, users, and every admin module."
             : "Here's your overview for the modules you've been granted access to."}
