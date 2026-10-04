@@ -224,7 +224,7 @@ const BillsTab: React.FC<{ token: string }> = ({ token }) => {
           pdfMoney(r.payable),
           pdfMoney(r.excess, true)
         ]),
-        foot: [[{ content: 'Total', colSpan: 8 }, pdfMoney(billed.reduce((a, r) => a + r.limit_amount, 0)), pdfMoney(sum('amount')), pdfMoney(sum('payable')), pdfMoney(sum('excess'))]],
+        foot: [[{ content: 'Total', colSpan: 8, styles: { halign: 'left' } }, pdfMoney(billed.reduce((a, r) => a + r.limit_amount, 0)), pdfMoney(sum('amount')), pdfMoney(sum('payable')), pdfMoney(sum('excess'))]],
         columnStyles: { 0: { halign: 'center', cellWidth: 12 }, 8: { halign: 'right' }, 9: { halign: 'right' }, 10: { halign: 'right' }, 11: { halign: 'right' } }
       });
       finalizePdfPageNumbers(doc);

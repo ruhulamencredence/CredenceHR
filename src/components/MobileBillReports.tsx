@@ -214,7 +214,7 @@ export const MobileBillReports: React.FC<{ token: string }> = ({ token }) => {
         ...standardTable(startY),
         head: [current.head],
         body: body.map((r) => fmt(r)),
-        foot: totalRow ? [fmt(totalRow, true)] : undefined,
+        foot: totalRow ? [fmt(totalRow, true).map((c, j) => (isMoney(j) ? c : { content: c, styles: { halign: 'left' as const } }))] : undefined,
         styles: { ...standardTable(startY).styles, fontSize: current.head.length > 14 ? 6.3 : 7 },
         columnStyles
       });

@@ -116,7 +116,9 @@ export function standardTable(startY: number) {
     theme: 'grid' as const,
     styles: { font: 'helvetica', fontSize: 7, cellPadding: 1.6, textColor: [40, 40, 40] as [number, number, number], lineColor: [215, 215, 215] as [number, number, number], lineWidth: 0.1, valign: 'middle' as const },
     headStyles: { fillColor: [246, 246, 246] as [number, number, number], textColor: [40, 40, 40] as [number, number, number], fontStyle: 'bold' as const, halign: 'center' as const },
-    footStyles: { fillColor: [255, 255, 255] as [number, number, number], textColor: [20, 20, 20] as [number, number, number], fontStyle: 'bold' as const },
+    // Totals are amounts, so right-aligned; give the "Total" label cell
+    // styles: { halign: 'left' }.
+    footStyles: { fillColor: [255, 255, 255] as [number, number, number], textColor: [20, 20, 20] as [number, number, number], fontStyle: 'bold' as const, halign: 'right' as const },
     showFoot: 'lastPage' as const
   };
 }

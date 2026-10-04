@@ -5,8 +5,8 @@ import { Banknote, Filter, Printer, CheckSquare, Square, RotateCcw, X, ReceiptTe
 import { ConveyanceBill, User } from '../types';
 import { apiUrl } from '../lib/api';
 import { formatDate, todayDateOnlyString } from '../lib/formatDate';
-import credenceLogo from '../assets/credence-logo.png';
-import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
+import { finalizePdfPageNumbers } from '../lib/pdfLetterhead';
+import { drawStandardHeader, loadPdfCompany, pdfMoney, standardTable } from '../lib/pdfStandard';
 import { savePdfCrossPlatform } from '../lib/saveFile';
 import { Spinner } from './Spinner';
 
@@ -113,83 +113,70 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
     if (!res.ok) throw new Error(`Failed to load Bill CB-${billId} for its voucher.`);
     const bill: ConveyanceBill = await res.json();
 
-    const logoImg = await loadImageElement(credenceLogo);
+    const co = await loadPdfCompany(token);
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
     const items = bill.items || [];
+    const total = items.reduce((s, it) => s + Number(it.amount), 0);
 
-    const letterheadOptions = {
-      reportTitle: 'Conveyance Payment Voucher',
-      filtersLabel: 'Voucher Details:',
-      filters: [
-        ['Voucher No', bill.voucher_no || '—'],
-        ['Paid To', bill.user_name || '—'],
-        ['Bill No', `CB-${bill.id}`],
-        ['Bill Date', formatDate(bill.bill_date) || '—'],
-        ['Disbursed On', bill.disbursed_at ? formatDate(bill.disbursed_at) : '—']
-      ] as [string, string][]
-    };
-    const contentStartY = drawPdfLetterhead(doc, logoImg, letterheadOptions);
+    const contentStartY = drawStandardHeader(doc, co, 'Conveyance Payment Voucher', [
+      ['Voucher No', bill.voucher_no || '-'],
+      ['Employee Name', bill.user_name || '-'],
+      ['Employee Code', bill.employee_code || '-'],
+      ['Designation', bill.designation || '-'],
+      ['Department', bill.department || '-'],
+      ['Bill No', `CB-${bill.id}`],
+      ['Bill Date', formatDate(bill.bill_date) || '-'],
+      ['Status', bill.is_disbursed ? `Disbursed${bill.disbursed_at ? ` on ${formatDate(bill.disbursed_at)}` : ''}${bill.disbursed_by_name ? ` by ${bill.disbursed_by_name}` : ''}` : 'Not disbursed']
+    ]);
 
     autoTable(doc, {
-      startY: contentStartY,
-      margin: { top: contentStartY, left: 14, right: 14 },
-      head: [['SL', 'Date', 'Particulars', 'From', 'To', 'Distance (KM)', 'Amount']],
+      ...standardTable(contentStartY),
+      head: [['Serial', 'Date', 'Particulars', 'From', 'To', 'Distance (KM)', 'Amount']],
       body: items.map((it, idx) => [
         String(idx + 1),
         formatDate(it.entry_date) || '',
         it.particulars || '',
         it.from_location || '',
         it.to_location || '',
-        it.distance_km != null ? String(it.distance_km) : '',
-        it.amount.toFixed(2)
+        it.distance_km != null ? String(it.distance_km) : '-',
+        pdfMoney(it.amount)
       ]),
-      styles: { fontSize: 7.5, cellPadding: 1.7, overflow: 'linebreak' },
+      foot: [[{ content: 'Total', colSpan: 6, styles: { halign: 'left' } }, pdfMoney(total)]],
       columnStyles: {
-        0: { cellWidth: 8 },
-        1: { cellWidth: 20 },
-        2: { cellWidth: 58 },
-        3: { cellWidth: 26 },
-        4: { cellWidth: 26 },
-        5: { cellWidth: 22 },
-        6: { cellWidth: 22 }
-      },
-      headStyles: { fillColor: [21, 128, 61], textColor: 255, fontSize: 7.5 },
-      alternateRowStyles: { fillColor: [248, 250, 252] },
-      didDrawPage: () => { drawPdfLetterhead(doc, logoImg, letterheadOptions); }
+        0: { cellWidth: 13, halign: 'center' },
+        1: { cellWidth: 20, halign: 'center' },
+        2: { cellWidth: 'auto' },
+        3: { cellWidth: 28 },
+        4: { cellWidth: 28 },
+        5: { cellWidth: 20, halign: 'right' },
+        6: { cellWidth: 24, halign: 'right' }
+      }
     });
 
-    const total = items.reduce((s, it) => s + Number(it.amount), 0);
     const finalY = (doc as any).lastAutoTable.finalY;
-
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(11);
-    doc.setTextColor(15, 23, 42);
-    doc.text(`Total Amount Disbursed: ${total.toFixed(2)}`, 14, finalY + 8);
-
+    const pageWidth = doc.internal.pageSize.getWidth();
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9);
-    doc.setTextColor(71, 85, 105);
+    doc.setFontSize(8);
+    doc.setTextColor(40, 40, 40);
     doc.text(
-      `I acknowledge receipt of the above amount in full settlement of the conveyance claim referenced above.`,
-      14,
-      finalY + 16,
-      { maxWidth: doc.internal.pageSize.getWidth() - 28 }
+      `Received Tk ${pdfMoney(total)} in full settlement of the conveyance claim referenced above.`,
+      8,
+      finalY + 8,
+      { maxWidth: pageWidth - 16 }
     );
 
     // Signature lines — a Voucher is a physical payout receipt, so leave room
     // for both the person disbursing and the claimant receiving to sign.
-    const pageWidth = doc.internal.pageSize.getWidth();
-    const sigY = finalY + 40;
-    doc.setDrawColor(148, 163, 184);
+    const sigY = finalY + 32;
+    doc.setDrawColor(120, 120, 120);
     doc.setLineWidth(0.2);
-    doc.line(14, sigY, 74, sigY);
-    doc.line(pageWidth / 2 - 30, sigY, pageWidth / 2 + 30, sigY);
-    doc.line(pageWidth - 74, sigY, pageWidth - 14, sigY);
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(8);
-    doc.text('Prepared By', 14, sigY + 4);
+    doc.line(8, sigY, 62, sigY);
+    doc.line(pageWidth / 2 - 27, sigY, pageWidth / 2 + 27, sigY);
+    doc.line(pageWidth - 62, sigY, pageWidth - 8, sigY);
+    doc.setFontSize(7.5);
+    doc.text('Prepared By', 35, sigY + 4, { align: 'center' });
     doc.text('Approved By', pageWidth / 2, sigY + 4, { align: 'center' });
-    doc.text("Received By (Claimant)", pageWidth - 74, sigY + 4);
+    doc.text('Received By (Claimant)', pageWidth - 35, sigY + 4, { align: 'center' });
 
     finalizePdfPageNumbers(doc);
     const filename = `Payment_Voucher_${bill.voucher_no || bill.id}_${bill.user_name?.replace(/\s+/g, '_') || 'user'}.pdf`;
