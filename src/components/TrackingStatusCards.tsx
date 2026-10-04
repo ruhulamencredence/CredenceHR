@@ -274,7 +274,7 @@ export const TrackingStatusCards: React.FC<Props> = ({ token, variant = 'panel',
       {/* Portalled to <body>: the Dashboard's glass tiles use backdrop-blur,
           which would otherwise trap these fixed overlays inside the tile. */}
       {chooser && createPortal(
-        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4" onClick={() => setChooser(false)}>
+        <div className="fixed inset-0 z-[1050] flex items-end sm:items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4" onClick={() => setChooser(false)}>
           <div role="dialog" aria-label="Employee Tracking" className="bg-white rounded-2xl shadow-xl border border-slate-200 w-full max-w-sm p-4" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
@@ -300,8 +300,10 @@ export const TrackingStatusCards: React.FC<Props> = ({ token, variant = 'panel',
         document.body
       )}
 
+      {/* z-[1050]: above the Leaflet map on Employee Tracking (its panes and
+          controls go up to 1000), below the Notice Report it opens (1100). */}
       {open && createPortal(
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4" onClick={() => setOpen(null)}>
+        <div className="fixed inset-0 z-[1050] flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4" onClick={() => setOpen(null)}>
           <div
             role="dialog"
             aria-label={open === 'tracked' ? 'Currently Under Tracking' : 'Currently Not Tracked'}
