@@ -38,6 +38,7 @@ import { registerPerformanceRoutes, ensurePerformanceSchema } from "./Performanc
 import { registerRecruitmentRoutes, ensureRecruitmentSchema } from "./RecruitmentRoutes";
 import { registerGrievanceRoutes, ensureGrievanceSchema } from "./GrievanceRoutes";
 import { registerTaskRoutes, ensureTaskSchema } from "./TaskRoutes";
+import { registerTrackingStayReportRoutes, wallMinutes } from "./TrackingStayReport";
 import { registerMobileBillRoutes, ensureMobileBillSchema, finalizeMobileLimitRequest, rejectMobileLimitRequest } from "./MobileBillRoutes";
 import { registerHROperationsRoutes, ensureHROperationsSchema, applyDueHrActions } from "./HROperationsRoutes";
 import { registerEmployee360Routes, ensureEmployee360Schema } from "./HrOps360Routes";
@@ -2407,7 +2408,11 @@ const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports",
 const PERMISSION_LAYER_KEYS = ["read", "edit_add", "entry_upload", "delete_trash", "permanent_delete"] as const;
 // Which modules currently enforce PERMISSION_LAYER_KEYS — mirrors
 // PERMISSION_LAYER_MODULES in src/types.ts. Rolled out module by module.
-const PERMISSION_LAYER_MODULES = ["departments", "projects", "approvals", "users", "reports"] as const;
+const PERMISSION_LAYER_MODULES = ["departments", "projects", "approvals", "users", "reports", "tracking"] as const;
+// Employee Tracking's layers: "read" = the live map, history and status
+// cards; "stay_report" = the Stay Report (TrackingStayReport.ts). Both are
+// reading, so an account with Employee Tracking and no saved layers has both.
+const TRACKING_LAYER_KEYS = ["read", "stay_report"] as const;
 // PEPM Reports uses four of them: Read Only, Edit, Delete/Trash, Permanent Delete
 // — plus its own "Budget Submission Status" (the second report on that page),
 // which, like Permanent Delete, is never part of the no-saved-rows default:
@@ -2434,6 +2439,7 @@ const MODULE_LAYER_KEY_SETS: Record<string, readonly string[]> = {
   approvals: PERMISSION_LAYER_KEYS,
   users: PERMISSION_LAYER_KEYS,
   reports: REPORT_LAYER_KEYS,
+  tracking: TRACKING_LAYER_KEYS,
   leave_manage: LEAVE_MANAGE_LAYER_KEYS,
 };
 
@@ -4063,7 +4069,7 @@ async function startServer() {
   // on for a module is never a silent regression; a Superadmin only actually
   // restricts anything once they explicitly save a narrower set in the
   // Module Access modal.
-  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status") =>
+  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "stay_report") =>
     async (req: any, res: any, next: any) => {
       if (!req.user) return res.status(401).json({ error: "Access token required" });
       if (req.user.role === "superadmin") return next();
@@ -4077,7 +4083,9 @@ async function startServer() {
         const grantedLayers = await getModulePermissionLayersForModule(req.user.id, moduleKey);
         const effectiveLayers: string[] = grantedLayers.length > 0
           ? grantedLayers
-          : PERMISSION_LAYER_KEYS.filter((k) => k !== "permanent_delete");
+          : moduleKey === "tracking"
+            ? [...TRACKING_LAYER_KEYS]
+            : PERMISSION_LAYER_KEYS.filter((k) => k !== "permanent_delete");
         if (!effectiveLayers.includes(layer)) {
           return res.status(403).json({ error: "You don't have permission to do this. Ask your Superadmin to grant it." });
         }
@@ -4636,7 +4644,7 @@ async function startServer() {
   // Live board (Admin Panel -> Employee Tracking): the SINGLE most recent ping
   // per user, plus how long ago it was — this is the "where is everyone right
   // now" map, not a history. Only users with at least one ping ever show up.
-  app.get("/api/tracking/live", authenticateToken, requireAdmin, requireModule("tracking"), async (req: any, res) => {
+  app.get("/api/tracking/live", authenticateToken, requireAdmin, requireModule("tracking"), requireModuleLayer("tracking", "read"), async (req: any, res) => {
     try {
       const rows = await queryDB("SELECT * FROM location_pings", []);
       const users = await queryDB("SELECT id, name, email, role FROM users", []);
@@ -4713,7 +4721,7 @@ async function startServer() {
   const canSendTrackingNotice = async (user: any) =>
     user.role === "superadmin" || (await getAdminModules(user.id)).includes("notices");
 
-  app.get("/api/tracking/status", authenticateToken, requireAdmin, requireModule("tracking"), async (req: any, res) => {
+  app.get("/api/tracking/status", authenticateToken, requireAdmin, requireModule("tracking"), requireModuleLayer("tracking", "read"), async (req: any, res) => {
     try {
       const rows = await trackingStatusRows();
       res.json({
@@ -4848,7 +4856,7 @@ async function startServer() {
   // Path history for ONE user (Admin Panel -> Employee Tracking -> click a user
   // -> "View path today"), optionally bounded by from/to — lets an Admin/
   // Superadmin play back where that user actually went, not just their latest dot.
-  app.get("/api/tracking/history", authenticateToken, requireAdmin, requireModule("tracking"), async (req: any, res) => {
+  app.get("/api/tracking/history", authenticateToken, requireAdmin, requireModule("tracking"), requireModuleLayer("tracking", "read"), async (req: any, res) => {
     try {
       const user_id = req.query.user_id ? Number(req.query.user_id) : null;
       if (!user_id) return res.status(400).json({ error: "user_id is required" });
@@ -4864,7 +4872,11 @@ async function startServer() {
       const from_time = req.query.from_time ? String(req.query.from_time) : null;
       const to_time = req.query.to_time ? String(req.query.to_time) : null;
       const filtered = rows.filter((r: any) => {
-        const iso = new Date(r.recorded_at).toISOString();
+        // The ping's own wall-clock date/time (as the app shows it) — not
+        // toISOString(), which is UTC and moved a 09:00–18:00 window six
+        // hours on a server running on Bangladesh time.
+        const wm = wallMinutes(r.recorded_at);
+        const iso = wm != null ? new Date(wm * 60000).toISOString() : new Date(r.recorded_at).toISOString();
         const day = iso.slice(0, 10);
         if (from && day < from) return false;
         if (to && day > to) return false;
@@ -5310,6 +5322,8 @@ async function startServer() {
   registerTaskRoutes(app, { authenticateToken, queryDB, getAdminModules, createAlert });
   // Mobile Bill (company SIMs, limits, bills, reports) — limit raise requests
   // ride the Dynamic Approval Engine (request_type 'mobile').
+  // Employee Tracking -> Stay Report (time at each place, day by day).
+  registerTrackingStayReportRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, queryDB });
   registerMobileBillRoutes(app, { authenticateToken, queryDB, getAdminModules, createAlert, createTemplateApprovalRequest, getCurrentStepApprovers });
   registerHRAnalyticsRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB });
   registerDocumentVaultRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB, getAdminModules });
