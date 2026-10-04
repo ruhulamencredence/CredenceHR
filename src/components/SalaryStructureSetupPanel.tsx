@@ -34,7 +34,8 @@ import {
   History,
   TrendingUp,
   TrendingDown,
-  RefreshCw
+  RefreshCw,
+  CalendarRange
 } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
@@ -102,7 +103,7 @@ const money = (n: number | null | undefined) =>
 
 export const SalaryStructureSetupPanel: React.FC<SalaryStructureSetupPanelProps> = ({ token }) => {
   const authHeaders = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
-  const [subTab, setSubTab] = useState<'components' | 'grades' | 'individual' | 'late_policy'>('components');
+  const [subTab, setSubTab] = useState<'components' | 'grades' | 'individual' | 'late_policy' | 'salary_month'>('components');
 
   return (
     <div className="space-y-4">
@@ -139,6 +140,14 @@ export const SalaryStructureSetupPanel: React.FC<SalaryStructureSetupPanelProps>
         >
           <Clock className="w-3.5 h-3.5" /> Late Policy
         </button>
+        <button
+          onClick={() => setSubTab('salary_month')}
+          className={`flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+            subTab === 'salary_month' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-blue-600'
+          }`}
+        >
+          <CalendarRange className="w-3.5 h-3.5" /> Salary Month
+        </button>
       </div>
 
       {subTab === 'components' ? (
@@ -147,6 +156,8 @@ export const SalaryStructureSetupPanel: React.FC<SalaryStructureSetupPanelProps>
         <PayGradesPanel authHeaders={authHeaders} />
       ) : subTab === 'individual' ? (
         <IndividualSalaryPanel authHeaders={authHeaders} />
+      ) : subTab === 'salary_month' ? (
+        <SalaryMonthPanel authHeaders={authHeaders} />
       ) : (
         <LatePolicyPanel authHeaders={authHeaders} />
       )}
@@ -1660,6 +1671,225 @@ const LatePolicyPanel: React.FC<{ authHeaders: Record<string, string> }> = ({ au
                   <td className="px-4 py-2 text-slate-600">{h.extreme_grace_minutes} min</td>
                   <td className="px-4 py-2 text-slate-600">{h.extreme_lates_per_deduction_day}</td>
                   <td className="px-4 py-2 text-slate-500">{h.changed_by_name || '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+};
+// ---------------------------------------------------------------------------
+// Salary Month — the day a salary month starts (PayrollRoutes.ts
+// salary_month_settings). 1 = the calendar month; 26 = "26 to 25", where the
+// September salary month runs from 26 August to 25 September. Payroll runs,
+// late counts and every employee's This Month figures follow it. Changing
+// it needs Payroll's "Salary Month Setting" permission layer.
+// ---------------------------------------------------------------------------
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const ordinal = (n: number) => `${n}${n % 10 === 1 && n !== 11 ? 'st' : n % 10 === 2 && n !== 12 ? 'nd' : n % 10 === 3 && n !== 13 ? 'rd' : 'th'}`;
+const fmtDay = (iso: string) => {
+  const [y, m, d] = iso.split('-').map(Number);
+  return `${d} ${MONTH_NAMES[m - 1]} ${y}`;
+};
+const monthName = (ym: string) => {
+  const [y, m] = ym.split('-').map(Number);
+  return `${MONTH_NAMES[m - 1]} ${y}`;
+};
+// Same dates as salaryPeriodFor() in PayrollRoutes.ts.
+function previewPeriod(ym: string, startDay: number): { start: string; end: string } {
+  const [y, m] = ym.split('-').map(Number);
+  const iso = (t: number) => new Date(t).toISOString().slice(0, 10);
+  if (startDay <= 1) return { start: iso(Date.UTC(y, m - 1, 1)), end: iso(Date.UTC(y, m, 0)) };
+  return { start: iso(Date.UTC(y, m - 2, startDay)), end: iso(Date.UTC(y, m - 1, startDay - 1)) };
+}
+const describeStart = (d: number) => (d <= 1 ? '1st to month end (calendar month)' : `${ordinal(d)} to ${ordinal(d - 1)}`);
+
+interface SalaryMonthInfo {
+  can_edit: boolean;
+  start_day: number;
+  current_month: string;
+  current_period: { start: string; end: string; days: number };
+  history: { id: number; start_day: number; effective_month: string; created_at: string; changed_by_name: string | null }[];
+}
+
+const SalaryMonthPanel: React.FC<{ authHeaders: Record<string, string> }> = ({ authHeaders }) => {
+  const [info, setInfo] = useState<SalaryMonthInfo | null>(null);
+  const [error, setError] = useState('');
+  const [startDay, setStartDay] = useState(1);
+  const [effectiveMonth, setEffectiveMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  const load = async () => {
+    setError('');
+    try {
+      const res = await fetch(apiUrl('/api/payroll/salary-month'), { headers: authHeaders });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not load the salary month setting.');
+      setInfo(data);
+      setStartDay(data.start_day);
+      setEffectiveMonth(data.current_month);
+    } catch (e: any) {
+      setError(e.message);
+    }
+  };
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const save = async () => {
+    setSaving(true);
+    setError('');
+    setSaved(false);
+    try {
+      const res = await fetch(apiUrl('/api/payroll/salary-month'), {
+        method: 'POST',
+        headers: { ...authHeaders, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ start_day: startDay, effective_month: effectiveMonth })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not save.');
+      setSaved(true);
+      await load();
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!info) {
+    return error ? (
+      <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-sm text-rose-700">{error}</div>
+    ) : (
+      <div className="flex items-center justify-center py-16 text-slate-400 gap-2 text-sm">
+        <Spinner size={16} /> Loading…
+      </div>
+    );
+  }
+  // Same rule as the server: a salary month starts the day after the
+  // previous one ended, so the month a new start day takes effect can be a
+  // one-off shorter/longer month.
+  const startDayFor = (ym: string) => {
+    const h = info.history.filter((r) => r.effective_month <= ym).sort((a, b) => (a.effective_month < b.effective_month ? 1 : -1))[0];
+    return h ? Number(h.start_day) : 1;
+  };
+  const shiftYm = (ym: string, n: number) => {
+    const [y, m] = ym.split('-').map(Number);
+    const d = new Date(Date.UTC(y, m - 1 + n, 1));
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+  };
+  const validMonth = /^\d{4}-\d{2}$/.test(effectiveMonth);
+  const preview = validMonth
+    ? (() => {
+        const own = previewPeriod(effectiveMonth, startDay);
+        const prevEnd = previewPeriod(shiftYm(effectiveMonth, -1), startDayFor(shiftYm(effectiveMonth, -1))).end;
+        const start = new Date(Date.parse(`${prevEnd}T00:00:00Z`) + 86400000).toISOString().slice(0, 10);
+        const next = previewPeriod(shiftYm(effectiveMonth, 1), startDay);
+        return { start, end: own.end, nextMonth: shiftYm(effectiveMonth, 1), next, oneOff: start !== own.start };
+      })()
+    : null;
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+      <div className="lg:col-span-2 bg-white rounded-2xl shadow-sm border border-slate-200 p-5 space-y-4 h-fit">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-800">Salary Month</h3>
+          <p className="text-[11px] text-slate-400 mt-0.5">
+            Which days make up a salary month. Payroll runs, late counts and each employee's This Month figures follow it.
+          </p>
+        </div>
+
+        <div className="bg-blue-50 border border-blue-100 rounded-lg px-3 py-2 text-[11px] text-blue-700 space-y-0.5">
+          <p>
+            Now: <strong>{describeStart(info.start_day)}</strong>
+          </p>
+          <p>
+            Current salary month <strong>{monthName(info.current_month)}</strong>: {fmtDay(info.current_period.start)} – {fmtDay(info.current_period.end)} ({info.current_period.days} days)
+          </p>
+        </div>
+
+        {info.can_edit ? (
+          <>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[11px] text-slate-500 mb-1">Month starts on</label>
+                <select
+                  value={startDay}
+                  onChange={(e) => setStartDay(Number(e.target.value))}
+                  className="w-full px-2.5 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white"
+                >
+                  <option value={1}>1st (calendar month)</option>
+                  {Array.from({ length: 27 }, (_, i) => i + 2).map((d) => (
+                    <option key={d} value={d}>{ordinal(d)}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[11px] text-slate-500 mb-1">From salary month</label>
+                <input
+                  type="month"
+                  value={effectiveMonth}
+                  onChange={(e) => setEffectiveMonth(e.target.value)}
+                  className="w-full px-2.5 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
+                />
+              </div>
+            </div>
+            {preview && (
+              <div className="text-[11px] text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 space-y-0.5">
+                <p>
+                  <strong>{monthName(effectiveMonth)}</strong> salary = {fmtDay(preview.start)} – {fmtDay(preview.end)}
+                  {preview.oneOff && <span className="text-amber-700"> (one-off, as the month changes over)</span>}
+                </p>
+                <p>
+                  <strong>{monthName(preview.nextMonth)}</strong> salary = {fmtDay(preview.next.start)} – {fmtDay(preview.next.end)}
+                </p>
+              </div>
+            )}
+            {error && <p className="text-[11px] text-rose-600">{error}</p>}
+            {saved && <p className="text-[11px] text-emerald-600">Saved.</p>}
+            <button
+              type="button"
+              onClick={save}
+              disabled={saving || !validMonth}
+              className="w-full py-2 text-sm font-semibold rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+            >
+              {saving ? 'Saving…' : 'Save'}
+            </button>
+          </>
+        ) : (
+          <p className="text-[11px] text-slate-500">
+            Only accounts given Payroll's <strong>Salary Month Setting</strong> permission can change this.
+          </p>
+        )}
+      </div>
+
+      <div className="lg:col-span-3 bg-white rounded-2xl shadow-sm border border-slate-200 p-5 h-fit">
+        <h3 className="text-sm font-semibold text-slate-800 flex items-center gap-1.5">
+          <History className="w-4 h-4 text-slate-400" /> Change History
+        </h3>
+        {info.history.length === 0 ? (
+          <p className="text-xs text-slate-400 mt-3">Not changed yet — salary months are calendar months.</p>
+        ) : (
+          <table className="w-full text-xs mt-3">
+            <thead>
+              <tr className="text-left text-[10px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
+                <th className="py-2 pr-2 font-semibold">From salary month</th>
+                <th className="py-2 pr-2 font-semibold">Month runs</th>
+                <th className="py-2 pr-2 font-semibold">Changed by</th>
+                <th className="py-2 font-semibold">On</th>
+              </tr>
+            </thead>
+            <tbody>
+              {info.history.map((h) => (
+                <tr key={h.id} className="border-b border-slate-50 last:border-0">
+                  <td className="py-2 pr-2 font-semibold text-slate-800">{monthName(h.effective_month)}</td>
+                  <td className="py-2 pr-2 text-slate-600">{describeStart(Number(h.start_day))}</td>
+                  <td className="py-2 pr-2 text-slate-600">{h.changed_by_name || '—'}</td>
+                  <td className="py-2 text-slate-500">{String(h.created_at).slice(0, 10)}</td>
                 </tr>
               ))}
             </tbody>

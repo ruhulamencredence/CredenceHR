@@ -19,6 +19,10 @@ interface MyMonthAttendanceCardProps {
 interface MonthSummary {
   linked: boolean;
   month_year: string;
+  // The salary month's dates (Payroll -> Salary Setup -> Salary Month); e.g.
+  // 26 Sep .. 25 Oct for the October salary month with a 26th start.
+  period_start?: string;
+  period_end?: string;
   working_days: number;
   working_days_so_far: number;
   present_days: number;
@@ -38,6 +42,13 @@ interface MonthSummary {
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+// "26 Sep – 25 Oct" — only when the salary month isn't the calendar month.
+function periodLabel(start?: string, end?: string): string | null {
+  if (!start || !end || start.slice(8) === '01') return null;
+  const f = (d: string) => `${Number(d.slice(8, 10))} ${MONTHS[Number(d.slice(5, 7)) - 1]}`;
+  return `${f(start)} – ${f(end)}`;
+}
 
 function monthLabel(monthYear: string): string {
   const [yy, mm] = monthYear.split('-').map(Number);
@@ -119,6 +130,9 @@ export const MyMonthAttendanceCard: React.FC<MyMonthAttendanceCardProps> = ({ to
       <div className="px-5 pt-5 pb-4 sm:px-6 border-b border-slate-200">
         <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
           <CalendarCheck className="w-4 h-4 text-blue-600" /> This Month · {monthLabel(summary.month_year)}
+          {periodLabel(summary.period_start, summary.period_end) && (
+            <span className="text-xs font-medium text-slate-500">({periodLabel(summary.period_start, summary.period_end)})</span>
+          )}
         </h3>
         <p className="text-xs text-slate-500 mt-0.5">
           {summary.working_days_so_far} of {summary.working_days} working days so far · office starts at{' '}
