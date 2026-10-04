@@ -885,11 +885,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             <div className="lg:col-span-2 bg-white/90 border border-white rounded-[22px] p-5 sm:p-6 shadow-[0_6px_20px_-12px_rgba(31,38,135,0.25)]">
               <div className="flex items-center justify-between gap-3 mb-4">
-                <h3 className="text-base font-bold text-slate-900 flex items-center gap-2.5 whitespace-nowrap">
-                  <span className="w-8 h-8 rounded-full flex items-center justify-center bg-violet-100 text-violet-700 shrink-0">
-                    <Users className="w-4 h-4" />
-                  </span>
-                  Quick View <span className="hidden sm:inline text-xs font-medium text-slate-400">· Today</span>
+                <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2 whitespace-nowrap">
+                  <Users className="w-4 h-4 text-blue-600" /> Quick View
                 </h3>
                 <div className="relative">
                   <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
@@ -897,19 +894,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                     placeholder="Search employee"
-                    className="pl-7 pr-3 py-1.5 text-xs bg-[#faf9fe] border border-[#eceaf5] rounded-full focus:outline-none focus:ring-2 focus:ring-violet-500 w-36 sm:w-44"
+                    className="pl-7 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-full focus:outline-none focus:ring-2 focus:ring-blue-600 w-36 sm:w-40"
                   />
                 </div>
               </div>
 
               {quickViewSummary && (
-                <>
-                <div className="flex flex-wrap items-center gap-1.5 mb-3">
+                <div className="flex flex-wrap items-center gap-1.5 mb-4 pb-4 border-b border-slate-100">
                   {([
                     ['total', quickViewSummary.total, 'Total Employee', 'text-slate-600', 'bg-slate-800'],
                     ['present', quickViewSummary.present, 'Present', 'text-emerald-600', 'bg-emerald-500'],
                     ['absent', quickViewSummary.absent, 'Absent', 'text-rose-600', 'bg-rose-500'],
-                    ['leave', quickViewSummary.onLeave, 'Leave', 'text-indigo-600', 'bg-indigo-500'],
+                    ['leave', quickViewSummary.onLeave, 'Leave', 'text-blue-600', 'bg-blue-600'],
                     ['delay', quickViewSummary.delay, 'Delay', 'text-orange-600', 'bg-orange-500'],
                     ['extremeDelay', quickViewSummary.extremeDelay, 'Extreme Delay', 'text-rose-600', 'bg-rose-600'],
                   ] as [QuickViewFilter, number | null, string, string, string][]).map(([key, count, label, text, bg]) => (
@@ -922,8 +918,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
                         setQuickViewDetail(key);
                       }}
                       title={count == null ? 'Set a late policy to count delays' : `See ${label.toLowerCase()} list`}
-                      className={`flex items-center gap-1.5 text-[11px] font-semibold rounded-full pl-1 pr-3 py-1 bg-[#f7f5fd] transition-colors ${
-                        count == null ? 'text-slate-300 cursor-default' : `${text} hover:bg-violet-50`
+                      className={`flex items-center gap-1.5 text-[11px] font-semibold rounded-full pl-1 pr-2.5 py-1 transition-colors ${
+                        count == null ? 'text-slate-300 cursor-default' : `${text} hover:bg-slate-100`
                       }`}
                     >
                       <span className={`min-w-6 h-6 px-1.5 rounded-full text-white flex items-center justify-center text-[10px] font-bold ${count == null ? 'bg-slate-200' : bg}`}>
@@ -933,23 +929,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
                     </button>
                   ))}
                 </div>
-                {/* Today's split at a glance: present / absent / on leave. */}
-                {(() => {
-                  const parts = [
-                    [quickViewSummary.present || 0, 'bg-emerald-500', 'Present'],
-                    [quickViewSummary.absent || 0, 'bg-rose-500', 'Absent'],
-                    [quickViewSummary.onLeave || 0, 'bg-indigo-500', 'Leave']
-                  ] as [number, string, string][];
-                  const sum = parts.reduce((a, [n]) => a + n, 0);
-                  return (
-                    <div className="flex h-2 rounded-full overflow-hidden bg-[#f1eef9] mb-4">
-                      {sum > 0 && parts.map(([n, cls, label]) => n > 0 && (
-                        <div key={label} className={cls} style={{ width: `${(n / sum) * 100}%` }} title={`${label}: ${n}`} />
-                      ))}
-                    </div>
-                  );
-                })()}
-                </>
               )}
 
               {!quickViewRows && (
@@ -962,11 +941,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
                 <div className="overflow-x-auto -mx-1">
                   <table className="w-full text-xs">
                     <thead>
-                      <tr className="text-left text-[10px] uppercase tracking-wide text-slate-400">
-                        <th className="px-2.5 py-2 font-semibold bg-[#f8f6fd] rounded-l-xl">Name</th>
-                        <th className="px-2.5 py-2 font-semibold bg-[#f8f6fd]">Designation</th>
-                        <th className="px-2.5 py-2 font-semibold bg-[#f8f6fd]">In Time</th>
-                        <th className="px-2.5 py-2 font-semibold bg-[#f8f6fd] rounded-r-xl">Status</th>
+                      <tr className="text-left text-[10px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
+                        <th className="px-2.5 py-2 font-semibold">Name</th>
+                        <th className="px-2.5 py-2 font-semibold">Designation</th>
+                        <th className="px-2.5 py-2 font-semibold">In Time</th>
+                        <th className="px-2.5 py-2 font-semibold">Status</th>
                       </tr>
                     </thead>
                     <tbody>
