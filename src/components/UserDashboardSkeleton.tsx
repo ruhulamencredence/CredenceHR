@@ -106,13 +106,12 @@ export const UserDashboardSkeleton: React.FC<Props> = ({ showAttendance = true, 
         </div>
       </div>
       )}
-      <div className="px-2 pt-3 grid grid-cols-3 gap-2.5">
+      <div className="px-2 pt-4 grid grid-cols-3 gap-x-2 gap-y-4">
         {TILE_TINTS.concat(TILE_TINTS.slice(0, 3)).map((tint, i) => (
-          <div
-            key={i}
-            className={`flex flex-col items-center justify-center gap-2 rounded-[24px] border border-white/70 p-3 h-[104px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br ${tint}`}
-          >
-            <div className="w-11 h-11 rounded-2xl bg-white/80" />
+          <div key={i} className="flex flex-col items-center gap-1.5">
+            <div className={`w-[78px] h-[78px] rounded-[26px] border border-white/70 shadow-[0_10px_24px_-10px_rgba(15,23,42,0.35)] bg-gradient-to-br ${tint} flex items-center justify-center`}>
+              <div className="w-11 h-11 rounded-[14px] bg-white/80" />
+            </div>
             <div className="h-2.5 w-14 rounded bg-white/80" />
           </div>
         ))}

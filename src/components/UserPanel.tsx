@@ -3334,24 +3334,31 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           one flat block. The icon badge inside each card is a vivid color-matched
           gradient square with a soft colored glow (white icon on top), rather than a
           flat white icon box, so it reads at a glance like a home-screen app icon. */}
+      {/* App-icon look: a frosted-glass squircle (translucent, bright top
+          edge, soft drop shadow) holding the colored icon, with the name
+          under the card instead of inside it. */}
       {mobileActiveSection === null && (
-        <div className="md:hidden grid grid-cols-3 gap-2.5 mobile-page-in">
+        <div className="md:hidden grid grid-cols-3 gap-x-2 gap-y-4 pt-1 mobile-page-in">
           {dashboardTiles.slice(0, MAX_DASHBOARD_TILES).map((t) => (
             <button
               key={t.key}
               type="button"
               onClick={t.onClick}
-              className={`relative flex flex-col items-center justify-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 h-[104px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br ${t.tileBg} backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all`}
+              className="group flex flex-col items-center gap-1.5 active:scale-95 transition-transform"
             >
-              <div className={`p-2.5 rounded-2xl bg-gradient-to-br ${t.iconBg} border border-white/30 relative`}>
-                <t.icon className="w-6 h-6 text-white" />
+              <span className="relative w-[78px] h-[78px] rounded-[26px] bg-white/40 backdrop-blur-xl border border-white/70 shadow-[inset_0_1.5px_1px_rgba(255,255,255,0.95),inset_0_-8px_16px_-6px_rgba(255,255,255,0.45),0_10px_24px_-10px_rgba(15,23,42,0.35)] flex items-center justify-center">
+                <span className={`absolute inset-0 rounded-[26px] bg-gradient-to-br ${t.tileBg} opacity-70`} />
+                <span className="absolute inset-x-2 top-0 h-1/2 rounded-t-[24px] bg-gradient-to-b from-white/55 to-transparent" />
+                <span className={`relative w-11 h-11 rounded-[14px] bg-gradient-to-br ${t.iconBg} flex items-center justify-center`}>
+                  <t.icon className="w-6 h-6 text-white" />
+                </span>
                 {!!t.badge && (
-                  <span className={`absolute -top-1.5 -right-1.5 text-[10px] font-semibold ${t.badgeBg || 'bg-rose-600'} text-white rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 border border-white/70`}>
+                  <span className={`absolute -top-1 -right-1 text-[10px] font-semibold ${t.badgeBg || 'bg-rose-600'} text-white rounded-full min-w-[19px] h-[19px] flex items-center justify-center px-1 border-2 border-white shadow-sm`}>
                     {t.badge}
                   </span>
                 )}
-              </div>
-              <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">{t.label}</span>
+              </span>
+              <span className="text-[11.5px] font-medium text-slate-700 text-center leading-tight line-clamp-2 px-0.5">{t.label}</span>
             </button>
           ))}
         </div>
