@@ -1114,7 +1114,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
           <>
             {/* In the docked popup (variant 'modal') its own close button sits
                 over the top-right corner, so the header keeps clear of it. */}
-            <div className={`p-3 bg-white border-b border-slate-200 flex items-center gap-3 ${variant === 'modal' ? 'pr-12' : ''}`}>
+            <div className={`p-3 bg-white/85 border-b border-violet-100/70 flex items-center gap-3 ${variant === 'modal' ? 'pr-12' : ''}`}>
               <button type="button" onClick={() => setActiveRoomId(null)} className="p-1.5 -ml-1 text-slate-500 hover:bg-slate-100 rounded-lg md:hidden">
                 <ArrowLeft className="w-5 h-5" />
               </button>
@@ -1177,7 +1177,16 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
               )}
             </div>
 
-            <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-4 space-y-2" style={{ background: CHAT_CONVERSATION_BACKGROUND }}>
+            {/* Frosted Glass kept, but faint: a soft lavender wash (the app's own
+                light background) over it, so the strips barely show and the
+                messages carry the page. */}
+            <div
+              ref={messagesContainerRef}
+              className="flex-1 overflow-y-auto p-4 space-y-2"
+              style={{
+                background: `radial-gradient(ellipse 60% 50% at 0% 0%, rgba(196,170,255,0.22), transparent 65%), radial-gradient(ellipse 60% 45% at 100% 100%, rgba(232,206,255,0.3), transparent 65%), linear-gradient(180deg, rgba(253,252,255,0.86), rgba(245,240,255,0.86)), ${CHAT_CONVERSATION_BACKGROUND}`
+              }}
+            >
               {loadingMessages && <div className="text-center text-xs text-slate-400 py-4">Loading...</div>}
               {messages.map((msg) => {
                 const isMe = msg.sender_id === user.id;
@@ -1189,8 +1198,10 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                         <div className="text-[11px] font-semibold text-slate-500 ml-1 mb-0.5">{msg.sender_name}</div>
                       )}
                       <div
-                        className={`px-3 py-2 rounded-2xl text-sm shadow-sm ${
-                          isMe ? 'bg-[#D9FDD3] text-slate-800 rounded-br-sm' : 'bg-white text-slate-800 rounded-bl-sm'
+                        className={`px-3 py-2 rounded-[18px] text-sm text-slate-800 border ${
+                          isMe
+                            ? 'bg-[rgba(127,0,255,0.10)] border-[rgba(127,0,255,0.10)] rounded-br-[4px]'
+                            : 'bg-white/75 border-white shadow-[0_2px_8px_-4px_rgba(31,38,135,0.15)] rounded-bl-[4px]'
                         }`}
                       >
                         {msg.reply_to_id && (
@@ -1229,7 +1240,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                             Reply
                           </button>
                           <span>{timeOnly(msg.created_at)}</span>
-                          {isMe && (isRead ? <CheckCheck size={14} className="text-blue-500" /> : <Check size={14} />)}
+                          {isMe && (isRead ? <CheckCheck size={14} className="text-violet-500" /> : <Check size={14} />)}
                         </div>
                       </div>
                       {isMe && activeRoom.type !== 'direct' && msg.id === lastOwnMessageId && seenByLastOwnMessage.length > 0 && (
@@ -1255,7 +1266,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
               </div>
             )}
 
-            <div className="relative p-3 bg-white border-t border-slate-200 flex items-center gap-2">
+            <div className="relative p-3 bg-white/85 border-t border-violet-100/70 flex items-center gap-2">
               {mentionQuery !== null && activeRoom.type !== 'direct' && mentionCandidates.length > 0 && (
                 <div className="absolute bottom-full left-3 right-3 mb-1 bg-white border border-slate-200 rounded-xl shadow-lg max-h-48 overflow-y-auto z-10">
                   {mentionCandidates.map((m) => (
@@ -1293,7 +1304,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                   <button
                     type="button"
                     onClick={() => stopRecording(true)}
-                    className="p-2.5 bg-emerald-600 text-white rounded-full hover:bg-emerald-700 shrink-0"
+                    className="p-2.5 bg-violet-600 text-white rounded-full hover:bg-violet-700 shrink-0"
                     title="Send voice message"
                   >
                     <Send className="w-4 h-4" />
@@ -1333,14 +1344,14 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                     }}
                     placeholder={activeRoom.type !== 'direct' ? 'Type a message, @ to mention' : 'Type a message'}
                     rows={1}
-                    className="flex-1 py-2.5 px-4 bg-slate-100 rounded-2xl border-none resize-none leading-5 max-h-32 overflow-y-auto focus:outline-none focus:ring-2 focus:ring-blue-600 text-sm"
+                    className="flex-1 py-2.5 px-4 bg-white/90 border border-violet-100 rounded-2xl resize-none leading-5 max-h-32 overflow-y-auto focus:outline-none focus:ring-2 focus:ring-violet-400 text-sm"
                   />
                   {messageInput.trim() ? (
                     <button
                       type="button"
                       onClick={sendTextMessage}
                       disabled={sending}
-                      className="p-2.5 bg-emerald-600 text-white rounded-full hover:bg-emerald-700 disabled:opacity-40 shrink-0"
+                      className="p-2.5 bg-violet-600 text-white rounded-full hover:bg-violet-700 disabled:opacity-40 shrink-0"
                     >
                       <Send className="w-4 h-4" />
                     </button>
@@ -1348,7 +1359,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                     <button
                       type="button"
                       onClick={startRecording}
-                      className="p-2.5 bg-emerald-600 text-white rounded-full hover:bg-emerald-700 shrink-0"
+                      className="p-2.5 bg-violet-600 text-white rounded-full hover:bg-violet-700 shrink-0"
                       title="Record a voice message"
                     >
                       <Mic className="w-4 h-4" />
