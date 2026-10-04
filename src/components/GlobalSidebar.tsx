@@ -722,7 +722,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
         } ${active ? 'bg-white/15 text-white shadow-sm' : 'text-white/85 hover:bg-white/10'}`}
       >
         <item.icon className="w-[18px] h-[18px] shrink-0" />
-        {!collapsed && <span className={`text-[13px] truncate ${active ? 'font-semibold' : 'font-medium'}`}>{item.label}</span>}
+        {!collapsed && <span className={`text-[13px] truncate ${active ? 'font-medium' : 'font-normal'}`}>{item.label}</span>}
       </button>
     );
   };
@@ -768,7 +768,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
           }`}
         >
           <GroupIcon className="w-[18px] h-[18px] shrink-0" />
-          <span className={`text-[13px] flex-1 text-left truncate ${groupActive ? 'font-bold' : 'font-semibold'}`}>{g.label}</span>
+          <span className={`text-[13px] flex-1 text-left truncate ${groupActive ? 'font-semibold' : 'font-medium'}`}>{g.label}</span>
           {isOpen ? (
             <ChevronDown className="w-3.5 h-3.5 shrink-0 rotate-180 transition-transform duration-200" />
           ) : (
@@ -802,7 +802,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
             selectAndClose(e.onClick);
           }}
           className={`w-full flex items-center gap-2 rounded-lg px-2.5 py-2 text-left transition-colors ${
-            active ? 'bg-white/15 text-white font-semibold' : 'text-white/75 hover:bg-white/10 hover:text-white'
+            active ? 'bg-white/15 text-white font-medium' : 'text-white/75 hover:bg-white/10 hover:text-white'
           }`}
         >
           <e.icon className="w-3.5 h-3.5 shrink-0" />
@@ -1015,7 +1015,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
           >
             <Home className="w-[18px] h-[18px] shrink-0" />
             {!collapsed && (
-              <span className={`text-[13px] truncate ${activeKey === 'dashboard' ? 'font-semibold' : 'font-medium'}`}>Dashboard</span>
+              <span className={`text-[13px] truncate ${activeKey === 'dashboard' ? 'font-medium' : 'font-normal'}`}>Dashboard</span>
             )}
           </button>
 
