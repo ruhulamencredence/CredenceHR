@@ -1737,34 +1737,69 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   useBackButtonClose(showBulkUsers, () => setShowBulkUsers(false));
   useBackButtonClose(approveResult !== null, () => setApproveResult(null));
 
-  useEffect(() => {
-    fetchAllData();
-  }, [token]);
-
-  const fetchAllData = async () => {
+  // The Admin Panel's shared lists (projects, branches, MPR numbers, PEPM
+  // entries, users, budgets, permissions, departments) load only when a tab
+  // that uses them is opened — not every time the panel opens. A tab that
+  // fetches its own data (Dashboard, HR Operations, Mobile Bill…) loads none
+  // of them, and the PEPM entries (the biggest list) only load for Reports.
+  // Each list loads once; fetchAllData() refreshes the ones already loaded.
+  type SharedKey = 'projects' | 'branches' | 'mprNumbers' | 'entries' | 'users' | 'budgets' | 'permissions' | 'departments';
+  const loadedShared = useRef<Set<SharedKey>>(new Set());
+  const SHARED_URL: Record<SharedKey, string> = {
+    projects: '/api/projects',
+    branches: '/api/branches',
+    mprNumbers: '/api/mpr-numbers',
+    entries: '/api/entries',
+    users: '/api/users',
+    budgets: '/api/budgets',
+    permissions: '/api/permissions',
+    departments: '/api/departments'
+  };
+  const SHARED_SET: Record<SharedKey, (v: any) => void> = {
+    projects: setProjects,
+    branches: setBranches,
+    mprNumbers: setMprNumbers,
+    entries: setEntries,
+    users: setUsers,
+    budgets: setBudgets,
+    permissions: setPermissions,
+    departments: setDepartments
+  };
+  const loadShared = async (keys: SharedKey[]) => {
+    if (!keys.length) return;
+    keys.forEach((k) => loadedShared.current.add(k));
     try {
-      const [projRes, branchRes, mprRes, entRes, userRes, budgetRes, permRes, deptRes] = await Promise.all([
-        fetch(apiUrl('/api/projects'), { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(apiUrl('/api/branches'), { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(apiUrl('/api/mpr-numbers'), { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(apiUrl('/api/entries'), { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(apiUrl('/api/users'), { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(apiUrl('/api/budgets'), { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(apiUrl('/api/permissions'), { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(apiUrl('/api/departments'), { headers: { Authorization: `Bearer ${token}` } })
-      ]);
-
-      if (projRes.ok) setProjects(await projRes.json());
-      if (branchRes.ok) setBranches(await branchRes.json());
-      if (mprRes.ok) setMprNumbers(await mprRes.json());
-      if (entRes.ok) setEntries(await entRes.json());
-      if (userRes.ok) setUsers(await userRes.json());
-      if (budgetRes.ok) setBudgets(await budgetRes.json());
-      if (permRes.ok) setPermissions(await permRes.json());
-      if (deptRes.ok) setDepartments(await deptRes.json());
+      await Promise.all(
+        keys.map(async (k) => {
+          const res = await fetch(apiUrl(SHARED_URL[k]), { headers: { Authorization: `Bearer ${token}` } });
+          if (res.ok) SHARED_SET[k](await res.json());
+        })
+      );
     } catch (err) {
       console.error('Failed to load admin data', err);
     }
+  };
+  // Tabs that read none of the shared lists.
+  const SELF_CONTAINED_TABS = new Set<string>([
+    'dashboard', 'reports_insights', 'data_import', 'hr_analytics', 'exit_offboarding', 'performance_management',
+    'recruitment', 'grievance_disciplinary', 'document_vault', 'hr_operations', 'task_management', 'mobile_bill',
+    'devices', 'active_users', 'companies'
+  ]);
+  const ALL_SHARED: SharedKey[] = ['projects', 'branches', 'mprNumbers', 'entries', 'users', 'budgets', 'permissions', 'departments'];
+  const sharedFor = (tab: string): SharedKey[] =>
+    SELF_CONTAINED_TABS.has(tab) ? [] : ALL_SHARED.filter((k) => k !== 'entries' || tab === 'reports');
+
+  useEffect(() => {
+    loadedShared.current = new Set();
+  }, [token]);
+  useEffect(() => {
+    loadShared(sharedFor(activeTab).filter((k) => !loadedShared.current.has(k)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, token]);
+
+  // After a change: reload the lists this panel has already loaded.
+  const fetchAllData = async () => {
+    await loadShared(ALL_SHARED.filter((k) => loadedShared.current.has(k)));
   };
 
   const fetchRateFileSummary = async () => {
