@@ -24,8 +24,6 @@ export interface MoreItem {
   icon: React.ComponentType<{ className?: string }>;
   // Icon badge gradient/glow (Tailwind classes).
   iconBg: string;
-  // Optional pastel tint for the glass card behind the icon.
-  tileBg?: string;
   badge?: number;
   onClick: () => void;
 }
@@ -149,56 +147,58 @@ export function BottomNav({ active, onChange, canViewMovementClaim = true, canVi
         {showMore && moreOpen &&
           createPortal(
             <div className="md:hidden fixed inset-0 z-[60]" role="dialog" aria-modal="true" aria-label="More">
-              <div className="absolute inset-0 bg-slate-900/25" onClick={() => setMoreOpen(false)} />
-              {/* A glass panel anchored to the round More button: three
-                  rounded corners, the bottom-right one square where the
-                  button sits, holding the same app-icon tiles as the
-                  Dashboard in a 3-column grid. */}
+              {/* Same liquid-glass sheet as the "Turn on location tracking"
+                  notice (TrackingNoticeCard.tsx, .liquid-glass* in
+                  index.css) — the house style for popups. Anchored to the
+                  round More button: three rounded corners, the bottom-right
+                  one square where the button sits. The wrapper does the
+                  positioning since .liquid-glass sets position: relative. */}
+              <div className="absolute inset-0 liquid-glass-backdrop" onClick={() => setMoreOpen(false)} />
               <div
-                className="absolute left-3 max-h-[68vh] overflow-y-auto overscroll-contain rounded-[30px] rounded-br-md bg-gradient-to-br from-violet-200/85 via-white/80 to-violet-100/85 backdrop-blur-2xl backdrop-saturate-150 border border-white/70 shadow-[0_16px_40px_-10px_rgba(42,0,85,0.45),inset_0_1px_0_rgba(255,255,255,0.8)] origin-bottom-right mobile-page-in"
+                className="absolute left-4"
                 style={{
                   right: 16 + 44 - 8,
                   bottom: `calc(${BAR_H + 14 + 44 - 8}px + var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)))`
                 }}
               >
-                {moreItems.length === 0 ? (
-                  <p className="px-5 py-6 text-xs text-slate-500 text-center">Nothing else to show here.</p>
-                ) : (
-                  <div className="grid grid-cols-3 gap-x-1.5 gap-y-4 px-3 pt-5 pb-5">
-                    {moreItems.map(({ key, label, icon: Icon, iconBg, tileBg, badge, onClick }) => (
-                      <button
-                        key={key}
-                        type="button"
-                        onClick={() => {
-                          setMoreOpen(false);
-                          onClick();
-                        }}
-                        className="flex flex-col items-center gap-1.5 active:scale-95 transition-transform"
-                      >
-                        <span className="relative w-[64px] h-[64px] rounded-[22px] bg-white/45 backdrop-blur-xl border border-white/70 shadow-[inset_0_1.5px_1px_rgba(255,255,255,0.95),inset_0_-8px_16px_-6px_rgba(255,255,255,0.45),0_8px_20px_-10px_rgba(15,23,42,0.35)] flex items-center justify-center">
-                          {tileBg && <span className={`absolute inset-0 rounded-[22px] bg-gradient-to-br ${tileBg} opacity-70`} />}
-                          <span className="absolute inset-x-2 top-0 h-1/2 rounded-t-[20px] bg-gradient-to-b from-white/55 to-transparent" />
-                          <span className={`relative w-9 h-9 rounded-xl bg-gradient-to-br ${iconBg} flex items-center justify-center`}>
-                            <Icon className="w-5 h-5 text-white" />
-                          </span>
-                          {!!badge && (
-                            <span className="absolute -top-1 -right-1 text-[10px] font-semibold bg-rose-600 text-white rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 border-2 border-white shadow-sm">
-                              {badge}
+                <div className="liquid-glass liquid-glass-in rounded-[32px] rounded-br-md max-h-[64vh] overflow-y-auto overscroll-contain">
+                  {moreItems.length === 0 ? (
+                    <p className="px-5 py-6 text-xs text-slate-500 text-center">Nothing else to show here.</p>
+                  ) : (
+                    <div className="grid grid-cols-3 gap-x-1 gap-y-3.5 px-3 pt-5 pb-4">
+                      {moreItems.map(({ key, label, icon: Icon, iconBg, badge, onClick }) => (
+                        <button
+                          key={key}
+                          type="button"
+                          onClick={() => {
+                            setMoreOpen(false);
+                            onClick();
+                          }}
+                          className="flex flex-col items-center gap-1 active:scale-95 transition-transform"
+                        >
+                          <span className="liquid-glass-inset relative w-[52px] h-[52px] rounded-[18px] flex items-center justify-center">
+                            <span className={`w-8 h-8 rounded-[10px] bg-gradient-to-br ${iconBg} flex items-center justify-center`}>
+                              <Icon className="w-4 h-4 text-white" />
                             </span>
-                          )}
-                        </span>
-                        <span className="text-[11px] font-medium text-slate-700 text-center leading-tight line-clamp-2 px-0.5">{label}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
+                            {!!badge && (
+                              <span className="absolute -top-1 -right-1 text-[9px] font-semibold bg-rose-600 text-white rounded-full min-w-[16px] h-[16px] flex items-center justify-center px-1 border-2 border-white">
+                                {badge}
+                              </span>
+                            )}
+                          </span>
+                          <span className="text-[10.5px] font-medium text-slate-700 text-center leading-tight line-clamp-2 px-0.5">{label}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
               {/* The round button stays on top of the backdrop, now as Close. */}
               <button
                 type="button"
                 onClick={() => setMoreOpen(false)}
                 aria-label="Close"
-                className="absolute right-4 flex items-center justify-center w-11 h-11 rounded-full bg-white/80 backdrop-blur-xl border border-white/80 shadow-[0_8px_20px_-6px_rgba(42,0,85,0.45),inset_0_1px_0_rgba(255,255,255,0.7)] active:scale-95 transition-transform"
+                className="liquid-glass-chip absolute right-4 flex items-center justify-center w-11 h-11 rounded-full active:scale-95 transition-transform"
                 style={{ bottom: `calc(${BAR_H + 14}px + var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)))` }}
               >
                 <X className="w-5 h-5" style={{ color: 'var(--g-accent)' }} />
