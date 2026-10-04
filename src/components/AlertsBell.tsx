@@ -4,7 +4,8 @@
  */
 
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { BellRing, Check, Trash2 } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { BellRing, Check, Trash2, X } from 'lucide-react';
 import { Alert } from '../types';
 import { MyAssetTarget } from '../lib/quickAccess';
 import { apiUrl } from '../lib/api';
@@ -56,6 +57,8 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
   // "No alerts yet." for the render before fetchAlerts kicks in.
   const [loading, setLoading] = useState(true);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  // The phone sheet is portalled to <body>, so outside-click checks both.
+  const sheetRef = useRef<HTMLDivElement>(null);
 
   const fetchUnreadCount = useCallback(async () => {
     try {
@@ -99,7 +102,9 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
   useEffect(() => {
     if (!open) return;
     const onClickOutside = (e: MouseEvent) => {
-      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      if (wrapperRef.current?.contains(t) || sheetRef.current?.contains(t)) return;
+      setOpen(false);
     };
     document.addEventListener('mousedown', onClickOutside);
     return () => document.removeEventListener('mousedown', onClickOutside);
@@ -256,11 +261,87 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
         )}
       </button>
 
+      {/* Phones: a liquid-glass sheet (the house popup style — see
+          CLAUDE.md / TrackingNoticeCard.tsx) under the header, each alert a
+          glass well with a dot while unread. Portalled to <body> so its
+          full-screen backdrop isn't clipped by the header. */}
+      {open &&
+        createPortal(
+          <div className="sm:hidden fixed inset-0 z-[60]" role="dialog" aria-modal="true" aria-label="Alerts">
+            <div className="absolute inset-0 liquid-glass-backdrop" />
+            <div
+              ref={sheetRef}
+              className="absolute left-3 right-3"
+              style={{ top: 'calc(4.25rem + var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px)))' }}
+            >
+              <div className="liquid-glass liquid-glass-in rounded-[32px] flex flex-col max-h-[calc(100dvh-10rem)] overflow-hidden">
+                <div className="flex items-center gap-2 px-5 pt-4 pb-3">
+                  <h3 className="text-base font-bold text-slate-900 flex-1">
+                    Alerts
+                    {unreadCount > 0 && <span className="ml-2 text-xs font-semibold text-rose-600">{unreadCount} new</span>}
+                  </h3>
+                  {unreadCount > 0 && (
+                    <button type="button" onClick={markAllRead} className="liquid-glass-chip flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold" style={{ color: 'var(--g-accent)' }}>
+                      <Check className="w-3.5 h-3.5" /> Mark all read
+                    </button>
+                  )}
+                  <button type="button" onClick={() => setOpen(false)} className="liquid-glass-chip p-1.5 rounded-full text-slate-600" aria-label="Close alerts">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+                <div className="flex-1 overflow-y-auto overscroll-contain px-3 pb-3 space-y-2">
+                  {loading && alerts.length === 0 ? (
+                    <p className="py-8 text-center text-sm text-slate-500">Loading...</p>
+                  ) : alerts.length === 0 ? (
+                    <p className="py-8 text-center text-sm text-slate-500">No alerts yet.</p>
+                  ) : (
+                    alerts.map((alert) => (
+                      <div
+                        key={alert.id}
+                        onClick={() => handleAlertClick(alert)}
+                        className={`liquid-glass-inset rounded-2xl px-3.5 py-3 flex items-start gap-2.5 active:scale-[0.99] transition-transform ${alert.is_read ? '' : '!bg-white/80'}`}
+                      >
+                        <span className={`mt-1.5 w-2 h-2 rounded-full shrink-0 ${alert.is_read ? 'bg-transparent' : 'bg-violet-600'}`} />
+                        <div className="flex-1 min-w-0">
+                          <div className={`text-sm leading-snug ${alert.is_read ? 'font-medium text-slate-700' : 'font-semibold text-slate-900'}`}>{alert.title}</div>
+                          <div className="text-xs mt-0.5 line-clamp-2 text-slate-500">{alert.message}</div>
+                          <div className="text-[11px] mt-1 text-slate-400">{formatDate(alert.created_at)}</div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={(e) => removeAlert(alert.id, e)}
+                          className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-slate-400 active:bg-white/70"
+                          aria-label="Remove alert"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+                {onViewAll && (
+                  <div className="px-4 pt-1 pb-4 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOpen(false);
+                        onViewAll();
+                      }}
+                      className="liquid-glass-button w-full py-2.5 rounded-full text-sm font-semibold"
+                    >
+                      View all
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
+
       {open && (
         <div
-          // Phones: pinned edge to edge under the header — anchored to the
-          // bell (which isn't at the screen edge) it ran off the left side.
-          className="absolute right-0 mt-2 w-80 max-w-[90vw] max-sm:fixed max-sm:left-2 max-sm:right-2 max-sm:w-auto max-sm:max-w-none max-sm:mt-0 max-sm:top-[calc(4rem+var(--native-safe-area-inset-top,env(safe-area-inset-top,0px)))] rounded-2xl shadow-lg border overflow-hidden z-50"
+          className="max-sm:hidden absolute right-0 mt-2 w-80 max-w-[90vw] rounded-2xl shadow-lg border overflow-hidden z-50"
           style={{ background: 'var(--g-surface, #fff)', borderColor: 'var(--g-border, #e5e7eb)' }}
         >
           <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: 'var(--g-border, #e5e7eb)' }}>
