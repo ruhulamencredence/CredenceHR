@@ -4352,7 +4352,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           with can_use_tracking granted, plus per-user path playback. */}
       {activeTab === 'tracking' && (
         <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6">
-          <EmployeeTrackingPanel token={token} />
+          <EmployeeTrackingPanel
+            token={token}
+            canStayReport={
+              user.role === 'superadmin' ||
+              (user.module_permission_layers?.tracking?.length ? user.module_permission_layers.tracking.includes('stay_report') : true)
+            }
+          />
         </div>
       )}
 

@@ -8,11 +8,12 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { Navigation, RefreshCw, Route, X, BatteryMedium, Clock, MapPin, Search, FileDown, FileText } from 'lucide-react';
+import { Navigation, RefreshCw, Route, X, BatteryMedium, Clock, MapPin, Search, FileDown, FileText, Timer } from 'lucide-react';
 import { LocationPing } from '../types';
 import { apiUrl } from '../lib/api';
 import { reverseGeocode } from '../lib/reverseGeocode';
 import { TrackingStatusCards } from './TrackingStatusCards';
+import { TrackingStayReport } from './TrackingStayReport';
 import { formatDate } from '../lib/formatDate';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
 import { savePdfCrossPlatform } from '../lib/saveFile';
@@ -41,6 +42,8 @@ function formatDateTime(iso: string): string {
 
 interface EmployeeTrackingPanelProps {
   token: string;
+  // Module Access -> Employee Tracking -> "Stay Report" layer.
+  canStayReport?: boolean;
 }
 
 // How often the Live board silently re-fetches while this tab is open — the
@@ -118,7 +121,9 @@ function agoLabel(iso: string): string {
 //    an interval, green pulsing dot if seen within STALE_AFTER_MIN, grey if not.
 //  - Path playback: click a user's row (or "View Path") to instead draw their
 //    full ping history for an optional date range as a connected purple trail.
-export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ token }) => {
+export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ token, canStayReport = false }) => {
+  // Stay Report (TrackingStayReport.tsx) — the tracking module's "Stay Report" layer.
+  const [showStay, setShowStay] = useState(false);
   const [live, setLive] = useState<LocationPing[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -442,7 +447,24 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
           >
             <FileText className="w-3.5 h-3.5" /> View Report
           </button>
+          {canStayReport && (
+            <button
+              onClick={() => setShowStay(true)}
+              className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded bg-violet-600 text-white hover:bg-violet-700"
+              title="How long at each place, day by day, inside the time range"
+            >
+              <Timer className="w-3.5 h-3.5" /> Stay Report
+            </button>
+          )}
         </div>
+      )}
+      {showStay && selectedUser && canStayReport && (
+        <TrackingStayReport
+          token={token}
+          user={selectedUser}
+          initial={{ from: fromDate, to: toDate, fromTime, toTime }}
+          onClose={() => setShowStay(false)}
+        />
       )}
 
       {!selectedUser && (
