@@ -68,7 +68,6 @@ interface Props {
 export const UserDashboardSkeleton: React.FC<Props> = ({ showAttendance = true, showLeaveSummary = true, showTracking = false }) => (
   <div
     className="relative w-full min-h-[calc(100vh-4rem)] text-slate-900 overflow-hidden animate-pulse"
-    style={{ background: 'var(--g-bg-gradient)' }}
     role="status"
     aria-label="Loading dashboard"
   >

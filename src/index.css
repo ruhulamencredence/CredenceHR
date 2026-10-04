@@ -145,9 +145,24 @@ body {
      handled on the sticky Navbar itself instead (see Navbar.tsx), since only the
      header needs to push down — the rest of the page already starts below it. */
   padding-bottom: var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
-  background: var(--g-bg-gradient);
-  background-attachment: fixed;
+  background: var(--g-bg);
   color: var(--g-text);
+}
+
+/* The app background (--g-bg-gradient, picked in Profile -> Appearance) sits
+   on its own window-sized layer instead of body + background-attachment:
+   fixed. A fixed background on the body (Apple Glow is six gradients) makes
+   the browser repaint the whole screen on every scroll frame, which made long
+   pages like Admin -> Employees stutter; a position: fixed layer is composited
+   once and just stays put. Page wrappers leave their own background
+   transparent so this layer shows through. */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: var(--g-bg-gradient);
 }
 
 .gemini-gradient-text {

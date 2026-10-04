@@ -48,7 +48,7 @@ export const NoticeBoard: React.FC<NoticeBoardProps> = ({ token, onBack }) => {
   }, [token]);
 
   return (
-    <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900" style={{ background: 'var(--g-bg-gradient)' }}>
+    <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900">
       <div className="w-full px-4 sm:px-6 lg:px-8 pt-3 pb-8 max-w-2xl mx-auto">
         {!isNativeApp && (
           <>

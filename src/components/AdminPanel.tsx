@@ -3333,7 +3333,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   };
 
   return (
-    <div className="w-full px-4 sm:px-6 lg:px-8 pt-3 pb-8 space-y-4 min-h-[calc(100vh-4rem)] text-slate-900" style={{ background: 'var(--g-bg-gradient)' }}>
+    <div className="w-full px-4 sm:px-6 lg:px-8 pt-3 pb-8 space-y-4 min-h-[calc(100vh-4rem)] text-slate-900">
       {/* Where this page sits in the menu — web only, same as every
           Self Service page's breadcrumb. */}
       {!Capacitor.isNativePlatform() && ADMIN_TAB_PATH[activeTab] && (
