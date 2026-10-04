@@ -586,14 +586,18 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
                  individually (instead of once, like a single page-level
                  card) is a real cost on Android WebView's software blur,
                  especially while scrolling. The tint gradient alone (no
-                 blur) keeps the same glass look at a fraction of the cost. */
+                 blur) keeps the same glass look at a fraction of the cost.
+                 The same goes for the badges and Mail/Phone buttons inside
+                 each card (5 blurs per card made scrolling stutter), and
+                 content-visibility lets the browser skip drawing cards that
+                 are off screen as the scroll-loaded list grows. */
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
                 {displayed.map((emp) => (
                   <button
                     key={emp.id}
                     type="button"
                     onClick={() => setSelectedEmployee(emp)}
-                    className={`relative text-left rounded-[28px] sm:rounded-2xl overflow-hidden border border-white/70 sm:border-slate-200 p-3 sm:p-4 space-y-2 sm:space-y-3 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] sm:shadow-sm bg-gradient-to-br ${cardTintClass(emp.name)} sm:bg-none sm:bg-white hover:shadow-lg hover:border-white sm:hover:border-blue-200 transition-all`}
+                    className={`relative text-left [content-visibility:auto] [contain-intrinsic-size:auto_118px] rounded-[28px] sm:rounded-2xl overflow-hidden border border-white/70 sm:border-slate-200 p-3 sm:p-4 space-y-2 sm:space-y-3 shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] sm:shadow-sm bg-gradient-to-br ${cardTintClass(emp.name)} sm:bg-none sm:bg-white hover:shadow-lg hover:border-white sm:hover:border-blue-200 transition-all`}
                   >
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
@@ -625,20 +629,20 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex flex-wrap gap-1 sm:gap-1.5 min-w-0">
                         {emp.employee_id && (
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-white/50 sm:bg-slate-100 backdrop-blur sm:backdrop-blur-none text-slate-700 sm:text-slate-600 border border-white/60 sm:border-slate-200">
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-white/50 sm:bg-slate-100 text-slate-700 sm:text-slate-600 border border-white/60 sm:border-slate-200">
                             ID: {emp.employee_id}
                           </span>
                         )}
                         {multiCompany && emp.company_code && (
                           <span
                             title={emp.company_name || undefined}
-                            className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-white/50 sm:bg-violet-50 backdrop-blur sm:backdrop-blur-none text-violet-800 sm:text-violet-700 border border-white/60 sm:border-violet-200"
+                            className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-white/50 sm:bg-violet-50 text-violet-800 sm:text-violet-700 border border-white/60 sm:border-violet-200"
                           >
                             {emp.company_code}
                           </span>
                         )}
                         {emp.department && (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-white/50 sm:bg-blue-50 backdrop-blur sm:backdrop-blur-none text-blue-800 sm:text-blue-700 border border-white/60 sm:border-blue-200">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-white/50 sm:bg-blue-50 text-blue-800 sm:text-blue-700 border border-white/60 sm:border-blue-200">
                             <Building2 className="w-3 h-3" /> {emp.department}
                           </span>
                         )}
@@ -649,7 +653,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
                           <a
                             href={`mailto:${emp.email}`}
                             onClick={(e) => e.stopPropagation()}
-                            className="w-8 h-8 rounded-full bg-white/60 backdrop-blur border border-white/60 shadow-sm flex items-center justify-center text-slate-600 hover:bg-white hover:text-blue-600 transition-colors"
+                            className="w-8 h-8 rounded-full bg-white/75 border border-white/60 shadow-sm flex items-center justify-center text-slate-600 hover:bg-white hover:text-blue-600 transition-colors"
                             title={emp.email}
                           >
                             <Mail className="w-3.5 h-3.5" />
@@ -659,7 +663,7 @@ export const EmployeeDirectory: React.FC<EmployeeDirectoryProps> = ({ token, onB
                           <a
                             href={`tel:${emp.mobile || emp.phone}`}
                             onClick={(e) => e.stopPropagation()}
-                            className="w-8 h-8 rounded-full bg-white/60 backdrop-blur border border-white/60 shadow-sm flex items-center justify-center text-slate-600 hover:bg-white hover:text-emerald-600 transition-colors"
+                            className="w-8 h-8 rounded-full bg-white/75 border border-white/60 shadow-sm flex items-center justify-center text-slate-600 hover:bg-white hover:text-emerald-600 transition-colors"
                             title={emp.mobile || emp.phone}
                           >
                             <Phone className="w-3.5 h-3.5" />

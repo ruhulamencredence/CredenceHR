@@ -846,8 +846,8 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
       {!isPersistent && (
         <div
           onClick={onClose}
-          className={`fixed inset-0 z-[1100] bg-slate-900/40 backdrop-blur-[2px] transition-opacity duration-300 ${
-            open ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
+          className={`fixed inset-0 z-[1100] bg-slate-900/40 transition-opacity duration-300 ${
+            open ? 'opacity-100 pointer-events-auto backdrop-blur-[2px]' : 'opacity-0 pointer-events-none'
           }`}
         />
       )}
