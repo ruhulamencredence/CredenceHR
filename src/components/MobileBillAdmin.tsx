@@ -39,6 +39,7 @@ import {
   num,
   OperatorBadge,
   parseMonthHeader,
+  shiftMonth,
   requestStage,
   StatusPill,
   thisMonth,
@@ -471,10 +472,34 @@ const ImportBillModal: React.FC<{ token: string; month: string; onClose: () => v
         ? []
         : grid
             .slice(headerIdx + 1)
-            .filter((r) => String(r[phoneCol] ?? '').trim())
+            .filter((r) => String(r[phoneCol] ?? '').trim() && String(r[amountCol] ?? '').trim())
             .map((r) => ({ phone_number: r[phoneCol], amount: r[amountCol] })),
     [grid, headerIdx, phoneCol, amountCol]
   );
+  // Numbers in the file with the amount left empty (e.g. an unfilled template row).
+  const noAmount = useMemo(
+    () => (phoneCol < 0 || amountCol < 0 ? 0 : grid.slice(headerIdx + 1).filter((r) => String(r[phoneCol] ?? '').trim() && !String(r[amountCol] ?? '').trim()).length),
+    [grid, headerIdx, phoneCol, amountCol]
+  );
+
+  // Every active SIM (of the operator picked) with an empty Bill Amount
+  // column to fill in and import back.
+  const downloadTemplate = async () => {
+    setError('');
+    try {
+      const d = await mbApi<{ rows: BillRow[] }>(token, `/api/mobile-bill/bills?month=${month}`);
+      const list = d.rows.filter((r) => !operator || r.operator === operator);
+      const head = ['SL', 'Mobile Number', 'Operator', 'Name', 'Emp. ID', 'Department', 'Duty Location', 'Official Ceiling', 'Bill Amount'];
+      const body = list.map((r, i) => [i + 1, r.phone_number, r.operator, r.employee?.name || '', r.employee?.employee_code || '', r.employee?.department || '', r.duty_location || '', r.limit_amount, r.amount ?? '']);
+      const ws = XLSX.utils.aoa_to_sheet([head, ...(body.length ? body : [['', '01XXXXXXXXX', '', '', '', '', '', '', '']])]);
+      ws['!cols'] = [6, 16, 14, 24, 10, 16, 18, 14, 14].map((wch) => ({ wch }));
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Bill');
+      XLSX.writeFile(wb, `Mobile-Bill-Template-${month}${operator ? `-${operator}` : ''}.xlsx`);
+    } catch (e: any) {
+      setError(e.message);
+    }
+  };
 
   const pick = async (f: File | undefined) => {
     if (!f) return;
@@ -505,8 +530,12 @@ const ImportBillModal: React.FC<{ token: string; month: string; onClose: () => v
     <Modal title="Import the operator's bill" onClose={onClose} wide>
       <div className="space-y-3">
         <p className="text-xs text-slate-500">
-          The file the operator sends — one row per number with its bill amount. Numbers must already be in the SIM list.
+          The file the operator sends — one row per number with its bill amount. Numbers must already be in the SIM list. Or download the template (every
+          SIM{operator ? ` of ${operator}` : ''}, already filled in), write each number's bill in <b>Bill Amount</b> and upload it here. Rows left empty are skipped.
         </p>
+        <button type="button" className={btnLight} onClick={downloadTemplate}>
+          <FileSpreadsheet className="w-3.5 h-3.5" /> Download template
+        </button>
         <div className="grid sm:grid-cols-3 gap-3">
           <div>
             <label className={labelCls}>Bill month</label>
@@ -566,6 +595,7 @@ const ImportBillModal: React.FC<{ token: string; month: string; onClose: () => v
           <input type="checkbox" checked={replace} onChange={(e) => (setReplace(e.target.checked), setCheck(null))} /> Replace bills already imported for this month
         </label>
         {error && <p className="text-sm text-rose-600">{error}</p>}
+        {noAmount > 0 && <p className="text-[11px] text-slate-500">{noAmount} row(s) have no amount and will be skipped.</p>}
         {check && <CheckTable check={check} showAmount />}
         <div className="flex justify-end gap-2">
           <button type="button" className={btnLight} disabled={busy || !rows.length} onClick={() => run(true)}>
@@ -1035,6 +1065,31 @@ const ImportSimsModal: React.FC<{ token: string; onClose: () => void; onDone: ()
   const at = (r: any[], i: number) => (i >= 0 ? r[i] : '');
   const rows = body.map((r) => ({ phone_number: at(r, cols.phone), employee_code: at(r, cols.emp), operator: at(r, cols.operator), limit_amount: at(r, cols.limit), duty_location: at(r, cols.duty) }));
 
+  // HR's SIM sheet layout (like "All Numbers"), with one example row and
+  // the last six months as usage columns.
+  const downloadTemplate = () => {
+    const months = Array.from({ length: 6 }, (_, i) => shiftMonth(thisMonth(), -1 - i));
+    const head = ['SL', 'Name', 'Emp. ID', 'Designation', 'Department', 'Work Station', 'Duty location', 'Mobile Number', 'Operator', 'Official Ceiling', ...months.map((m) => monthLabel(m, true).replace(' ', '-'))];
+    const example = [1, 'Example Name', 'EMP-ID', 'Officer', 'Admin', 'Head Office', 'Head Office', '01XXXXXXXXX', 'Grameenphone', 500, ...months.map(() => '')];
+    const ws = XLSX.utils.aoa_to_sheet([head, example]);
+    ws['!cols'] = head.map((h) => ({ wch: Math.max(10, h.length + 2) }));
+    const notes = XLSX.utils.aoa_to_sheet([
+      ['How to fill the SIM list'],
+      ['Mobile Number — required, 01XXXXXXXXX.'],
+      ['Emp. ID — the employee ID in Employees; leave empty for a spare SIM.'],
+      ['Official Ceiling — the monthly limit; leave empty to use the employee type limit.'],
+      ['Operator — optional; taken from the number when empty.'],
+      ['Month columns (e.g. Sep-26) — optional past bills; empty or 0 is skipped.'],
+      ['Name, Designation, Department, Work Station are only for your reference — they come from Employees.'],
+      ['Delete the example row before importing.']
+    ]);
+    notes['!cols'] = [{ wch: 90 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'All Numbers');
+    XLSX.utils.book_append_sheet(wb, notes, 'How to fill');
+    XLSX.writeFile(wb, 'Mobile-SIM-List-Template.xlsx');
+  };
+
   const pick = async (f: File | undefined) => {
     if (!f) return;
     setError('');
@@ -1081,6 +1136,9 @@ const ImportSimsModal: React.FC<{ token: string; onClose: () => void; onDone: ()
           with no ceiling takes the employee type's limit. Month columns like <b>Sep-26</b> are read as that month's bill.
         </p>
         <div className="flex flex-wrap gap-3 items-end">
+          <button type="button" className={btnLight} onClick={downloadTemplate}>
+            <FileSpreadsheet className="w-3.5 h-3.5" /> Download template
+          </button>
           <input type="file" accept=".xlsx,.xls,.csv" className="text-xs" onChange={(e) => pick(e.target.files?.[0])} />
           {book && book.sheets.length > 1 && (
             <select className={filterCls} value={sheet} onChange={(e) => (setSheet(e.target.value), setCheck(null))}>
