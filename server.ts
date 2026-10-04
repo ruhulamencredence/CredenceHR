@@ -1700,6 +1700,11 @@ async function ensureSchemaMigrations() {
     // was an unindexed full table scan of every approval request ever
     // created. Ignore the error if it already exists.
     await dbPool.query(`CREATE INDEX idx_approval_requests_status ON approval_requests (status)`).catch(() => {});
+    // The Monthly Attendance Report (and the Admin Dashboard that reads it)
+    // reads one month by date; claims and leave are read from a date on.
+    await dbPool.query(`CREATE INDEX idx_attendance_date ON attendance (attendance_date)`).catch(() => {});
+    await dbPool.query(`CREATE INDEX idx_user_claims_claim_date ON user_claims (claim_date)`).catch(() => {});
+    await dbPool.query(`CREATE INDEX idx_leave_applications_end_date ON leave_applications (end_date)`).catch(() => {});
   } catch (err: any) {
     console.warn("⚠️ Could not ensure approval_chain_steps/approval_requests tables exist: " + err.message);
   }

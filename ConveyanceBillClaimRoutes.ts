@@ -772,6 +772,9 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
   // viewer.
   app.get("/api/user-claims", authenticateToken, requireAdmin, requireModule("conveyance"), async (req: any, res) => {
     try {
+      // ?since=YYYY-MM-DD: only claims dated on/after that day (the Admin
+      // Dashboard's last three months).
+      const since = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.since || "")) ? String(req.query.since) : null;
       const [rows, employees] = await Promise.all([
         queryDB(
           `SELECT uc.id, uc.user_id, u.name AS user_name, uc.claim_date, uc.from_date, uc.to_date, uc.category, uc.amount,
@@ -782,7 +785,9 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
              LEFT JOIN users u ON u.id = uc.user_id
              LEFT JOIN users r ON r.id = uc.reviewed_by
              LEFT JOIN conveyance_bill_items i ON i.user_claim_id = uc.id
-            ORDER BY uc.id DESC`
+            ${since ? "WHERE uc.claim_date >= ?" : ""}
+            ORDER BY uc.id DESC`,
+          since ? [since] : []
         ),
         queryDB("SELECT user_id, department FROM all_employees WHERE user_id IS NOT NULL")
       ]);

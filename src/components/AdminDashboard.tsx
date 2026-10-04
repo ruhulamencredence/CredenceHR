@@ -282,6 +282,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
     (async () => {
       setLoading(true);
       const now0 = new Date();
+      // Only the dates the dashboard shows: leave from the start of last year
+      // (this year's taken days, the Leave Calendar) plus every pending one,
+      // claims from the first of the month two months back (the 3-month chart).
+      const leaveSince = `${now0.getFullYear() - 1}-01-01`;
+      const claimsFrom = new Date(now0.getFullYear(), now0.getMonth() - 2, 1);
+      const claimsSince = `${claimsFrom.getFullYear()}-${String(claimsFrom.getMonth() + 1).padStart(2, '0')}-01`;
       const [
         leaveApps, balances, advances, assetReqs, claims, bills, activeNotices, empDir, monthlyReport, holidayRows, latePolicyRows, extraRows,
       ] = await Promise.all([
@@ -291,11 +297,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
         // report is the one already gated by the grantable 'leave_applications'
         // module, so an account granted Admin Dashboard + Monthly Leave
         // Application sees real figures here too, not just a Superadmin.
-        safeGet<any[]>('/api/leave-applications/report', groupHeaders),
+        safeGet<any[]>(`/api/leave-applications/report?since=${leaveSince}`, groupHeaders),
         safeGet<any[]>('/api/leave-balances', authHeaders),
         safeGet<any[]>('/api/payroll/advance-requests?status=pending', authHeaders),
         safeGet<any[]>('/api/assets/requisitions?status=pending', authHeaders),
-        safeGet<any[]>('/api/user-claims', authHeaders),
+        safeGet<any[]>(`/api/user-claims?since=${claimsSince}`, authHeaders),
         safeGet<any[]>('/api/conveyance-bills', authHeaders),
         safeGet<any[]>('/api/notices/active', authHeaders),
         safeGet<any[]>('/api/employee-directory', groupHeaders),

@@ -1192,8 +1192,13 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
         return res.status(403).json({ error: "You don't have access to this Department's Leave Applications." });
       }
 
+      // ?since=YYYY-MM-DD: only applications still running on/after that day,
+      // plus every pending one (the Admin Dashboard reads it this way).
+      const since = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.since || "")) ? String(req.query.since) : null;
       const [applications, users, employees, approvalRequests] = await Promise.all([
-        queryDB("SELECT * FROM leave_applications ORDER BY created_at DESC"),
+        since
+          ? queryDB("SELECT * FROM leave_applications WHERE end_date >= ? OR status = 'pending' ORDER BY created_at DESC", [since])
+          : queryDB("SELECT * FROM leave_applications ORDER BY created_at DESC"),
         queryDB("SELECT id, name, role FROM users"),
         queryDB("SELECT user_id, department FROM all_employees WHERE user_id IS NOT NULL"),
         queryDB("SELECT * FROM approval_requests WHERE source_type = 'leave_application'")

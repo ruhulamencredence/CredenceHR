@@ -59,8 +59,10 @@ export function registerAdminDashboardRoutes(app: Express, deps: AdminDashboardR
           rows("SELECT id, name FROM users"),
           rows("SELECT employee_id, probation_end_date, confirmation_date, contract_end_date, service_status FROM hr_employee_service"),
           rows("SELECT id, user_id, doc_type, expiry_date FROM employee_documents"),
-          rows("SELECT id, source_type, requested_by, status, created_at FROM approval_requests"),
-          rows("SELECT id, user_id, attendance_date, status, created_at FROM attendance_corrections"),
+          // Only what's waiting — every check-in/out has an approval request,
+          // so the full table grows by the day.
+          rows("SELECT id, source_type, requested_by, status, created_at FROM approval_requests WHERE status = 'pending'"),
+          rows("SELECT id, user_id, attendance_date, status, created_at FROM attendance_corrections WHERE status = 'pending'"),
           rows("SELECT id, employee_id, user_id, letter_type, status, created_at FROM hr_letter_requests"),
           rows("SELECT id, employee_id, user_id, item_type, doc_type, status, submitted_at FROM hr_info_requests"),
           rows("SELECT id, employee_id, action_type, effective_date, status, applied FROM hr_actions"),
