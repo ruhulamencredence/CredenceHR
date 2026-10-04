@@ -312,7 +312,7 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
         // lines actually reach the card's own rounded corners, same as the
         // Admin grid reaching its bordered container's edges.
         <div onTouchStart={onGridTouchStart} onTouchEnd={onGridTouchEnd}>
-          <div className="grid grid-cols-7 bg-white/30 backdrop-blur border-b border-white/40">
+          <div className="grid grid-cols-7 bg-white/30 border-b border-white/40">
             {weekdayLabels.map((w, i) => (
               <div key={i} className="py-2 text-center text-[10px] font-bold uppercase tracking-wide text-slate-500">
                 {w}
@@ -328,7 +328,7 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
                 <div
                   key={cell.dateStr}
                   title={entry ? `${entry.title} (${dayTypeLabel(entry.day_type)})` : undefined}
-                  className={`relative ${dates.sub ? 'h-14' : 'h-12'} flex flex-col items-center justify-center gap-0.5 border-b border-r border-white/40 text-[11px] backdrop-blur transition-colors ${
+                  className={`relative ${dates.sub ? 'h-14' : 'h-12'} flex flex-col items-center justify-center gap-0.5 border-b border-r border-white/40 text-[11px] transition-colors ${
                     !cell.inCurrentMonth
                       ? 'text-slate-300'
                       : entry
@@ -362,7 +362,7 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
         className={
           large
             ? 'flex items-center gap-4 border-t border-slate-100 font-medium text-slate-500 px-6 py-3 mt-2 text-xs'
-            : 'flex items-center gap-4 border-t border-white/40 bg-white/30 backdrop-blur font-medium text-slate-500 px-4 py-2.5 text-[10px]'
+            : 'flex items-center gap-4 border-t border-white/40 bg-white/30 font-medium text-slate-500 px-4 py-2.5 text-[10px]'
         }
       >
         <span className="flex items-center gap-1.5">

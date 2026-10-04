@@ -3346,7 +3346,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
               onClick={t.onClick}
               className="group flex flex-col items-center gap-1.5 active:scale-95 transition-transform"
             >
-              <span className="relative w-[78px] h-[78px] rounded-[26px] bg-white/40 backdrop-blur-xl border border-white/70 shadow-[inset_0_1.5px_1px_rgba(255,255,255,0.95),inset_0_-8px_16px_-6px_rgba(255,255,255,0.45),0_10px_24px_-10px_rgba(15,23,42,0.35)] flex items-center justify-center">
+              <span className="relative w-[78px] h-[78px] rounded-[26px] bg-white/55 border border-white/70 shadow-[inset_0_1.5px_1px_rgba(255,255,255,0.95),inset_0_-8px_16px_-6px_rgba(255,255,255,0.45),0_10px_24px_-10px_rgba(15,23,42,0.35)] flex items-center justify-center">
                 <span className={`absolute inset-0 rounded-[26px] bg-gradient-to-br ${t.tileBg} opacity-70`} />
                 <span className="absolute inset-x-2 top-0 h-1/2 rounded-t-[24px] bg-gradient-to-b from-white/55 to-transparent" />
                 <span className={`relative w-11 h-11 rounded-[14px] bg-gradient-to-br ${t.iconBg} flex items-center justify-center`}>
