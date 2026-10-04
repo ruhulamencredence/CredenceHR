@@ -159,13 +159,35 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
       // The claimant's Employee record — the Payment Voucher prints their
       // code, designation and department.
       const emp: any[] = (await queryDB("SELECT employee_id, designation, department FROM all_employees WHERE user_id = ?", [bills[0].user_id])) || [];
+      // An item that came from a Conveyance Bill Claim carries that claim's
+      // category lines (user_claim_items: category, date, amount,
+      // description) so the voucher can group the bill by category.
+      const ucIds = items.map((it: any) => Number(it.user_claim_id)).filter((v: number) => v > 0);
+      const [ucRows, ucItemRows]: any[] = ucIds.length
+        ? await Promise.all([
+            queryDB(`SELECT id, category FROM user_claims WHERE id IN (${ucIds.map(() => "?").join(",")})`, ucIds),
+            queryDB(`SELECT * FROM user_claim_items WHERE user_claim_id IN (${ucIds.map(() => "?").join(",")}) ORDER BY bill_date, id`, ucIds)
+          ])
+        : [[], []];
+      const ucCategory = new Map<number, string>((ucRows || []).map((r: any) => [Number(r.id), r.category]));
       res.json({
         ...bills[0],
         employee_code: emp[0]?.employee_id || null,
         designation: emp[0]?.designation || null,
         department: emp[0]?.department || null,
         is_disbursed: !!Number(bills[0].is_disbursed),
-        items: items.map((it: any) => ({ ...it, distance_km: it.distance_km !== null ? Number(it.distance_km) : null, rate_per_km: it.rate_per_km !== null ? Number(it.rate_per_km) : null, amount: Number(it.amount) }))
+        items: items.map((it: any) => ({
+          ...it,
+          distance_km: it.distance_km !== null ? Number(it.distance_km) : null,
+          rate_per_km: it.rate_per_km !== null ? Number(it.rate_per_km) : null,
+          amount: Number(it.amount),
+          claim_category: it.user_claim_id ? ucCategory.get(Number(it.user_claim_id)) || null : null,
+          claim_lines: it.user_claim_id
+            ? (ucItemRows || [])
+                .filter((l: any) => Number(l.user_claim_id) === Number(it.user_claim_id))
+                .map((l: any) => ({ category: l.category_name, bill_date: l.bill_date, amount: Number(l.amount), description: l.description || null }))
+            : []
+        }))
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message });

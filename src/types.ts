@@ -1630,6 +1630,10 @@ export interface ConveyanceBillItem {
   amount: number;
   remarks?: string | null;
   created_at?: string;
+  // GET /api/conveyance-bills/:id only, for an item from a Conveyance Bill
+  // Claim: the claim's category and its category lines.
+  claim_category?: string | null;
+  claim_lines?: { category: string; bill_date: string; amount: number; description: string | null }[];
 }
 
 // One Conveyance Bill — groups several ConveyanceBillItem rows for a single User
