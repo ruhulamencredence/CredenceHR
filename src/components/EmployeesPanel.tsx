@@ -250,6 +250,11 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [search, setSearch] = useState('');
+  // The directory shows one page at a time — drawing every employee at once
+  // made the tab (and typing in the edit form above it) slow.
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
   // Directory (the employee table) vs. all-employees Change History.
   const [view, setView] = useState<'directory' | 'history'>('directory');
 
@@ -1071,18 +1076,33 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
     return d?.supervisor_name ? `Supervisor: ${d.supervisor_name}` : '';
   };
 
-  const filtered = employees.filter((e) => {
-    const q = search.trim().toLowerCase();
-    if (!q) return true;
-    return (
-      e.name.toLowerCase().includes(q) ||
-      (e.employee_id || '').toLowerCase().includes(q) ||
-      (e.designation || '').toLowerCase().includes(q) ||
-      (e.department || '').toLowerCase().includes(q) ||
-      (e.email || '').toLowerCase().includes(q) ||
-      (e.phone || '').toLowerCase().includes(q)
-    );
-  });
+  const deferredSearch = React.useDeferredValue(search);
+  const filtered = useMemo(() => {
+    const q = deferredSearch.trim().toLowerCase();
+    return employees.filter((e) => {
+      if (statusFilter === 'active' && !e.is_active) return false;
+      if (statusFilter === 'inactive' && e.is_active) return false;
+      if (!q) return true;
+      return (
+        (e.name || '').toLowerCase().includes(q) ||
+        (e.employee_id || '').toLowerCase().includes(q) ||
+        (e.designation || '').toLowerCase().includes(q) ||
+        (e.department || '').toLowerCase().includes(q) ||
+        (e.email || '').toLowerCase().includes(q) ||
+        (e.phone || '').toLowerCase().includes(q)
+      );
+    });
+  }, [employees, deferredSearch, statusFilter]);
+
+  // Back to the first page whenever the search or filter changes.
+  useEffect(() => setPage(1), [deferredSearch, statusFilter, pageSize]);
+  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const currentPage = Math.min(page, pageCount);
+  const pageRows = useMemo(
+    () => filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize),
+    [filtered, currentPage, pageSize]
+  );
+  const activeCount = useMemo(() => employees.filter((e) => e.is_active).length, [employees]);
 
   return (
     <div className="space-y-5">
@@ -1133,15 +1153,26 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
       </div>
 
       {view === 'directory' && (
-        <div className="relative">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by name, ID, designation, department, email, phone…"
-            className="block w-full pl-9 pr-3 py-2.5 bg-white border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
-          />
+        <div className="flex flex-col sm:flex-row gap-2">
+          <div className="relative flex-1">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search by name, ID, designation, department, email, phone…"
+              className="block w-full pl-9 pr-3 py-2.5 bg-white border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
+            />
+          </div>
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
+            className="py-2.5 px-3 bg-white border border-slate-200 rounded-xl text-slate-700 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
+          >
+            <option value="all">All ({employees.length})</option>
+            <option value="active">Active ({activeCount})</option>
+            <option value="inactive">Inactive ({employees.length - activeCount})</option>
+          </select>
         </div>
       )}
 
@@ -1174,7 +1205,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filtered.map((emp) => (
+                {pageRows.map((emp) => (
                   <tr key={emp.id} className="hover:bg-slate-50/80 transition-colors">
                     <td className="px-4 py-3 whitespace-nowrap">
                       <div className="font-semibold text-slate-900 text-xs">{emp.name}</div>
@@ -1278,6 +1309,30 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                 ))}
               </tbody>
             </table>
+          </div>
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-2 px-4 py-3 border-t border-slate-200 bg-slate-50/60 text-xs text-slate-600">
+            <div className="flex items-center gap-2">
+              <span>
+                Showing {(currentPage - 1) * pageSize + 1}–{Math.min(currentPage * pageSize, filtered.length)} of {filtered.length}
+              </span>
+              <select
+                value={pageSize}
+                onChange={(e) => setPageSize(Number(e.target.value))}
+                className="py-1 px-2 bg-white border border-slate-200 rounded-lg text-xs"
+                aria-label="Rows per page"
+              >
+                {[25, 50, 100, 200].map((n) => (
+                  <option key={n} value={n}>{n} / page</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex items-center gap-1">
+              <button type="button" onClick={() => setPage(1)} disabled={currentPage === 1} className="px-2 py-1 rounded-lg border border-slate-200 bg-white disabled:opacity-40">First</button>
+              <button type="button" onClick={() => setPage(currentPage - 1)} disabled={currentPage === 1} className="px-2 py-1 rounded-lg border border-slate-200 bg-white disabled:opacity-40">Prev</button>
+              <span className="px-2">Page {currentPage} of {pageCount}</span>
+              <button type="button" onClick={() => setPage(currentPage + 1)} disabled={currentPage === pageCount} className="px-2 py-1 rounded-lg border border-slate-200 bg-white disabled:opacity-40">Next</button>
+              <button type="button" onClick={() => setPage(pageCount)} disabled={currentPage === pageCount} className="px-2 py-1 rounded-lg border border-slate-200 bg-white disabled:opacity-40">Last</button>
+            </div>
           </div>
         </div>
       )}
