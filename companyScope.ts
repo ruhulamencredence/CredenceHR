@@ -240,11 +240,14 @@ function scopes(ctx: CompanyContext, group: boolean) {
   // Accounts that have no Employee record (e.g. an Admin) count in the
   // companies they may enter.
   const self = ctx.userId ? ` OR id = ${int(ctx.userId)}` : "";
+  // The UNION sits inside its own derived table so MySQL builds the list of
+  // accounts once per query; written bare inside "user_id IN (…)" it was
+  // re-run for every row (36,000 claims took 3 s instead of 0.01 s).
   const users = group
     ? `SELECT id FROM users WHERE group_id = ${gid}${self}`
-    : `SELECT user_id FROM (${employees}) se WHERE se.user_id IS NOT NULL
+    : `SELECT user_id FROM (SELECT user_id FROM (${employees}) se WHERE se.user_id IS NOT NULL
        UNION SELECT a.user_id FROM user_company_access a
-         WHERE a.company_id = ${cid} AND a.user_id NOT IN (SELECT user_id FROM all_employees WHERE user_id IS NOT NULL)`;
+         WHERE a.company_id = ${cid} AND a.user_id NOT IN (SELECT user_id FROM all_employees WHERE user_id IS NOT NULL)) scope_users`;
   const shared = new Set(ctx.shared || []);
   const mother = ctx.motherId && ctx.motherId !== ctx.companyId ? int(ctx.motherId) : null;
   return {

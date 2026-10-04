@@ -743,17 +743,22 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
         return res.status(403).json({ error: "You don't have access to this Department's Attendance Report." });
       }
 
-      const rows = await queryDB("SELECT * FROM attendance");
-      const projects = await queryDB("SELECT * FROM projects");
-      const users = await queryDB("SELECT id, name, email, role, created_at FROM users");
-      const projectMap = new Map<number, any>(projects.map((p: any) => [p.id, p]));
-
       const monthStr = String(month).padStart(2, "0");
       const prefix = `${year}-${monthStr}`;
       const daysInMonth = new Date(year, month, 0).getDate();
       const monthStart = `${prefix}-01`;
       const todayStr = todayInDhaka();
       const monthEnd = `${prefix}-${String(daysInMonth).padStart(2, "0")}`;
+
+      // Only this month's rows (idx_attendance_date) — reading the whole
+      // table every time made the report, and the Admin Dashboard that loads
+      // it, slower every day.
+      const [rows, projects, users] = await Promise.all([
+        queryDB("SELECT * FROM attendance WHERE attendance_date BETWEEN ? AND ?", [monthStart, monthEnd]),
+        queryDB("SELECT * FROM projects"),
+        queryDB("SELECT id, name, email, role, created_at FROM users")
+      ]);
+      const projectMap = new Map<number, any>(projects.map((p: any) => [p.id, p]));
 
       // Department comes from the Employee Directory row linked to this login
       // account (all_employees.user_id) — no department column of its own on
