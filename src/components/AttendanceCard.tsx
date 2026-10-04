@@ -141,7 +141,9 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
   // Late warning: this month's own Delay / Extreme Delay counts against the
   // Late Attendance Policy (same /api/my-attendance-summary figures the
   // This Month card and payroll use). When one more late would cost a day's
-  // salary — e.g. 2 lates under "3 lates = 1 day" — a rose pill says so.
+  // salary — e.g. 2 lates under "3 lates = 1 day" — a small rose badge in
+  // the In Time tile's corner says so ("2/3 late"; the full sentence is its
+  // tooltip).
   // Read again after each check-in, since that's what can add a late.
   const [lateSummary, setLateSummary] = useState<{
     linked: boolean;
@@ -250,16 +252,22 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
   const outParts = status?.check_out_at ? formatTimeParts(status.check_out_at as string) : null;
   const busy = working !== null || !!pending || loadingStatus;
 
-  const lateWarnings: string[] = [];
+  const lateWarnings: { badge: string; text: string }[] = [];
   if (lateSummary?.policy) {
     const oneShort = (count: number, per: number) => per > 1 && count % per === per - 1;
     const per = Number(lateSummary.policy.lates_per_deduction_day) || 0;
     const xPer = Number(lateSummary.policy.extreme_lates_per_deduction_day) || 0;
     if (oneShort(Number(lateSummary.late_count) || 0, per)) {
-      lateWarnings.push(`${lateSummary.late_count} Delay this month — 1 more and a day's salary will be deducted (${per} Delay = 1 day).`);
+      lateWarnings.push({
+        badge: `${lateSummary.late_count}/${per} late`,
+        text: `${lateSummary.late_count} Delay this month — 1 more and a day's salary will be deducted (${per} Delay = 1 day).`
+      });
     }
     if (oneShort(Number(lateSummary.extreme_late_count) || 0, xPer)) {
-      lateWarnings.push(`${lateSummary.extreme_late_count} Extreme Delay this month — 1 more and a day's salary will be deducted (${xPer} Extreme Delay = 1 day).`);
+      lateWarnings.push({
+        badge: `${lateSummary.extreme_late_count}/${xPer} extreme`,
+        text: `${lateSummary.extreme_late_count} Extreme Delay this month — 1 more and a day's salary will be deducted (${xPer} Extreme Delay = 1 day).`
+      });
     }
   }
 
@@ -324,7 +332,16 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
             own distinct tile even where backdrop-blur-lg doesn't render
             (Android WebView — see the note above), while staying low
             enough to keep some translucency instead of a flat opaque box. */}
-        <div className={`rounded-xl px-4 py-3 border ${isNativeApp ? '' : 'backdrop-blur-lg'} ${hasCheckedIn ? 'bg-blue-100/70 border-white/60' : 'bg-white/70 border-white/50'}`}>
+        <div className={`relative rounded-xl px-4 py-3 border ${isNativeApp ? '' : 'backdrop-blur-lg'} ${hasCheckedIn ? 'bg-blue-100/70 border-white/60' : 'bg-white/70 border-white/50'}`}>
+          {lateWarnings.length > 0 && (
+            <div className="absolute top-2 right-2 flex flex-col items-end gap-1">
+              {lateWarnings.map((w) => (
+                <span key={w.badge} role="status" title={w.text} aria-label={w.text} className="px-1.5 py-px rounded-full bg-rose-500 text-white text-[10px] font-bold leading-4 whitespace-nowrap">
+                  {w.badge}
+                </span>
+              ))}
+            </div>
+          )}
           <div className="text-xs font-medium text-slate-500">In Time</div>
           {hasCheckedIn && inParts ? (
             <div className="mt-0.5 font-bold text-blue-700">
@@ -366,13 +383,6 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
           )}
         </div>
       </div>
-
-      {lateWarnings.map((w) => (
-        <div key={w} role="alert" className="mt-2 flex items-start gap-2 text-[11px] font-semibold leading-snug px-3 py-2 rounded-2xl bg-rose-500 text-white shadow-[0_6px_16px_-6px_rgba(244,63,94,0.6)]">
-          <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-px" />
-          <span>{w}</span>
-        </div>
-      ))}
 
       {selectedProject && !loadingStatus && (
         <div className="mt-2 pt-2 border-t border-white/50 space-y-1 text-[11px] text-slate-500">
