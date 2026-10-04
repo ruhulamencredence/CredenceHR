@@ -199,7 +199,7 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
         )}
 
         <div className="bg-transparent sm:bg-white rounded-none sm:rounded-2xl shadow-none sm:shadow-sm border-0 sm:border sm:border-slate-200 overflow-hidden">
-          <div className="p-5 sm:p-6 border-b border-slate-200 flex items-center justify-between gap-3">
+          <div className="p-5 sm:p-6 max-sm:px-3 max-sm:pt-2 max-sm:pb-3 sm:border-b border-slate-200 flex items-center justify-between gap-3">
             <div className="flex items-center gap-3">
               {isNativeApp && (
                 <button type="button" onClick={onBack} className="p-1.5 -ml-1.5 text-slate-500 hover:bg-slate-100 rounded-lg">
@@ -220,7 +220,7 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
               <button
                 type="button"
                 onClick={markAllRead}
-                className="text-xs font-medium flex items-center gap-1.5 px-3 py-1.5 rounded-lg hover:bg-slate-100 transition-colors shrink-0"
+                className="text-xs font-medium flex items-center gap-1.5 px-3 py-1.5 rounded-lg hover:bg-slate-100 transition-colors shrink-0 max-sm:rounded-full max-sm:font-semibold max-sm:bg-white/60 max-sm:border max-sm:border-white/80 max-sm:shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_2px_8px_-2px_rgba(15,23,42,0.2)]"
                 style={{ color: 'var(--g-accent)' }}
               >
                 <Check className="w-3.5 h-3.5" />
@@ -229,7 +229,11 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
             )}
           </div>
 
-          <div>
+          {/* Phones: each alert is its own glass card (same look as the
+              liquid-glass Alerts sheet in AlertsBell.tsx) with a dot while
+              unread; no backdrop blur per card, so long lists still scroll
+              smoothly. */}
+          <div className="max-sm:px-2 max-sm:space-y-2">
             {loading ? (
               <div className="px-4 py-16 flex items-center justify-center">
                 <Spinner size={24} />
@@ -241,11 +245,13 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
                 <div
                   key={alert.id}
                   onClick={() => handleAlertClick(alert)}
-                  className="px-4 sm:px-6 py-4 border-b border-slate-100 last:border-b-0 cursor-pointer flex items-start gap-3 transition-colors hover:bg-slate-50"
-                  style={{ background: alert.is_read ? 'transparent' : 'var(--g-accent-soft)' }}
+                  className={`px-4 sm:px-6 py-4 sm:border-b border-slate-100 last:border-b-0 cursor-pointer flex items-start gap-3 transition-colors sm:hover:bg-slate-50 max-sm:rounded-2xl max-sm:border max-sm:border-white/80 max-sm:shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_6px_18px_-12px_rgba(31,38,135,0.35)] ${
+                    alert.is_read ? 'max-sm:bg-white/45' : 'sm:bg-[var(--g-accent-soft)] max-sm:bg-white/80'
+                  }`}
                 >
+                  <span className={`sm:hidden mt-1.5 w-2 h-2 rounded-full shrink-0 ${alert.is_read ? 'bg-transparent' : 'bg-violet-600'}`} />
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium text-slate-900">{alert.title}</div>
+                    <div className={`text-sm text-slate-900 ${alert.is_read ? 'font-medium' : 'font-medium max-sm:font-semibold'}`}>{alert.title}</div>
                     <div className="text-xs mt-1 text-slate-600">{alert.message}</div>
                     <div className="text-[11px] mt-1.5 text-slate-400">{formatDate(alert.created_at)}</div>
                   </div>
