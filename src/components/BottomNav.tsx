@@ -24,6 +24,8 @@ export interface MoreItem {
   icon: React.ComponentType<{ className?: string }>;
   // Icon badge gradient/glow (Tailwind classes).
   iconBg: string;
+  // Optional pastel tint for the glass card behind the icon.
+  tileBg?: string;
   badge?: number;
   onClick: () => void;
 }
@@ -148,26 +150,22 @@ export function BottomNav({ active, onChange, canViewMovementClaim = true, canVi
           createPortal(
             <div className="md:hidden fixed inset-0 z-[60]" role="dialog" aria-modal="true" aria-label="More">
               <div className="absolute inset-0 bg-slate-900/25" onClick={() => setMoreOpen(false)} />
+              {/* A glass panel anchored to the round More button: three
+                  rounded corners, the bottom-right one square where the
+                  button sits, holding the same app-icon tiles as the
+                  Dashboard in a 3-column grid. */}
               <div
-                className="absolute left-3 right-3 min-h-[45vh] max-h-[70vh] overflow-y-auto rounded-[28px] bg-gradient-to-br from-violet-200/60 via-white/50 to-violet-100/70 backdrop-blur-2xl backdrop-saturate-150 border border-white/70 shadow-[0_16px_40px_-10px_rgba(42,0,85,0.45),inset_0_1px_0_rgba(255,255,255,0.8)] mobile-page-in"
-                style={{ bottom: `calc(${BAR_H + 66}px + var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)))` }}
+                className="absolute left-3 max-h-[68vh] overflow-y-auto overscroll-contain rounded-[30px] rounded-br-md bg-gradient-to-br from-violet-200/85 via-white/80 to-violet-100/85 backdrop-blur-2xl backdrop-saturate-150 border border-white/70 shadow-[0_16px_40px_-10px_rgba(42,0,85,0.45),inset_0_1px_0_rgba(255,255,255,0.8)] origin-bottom-right mobile-page-in"
+                style={{
+                  right: 16 + 44 - 8,
+                  bottom: `calc(${BAR_H + 14 + 44 - 8}px + var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)))`
+                }}
               >
-                <div className="flex items-center justify-between px-5 pt-4 pb-2">
-                  <h3 className="text-sm font-bold text-slate-900">More</h3>
-                  <button
-                    type="button"
-                    onClick={() => setMoreOpen(false)}
-                    aria-label="Close"
-                    className="p-1.5 rounded-full text-slate-500 hover:bg-white/60 transition-colors"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
                 {moreItems.length === 0 ? (
-                  <p className="px-5 pb-5 text-xs text-slate-500">Nothing else to show here.</p>
+                  <p className="px-5 py-6 text-xs text-slate-500 text-center">Nothing else to show here.</p>
                 ) : (
-                  <div className="grid grid-cols-3 gap-x-2 gap-y-3 px-3 pb-5">
-                    {moreItems.map(({ key, label, icon: Icon, iconBg, badge, onClick }) => (
+                  <div className="grid grid-cols-3 gap-x-1.5 gap-y-4 px-3 pt-5 pb-5">
+                    {moreItems.map(({ key, label, icon: Icon, iconBg, tileBg, badge, onClick }) => (
                       <button
                         key={key}
                         type="button"
@@ -175,22 +173,36 @@ export function BottomNav({ active, onChange, canViewMovementClaim = true, canVi
                           setMoreOpen(false);
                           onClick();
                         }}
-                        className="relative flex flex-col items-center justify-start gap-1.5 px-1 py-2 rounded-2xl active:scale-95 active:bg-white/40 transition-all"
+                        className="flex flex-col items-center gap-1.5 active:scale-95 transition-transform"
                       >
-                        <div className={`p-2.5 rounded-2xl bg-gradient-to-br ${iconBg} border border-white/30 relative`}>
-                          <Icon className="w-6 h-6 text-white" />
+                        <span className="relative w-[64px] h-[64px] rounded-[22px] bg-white/45 backdrop-blur-xl border border-white/70 shadow-[inset_0_1.5px_1px_rgba(255,255,255,0.95),inset_0_-8px_16px_-6px_rgba(255,255,255,0.45),0_8px_20px_-10px_rgba(15,23,42,0.35)] flex items-center justify-center">
+                          {tileBg && <span className={`absolute inset-0 rounded-[22px] bg-gradient-to-br ${tileBg} opacity-70`} />}
+                          <span className="absolute inset-x-2 top-0 h-1/2 rounded-t-[20px] bg-gradient-to-b from-white/55 to-transparent" />
+                          <span className={`relative w-9 h-9 rounded-xl bg-gradient-to-br ${iconBg} flex items-center justify-center`}>
+                            <Icon className="w-5 h-5 text-white" />
+                          </span>
                           {!!badge && (
-                            <span className="absolute -top-1.5 -right-1.5 text-[10px] font-semibold bg-rose-600 text-white rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 border border-white/70">
+                            <span className="absolute -top-1 -right-1 text-[10px] font-semibold bg-rose-600 text-white rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 border-2 border-white shadow-sm">
                               {badge}
                             </span>
                           )}
-                        </div>
-                        <span className="text-[11px] font-semibold text-slate-700 text-center leading-tight line-clamp-3">{label}</span>
+                        </span>
+                        <span className="text-[11px] font-medium text-slate-700 text-center leading-tight line-clamp-2 px-0.5">{label}</span>
                       </button>
                     ))}
                   </div>
                 )}
               </div>
+              {/* The round button stays on top of the backdrop, now as Close. */}
+              <button
+                type="button"
+                onClick={() => setMoreOpen(false)}
+                aria-label="Close"
+                className="absolute right-4 flex items-center justify-center w-11 h-11 rounded-full bg-white/80 backdrop-blur-xl border border-white/80 shadow-[0_8px_20px_-6px_rgba(42,0,85,0.45),inset_0_1px_0_rgba(255,255,255,0.7)] active:scale-95 transition-transform"
+                style={{ bottom: `calc(${BAR_H + 14}px + var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)))` }}
+              >
+                <X className="w-5 h-5" style={{ color: 'var(--g-accent)' }} />
+              </button>
             </div>,
             document.body
           )}
