@@ -832,9 +832,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
                 >
                   <span
                     className="w-9 h-9 sm:w-11 sm:h-11 rounded-full flex items-center justify-center shrink-0"
-                    style={{ background: featured ? 'rgba(255,255,255,0.2)' : `${iconColor}1A` }}
+                    style={{ background: featured ? 'rgba(255,255,255,0.2)' : `${iconColor}1A`, color: featured ? '#fff' : iconColor }}
                   >
-                    <tile.icon className="w-4 h-4 sm:w-5 sm:h-5" style={{ color: featured ? '#fff' : iconColor }} />
+                    <tile.icon className="w-4 h-4 sm:w-5 sm:h-5" />
                   </span>
                   <div className="min-w-0 flex-1">
                     <p className={`text-[11px] sm:text-xs leading-snug line-clamp-2 sm:truncate ${featured ? 'text-white/80' : 'text-slate-500'}`} title={tile.label}>{tile.label}</p>
