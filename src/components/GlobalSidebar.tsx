@@ -49,7 +49,7 @@ interface GlobalSidebarProps {
   onGoToUserClaims: (target: 'movementClaims' | 'conveyanceBill') => void;
   // Everyday employee self-service items — not Admin-gated, shown to every
   // account regardless of role/module access.
-  onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks') => void;
+  onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim') => void;
   // Admin Panel's own Movement Claims / Conveyance Bill Claim review tabs —
   // separate feature from onGoToUserClaims above, gated by module_permissions
   // like every other Admin Panel module.
@@ -302,6 +302,11 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   if (isSuperAdmin || !!user.can_view_tasks || canSeeModule('task_management')) {
     selfServiceItems.push({ key: 'myTasks', label: 'My Tasks', icon: ListChecks, onClick: () => onGoToSelfServiceTab('myTasks') });
   }
+  // My Mobile SIM (MyMobileSim.tsx) — company SIMs, limits, bills, limit
+  // requests. Off until turned on in Module Access.
+  if (isSuperAdmin || !!user.can_view_mobile_bill || canSeeModule('mobile_bill')) {
+    selfServiceItems.push({ key: 'myMobileSim', label: 'My Mobile SIM', icon: Smartphone, onClick: () => onGoToSelfServiceTab('myMobileSim') });
+  }
   if (siteSupervisor.teams > 0) {
     selfServiceItems.push({ key: 'teamAttendance', label: 'Team Attendance', icon: ClipboardCheck, onClick: () => onGoToSelfServiceTab('teamAttendance') });
   }
@@ -415,6 +420,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     { key: 'notices', label: 'Notices', icon: Bell, onClick: () => onGoToAdminModule('notices') },
     { key: 'holidays', label: 'Holidays', icon: Calendar, onClick: () => onGoToAdminModule('holidays') },
     { key: 'task_management', label: 'Task Management', icon: ClipboardList, onClick: () => onGoToAdminModule('task_management') },
+    { key: 'mobile_bill', label: 'Mobile Bill', icon: Smartphone, onClick: () => onGoToAdminModule('mobile_bill') },
     ...departmentsItem,
   ].filter((i) => canSeeModule(i.key as AdminModuleKey));
 

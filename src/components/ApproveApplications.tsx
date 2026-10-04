@@ -24,7 +24,7 @@ interface ApproveApplicationsProps {
 // original, narrower version of this same shape.
 interface MyApprovalItem {
   id: number;
-  source_type: 'attendance' | 'claim' | 'user_claim' | 'attendance_correction' | 'leave_application' | 'leave_reliever' | 'leave_direct' | 'exit_clearance' | 'asset_requisition' | 'vehicle_requisition' | 'hr_action';
+  source_type: 'attendance' | 'claim' | 'user_claim' | 'attendance_correction' | 'leave_application' | 'leave_reliever' | 'leave_direct' | 'exit_clearance' | 'asset_requisition' | 'vehicle_requisition' | 'mobile_limit_request' | 'hr_action';
   source_id: number;
   source_label: string;
   source_amount: number | null;
@@ -134,6 +134,8 @@ const sourceTitle = (t: MyApprovalItem['source_type']) =>
     ? 'Asset Requisition'
     : t === 'vehicle_requisition'
     ? 'Vehicle Requisition'
+    : t === 'mobile_limit_request'
+    ? 'Mobile Limit Request'
     : t === 'hr_action'
     ? 'HR Action'
     : 'Movement Claim';

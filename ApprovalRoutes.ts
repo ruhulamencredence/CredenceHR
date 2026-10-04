@@ -91,6 +91,13 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
     createAlert
   } = deps;
 
+  // One-line summary of a Mobile Bill limit raise request (MobileBillRoutes.ts).
+  const mobileLimitLabel = (ml: any) => {
+    const [y, m] = String(ml.for_month || "").split("-").map(Number);
+    const month = y && m ? new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString("en-GB", { month: "short", year: "numeric", timeZone: "UTC" }) : ml.for_month;
+    return `Mobile Limit \u2014 ${ml.phone_number || "SIM"}: \u09f3${Number(ml.current_limit)} \u2192 \u09f3${Number(ml.requested_limit)} ${ml.scope === "permanent" ? `from ${month} on` : `for ${month} only`}`;
+  };
+
   // Alert type + a friendly "waiting on you" label per source_type — used
   // only by notifyNextStepApprovers below, so a step advance's notification
   // reads naturally regardless of which module the request belongs to.
@@ -100,7 +107,8 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
     leave_application: { type: "leave_approval", label: "Leave Application" },
     // 'vehicle_approval' (not 'vehicle_requisition', which is the requester's
     // own ride-status alerts) so a click opens Approve Application.
-    vehicle_requisition: { type: "vehicle_approval", label: "Vehicle Requisition" }
+    vehicle_requisition: { type: "vehicle_approval", label: "Vehicle Requisition" },
+    mobile_limit_request: { type: "mobile_limit_approval", label: "Mobile Limit Request" }
   };
 
   // Fires right after performApprovalAction advances a request to its NEXT
@@ -264,7 +272,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
   // details + who's up next) for the Admin Panel -> Approvals queue/history.
   app.get("/api/approvals", authenticateToken, requireAdmin, requireModule("approvals"), async (req: any, res) => {
     try {
-      const [requests, chain, templateStepApproverRows, attendanceRows, claimRows, userClaimRows, attendanceCorrectionRows, leaveApplicationRows, assetRequisitionRows, vehicleRequisitionRows, projects, users] = await Promise.all([
+      const [requests, chain, templateStepApproverRows, attendanceRows, claimRows, userClaimRows, attendanceCorrectionRows, leaveApplicationRows, assetRequisitionRows, vehicleRequisitionRows, mobileLimitRows, projects, users] = await Promise.all([
         queryDB("SELECT ar.*, u.name AS requested_by_name FROM approval_requests ar LEFT JOIN users u ON u.id = ar.requested_by ORDER BY ar.id DESC"),
         getApprovalChain(),
         queryDB(
@@ -280,6 +288,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
         queryDB("SELECT * FROM leave_applications"),
         queryDB("SELECT * FROM asset_requisitions"),
         queryDB("SELECT * FROM vehicle_requisitions"),
+        queryDB("SELECT r.*, s.phone_number FROM mobile_limit_requests r LEFT JOIN mobile_sims s ON s.id = r.sim_id").catch(() => []),
         queryDB("SELECT * FROM projects"),
         queryDB("SELECT id, name, email, role, created_at FROM users")
       ]);
@@ -290,6 +299,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       const leaveApplicationMap = new Map<number, any>(leaveApplicationRows.map((l: any) => [Number(l.id), l]));
       const assetRequisitionMap = new Map<number, any>(assetRequisitionRows.map((r: any) => [Number(r.id), r]));
       const vehicleRequisitionMap = new Map<number, any>(vehicleRequisitionRows.map((r: any) => [Number(r.id), r]));
+      const mobileLimitMap = new Map<number, any>(mobileLimitRows.map((r: any) => [Number(r.id), r]));
       const projectMap = new Map<number, any>(projects.map((p: any) => [Number(p.id), p]));
       const userMap = new Map<number, any>(users.map((u: any) => [Number(u.id), u]));
       const chainByStep = new Map<number, any>(chain.map((s: any) => [Number(s.step_order), s]));
@@ -340,6 +350,10 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
           } else if (r.source_type === "vehicle_requisition") {
             const vr = vehicleRequisitionMap.get(Number(r.source_id));
             sourceLabel = vr ? `Vehicle Requisition \u2014 ${vr.pickup_location} \u2192 ${vr.destination}` : "(requisition removed)";
+          } else if (r.source_type === "mobile_limit_request") {
+            const ml = mobileLimitMap.get(Number(r.source_id));
+            sourceLabel = ml ? mobileLimitLabel(ml) : "(request removed)";
+            sourceAmount = ml ? Number(ml.requested_limit) : null;
           } else {
             const c = claimMap.get(Number(r.source_id));
             sourceLabel = c ? c.purpose : "(claim removed)";
@@ -563,6 +577,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       const leaveApplicationIds = mine.filter((r: any) => r.source_type === "leave_application").map((r: any) => Number(r.source_id));
       const assetRequisitionIds = mine.filter((r: any) => r.source_type === "asset_requisition").map((r: any) => Number(r.source_id));
       const vehicleRequisitionIds = mine.filter((r: any) => r.source_type === "vehicle_requisition").map((r: any) => Number(r.source_id));
+      const mobileLimitIds = mine.filter((r: any) => r.source_type === "mobile_limit_request").map((r: any) => Number(r.source_id));
       const requestedByIds = Array.from(
         new Set([
           ...mine.map((r: any) => Number(r.requested_by)),
@@ -575,7 +590,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       const fetchByIds = (table: string, ids: number[], columns = "*") =>
         ids.length === 0 ? Promise.resolve([]) : queryDB(`SELECT ${columns} FROM ${table} WHERE id IN (${ids.map(() => "?").join(",")})`, ids);
 
-      const [userClaimRows, attendanceCorrectionRows, leaveApplicationRows, assetRequisitionRows, assetRequisitionItemRows, vehicleRequisitionRows, requesterRows] = await Promise.all([
+      const [userClaimRows, attendanceCorrectionRows, leaveApplicationRows, assetRequisitionRows, assetRequisitionItemRows, vehicleRequisitionRows, mobileLimitRows, requesterRows] = await Promise.all([
         fetchByIds("user_claims", userClaimIds),
         fetchByIds("attendance_corrections", attendanceCorrectionIds),
         fetchByIds("leave_applications", leaveApplicationIds),
@@ -590,6 +605,12 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
               assetRequisitionIds
             ),
         fetchByIds("vehicle_requisitions", vehicleRequisitionIds),
+        mobileLimitIds.length === 0
+          ? Promise.resolve([])
+          : queryDB(
+              `SELECT r.*, s.phone_number FROM mobile_limit_requests r LEFT JOIN mobile_sims s ON s.id = r.sim_id WHERE r.id IN (${mobileLimitIds.map(() => "?").join(",")})`,
+              mobileLimitIds
+            ),
         fetchByIds("users", requestedByIds, "id, name")
       ]);
       // attendance_corrections' project_name comes from a second lookup —
@@ -622,6 +643,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
         });
       }
       const vehicleRequisitionMap = new Map<number, any>(vehicleRequisitionRows.map((r: any) => [Number(r.id), r]));
+      const mobileLimitMap = new Map<number, any>(mobileLimitRows.map((r: any) => [Number(r.id), r]));
       const projectMap = new Map<number, any>(projects.map((p: any) => [Number(p.id), p]));
       const requesterMap = new Map<number, any>(requesterRows.map((u: any) => [Number(u.id), u]));
 
@@ -658,6 +680,10 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
           } else if (r.source_type === "vehicle_requisition") {
             const vr = vehicleRequisitionMap.get(Number(r.source_id));
             sourceLabel = vr ? `Vehicle Requisition \u2014 ${vr.pickup_location} \u2192 ${vr.destination}` : "(requisition removed)";
+          } else if (r.source_type === "mobile_limit_request") {
+            const ml = mobileLimitMap.get(Number(r.source_id));
+            sourceLabel = ml ? `${mobileLimitLabel(ml)}${ml.reason ? ` \u2014 ${ml.reason}` : ""}` : "(request removed)";
+            sourceAmount = ml ? Number(ml.requested_limit) : null;
           }
           // Full requisition details for the card's "click to expand" view \u2014
           // only populated for asset_requisition (see AssetRequisitionDetails
@@ -986,8 +1012,8 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       // instead of left as the default virtual Supervisor position.
       const skipAutoSupervisor = !!req.body?.skip_auto_supervisor;
       if (!name) return res.status(400).json({ error: "Template name is required." });
-      if (!["conveyance", "leave", "timesheet", "asset", "vehicle"].includes(requestType)) {
-        return res.status(400).json({ error: "request_type must be one of conveyance, leave, timesheet, asset, vehicle." });
+      if (!["conveyance", "leave", "timesheet", "asset", "vehicle", "mobile"].includes(requestType)) {
+        return res.status(400).json({ error: "request_type must be one of conveyance, leave, timesheet, asset, vehicle, mobile." });
       }
       const steps = await validateTemplateSteps(req.body?.steps, requestType);
 
@@ -1042,8 +1068,8 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       const isActive = req.body?.is_active === false ? false : true;
       const skipAutoSupervisor = !!req.body?.skip_auto_supervisor;
       if (!name) return res.status(400).json({ error: "Template name is required." });
-      if (!["conveyance", "leave", "timesheet", "asset", "vehicle"].includes(requestType)) {
-        return res.status(400).json({ error: "request_type must be one of conveyance, leave, timesheet, asset, vehicle." });
+      if (!["conveyance", "leave", "timesheet", "asset", "vehicle", "mobile"].includes(requestType)) {
+        return res.status(400).json({ error: "request_type must be one of conveyance, leave, timesheet, asset, vehicle, mobile." });
       }
       if (requestType !== existing.request_type) {
         const assignedCount = await queryDB("SELECT COUNT(*) AS cnt FROM employee_template_assignments WHERE template_id = ?", [id]);
@@ -1168,8 +1194,8 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
   app.get("/api/template-assignments", authenticateToken, requireAdmin, requireModule("approvals"), async (req: any, res) => {
     try {
       const requestType = req.query?.request_type ? String(req.query.request_type) : null;
-      if (!requestType || !["conveyance", "leave", "timesheet", "asset", "vehicle"].includes(requestType)) {
-        return res.status(400).json({ error: "?request_type= is required (conveyance, leave, timesheet, asset, or vehicle)." });
+      if (!requestType || !["conveyance", "leave", "timesheet", "asset", "vehicle", "mobile"].includes(requestType)) {
+        return res.status(400).json({ error: "?request_type= is required (conveyance, leave, timesheet, asset, vehicle or mobile)." });
       }
       const users = await queryDB("SELECT id, name, email, username, role FROM users ORDER BY name ASC");
       const assignments = await queryDB(
@@ -1213,8 +1239,8 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       const requestType = req.body?.request_type;
       const templateId = req.body?.template_id === null || req.body?.template_id === undefined ? null : Number(req.body.template_id);
       if (!Number.isFinite(employeeUserId)) return res.status(400).json({ error: "employee_user_id is required." });
-      if (!["conveyance", "leave", "timesheet", "asset", "vehicle"].includes(requestType)) {
-        return res.status(400).json({ error: "request_type must be one of conveyance, leave, timesheet, asset, vehicle." });
+      if (!["conveyance", "leave", "timesheet", "asset", "vehicle", "mobile"].includes(requestType)) {
+        return res.status(400).json({ error: "request_type must be one of conveyance, leave, timesheet, asset, vehicle, mobile." });
       }
       const userRows = await queryDB("SELECT id FROM users WHERE id = ?", [employeeUserId]);
       if (userRows.length === 0) return res.status(404).json({ error: "Employee account not found." });

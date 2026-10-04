@@ -121,7 +121,11 @@ export const OWN_TABLES = new Set([
   "vehicle_requisitions",
   "grievances",
   "tasks",
-  "task_recurrences"
+  "task_recurrences",
+  "mobile_sims",
+  "mobile_bills",
+  "mobile_limit_policies",
+  "mobile_limit_requests"
 ]);
 
 // Shared by every company of a group (PEPM budgets & rate file, chat…) but
@@ -194,6 +198,7 @@ export const LINKED_TABLES = new Map<string, [string, string]>([
   ["site_attendance_members", ["team_id", "site_attendance_teams"]],
   ["task_assignees", ["task_id", "tasks"]],
   ["task_comments", ["task_id", "tasks"]],
+  ["mobile_sim_events", ["sim_id", "mobile_sims"]],
   ["site_attendance_sheets", ["team_id", "site_attendance_teams"]],
   ["user_access_audit", ["target_user_id", "users"]],
   ["user_claim_references", ["user_claim_id", "user_claims"]],
