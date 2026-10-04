@@ -24,3 +24,19 @@ surrounding page.
   the menu.
 - A Superadmin always has access. Hide the UI *and* block the API — never
   only one of them.
+
+## Popup style (house style)
+
+Every popup / modal / sheet uses the same liquid-glass look as the "Turn on
+location tracking" notice (src/components/TrackingNoticeCard.tsx), built from
+the `.liquid-glass*` classes in src/index.css:
+
+- backdrop: `liquid-glass-backdrop` (dim + blur of the page behind)
+- the card: `liquid-glass liquid-glass-in rounded-[32px]`
+- wells inside it (lists, images, icon tiles): `liquid-glass-inset`
+- round close button: `liquid-glass-chip`; main action: `liquid-glass-button rounded-full`
+
+`.liquid-glass` sets `position: relative`, so position the card with a
+wrapper element (fixed/absolute) rather than on the card itself. The mobile
+More popup (BottomNav.tsx) already follows this; existing popups are to be
+moved over to it as they are touched.
