@@ -45,7 +45,38 @@ interface ChatPanelProps {
   // whole screen, so the fixed positioning/visualViewport tracking below is
   // skipped entirely in this mode.
   variant?: 'fullscreen' | 'modal';
+  // Phone bottom bar's avatar -> the Profile page (App.tsx).
+  onOpenProfile?: () => void;
 }
+
+// Phone bottom bar: the signed-in account's own photo (initials until /
+// unless one loads).
+const MyAvatar: React.FC<{ token: string; user: User }> = ({ token, user }) => {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let objectUrl: string | null = null;
+    let cancelled = false;
+    fetch(apiUrl(`/api/profile/photo/${user.id}`), { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => (r.ok ? r.blob() : null))
+      .then((b) => {
+        if (!b || cancelled) return;
+        objectUrl = URL.createObjectURL(b);
+        setUrl(objectUrl);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [token, user.id]);
+  return url ? (
+    <img src={url} alt="" className="w-8 h-8 rounded-full object-cover ring-2 ring-white" />
+  ) : (
+    <span className="w-8 h-8 rounded-full flex items-center justify-center text-white text-[11px] font-semibold ring-2 ring-white" style={{ background: avatarColor(user.name) }}>
+      {initialsOf(user.name)}
+    </span>
+  );
+};
 
 function timeOnly(iso: string): string {
   const d = new Date(iso);
@@ -171,11 +202,15 @@ const AudioAttachment: React.FC<{ token: string; messageId: number }> = ({ token
   return <audio controls src={url} className="w-56 max-w-full h-9" />;
 };
 
-export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initialRoomId, onInitialRoomHandled, variant = 'fullscreen' }) => {
+export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initialRoomId, onInitialRoomHandled, variant = 'fullscreen', onOpenProfile }) => {
   const [rooms, setRooms] = useState<ChatRoom[]>([]);
   const [activeRoomId, setActiveRoomId] = useState<number | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [roomSearch, setRoomSearch] = useState('');
+  // Phone bottom bar: which list the room column shows, and the "+" menu.
+  const [listTab, setListTab] = useState<'chats' | 'groups' | 'calls'>('chats');
+  const [newMenuOpen, setNewMenuOpen] = useState(false);
+  const canCall = user.role === 'superadmin' || !!user.can_use_calls;
   const [messageInput, setMessageInput] = useState('');
   const [sending, setSending] = useState(false);
   const [typingByRoom, setTypingByRoom] = useState<Record<number, Set<number>>>({});
@@ -840,9 +875,20 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
 
   const filteredRooms = useMemo(() => {
     const q = roomSearch.trim().toLowerCase();
-    if (!q) return rooms;
-    return rooms.filter((r) => roomDisplayName(r, user.id).toLowerCase().includes(q));
-  }, [rooms, roomSearch, user.id]);
+    // Groups: groups and communities; Calls: one-to-one chats (each with
+    // call buttons). Chats shows everything.
+    const byTab = rooms.filter((r) =>
+      listTab === 'groups' ? r.type !== 'direct' : listTab === 'calls' ? r.type === 'direct' && !!r.other_participant : true
+    );
+    if (!q) return byTab;
+    return byTab.filter((r) => roomDisplayName(r, user.id).toLowerCase().includes(q));
+  }, [rooms, roomSearch, user.id, listTab]);
+  const startCall = (room: ChatRoom, kind: 'audio' | 'video') =>
+    window.dispatchEvent(
+      new CustomEvent('credence:start-call', {
+        detail: { roomId: room.id, peer: { id: room.other_participant!.id, name: roomDisplayName(room, user.id) }, kind }
+      })
+    );
 
   const isRoomAdmin = activeRoom?.my_role === 'admin';
   const typingNamesInActiveRoom = activeRoomId ? [...(typingByRoom[activeRoomId] || [])] : [];
@@ -861,13 +907,13 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
       }
     >
       {/* Sidebar: room list */}
-      <div className={`w-full md:w-[360px] border-r border-slate-200 flex flex-col ${activeRoomId ? 'hidden md:flex' : 'flex'}`}>
+      <div className={`relative w-full md:w-[360px] border-r border-slate-200 flex flex-col ${activeRoomId ? 'hidden md:flex' : 'flex'}`}>
         <div className="p-4 border-b border-slate-200 flex items-center justify-between gap-2">
           <button type="button" onClick={onBack} className="p-1.5 -ml-1.5 text-slate-500 hover:bg-slate-100 rounded-lg md:hidden">
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <h2 className="font-bold text-slate-900 text-lg flex-1">Chats</h2>
-          <div className="relative group">
+          <h2 className="font-bold text-slate-900 text-lg flex-1">{listTab === 'groups' ? 'Groups' : listTab === 'calls' ? 'Calls' : 'Chats'}</h2>
+          <div className={`relative group ${variant === 'fullscreen' ? 'max-md:hidden' : ''}`}>
             <button type="button" className="p-2 text-slate-600 hover:bg-slate-100 rounded-full">
               <Plus className="w-5 h-5" />
             </button>
@@ -896,9 +942,11 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
             />
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto">
+        <div className={`flex-1 overflow-y-auto ${variant === 'fullscreen' ? 'max-md:pb-28' : ''}`}>
           {filteredRooms.length === 0 && (
-            <div className="p-8 text-center text-sm text-slate-400">No chats yet — tap + to start one.</div>
+            <div className="p-8 text-center text-sm text-slate-400">
+              {listTab === 'groups' ? 'No groups yet.' : listTab === 'calls' ? 'No one-to-one chats to call yet.' : 'No chats yet — tap + to start one.'}
+            </div>
           )}
           {filteredRooms.map((room) => {
             const name = roomDisplayName(room, user.id);
@@ -930,6 +978,29 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                   </div>
                   {isOnline && <span className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-500 border-2 border-white rounded-full" />}
                 </div>
+                {listTab === 'calls' && canCall ? (
+                  <>
+                    <div className="flex-1 min-w-0">
+                      <span className="block font-semibold text-sm text-slate-900 truncate">{name}</span>
+                      <span className="text-xs text-slate-500">{isOnline ? 'Online' : 'Offline'}</span>
+                    </div>
+                    {(['audio', 'video'] as const).map((k) => (
+                      <span
+                        key={k}
+                        role="button"
+                        tabIndex={0}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          startCall(room, k);
+                        }}
+                        className="p-2 rounded-full text-violet-600 bg-violet-50 active:bg-violet-100"
+                        aria-label={k === 'audio' ? `Audio call ${name}` : `Video call ${name}`}
+                      >
+                        {k === 'audio' ? <Phone className="w-4 h-4" /> : <Video className="w-4 h-4" />}
+                      </span>
+                    ))}
+                  </>
+                ) : (
                 <div className="flex-1 min-w-0">
                   <div className="flex justify-between items-baseline gap-2">
                     <span className="font-semibold text-sm text-slate-900 truncate">{name}</span>
@@ -944,10 +1015,92 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                     )}
                   </div>
                 </div>
+                )}
               </button>
             );
           })}
         </div>
+
+        {/* Phone bottom bar (full-screen Chat only): a floating glass pill
+            with Chats / Groups / Calls / your photo — the active one widens
+            into a labelled pill — and a round "+" beside it for a new chat,
+            group or community. */}
+        {variant === 'fullscreen' && (
+          <div className="md:hidden absolute left-0 right-0 bottom-0 px-4 pb-[calc(1rem+var(--native-safe-area-inset-bottom,env(safe-area-inset-bottom,0px)))] pt-2 flex items-center gap-3 pointer-events-none">
+            <div className="pointer-events-auto flex-1 flex items-center justify-between gap-1 p-1.5 rounded-full bg-white/75 backdrop-blur-xl border border-white shadow-[0_10px_30px_-10px_rgba(15,23,42,0.35),inset_0_1px_0_rgba(255,255,255,0.9)]">
+              {([
+                ['chats', 'Chats', MessageSquare],
+                ['groups', 'Groups', Users],
+                ...(canCall ? [['calls', 'Calls', Phone]] : [])
+              ] as [typeof listTab, string, React.ComponentType<{ className?: string }>][]).map(([k, label, Icon]) => {
+                const on = listTab === k;
+                return (
+                  <button
+                    key={k}
+                    type="button"
+                    onClick={() => setListTab(k)}
+                    aria-label={label}
+                    aria-pressed={on}
+                    className={`flex items-center justify-center gap-2 h-11 rounded-full transition-all ${
+                      on ? 'px-4 bg-slate-900/[0.06] text-slate-900 font-semibold text-sm' : 'w-12 text-slate-400'
+                    }`}
+                  >
+                    <Icon className={`w-5 h-5 ${on ? 'text-slate-900' : ''}`} />
+                    {on && <span>{label}</span>}
+                  </button>
+                );
+              })}
+              {onOpenProfile && (
+                <button
+                  type="button"
+                  onClick={onOpenProfile}
+                  aria-label="My profile"
+                  className="w-12 h-11 flex items-center justify-center rounded-full"
+                >
+                  <MyAvatar token={token} user={user} />
+                </button>
+              )}
+            </div>
+            <div className="pointer-events-auto relative shrink-0">
+              {newMenuOpen && (
+                <>
+                  <div className="fixed inset-0" onClick={() => setNewMenuOpen(false)} />
+                  {/* .liquid-glass sets position: relative, so a wrapper places it. */}
+                  <div className="absolute right-0 bottom-full mb-3 w-48">
+                  <div className="liquid-glass liquid-glass-in rounded-3xl p-1.5">
+                    {([
+                      ['direct', 'New Chat', MessageSquare],
+                      ['group', 'New Group', Users],
+                      ['community', 'New Community', Shield]
+                    ] as ['direct' | 'group' | 'community', string, React.ComponentType<{ className?: string }>][]).map(([k, label, Icon]) => (
+                      <button
+                        key={k}
+                        type="button"
+                        onClick={() => {
+                          setNewMenuOpen(false);
+                          setShowNewChatModal(k);
+                        }}
+                        className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-2xl text-sm font-medium text-slate-800 active:bg-white/70"
+                      >
+                        <Icon className="w-4 h-4 text-violet-600" /> {label}
+                      </button>
+                    ))}
+                  </div>
+                  </div>
+                </>
+              )}
+              <button
+                type="button"
+                onClick={() => setNewMenuOpen((v) => !v)}
+                aria-label="New chat"
+                aria-expanded={newMenuOpen}
+                className="liquid-glass-button w-14 h-14 rounded-full flex items-center justify-center"
+              >
+                <Plus className={`w-6 h-6 transition-transform ${newMenuOpen ? 'rotate-45' : ''}`} />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Main chat window */}
