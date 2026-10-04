@@ -156,8 +156,14 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
       );
       if (bills.length === 0) return res.status(404).json({ error: "Bill not found" });
       const items = await queryDB(`SELECT * FROM conveyance_bill_items WHERE bill_id = ? ORDER BY entry_date ASC, id ASC`, [id]);
+      // The claimant's Employee record — the Payment Voucher prints their
+      // code, designation and department.
+      const emp: any[] = (await queryDB("SELECT employee_id, designation, department FROM all_employees WHERE user_id = ?", [bills[0].user_id])) || [];
       res.json({
         ...bills[0],
+        employee_code: emp[0]?.employee_id || null,
+        designation: emp[0]?.designation || null,
+        department: emp[0]?.department || null,
         is_disbursed: !!Number(bills[0].is_disbursed),
         items: items.map((it: any) => ({ ...it, distance_km: it.distance_km !== null ? Number(it.distance_km) : null, rate_per_km: it.rate_per_km !== null ? Number(it.rate_per_km) : null, amount: Number(it.amount) }))
       });
