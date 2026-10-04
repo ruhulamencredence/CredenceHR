@@ -42,6 +42,7 @@ import { MyResignation } from './components/MyResignation';
 import { AssetManagement } from './components/AssetManagement';
 import { MyCases } from './components/MyCases';
 import { MyTasks } from './components/MyTasks';
+import { MyMobileSim } from './components/MyMobileSim';
 import { MyLetters } from './components/MyLetters';
 import { TeamAttendance } from './components/TeamAttendance';
 import { VehicleManagement } from './components/VehicleManagement';
@@ -105,7 +106,7 @@ export default function App() {
   // this account was actually looking at, instead of resetting to the
   // Admin/User Panel default every time.
   const selfServiceViewStorageKey = user ? `mpr_self_service_view_${user.id}` : null;
-  const [selfServiceView, setSelfServiceView] = useState<'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | null>(() => {
+  const [selfServiceView, setSelfServiceView] = useState<'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | null>(() => {
     try {
       const saved = selfServiceViewStorageKey ? localStorage.getItem(selfServiceViewStorageKey) : null;
       if (saved === 'leaveApplication' || saved === 'leaveManagement' || saved === 'timesheet' || saved === 'approveApplications' || saved === 'employeeDirectory' || saved === 'resignation') {
@@ -688,6 +689,26 @@ export default function App() {
     window.addEventListener('credence:open-task', onOpen);
     return () => window.removeEventListener('credence:open-task', onOpen);
   }, [user]);
+  // A Mobile Bill alert (MobileBillRoutes.ts): a new limit request with no
+  // approval chain opens HR's Mobile Bill; anything else opens My Mobile SIM.
+  useEffect(() => {
+    const onOpen = (e: Event) => {
+      if (!user) return;
+      const title = String((e as CustomEvent).detail?.title || '');
+      const isHr = user.role === 'superadmin' || (user.module_permissions || []).includes('mobile_bill');
+      setShowProfilePage(false);
+      setShowChat(false);
+      setShowAlertsPage(false);
+      if (isHr && title === 'Mobile Limit Request') {
+        setSelfServiceView(null);
+        window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'mobile_bill' }));
+      } else if (user.role === 'superadmin' || !!user.can_view_mobile_bill || isHr) {
+        setSelfServiceView('myMobileSim');
+      }
+    };
+    window.addEventListener('credence:open-mobile-bill', onOpen);
+    return () => window.removeEventListener('credence:open-mobile-bill', onOpen);
+  }, [user]);
 
   if (!token || !user) {
     return (
@@ -842,7 +863,7 @@ export default function App() {
       setViewMode('admin');
       setAdminNavRequest({ target, ts: Date.now() });
     },
-    onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks') => {
+    onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim') => {
       setShowProfilePage(false);
           setShowChat(false);
           setShowAlertsPage(false);
@@ -1146,6 +1167,8 @@ export default function App() {
           <MyCases token={token} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'myTasks' ? (
           <MyTasks token={token} user={user} onBack={() => setSelfServiceView(null)} />
+        ) : selfServiceView === 'myMobileSim' ? (
+          <MyMobileSim token={token} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'myLetters' ? (
           <MyLetters token={token} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'teamAttendance' ? (

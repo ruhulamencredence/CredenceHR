@@ -3,7 +3,7 @@ export type UserRole = 'superadmin' | 'admin' | 'user';
 // Every Admin Panel tab. A Superadmin implicitly has all of these; a plain Admin
 // only sees/uses the ones the Superadmin has explicitly granted via
 // PUT /api/users/:id/module-permissions. Mirrors ADMIN_MODULE_KEYS in server.ts.
-export type AdminModuleKey = 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'recycle' | 'editlog' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'disbursement' | 'employees' | 'departments' | 'tracking' | 'office_attendance' | 'holidays' | 'payroll' | 'asset_management' | 'vehicle_management' | 'vehicle_maintainer' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'hr_operations' | 'admin_dashboard' | 'task_management';
+export type AdminModuleKey = 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'recycle' | 'editlog' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'disbursement' | 'employees' | 'departments' | 'tracking' | 'office_attendance' | 'holidays' | 'payroll' | 'asset_management' | 'vehicle_management' | 'vehicle_maintainer' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'hr_operations' | 'admin_dashboard' | 'task_management' | 'mobile_bill';
 
 // Admin Panel -> Reports & Insights is not its own module grant: it shows for
 // anyone holding at least one of the modules its reports come from (each
@@ -72,7 +72,10 @@ export const ADMIN_MODULES: { key: AdminModuleKey; label: string }[] = [
   { key: 'hr_operations', label: 'HR Operations' },
   // Tasks (TaskManagement.tsx): give tasks to anyone, employees' requests to
   // HR, repeating tasks, monthly report.
-  { key: 'task_management', label: 'Task Management' }
+  { key: 'task_management', label: 'Task Management' },
+  // Mobile Bill (MobileBillAdmin.tsx): company SIMs, limits by employee type,
+  // the operators' monthly bills, payment sheet and reports.
+  { key: 'mobile_bill', label: 'Mobile Bill' }
 ];
 
 // Granular per-module action layers, layered on top of the coarse module
@@ -411,7 +414,7 @@ export interface ApprovalChainStep {
 // which layer it's waiting on right now while status is 'pending'.
 export interface ApprovalRequest {
   id: number;
-  source_type: 'attendance' | 'claim' | 'user_claim' | 'attendance_correction' | 'leave_application' | 'asset_requisition' | 'vehicle_requisition';
+  source_type: 'attendance' | 'claim' | 'user_claim' | 'attendance_correction' | 'leave_application' | 'asset_requisition' | 'vehicle_requisition' | 'mobile_limit_request';
   event_type: 'check_in' | 'check_out' | 'submit';
   source_id: number;
   requested_by: number;
@@ -610,6 +613,8 @@ export interface User {
   can_view_group_dashboard?: boolean;
   // Self Service -> My Tasks (MyTasks.tsx) — off until turned on in Module Access.
   can_view_tasks?: boolean;
+  // Self Service -> My Mobile SIM (MyMobileSim.tsx) — off until turned on in Module Access.
+  can_view_mobile_bill?: boolean;
   can_view_leave_application?: boolean;
   can_view_my_leave?: boolean;
 }
@@ -1530,7 +1535,13 @@ export type AlertType =
   | 'device_request'
   // Tasks (TaskRoutes.ts): a task given / started / done / overdue, or a new
   // request to HR — opens the task in My Tasks or Task Management.
-  | 'task';
+  | 'task'
+  // Mobile Bill (MobileBillRoutes.ts): a SIM given to me / my limit request
+  // decided -> My Mobile SIM; a new request with no approval chain -> HR's
+  // Mobile Bill. 'mobile_limit_approval' = a request waiting on this account
+  // -> Approve Application.
+  | 'mobile_bill'
+  | 'mobile_limit_approval';
 
 export interface Alert {
   id: number;

@@ -17,7 +17,8 @@ const REQUEST_TYPES: { key: ApprovalRequestType; label: string }[] = [
   { key: 'leave', label: 'Leave Application' },
   { key: 'timesheet', label: 'Timesheet (Attendance Correction)' },
   { key: 'asset', label: 'Asset Requisition' },
-  { key: 'vehicle', label: 'Vehicle Requisition' }
+  { key: 'vehicle', label: 'Vehicle Requisition' },
+  { key: 'mobile', label: 'Mobile Limit Request' }
 ];
 
 // Per-Request-Type Layer names — shown instead of the generic "Layer N" so
@@ -42,7 +43,9 @@ const LAYER_NAMES: Partial<Record<ApprovalRequestType, Record<number, string>>> 
   // "HR/Admin রিভিউ (গাড়ির অ্যাভেইলেবিলিটি চেক)": Layer 1 defaults to the
   // requester's own Supervisor (same auto-gate as Asset), Layer 2 is HR/
   // Admin's own picked approvers.
-  vehicle: { 1: 'Supervisor Approval', 2: 'HR/Admin Review' }
+  vehicle: { 1: 'Supervisor Approval', 2: 'HR/Admin Review' },
+  // Mobile Bill limit raise: the requester's Supervisor, then HR.
+  mobile: { 1: 'Supervisor Approval', 2: 'HR Approval' }
 };
 function layerLabel(requestType: ApprovalRequestType, idx: number): string {
   const named = LAYER_NAMES[requestType]?.[idx + 1];

@@ -38,6 +38,7 @@ import { registerPerformanceRoutes, ensurePerformanceSchema } from "./Performanc
 import { registerRecruitmentRoutes, ensureRecruitmentSchema } from "./RecruitmentRoutes";
 import { registerGrievanceRoutes, ensureGrievanceSchema } from "./GrievanceRoutes";
 import { registerTaskRoutes, ensureTaskSchema } from "./TaskRoutes";
+import { registerMobileBillRoutes, ensureMobileBillSchema, finalizeMobileLimitRequest, rejectMobileLimitRequest } from "./MobileBillRoutes";
 import { registerHROperationsRoutes, ensureHROperationsSchema, applyDueHrActions } from "./HROperationsRoutes";
 import { registerEmployee360Routes, ensureEmployee360Schema } from "./HrOps360Routes";
 import { registerHrReportsRoutes, ensureHrReportsSchema } from "./HrOpsReportsRoutes";
@@ -269,6 +270,7 @@ async function ensureSchemaMigrations() {
   await ensureRecruitmentSchema(dbPool);
   await ensureGrievanceSchema(dbPool);
   await ensureTaskSchema(dbPool);
+  await ensureMobileBillSchema(dbPool);
   await ensureDocumentVaultSchema(dbPool);
   // HR Operations (personnel actions, letters, onboarding, service book) —
   // HROperationsRoutes.ts.
@@ -804,6 +806,13 @@ async function ensureSchemaMigrations() {
     await dbPool.query(`ALTER TABLE users ADD COLUMN can_view_tasks TINYINT(1) NOT NULL DEFAULT 0`);
   } catch (err: any) {
     if (err.code !== 'ER_DUP_FIELDNAME') console.warn("⚠️ Could not add users.can_view_tasks column: " + err.message);
+  }
+  try {
+    // Self Service -> My Mobile SIM (MobileBillRoutes.ts) — OFF until turned
+    // on per account in Module Access.
+    await dbPool.query(`ALTER TABLE users ADD COLUMN can_view_mobile_bill TINYINT(1) NOT NULL DEFAULT 0`);
+  } catch (err: any) {
+    if (err.code !== 'ER_DUP_FIELDNAME') console.warn("⚠️ Could not add users.can_view_mobile_bill column: " + err.message);
   }
   try {
     // Admin Dashboard "See all companies (group view)" — OFF until turned on
@@ -1683,7 +1692,7 @@ async function ensureSchemaMigrations() {
     // Attendance Correction / Asset Requisition requests routed through this same Approval Workflow engine.
     await dbPool.query(`
       ALTER TABLE approval_requests
-        MODIFY COLUMN source_type ENUM('attendance','claim','user_claim','attendance_correction','leave_application','asset_requisition','vehicle_requisition') NOT NULL,
+        MODIFY COLUMN source_type ENUM('attendance','claim','user_claim','attendance_correction','leave_application','asset_requisition','vehicle_requisition','mobile_limit_request') NOT NULL,
         MODIFY COLUMN event_type ENUM('check_in','check_out','submit') NOT NULL
     `);
     // GET /api/my-approvals (PendingApprovalsCard — hit on every Dashboard
@@ -1893,6 +1902,13 @@ async function ensureSchemaMigrations() {
     await dbPool.query(`ALTER TABLE employee_template_assignments MODIFY COLUMN request_type ENUM('conveyance','leave','timesheet','asset','vehicle') NOT NULL`);
   } catch (err: any) {
     console.warn("⚠️ Could not widen request_type ENUM to include 'vehicle': " + err.message);
+  }
+  // 'mobile' — Mobile Bill limit raise requests (MobileBillRoutes.ts).
+  try {
+    await dbPool.query(`ALTER TABLE approval_templates MODIFY COLUMN request_type ENUM('conveyance','leave','timesheet','asset','vehicle','mobile') NOT NULL`);
+    await dbPool.query(`ALTER TABLE employee_template_assignments MODIFY COLUMN request_type ENUM('conveyance','leave','timesheet','asset','vehicle','mobile') NOT NULL`);
+  } catch (err: any) {
+    console.warn("⚠️ Could not widen request_type ENUM to include 'mobile': " + err.message);
   }
   // Timesheet -> click any date's row to manually fix that day's In/Out Time
   // (typically a day with no attendance at all, but any day can be corrected).
@@ -2377,7 +2393,7 @@ const USER_CLAIM_CATEGORIES = ["Transport", "Fuel", "Toll", "Parking", "Others"]
 // running day-to-day without also giving them the full Admin Panel ->
 // Vehicle Management tab (fleet CRUD, the Approval Workflow's own queue,
 // etc.). See the two routes' own comments for what the bypass does.
-const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports", "users", "attendance", "attendance_reports", "leave_applications", "recycle", "editlog", "notices", "claims", "approvals", "conveyance", "disbursement", "employees", "departments", "tracking", "office_attendance", "holidays", "payroll", "asset_management", "vehicle_management", "vehicle_maintainer", "exit_offboarding", "performance_management", "recruitment", "grievance_disciplinary", "hr_analytics", "document_vault", "hr_operations", "admin_dashboard", "task_management"] as const;
+const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports", "users", "attendance", "attendance_reports", "leave_applications", "recycle", "editlog", "notices", "claims", "approvals", "conveyance", "disbursement", "employees", "departments", "tracking", "office_attendance", "holidays", "payroll", "asset_management", "vehicle_management", "vehicle_maintainer", "exit_offboarding", "performance_management", "recruitment", "grievance_disciplinary", "hr_analytics", "document_vault", "hr_operations", "admin_dashboard", "task_management", "mobile_bill"] as const;
 
 // Granular per-module action layers — mirrors PermissionLayerKey/
 // PERMISSION_LAYERS in src/types.ts (single source of truth is duplicated
@@ -2612,7 +2628,7 @@ async function createApprovalRequest(
 // Employee-specific assignment first (must point at an ACTIVE template — a
 // deactivated assignment is treated the same as no assignment at all, not an
 // error), else that request_type's active default, else null.
-async function resolveApprovalTemplate(employeeUserId: number, requestType: "conveyance" | "leave" | "timesheet" | "asset" | "vehicle"): Promise<any | null> {
+async function resolveApprovalTemplate(employeeUserId: number, requestType: "conveyance" | "leave" | "timesheet" | "asset" | "vehicle" | "mobile"): Promise<any | null> {
   try {
     const assigned = await queryDB(
       `SELECT t.* FROM employee_template_assignments eta
@@ -2725,8 +2741,8 @@ async function resolveSupervisorApprover(employeeUserId: number): Promise<number
 // Employee's own Direct Supervisor (employee_supervisors) when set and
 // usable, otherwise the Department Supervisor as a fallback.
 async function createTemplateApprovalRequest(
-  requestType: "conveyance" | "leave" | "timesheet" | "asset" | "vehicle",
-  sourceType: "user_claim" | "attendance_correction" | "leave_application" | "asset_requisition" | "vehicle_requisition",
+  requestType: "conveyance" | "leave" | "timesheet" | "asset" | "vehicle" | "mobile",
+  sourceType: "user_claim" | "attendance_correction" | "leave_application" | "asset_requisition" | "vehicle_requisition" | "mobile_limit_request",
   sourceId: number,
   requestedBy: number,
   // Vehicle Requisition Flowchart v2.0's "জরুরি/HR Direct" initiator path —
@@ -3006,6 +3022,16 @@ async function performApprovalAction(
       }
     } catch (finalizeErr: any) {
       throw new ApprovalActionError(400, finalizeErr.message || "Approved, but could not finalize this Vehicle Requisition.");
+    }
+  } else if (request.source_type === "mobile_limit_request") {
+    try {
+      if (newStatus === "approved") {
+        await finalizeMobileLimitRequest(queryDB, createAlert, Number(request.source_id), actorUser.id, remarks);
+      } else if (newStatus === "rejected") {
+        await rejectMobileLimitRequest(queryDB, createAlert, Number(request.source_id), actorUser.id, remarks);
+      }
+    } catch (finalizeErr: any) {
+      throw new ApprovalActionError(400, finalizeErr.message || "Approved, but could not change this SIM's limit.");
     }
   }
 
@@ -4360,6 +4386,7 @@ async function startServer() {
           can_view_timesheet: user.role === "superadmin" ? true : !!Number(user.can_view_timesheet),
           can_use_calls: user.role === "superadmin" ? true : !!Number(user.can_use_calls),
           can_view_tasks: user.role === "superadmin" ? true : !!Number(user.can_view_tasks),
+          can_view_mobile_bill: user.role === "superadmin" ? true : !!Number(user.can_view_mobile_bill),
           can_view_leave_application: user.role === "superadmin" ? true : !!Number(user.can_view_leave_application),
           can_view_my_leave: user.role === "superadmin" ? true : !!Number(user.can_view_my_leave),
           // Superadmin-granted, only ever meaningful for role='admin': can this
@@ -4383,7 +4410,7 @@ async function startServer() {
   app.get("/api/auth/me", authenticateToken, async (req: any, res) => {
     try {
       const users = await queryDB(
-        "SELECT id, name, email, role, created_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, can_use_calls, can_view_tasks, can_grant_module_access, attendance_project_id FROM users WHERE id = ?",
+        "SELECT id, name, email, role, created_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, can_use_calls, can_view_tasks, can_view_mobile_bill, can_grant_module_access, attendance_project_id FROM users WHERE id = ?",
         [req.user.id]
       );
       if (users.length === 0) return res.status(404).json({ error: "User not found" });
@@ -4407,6 +4434,7 @@ async function startServer() {
         can_view_timesheet: u.role === "superadmin" ? true : !!Number(u.can_view_timesheet),
         can_use_calls: u.role === "superadmin" ? true : !!Number(u.can_use_calls),
         can_view_tasks: u.role === "superadmin" ? true : !!Number(u.can_view_tasks),
+        can_view_mobile_bill: u.role === "superadmin" ? true : !!Number(u.can_view_mobile_bill),
         can_view_leave_application: u.role === "superadmin" ? true : !!Number(u.can_view_leave_application),
         can_view_my_leave: u.role === "superadmin" ? true : !!Number(u.can_view_my_leave),
         can_grant_module_access: u.role === "admin" ? !!Number(u.can_grant_module_access) : false,
@@ -5275,6 +5303,9 @@ async function startServer() {
   registerRecruitmentRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB });
   registerGrievanceRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB, getAdminModules, createAlert });
   registerTaskRoutes(app, { authenticateToken, queryDB, getAdminModules, createAlert });
+  // Mobile Bill (company SIMs, limits, bills, reports) — limit raise requests
+  // ride the Dynamic Approval Engine (request_type 'mobile').
+  registerMobileBillRoutes(app, { authenticateToken, queryDB, getAdminModules, createAlert, createTemplateApprovalRequest, getCurrentStepApprovers });
   registerHRAnalyticsRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB });
   registerDocumentVaultRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB, getAdminModules });
   registerHROperationsRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB, getAdminModules, todayInDhaka, createAlert });
