@@ -883,10 +883,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
 
           {/* Quick View + Claim Amount chart */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            <div className="lg:col-span-2 bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-                  <Users className="w-4 h-4 text-blue-600" /> Quick View
+            <div className="lg:col-span-2 bg-white/90 border border-white rounded-[22px] p-5 sm:p-6 shadow-[0_6px_20px_-12px_rgba(31,38,135,0.25)]">
+              <div className="flex items-center justify-between gap-3 mb-4">
+                <h3 className="text-base font-bold text-slate-900 flex items-center gap-2.5 whitespace-nowrap">
+                  <span className="w-8 h-8 rounded-full flex items-center justify-center bg-violet-100 text-violet-700 shrink-0">
+                    <Users className="w-4 h-4" />
+                  </span>
+                  Quick View <span className="hidden sm:inline text-xs font-medium text-slate-400">· Today</span>
                 </h3>
                 <div className="relative">
                   <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
@@ -894,18 +897,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                     placeholder="Search employee"
-                    className="pl-7 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-full focus:outline-none focus:ring-2 focus:ring-blue-600 w-40"
+                    className="pl-7 pr-3 py-1.5 text-xs bg-[#faf9fe] border border-[#eceaf5] rounded-full focus:outline-none focus:ring-2 focus:ring-violet-500 w-36 sm:w-44"
                   />
                 </div>
               </div>
 
               {quickViewSummary && (
-                <div className="flex flex-wrap items-center gap-1.5 mb-4 pb-4 border-b border-slate-100">
+                <>
+                <div className="flex flex-wrap items-center gap-1.5 mb-3">
                   {([
                     ['total', quickViewSummary.total, 'Total Employee', 'text-slate-600', 'bg-slate-800'],
                     ['present', quickViewSummary.present, 'Present', 'text-emerald-600', 'bg-emerald-500'],
                     ['absent', quickViewSummary.absent, 'Absent', 'text-rose-600', 'bg-rose-500'],
-                    ['leave', quickViewSummary.onLeave, 'Leave', 'text-blue-600', 'bg-blue-600'],
+                    ['leave', quickViewSummary.onLeave, 'Leave', 'text-indigo-600', 'bg-indigo-500'],
                     ['delay', quickViewSummary.delay, 'Delay', 'text-orange-600', 'bg-orange-500'],
                     ['extremeDelay', quickViewSummary.extremeDelay, 'Extreme Delay', 'text-rose-600', 'bg-rose-600'],
                   ] as [QuickViewFilter, number | null, string, string, string][]).map(([key, count, label, text, bg]) => (
@@ -918,17 +922,34 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
                         setQuickViewDetail(key);
                       }}
                       title={count == null ? 'Set a late policy to count delays' : `See ${label.toLowerCase()} list`}
-                      className={`flex items-center gap-1.5 text-[11px] font-semibold rounded-full pl-1 pr-2.5 py-1 transition-colors ${
-                        count == null ? 'text-slate-300 cursor-default' : `${text} hover:bg-slate-100`
+                      className={`flex items-center gap-1.5 text-[11px] font-semibold rounded-full pl-1 pr-3 py-1 bg-[#f7f5fd] transition-colors ${
+                        count == null ? 'text-slate-300 cursor-default' : `${text} hover:bg-violet-50`
                       }`}
                     >
-                      <span className={`w-6 h-6 rounded-full text-white flex items-center justify-center text-[10px] font-bold ${count == null ? 'bg-slate-200' : bg}`}>
+                      <span className={`min-w-6 h-6 px-1.5 rounded-full text-white flex items-center justify-center text-[10px] font-bold ${count == null ? 'bg-slate-200' : bg}`}>
                         {count == null ? '—' : count}
                       </span>
                       {label}
                     </button>
                   ))}
                 </div>
+                {/* Today's split at a glance: present / absent / on leave. */}
+                {(() => {
+                  const parts = [
+                    [quickViewSummary.present || 0, 'bg-emerald-500', 'Present'],
+                    [quickViewSummary.absent || 0, 'bg-rose-500', 'Absent'],
+                    [quickViewSummary.onLeave || 0, 'bg-indigo-500', 'Leave']
+                  ] as [number, string, string][];
+                  const sum = parts.reduce((a, [n]) => a + n, 0);
+                  return (
+                    <div className="flex h-2 rounded-full overflow-hidden bg-[#f1eef9] mb-4">
+                      {sum > 0 && parts.map(([n, cls, label]) => n > 0 && (
+                        <div key={label} className={cls} style={{ width: `${(n / sum) * 100}%` }} title={`${label}: ${n}`} />
+                      ))}
+                    </div>
+                  );
+                })()}
+                </>
               )}
 
               {!quickViewRows && (
@@ -941,40 +962,40 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
                 <div className="overflow-x-auto -mx-1">
                   <table className="w-full text-xs">
                     <thead>
-                      <tr className="text-left text-[10px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
-                        <th className="px-2 py-2 font-semibold">Name</th>
-                        <th className="px-2 py-2 font-semibold">Designation</th>
-                        <th className="px-2 py-2 font-semibold">In Time</th>
-                        <th className="px-2 py-2 font-semibold">Status</th>
+                      <tr className="text-left text-[10px] uppercase tracking-wide text-slate-400">
+                        <th className="px-2.5 py-2 font-semibold bg-[#f8f6fd] rounded-l-xl">Name</th>
+                        <th className="px-2.5 py-2 font-semibold bg-[#f8f6fd]">Designation</th>
+                        <th className="px-2.5 py-2 font-semibold bg-[#f8f6fd]">In Time</th>
+                        <th className="px-2.5 py-2 font-semibold bg-[#f8f6fd] rounded-r-xl">Status</th>
                       </tr>
                     </thead>
                     <tbody>
                       {quickViewRows.slice(0, 6).map((r, i) => (
-                        <tr key={r.id} className="border-b border-slate-50 last:border-0">
-                          <td className="px-2 py-2.5 flex items-center gap-2 font-semibold text-slate-900">
+                        <tr key={r.id} className="border-b border-[#f3f1fa] last:border-0">
+                          <td className="px-2.5 py-2.5 flex items-center gap-2.5 font-semibold text-slate-900">
                             <span
-                              className="w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-bold text-white shrink-0"
+                              className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold text-white shrink-0"
                               style={{ background: avatarColorFor(i) }}
                             >
                               {initialsOf(r.name)}
                             </span>
                             {r.name}
                           </td>
-                          <td className="px-2 py-2.5 text-slate-500">{r.designation}</td>
-                          <td className="px-2 py-2.5 text-slate-600">{r.inTime}</td>
-                          <td className="px-2 py-2.5">
-                            <span className={`px-2 py-0.5 rounded-md font-medium ${
+                          <td className="px-2.5 py-2.5 text-slate-500">{r.designation}</td>
+                          <td className="px-2.5 py-2.5 text-slate-700">{r.inTime}</td>
+                          <td className="px-2.5 py-2.5">
+                            <span className={`px-2 py-0.5 rounded-full font-semibold ${
                               r.holiday ? 'bg-amber-50 text-amber-600' :
-                              r.onLeaveToday ? 'bg-blue-50 text-blue-600' :
+                              r.onLeaveToday ? 'bg-indigo-50 text-indigo-600' :
                               r.present ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-600'
                             }`}>
                               {r.holiday ? r.holiday : r.onLeaveToday ? 'Leave' : r.present ? 'Present' : 'Absent'}
                             </span>
                             {r.isDelay && (
-                              <span className="ml-1 px-1.5 py-0.5 rounded-md font-medium bg-orange-50 text-orange-600">Delay</span>
+                              <span className="ml-1 px-2 py-0.5 rounded-full font-semibold bg-orange-50 text-orange-600">Delay</span>
                             )}
                             {r.isExtremeDelay && (
-                              <span className="ml-1 px-1.5 py-0.5 rounded-md font-medium bg-rose-50 text-rose-600">Extreme Delay</span>
+                              <span className="ml-1 px-2 py-0.5 rounded-full font-semibold bg-rose-50 text-rose-600">Extreme Delay</span>
                             )}
                           </td>
                         </tr>
@@ -985,21 +1006,31 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
               )}
             </div>
 
-            <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
-              <h3 className="text-sm font-bold text-slate-900 mb-4 flex items-center gap-2">
-                <Wallet className="w-4 h-4 text-blue-600" /> Claim Amount
-              </h3>
+            <div className="bg-white/90 border border-white rounded-[22px] p-5 sm:p-6 shadow-[0_6px_20px_-12px_rgba(31,38,135,0.25)]">
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <h3 className="text-base font-bold text-slate-900 flex items-center gap-2.5">
+                  <span className="w-8 h-8 rounded-full flex items-center justify-center bg-pink-100 text-pink-600">
+                    <Wallet className="w-4 h-4" />
+                  </span>
+                  Claim Amount
+                </h3>
+                <span className="text-xs text-slate-400">Last 3 months</span>
+              </div>
+              <p className="text-xs text-slate-500">This month claimed</p>
+              <p className="text-2xl sm:text-[28px] font-extrabold tracking-tight text-slate-900 mb-3">
+                {monthlyClaimAmount != null ? formatMoney(monthlyClaimAmount) : '—'}
+              </p>
               <div className="flex items-end justify-between gap-3 h-40 px-1">
                 {claimChartData.map((d) => (
                   <div key={d.label} className="flex-1 flex flex-col items-center gap-1">
                     <div className="w-full flex items-end justify-center gap-1 h-32">
                       <div
-                        className="w-1/2 rounded-t-md bg-blue-600"
+                        className="w-[22px] rounded-t-lg rounded-b-sm bg-gradient-to-b from-purple-500 to-[#7F00FF]"
                         style={{ height: `${(d.claimSum / maxClaimChart) * 100}%`, minHeight: d.claimSum > 0 ? 4 : 0 }}
                         title={`Claim: ${formatMoney(d.claimSum)}`}
                       />
                       <div
-                        className="w-1/2 rounded-t-md bg-blue-200"
+                        className="w-[22px] rounded-t-lg rounded-b-sm bg-[#e4d4ff]"
                         style={{ height: `${(d.disbursedSum / maxClaimChart) * 100}%`, minHeight: d.disbursedSum > 0 ? 4 : 0 }}
                         title={`Disbursed: ${formatMoney(d.disbursedSum)}`}
                       />
@@ -1009,8 +1040,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
                 ))}
               </div>
               <div className="flex items-center gap-4 mt-3 text-[10px] text-slate-500">
-                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-600 inline-block" /> Claim Amount</span>
-                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-200 inline-block" /> Disbursed</span>
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[#7F00FF] inline-block" /> Claim Amount</span>
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[#e4d4ff] inline-block" /> Disbursed</span>
               </div>
             </div>
           </div>
