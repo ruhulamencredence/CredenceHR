@@ -431,7 +431,7 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
                                 type="number"
                                 step="0.01"
                                 min={0}
-                                max={claimAmount ?? undefined}
+                                max={startAmount ?? undefined}
                                 value={approvedAmountDraft[r.id] ?? (startAmount != null ? String(startAmount) : '')}
                                 onChange={(e) => setApprovedAmountDraft((prev) => ({ ...prev, [r.id]: e.target.value }))}
                                 className="w-28 text-xs px-2 py-1 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
@@ -526,8 +526,16 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
                                     setMessage({ type: 'error', text: 'Approved Amount must be a positive number.' });
                                     return;
                                   }
-                                  if (claimAmount != null && approvedAmount > claimAmount) {
-                                    setMessage({ type: 'error', text: "Approved Amount can't be more than the Claim Amount." });
+                                  // A Layer may cut the amount but never raise it above what the previous Layer approved.
+                                  const cap = startAmount != null ? Number(startAmount) : null;
+                                  if (cap != null && approvedAmount > cap) {
+                                    setMessage({
+                                      type: 'error',
+                                      text:
+                                        r.source_approved_amount != null
+                                          ? `Approved Amount can't be more than ৳${cap.toLocaleString('en-BD')} — the amount the previous Layer approved.`
+                                          : "Approved Amount can't be more than the Claim Amount."
+                                    });
                                     return;
                                   }
                                   if (
