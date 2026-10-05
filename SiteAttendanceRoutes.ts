@@ -930,7 +930,11 @@ export function registerSiteAttendanceRoutes(app: Express, deps: SiteAttendanceR
           for (let d = 1; d <= days; d++) {
             const ds = `${month}-${String(d).padStart(2, "0")}`;
             const x = mine.find((q) => ymd(q.attendance_date) === ds);
-            if (x) {
+            // A date made a Weekend/Holiday after the sheet was submitted:
+            // an Absent / Leave mark there no longer counts (nobody was due
+            // to work), only an actual Present / Late does.
+            const offDay = hol?.get(ds);
+            if (x && !(offDay && (x.status === "absent" || x.status === "leave"))) {
               const code = x.status === "present" ? "P" : x.status === "late" ? "L" : x.status === "absent" ? "A" : "LV";
               cells[ds] = { code, confirmed: Number(x.confirmed) === 1, in: x.in_time || null, out: x.out_time || null };
               (tot as any)[x.status]++;
