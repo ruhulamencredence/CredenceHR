@@ -4,7 +4,7 @@
  */
 
 // Account Block — stops a login account from signing in, and signs out every
-// session it already has (authenticateToken checks accountBlocked() on each
+// session it already has (authenticateToken checks accountState() on each
 // request). Set three ways:
 //   - by hand: Admin Panel -> Users -> Block / Unblock, which needs the
 //     Users module's "Block Account" layer (an explicit-only layer — see
@@ -36,18 +36,24 @@ export async function ensureAccountBlockSchema(dbPool: any) {
 
 // Checked on every authenticated request, so cached briefly; a block made
 // through setAccountBlocked() clears the cache entry at once.
-const cache = new Map<number, { blocked: boolean; at: number }>();
+//   "ok"       — the account exists and may work;
+//   "blocked"  — Admin Panel -> Users -> Block (or a Termination…);
+//   "removed"  — no such account any more (deleted, or the database was
+//                reset while an old sign-in was still open).
+export type AccountState = "ok" | "blocked" | "removed";
+const cache = new Map<number, { state: AccountState; at: number }>();
 const TTL_MS = 30_000;
 
-export async function accountBlocked(queryDB: QueryDB, userId: number): Promise<boolean> {
+export async function accountState(queryDB: QueryDB, userId: number): Promise<AccountState> {
   const hit = cache.get(userId);
-  if (hit && Date.now() - hit.at < TTL_MS) return hit.blocked;
-  const rows: any[] | null = await queryDB("/*unscoped*/ SELECT is_blocked FROM users WHERE id = ?", [userId]).catch(() => null);
+  if (hit && Date.now() - hit.at < TTL_MS) return hit.state;
+  const rows: any[] | null = await queryDB("/*unscoped*/ SELECT id, is_blocked FROM users WHERE id = ?", [userId]).catch(() => null);
   // A database hiccup never signs anyone out.
-  if (!rows) return false;
-  const blocked = Number(rows[0]?.is_blocked || 0) === 1;
-  cache.set(userId, { blocked, at: Date.now() });
-  return blocked;
+  if (!rows) return "ok";
+  const row = rows.find((r: any) => Number(r.id) === userId);
+  const state: AccountState = !row ? "removed" : Number(row.is_blocked || 0) === 1 ? "blocked" : "ok";
+  cache.set(userId, { state, at: Date.now() });
+  return state;
 }
 
 // Returns false when the account is a Superadmin (never blocked) or missing.

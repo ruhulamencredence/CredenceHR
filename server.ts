@@ -27,7 +27,7 @@ import { registerEntriesRoutes } from "./EntriesRoutes";
 import { registerEmployeeTransferRoutes, ensureEmployeeTransferSchema, applyDueEmployeeTransfers, recordEmployeeEditHistory } from "./EmployeeTransferRoutes";
 import { registerAdminDashboardRoutes } from "./AdminDashboardRoutes";
 import { registerDeviceRoutes, ensureDeviceSchema, checkAppDevice, deviceStillAllowed } from "./DeviceRoutes";
-import { ensureAccountBlockSchema, accountBlocked, registerAccountBlockRoutes } from "./AccountBlock";
+import { ensureAccountBlockSchema, accountState, registerAccountBlockRoutes } from "./AccountBlock";
 import { registerActiveUsersRoutes, ensureActiveUsersSchema, touchSession } from "./ActiveUsersRoutes";
 import { registerDataImportRoutes } from "./DataImportRoutes";
 import { registerCallRoutes, setupCallSocket } from "./CallRoutes";
@@ -3943,10 +3943,16 @@ async function startServer() {
         return res.status(401).json({ error: "This phone was removed from your account. Sign in again.", code: "DEVICE_REVOKED" });
       }
       // A blocked account (Admin Panel -> Users -> Block, or an approved
-      // Termination) is signed out of every session it still has.
-      if (user?.id && (await accountBlocked(queryDB, Number(user.id)))) {
+      // Termination) is signed out of every session it still has — and so is
+      // a token whose account no longer exists (deleted, or a reset database).
+      const state = user?.id ? await accountState(queryDB, Number(user.id)) : "ok";
+      if (state === "blocked") {
         res.setHeader("X-Account-Blocked", "1");
         return res.status(401).json({ error: "This account has been blocked. Contact HR.", code: "ACCOUNT_BLOCKED" });
+      }
+      if (state === "removed") {
+        res.setHeader("X-Account-Blocked", "removed");
+        return res.status(401).json({ error: "This account no longer exists. Sign in again.", code: "ACCOUNT_REMOVED" });
       }
       req.user = user;
       // Admin Panel -> Active Users: this sign-in's IP, device and last use.

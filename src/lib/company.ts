@@ -50,7 +50,8 @@ export function installCompanyHeader() {
     const watch = (p: Promise<Response>) =>
       p.then((res) => {
         if (sameOriginApi && res.status === 401 && res.headers.get('X-Device-Revoked')) window.dispatchEvent(new Event(DEVICE_REVOKED_EVENT));
-        if (sameOriginApi && res.status === 401 && res.headers.get('X-Account-Blocked')) window.dispatchEvent(new Event(ACCOUNT_BLOCKED_EVENT));
+        const blocked = sameOriginApi && res.status === 401 ? res.headers.get('X-Account-Blocked') : null;
+        if (blocked) window.dispatchEvent(new CustomEvent(ACCOUNT_BLOCKED_EVENT, { detail: blocked }));
         return res;
       });
     if (!company || !sameOriginApi) return watch(original(input, init));
