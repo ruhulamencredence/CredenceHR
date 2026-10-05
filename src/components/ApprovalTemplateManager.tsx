@@ -73,7 +73,9 @@ interface StepDraft {
   // 'asset_fulfiller' is the Asset Requisition equivalent: the LAST Layer's
   // approver fulfills/hands over the items instead of approving (PUT
   // .../approve-and-fulfill in AssetManagementRoutes.ts).
-  approver_type: 'supervisor' | 'employee' | 'admin' | 'vehicle_maintainer' | 'asset_fulfiller';
+  // 'conveyance_disburser': a Conveyance template's LAST Layer pays the claim
+  // out (own Bill + voucher) as it approves (performApprovalAction).
+  approver_type: 'supervisor' | 'employee' | 'admin' | 'vehicle_maintainer' | 'asset_fulfiller' | 'conveyance_disburser';
   // Custom Layer name — empty means "fall back to the generic/position-based
   // name" (layerLabel() below). Travels WITH this step's own approvers when
   // dragged/moved, unlike the position-based fallback, so e.g. an Asset
@@ -191,7 +193,7 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
       const persistedSteps: StepDraft[] = (data.steps || []).map((s: ApprovalTemplateStep) => ({
         approver_user_ids: s.approvers.map((a) => a.user_id),
         approver_type:
-          ['admin', 'vehicle_maintainer', 'asset_fulfiller'].includes((s as any).approver_type) ? (s as any).approver_type : 'employee',
+          ['admin', 'vehicle_maintainer', 'asset_fulfiller', 'conveyance_disburser'].includes((s as any).approver_type) ? (s as any).approver_type : 'employee',
         label: (s as any).label || ''
       }));
       setStepsDraft(
@@ -270,9 +272,9 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
         steps: realSteps.map((s, i) => ({
           approver_user_ids: s.approver_user_ids,
           approver_type:
-            (s.approver_type === 'vehicle_maintainer' || s.approver_type === 'asset_fulfiller') && i !== realSteps.length - 1
+            (s.approver_type === 'vehicle_maintainer' || s.approver_type === 'asset_fulfiller' || s.approver_type === 'conveyance_disburser') && i !== realSteps.length - 1
               ? 'employee'
-              : s.approver_type === 'admin' || s.approver_type === 'vehicle_maintainer' || s.approver_type === 'asset_fulfiller'
+              : s.approver_type === 'admin' || s.approver_type === 'vehicle_maintainer' || s.approver_type === 'asset_fulfiller' || s.approver_type === 'conveyance_disburser'
                 ? s.approver_type
                 : 'employee',
           label: s.label.trim() || undefined
@@ -720,7 +722,7 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
                             className="text-xs font-semibold text-slate-700 bg-transparent border-b border-dashed border-slate-300 focus:border-blue-500 focus:outline-none px-0.5 w-40"
                           />
                         )}
-                        {step.approver_type !== 'vehicle_maintainer' && step.approver_type !== 'asset_fulfiller' && (
+                        {step.approver_type !== 'vehicle_maintainer' && step.approver_type !== 'asset_fulfiller' && step.approver_type !== 'conveyance_disburser' && (
                           <select
                             value={step.approver_type}
                             onChange={(e) => setStepApproverType(idx, e.target.value as any)}
@@ -783,6 +785,23 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
                               </span>
                             </label>
                           )}
+                          {typeDraft === 'conveyance' && isLastLayer && (
+                            <label className="flex items-start gap-2 pl-7 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={step.approver_type === 'conveyance_disburser'}
+                                onChange={(e) => setStepApproverType(idx, e.target.checked ? 'conveyance_disburser' : 'employee')}
+                                className="mt-0.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-600"
+                              />
+                              <span className="text-[11px] text-slate-600">
+                                <span className="font-semibold text-slate-700">Conveyance Disburser (Pay Out)</span> — the
+                                people picked here get an alert when a claim reaches this Layer, and on Pending Approvals
+                                they get <span className="font-semibold">Disburse</span> instead of Approve: the claim is
+                                approved, put on its own Bill and marked paid with a voucher number in one step, and the
+                                employee is told it has been disbursed.
+                              </span>
+                            </label>
+                          )}
                           <div className="flex flex-wrap gap-1.5 pl-7">
                             {step.approver_user_ids.length === 0 && <span className="text-[11px] text-slate-400">No approvers yet — add at least one.</span>}
                             {step.approver_user_ids.map((uid) => (
@@ -815,6 +834,8 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
                                     ? 'Search a Vehicle Maintainer by name to add as approver…'
                                     : step.approver_type === 'asset_fulfiller'
                                       ? 'Search who hands over the assets (store/inventory) by name…'
+                                    : step.approver_type === 'conveyance_disburser'
+                                      ? 'Search who pays out conveyance (accounts/cash) by name…'
                                     : 'Search an employee by name to add as approver — one member per row, add the whole team to represent a Department…'
                               }
                               className="w-full text-xs px-2.5 py-2 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"

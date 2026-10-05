@@ -67,6 +67,7 @@ interface ApprovalRouteDeps {
   getCurrentStepApprovers: (request: any) => Promise<{ user_id: number; user_name: string | null }[]>;
   isVehicleMaintainerStep: (request: any) => Promise<boolean>;
   isAssetFulfillerStep: (request: any) => Promise<boolean>;
+  isConveyanceDisburserStep: (request: any) => Promise<boolean>;
   createAlert: (
     queryDB: (sql: string, params?: any[]) => Promise<any>,
     params: { userId: number; type: AlertType; title: string; message: string; relatedType?: string; relatedId?: number }
@@ -88,6 +89,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
     getCurrentStepApprovers,
     isVehicleMaintainerStep,
     isAssetFulfillerStep,
+    isConveyanceDisburserStep,
     createAlert
   } = deps;
 
@@ -133,6 +135,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       const approvers = await getCurrentStepApprovers(request);
       const assignOnly = request.source_type === "vehicle_requisition" && (await isVehicleMaintainerStep(request));
       const fulfillOnly = request.source_type === "asset_requisition" && (await isAssetFulfillerStep(request));
+      const disburseOnly = request.source_type === "user_claim" && (await isConveyanceDisburserStep(request));
       for (const approver of approvers) {
         await createAlert(queryDB, {
           userId: approver.user_id,
@@ -141,12 +144,16 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
             ? "Ride Request Awaiting Vehicle Assignment"
             : fulfillOnly
               ? "Asset Requisition Awaiting Fulfillment"
-              : `${mapping.label} Awaiting Your Approval`,
+              : disburseOnly
+                ? "Conveyance Claim Awaiting Disbursement"
+                : `${mapping.label} Awaiting Your Approval`,
           message: assignOnly
             ? `${actorName || "A previous approver"} approved this ride request — assign a vehicle and driver to confirm it.`
             : fulfillOnly
               ? `${actorName || "A previous approver"} approved this asset requisition — fulfill and hand over the items from Pending Approvals.`
-              : `${actorName || "A previous approver"} approved this ${mapping.label.toLowerCase()} — it's now waiting on your review.`,
+              : disburseOnly
+                ? `${actorName || "A previous approver"} approved this conveyance claim — pay it out and record the voucher from Pending Approvals.`
+                : `${actorName || "A previous approver"} approved this ${mapping.label.toLowerCase()} — it's now waiting on your review.`,
           relatedType: request.source_type,
           relatedId: Number(request.source_id)
         });
@@ -313,6 +320,12 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       // Dynamic Approval Engine (Part 3) — same idea as chainByStep above, but
       // keyed by "template_id:step_order" and holding an ARRAY of approvers
       // (any one of whom clears that step), not a single user_id.
+      // Which template Layers are a Conveyance Disburser (Approve there also pays out).
+      const disburserSteps = new Set<string>(
+        (await queryDB("SELECT * FROM approval_template_steps"))
+          .filter((s: any) => s.approver_type === "conveyance_disburser")
+          .map((s: any) => `${s.template_id}:${s.step_order}`)
+      );
       const templateStepApproversMap = new Map<string, { user_id: number; user_name: string | null }[]>();
       for (const r of templateStepApproverRows) {
         const key = `${r.template_id}:${r.step_order}`;
@@ -404,6 +417,12 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
             current_approver_id: currentApprovers[0] ? Number(currentApprovers[0].user_id) : null,
             current_approver_name: currentApprovers.length > 0 ? currentApprovers.map((a) => a.user_name || `User #${a.user_id}`).join(" or ") : null,
             current_approver_ids: currentApprovers.map((a) => a.user_id),
+            conveyance_disburser_step:
+              r.status === "pending" &&
+              r.source_type === "user_claim" &&
+              !!r.template_id &&
+              Number(r.current_step) >= Number(r.total_steps) &&
+              disburserSteps.has(`${r.template_id}:${r.supervisor_step_user_id ? Number(r.current_step) - 1 : Number(r.current_step)}`),
             actions
           };
         })
@@ -440,11 +459,12 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       // otherwise. Lets the approver approve for less than the Claim Amount.
       const approvedAmount = req.body?.approved_amount != null && req.body.approved_amount !== "" ? Number(req.body.approved_amount) : null;
 
-      const { status, current_step, billInfo } = await performApprovalAction(Number(id), req.user, action, remarks, billId, approvedAmount);
+      const voucherNo = typeof req.body?.voucher_no === "string" ? req.body.voucher_no : null;
+      const { status, current_step, billInfo } = await performApprovalAction(Number(id), req.user, action, remarks, billId, approvedAmount, voucherNo);
       if (action === "approved") await notifyNextStepApprovers(Number(id), status, req.user.name);
       res.json({ success: true, status, current_step, ...billInfo });
     } catch (err: any) {
-      res.status(err instanceof ApprovalActionError ? err.statusCode : 500).json({ error: err.message });
+      res.status(Number.isInteger(err?.statusCode) ? err.statusCode : 500).json({ error: err.message });
     }
   });
 
@@ -731,6 +751,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
           // PUT .../approve-and-assign in VehicleManagementRoutes.ts).
           let vehicleMaintainerBypass = false;
           let assetFulfillerBypass = false;
+          let conveyanceDisburserBypass = false;
           if (Number(r.current_step) >= Number(r.total_steps) && r.template_id) {
             const hasSupervisorStep = !!r.supervisor_step_user_id;
             const templateStepOrder = hasSupervisorStep ? Number(r.current_step) - 1 : Number(r.current_step);
@@ -740,6 +761,9 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
             // handed over) instead of Approve/Reject; see PUT
             // .../approve-and-fulfill in AssetManagementRoutes.ts.
             assetFulfillerBypass = r.source_type === "asset_requisition" && stepType === "asset_fulfiller";
+            // Conveyance Disburser Layer — Approve here also pays the claim
+            // out (own Bill + voucher); see performApprovalAction.
+            conveyanceDisburserBypass = r.source_type === "user_claim" && stepType === "conveyance_disburser";
           }
           return {
             id: r.id,
@@ -754,6 +778,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
             total_steps: r.total_steps,
             vehicle_maintainer_bypass: vehicleMaintainerBypass,
             asset_fulfiller_bypass: assetFulfillerBypass,
+            conveyance_disburser_bypass: conveyanceDisburserBypass,
             // The requester's Supervisor (auto Layer 1) may add/delete items
             // and change quantities before approving — PUT
             // /api/assets/requisitions/:id/items (AssetManagementRoutes.ts).
@@ -1049,11 +1074,12 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       // same as the Admin Panel's Approvals tab.
       const approvedAmount = req.body?.approved_amount != null && req.body.approved_amount !== "" ? Number(req.body.approved_amount) : null;
 
-      const { status, current_step, billInfo } = await performApprovalAction(Number(id), req.user, action, remarks, billId, approvedAmount);
+      const voucherNo = typeof req.body?.voucher_no === "string" ? req.body.voucher_no : null;
+      const { status, current_step, billInfo } = await performApprovalAction(Number(id), req.user, action, remarks, billId, approvedAmount, voucherNo);
       if (action === "approved") await notifyNextStepApprovers(Number(id), status, req.user.name);
       res.json({ success: true, status, current_step, ...billInfo });
     } catch (err: any) {
-      res.status(err instanceof ApprovalActionError ? err.statusCode : 500).json({ error: err.message });
+      res.status(Number.isInteger(err?.statusCode) ? err.statusCode : 500).json({ error: err.message });
     }
   });
 
@@ -1103,7 +1129,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       steps: steps.map((s: any) => ({
         ...s,
         approver_type:
-          s.approver_type === "admin" || s.approver_type === "vehicle_maintainer" || s.approver_type === "asset_fulfiller" ? s.approver_type : "employee",
+          ["admin", "vehicle_maintainer", "asset_fulfiller", "conveyance_disburser"].includes(s.approver_type) ? s.approver_type : "employee",
         approvers: approversByStep.get(Number(s.id)) || []
       }))
     };
@@ -1119,13 +1145,13 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
   async function validateTemplateSteps(
     steps: any,
     requestType: string
-  ): Promise<{ approver_user_ids: number[]; approver_type: "employee" | "admin" | "vehicle_maintainer" | "asset_fulfiller"; label: string | null }[]> {
+  ): Promise<{ approver_user_ids: number[]; approver_type: "employee" | "admin" | "vehicle_maintainer" | "asset_fulfiller" | "conveyance_disburser"; label: string | null }[]> {
     if (!Array.isArray(steps) || steps.length === 0) {
       throw new Error("A template needs at least one Layer/Step.");
     }
     const allUsers = await queryDB("SELECT * FROM users");
     const validUserIds = new Set<number>(allUsers.map((u: any) => Number(u.id)));
-    const cleaned: { approver_user_ids: number[]; approver_type: "employee" | "admin" | "vehicle_maintainer" | "asset_fulfiller"; label: string | null }[] = [];
+    const cleaned: { approver_user_ids: number[]; approver_type: "employee" | "admin" | "vehicle_maintainer" | "asset_fulfiller" | "conveyance_disburser"; label: string | null }[] = [];
     steps.forEach((step: any, idx: number) => {
       const ids = Array.isArray(step?.approver_user_ids) ? step.approver_user_ids.map((v: any) => Number(v)).filter((v: number) => Number.isFinite(v)) : [];
       const uniqueIds = Array.from(new Set(ids));
@@ -1140,7 +1166,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       // VehicleManagementRoutes.ts — it only fires once the chain's final
       // step is reached), so it's rejected everywhere else instead of
       // silently downgrading to 'employee' and confusing whoever picked it.
-      let approverType: "employee" | "admin" | "vehicle_maintainer" | "asset_fulfiller" = step?.approver_type === "admin" ? "admin" : "employee";
+      let approverType: "employee" | "admin" | "vehicle_maintainer" | "asset_fulfiller" | "conveyance_disburser" = step?.approver_type === "admin" ? "admin" : "employee";
       if (step?.approver_type === "vehicle_maintainer") {
         if (requestType !== "vehicle") {
           throw new Error(`Layer ${idx + 1}: "Vehicle Maintainer" is only available for Vehicle Requisition templates.`);
@@ -1160,6 +1186,17 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
           throw new Error(`Layer ${idx + 1}: "Asset Fulfiller" can only be used on the last Layer.`);
         }
         approverType = "asset_fulfiller";
+      }
+      // Conveyance counterpart — the last Layer's approver pays the claim out
+      // (Bill + voucher) as they approve it.
+      if (step?.approver_type === "conveyance_disburser") {
+        if (requestType !== "conveyance") {
+          throw new Error(`Layer ${idx + 1}: "Conveyance Disburser" is only available for Conveyance templates.`);
+        }
+        if (idx !== steps.length - 1) {
+          throw new Error(`Layer ${idx + 1}: "Conveyance Disburser" can only be used on the last Layer.`);
+        }
+        approverType = "conveyance_disburser";
       }
       // Custom Layer name — travels with THIS step's approvers regardless of
       // where it ends up after a drag/reorder, instead of the position-based
@@ -1272,7 +1309,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       await grantVehicleMaintainerAccess(steps);
       res.status(201).json(await getTemplateWithSteps(templateId));
     } catch (err: any) {
-      res.status(err.message?.includes("not found") || err.message?.includes("needs at least") || err.message?.includes("Vehicle Maintainer") ? 400 : 500).json({ error: err.message });
+      res.status(err.message?.includes("not found") || err.message?.includes("needs at least") || /^Layer \d+/.test(err.message || "") ? 400 : 500).json({ error: err.message });
     }
   });
 
@@ -1338,7 +1375,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       await grantVehicleMaintainerAccess(steps);
       res.json(await getTemplateWithSteps(id));
     } catch (err: any) {
-      res.status(err.message?.includes("not found") || err.message?.includes("needs at least") || err.message?.includes("Vehicle Maintainer") ? 400 : 500).json({ error: err.message });
+      res.status(err.message?.includes("not found") || err.message?.includes("needs at least") || /^Layer \d+/.test(err.message || "") ? 400 : 500).json({ error: err.message });
     }
   });
 

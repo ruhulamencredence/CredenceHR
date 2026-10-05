@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { ShieldCheck, CheckCircle2, XCircle, AlertCircle, MapPin, ChevronRight, ArrowLeft, X, Package, Paperclip, Car } from 'lucide-react';
+import { ShieldCheck, CheckCircle2, XCircle, AlertCircle, MapPin, ChevronRight, ArrowLeft, X, Package, Paperclip, Car, Wallet } from 'lucide-react';
 import { apiUrl, dedupedFetchJson } from '../lib/api';
 import { Spinner } from './Spinner';
+import { confirmDialog } from '../lib/confirmDialog';
 import { AssetFulfillModal } from './AssetFulfillModal';
 import { AssetRequisitionEditItemsModal } from './AssetRequisitionEditItemsModal';
 import { UserClaimReference, UserClaimItem, ClaimRecord } from '../types';
@@ -47,6 +48,9 @@ interface MyApprovalItem {
   // Asset Requisition on its Template's 'asset_fulfiller' Layer — this
   // approver gets Fulfill & Hand Over instead of Approve/Reject.
   asset_fulfiller_bypass?: boolean;
+  // Conveyance claim on its Template's 'conveyance_disburser' Layer — Approve
+  // here also pays it out (own Bill + voucher no).
+  conveyance_disburser_bypass?: boolean;
   // Requester's Supervisor Layer — may edit the items before approving.
   can_edit_asset_items?: boolean;
 }
@@ -118,6 +122,7 @@ export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ toke
   const [actingId, setActingId] = useState<number | null>(null);
   const [remarksDraft, setRemarksDraft] = useState<Record<number, string>>({});
   const [approvedAmountDraft, setApprovedAmountDraft] = useState<Record<number, string>>({});
+  const [voucherDraft, setVoucherDraft] = useState<Record<number, string>>({});
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [openCategory, setOpenCategory] = useState<MyApprovalItem['source_type'] | null>(null);
   const [viewingRef, setViewingRef] = useState<{ ref: UserClaimReference; item: MyApprovalItem } | null>(null);
@@ -222,12 +227,16 @@ export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ toke
         body: JSON.stringify({
           action,
           remarks: remarksDraft[id] || undefined,
-          approved_amount: action === 'approved' && approvedAmount != null ? approvedAmount : undefined
+          approved_amount: action === 'approved' && approvedAmount != null ? approvedAmount : undefined,
+          voucher_no: action === 'approved' && item.conveyance_disburser_bypass ? voucherDraft[id] || undefined : undefined
         })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `Failed to ${action === 'approved' ? 'approve' : 'reject'} this request`);
-      setMessage({ type: 'success', text: action === 'approved' ? 'Approved.' : 'Rejected.' });
+      setMessage({
+        type: 'success',
+        text: action !== 'approved' ? 'Rejected.' : data.voucher_no ? `Disbursed — voucher ${data.voucher_no}.` : 'Approved.'
+      });
       setRemarksDraft((prev) => ({ ...prev, [id]: '' }));
       setApprovedAmountDraft((prev) => ({ ...prev, [id]: '' }));
       setItems((prev) => prev.filter((i) => !(i.id === id && i.source_type === item.source_type)));
@@ -276,7 +285,7 @@ export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ toke
   // Same Approved Amount validation the full Approve Application page uses —
   // relevant for a 'user_claim' item on ANY Layer; every other item type just
   // approves as-is.
-  const handleApprove = (item: MyApprovalItem) => {
+  const handleApprove = async (item: MyApprovalItem) => {
     if (item.source_type === 'user_claim') {
       const claimAmount = item.source_amount != null ? Number(item.source_amount) : null;
       const draft = approvedAmountDraft[item.id];
@@ -290,6 +299,14 @@ export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ toke
         setMessage({ type: 'error', text: "Approved Amount can't be more than the Claim Amount." });
         return;
       }
+      if (
+        item.conveyance_disburser_bypass &&
+        !(await confirmDialog(`Disburse \u09f3${approvedAmount.toLocaleString('en-BD')} to ${item.requested_by_name || 'this employee'}? The claim is approved and marked paid.`, {
+          title: 'Disburse conveyance',
+          confirmLabel: 'Disburse'
+        }))
+      )
+        return;
       handleAct(item, 'approved', approvedAmount);
     } else {
       handleAct(item, 'approved');
@@ -379,7 +396,9 @@ export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ toke
                     ? 'Ride Request — Assign Vehicle'
                     : cat === 'asset_requisition' && list.every((i) => i.asset_fulfiller_bypass)
                       ? 'Asset Requisition — Fulfill'
-                      : sourceTitle(cat)}
+                      : cat === 'user_claim' && list.every((i) => i.conveyance_disburser_bypass)
+                        ? 'Conveyance — Disburse'
+                        : sourceTitle(cat)}
                 </span>
               </button>
             );
@@ -543,6 +562,20 @@ export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ toke
                           <Package className="w-3.5 h-3.5" /> Edit items (qty / add / delete)
                         </button>
                       )}
+                      {item.conveyance_disburser_bypass && (
+                        <>
+                          <p className="text-[11px] text-slate-500 flex items-center gap-1 mb-2">
+                            <Wallet className="w-3 h-3 text-emerald-600" /> You pay this claim out — Disburse approves it, puts it on its own Bill and records the voucher.
+                          </p>
+                          <input
+                            type="text"
+                            placeholder="Voucher no (blank = automatic)"
+                            value={voucherDraft[item.id] || ''}
+                            onChange={(e) => setVoucherDraft((prev) => ({ ...prev, [item.id]: e.target.value }))}
+                            className="w-full mb-2 text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                          />
+                        </>
+                      )}
                       <input
                         type="text"
                         placeholder="Remarks (optional)"
@@ -565,7 +598,14 @@ export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ toke
                           onClick={() => handleApprove(item)}
                           className="flex-1 text-xs font-semibold px-3 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 transition-colors inline-flex items-center justify-center gap-1"
                         >
-                          {actingId === item.id ? <Spinner size={12} /> : <CheckCircle2 className="w-3.5 h-3.5" />} Approve
+                          {actingId === item.id ? (
+                            <Spinner size={12} />
+                          ) : item.conveyance_disburser_bypass ? (
+                            <Wallet className="w-3.5 h-3.5" />
+                          ) : (
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                          )}{' '}
+                          {item.conveyance_disburser_bypass ? 'Disburse' : 'Approve'}
                         </button>
                       </div>
                     </div>

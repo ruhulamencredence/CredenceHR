@@ -14,7 +14,7 @@ import { registerProfileRoutes } from "./profileRoutes";
 import { registerHolidayRoutes, ensureHolidayCalendarSchema } from "./holidayRoutes";
 import { registerAlertRoutes, ensureAlertsSchema, createAlert } from "./Alerts";
 import { registerUserManagementRoutes } from "./UserManagement";
-import { registerConveyanceBillClaimRoutes } from "./ConveyanceBillClaimRoutes";
+import { registerConveyanceBillClaimRoutes, disburseConveyanceBill } from "./ConveyanceBillClaimRoutes";
 import { registerDepartmentsAndBranchesRoutes } from "./DepartmentsAndBranches";
 import { registerAttendanceRoutes } from "./AttendanceRoutes";
 import { registerApprovalRoutes } from "./ApprovalRoutes";
@@ -1890,7 +1890,7 @@ async function ensureSchemaMigrations() {
     // Template's FINAL Layer whose approver fulfills/hands over the items
     // (typing what was handed over) instead of approving — see PUT
     // /api/assets/requisitions/:id/approve-and-fulfill in AssetManagementRoutes.ts.
-    await dbPool.query(`ALTER TABLE approval_template_steps MODIFY COLUMN approver_type ENUM('employee','admin','vehicle_maintainer','asset_fulfiller') NOT NULL DEFAULT 'employee'`);
+    await dbPool.query(`ALTER TABLE approval_template_steps MODIFY COLUMN approver_type ENUM('employee','admin','vehicle_maintainer','asset_fulfiller','conveyance_disburser') NOT NULL DEFAULT 'employee'`);
   } catch (err: any) {
     console.warn("⚠️ Could not widen approval_template_steps.approver_type to include 'vehicle_maintainer': " + err.message);
   }
@@ -2911,6 +2911,12 @@ async function isVehicleMaintainerStep(request: any): Promise<boolean> {
 async function isAssetFulfillerStep(request: any): Promise<boolean> {
   return (await getCurrentTemplateStepType(request)) === "asset_fulfiller";
 }
+// Conveyance counterpart — a 'conveyance' Template's last Layer set to
+// 'conveyance_disburser': that approver pays the claim out (Bill + voucher)
+// instead of only approving it. See performApprovalAction.
+async function isConveyanceDisburserStep(request: any): Promise<boolean> {
+  return (await getCurrentTemplateStepType(request)) === "conveyance_disburser";
+}
 
 // A small typed error so callers (both the Admin-queue route and the
 // personal-queue route below) can map it to the right HTTP status without
@@ -2937,8 +2943,9 @@ async function performApprovalAction(
   action: "approved" | "rejected",
   remarks: string | null,
   billId: number | null,
-  approvedAmount?: number | null
-): Promise<{ status: string; current_step: number; billInfo: { bill_id: number; bill_item_id: number } | null }> {
+  approvedAmount?: number | null,
+  voucherNo?: string | null
+): Promise<{ status: string; current_step: number; billInfo: { bill_id: number; bill_item_id: number; voucher_no?: string } | null }> {
   const rows = await queryDB("SELECT * FROM approval_requests WHERE id = ?", [requestId]);
   if (rows.length === 0) throw new ApprovalActionError(404, "Approval request not found.");
   const request = rows[0];
@@ -2951,6 +2958,14 @@ async function performApprovalAction(
   if (actorUser.role !== "superadmin" && !isAssignedApprover) {
     throw new ApprovalActionError(403, "This request isn't waiting on you yet.");
   }
+  // The Conveyance Disburser Layer pays out as it approves: the claim gets its
+  // own new Bill (never folded into an existing one) and that Bill is marked
+  // disbursed in the same action.
+  const disburseOnApprove =
+    request.source_type === "user_claim" &&
+    action === "approved" &&
+    Number(request.current_step) >= Number(request.total_steps) &&
+    (await isConveyanceDisburserStep(request));
 
   let actions: any[] = [];
   try {
@@ -3012,11 +3027,14 @@ async function performApprovalAction(
   // the moment it's 'rejected' (at any step). Attendance/Movement Claims are
   // already recorded regardless — this Approval Workflow is purely their
   // review trail — so nothing further happens for those.
-  let billInfo: { bill_id: number; bill_item_id: number } | null = null;
+  let billInfo: { bill_id: number; bill_item_id: number; voucher_no?: string } | null = null;
   if (request.source_type === "user_claim") {
     try {
       if (newStatus === "approved") {
-        billInfo = await finalizeUserClaimApproval(Number(request.source_id), actorUser.id, billId, remarks, approvedAmount);
+        billInfo = await finalizeUserClaimApproval(Number(request.source_id), actorUser.id, disburseOnApprove ? null : billId, remarks, approvedAmount);
+        if (disburseOnApprove) {
+          billInfo.voucher_no = await disburseConveyanceBill(queryDB, createAlert, todayInDhaka, billInfo.bill_id, actorUser.id, voucherNo);
+        }
       } else if (newStatus === "rejected") {
         await rejectUserClaimRecord(Number(request.source_id), actorUser.id, remarks);
       } else if (action === "approved" && approvedAmount != null) {
@@ -5660,6 +5678,7 @@ async function startServer() {
     getCurrentStepApprovers,
     isVehicleMaintainerStep,
     isAssetFulfillerStep,
+    isConveyanceDisburserStep,
     createAlert
   });
 

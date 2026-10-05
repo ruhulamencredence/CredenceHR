@@ -6,6 +6,7 @@ import { ApprovalRequest, ApprovalChainStep, User } from '../types';
 import { apiUrl } from '../lib/api';
 import { formatDate } from '../lib/formatDate';
 import { Spinner } from './Spinner';
+import { confirmDialog } from '../lib/confirmDialog';
 
 interface ApprovalManagerProps {
   token: string;
@@ -67,6 +68,7 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
   // Conveyance Bill (for that same User) to attach it to on Approve. Left blank
   // to auto-create a new Bill, same default POST /api/approvals/:id/act uses.
   const [billChoice, setBillChoice] = useState<Record<number, string>>({});
+  const [voucherDraft, setVoucherDraft] = useState<Record<number, string>>({});
   const [userBillsCache, setUserBillsCache] = useState<Record<number, { id: number; bill_date: string }[]>>({});
   // Approved Amount draft for a 'user_claim' request's LAST step — pre-filled
   // with the full Claim Amount (default = approve as claimed) the first time
@@ -186,19 +188,25 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
     setMessage(null);
     try {
       const bill_id = billChoice[id] ? Number(billChoice[id]) : undefined;
+      // On a Conveyance Disburser Layer the same field holds the voucher no.
+      const disburse = requests.some((r) => r.id === id && r.conveyance_disburser_step);
       const res = await fetch(apiUrl(`/api/approvals/${id}/act`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
           action,
           remarks: remarksDraft[id] || undefined,
-          bill_id,
+          bill_id: disburse ? undefined : bill_id,
+          voucher_no: disburse && action === 'approved' ? voucherDraft[id] || undefined : undefined,
           approved_amount: action === 'approved' && approvedAmount != null ? approvedAmount : undefined
         })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `Failed to ${action === 'approved' ? 'approve' : 'reject'} this request`);
-      setMessage({ type: 'success', text: action === 'approved' ? 'Approved.' : 'Rejected.' });
+      setMessage({
+        type: 'success',
+        text: action !== 'approved' ? 'Rejected.' : data.voucher_no ? `Disbursed — voucher ${data.voucher_no}.` : 'Approved.'
+      });
       setRemarksDraft((prev) => ({ ...prev, [id]: '' }));
       setBillChoice((prev) => ({ ...prev, [id]: '' }));
       setApprovedAmountDraft((prev) => ({ ...prev, [id]: '' }));
@@ -400,13 +408,15 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
                       const isLastStep = Number(r.current_step) === Number(r.total_steps);
                       const editable = isUserClaim && canAct && r.status === 'pending' && isLastStep;
                       const claimAmount = r.source_amount != null ? Number(r.source_amount) : null;
+                      // An earlier Layer may already have cut the amount — start from that.
+                      const startAmount = r.source_approved_amount != null ? Number(r.source_approved_amount) : claimAmount;
                       const fmt = (n: number) => `৳${n.toLocaleString('en-BD', { minimumFractionDigits: 2 })}`;
                       let approvedAmount: number | null = null;
                       if (r.status === 'approved') {
                         approvedAmount = r.source_approved_amount != null ? Number(r.source_approved_amount) : claimAmount;
                       } else if (editable) {
                         const draft = approvedAmountDraft[r.id];
-                        const parsed = Number(draft != null && draft !== '' ? draft : claimAmount);
+                        const parsed = Number(draft != null && draft !== '' ? draft : startAmount);
                         approvedAmount = Number.isFinite(parsed) ? parsed : null;
                       }
                       const remainingAmount = claimAmount != null && approvedAmount != null ? claimAmount - approvedAmount : null;
@@ -422,7 +432,7 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
                                 step="0.01"
                                 min={0}
                                 max={claimAmount ?? undefined}
-                                value={approvedAmountDraft[r.id] ?? (claimAmount != null ? String(claimAmount) : '')}
+                                value={approvedAmountDraft[r.id] ?? (startAmount != null ? String(startAmount) : '')}
                                 onChange={(e) => setApprovedAmountDraft((prev) => ({ ...prev, [r.id]: e.target.value }))}
                                 className="w-28 text-xs px-2 py-1 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
                               />
@@ -462,7 +472,17 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
                     <td className="px-4 py-3">
                       {canAct ? (
                         <div className="flex flex-col items-end gap-1.5">
-                          {r.source_type === 'user_claim' && Number(r.current_step) === Number(r.total_steps) && (
+                          {r.conveyance_disburser_step && (
+                            <input
+                              type="text"
+                              placeholder="Voucher no (auto if blank)"
+                              title="Disburse approves this claim, puts it on its own Bill and records this voucher"
+                              value={voucherDraft[r.id] || ''}
+                              onChange={(e) => setVoucherDraft((prev) => ({ ...prev, [r.id]: e.target.value }))}
+                              className="w-40 text-xs px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                            />
+                          )}
+                          {r.source_type === 'user_claim' && Number(r.current_step) === Number(r.total_steps) && !r.conveyance_disburser_step && (
                             <select
                               value={billChoice[r.id] || ''}
                               onFocus={() => ensureUserBillsLoaded(r.requested_by)}
@@ -496,11 +516,12 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
                             <button
                               type="button"
                               disabled={actingId === r.id}
-                              onClick={() => {
+                              onClick={async () => {
                                 if (r.source_type === 'user_claim' && Number(r.current_step) === Number(r.total_steps)) {
                                   const claimAmount = r.source_amount != null ? Number(r.source_amount) : null;
                                   const draft = approvedAmountDraft[r.id];
-                                  const approvedAmount = Number(draft != null && draft !== '' ? draft : claimAmount);
+                                  const startAmount = r.source_approved_amount != null ? Number(r.source_approved_amount) : claimAmount;
+                                  const approvedAmount = Number(draft != null && draft !== '' ? draft : startAmount);
                                   if (!Number.isFinite(approvedAmount) || approvedAmount <= 0) {
                                     setMessage({ type: 'error', text: 'Approved Amount must be a positive number.' });
                                     return;
@@ -509,6 +530,14 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
                                     setMessage({ type: 'error', text: "Approved Amount can't be more than the Claim Amount." });
                                     return;
                                   }
+                                  if (
+                                    r.conveyance_disburser_step &&
+                                    !(await confirmDialog(`Disburse \u09f3${approvedAmount.toLocaleString('en-BD')} to ${r.requested_by_name || 'this employee'}? The claim is approved and marked paid.`, {
+                                      title: 'Disburse conveyance',
+                                      confirmLabel: 'Disburse'
+                                    }))
+                                  )
+                                    return;
                                   handleAct(r.id, 'approved', approvedAmount);
                                 } else {
                                   handleAct(r.id, 'approved');
@@ -517,7 +546,7 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
                               className="text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 transition-colors flex items-center gap-1"
                             >
                               {actingId === r.id ? <Spinner size={12} /> : null}
-                              Approve
+                              {r.conveyance_disburser_step ? 'Disburse' : 'Approve'}
                             </button>
                           </div>
                         </div>

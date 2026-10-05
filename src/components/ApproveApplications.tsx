@@ -5,9 +5,10 @@
 
 import React, { useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
-import { ArrowLeft, ShieldCheck, Inbox, CheckCircle2, XCircle, RefreshCw, MapPin, X, Package, Paperclip, Car } from 'lucide-react';
+import { ArrowLeft, ShieldCheck, Inbox, CheckCircle2, XCircle, RefreshCw, MapPin, X, Package, Paperclip, Car, Wallet } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
+import { confirmDialog } from '../lib/confirmDialog';
 import { AssetFulfillModal } from './AssetFulfillModal';
 import { AssetRequisitionEditItemsModal } from './AssetRequisitionEditItemsModal';
 import { ModulePath } from './ModulePath';
@@ -72,6 +73,9 @@ interface MyApprovalItem {
   // Asset Requisition on its Template's 'asset_fulfiller' Layer — this
   // approver gets Fulfill & Hand Over instead of Approve/Reject.
   asset_fulfiller_bypass?: boolean;
+  // Conveyance claim on its Template's 'conveyance_disburser' Layer — Approve
+  // here also pays it out (own Bill + voucher no).
+  conveyance_disburser_bypass?: boolean;
   // Requester's Supervisor Layer — may edit the items before approving.
   can_edit_asset_items?: boolean;
   // Only on an 'hr_action' item (HR Operations — Promotion, Increment,
@@ -184,6 +188,7 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
   // draft server-side (see updateUserClaimApprovedAmountDraft) and carry
   // forward as the next Layer's pre-fill.
   const [approvedAmountDraft, setApprovedAmountDraft] = useState<Record<string, string>>({});
+  const [voucherDraft, setVoucherDraft] = useState<Record<string, string>>({});
   // The referenced Movement Claim currently shown on the read-only location
   // map (opened by tapping a claim_refs row below) — same ClaimLocationMap
   // every other Conveyance Bill Claim view (ConveyanceClaimCard, the Admin
@@ -282,12 +287,16 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
         body: JSON.stringify({
           action,
           remarks: remarksDraft[key] || undefined,
-          approved_amount: action === 'approved' && approvedAmount != null ? approvedAmount : undefined
+          approved_amount: action === 'approved' && approvedAmount != null ? approvedAmount : undefined,
+          voucher_no: action === 'approved' && item.conveyance_disburser_bypass ? voucherDraft[key] || undefined : undefined
         })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `Failed to ${action === 'approved' ? 'approve' : 'reject'} this request`);
-      setMessage({ type: 'success', text: action === 'approved' ? 'Approved.' : 'Rejected.' });
+      setMessage({
+        type: 'success',
+        text: action !== 'approved' ? 'Rejected.' : data.voucher_no ? `Disbursed — voucher ${data.voucher_no}.` : 'Approved.'
+      });
       setRemarksDraft((prev) => ({ ...prev, [key]: '' }));
       setApprovedAmountDraft((prev) => ({ ...prev, [key]: '' }));
       setItems((prev) => prev.filter((i) => keyFor(i) !== key));
@@ -339,7 +348,7 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
   // the Admin Panel's Approvals tab uses — relevant for a 'user_claim' item
   // on ANY Layer (Supervisor auto-layer included), not just the last one;
   // every other item just approves as-is.
-  const handleApprove = (item: MyApprovalItem) => {
+  const handleApprove = async (item: MyApprovalItem) => {
     const key = keyFor(item);
     if (item.source_type === 'user_claim') {
       const claimAmount = item.source_amount != null ? Number(item.source_amount) : null;
@@ -354,6 +363,14 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
         setMessage({ type: 'error', text: "Approved Amount can't be more than the Claim Amount." });
         return;
       }
+      if (
+        item.conveyance_disburser_bypass &&
+        !(await confirmDialog(`Disburse \u09f3${approvedAmount.toLocaleString('en-BD')} to ${item.requested_by_name || 'this employee'}? The claim is approved and marked paid.`, {
+          title: 'Disburse conveyance',
+          confirmLabel: 'Disburse'
+        }))
+      )
+        return;
       handleAct(item, 'approved', approvedAmount);
     } else {
       handleAct(item, 'approved');
@@ -489,7 +506,9 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
                               ? 'Ride Request — Assign Vehicle'
                               : item.asset_fulfiller_bypass
                                 ? 'Asset Requisition — Fulfill'
-                                : item.hr_action_details
+                                : item.conveyance_disburser_bypass
+                                  ? 'Conveyance — Disburse'
+                                  : item.hr_action_details
                                   ? `${item.hr_action_details.action_label} — ${item.hr_action_details.employee_name || ''}`
                                   : sourceTitle(item.source_type)}
                           </span>
@@ -642,6 +661,16 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
                             <Package className="w-3.5 h-3.5" /> Edit items
                           </button>
                         )}
+                        {item.conveyance_disburser_bypass && (
+                          <input
+                            type="text"
+                            placeholder="Voucher no (blank = automatic)"
+                            title="Disburse approves this claim, puts it on its own Bill and records this voucher"
+                            value={voucherDraft[key] || ''}
+                            onChange={(e) => setVoucherDraft((prev) => ({ ...prev, [key]: e.target.value }))}
+                            className="min-w-[160px] text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                          />
+                        )}
                         <input
                           type="text"
                           placeholder="Remarks (optional)"
@@ -664,8 +693,14 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
                             onClick={() => handleApprove(item)}
                             className="flex items-center gap-1 text-xs px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold disabled:opacity-50 transition-colors"
                           >
-                            {actingKey === key ? <Spinner size={14} /> : <CheckCircle2 className="w-3.5 h-3.5" />}
-                            Approve
+                            {actingKey === key ? (
+                              <Spinner size={14} />
+                            ) : item.conveyance_disburser_bypass ? (
+                              <Wallet className="w-3.5 h-3.5" />
+                            ) : (
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                            )}
+                            {item.conveyance_disburser_bypass ? 'Disburse' : 'Approve'}
                           </button>
                         </div>
                       </div>
