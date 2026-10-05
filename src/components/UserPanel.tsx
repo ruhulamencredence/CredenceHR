@@ -942,6 +942,22 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // in its usual spot on first paint instead of only appearing once this
   // fetch completes.
   const [projectsLoaded, setProjectsLoaded] = useState(false);
+  // Remote Attendance card's own Projects (GET /api/attendance/my-projects) —
+  // the pinned check-in Project, even without any Budget / Jobs / MPR access.
+  const [attendanceProjects, setAttendanceProjects] = useState<Project[]>([]);
+  const [attendanceProjectsLoaded, setAttendanceProjectsLoaded] = useState(false);
+  useEffect(() => {
+    if (!user.can_use_attendance) return;
+    let cancelled = false;
+    fetch(apiUrl('/api/attendance/my-projects'), { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((rows) => !cancelled && setAttendanceProjects(Array.isArray(rows) ? rows : []))
+      .catch(() => {})
+      .finally(() => !cancelled && setAttendanceProjectsLoaded(true));
+    return () => {
+      cancelled = true;
+    };
+  }, [token, user.can_use_attendance, user.attendance_project_id]);
   const [mprNumbers, setMprNumbers] = useState<MprNumber[]>([]);
   const [entries, setEntries] = useState<Entry[]>([]);
   // System-wide "which Job is this MPR No already used under" lookup — kept separate
@@ -2981,15 +2997,6 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // edited, if any) instead of being re-derived twice per render as before.
   const editMprOptions = filteredEditMprOptions();
 
-  // Attendance-only Project restriction: when an Admin/Superadmin has pinned
-  // this account to one Project (Admin Panel -> Users -> "Attend. Project"),
-  // the Attendance card below only ever offers that single Project — not the
-  // full `projects` list Budget/Jobs/MPR uses everywhere else on this page,
-  // which stays completely untouched by this. Falls back to the full list
-  // when nothing's pinned (today's behavior).
-  const attendanceProjects = user.attendance_project_id
-    ? projects.filter((p) => p.id === user.attendance_project_id)
-    : projects;
 
 
   // Mobile Dashboard quick access tiles, in order, each only when this
@@ -3034,7 +3041,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
 
         {!!user.can_use_attendance && (
           <div className="relative z-10 px-2 -mt-6 pb-7">
-            <AttendanceCard token={token} projects={attendanceProjects} loading={!projectsLoaded} />
+            <AttendanceCard token={token} projects={attendanceProjects} loading={!attendanceProjectsLoaded} />
           </div>
         )}
 
@@ -3101,7 +3108,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
         }`}
       >
         {!!user.can_use_attendance && (
-          <AttendanceCard token={token} projects={attendanceProjects} loading={!projectsLoaded} />
+          <AttendanceCard token={token} projects={attendanceProjects} loading={!attendanceProjectsLoaded} />
         )}
         {!!user.can_view_leave_summary && (
           <LeaveSummaryCard token={token} onOpen={() => goToMobileSection('leave')} />
