@@ -2414,7 +2414,7 @@ const PERMISSION_LAYER_KEYS = ["read", "edit_add", "entry_upload", "delete_trash
 const USERS_LAYER_KEYS = [...PERMISSION_LAYER_KEYS, "block_account"] as const;
 // Which modules currently enforce PERMISSION_LAYER_KEYS — mirrors
 // PERMISSION_LAYER_MODULES in src/types.ts. Rolled out module by module.
-const PERMISSION_LAYER_MODULES = ["departments", "projects", "approvals", "users", "reports", "tracking", "payroll", "mobile_bill"] as const;
+const PERMISSION_LAYER_MODULES = ["departments", "projects", "approvals", "users", "reports", "tracking", "payroll", "mobile_bill", "office_attendance"] as const;
 // Employee Tracking's layers: "read" = the live map, history and status
 // cards; "stay_report" = the Stay Report (TrackingStayReport.ts). Both are
 // reading, so an account with Employee Tracking and no saved layers has both.
@@ -2431,6 +2431,10 @@ const PAYROLL_LAYER_KEYS = ["read", "salary_month", "salary_hold"] as const;
 // Reports -> Limit changes (who changed which SIM's limit, when). Both are
 // reading, so an account with Mobile Bill and no saved layers has both.
 const MOBILE_BILL_LAYER_KEYS = ["read", "limit_history"] as const;
+// Office Attendance: "read" = the module as it was; "link_pins" = Unlinked
+// PINs — tie a device PIN that has punches to an Employee (edits the
+// Employee record, so never part of the no-saved-layers default).
+const OFFICE_ATTENDANCE_LAYER_KEYS = ["read", "link_pins"] as const;
 // PEPM Reports uses four of them: Read Only, Edit, Delete/Trash, Permanent Delete
 // — plus its own "Budget Submission Status" (the second report on that page),
 // which, like Permanent Delete, is never part of the no-saved-rows default:
@@ -2460,6 +2464,7 @@ const MODULE_LAYER_KEY_SETS: Record<string, readonly string[]> = {
   tracking: TRACKING_LAYER_KEYS,
   payroll: PAYROLL_LAYER_KEYS,
   mobile_bill: MOBILE_BILL_LAYER_KEYS,
+  office_attendance: OFFICE_ATTENDANCE_LAYER_KEYS,
   leave_manage: LEAVE_MANAGE_LAYER_KEYS,
 };
 
@@ -4101,7 +4106,7 @@ async function startServer() {
   // on for a module is never a silent regression; a Superadmin only actually
   // restricts anything once they explicitly save a narrower set in the
   // Module Access modal.
-  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "stay_report" | "salary_month" | "salary_hold" | "block_account" | "limit_history") =>
+  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "stay_report" | "salary_month" | "salary_hold" | "block_account" | "limit_history" | "link_pins") =>
     async (req: any, res: any, next: any) => {
       if (!req.user) return res.status(401).json({ error: "Access token required" });
       if (req.user.role === "superadmin") return next();
@@ -4117,7 +4122,7 @@ async function startServer() {
           ? grantedLayers
           : moduleKey === "tracking"
             ? [...TRACKING_LAYER_KEYS]
-            : moduleKey === "payroll"
+            : moduleKey === "payroll" || moduleKey === "office_attendance"
               ? ["read"]
               : moduleKey === "mobile_bill"
                 ? [...MOBILE_BILL_LAYER_KEYS]
@@ -4145,7 +4150,7 @@ async function startServer() {
     const defaults: readonly string[] =
       moduleKey === "tracking"
         ? TRACKING_LAYER_KEYS
-        : moduleKey === "payroll"
+        : moduleKey === "payroll" || moduleKey === "office_attendance"
           ? ["read"]
           : moduleKey === "mobile_bill"
             ? MOBILE_BILL_LAYER_KEYS
@@ -5064,6 +5069,84 @@ async function startServer() {
   // Office Attendance report — one row per employee per day: first punch of the
   // day = Check In, last punch = Check Out, plus the raw punch count so an
   // Admin can spot a likely missed punch (an odd count).
+  // Office Attendance -> Unlinked PINs: device PINs that have punches but no
+  // Employee carries them (all_employees.zk_device_pin), so those punches
+  // reach nobody's attendance — the usual reason someone who punched in still
+  // reads Absent. Needs Office Attendance's "Link Device PINs" layer.
+  app.get("/api/office-attendance/unlinked-pins", authenticateToken, requireAdmin, requireModuleLayer("office_attendance", "link_pins"), async (req: any, res) => {
+    try {
+      const days = Math.min(365, Math.max(1, Number(req.query.days) || 30));
+      const since = new Date(Date.now() - days * 86400000).toLocaleDateString("en-CA", { timeZone: "Asia/Dhaka" });
+      const [pins, devices, employees]: any[] = await Promise.all([
+        queryDB(
+          `SELECT device_user_pin AS pin, device_id, COUNT(*) AS punches, MIN(punch_time) AS first_punch, MAX(punch_time) AS last_punch,
+                  COUNT(DISTINCT DATE(punch_time)) AS days
+           FROM zk_attendance_logs WHERE DATE(punch_time) >= ? GROUP BY device_user_pin, device_id`,
+          [since]
+        ),
+        queryDB("SELECT id, name FROM zk_devices"),
+        queryDB("SELECT id, employee_id, name, designation, department, user_id, zk_device_pin, is_active FROM all_employees")
+      ]);
+      const linked = new Set<string>(employees.filter((e: any) => e.zk_device_pin).map((e: any) => String(e.zk_device_pin)));
+      const deviceName = new Map<number, string>(devices.map((d: any) => [Number(d.id), d.name]));
+      const byPin = new Map<string, any>();
+      for (const p of pins) {
+        const pin = String(p.pin);
+        if (linked.has(pin)) continue;
+        const cur = byPin.get(pin) || { pin, punches: 0, days: 0, first_punch: p.first_punch, last_punch: p.last_punch, devices: [] as string[] };
+        cur.punches += Number(p.punches);
+        cur.days = Math.max(cur.days, Number(p.days));
+        if (String(p.first_punch) < String(cur.first_punch)) cur.first_punch = p.first_punch;
+        if (String(p.last_punch) > String(cur.last_punch)) cur.last_punch = p.last_punch;
+        const dn = deviceName.get(Number(p.device_id));
+        if (dn && !cur.devices.includes(dn)) cur.devices.push(dn);
+        byPin.set(pin, cur);
+      }
+      // A likely match: an Employee with no PIN whose Employee ID is the PIN
+      // (or ends with it, e.g. PIN 14 for 241221014).
+      const noPin = employees.filter((e: any) => !e.zk_device_pin && Number(e.is_active ?? 1) === 1);
+      const unlinked = Array.from(byPin.values())
+        .map((u: any) => {
+          const exact = noPin.find((e: any) => String(e.employee_id || "") === u.pin);
+          const tail = exact ? null : noPin.filter((e: any) => String(e.employee_id || "").endsWith(u.pin));
+          const suggestion = exact || (tail && tail.length === 1 ? tail[0] : null);
+          return { ...u, suggestion: suggestion ? { id: Number(suggestion.id), name: suggestion.name, employee_code: suggestion.employee_id } : null };
+        })
+        .sort((a: any, b: any) => String(b.last_punch).localeCompare(String(a.last_punch)));
+      res.json({
+        days,
+        unlinked,
+        employees_without_pin: noPin
+          .map((e: any) => ({ id: Number(e.id), name: e.name, employee_code: e.employee_id, designation: e.designation, department: e.department, has_login: !!e.user_id }))
+          .sort((a: any, b: any) => String(a.name).localeCompare(String(b.name)))
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Body: { pin, employee_id } — gives that Employee the device PIN, so its
+  // punches (past and future) count as their Office Attendance.
+  app.post("/api/office-attendance/link-pin", authenticateToken, requireAdmin, requireModuleLayer("office_attendance", "link_pins"), async (req: any, res) => {
+    try {
+      const pin = String(req.body?.pin ?? "").trim().slice(0, 20);
+      const employeeId = Number(req.body?.employee_id);
+      if (!pin || !employeeId) return res.status(400).json({ error: "Pick the employee for this PIN." });
+      const emp: any[] = await queryDB("SELECT id, name, zk_device_pin FROM all_employees WHERE id = ?", [employeeId]);
+      if (!emp.length) return res.status(404).json({ error: "Employee not found." });
+      if (emp[0].zk_device_pin && String(emp[0].zk_device_pin) !== pin) {
+        return res.status(400).json({ error: `${emp[0].name} already has PIN ${emp[0].zk_device_pin}. Change it in Employees first.` });
+      }
+      const taken: any[] = await queryDB("SELECT id, name FROM all_employees WHERE zk_device_pin = ?", [pin]);
+      const other = taken.find((t: any) => Number(t.id) !== employeeId);
+      if (other) return res.status(400).json({ error: `PIN ${pin} already belongs to ${other.name}.` });
+      await queryDB("UPDATE all_employees SET zk_device_pin = ? WHERE id = ?", [pin, employeeId]);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/office-attendance", authenticateToken, requireAdmin, requireModule("office_attendance"), async (req: any, res) => {
     try {
       const dateFrom = req.query.from ? String(req.query.from) : todayInDhaka();

@@ -10,6 +10,7 @@ import { apiUrl } from '../lib/api';
 import { formatDate, todayDateOnlyString } from '../lib/formatDate';
 import { Spinner } from './Spinner';
 import { confirmDialog } from '../lib/confirmDialog';
+import { UnlinkedPinsModal, UnlinkedPin, PinlessEmployee } from './UnlinkedPinsModal';
 
 interface OfficeAttendancePanelProps {
   token: string;
@@ -51,6 +52,19 @@ export const OfficeAttendancePanel: React.FC<OfficeAttendancePanelProps> = ({ to
   const [fromDate, setFromDate] = useState(todayDateOnlyString());
   const [toDate, setToDate] = useState(todayDateOnlyString());
   const [search, setSearch] = useState('');
+  // Unlinked PINs — only for accounts with the "Link Device PINs" layer
+  // (the API answers 403 otherwise, and the button stays hidden).
+  const [pinData, setPinData] = useState<{ unlinked: UnlinkedPin[]; employees_without_pin: PinlessEmployee[]; days: number } | null>(null);
+  const [showPins, setShowPins] = useState(false);
+  const loadPins = useCallback(() => {
+    fetch(apiUrl('/api/office-attendance/unlinked-pins?days=30'), { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setPinData(d))
+      .catch(() => setPinData(null));
+  }, [token]);
+  useEffect(() => {
+    loadPins();
+  }, [loadPins]);
 
   // Per-column filters shown in the table header row — separate from the
   // global name/department/designation search box above, and combined with
@@ -345,6 +359,18 @@ export const OfficeAttendancePanel: React.FC<OfficeAttendancePanelProps> = ({ to
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {pinData && (
+            <button
+              onClick={() => setShowPins(true)}
+              className={`flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg border ${
+                pinData.unlinked.length ? 'border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100' : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+              }`}
+              title="Device PINs with punches that no Employee has"
+            >
+              <AlertTriangle className="w-3.5 h-3.5" /> Unlinked PINs
+              {pinData.unlinked.length > 0 && <span className="px-1.5 rounded-full bg-amber-500 text-white text-[11px] font-bold">{pinData.unlinked.length}</span>}
+            </button>
+          )}
           <button
             onClick={() => setShowDeviceModal(true)}
             className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
@@ -582,6 +608,18 @@ export const OfficeAttendancePanel: React.FC<OfficeAttendancePanelProps> = ({ to
           </tbody>
         </table>
       </div>
+
+      {showPins && pinData && (
+        <UnlinkedPinsModal
+          token={token}
+          data={pinData}
+          onClose={() => setShowPins(false)}
+          onLinked={() => {
+            loadPins();
+            fetchRows();
+          }}
+        />
+      )}
 
       {/* Manage Devices modal — the ZKTeco device registry (zk_devices),
           full CRUD from the interface instead of a manual SQL INSERT
