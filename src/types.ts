@@ -468,6 +468,9 @@ export interface ApprovalRequest {
   // been approved — the Approved Amount the approver recorded at decision time
   // (may be less than source_amount, a partial approval). NULL while still
   // pending, rejected, or for anything approved before this feature existed.
+  // Pending user_claim on its template's Conveyance Disburser Layer —
+  // Approve there also pays it out (own Bill + voucher no).
+  conveyance_disburser_step?: boolean;
   source_approved_amount?: number | null;
   current_approver_id?: number | null;
   current_approver_name?: string | null;

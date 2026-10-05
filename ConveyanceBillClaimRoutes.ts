@@ -82,6 +82,58 @@ interface ConveyanceBillClaimRouteDeps {
   getConveyanceClaimDeptScope: (userId: number) => Promise<string[] | null>;
 }
 
+// Marks a Bill paid out: voucher no + who/when, and tells the claimant. Used
+// by Conveyance Disbursement and by a Conveyance Template's "Conveyance
+// Disburser" Layer (server.ts performApprovalAction). Errors carry statusCode.
+export async function disburseConveyanceBill(
+  queryDB: (sql: string, params?: any[]) => Promise<any>,
+  createAlert: (queryDB: (sql: string, params?: any[]) => Promise<any>, alert: any) => Promise<any>,
+  todayInDhaka: () => string,
+  id: number,
+  userId: number,
+  voucherNo?: unknown
+): Promise<string> {
+  const fail = (statusCode: number, message: string) => Object.assign(new Error(message), { statusCode });
+  const bills = await queryDB("SELECT * FROM conveyance_bills WHERE id = ?", [id]);
+  if (bills.length === 0) throw fail(404, "Bill not found");
+  const bill = bills[0];
+  if (!!Number(bill.is_disbursed)) throw fail(400, "This Bill has already been disbursed.");
+
+  const itemCountRows = await queryDB("SELECT COUNT(*) AS cnt FROM conveyance_bill_items WHERE bill_id = ?", [id]);
+  if (Number(itemCountRows[0]?.cnt || 0) === 0) {
+    throw fail(400, "This Bill has no line items yet — add at least one before disbursing.");
+  }
+
+  // Auto-suggested if the client didn't send one (or sent blank) — same
+  // "PV-<billId>-<YYYYMMDD>" shape the frontend pre-fills, computed here too
+  // so a bulk-disburse call (which sends no voucher_no per bill) still gets
+  // one, and a single manual disburse can still override it.
+  let voucher_no = typeof voucherNo === "string" ? voucherNo.trim().slice(0, 100) : "";
+  if (!voucher_no) voucher_no = `PV-${id}-${todayInDhaka().replace(/-/g, "")}`;
+
+  await queryDB("UPDATE conveyance_bills SET is_disbursed = 1, voucher_no = ?, disbursed_at = NOW(), disbursed_by = ? WHERE id = ?", [
+    voucher_no,
+    userId,
+    id
+  ]);
+
+  try {
+    const totalRows = await queryDB("SELECT COALESCE(SUM(amount), 0) AS total FROM conveyance_bill_items WHERE bill_id = ?", [id]);
+    const total = Number(totalRows[0]?.total || 0);
+    await createAlert(queryDB, {
+      userId: bill.user_id,
+      type: "conveyance_disbursed",
+      title: "Conveyance Bill Disbursed",
+      message: `Your conveyance bill CB-${id} of ৳${total.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} has been disbursed (Voucher ${voucher_no}).`,
+      relatedType: "conveyance_bill",
+      relatedId: id
+    });
+  } catch (alertErr: any) {
+    console.warn("⚠️ Could not notify the claimant for disbursed Bill #" + id + ": " + alertErr.message);
+  }
+  return voucher_no;
+}
+
 export function registerConveyanceBillClaimRoutes(app: Express, deps: ConveyanceBillClaimRouteDeps) {
   const {
     authenticateToken,
@@ -258,55 +310,10 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
 
   app.post("/api/conveyance-bills/:id/disburse", authenticateToken, requireAdmin, requireModule("disbursement"), async (req: any, res) => {
     try {
-      const { id } = req.params;
-      const bills = await queryDB(
-        `SELECT b.*, u.name AS user_name FROM conveyance_bills b LEFT JOIN users u ON u.id = b.user_id WHERE b.id = ?`,
-        [id]
-      );
-      if (bills.length === 0) return res.status(404).json({ error: "Bill not found" });
-      const bill = bills[0];
-      if (!!Number(bill.is_disbursed)) {
-        return res.status(400).json({ error: "This Bill has already been disbursed." });
-      }
-
-      const itemCountRows = await queryDB("SELECT COUNT(*) AS cnt FROM conveyance_bill_items WHERE bill_id = ?", [id]);
-      if (Number(itemCountRows[0]?.cnt || 0) === 0) {
-        return res.status(400).json({ error: "This Bill has no line items yet — add at least one before disbursing." });
-      }
-
-      // Auto-suggested if the client didn't send one (or sent blank) — same
-      // "PV-<billId>-<YYYYMMDD>" shape the frontend pre-fills, computed here too
-      // so a bulk-disburse call (which sends no voucher_no per bill) still gets
-      // one, and a single manual disburse can still override it.
-      let voucher_no = typeof req.body?.voucher_no === "string" ? req.body.voucher_no.trim().slice(0, 100) : "";
-      if (!voucher_no) {
-        const today = todayInDhaka().replace(/-/g, "");
-        voucher_no = `PV-${id}-${today}`;
-      }
-
-      await queryDB(
-        "UPDATE conveyance_bills SET is_disbursed = 1, voucher_no = ?, disbursed_at = NOW(), disbursed_by = ? WHERE id = ?",
-        [voucher_no, req.user.id, id]
-      );
-
-      try {
-        const totalRows = await queryDB("SELECT COALESCE(SUM(amount), 0) AS total FROM conveyance_bill_items WHERE bill_id = ?", [id]);
-        const total = Number(totalRows[0]?.total || 0);
-        await createAlert(queryDB, {
-          userId: bill.user_id,
-          type: "conveyance_disbursed",
-          title: "Conveyance Bill Disbursed",
-          message: `Your conveyance bill CB-${id} of \u09f3${total.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} has been disbursed (Voucher ${voucher_no}).`,
-          relatedType: "conveyance_bill",
-          relatedId: Number(id)
-        });
-      } catch (alertErr: any) {
-        console.warn("⚠️ Could not notify the claimant for disbursed Bill #" + id + ": " + alertErr.message);
-      }
-
+      const voucher_no = await disburseConveyanceBill(queryDB, createAlert, todayInDhaka, Number(req.params.id), req.user.id, req.body?.voucher_no);
       res.json({ success: true, voucher_no });
     } catch (err: any) {
-      res.status(500).json({ error: err.message || "Failed to disburse bill" });
+      res.status(Number.isInteger(err?.statusCode) ? err.statusCode : 500).json({ error: err.message || "Failed to disburse bill" });
     }
   });
 
