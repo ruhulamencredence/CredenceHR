@@ -4,7 +4,8 @@
  */
 
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
-import { CalendarDays, ChevronLeft, ChevronRight, UserRound } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { CalendarDays, ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { HolidayEntry } from '../types';
 import { apiUrl, dedupedFetchJson } from '../lib/api';
 import {
@@ -39,36 +40,70 @@ const MONTH_LABELS = [
   'July', 'August', 'September', 'October', 'November', 'December'
 ];
 
-// GET /api/calendar-attendance — one person's own Delay / Extreme Delay /
-// Leave per day (see PayrollRoutes.ts for who may open whose calendar).
-interface DayStatus {
-  late?: 'delay' | 'extreme';
-  leave?: { type: string; status: 'approved' | 'pending' };
+// GET /api/calendar-attendance — who was late or on Leave each day. Holds
+// just the viewer unless they're an Admin / Monthly Attendance Report holder
+// (their Department) or the Superadmin (everyone); see PayrollRoutes.ts.
+interface DayMark {
+  user_id: number;
+  kind: 'delay' | 'extreme' | 'leave';
+  leave_type?: string;
+  status?: 'approved' | 'pending';
 }
 interface CalendarPerson {
   user_id: number;
   name: string;
-  employee_code?: string | null;
   department: string | null;
 }
 
-// Short label + colours for a day's own status; Extreme Delay outranks a
-// plain Delay, and a Leave day is never also late.
-function statusBadge(s: DayStatus | undefined): { label: string; title: string; dot: string; text: string } | null {
-  if (!s) return null;
-  if (s.leave) {
-    const pending = s.leave.status === 'pending';
+type MarkFilter = 'all' | 'delay' | 'extreme' | 'leave' | `type:${string}`;
+const matchesFilter = (m: DayMark, f: MarkFilter) =>
+  f === 'all' || m.kind === f || (f.startsWith('type:') && m.kind === 'leave' && m.leave_type === f.slice(5));
+
+function markStyle(m: DayMark): { label: string; detail: string; dot: string; ring: string; text: string } {
+  if (m.kind === 'leave') {
+    const pending = m.status === 'pending';
     return {
-      label: pending ? 'Leave?' : 'Leave',
-      title: `${s.leave.type} leave (${pending ? 'pending approval' : 'approved'})`,
-      dot: pending ? 'bg-white ring-2 ring-inset ring-violet-500' : 'bg-violet-500',
-      text: 'text-violet-700'
+      label: pending ? 'Pending' : 'Leave',
+      detail: `${m.leave_type || ''} leave · ${pending ? 'Pending' : 'Approved'}`.trim(),
+      dot: pending ? 'bg-white ring-2 ring-inset ring-emerald-500' : 'bg-emerald-500',
+      ring: pending ? 'ring-emerald-300' : 'ring-emerald-500',
+      text: 'text-emerald-700'
     };
   }
-  if (s.late === 'extreme') return { label: 'Extreme', title: 'Extreme Delay', dot: 'bg-rose-500', text: 'text-rose-600' };
-  if (s.late === 'delay') return { label: 'Delay', title: 'Delay', dot: 'bg-orange-400', text: 'text-orange-600' };
-  return null;
+  if (m.kind === 'extreme') return { label: 'Extreme', detail: 'Extreme Delay', dot: 'bg-rose-500', ring: 'ring-rose-500', text: 'text-rose-600' };
+  return { label: 'Delay', detail: 'Delay', dot: 'bg-orange-400', ring: 'ring-orange-400', text: 'text-orange-600' };
 }
+
+// Profile photo (GET /api/profile/photo/:userId), initials until it loads or
+// when there's none. Cached per user for the page's lifetime.
+const photoCache = new Map<number, Promise<string | null>>();
+const PersonPhoto: React.FC<{ userId: number; name: string; token: string; className: string }> = ({ userId, name, token, className }) => {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (!photoCache.has(userId)) {
+      photoCache.set(
+        userId,
+        fetch(apiUrl(`/api/profile/photo/${userId}`), { headers: { Authorization: `Bearer ${token}` } })
+          .then((r) => (r.ok ? r.blob().then((b) => URL.createObjectURL(b)) : null))
+          .catch(() => null)
+      );
+    }
+    photoCache.get(userId)!.then((u) => {
+      if (!cancelled) setUrl(u);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [userId, token]);
+  if (url) return <img src={url} alt={name} className={`${className} rounded-full object-cover`} />;
+  const initials = name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
+  return (
+    <span className={`${className} rounded-full bg-gradient-to-br from-violet-400 to-blue-500 text-white font-bold flex items-center justify-center`}>
+      <span className="text-[0.55em] leading-none">{initials}</span>
+    </span>
+  );
+};
 
 const pad2 = (n: number) => String(n).padStart(2, '0');
 const toDateStr = (y: number, m: number, d: number) => `${y}-${pad2(m + 1)}-${pad2(d)}`;
@@ -116,8 +151,8 @@ function buildGrid(year: number, month: number): GridCell[] {
 // signed-in account, so this needs no extra permission of its own.
 // On top of the Weekend/Holiday dates each day carries the viewer's own
 // Delay / Extreme Delay / Leave. An Admin or a Monthly Attendance Report
-// holder can switch to anyone in their own Department, the Superadmin to
-// anyone; the server enforces the same rule (/api/calendar-attendance).
+// holder sees their whole Department's (faces on each day, tap a day for the
+// list), the Superadmin everyone's — scoped by /api/calendar-attendance.
 export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ token, size = 'compact' }) => {
   const large = size === 'large';
   const [entries, setEntries] = useState<HolidayEntry[]>([]);
@@ -175,33 +210,78 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
 
   const gridCells = useMemo(() => buildGrid(calYear, calMonth), [calYear, calMonth]);
 
-  // Whose attendance the grid shows. The list holds just the viewer unless
-  // they're an Admin / Monthly Attendance Report holder (their Department)
-  // or the Superadmin (everyone) — the picker only appears with 2+ people.
+  // Who was late / on Leave on each day of the visible grid.
   const [people, setPeople] = useState<CalendarPerson[]>([]);
-  const [viewUserId, setViewUserId] = useState<number | null>(null);
-  const [statusByDate, setStatusByDate] = useState<Record<string, DayStatus>>({});
-  useEffect(() => {
-    dedupedFetchJson(apiUrl('/api/calendar-attendance/people'), token)
-      .then((r: any) => setPeople(Array.isArray(r?.people) ? r.people : []))
-      .catch(() => {});
-  }, [token]);
+  const [marksByDate, setMarksByDate] = useState<Record<string, DayMark[]>>({});
+  const [filter, setFilter] = useState<MarkFilter>('all');
+  const [openDay, setOpenDay] = useState<{ date: string; rect: DOMRect } | null>(null);
   const gridFrom = gridCells[0].dateStr;
   const gridTo = gridCells[gridCells.length - 1].dateStr;
   useEffect(() => {
     let cancelled = false;
-    const who = viewUserId ? `&user_id=${viewUserId}` : '';
-    dedupedFetchJson(apiUrl(`/api/calendar-attendance?from=${gridFrom}&to=${gridTo}${who}`), token)
-      .then((r: any) => {
-        if (!cancelled) setStatusByDate(r?.days || {});
-      })
-      .catch(() => {
-        if (!cancelled) setStatusByDate({});
-      });
+    dedupedFetchJson(apiUrl(`/api/calendar-attendance?from=${gridFrom}&to=${gridTo}`), token).then((r: any) => {
+      if (cancelled) return;
+      setPeople(Array.isArray(r?.people) ? r.people : []);
+      setMarksByDate(r?.days || {});
+    });
     return () => {
       cancelled = true;
     };
-  }, [token, gridFrom, gridTo, viewUserId]);
+  }, [token, gridFrom, gridTo]);
+  const personById = useMemo(() => new Map(people.map((p) => [p.user_id, p])), [people]);
+  // Just the viewer's own calendar: a word under the date reads better than
+  // their own face on every marked day.
+  const solo = people.length <= 1;
+  const leaveTypes = useMemo(() => {
+    const set = new Set<string>();
+    for (const list of Object.values(marksByDate)) for (const m of list) if (m.kind === 'leave' && m.leave_type) set.add(m.leave_type);
+    return Array.from(set).sort();
+  }, [marksByDate]);
+  const marksFor = (dateStr: string) => (marksByDate[dateStr] || []).filter((m) => matchesFilter(m, filter));
+
+  // Avatars (team) or a status word (own calendar) for one day cell.
+  const renderMarks = (dateStr: string, isToday: boolean) => {
+    const marks = marksFor(dateStr);
+    if (marks.length === 0) return null;
+    if (solo) {
+      const st = markStyle(marks[0]);
+      return (
+        <span
+          className={`inline-flex items-center gap-1 font-bold uppercase tracking-wide ${large ? 'text-[10px]' : 'text-[7px]'} ${
+            isToday && large ? 'text-white' : st.text
+          }`}
+        >
+          {large && <span className={`w-1.5 h-1.5 rounded-full ${st.dot}`} />}
+          {st.label}
+        </span>
+      );
+    }
+    const max = large ? 3 : 2;
+    return (
+      <span className="flex items-center -space-x-1.5">
+        {marks.slice(0, max).map((m) => (
+          <span key={m.user_id} className={`rounded-full ring-2 ${markStyle(m).ring} bg-white`}>
+            <PersonPhoto
+              userId={m.user_id}
+              name={personById.get(m.user_id)?.name || '?'}
+              token={token}
+              className={large ? 'w-6 h-6' : 'w-4 h-4'}
+            />
+          </span>
+        ))}
+        {marks.length > max && (
+          <span
+            className={`relative rounded-full bg-slate-700 text-white font-bold flex items-center justify-center ring-2 ring-white ${
+              large ? 'w-6 h-6 text-[9px]' : 'w-4 h-4 text-[7px]'
+            }`}
+          >
+            +{marks.length - max}
+          </span>
+        )}
+      </span>
+    );
+  };
+  const openDayMarks = openDay ? marksFor(openDay.date) : [];
 
   const goPrevMonth = () => {
     if (calMonth === 0) {
@@ -302,7 +382,7 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
         </div>
       </div>
 
-      <div className={`flex justify-center ${large ? 'px-6 pt-3' : 'px-4 pt-2.5 pb-2.5 border-b border-white/40'}`}>
+      <div className={`flex items-center justify-between gap-2 ${large ? 'px-6 pt-3' : 'px-4 pt-2.5 pb-2.5 border-b border-white/40'}`}>
         <div className="inline-flex rounded-full bg-slate-100/80 p-0.5" role="tablist" aria-label="Calendar">
           {CALENDAR_SYSTEMS.map((c) => (
             <button
@@ -319,32 +399,25 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
             </button>
           ))}
         </div>
+        <select
+          value={filter}
+          onChange={(e) => setFilter(e.target.value as MarkFilter)}
+          className={`rounded-lg border font-medium text-slate-600 outline-none focus:ring-2 focus:ring-blue-200 ${
+            large ? 'border-slate-200 bg-slate-50 px-3 py-1.5 text-xs' : 'border-white/60 bg-white/60 px-2.5 py-1 text-[11px]'
+          }`}
+          aria-label="Show"
+        >
+          <option value="all">All</option>
+          <option value="delay">Delay</option>
+          <option value="extreme">Extreme Delay</option>
+          <option value="leave">Leave</option>
+          {leaveTypes.map((t) => (
+            <option key={t} value={`type:${t}`}>
+              {t} leave
+            </option>
+          ))}
+        </select>
       </div>
-
-      {people.length > 1 && (
-        <div className={large ? 'px-6 pt-3' : 'px-4 py-2 border-b border-white/40'}>
-          <label className="flex items-center gap-2">
-            <UserRound className={`shrink-0 text-slate-400 ${large ? 'w-4 h-4' : 'w-3.5 h-3.5'}`} />
-            <select
-              value={viewUserId ?? ''}
-              onChange={(e) => setViewUserId(e.target.value ? Number(e.target.value) : null)}
-              className={`w-full min-w-0 rounded-lg border font-medium text-slate-700 outline-none focus:ring-2 focus:ring-blue-200 ${
-                large ? 'border-slate-200 bg-white px-3 py-1.5 text-sm' : 'border-white/60 bg-white/60 px-2.5 py-1.5 text-xs'
-              }`}
-              aria-label="Show attendance of"
-            >
-              <option value="">My attendance</option>
-              {people.map((p) => (
-                <option key={p.user_id} value={p.user_id}>
-                  {p.name}
-                  {p.employee_code ? ` (${p.employee_code})` : ''}
-                  {p.department ? ` · ${p.department}` : ''}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-      )}
 
       {large ? (
         <div className="px-5 pt-4">
@@ -360,14 +433,15 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
               const entry = entryByDate.get(cell.dateStr);
               const isToday = cell.dateStr === todayStr;
               const dates = cellDates(cell);
-              const badge = cell.inCurrentMonth ? statusBadge(statusByDate[cell.dateStr]) : null;
+              const hasMarks = cell.inCurrentMonth && marksFor(cell.dateStr).length > 0;
               // Bigger square cells with room for a day-type label under the
               // number, same look HolidayCalendarPanel's own Admin grid uses.
               return (
                 <div
                   key={cell.dateStr}
-                  title={[entry && `${entry.title} (${dayTypeLabel(entry.day_type)})`, badge?.title].filter(Boolean).join(' · ') || undefined}
-                  className={`relative h-16 flex flex-col items-center justify-center gap-0.5 rounded-xl text-sm ${
+                  title={entry ? `${entry.title} (${dayTypeLabel(entry.day_type)})` : undefined}
+                  onClick={hasMarks ? (e) => setOpenDay({ date: cell.dateStr, rect: e.currentTarget.getBoundingClientRect() }) : undefined}
+                  className={`${hasMarks ? 'cursor-pointer' : ''} relative h-16 flex flex-col items-center justify-center gap-0.5 rounded-xl text-sm ${
                     !cell.inCurrentMonth
                       ? 'text-slate-200'
                       : isToday
@@ -386,16 +460,7 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
                       {dayTypeLabel(entry.day_type)}
                     </span>
                   )}
-                  {badge && (
-                    <span
-                      className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide ${
-                        isToday ? 'text-white' : badge.text
-                      }`}
-                    >
-                      <span className={`w-1.5 h-1.5 rounded-full ${badge.dot}`} />
-                      {badge.label}
-                    </span>
-                  )}
+                  {cell.inCurrentMonth && renderMarks(cell.dateStr, isToday)}
                 </div>
               );
             })}
@@ -423,12 +488,13 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
               const entry = entryByDate.get(cell.dateStr);
               const isToday = cell.dateStr === todayStr;
               const dates = cellDates(cell);
-              const badge = cell.inCurrentMonth ? statusBadge(statusByDate[cell.dateStr]) : null;
+              const hasMarks = cell.inCurrentMonth && marksFor(cell.dateStr).length > 0;
               return (
                 <div
                   key={cell.dateStr}
-                  title={[entry && `${entry.title} (${dayTypeLabel(entry.day_type)})`, badge?.title].filter(Boolean).join(' · ') || undefined}
-                  className={`relative ${dates.sub ? 'h-14' : 'h-12'} flex flex-col items-center justify-center gap-0.5 border-b border-r border-white/40 text-[11px] transition-colors ${
+                  title={entry ? `${entry.title} (${dayTypeLabel(entry.day_type)})` : undefined}
+                  onClick={hasMarks ? (e) => setOpenDay({ date: cell.dateStr, rect: e.currentTarget.getBoundingClientRect() }) : undefined}
+                  className={`${hasMarks ? 'cursor-pointer' : ''} relative ${hasMarks && !solo ? 'h-[60px]' : dates.sub ? 'h-14' : 'h-12'} flex flex-col items-center justify-center gap-0.5 border-b border-r border-white/40 text-[11px] transition-colors ${
                     !cell.inCurrentMonth
                       ? 'text-slate-300'
                       : entry
@@ -451,12 +517,7 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
                       {dayTypeLabel(entry.day_type)}
                     </span>
                   )}
-                  {badge && !entry && (
-                    <span className={`text-[7px] font-bold uppercase tracking-wide truncate max-w-[90%] ${badge.text}`}>
-                      {badge.label}
-                    </span>
-                  )}
-                  {badge && <span className={`absolute top-1 right-1 w-1.5 h-1.5 rounded-full ${badge.dot}`} />}
+                  {cell.inCurrentMonth && renderMarks(cell.dateStr, isToday)}
                 </div>
               );
             })}
@@ -484,13 +545,64 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
           <span className="w-2.5 h-2.5 rounded-full bg-rose-500" /> Extreme
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="w-2.5 h-2.5 rounded-full bg-violet-500" /> Leave
+          <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" /> Approved
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="w-2.5 h-2.5 rounded-full bg-white ring-2 ring-inset ring-violet-500" /> Pending
+          <span className="w-2.5 h-2.5 rounded-full bg-white ring-2 ring-inset ring-emerald-500" /> Pending
         </span>
         {loading && <span className="ml-auto text-slate-300">Loading…</span>}
       </div>
+
+      {/* A day's people — liquid-glass card anchored under the tapped day. */}
+      {openDay &&
+        openDayMarks.length > 0 &&
+        createPortal(
+          <>
+            <div className="fixed inset-0 z-[90]" onClick={() => setOpenDay(null)} onWheel={() => setOpenDay(null)} onTouchMove={() => setOpenDay(null)} />
+            <div
+              className="fixed z-[91] w-[260px]"
+              style={{
+                left: Math.max(12, Math.min(openDay.rect.left + openDay.rect.width / 2 - 130, window.innerWidth - 272)),
+                ...(openDay.rect.bottom + 260 > window.innerHeight
+                  ? { bottom: window.innerHeight - openDay.rect.top + 6 }
+                  : { top: openDay.rect.bottom + 6 })
+              }}
+            >
+              <div className="liquid-glass liquid-glass-in rounded-[32px] p-3">
+                <div className="flex items-center justify-between px-2 pb-2">
+                  <span className="text-xs font-bold text-slate-700">
+                    {Number(openDay.date.slice(8))} {MONTH_LABELS[Number(openDay.date.slice(5, 7)) - 1]}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setOpenDay(null)}
+                    className="liquid-glass-chip w-7 h-7 rounded-full flex items-center justify-center text-slate-500"
+                    aria-label="Close"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                <div className="liquid-glass-inset rounded-2xl p-1.5 max-h-[240px] overflow-y-auto">
+                  {openDayMarks.map((m) => {
+                    const st = markStyle(m);
+                    const name = personById.get(m.user_id)?.name || 'Unknown';
+                    return (
+                      <div key={m.user_id} className="flex items-center gap-2.5 px-2 py-1.5">
+                        <span className={`w-2 h-2 rounded-full shrink-0 ${st.dot}`} />
+                        <PersonPhoto userId={m.user_id} name={name} token={token} className="w-7 h-7 shrink-0" />
+                        <div className="min-w-0">
+                          <div className="text-sm font-semibold text-slate-800 truncate">{name}</div>
+                          <div className={`text-[11px] font-medium ${st.text}`}>{st.detail}</div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </>,
+          document.body
+        )}
     </div>
   );
 };
