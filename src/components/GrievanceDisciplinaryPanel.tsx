@@ -3,6 +3,7 @@ import { Gavel, Plus, X, AlertTriangle, CheckCircle2, MessageSquareWarning, Shie
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
 import { confirmDialog } from '../lib/confirmDialog';
+import { GRIEVANCE_TAB_EVENT, GRIEVANCE_TAB_KEY, GrievanceAdminTab } from '../lib/grievanceNav';
 
 interface GrievanceDisciplinaryPanelProps {
   token: string;
@@ -126,7 +127,31 @@ const ACTION_TYPE_LABEL: Record<string, string> = {
 export const GrievanceDisciplinaryPanel: React.FC<GrievanceDisciplinaryPanelProps> = ({ token }) => {
   const authHeaders = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
 
-  const [tab, setTab] = useState<'grievances' | 'disciplinary'>('grievances');
+  // An HR-side alert (e.g. "Disciplinary Feedback Received") asks for a tab
+  // through grievanceNav — on mount via sessionStorage, or by event when the
+  // panel is already open.
+  const [tab, setTab] = useState<GrievanceAdminTab>(() => {
+    try {
+      const asked = sessionStorage.getItem(GRIEVANCE_TAB_KEY);
+      sessionStorage.removeItem(GRIEVANCE_TAB_KEY);
+      return asked === 'disciplinary' ? 'disciplinary' : 'grievances';
+    } catch {
+      return 'grievances';
+    }
+  });
+  useEffect(() => {
+    const onTab = (e: Event) => {
+      const t = (e as CustomEvent).detail;
+      if (t === 'grievances' || t === 'disciplinary') setTab(t);
+      try {
+        sessionStorage.removeItem(GRIEVANCE_TAB_KEY);
+      } catch {
+        // storage unavailable
+      }
+    };
+    window.addEventListener(GRIEVANCE_TAB_EVENT, onTab);
+    return () => window.removeEventListener(GRIEVANCE_TAB_EVENT, onTab);
+  }, []);
   const [grievances, setGrievances] = useState<Grievance[]>([]);
   const [actions, setActions] = useState<DisciplinaryAction[]>([]);
   const [users, setUsers] = useState<{ id: number; name: string }[]>([]);

@@ -9,6 +9,7 @@ import { BellRing, Check, ChevronLeft, Trash2 } from 'lucide-react';
 import { Alert } from '../types';
 import { MyAssetTarget } from '../lib/quickAccess';
 import { apiUrl } from '../lib/api';
+import { isHrSideCaseAlert, openGrievanceAdmin } from '../lib/grievanceNav';
 import { formatDate } from '../lib/formatDate';
 import { ModulePath } from './ModulePath';
 import { Spinner } from './Spinner';
@@ -31,8 +32,11 @@ interface AlertsPageProps {
   onOpenMyAsset?: (target: MyAssetTarget) => void;
   // The employee's own resignation updates -> My Resignation.
   onOpenResignation?: () => void;
-  // Grievance / Disciplinary alerts open Self Service -> Grievance & Disciplinary.
+  // Grievance / Disciplinary alerts open Self Service -> Grievance & Disciplinary;
+  // the HR-side ones open the Admin Panel module instead when this account
+  // can see it (canOpenGrievanceAdmin).
   onOpenMyCases?: () => void;
+  canOpenGrievanceAdmin?: boolean;
   // HR Operations: a letter issued to this account -> My Letters; HR-side
   // updates (a letter acknowledged/requested, an action decided) -> the
   // HR Operations module.
@@ -46,7 +50,7 @@ interface AlertsPageProps {
 // every other self-service section (Employee Directory, My Leave, ...).
 // Reachable from GlobalSidebar's "Alerts" item and AlertsBell's dropdown
 // footer "View all" link.
-export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLeaveApplication, onOpenApproveApplications, onOpenVehicleManagement, onOpenConveyanceClaim, onOpenMyAsset, onOpenResignation, onOpenMyCases, onOpenMyLetters, onOpenHrOperations }) => {
+export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLeaveApplication, onOpenApproveApplications, onOpenVehicleManagement, onOpenConveyanceClaim, onOpenMyAsset, onOpenResignation, onOpenMyCases, canOpenGrievanceAdmin, onOpenMyLetters, onOpenHrOperations }) => {
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [loading, setLoading] = useState(true);
   const isNativeApp = Capacitor.isNativePlatform();
@@ -113,7 +117,9 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
         : alert.type === 'resignation'
         ? onOpenResignation
         : alert.type === 'grievance' || alert.type === 'disciplinary'
-        ? onOpenMyCases
+        ? canOpenGrievanceAdmin && isHrSideCaseAlert(alert.title)
+          ? () => openGrievanceAdmin(alert.type === 'disciplinary' ? 'disciplinary' : 'grievances')
+          : onOpenMyCases
         : alert.type === 'hr_action'
         ? /Awaiting Your Approval/.test(alert.title)
           ? onOpenApproveApplications
