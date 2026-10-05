@@ -438,7 +438,7 @@ export interface ApprovalChainStep {
 // which layer it's waiting on right now while status is 'pending'.
 export interface ApprovalRequest {
   id: number;
-  source_type: 'attendance' | 'claim' | 'user_claim' | 'attendance_correction' | 'leave_application' | 'asset_requisition' | 'vehicle_requisition' | 'mobile_limit_request';
+  source_type: 'attendance' | 'claim' | 'user_claim' | 'attendance_correction' | 'leave_application' | 'asset_requisition' | 'vehicle_requisition' | 'mobile_limit_request' | 'advance_request';
   event_type: 'check_in' | 'check_out' | 'submit';
   source_id: number;
   requested_by: number;
@@ -645,6 +645,8 @@ export interface User {
   can_view_mobile_bill?: boolean;
   // Self Service -> My Letters & Service Record -> Service Book (own Employee 360).
   can_view_service_book?: boolean;
+  // Self Service -> My Loan / Advance (LoanRequestRoutes.ts).
+  can_view_loan_request?: boolean;
   can_view_leave_application?: boolean;
   can_view_my_leave?: boolean;
 }
@@ -1571,7 +1573,12 @@ export type AlertType =
   // Mobile Bill. 'mobile_limit_approval' = a request waiting on this account
   // -> Approve Application.
   | 'mobile_bill'
-  | 'mobile_limit_approval';
+  | 'mobile_limit_approval'
+  // Loan / Advance (LoanRequestRoutes.ts): 'loan_request' = my request
+  // decided -> My Loan / Advance, or (Payroll) one to decide -> Payroll ->
+  // Loans & Advances; 'loan_approval' = waiting on me -> Approve Application.
+  | 'loan_request'
+  | 'loan_approval';
 
 export interface Alert {
   id: number;

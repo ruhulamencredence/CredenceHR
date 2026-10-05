@@ -41,6 +41,7 @@ import { registerGrievanceRoutes, ensureGrievanceSchema } from "./GrievanceRoute
 import { registerTaskRoutes, ensureTaskSchema } from "./TaskRoutes";
 import { registerTrackingStayReportRoutes, wallMinutes } from "./TrackingStayReport";
 import { registerMobileBillRoutes, ensureMobileBillSchema, finalizeMobileLimitRequest, rejectMobileLimitRequest } from "./MobileBillRoutes";
+import { registerLoanRequestRoutes, ensureLoanRequestSchema, finalizeAdvanceRequest, rejectAdvanceRequest, recommendAdvanceRequest } from "./LoanRequestRoutes";
 import { registerHROperationsRoutes, ensureHROperationsSchema, applyDueHrActions } from "./HROperationsRoutes";
 import { registerEmployee360Routes, ensureEmployee360Schema } from "./HrOps360Routes";
 import { registerHrReportsRoutes, ensureHrReportsSchema } from "./HrOpsReportsRoutes";
@@ -242,6 +243,7 @@ async function ensureSchemaMigrations() {
   // table + schema owned by PayrollRoutes.ts, only the call site lives here,
   // same as every other self-healing migration in this function.
   await ensurePayrollSchema(dbPool);
+  await ensureLoanRequestSchema(dbPool);
   // Payroll -> Allowance & Adjustment (PayrollItemsRoutes.ts) — after
   // ensurePayrollSchema, since its tables point at payrolls.
   await ensurePayrollItemsSchema(dbPool);
@@ -810,6 +812,13 @@ async function ensureSchemaMigrations() {
     await dbPool.query(`ALTER TABLE users ADD COLUMN can_view_tasks TINYINT(1) NOT NULL DEFAULT 0`);
   } catch (err: any) {
     if (err.code !== 'ER_DUP_FIELDNAME') console.warn("⚠️ Could not add users.can_view_tasks column: " + err.message);
+  }
+  try {
+    // Self Service -> My Loan / Advance (LoanRequestRoutes.ts) — OFF until
+    // turned on per account in Module Access.
+    await dbPool.query(`ALTER TABLE users ADD COLUMN can_view_loan_request TINYINT(1) NOT NULL DEFAULT 0`);
+  } catch (err: any) {
+    if (err.code !== 'ER_DUP_FIELDNAME') console.warn("⚠️ Could not add users.can_view_loan_request column: " + err.message);
   }
   try {
     // Self Service -> My Letters & Service Record -> "Service Book" (the
@@ -1704,7 +1713,7 @@ async function ensureSchemaMigrations() {
     // Attendance Correction / Asset Requisition requests routed through this same Approval Workflow engine.
     await dbPool.query(`
       ALTER TABLE approval_requests
-        MODIFY COLUMN source_type ENUM('attendance','claim','user_claim','attendance_correction','leave_application','asset_requisition','vehicle_requisition','mobile_limit_request') NOT NULL,
+        MODIFY COLUMN source_type ENUM('attendance','claim','user_claim','attendance_correction','leave_application','asset_requisition','vehicle_requisition','mobile_limit_request','advance_request') NOT NULL,
         MODIFY COLUMN event_type ENUM('check_in','check_out','submit') NOT NULL
     `);
     // GET /api/my-approvals (PendingApprovalsCard — hit on every Dashboard
@@ -1926,6 +1935,13 @@ async function ensureSchemaMigrations() {
     await dbPool.query(`ALTER TABLE employee_template_assignments MODIFY COLUMN request_type ENUM('conveyance','leave','timesheet','asset','vehicle','mobile') NOT NULL`);
   } catch (err: any) {
     console.warn("⚠️ Could not widen request_type ENUM to include 'mobile': " + err.message);
+  }
+  // 'loan' — Self Service loan / salary advance requests (LoanRequestRoutes.ts).
+  try {
+    await dbPool.query(`ALTER TABLE approval_templates MODIFY COLUMN request_type ENUM('conveyance','leave','timesheet','asset','vehicle','mobile','loan') NOT NULL`);
+    await dbPool.query(`ALTER TABLE employee_template_assignments MODIFY COLUMN request_type ENUM('conveyance','leave','timesheet','asset','vehicle','mobile','loan') NOT NULL`);
+  } catch (err: any) {
+    console.warn("⚠️ Could not widen request_type ENUM to include 'loan': " + err.message);
   }
   // Timesheet -> click any date's row to manually fix that day's In/Out Time
   // (typically a day with no attendance at all, but any day can be corrected).
@@ -2672,7 +2688,7 @@ async function createApprovalRequest(
 // Employee-specific assignment first (must point at an ACTIVE template — a
 // deactivated assignment is treated the same as no assignment at all, not an
 // error), else that request_type's active default, else null.
-async function resolveApprovalTemplate(employeeUserId: number, requestType: "conveyance" | "leave" | "timesheet" | "asset" | "vehicle" | "mobile"): Promise<any | null> {
+async function resolveApprovalTemplate(employeeUserId: number, requestType: "conveyance" | "leave" | "timesheet" | "asset" | "vehicle" | "mobile" | "loan"): Promise<any | null> {
   try {
     const assigned = await queryDB(
       `SELECT t.* FROM employee_template_assignments eta
@@ -2785,8 +2801,8 @@ async function resolveSupervisorApprover(employeeUserId: number): Promise<number
 // Employee's own Direct Supervisor (employee_supervisors) when set and
 // usable, otherwise the Department Supervisor as a fallback.
 async function createTemplateApprovalRequest(
-  requestType: "conveyance" | "leave" | "timesheet" | "asset" | "vehicle" | "mobile",
-  sourceType: "user_claim" | "attendance_correction" | "leave_application" | "asset_requisition" | "vehicle_requisition" | "mobile_limit_request",
+  requestType: "conveyance" | "leave" | "timesheet" | "asset" | "vehicle" | "mobile" | "loan",
+  sourceType: "user_claim" | "attendance_correction" | "leave_application" | "asset_requisition" | "vehicle_requisition" | "mobile_limit_request" | "advance_request",
   sourceId: number,
   requestedBy: number,
   // Vehicle Requisition Flowchart v2.0's "জরুরি/HR Direct" initiator path —
@@ -3076,6 +3092,19 @@ async function performApprovalAction(
       }
     } catch (finalizeErr: any) {
       throw new ApprovalActionError(400, finalizeErr.message || "Approved, but could not change this SIM's limit.");
+    }
+  } else if (request.source_type === "advance_request") {
+    // With a Template the chain's final Approve lends the money; with only a
+    // Supervisor it's a recommendation and Payroll decides (LoanRequestRoutes.ts).
+    try {
+      if (newStatus === "approved") {
+        if (request.template_id) await finalizeAdvanceRequest(queryDB, createAlert, Number(request.source_id), actorUser.id, remarks);
+        else await recommendAdvanceRequest(queryDB, createAlert, getAdminModules, Number(request.source_id), actorUser.name || "The approver");
+      } else if (newStatus === "rejected") {
+        await rejectAdvanceRequest(queryDB, createAlert, Number(request.source_id), actorUser.id, remarks);
+      }
+    } catch (finalizeErr: any) {
+      throw new ApprovalActionError(400, finalizeErr.message || "Approved, but could not create this loan.");
     }
   }
 
@@ -4499,6 +4528,7 @@ async function startServer() {
           can_view_tasks: user.role === "superadmin" ? true : !!Number(user.can_view_tasks),
           can_view_mobile_bill: user.role === "superadmin" ? true : !!Number(user.can_view_mobile_bill),
           can_view_service_book: user.role === "superadmin" ? true : !!Number(user.can_view_service_book),
+          can_view_loan_request: user.role === "superadmin" ? true : !!Number(user.can_view_loan_request),
           can_view_leave_application: user.role === "superadmin" ? true : !!Number(user.can_view_leave_application),
           can_view_my_leave: user.role === "superadmin" ? true : !!Number(user.can_view_my_leave),
           // Superadmin-granted, only ever meaningful for role='admin': can this
@@ -4522,7 +4552,7 @@ async function startServer() {
   app.get("/api/auth/me", authenticateToken, async (req: any, res) => {
     try {
       const users = await queryDB(
-        "SELECT id, name, email, role, created_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, can_use_calls, can_view_tasks, can_view_mobile_bill, can_view_service_book, can_grant_module_access, attendance_project_id FROM users WHERE id = ?",
+        "SELECT id, name, email, role, created_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, can_use_calls, can_view_tasks, can_view_mobile_bill, can_view_service_book, can_view_loan_request, can_grant_module_access, attendance_project_id FROM users WHERE id = ?",
         [req.user.id]
       );
       if (users.length === 0) return res.status(404).json({ error: "User not found" });
@@ -4548,6 +4578,7 @@ async function startServer() {
         can_view_tasks: u.role === "superadmin" ? true : !!Number(u.can_view_tasks),
         can_view_mobile_bill: u.role === "superadmin" ? true : !!Number(u.can_view_mobile_bill),
         can_view_service_book: u.role === "superadmin" ? true : !!Number(u.can_view_service_book),
+        can_view_loan_request: u.role === "superadmin" ? true : !!Number(u.can_view_loan_request),
         can_view_leave_application: u.role === "superadmin" ? true : !!Number(u.can_view_leave_application),
         can_view_my_leave: u.role === "superadmin" ? true : !!Number(u.can_view_my_leave),
         can_grant_module_access: u.role === "admin" ? !!Number(u.can_grant_module_access) : false,
@@ -5508,6 +5539,9 @@ async function startServer() {
   // Employee Tracking -> Stay Report (time at each place, day by day).
   registerTrackingStayReportRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, queryDB });
   registerMobileBillRoutes(app, { authenticateToken, queryDB, getAdminModules, createAlert, createTemplateApprovalRequest, getCurrentStepApprovers, hasModuleLayer });
+  // Self Service loan / salary advance requests — ride the Dynamic Approval
+  // Engine (request_type 'loan'); Payroll creates the loan.
+  registerLoanRequestRoutes(app, { authenticateToken, queryDB, getAdminModules, createAlert, createTemplateApprovalRequest, getCurrentStepApprovers });
   registerHRAnalyticsRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB });
   registerDocumentVaultRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB, getAdminModules });
   registerHROperationsRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB, getAdminModules, todayInDhaka, createAlert });

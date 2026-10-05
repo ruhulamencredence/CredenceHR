@@ -43,6 +43,7 @@ import { AssetManagement } from './components/AssetManagement';
 import { MyCases } from './components/MyCases';
 import { MyTasks } from './components/MyTasks';
 import { MyMobileSim } from './components/MyMobileSim';
+import { MyLoans } from './components/MyLoans';
 import { MyLetters } from './components/MyLetters';
 import { TeamAttendance } from './components/TeamAttendance';
 import { VehicleManagement } from './components/VehicleManagement';
@@ -106,7 +107,7 @@ export default function App() {
   // this account was actually looking at, instead of resetting to the
   // Admin/User Panel default every time.
   const selfServiceViewStorageKey = user ? `mpr_self_service_view_${user.id}` : null;
-  const [selfServiceView, setSelfServiceView] = useState<'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | null>(() => {
+  const [selfServiceView, setSelfServiceView] = useState<'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | null>(() => {
     try {
       const saved = selfServiceViewStorageKey ? localStorage.getItem(selfServiceViewStorageKey) : null;
       if (saved === 'leaveApplication' || saved === 'leaveManagement' || saved === 'timesheet' || saved === 'approveApplications' || saved === 'employeeDirectory' || saved === 'resignation') {
@@ -721,6 +722,33 @@ export default function App() {
     window.addEventListener('credence:open-mobile-bill', onOpen);
     return () => window.removeEventListener('credence:open-mobile-bill', onOpen);
   }, [user]);
+  // A Loan / Advance alert (LoanRequestRoutes.ts): one for Payroll to decide
+  // opens Payroll -> Loans & Advances -> Approvals; anything else opens My
+  // Loan / Advance.
+  useEffect(() => {
+    const onOpen = (e: Event) => {
+      if (!user) return;
+      const title = String((e as CustomEvent).detail?.title || '');
+      const isPayroll = user.role === 'superadmin' || (user.module_permissions || []).includes('payroll');
+      setShowProfilePage(false);
+      setShowChat(false);
+      setShowAlertsPage(false);
+      if (isPayroll && /^(New Loan \/ Advance Request|Loan \/ Advance Request Ready for Decision)$/.test(title)) {
+        try {
+          sessionStorage.setItem('payroll_tab', 'loans');
+          sessionStorage.setItem('loans_subtab', 'approvals');
+        } catch {
+          // storage unavailable
+        }
+        setSelfServiceView(null);
+        setTimeout(() => setSelfServiceView('payroll'), 0);
+      } else if (user.role === 'superadmin' || !!user.can_view_loan_request) {
+        setSelfServiceView('myLoans');
+      }
+    };
+    window.addEventListener('credence:open-loan', onOpen);
+    return () => window.removeEventListener('credence:open-loan', onOpen);
+  }, [user]);
 
   if (!token || !user) {
     return (
@@ -875,7 +903,7 @@ export default function App() {
       setViewMode('admin');
       setAdminNavRequest({ target, ts: Date.now() });
     },
-    onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim') => {
+    onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans') => {
       setShowProfilePage(false);
           setShowChat(false);
           setShowAlertsPage(false);
@@ -1186,6 +1214,8 @@ export default function App() {
           <MyTasks token={token} user={user} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'myMobileSim' ? (
           <MyMobileSim token={token} onBack={() => setSelfServiceView(null)} />
+        ) : selfServiceView === 'myLoans' ? (
+          <MyLoans token={token} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'myLetters' ? (
           <MyLetters token={token} onBack={() => setSelfServiceView(null)} canServiceBook={!!user && (user.role === 'superadmin' || !!user.can_view_service_book)} />
         ) : selfServiceView === 'teamAttendance' ? (

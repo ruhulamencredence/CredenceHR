@@ -19,7 +19,8 @@ const REQUEST_TYPES: { key: ApprovalRequestType; label: string }[] = [
   { key: 'timesheet', label: 'Timesheet (Attendance Correction)' },
   { key: 'asset', label: 'Asset Requisition' },
   { key: 'vehicle', label: 'Vehicle Requisition' },
-  { key: 'mobile', label: 'Mobile Limit Request' }
+  { key: 'mobile', label: 'Mobile Limit Request' },
+  { key: 'loan', label: 'Loan / Advance Request' }
 ];
 
 // Per-Request-Type Layer names — shown instead of the generic "Layer N" so

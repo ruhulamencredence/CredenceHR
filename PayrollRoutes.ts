@@ -38,6 +38,8 @@
 // (Admin Panel -> Users -> Module Access), exactly like every other module.
 
 import type { Express } from "express";
+import { createAlert } from "./Alerts";
+import { finalizeAdvanceRequest, rejectAdvanceRequest } from "./LoanRequestRoutes";
 import { getHolidayMap, getHolidayMapsByGroup, getEmployeeBranchTypeMap, getEmployeeBranchTypeByEmployeeId, HolidayAppliesTo } from "./holidayRoutes";
 import { loadSiteEntries } from "./SiteAttendanceRoutes";
 import { activeCompanyId } from "./companyContext";
@@ -1295,41 +1297,8 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
   // remark. The existing "New Loan / Advance" flow is unchanged — an Admin
   // can still log one directly with no request step, exactly as before.
 
-  app.post("/api/user-advance-requests", authenticateToken, async (req: any, res) => {
-    try {
-      const empRows = await queryDB("SELECT id FROM all_employees WHERE user_id = ?", [req.user.id]);
-      if (empRows.length === 0) {
-        return res.status(400).json({ error: "Your account isn't linked to an Employee Directory record, so a loan/advance request can't be submitted." });
-      }
-      const employeeId = empRows[0].id;
-      const total = num(req.body?.total_amount);
-      const installment = num(req.body?.monthly_installment);
-      const reason = typeof req.body?.reason === "string" ? req.body.reason.trim().slice(0, 255) : null;
-      if (total <= 0) return res.status(400).json({ error: "Total Amount must be a positive number." });
-      if (installment <= 0) return res.status(400).json({ error: "Monthly Installment must be a positive number." });
-      if (installment > total) return res.status(400).json({ error: "Monthly Installment can't be more than the Total Amount." });
-
-      const result = await queryDB(
-        `INSERT INTO advance_requests (employee_id, total_amount, monthly_installment, reason, requested_by)
-         VALUES (?, ?, ?, ?, ?)`,
-        [employeeId, total, installment, reason, req.user.id]
-      );
-      res.json({ success: true, id: result.insertId });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || "Failed to submit request." });
-    }
-  });
-
-  app.get("/api/user-advance-requests/mine", authenticateToken, async (req: any, res) => {
-    try {
-      const empRows = await queryDB("SELECT id FROM all_employees WHERE user_id = ?", [req.user.id]);
-      if (empRows.length === 0) return res.json([]);
-      const rows = await queryDB("SELECT * FROM advance_requests WHERE employee_id = ? ORDER BY created_at DESC", [empRows[0].id]);
-      res.json(rows);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
+  // The employee's own side (apply, follow, cancel) is LoanRequestRoutes.ts
+  // (/api/my-loans, behind users.can_view_loan_request).
 
   app.get("/api/payroll/advance-requests", authenticateToken, requireAdmin, requireModule("payroll"), async (req: any, res) => {
     try {
@@ -1355,37 +1324,26 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
     }
   });
 
+  // A Payroll holder's decision. A request still inside its approval
+  // chain (chain_status 'in_progress') is decided there first.
   app.post("/api/payroll/advance-requests/:id/decision", authenticateToken, requireAdmin, requireModule("payroll"), async (req: any, res) => {
     try {
       const rows = await queryDB("SELECT * FROM advance_requests WHERE id = ?", [req.params.id]);
       if (rows.length === 0) return res.status(404).json({ error: "Request not found." });
       const request = rows[0];
       if (request.status !== "pending") return res.status(400).json({ error: "This request has already been decided." });
-
+      if (request.chain_status === "in_progress") {
+        return res.status(400).json({ error: "This request is still with its approvers (Approve Applications) — it comes here once they approve it." });
+      }
       const action = req.body?.action;
       const remarks = typeof req.body?.remarks === "string" ? req.body.remarks.trim().slice(0, 255) : null;
-
       if (action === "reject") {
-        await queryDB(
-          "UPDATE advance_requests SET status = 'rejected', decided_by = ?, decision_remarks = ?, decided_at = CURRENT_TIMESTAMP WHERE id = ?",
-          [req.user.id, remarks, req.params.id]
-        );
+        await rejectAdvanceRequest(queryDB, createAlert, Number(request.id), req.user.id, remarks);
         return res.json({ success: true, status: "rejected" });
       }
       if (action !== "approve") return res.status(400).json({ error: "action must be 'approve' or 'reject'." });
-
-      const total = Number(request.total_amount);
-      const installment = Number(request.monthly_installment);
-      const result = await queryDB(
-        `INSERT INTO employee_advances (employee_id, total_amount, monthly_installment, reason, created_by)
-         VALUES (?, ?, ?, ?, ?)`,
-        [request.employee_id, total, installment, request.reason, req.user.id]
-      );
-      await queryDB(
-        "UPDATE advance_requests SET status = 'approved', decided_by = ?, decision_remarks = ?, decided_at = CURRENT_TIMESTAMP, advance_id = ? WHERE id = ?",
-        [req.user.id, remarks, result.insertId, req.params.id]
-      );
-      res.json({ success: true, status: "approved", advance_id: result.insertId });
+      const made = await finalizeAdvanceRequest(queryDB, createAlert, Number(request.id), req.user.id, remarks);
+      res.json({ success: true, status: "approved", advance_id: made.advance_id });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Failed to record the decision." });
     }

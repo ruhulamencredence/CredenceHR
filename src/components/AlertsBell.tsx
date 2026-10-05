@@ -163,7 +163,7 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
     const target =
       alert.type === 'leave_application'
         ? onOpenLeaveApplication
-        : alert.type === 'vehicle_approval' || alert.type === 'leave_approval' || alert.type === 'conveyance_approval' || alert.type === 'asset_approval' || alert.type === 'exit_clearance' || alert.type === 'mobile_limit_approval'
+        : alert.type === 'vehicle_approval' || alert.type === 'leave_approval' || alert.type === 'conveyance_approval' || alert.type === 'asset_approval' || alert.type === 'exit_clearance' || alert.type === 'mobile_limit_approval' || alert.type === 'loan_approval'
         ? onOpenApproveApplications
         : alert.type === 'vehicle_requisition'
         ? onOpenVehicleManagement
@@ -227,6 +227,9 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
             }
             window.dispatchEvent(new CustomEvent('credence:open-task', { detail: { title: alert.title } }));
           }
+        : alert.type === 'loan_request'
+        ? // My Loan / Advance, or Payroll -> Loans & Advances for one to decide (App.tsx).
+          () => window.dispatchEvent(new CustomEvent('credence:open-loan', { detail: { title: alert.title } }))
         : alert.type === 'mobile_bill'
         ? // My Mobile SIM, or HR's Mobile Bill for a request with no approval chain (App.tsx).
           () => window.dispatchEvent(new CustomEvent('credence:open-mobile-bill', { detail: { title: alert.title } }))

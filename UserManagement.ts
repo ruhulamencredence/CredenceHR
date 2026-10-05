@@ -350,7 +350,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
   app.get("/api/users", authenticateToken, requireAdmin, requireModule("users"), async (req: any, res) => {
     try {
       const users = await queryDB(
-        "SELECT id, name, email, username, role, created_at, last_login_lat, last_login_lng, last_login_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, can_use_calls, can_view_group_dashboard, can_view_tasks, can_view_mobile_bill, can_view_service_book, can_grant_module_access, attendance_project_id, is_blocked, blocked_reason, blocked_at FROM users ORDER BY created_at DESC"
+        "SELECT id, name, email, username, role, created_at, last_login_lat, last_login_lng, last_login_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, can_use_calls, can_view_group_dashboard, can_view_tasks, can_view_mobile_bill, can_view_service_book, can_view_loan_request, can_grant_module_access, attendance_project_id, is_blocked, blocked_reason, blocked_at FROM users ORDER BY created_at DESC"
       );
       // Attach each Admin's module_permissions so the Superadmin's "Module Access"
       // UI has them without a separate round trip per row. Only role='admin' rows
@@ -415,6 +415,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
         can_view_tasks: u.role === "superadmin" ? true : !!Number(u.can_view_tasks),
         can_view_mobile_bill: u.role === "superadmin" ? true : !!Number(u.can_view_mobile_bill),
         can_view_service_book: u.role === "superadmin" ? true : !!Number(u.can_view_service_book),
+        can_view_loan_request: u.role === "superadmin" ? true : !!Number(u.can_view_loan_request),
         can_view_leave_application: u.role === "superadmin" ? true : !!Number(u.can_view_leave_application),
         can_view_my_leave: u.role === "superadmin" ? true : !!Number(u.can_view_my_leave),
         can_grant_module_access: u.role === "admin" ? !!Number(u.can_grant_module_access) : false,
@@ -1069,6 +1070,23 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
       }
       await queryDB("UPDATE users SET can_view_service_book = ? WHERE id = ?", [enabled ? 1 : 0, id]);
       res.json({ success: true, can_view_service_book: enabled });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Self Service -> My Loan / Advance (LoanRequestRoutes.ts). OFF by default.
+  app.put("/api/users/:id/loan-request-access", authenticateToken, requireModuleGrantAccess, requireUserTargetUnlessSuperadmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const enabled = !!req.body?.can_view_loan_request;
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "Loan / Advance requests only apply to Admin and User accounts." });
+      }
+      await queryDB("UPDATE users SET can_view_loan_request = ? WHERE id = ?", [enabled ? 1 : 0, id]);
+      res.json({ success: true, can_view_loan_request: enabled });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

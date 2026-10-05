@@ -372,9 +372,11 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
                           ? 'Vehicle Requisition'
                           : r.source_type === 'mobile_limit_request'
                           ? 'Mobile Limit Request'
+                          : r.source_type === 'advance_request'
+                          ? 'Loan / Advance Request'
                           : 'Movement Claim'}
                         {' — '}
-                        {r.source_type === 'attendance_correction' || r.source_type === 'leave_application' || r.source_type === 'asset_requisition' || r.source_type === 'vehicle_requisition' || r.source_type === 'mobile_limit_request'
+                        {r.source_type === 'attendance_correction' || r.source_type === 'leave_application' || r.source_type === 'asset_requisition' || r.source_type === 'vehicle_requisition' || r.source_type === 'mobile_limit_request' || r.source_type === 'advance_request'
                           ? 'Requested'
                           : r.event_type === 'check_in'
                           ? 'Check In'
