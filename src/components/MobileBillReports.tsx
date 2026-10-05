@@ -22,9 +22,10 @@ import { Spinner } from './Spinner';
 import { finalizePdfPageNumbers } from '../lib/pdfLetterhead';
 import { drawStandardHeader, loadPdfCompany, pdfMoney, standardTable } from '../lib/pdfStandard';
 import { savePdfCrossPlatform } from '../lib/saveFile';
+import { MobileLimitHistoryReport } from './MobileLimitHistoryReport';
 import { inputCls, labelCls, MbSim, mbApi, monthLabel, monthsBetween, num, OperatorBadge, shiftMonth, thisMonth, tk } from './MobileBillParts';
 
-type View = 'matrix' | 'operator' | 'usage' | 'excess';
+type View = 'matrix' | 'operator' | 'usage' | 'excess' | 'limits';
 interface Bill {
   sim_id: number;
   month: string;
@@ -49,6 +50,13 @@ export const MobileBillReports: React.FC<{ token: string }> = ({ token }) => {
   const [data, setData] = useState<{ sims: MbSim[]; bills: Bill[] } | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  // Mobile Bill's "Limit Change History" layer.
+  const [canLimitHistory, setCanLimitHistory] = useState(false);
+  useEffect(() => {
+    mbApi<{ limit_history?: boolean }>(token, '/api/mobile-bill/access')
+      .then((a) => setCanLimitHistory(!!a.limit_history))
+      .catch(() => {});
+  }, [token]);
 
   const from = shiftMonth(to, -(span - 1));
   const months = useMemo(() => monthsBetween(from, to).reverse(), [from, to]);
@@ -178,14 +186,15 @@ export const MobileBillReports: React.FC<{ token: string }> = ({ token }) => {
     ]
   };
 
-  const current = view === 'matrix' ? matrix : view === 'operator' ? operatorTable : view === 'usage' ? usageTable : excessTable;
+  const current = view === 'matrix' || view === 'limits' ? matrix : view === 'operator' ? operatorTable : view === 'usage' ? usageTable : excessTable;
   // PDF: which columns are taka amounts (2 decimals, right-aligned), and
   // whether the last body row is the Total (printed as the table's footer).
   const pdfShape = {
     matrix: { moneyFrom: 9, moneyTo: 99, total: false },
     operator: { moneyFrom: 2, moneyTo: 99, total: true },
     usage: { moneyFrom: 7, moneyTo: 8, total: false },
-    excess: { moneyFrom: 8, moneyTo: 99, total: excessRows.length > 0 }
+    excess: { moneyFrom: 8, moneyTo: 99, total: excessRows.length > 0 },
+    limits: { moneyFrom: 9, moneyTo: 99, total: false }
   }[view];
 
   const excel = () => {
@@ -238,7 +247,8 @@ export const MobileBillReports: React.FC<{ token: string }> = ({ token }) => {
     { key: 'matrix', label: 'Month by month' },
     { key: 'operator', label: 'Operator-wise' },
     { key: 'usage', label: 'Over / under limit' },
-    { key: 'excess', label: 'Excess (deduction)' }
+    { key: 'excess', label: 'Excess (deduction)' },
+    ...(canLimitHistory ? [{ key: 'limits' as View, label: 'Limit changes' }] : [])
   ];
   const cell = (b: Bill | undefined) =>
     b ? <span className={b.amount > b.limit_amount ? 'text-rose-600 font-semibold' : ''}>{num(b.amount)}</span> : <span className="text-slate-300">—</span>;
@@ -257,6 +267,10 @@ export const MobileBillReports: React.FC<{ token: string }> = ({ token }) => {
           </button>
         ))}
       </div>
+      {view === 'limits' ? (
+        <MobileLimitHistoryReport token={token} />
+      ) : (
+      <>
       <div className="flex flex-wrap items-end gap-2">
         <div>
           <label className={labelCls}>{view === 'excess' ? 'Month' : 'Up to month'}</label>
@@ -501,6 +515,8 @@ export const MobileBillReports: React.FC<{ token: string }> = ({ token }) => {
             </table>
           </div>
         </div>
+      )}
+      </>
       )}
     </div>
   );

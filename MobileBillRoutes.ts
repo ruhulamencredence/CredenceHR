@@ -50,6 +50,9 @@ interface MobileBillRouteDeps {
     requestedBy: number
   ) => Promise<{ autoApproved: boolean; template: any | null }>;
   getCurrentStepApprovers: (request: any) => Promise<{ user_id: number; user_name: string | null }[]>;
+  // Mobile Bill's permission layers (server.ts MOBILE_BILL_LAYER_KEYS):
+  // "read" = the module as it was, "limit_history" = Reports -> Limit changes.
+  hasModuleLayer: (user: any, moduleKey: "mobile_bill", layer: "read" | "limit_history") => Promise<boolean>;
 }
 
 export const MOBILE_OPERATORS = ["Grameenphone", "Robi", "Airtel", "Banglalink", "Teletalk"] as const;
@@ -186,10 +189,40 @@ export async function ensureMobileBillSchema(dbPool: any): Promise<void> {
       FOREIGN KEY (sim_id) REFERENCES mobile_sims(id) ON DELETE CASCADE
     )`
   );
+  // A limit change's own figures, for Reports -> Limit changes. Rows written
+  // before these columns existed are read from their message instead.
+  for (const [name, def] of [
+    ["old_limit", "DECIMAL(10,2) NULL"],
+    ["new_limit", "DECIMAL(10,2) NULL"],
+    ["change_kind", "VARCHAR(20) NULL"],
+    ["for_month", "CHAR(7) NULL"]
+  ]) {
+    try {
+      await dbPool.query(`ALTER TABLE mobile_sim_events ADD COLUMN ${name} ${def}`);
+    } catch (err: any) {
+      if (err?.code !== "ER_DUP_FIELDNAME") console.warn(`⚠️ Could not add mobile_sim_events.${name} column: ` + err.message);
+    }
+  }
 }
 
-async function logSim(queryDB: QueryDB, simId: number, action: string, message: string, actorId: number | null) {
+// change_kind: "added" (first limit), "manual" (edited by HR), "type" (the
+// employee type's limit changed), "permanent" / "month" (approved request).
+interface LimitChange {
+  old_limit: number | null;
+  new_limit: number;
+  change_kind: "added" | "manual" | "type" | "permanent" | "month";
+  for_month?: string | null;
+}
+
+async function logSim(queryDB: QueryDB, simId: number, action: string, message: string, actorId: number | null, change?: LimitChange) {
   try {
+    if (change) {
+      await queryDB(
+        "INSERT INTO mobile_sim_events (sim_id, action, message, actor_id, old_limit, new_limit, change_kind, for_month) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [simId, action, message.slice(0, 500), actorId, change.old_limit, change.new_limit, change.change_kind, change.for_month || null]
+      );
+      return;
+    }
     await queryDB("INSERT INTO mobile_sim_events (sim_id, action, message, actor_id) VALUES (?, ?, ?, ?)", [simId, action, message.slice(0, 500), actorId]);
   } catch (err: any) {
     console.warn("⚠️ Could not log mobile SIM event: " + err.message);
@@ -222,10 +255,20 @@ export async function finalizeMobileLimitRequest(queryDB: QueryDB, createAlert: 
     if (r.scope === "permanent") {
       await queryDB("UPDATE mobile_sims SET limit_amount = ?, limit_source = 'custom' WHERE id = ?", [newLimit, sim.id]);
       await queryDB("UPDATE mobile_bills SET limit_amount = ? WHERE sim_id = ? AND bill_month >= ?", [newLimit, sim.id, r.for_month]);
-      await logSim(queryDB, Number(sim.id), "limit", `Limit ${money(sim.limit_amount)} → ${newLimit} from ${monthText(r.for_month)} (approved request #${r.id}).`, actorId);
+      await logSim(queryDB, Number(sim.id), "limit", `Limit ${money(sim.limit_amount)} → ${newLimit} from ${monthText(r.for_month)} (approved request #${r.id}).`, actorId, {
+        old_limit: money(sim.limit_amount),
+        new_limit: newLimit,
+        change_kind: "permanent",
+        for_month: r.for_month
+      });
     } else {
       await queryDB("UPDATE mobile_bills SET limit_amount = ? WHERE sim_id = ? AND bill_month = ?", [newLimit, sim.id, r.for_month]);
-      await logSim(queryDB, Number(sim.id), "limit", `Limit ${newLimit} for ${monthText(r.for_month)} only (approved request #${r.id}).`, actorId);
+      await logSim(queryDB, Number(sim.id), "limit", `Limit ${newLimit} for ${monthText(r.for_month)} only (approved request #${r.id}).`, actorId, {
+        old_limit: money(r.current_limit),
+        new_limit: newLimit,
+        change_kind: "month",
+        for_month: r.for_month
+      });
     }
   }
   await createAlert(queryDB, {
@@ -254,12 +297,12 @@ export async function rejectMobileLimitRequest(queryDB: QueryDB, createAlert: Cr
 }
 
 export function registerMobileBillRoutes(app: Express, deps: MobileBillRouteDeps) {
-  const { authenticateToken, queryDB, getAdminModules, createAlert, createTemplateApprovalRequest, getCurrentStepApprovers } = deps;
+  const { authenticateToken, queryDB, getAdminModules, createAlert, createTemplateApprovalRequest, getCurrentStepApprovers, hasModuleLayer } = deps;
 
   // ---- who may do what -------------------------------------------------
   async function isHr(user: any): Promise<boolean> {
     if (user.role === "superadmin") return true;
-    return (await getAdminModules(Number(user.id))).includes("mobile_bill");
+    return hasModuleLayer(user, "mobile_bill", "read");
   }
   async function hasSelf(user: any): Promise<boolean> {
     if (user.role === "superadmin") return true;
@@ -407,7 +450,12 @@ export function registerMobileBillRoutes(app: Express, deps: MobileBillRouteDeps
   // ---- access & lookups --------------------------------------------------
   app.get("/api/mobile-bill/access", authenticateToken, async (req: any, res: any) => {
     try {
-      res.json({ hr: await isHr(req.user), self: await hasSelf(req.user), operators: MOBILE_OPERATORS });
+      res.json({
+        hr: await isHr(req.user),
+        self: await hasSelf(req.user),
+        limit_history: await hasModuleLayer(req.user, "mobile_bill", "limit_history"),
+        operators: MOBILE_OPERATORS
+      });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -451,7 +499,11 @@ export function registerMobileBillRoutes(app: Express, deps: MobileBillRouteDeps
       const lim = typeLimit(pols, s.employee?.employee_type || null);
       if (lim == null || lim === s.limit_amount) continue;
       await queryDB("UPDATE mobile_sims SET limit_amount = ? WHERE id = ?", [lim, s.id]);
-      await logSim(queryDB, s.id, "limit", `Limit ${s.limit_amount} → ${lim} (employee type limit changed).`, actorId);
+      await logSim(queryDB, s.id, "limit", `Limit ${s.limit_amount} → ${lim} (employee type limit changed).`, actorId, {
+        old_limit: s.limit_amount,
+        new_limit: lim,
+        change_kind: "type"
+      });
       changed++;
     }
     return changed;
@@ -569,7 +621,11 @@ export function registerMobileBillRoutes(app: Express, deps: MobileBillRouteDeps
         [f.phone, f.operator, f.packageName, f.employeeId, f.dutyLocation, f.limit, f.limitSource, f.status, f.issued, f.note, req.user.id]
       );
       const id = Number(r.insertId);
-      await logSim(queryDB, id, "added", `SIM added${f.emp ? ` and given to ${f.emp.name}` : " (not given to anyone yet)"}, limit ৳${f.limit}.`, Number(req.user.id));
+      await logSim(queryDB, id, "added", `SIM added${f.emp ? ` and given to ${f.emp.name}` : " (not given to anyone yet)"}, limit ৳${f.limit}.`, Number(req.user.id), {
+        old_limit: null,
+        new_limit: f.limit,
+        change_kind: "added"
+      });
       if (f.emp?.user_id) {
         await createAlert(queryDB, {
           userId: f.emp.user_id,
@@ -611,7 +667,12 @@ export function registerMobileBillRoutes(app: Express, deps: MobileBillRouteDeps
           }).catch(() => {});
         }
       }
-      if (old.limit_amount !== f.limit) await logSim(queryDB, id, "limit", `Limit ৳${old.limit_amount} → ৳${f.limit}${f.limitSource === "type" ? " (employee type limit)" : ""}.`, actor);
+      if (old.limit_amount !== f.limit)
+        await logSim(queryDB, id, "limit", `Limit ৳${old.limit_amount} → ৳${f.limit}${f.limitSource === "type" ? " (employee type limit)" : ""}.`, actor, {
+          old_limit: old.limit_amount,
+          new_limit: f.limit,
+          change_kind: f.limitSource === "type" ? "type" : "manual"
+        });
       if (old.status !== f.status) await logSim(queryDB, id, "status", f.status === "active" ? "Turned back on." : "Turned off (inactive).", actor);
       if (old.phone_number !== f.phone || old.operator !== f.operator) await logSim(queryDB, id, "edited", `Number/operator ${old.phone_number} ${old.operator} → ${f.phone} ${f.operator}.`, actor);
       res.json((await loadSims("WHERE id = ?", [id]))[0]);
@@ -678,7 +739,11 @@ export function registerMobileBillRoutes(app: Express, deps: MobileBillRouteDeps
             "INSERT INTO mobile_sims (phone_number, operator, employee_id, duty_location, limit_amount, limit_source, status, created_by) VALUES (?, ?, ?, ?, ?, ?, 'active', ?)",
             [r.phone_number, r.operator, r.employee_id, r.duty_location, r.limit_amount, r.limit_source, req.user.id]
           );
-          await logSim(queryDB, Number(ins.insertId), "added", `Imported${r.employee_name ? ` for ${r.employee_name}` : ""}, limit ৳${r.limit_amount}.`, Number(req.user.id));
+          await logSim(queryDB, Number(ins.insertId), "added", `Imported${r.employee_name ? ` for ${r.employee_name}` : ""}, limit ৳${r.limit_amount}.`, Number(req.user.id), {
+            old_limit: null,
+            new_limit: Number(r.limit_amount),
+            change_kind: "added"
+          });
         }
       }
       res.json({ dry_run: dryRun, total: results.length, ok: ok.length, failed: results.length - ok.length, rows: results.map(({ emp_user_id, ...r }) => r) });
@@ -961,6 +1026,74 @@ export function registerMobileBillRoutes(app: Express, deps: MobileBillRouteDeps
   // ---- reports -------------------------------------------------------------
   // Every bill between two months plus the SIM list; the page builds the
   // operator, month-by-month, average and over/under-limit views from it.
+  // Reports -> Limit changes: every change to a SIM's limit in [from, to]
+  // (YYYY-MM-DD) — HR edits, employee-type changes, approved requests (for
+  // good or one month) and the first limit a SIM got. Needs the Mobile Bill
+  // module's "Limit Change History" layer.
+  app.get("/api/mobile-bill/limit-history", authenticateToken, async (req: any, res: any) => {
+    try {
+      if (!(await hasModuleLayer(req.user, "mobile_bill", "limit_history"))) {
+        return res.status(403).json({ error: "You don't have access to the Limit Change History." });
+      }
+      const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+      const from = DATE_RE.test(String(req.query.from || "")) ? String(req.query.from) : "1970-01-01";
+      const to = DATE_RE.test(String(req.query.to || "")) ? String(req.query.to) : "2999-12-31";
+      const sims = await loadSims();
+      const simById = new Map<number, any>(sims.map((s: any) => [Number(s.id), s]));
+      const ids = sims.map((s: any) => Number(s.id));
+      const events: any[] = ids.length
+        ? (await queryDB(
+            `SELECT * FROM mobile_sim_events WHERE action IN ('limit', 'added') AND sim_id IN (${ids.map(() => "?").join(",")})
+             AND DATE(created_at) BETWEEN ? AND ? ORDER BY created_at DESC, id DESC`,
+            [...ids, from, to]
+          )) || []
+        : [];
+      const actorIds = Array.from(new Set(events.map((e) => Number(e.actor_id)).filter(Boolean)));
+      const actors: any[] = actorIds.length ? (await queryDB(`SELECT id, name FROM users WHERE id IN (${actorIds.map(() => "?").join(",")})`, actorIds)) || [] : [];
+      const actorName = new Map<number, string>(actors.map((a: any) => [Number(a.id), a.name]));
+      const amount = (t: string) => Number(String(t).replace(/[৳,\s]/g, ""));
+      const rows = events.map((e: any) => {
+        let oldLimit = e.old_limit != null ? money(e.old_limit) : null;
+        let newLimit = e.new_limit != null ? money(e.new_limit) : null;
+        let kind: string | null = e.change_kind || null;
+        let forMonth: string | null = e.for_month || null;
+        const msg = String(e.message || "");
+        // Older rows: read the figures from the message.
+        if (newLimit == null) {
+          const arrow = msg.match(/৳?\s*([\d,.]+)\s*→\s*৳?\s*([\d,.]+)/);
+          const only = msg.match(/Limit\s+৳?([\d,.]+)\s+for\s+(.+?)\s+only/);
+          const added = msg.match(/limit\s+৳?([\d,.]+)/i);
+          if (arrow) {
+            oldLimit = amount(arrow[1]);
+            newLimit = amount(arrow[2]);
+          } else if (only) newLimit = amount(only[1]);
+          else if (e.action === "added" && added) newLimit = amount(added[1]);
+          kind =
+            e.action === "added" ? "added" : /approved request/.test(msg) ? (only ? "month" : "permanent") : /employee type/.test(msg) ? "type" : "manual";
+        }
+        const sim = simById.get(Number(e.sim_id));
+        return {
+          id: Number(e.id),
+          at: e.created_at,
+          sim_id: Number(e.sim_id),
+          phone_number: sim?.phone_number || "",
+          operator: sim?.operator || "",
+          employee: sim?.employee ? { name: sim.employee.name, employee_code: sim.employee.employee_code, department: sim.employee.department, designation: sim.employee.designation } : null,
+          old_limit: oldLimit,
+          new_limit: newLimit,
+          change: oldLimit != null && newLimit != null ? money(newLimit - oldLimit) : null,
+          kind,
+          for_month: forMonth,
+          by: e.actor_id ? actorName.get(Number(e.actor_id)) || null : null,
+          note: msg
+        };
+      });
+      res.json({ from, to, rows });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/mobile-bill/report", authenticateToken, hrOnly, async (req: any, res: any) => {
     try {
       const to = MONTH_RE.test(String(req.query.to || "")) ? String(req.query.to) : thisMonth();

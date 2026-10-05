@@ -14,6 +14,7 @@ import { ModulePath } from './ModulePath';
 import { UserClaimReference, UserClaimItem, ClaimRecord } from '../types';
 import ClaimLocationMap from './ClaimLocationMap';
 import { ClaimBillLines } from './ClaimBillLines';
+import { ApprovalHistory } from './ApprovalHistory';
 
 interface ApproveApplicationsProps {
   token: string;
@@ -165,6 +166,8 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
   const isNativeApp = Capacitor.isNativePlatform();
   const authHeaders = { Authorization: `Bearer ${token}` };
   const [items, setItems] = useState<MyApprovalItem[]>([]);
+  // Pending queue, or this account's own approve / reject history.
+  const [view, setView] = useState<'pending' | 'history'>('pending');
   const [loading, setLoading] = useState(true);
   const [actingKey, setActingKey] = useState<string | null>(null);
   const [remarksDraft, setRemarksDraft] = useState<Record<string, string>>({});
@@ -389,16 +392,45 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
                 <p className="text-xs text-slate-500">Requests waiting on your approval, across every workflow you're a part of.</p>
               </div>
             </div>
-            <button
-              type="button"
-              onClick={load}
-              disabled={loading}
-              className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors disabled:opacity-50"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> Refresh
-            </button>
+            <div className="flex items-center gap-2">
+              <div className="inline-flex rounded-full bg-slate-100 p-0.5" role="tablist" aria-label="Approve Application">
+                {(
+                  [
+                    ['pending', 'Pending'],
+                    ['history', 'History']
+                  ] as const
+                ).map(([key, label]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    role="tab"
+                    aria-selected={view === key}
+                    onClick={() => setView(key)}
+                    className={`px-3.5 py-1.5 rounded-full text-xs font-semibold transition-colors ${
+                      view === key ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {view === 'pending' && (
+                <button
+                  type="button"
+                  onClick={load}
+                  disabled={loading}
+                  className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> Refresh
+                </button>
+              )}
+            </div>
           </div>
 
+          {view === 'history' ? (
+            <ApprovalHistory token={token} />
+          ) : (
+          <>
           {message && (
             <div
               className={`mx-6 mt-4 flex items-center gap-2 text-xs px-3 py-2.5 rounded-xl ${
@@ -640,6 +672,8 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
                 );
               })}
             </div>
+          )}
+          </>
           )}
         </div>
       </div>

@@ -2414,7 +2414,7 @@ const PERMISSION_LAYER_KEYS = ["read", "edit_add", "entry_upload", "delete_trash
 const USERS_LAYER_KEYS = [...PERMISSION_LAYER_KEYS, "block_account"] as const;
 // Which modules currently enforce PERMISSION_LAYER_KEYS — mirrors
 // PERMISSION_LAYER_MODULES in src/types.ts. Rolled out module by module.
-const PERMISSION_LAYER_MODULES = ["departments", "projects", "approvals", "users", "reports", "tracking", "payroll"] as const;
+const PERMISSION_LAYER_MODULES = ["departments", "projects", "approvals", "users", "reports", "tracking", "payroll", "mobile_bill"] as const;
 // Employee Tracking's layers: "read" = the live map, history and status
 // cards; "stay_report" = the Stay Report (TrackingStayReport.ts). Both are
 // reading, so an account with Employee Tracking and no saved layers has both.
@@ -2427,6 +2427,10 @@ const TRACKING_LAYER_KEYS = ["read", "stay_report"] as const;
 // "salary_hold" = holding / releasing one employee's salary for a month
 // (kept out of disbursement until released) — also explicit-only.
 const PAYROLL_LAYER_KEYS = ["read", "salary_month", "salary_hold"] as const;
+// Mobile Bill's layers: "read" = the module as it was; "limit_history" =
+// Reports -> Limit changes (who changed which SIM's limit, when). Both are
+// reading, so an account with Mobile Bill and no saved layers has both.
+const MOBILE_BILL_LAYER_KEYS = ["read", "limit_history"] as const;
 // PEPM Reports uses four of them: Read Only, Edit, Delete/Trash, Permanent Delete
 // — plus its own "Budget Submission Status" (the second report on that page),
 // which, like Permanent Delete, is never part of the no-saved-rows default:
@@ -2455,6 +2459,7 @@ const MODULE_LAYER_KEY_SETS: Record<string, readonly string[]> = {
   reports: REPORT_LAYER_KEYS,
   tracking: TRACKING_LAYER_KEYS,
   payroll: PAYROLL_LAYER_KEYS,
+  mobile_bill: MOBILE_BILL_LAYER_KEYS,
   leave_manage: LEAVE_MANAGE_LAYER_KEYS,
 };
 
@@ -4096,7 +4101,7 @@ async function startServer() {
   // on for a module is never a silent regression; a Superadmin only actually
   // restricts anything once they explicitly save a narrower set in the
   // Module Access modal.
-  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "stay_report" | "salary_month" | "salary_hold" | "block_account") =>
+  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "stay_report" | "salary_month" | "salary_hold" | "block_account" | "limit_history") =>
     async (req: any, res: any, next: any) => {
       if (!req.user) return res.status(401).json({ error: "Access token required" });
       if (req.user.role === "superadmin") return next();
@@ -4114,7 +4119,9 @@ async function startServer() {
             ? [...TRACKING_LAYER_KEYS]
             : moduleKey === "payroll"
               ? ["read"]
-              : PERMISSION_LAYER_KEYS.filter((k) => k !== "permanent_delete");
+              : moduleKey === "mobile_bill"
+                ? [...MOBILE_BILL_LAYER_KEYS]
+                : PERMISSION_LAYER_KEYS.filter((k) => k !== "permanent_delete");
         if (!effectiveLayers.includes(layer)) {
           return res.status(403).json({ error: "You don't have permission to do this. Ask your Superadmin to grant it." });
         }
@@ -4135,7 +4142,14 @@ async function startServer() {
     if (!(PERMISSION_LAYER_MODULES as readonly string[]).includes(moduleKey)) return true;
     const granted = await getModulePermissionLayersForModule(user.id, moduleKey);
     if (granted.length > 0) return granted.includes(layer);
-    const defaults: readonly string[] = moduleKey === "tracking" ? TRACKING_LAYER_KEYS : moduleKey === "payroll" ? ["read"] : PERMISSION_LAYER_KEYS.filter((k) => k !== "permanent_delete");
+    const defaults: readonly string[] =
+      moduleKey === "tracking"
+        ? TRACKING_LAYER_KEYS
+        : moduleKey === "payroll"
+          ? ["read"]
+          : moduleKey === "mobile_bill"
+            ? MOBILE_BILL_LAYER_KEYS
+            : PERMISSION_LAYER_KEYS.filter((k) => k !== "permanent_delete");
     return defaults.includes(layer);
   };
 
@@ -5380,7 +5394,7 @@ async function startServer() {
   // ride the Dynamic Approval Engine (request_type 'mobile').
   // Employee Tracking -> Stay Report (time at each place, day by day).
   registerTrackingStayReportRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, queryDB });
-  registerMobileBillRoutes(app, { authenticateToken, queryDB, getAdminModules, createAlert, createTemplateApprovalRequest, getCurrentStepApprovers });
+  registerMobileBillRoutes(app, { authenticateToken, queryDB, getAdminModules, createAlert, createTemplateApprovalRequest, getCurrentStepApprovers, hasModuleLayer });
   registerHRAnalyticsRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB });
   registerDocumentVaultRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB, getAdminModules });
   registerHROperationsRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB, getAdminModules, todayInDhaka, createAlert });
