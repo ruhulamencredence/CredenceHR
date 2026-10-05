@@ -42,18 +42,11 @@ export const DEFAULT_USER_TEMPLATE = {
     "can_view_timesheet",
     "can_view_leave_application",
     "can_view_tasks",
-    "can_view_mobile_bill"
+    "can_view_mobile_bill",
+    "can_view_service_book"
   ],
   modules: [] as string[]
 };
-
-export async function ensureAccessTemplateSchema(queryDB: QueryDB) {
-  try {
-    await queryDB("ALTER TABLE access_templates ADD COLUMN is_default TINYINT(1) NOT NULL DEFAULT 0");
-  } catch (err: any) {
-    if (err?.code !== "ER_DUP_FIELDNAME") console.warn("⚠️ Could not add access_templates.is_default column: " + err.message);
-  }
-}
 
 const parseList = (v: any): string[] => {
   try {
@@ -63,6 +56,40 @@ const parseList = (v: any): string[] => {
     return [];
   }
 };
+
+export async function ensureAccessTemplateSchema(queryDB: QueryDB) {
+  try {
+    await queryDB("ALTER TABLE access_templates ADD COLUMN is_default TINYINT(1) NOT NULL DEFAULT 0");
+  } catch (err: any) {
+    if (err?.code !== "ER_DUP_FIELDNAME") console.warn("⚠️ Could not add access_templates.is_default column: " + err.message);
+  }
+  // One-time additions to the "Default User" template that already exists
+  // in a database (features_rev counts them, so a switch HR later removes
+  // from the template isn't put back): rev 1 = My Service Book.
+  try {
+    await queryDB("ALTER TABLE access_templates ADD COLUMN features_rev INT NOT NULL DEFAULT 0");
+  } catch (err: any) {
+    if (err?.code !== "ER_DUP_FIELDNAME") console.warn("⚠️ Could not add access_templates.features_rev column: " + err.message);
+  }
+  // Rows made from now on already have every addition.
+  await queryDB("ALTER TABLE access_templates ALTER COLUMN features_rev SET DEFAULT 1").catch(() => undefined);
+  try {
+    const rows: any[] = (await queryDB("/*unscoped*/ SELECT id, name, features_json, features_rev FROM access_templates")) || [];
+    for (const r of rows) {
+      if (Number(r.features_rev || 0) >= 1) continue;
+      if (r.name === DEFAULT_USER_TEMPLATE.name) {
+        const features = parseList(r.features_json);
+        if (!features.includes("can_view_service_book")) features.push("can_view_service_book");
+        await queryDB("UPDATE access_templates SET features_json = ?, features_rev = 1 WHERE id = ?", [JSON.stringify(features), r.id]);
+      } else {
+        await queryDB("UPDATE access_templates SET features_rev = 1 WHERE id = ?", [r.id]);
+      }
+    }
+  } catch (err: any) {
+    console.warn("⚠️ Could not update the Default User access template: " + err.message);
+  }
+}
+
 
 // The company always has exactly one default template: "Default User" is
 // created (with the permissions above) the first time none is marked.

@@ -512,6 +512,24 @@ function buildPayslipEmailHtml(record: any): string {
   `;
 }
 
+// Leave approved for days whose salary was already processed/paid (e.g. a
+// sick day filed after the payslip went out): those days were cut as Absent,
+// so the cut is paid back with the next salary as an Arrear
+// (salary_adjustments, PayrollItemsRoutes.ts). Set up by
+// registerPayrollRoutes; server.ts's finalizeLeaveApplicationApproval calls
+// it. Returns what it created, for the employee's alert.
+export interface LateLeaveArrear {
+  for_month: string;
+  start_month: string;
+  days: number;
+  amount: number;
+}
+let lateLeaveArrearImpl: ((leaveId: number, actorId: number | null) => Promise<LateLeaveArrear[]>) | null = null;
+export async function arrearForLateLeave(leaveId: number, actorId: number | null): Promise<LateLeaveArrear[]> {
+  return lateLeaveArrearImpl ? lateLeaveArrearImpl(leaveId, actorId) : [];
+}
+export const LATE_LEAVE_ARREAR_PREFIX = "Leave approved after salary";
+
 export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
   const { authenticateToken, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer, getAdminModules, queryDB } = deps;
 
@@ -1719,6 +1737,58 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
     }
     return calMonth;
   }
+
+  // See arrearForLateLeave above. Per salary month the leave touches whose
+  // run is already Processed/Paid: the leave's days in that month (counted
+  // the way payroll counts leave), at most the days that run cut as
+  // Absent/LWP less what earlier late leaves already gave back, priced at
+  // that run's own per-day gross. Settled in the first month after it that
+  // has no Processed/Paid run yet, in one go.
+  lateLeaveArrearImpl = async (leaveId, actorId) => {
+    const rows: any[] = await queryDB("SELECT * FROM leave_applications WHERE id = ?", [leaveId]);
+    const leave = rows.find((r: any) => Number(r.id) === leaveId);
+    if (!leave || leave.status !== "approved" || leave.leave_type === "without_pay") return [];
+    const emps: any[] = await queryDB("SELECT id FROM all_employees WHERE user_id = ?", [Number(leave.user_id)]);
+    const employeeId = Number(emps[0]?.id || 0);
+    if (!employeeId) return [];
+    const from = String(leave.start_date).slice(0, 10);
+    const to = String(leave.end_date).slice(0, 10);
+    const runs: any[] = await queryDB("SELECT * FROM payrolls WHERE employee_id = ?", [employeeId]);
+    const closed = new Set(runs.filter((r: any) => r.payment_status === "processed" || r.payment_status === "paid").map((r: any) => String(r.month_year)));
+    const made: LateLeaveArrear[] = [];
+    const firstMonth = await salaryMonthOf(from);
+    const lastMonth = await salaryMonthOf(to);
+    for (let m = firstMonth; m <= lastMonth; m = shiftMonthYear(m, 1)) {
+      const run = runs.find((r: any) => String(r.month_year) === m && (r.payment_status === "processed" || r.payment_status === "paid"));
+      if (!run) continue;
+      const p = await getSalaryPeriod(m);
+      const s = from > p.start ? from : p.start;
+      const e = to < p.end ? to : p.end;
+      const leaveDays = Math.max(0, Math.round((Date.parse(e) - Date.parse(s)) / 86400000) + 1);
+      const workingDays = Math.max(1, Number(run.total_working_days) || 1);
+      const perDay = (num(run.basic_amount) + num(run.allowances_total)) / workingDays;
+      if (!(perDay > 0) || leaveDays <= 0) continue;
+      const earlier: any[] = await queryDB("SELECT * FROM salary_adjustments WHERE employee_id = ? AND kind = 'arrear' AND for_month = ?", [employeeId, m]);
+      const mine = earlier.filter((a: any) => a.status !== "cancelled" && String(a.reason || "").startsWith(LATE_LEAVE_ARREAR_PREFIX));
+      if (mine.some((a: any) => String(a.reason || "").includes(`#${leaveId})`))) continue;
+      const alreadyBack = mine.reduce((t: number, a: any) => t + num(a.total_amount), 0);
+      const cutDays = Math.max(0, Math.round(num(run.absent_days)) + Math.round(num(run.lwp_days)));
+      const room = money(perDay * cutDays - alreadyBack);
+      const amount = Math.min(money(perDay * leaveDays), room);
+      if (!(amount > 0)) continue;
+      const days = Math.round((amount / perDay) * 100) / 100;
+      let start = shiftMonthYear(m, 1);
+      while (closed.has(start)) start = shiftMonthYear(start, 1);
+      const reason = `${LATE_LEAVE_ARREAR_PREFIX}: ${from === to ? from : `${from} to ${to}`} (${days} day${days === 1 ? "" : "s"}, leave #${leaveId})`;
+      await queryDB(
+        `INSERT INTO salary_adjustments (employee_id, kind, for_month, total_amount, installment_amount, start_month, reason, status, created_by)
+         VALUES (?, 'arrear', ?, ?, ?, ?, ?, 'active', ?)`,
+        [employeeId, m, amount, amount, start, reason.slice(0, 500), actorId]
+      );
+      made.push({ for_month: m, start_month: start, days, amount });
+    }
+    return made;
+  };
 
   async function getLatePolicyForMonth(monthYear: string) {
     const rows = await queryDB(
