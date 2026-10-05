@@ -371,8 +371,12 @@ export default function App() {
       setSignedOutReason('This phone was removed from your account by your Superadmin. Sign in again to ask for access.');
       handleLogout();
     };
-    const onBlocked = () => {
-      setSignedOutReason('This account has been blocked. Contact HR.');
+    const onBlocked = (e: Event) => {
+      setSignedOutReason(
+        (e as CustomEvent).detail === 'removed'
+          ? 'This account no longer exists. Sign in again.'
+          : 'This account has been blocked. Contact HR.'
+      );
       handleLogout();
     };
     window.addEventListener(DEVICE_REVOKED_EVENT, onRevoked);

@@ -337,7 +337,9 @@ export async function loadCompanyAccess(queryDB: QueryDB, user: { id: number; ro
   );
   let allowed = rows.map((r) => Number(r.company_id)).filter((id) => activeIds.has(id));
   let defaultId = Number(rows.find((r) => Number(r.is_default) === 1 && activeIds.has(Number(r.company_id)))?.company_id || 0);
-  if (!rows.length && mother) {
+  // A token whose account no longer exists (deleted, or the database was
+  // reset) gets no access row — the foreign key would refuse it anyway.
+  if (!rows.length && mother && u) {
     // First visit (an existing account, or one just created): it works in
     // the company of the Employee it belongs to, else the group's mother
     // company — exactly as before multi-company.
