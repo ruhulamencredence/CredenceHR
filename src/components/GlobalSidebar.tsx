@@ -472,6 +472,9 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     ? [
         { key: 'hr_operations', label: 'Monthly Report', icon: BarChart3, onClick: () => openHrOps('dashboard') },
         { key: 'hr_operations_actions', label: 'Personnel Actions', icon: ClipboardList, onClick: () => openHrOps('actions') },
+        ...(canSeeModule('grievance_disciplinary')
+          ? [{ key: 'hr_operations_grievance', label: 'Grievance & Disciplinary', icon: Gavel, onClick: () => openHrOps('grievance') }]
+          : []),
         { key: 'hr_operations_service_book', label: 'Service Book', icon: BookOpen, onClick: () => openHrOps('service_book') },
         { key: 'hr_operations_letters', label: 'Letters', icon: FileText, onClick: () => openHrOps('letters') },
         { key: 'hr_operations_onboarding', label: 'Onboarding', icon: ClipboardCheck, onClick: () => openHrOps('onboarding') },
@@ -601,7 +604,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
       icon: Briefcase,
       entries: pick(
         { heading: 'Daily' }, 'task_management', 'notices', 'approvals',
-        { heading: 'Employee records' }, 'hr_operations_actions', 'hr_operations_letters', 'hr_operations_service_book', 'hr_operations_onboarding', 'hr_operations_increments',
+        { heading: 'Employee records' }, 'hr_operations_actions', 'hr_operations_grievance', 'hr_operations_letters', 'hr_operations_service_book', 'hr_operations_onboarding', 'hr_operations_increments',
         { heading: 'Reports' }, 'hr_operations_reports', 'hr_operations',
         { heading: 'Facilities' }, 'asset_management', 'vehicle_management', 'mobile_bill',
         { heading: 'Settings' }, 'hr_operations_settings'
