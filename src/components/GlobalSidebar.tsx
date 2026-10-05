@@ -133,6 +133,52 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     });
   };
 
+  // The SELF SERVICE / ADMIN PANEL headings fold their whole section away
+  // (tap the heading again to bring it back). Remembered per device.
+  const [hiddenSections, setHiddenSections] = useState<string[]>(() => {
+    try {
+      const v = JSON.parse(localStorage.getItem('gsidebar_hidden_sections') || '[]');
+      return Array.isArray(v) ? v : [];
+    } catch {
+      return [];
+    }
+  });
+  const toggleSection = (key: string) => {
+    setHiddenSections((prev) => {
+      const next = prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key];
+      try {
+        localStorage.setItem('gsidebar_hidden_sections', JSON.stringify(next));
+      } catch {
+        // not persisted — fine
+      }
+      // Keep the other sidebar instance (desktop column / mobile drawer) in step.
+      setTimeout(() => window.dispatchEvent(new CustomEvent('credence:sidebar-sections', { detail: next })), 0);
+      return next;
+    });
+  };
+  useEffect(() => {
+    const onSync = (e: Event) => {
+      const next = (e as CustomEvent<string[]>).detail;
+      if (Array.isArray(next)) setHiddenSections(next);
+    };
+    window.addEventListener('credence:sidebar-sections', onSync);
+    return () => window.removeEventListener('credence:sidebar-sections', onSync);
+  }, []);
+  const sectionHeading = (key: string, label: string) => {
+    const open = !hiddenSections.includes(key);
+    return (
+      <button
+        type="button"
+        onClick={() => toggleSection(key)}
+        aria-expanded={open}
+        title={open ? `Hide ${label}` : `Show ${label}`}
+        className="w-full flex items-center justify-between px-2.5 mt-3 mb-1.5 py-0.5 rounded-md text-[10px] font-semibold tracking-wide text-white/50 hover:text-white/80"
+      >
+        <span>{label.toUpperCase()}</span>
+        <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${open ? 'rotate-180' : ''}`} />
+      </button>
+    );
+  };
 
   const initials = user.name
     .split(' ')
@@ -1101,19 +1147,23 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
             (collapsed ? (
               <div className="h-px mx-2 my-2 bg-white/15" />
             ) : (
-              <p className="px-2.5 mt-3 mb-1.5 text-[10px] font-semibold tracking-wide text-white/50">SELF SERVICE</p>
+              sectionHeading('self', 'Self Service')
             ))}
-          {selfGroups.map(renderMenuGroup)}
+          {(collapsed || !hiddenSections.includes('self')) && selfGroups.map(renderMenuGroup)}
 
           {(adminTopItems.length > 0 || adminGroups.length > 0) && (
             <>
               {collapsed ? (
                 <div className="h-px mx-2 my-2 bg-white/15" />
               ) : (
-                <p className="px-2.5 mt-3 mb-1.5 text-[10px] font-semibold tracking-wide text-white/50">ADMIN PANEL</p>
+                sectionHeading('admin', 'Admin Panel')
               )}
-              {adminTopItems.map(renderItem)}
-              {adminGroups.map(renderMenuGroup)}
+              {(collapsed || !hiddenSections.includes('admin')) && (
+                <>
+                  {adminTopItems.map(renderItem)}
+                  {adminGroups.map(renderMenuGroup)}
+                </>
+              )}
             </>
           )}
 
