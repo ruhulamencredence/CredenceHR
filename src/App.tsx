@@ -1187,7 +1187,7 @@ export default function App() {
         ) : selfServiceView === 'myMobileSim' ? (
           <MyMobileSim token={token} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'myLetters' ? (
-          <MyLetters token={token} onBack={() => setSelfServiceView(null)} />
+          <MyLetters token={token} onBack={() => setSelfServiceView(null)} canServiceBook={!!user && (user.role === 'superadmin' || !!user.can_view_service_book)} />
         ) : selfServiceView === 'teamAttendance' ? (
           <TeamAttendance token={token} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'vehicleManagement' ? (

@@ -643,6 +643,8 @@ export interface User {
   can_view_tasks?: boolean;
   // Self Service -> My Mobile SIM (MyMobileSim.tsx) — off until turned on in Module Access.
   can_view_mobile_bill?: boolean;
+  // Self Service -> My Letters & Service Record -> Service Book (own Employee 360).
+  can_view_service_book?: boolean;
   can_view_leave_application?: boolean;
   can_view_my_leave?: boolean;
 }

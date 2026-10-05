@@ -9,6 +9,7 @@ import { X, Paperclip, AlertTriangle, CheckCircle2, Route, Plus, Trash2, Lock, S
 import { ClaimRecord, MyBillClaimPolicy } from '../types';
 import { apiUrl } from '../lib/api';
 import { todayDateOnlyString, formatDate } from '../lib/formatDate';
+import { useKeyboardInset, scrollFocusedFieldIntoView } from '../lib/useKeyboardInset';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
 import { Spinner } from './Spinner';
 
@@ -47,6 +48,21 @@ const money = (n: number) => `৳${n.toLocaleString('en-BD', { minimumFractionDi
 // (GET /api/bill-claim-policy/mine): how far back a date may go, dates already
 // closed for this user, categories and their limits. The server checks them
 // again on submit.
+//
+// Check In/Out references belong to a Transport bill: they can only be picked
+// once a bill's category is Transport, only from check-ins inside the claim's
+// From–To range, and their amounts ARE that bill's amount (the bill's own
+// Amount field is filled from them and locked) — so the claim total never
+// counts the same fare twice.
+const isTransportName = (name: string | undefined) => /transport/i.test(name || '');
+// A check-in's own date ('YYYY-MM-DD HH:MM:SS' from the server, Dhaka time).
+const checkInDate = (v: string | null | undefined) => {
+  if (!v) return '';
+  if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2})?$/.test(v)) return v.slice(0, 10);
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return String(v).slice(0, 10);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
 export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = ({ token, onClose, onSubmitted }) => {
   const [policy, setPolicy] = useState<MyBillClaimPolicy | null>(null);
   const [policyError, setPolicyError] = useState('');
@@ -72,6 +88,7 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
   const [selectedRefs, setSelectedRefs] = useState<Record<number, string>>({});
 
   useBackButtonClose(true, submitting ? () => {} : onClose);
+  const keyboardInset = useKeyboardInset();
 
   useEffect(() => {
     let cancelled = false;
@@ -99,19 +116,36 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
   const maxDate = policy?.max_date || today;
   const categories = policy?.categories || [];
   const maxBills = Number(policy?.values.max_bills_per_claim) || 20;
-  const billsTotal = bills.reduce((sum, b) => sum + (Number(b.amount) || 0), 0);
+  const isTransportBill = (b: BillDraft) => isTransportName(categories.find((c) => String(c.id) === b.category_id)?.name);
+  // The bill the check-in/out references belong to (the first Transport one).
+  const transportBill = bills.find(isTransportBill) || null;
 
   const updateBill = (key: number, patch: Partial<BillDraft>) => setBills((prev) => prev.map((b) => (b.key === key ? { ...b, ...patch } : b)));
   const removeBill = (key: number) => setBills((prev) => prev.filter((b) => b.key !== key));
   const addBill = () =>
     setBills((prev) => (prev.length >= maxBills ? prev : [...prev, newBill(prev[prev.length - 1]?.bill_date || fromDate)]));
 
-  // Changing the range pulls any bill date that falls outside it back inside.
+  // Changing the range pulls any bill date that falls outside it back inside,
+  // and drops picked check-in/outs that are now outside it.
   const setRange = (from: string, to: string) => {
     setFromDate(from);
     setToDate(to);
     setBills((prev) => prev.map((b) => ({ ...b, bill_date: b.bill_date < from ? from : b.bill_date > to ? to : b.bill_date })));
+    setSelectedRefs((prev) => {
+      const next: Record<number, string> = {};
+      for (const [id, v] of Object.entries(prev)) {
+        const c = availableClaims.find((x) => x.id === Number(id));
+        const d = checkInDate(c?.check_in_at);
+        if (c && d >= from && d <= to) next[Number(id)] = v;
+      }
+      return next;
+    });
   };
+  // Only check-ins inside the claim's From–To range can be referenced.
+  const claimsInRange = availableClaims.filter((c) => {
+    const d = checkInDate(c.check_in_at);
+    return d >= fromDate && d <= toDate;
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -144,9 +178,19 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
     setSelectedRefs((prev) => ({ ...prev, [claimId]: value }));
   };
 
+  // No Transport bill any more -> the references go too.
+  useEffect(() => {
+    if (!transportBill && Object.keys(selectedRefs).length > 0) setSelectedRefs({});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transportBill?.key]);
+
   const hasRefs = Object.keys(selectedRefs).length > 0;
-  const refsTotal = Object.values(selectedRefs).reduce((sum, v) => sum + (Number(v) || 0), 0);
-  const claimTotal = billsTotal + refsTotal;
+  const refsTotal = Math.round(Object.values(selectedRefs).reduce((sum, v) => sum + (Number(v) || 0), 0) * 100) / 100;
+  // The Transport bill's amount comes from its check-in/outs when any are picked.
+  const refsDriveBill = (b: BillDraft) => hasRefs && transportBill?.key === b.key;
+  const billAmount = (b: BillDraft) => (refsDriveBill(b) ? refsTotal : Number(b.amount) || 0);
+  const billsTotal = bills.reduce((sum, b) => sum + billAmount(b), 0);
+  const claimTotal = billsTotal;
   const receiptAbove = Number(policy?.values.attachment_required_above) || 0;
   const needsReceipt =
     (receiptAbove > 0 && claimTotal > receiptAbove) ||
@@ -186,8 +230,10 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
       if (!b.bill_date) return `Bill ${n}: select the bill's date.`;
       if (b.bill_date < fromDate || b.bill_date > toDate) return `Bill ${n}: the date must be between ${formatDate(fromDate)} and ${formatDate(toDate)}.`;
       if (locked.has(b.bill_date)) return `Bill ${n}: ${formatDate(b.bill_date)} was already claimed on an earlier day.`;
-      const amt = Number(b.amount);
-      if (!b.amount || !Number.isFinite(amt) || amt <= 0) return `Bill ${n}: enter an amount greater than 0.`;
+      const amt = billAmount(b);
+      if (refsDriveBill(b)) {
+        if (!(amt > 0)) return `Bill ${n}: enter the amount of each referenced check-in/out.`;
+      } else if (!b.amount || !Number.isFinite(amt) || amt <= 0) return `Bill ${n}: enter an amount greater than 0.`;
       const cat = categories.find((c) => String(c.id) === b.category_id);
       if (policy.values.enforce_category_limits && cat?.max_per_bill != null && amt > cat.max_per_bill) {
         return `Bill ${n}: ${cat.name} bills can be at most ${money(cat.max_per_bill)} each.`;
@@ -233,7 +279,7 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
           items: bills.map((b) => ({
             category_id: Number(b.category_id),
             bill_date: b.bill_date,
-            amount: Number(b.amount),
+            amount: billAmount(b),
             description: b.description.trim() || undefined
           })),
           description: description.trim() || undefined,
@@ -266,7 +312,9 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
       className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4"
       style={{
         paddingTop: 'calc(var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px)) + 0.5rem)',
-        paddingBottom: 'calc(var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) + 0.5rem)'
+        paddingBottom: keyboardInset
+          ? `${keyboardInset + 8}px`
+          : 'calc(var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) + 0.5rem)'
       }}
     >
       <div
@@ -285,7 +333,7 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
           </button>
         </div>
 
-        <div className="p-5 space-y-4 overflow-y-auto min-h-0">
+        <div className="p-5 space-y-4 overflow-y-auto min-h-0" onFocusCapture={scrollFocusedFieldIntoView}>
           {policyError && (
             <div className="flex items-center gap-2 text-xs px-3 py-2.5 rounded-xl bg-rose-50 text-rose-700">
               <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
@@ -360,7 +408,7 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
                       <button
                         type="button"
                         onClick={() => removeBill(b.key)}
-                        disabled={bills.length === 1 && !hasRefs}
+                        disabled={bills.length === 1}
                         className="p-1 text-slate-400 hover:text-rose-600 disabled:opacity-30"
                         aria-label={`Remove bill ${i + 1}`}
                       >
@@ -398,11 +446,15 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
                           type="number"
                           min="0.01"
                           step="0.01"
-                          value={b.amount}
-                          onChange={(e) => updateBill(b.key, { amount: e.target.value })}
-                          placeholder="Amount"
+                          value={refsDriveBill(b) ? String(refsTotal || '') : b.amount}
+                          readOnly={refsDriveBill(b)}
+                          onChange={(e) => !refsDriveBill(b) && updateBill(b.key, { amount: e.target.value })}
+                          placeholder={refsDriveBill(b) ? 'From check-in/out' : 'Amount'}
+                          title={refsDriveBill(b) ? 'The total of the referenced check-in/outs below' : undefined}
                           aria-label={`Bill ${i + 1} amount`}
-                          className="w-full text-xs px-2.5 py-2 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none pl-6"
+                          className={`w-full text-xs px-2.5 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none pl-6 ${
+                            refsDriveBill(b) ? 'bg-slate-100 text-slate-600 cursor-not-allowed' : 'bg-white'
+                          }`}
                         />
                       </div>
                       <input
@@ -415,6 +467,7 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
                       />
                     </div>
                     {dateClosed && <p className="text-[10px] text-rose-600">This date was already claimed on an earlier day.</p>}
+                    {refsDriveBill(b) && <p className="text-[10px] text-blue-600">Amount = the referenced check-in/outs below ({money(refsTotal)}).</p>}
                     {cat && policy?.values.enforce_category_limits && (cat.max_per_bill != null || cat.monthly_limit != null || cat.receipt_required) && (
                       <p className="text-[10px] text-slate-400">
                         {[
@@ -442,19 +495,23 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
 
           <div>
             <label className="text-[11px] font-semibold text-slate-500 mb-1 flex items-center gap-1.5">
-              <Route className="w-3.5 h-3.5 text-slate-400" /> Reference Check In/Out (optional)
+              <Route className="w-3.5 h-3.5 text-slate-400" /> Reference Check In/Out (optional, Transport only)
             </label>
-            {loadingClaims ? (
+            {!transportBill ? (
+              <p className="text-xs text-slate-400 px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl">
+                Choose <span className="font-semibold">Transport</span> as a bill's category to reference your check-in/outs.
+              </p>
+            ) : loadingClaims ? (
               <div className="flex items-center gap-2 text-xs text-slate-400 px-3 py-2.5">
                 <Spinner size={14} /> {'Loading your check-in/out history\u2026'}
               </div>
-            ) : availableClaims.length === 0 ? (
+            ) : claimsInRange.length === 0 ? (
               <p className="text-xs text-slate-400 px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl">
-                No completed check-in/out available to reference yet.
+                No completed check-in/out between {formatDate(fromDate)} and {formatDate(toDate)} to reference.
               </p>
             ) : (
               <div className="border border-slate-200 rounded-xl divide-y divide-slate-100 max-h-52 overflow-y-auto">
-                {availableClaims.map((c) => {
+                {claimsInRange.map((c) => {
                   const checked = c.id in selectedRefs;
                   return (
                     <div key={c.id} className="px-3 py-2.5">
@@ -502,7 +559,7 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
           <div className="flex items-center justify-between px-3 py-2.5 rounded-xl bg-blue-50 text-sm">
             <span className="text-slate-600">
               Claim total
-              {hasRefs && <span className="text-[11px] text-slate-400"> (bills {money(billsTotal)} + check-in/out {money(refsTotal)})</span>}
+              {hasRefs && <span className="text-[11px] text-slate-400"> (Transport {money(refsTotal)} from check-in/out)</span>}
             </span>
             <span className="font-bold text-slate-900">{money(claimTotal)}</span>
           </div>

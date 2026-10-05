@@ -812,6 +812,14 @@ async function ensureSchemaMigrations() {
     if (err.code !== 'ER_DUP_FIELDNAME') console.warn("⚠️ Could not add users.can_view_tasks column: " + err.message);
   }
   try {
+    // Self Service -> My Letters & Service Record -> "Service Book" (the
+    // employee's own read-only Employee 360, HrOps360Routes.ts) — OFF until
+    // turned on per account in Module Access.
+    await dbPool.query(`ALTER TABLE users ADD COLUMN can_view_service_book TINYINT(1) NOT NULL DEFAULT 0`);
+  } catch (err: any) {
+    if (err.code !== 'ER_DUP_FIELDNAME') console.warn("⚠️ Could not add users.can_view_service_book column: " + err.message);
+  }
+  try {
     // Self Service -> My Mobile SIM (MobileBillRoutes.ts) — OFF until turned
     // on per account in Module Access.
     await dbPool.query(`ALTER TABLE users ADD COLUMN can_view_mobile_bill TINYINT(1) NOT NULL DEFAULT 0`);
@@ -4470,6 +4478,7 @@ async function startServer() {
           can_use_calls: user.role === "superadmin" ? true : !!Number(user.can_use_calls),
           can_view_tasks: user.role === "superadmin" ? true : !!Number(user.can_view_tasks),
           can_view_mobile_bill: user.role === "superadmin" ? true : !!Number(user.can_view_mobile_bill),
+          can_view_service_book: user.role === "superadmin" ? true : !!Number(user.can_view_service_book),
           can_view_leave_application: user.role === "superadmin" ? true : !!Number(user.can_view_leave_application),
           can_view_my_leave: user.role === "superadmin" ? true : !!Number(user.can_view_my_leave),
           // Superadmin-granted, only ever meaningful for role='admin': can this
@@ -4493,7 +4502,7 @@ async function startServer() {
   app.get("/api/auth/me", authenticateToken, async (req: any, res) => {
     try {
       const users = await queryDB(
-        "SELECT id, name, email, role, created_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, can_use_calls, can_view_tasks, can_view_mobile_bill, can_grant_module_access, attendance_project_id FROM users WHERE id = ?",
+        "SELECT id, name, email, role, created_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, can_use_calls, can_view_tasks, can_view_mobile_bill, can_view_service_book, can_grant_module_access, attendance_project_id FROM users WHERE id = ?",
         [req.user.id]
       );
       if (users.length === 0) return res.status(404).json({ error: "User not found" });
@@ -4518,6 +4527,7 @@ async function startServer() {
         can_use_calls: u.role === "superadmin" ? true : !!Number(u.can_use_calls),
         can_view_tasks: u.role === "superadmin" ? true : !!Number(u.can_view_tasks),
         can_view_mobile_bill: u.role === "superadmin" ? true : !!Number(u.can_view_mobile_bill),
+        can_view_service_book: u.role === "superadmin" ? true : !!Number(u.can_view_service_book),
         can_view_leave_application: u.role === "superadmin" ? true : !!Number(u.can_view_leave_application),
         can_view_my_leave: u.role === "superadmin" ? true : !!Number(u.can_view_my_leave),
         can_grant_module_access: u.role === "admin" ? !!Number(u.can_grant_module_access) : false,

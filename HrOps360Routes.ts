@@ -957,9 +957,10 @@ export function registerEmployee360Routes(app: Express, deps: Employee360RouteDe
   async function disciplineSection(emp: any) {
     if (!emp.user_id) return { linked: false, actions: [], exit: null };
     const userName = await userNames();
-    const [acts, exits] = await Promise.all([
+    const [acts, exits, feedback] = await Promise.all([
       rowsFor(queryDB, "disciplinary_actions", "user_id", Number(emp.user_id)),
-      rowsFor(queryDB, "exit_requests", "user_id", Number(emp.user_id))
+      rowsFor(queryDB, "exit_requests", "user_id", Number(emp.user_id)),
+      rowsFor(queryDB, "case_feedback", "case_type", "disciplinary")
     ]);
     const exit = exits.filter((x: any) => x.status !== "cancelled").sort((a: any, b: any) => Number(b.id) - Number(a.id))[0];
     return {
@@ -972,7 +973,14 @@ export function registerEmployee360Routes(app: Express, deps: Employee360RouteDe
           issued_at: toDate(d.issued_at),
           issued_by: userName(d.issued_by),
           acknowledged: !!Number(d.acknowledged),
-          status: d.status
+          acknowledged_at: d.acknowledged_at ? String(d.acknowledged_at) : null,
+          document_text: d.document_text || null,
+          status: d.status,
+          // The employee's explanation and HR's notes, oldest first.
+          feedback: feedback
+            .filter((f: any) => Number(f.case_id) === Number(d.id))
+            .sort((a: any, b: any) => Number(a.id) - Number(b.id))
+            .map((f: any) => ({ by: userName(f.user_id), role: f.role, message: f.message, at: f.created_at ? String(f.created_at) : null }))
         }))
         .sort((a: any, b: any) => (b.issued_at || "").localeCompare(a.issued_at || "")),
       exit: exit
@@ -1012,9 +1020,16 @@ export function registerEmployee360Routes(app: Express, deps: Employee360RouteDe
   // ---- overview: header, personal profile, summary tiles, timeline ----
   app.get("/api/hr-ops/p360/:employeeId", ...gate, async (req: any, res: any) => {
     try {
-      const empId = Number(req.params.employeeId);
+      await sendOverview(res, Number(req.params.employeeId), await viewerModules(req));
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+  // `mods` decides what the page shows (salary/loans) and which operations
+  // it offers — the viewer's modules, or just "payroll" for one's own book.
+  async function sendOverview(res: any, empId: number, mods: Set<string>) {
+    try {
       const today = todayInDhaka();
-      const mods = await viewerModules(req);
       const canPayroll = has(mods, "payroll");
       const book = await buildServiceBook(queryDB, today, empId, false);
       const world = await loadEmployeeWorld(queryDB);
@@ -1117,15 +1132,21 @@ export function registerEmployee360Routes(app: Express, deps: Employee360RouteDe
     } catch (err) {
       fail(res, err);
     }
-  });
+  }
 
   // ---- one section at a time (tabs load lazily) ----
   app.get("/api/hr-ops/p360/:employeeId/section/:section", ...gate, async (req: any, res: any) => {
     try {
-      const empId = Number(req.params.employeeId);
+      await sendSection(req, res, Number(req.params.employeeId), await viewerModules(req));
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+  async function sendSection(req: any, res: any, empId: number, mods: Set<string>) {
+    try {
       const section = String(req.params.section);
       if (!(SECTIONS as readonly string[]).includes(section)) throw bad("Unknown section.", 404);
-      if (PAYROLL_SECTIONS.has(section) && !has(await viewerModules(req), "payroll")) {
+      if (PAYROLL_SECTIONS.has(section) && !has(mods, "payroll")) {
         throw bad("Salary and loan details need the Payroll module. Ask your Superadmin to grant it.", 403);
       }
       const e = await employeeRow(empId);
@@ -1145,6 +1166,50 @@ export function registerEmployee360Routes(app: Express, deps: Employee360RouteDe
       else if (section === "discipline") data = await disciplineSection(e);
       else data = await performanceSection(e);
       res.json(data);
+    } catch (err) {
+      fail(res, err);
+    }
+  }
+
+  // ---- Self Service -> My Letters & Service Record -> Service Book ----
+  // The employee's own book, read only, behind users.can_view_service_book
+  // (Module Access; a Superadmin always). Salary and loans are their own, so
+  // they show; no HR operations are offered.
+  async function myEmployeeId(req: any): Promise<number> {
+    if (req.user.role !== "superadmin") {
+      const u: any[] = await queryDB("SELECT can_view_service_book FROM users WHERE id = ?", [Number(req.user.id)]);
+      if (!Number(u[0]?.can_view_service_book || 0)) throw bad("You don't have access to My Service Book. Ask HR to turn it on.", 403);
+    }
+    const rows: any[] = await queryDB("SELECT id, is_active FROM all_employees WHERE user_id = ?", [Number(req.user.id)]);
+    const mine = rows.filter((r: any) => Number(r.is_active ?? 1) !== 0)[0] || rows[0];
+    if (!mine) throw bad("Your login isn't linked to an Employee record yet — please contact HR.", 404);
+    return Number(mine.id);
+  }
+  const OWN = new Set(["payroll"]);
+  app.get("/api/hr-ops/my/p360", authenticateToken, async (req: any, res: any) => {
+    try {
+      await sendOverview(res, await myEmployeeId(req), OWN);
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+  app.get("/api/hr-ops/my/p360/section/:section", authenticateToken, async (req: any, res: any) => {
+    try {
+      await sendSection(req, res, await myEmployeeId(req), OWN);
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+  app.get("/api/hr-ops/my/p360/documents/:docId/file", authenticateToken, async (req: any, res: any) => {
+    try {
+      await myEmployeeId(req);
+      const rows: any[] = await queryDB("SELECT * FROM employee_documents WHERE id = ?", [Number(req.params.docId)]);
+      const d = rows.find((x: any) => Number(x.id) === Number(req.params.docId));
+      if (!d?.file_data || Number(d.user_id) !== Number(req.user.id)) throw bad("File not found.", 404);
+      const buf: Buffer = Buffer.isBuffer(d.file_data) ? d.file_data : Buffer.from(d.file_data);
+      res.setHeader("Content-Type", d.file_mimetype || "application/octet-stream");
+      res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(d.file_name || "document")}"`);
+      res.send(buf);
     } catch (err) {
       fail(res, err);
     }
@@ -1340,6 +1405,21 @@ export function registerEmployee360Routes(app: Express, deps: Employee360RouteDe
       await recordById(spec, id);
       await queryDB(`DELETE FROM ${spec.table} WHERE id = ?`, [id]);
       res.json({ success: true });
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+  app.get("/api/hr-ops/my/p360/records/:kind/:id/file", authenticateToken, async (req: any, res: any) => {
+    try {
+      const empId = await myEmployeeId(req);
+      const spec = specOf(req.params.kind);
+      const r = await recordById(spec, Number(req.params.id));
+      if (Number(r.employee_id) !== empId || !r.file_data) throw bad("No file attached.", 404);
+      const buf: Buffer = Buffer.isBuffer(r.file_data) ? r.file_data : Buffer.from(r.file_data);
+      res.setHeader("Content-Type", r.file_mime || "application/octet-stream");
+      res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(r.file_name || "attachment")}"`);
+      res.send(buf);
     } catch (err) {
       fail(res, err);
     }

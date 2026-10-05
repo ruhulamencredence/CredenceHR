@@ -25,7 +25,8 @@ export const TEMPLATE_FEATURE_COLUMNS: Record<string, string[]> = {
   // Leave Application and My Leave are one switch in Module Access.
   can_view_leave_application: ["can_view_leave_application", "can_view_my_leave"],
   can_view_tasks: ["can_view_tasks"],
-  can_view_mobile_bill: ["can_view_mobile_bill"]
+  can_view_mobile_bill: ["can_view_mobile_bill"],
+  can_view_service_book: ["can_view_service_book"]
 };
 export const TEMPLATE_FEATURES = Object.keys(TEMPLATE_FEATURE_COLUMNS);
 
