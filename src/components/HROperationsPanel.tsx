@@ -9,10 +9,12 @@
 // confirmation / separation… with approval), each Employee's Service Book
 // (Employee 360 — everything about one Employee on one page),
 // Letters (templates, register, requests), the Onboarding checklist,
-// Increment planning, company-wide Employee Reports, and Settings.
+// Increment planning, company-wide Employee Reports, and Settings — plus
+// Grievance & Disciplinary (the same page as HR Advanced's), shown only to an
+// account that also holds that module.
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Briefcase, LayoutDashboard, ClipboardList, BookOpen, FileText, ClipboardCheck, TrendingUp, Settings, FileSpreadsheet } from 'lucide-react';
+import { Briefcase, LayoutDashboard, ClipboardList, BookOpen, FileText, ClipboardCheck, TrendingUp, Settings, FileSpreadsheet, Gavel } from 'lucide-react';
 import { Spinner } from './Spinner';
 import { useHrApi, Notice, type HrOpsEmployee, type HrOpsMeta } from './HrOpsShared';
 import { HrOpsDashboard } from './HrOpsDashboard';
@@ -23,12 +25,14 @@ import { HrOpsOnboarding } from './HrOpsOnboarding';
 import { HrOpsIncrements } from './HrOpsIncrements';
 import { HrOpsSettings } from './HrOpsSettings';
 import { HrOpsReports } from './HrOpsReports';
+import { GrievanceDisciplinaryPanel } from './GrievanceDisciplinaryPanel';
 
-export type HrOpsTab = 'dashboard' | 'actions' | 'service_book' | 'letters' | 'onboarding' | 'increments' | 'reports' | 'settings';
+export type HrOpsTab = 'dashboard' | 'actions' | 'service_book' | 'letters' | 'onboarding' | 'increments' | 'reports' | 'grievance' | 'settings';
 
 const TABS: { key: HrOpsTab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { key: 'dashboard', label: 'Monthly Report', icon: LayoutDashboard },
   { key: 'actions', label: 'Personnel Actions', icon: ClipboardList },
+  { key: 'grievance', label: 'Grievance & Disciplinary', icon: Gavel },
   { key: 'service_book', label: 'Service Book (360°)', icon: BookOpen },
   { key: 'letters', label: 'Letters', icon: FileText },
   { key: 'onboarding', label: 'Onboarding', icon: ClipboardCheck },
@@ -42,12 +46,13 @@ const TABS: { key: HrOpsTab; label: string; icon: React.ComponentType<{ classNam
 export const HR_OPS_TAB_EVENT = 'credence:hr-ops-tab';
 const TAB_STORAGE_KEY = 'hr_ops_tab';
 
-export const HROperationsPanel: React.FC<{ token: string }> = ({ token }) => {
+export const HROperationsPanel: React.FC<{ token: string; canGrievance?: boolean }> = ({ token, canGrievance = false }) => {
   const api = useHrApi(token);
+  const tabs = TABS.filter((t) => t.key !== 'grievance' || canGrievance);
   const [tab, setTab] = useState<HrOpsTab>(() => {
     try {
       const t = sessionStorage.getItem(TAB_STORAGE_KEY) as HrOpsTab | null;
-      if (t && TABS.some((x) => x.key === t)) return t;
+      if (t && TABS.some((x) => x.key === t) && (t !== 'grievance' || canGrievance)) return t;
     } catch {
       // storage unavailable
     }
@@ -76,11 +81,11 @@ export const HROperationsPanel: React.FC<{ token: string }> = ({ token }) => {
   useEffect(() => {
     const onTab = (e: Event) => {
       const t = (e as CustomEvent).detail as HrOpsTab;
-      if (TABS.some((x) => x.key === t)) setTab(t);
+      if (TABS.some((x) => x.key === t) && (t !== 'grievance' || canGrievance)) setTab(t);
     };
     window.addEventListener(HR_OPS_TAB_EVENT, onTab);
     return () => window.removeEventListener(HR_OPS_TAB_EVENT, onTab);
-  }, []);
+  }, [canGrievance]);
 
   const changed = () => {
     loadEmployees();
@@ -106,7 +111,7 @@ export const HROperationsPanel: React.FC<{ token: string }> = ({ token }) => {
           </div>
         </div>
         <div className="flex gap-1 mt-5 overflow-x-auto -mb-px">
-          {TABS.map((t) => (
+          {tabs.map((t) => (
             <button
               key={t.key}
               type="button"
@@ -141,6 +146,8 @@ export const HROperationsPanel: React.FC<{ token: string }> = ({ token }) => {
           <HrOpsLetters token={token} meta={meta} employees={employees} refreshKey={refreshKey} />
         ) : tab === 'onboarding' ? (
           <HrOpsOnboarding token={token} meta={meta} employees={employees} />
+        ) : tab === 'grievance' && canGrievance ? (
+          <GrievanceDisciplinaryPanel token={token} embedded />
         ) : tab === 'reports' ? (
           <HrOpsReports token={token} onOpenEmployee={openEmployee} />
         ) : tab === 'increments' ? (

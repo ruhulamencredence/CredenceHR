@@ -7,6 +7,8 @@ import { GRIEVANCE_TAB_EVENT, GRIEVANCE_TAB_KEY, GrievanceAdminTab } from '../li
 
 interface GrievanceDisciplinaryPanelProps {
   token: string;
+  // Inside HR Operations' own tab: no second card / page title around it.
+  embedded?: boolean;
 }
 
 interface Grievance {
@@ -124,7 +126,7 @@ const ACTION_TYPE_LABEL: Record<string, string> = {
 // disciplinary actions issued to employees, each with its feedback thread.
 // Employees raise grievances and give their feedback from Self Service ->
 // Grievance & Disciplinary (MyCases.tsx).
-export const GrievanceDisciplinaryPanel: React.FC<GrievanceDisciplinaryPanelProps> = ({ token }) => {
+export const GrievanceDisciplinaryPanel: React.FC<GrievanceDisciplinaryPanelProps> = ({ token, embedded = false }) => {
   const authHeaders = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
 
   // An HR-side alert (e.g. "Disciplinary Feedback Received") asks for a tab
@@ -266,9 +268,9 @@ export const GrievanceDisciplinaryPanel: React.FC<GrievanceDisciplinaryPanelProp
   };
 
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-      <div className="p-6 border-b border-slate-200 flex items-start justify-between gap-4 flex-wrap">
-        <div className="flex items-start gap-3">
+    <div className={embedded ? '-m-6' : 'bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden'}>
+      <div className={`border-b border-slate-200 flex items-start justify-between gap-4 flex-wrap ${embedded ? 'px-6 py-4' : 'p-6'}`}>
+        <div className={embedded ? 'hidden' : 'flex items-start gap-3'}>
           <div className="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center shrink-0">
             <Gavel className="w-5 h-5 text-blue-600" />
           </div>
