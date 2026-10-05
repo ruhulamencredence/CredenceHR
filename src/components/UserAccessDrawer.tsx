@@ -60,6 +60,7 @@ const FEATURE_NAME: Record<string, string> = {
   can_view_group_dashboard: 'Admin Dashboard: all companies',
   can_view_tasks: 'My Tasks',
   can_view_mobile_bill: 'My Mobile SIM',
+  can_view_service_book: 'My Service Book',
   can_view_leave_application: 'Leave Application',
   can_view_my_leave: 'My Leave'
 };
@@ -337,6 +338,7 @@ export function UserAccessDrawer({
     { label: 'Admin Dashboard: all companies', on: !!u.can_view_group_dashboard },
     { label: 'My Tasks', on: !!u.can_view_tasks },
     { label: 'My Mobile SIM', on: !!u.can_view_mobile_bill },
+    { label: 'My Service Book', on: !!u.can_view_service_book },
     { label: 'Movement Claim', on: !!u.can_view_movement_claims },
     { label: 'Conveyance Claim', on: !!u.can_view_conveyance_claims },
     { label: 'Budget / Jobs / MPR', on: u.can_view_budget_module ?? true }

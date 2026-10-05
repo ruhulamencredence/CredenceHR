@@ -575,9 +575,10 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
           refs.push({ claim_id: claimId, amount: refAmount });
         }
 
-        const claimRows = await queryDB(`SELECT id, user_id, status FROM claims WHERE id IN (${refs.map(() => "?").join(",")})`, [
-          ...refs.map((r) => r.claim_id)
-        ]);
+        const claimRows = await queryDB(
+          `SELECT id, user_id, status, DATE_FORMAT(check_in_at, '%Y-%m-%d') AS check_in_day FROM claims WHERE id IN (${refs.map(() => "?").join(",")})`,
+          [...refs.map((r) => r.claim_id)]
+        );
         for (const r of refs) {
           const claimRow = claimRows.find((c: any) => Number(c.id) === r.claim_id);
           if (!claimRow || Number(claimRow.user_id) !== Number(req.user.id)) {
@@ -585,6 +586,11 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
           }
           if (claimRow.status !== "completed") {
             return res.status(400).json({ error: "A referenced Movement Claim must be checked out first." });
+          }
+          // Only check-ins inside the claim's own From–To range.
+          const day = String(claimRow.check_in_day || "").slice(0, 10);
+          if (usesItems && day && (day < String(from) || day > String(to))) {
+            return res.status(400).json({ error: `A referenced check-in/out (${day}) is outside this claim's dates (${from} to ${to}).` });
           }
         }
         const alreadyUsed = await queryDB(
@@ -612,14 +618,30 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
       // Bill Claim Policy (BillClaimPolicy.ts): dates, closed dates, limits,
       // categories, receipts. When references are attached and no bills, the
       // Claim Amount is their sum (older app versions).
-      const lines = usesItems ? items : refs.length > 0 ? [] : [{ category, bill_date: from, amount, description: desc }];
+      let lines = usesItems ? items : refs.length > 0 ? [] : [{ category, bill_date: from, amount, description: desc }];
+      // With bills, check-in/out references belong to a Transport bill and
+      // ARE its amount — the claim total counts them once, not on top of it.
+      let extraTotal = refsTotal;
+      if (usesItems && refs.length > 0) {
+        const cats = await loadCategories(queryDB);
+        const isTransport = (l: any) => {
+          const c = cats.find((x) => x.id === Number(l?.category_id)) || (l?.category ? cats.find((x) => x.name.toLowerCase() === String(l.category).trim().toLowerCase()) : undefined);
+          return !!c && /transport/i.test(c.name);
+        };
+        const at = lines.findIndex(isTransport);
+        if (at < 0) {
+          return res.status(400).json({ error: "Check-in/out references go with a Transport bill — choose Transport as a bill's category." });
+        }
+        lines = lines.map((l: any, i: number) => (i === at ? { ...l, amount: Math.round(refsTotal * 100) / 100 } : l));
+        extraTotal = 0;
+      }
       const checked = await checkClaimBills(queryDB, {
         userId: req.user.id,
         today,
         from,
         to,
         lines,
-        extraTotal: refsTotal,
+        extraTotal,
         hasAttachment: !!fileBuffer
       });
       if ("error" in checked) return res.status(400).json({ error: checked.error });
@@ -870,7 +892,7 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
       }
       // A claim with bill lines keeps its categories and total from those
       // lines; the Admin edits its dates and description here.
-      const itemRows = await queryDB("SELECT amount FROM user_claim_items WHERE user_claim_id = ?", [uc.id]);
+      const itemRows = await queryDB("SELECT amount, category_name FROM user_claim_items WHERE user_claim_id = ?", [uc.id]);
       const hasItems = itemRows.length > 0;
       const editCategory = hasItems ? uc.category : category;
       if (!hasItems && editCategory !== uc.category) {
@@ -881,8 +903,12 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
       const refRows = await queryDB("SELECT amount FROM user_claim_references WHERE user_claim_id = ?", [uc.id]);
       let amt: number;
       if (hasItems) {
-        amt =
-          itemRows.reduce((sum: number, r: any) => sum + Number(r.amount), 0) + refRows.reduce((sum: number, r: any) => sum + Number(r.amount), 0);
+        const refsSum = refRows.reduce((sum: number, r: any) => sum + Number(r.amount), 0);
+        // Claims filed since references became the Transport bill's own
+        // amount already carry them in that bill — count them once.
+        const inTransportBill =
+          refRows.length > 0 && itemRows.some((r: any) => /transport/i.test(String(r.category_name || "")) && Math.abs(Number(r.amount) - refsSum) < 0.005);
+        amt = itemRows.reduce((sum: number, r: any) => sum + Number(r.amount), 0) + (inTransportBill ? 0 : refsSum);
       } else if (refRows.length > 0) {
         // Referenced check-in/outs still drive the total — an Admin edits the
         // date/category/description here, not the Amount itself.

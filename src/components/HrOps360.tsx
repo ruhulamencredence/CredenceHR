@@ -11,8 +11,13 @@
 // Discipline / Performance. "Actions" runs the common operations from here —
 // each one through the module that owns it, so its permission and workflow
 // still apply. "Dossier" exports any mix of sections as PDF or Excel.
+//
+// The same page, read only, is the employee's own Service Book in Self
+// Service -> My Letters & Service Record (`self`): it loads from
+// /api/hr-ops/my/p360 (users.can_view_service_book) and offers no picker,
+// actions or edit buttons.
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { CompanyAssignmentsModal } from './HrOpsCompanyTools';
 import {
   BookOpen,
@@ -80,7 +85,13 @@ import {
 } from './HrOps360Parts';
 import { confirmDialog } from '../lib/confirmDialog';
 
-type TabKey = 'overview' | 'personal' | 'career' | 'documents' | 'attendance' | 'leave' | 'claims' | 'salary' | 'loans' | 'other';
+type TabKey = 'overview' | 'personal' | 'career' | 'documents' | 'attendance' | 'leave' | 'claims' | 'salary' | 'loans' | 'discipline' | 'other';
+
+// True inside the employee's own (read-only) Service Book.
+const SelfBook = createContext(false);
+// HR paths -> the employee's own ones (/api/hr-ops/my/p360/...).
+const p360Path = (self: boolean, path: string) =>
+  self ? path.replace(/^\/api\/hr-ops\/p360\/\d+(?=\/section|$)/, '/api/hr-ops/my/p360').replace(/^\/api\/hr-ops\/p360\/(records|documents)\//, '/api/hr-ops/my/p360/$1/') : path;
 
 const TABS: { key: TabKey; label: string; icon: React.ComponentType<{ className?: string }>; payroll?: boolean }[] = [
   { key: 'overview', label: 'Overview', icon: LayoutDashboard },
@@ -92,6 +103,7 @@ const TABS: { key: TabKey; label: string; icon: React.ComponentType<{ className?
   { key: 'claims', label: 'Claims & Conveyance', icon: Receipt },
   { key: 'salary', label: 'Salary', icon: Wallet, payroll: true },
   { key: 'loans', label: 'Loans', icon: HandCoins, payroll: true },
+  { key: 'discipline', label: 'Disciplinary', icon: ShieldCheck },
   { key: 'other', label: 'Assets & Records', icon: Package }
 ];
 
@@ -119,7 +131,9 @@ async function openFile(token: string, path: string) {
 }
 
 // Loads one section when its tab opens (and again when `deps` change).
-function useSection<T>(api: ReturnType<typeof useHrApi>, path: string | null, reloadKey: number) {
+function useSection<T>(api: ReturnType<typeof useHrApi>, rawPath: string | null, reloadKey: number) {
+  const self = useContext(SelfBook);
+  const path = rawPath && p360Path(self, rawPath);
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -210,12 +224,17 @@ const statusTone = (s: string) => (s === 'approved' || s === 'paid' || s === 'co
 
 export const Employee360: React.FC<{
   token: string;
-  meta: HrOpsMeta;
-  employees: HrOpsEmployee[];
+  meta?: HrOpsMeta;
+  employees?: HrOpsEmployee[];
   employeeId: number | null;
-  onPick: (id: number | null) => void;
-  onChanged: () => void;
-}> = ({ token, meta, employees, employeeId, onPick, onChanged }) => {
+  onPick?: (id: number | null) => void;
+  onChanged?: () => void;
+  // The employee's own read-only book (Self Service).
+  self?: boolean;
+}> = ({ token, meta: metaProp, employees = [], employeeId: employeeIdProp, onPick = () => {}, onChanged = () => {}, self = false }) => {
+  const meta = metaProp as HrOpsMeta;
+  // Own book: the server finds the Employee from the login.
+  const employeeId = self ? -1 : employeeIdProp;
   const api = useHrApi(token);
   const [ov, setOv] = useState<P360Overview | null>(null);
   const [loading, setLoading] = useState(false);
@@ -246,13 +265,13 @@ export const Employee360: React.FC<{
     }
     setLoading(true);
     try {
-      setOv(await api.get<P360Overview>(`/api/hr-ops/p360/${employeeId}`));
+      setOv(await api.get<P360Overview>(self ? '/api/hr-ops/my/p360' : `/api/hr-ops/p360/${employeeId}`));
     } catch (e: any) {
       setMsg({ type: 'error', text: e.message });
     } finally {
       setLoading(false);
     }
-  }, [api, employeeId]);
+  }, [api, employeeId, self]);
   useEffect(() => {
     load();
   }, [load]);
@@ -314,12 +333,15 @@ export const Employee360: React.FC<{
   const visibleActions = ACTIONS.filter((a) => a.show !== false);
 
   return (
+    <SelfBook.Provider value={self}>
     <div className="space-y-4">
       <Notice msg={msg} onClose={() => setMsg(null)} />
-      <div className="max-w-md">
-        <label className={labelCls}>Employee</label>
-        <EmployeePicker employees={employees} value={employeeId} onChange={onPick} includeInactive />
-      </div>
+      {!self && (
+        <div className="max-w-md">
+          <label className={labelCls}>Employee</label>
+          <EmployeePicker employees={employees} value={employeeId} onChange={onPick} includeInactive />
+        </div>
+      )}
 
       {!employeeId ? (
         <div className="text-center py-16 text-sm text-slate-400">
@@ -352,6 +374,7 @@ export const Employee360: React.FC<{
                   <Field label="Education" value={s.highest_education} />
                 </div>
               </div>
+              {!self && (
               <div className="flex flex-wrap gap-2">
                 <div className="relative" ref={menuRef}>
                   <button type="button" className={btnPrimary} onClick={() => setMenuOpen((o) => !o)}>
@@ -386,6 +409,7 @@ export const Employee360: React.FC<{
                   <FileDown className="w-3.5 h-3.5" /> Dossier
                 </button>
               </div>
+              )}
             </div>
           </div>
 
@@ -458,6 +482,7 @@ export const Employee360: React.FC<{
           {tab === 'claims' && <ClaimsTab api={api} ov={ov} reloadKey={reloadKey} />}
           {tab === 'salary' && perms?.payroll && <SalaryTab api={api} ov={ov} reloadKey={reloadKey} onNewAction={() => setModal({ kind: 'action' })} />}
           {tab === 'loans' && perms?.payroll && <LoansTab api={api} ov={ov} reloadKey={reloadKey} onNew={() => setModal({ kind: 'loan' })} />}
+          {tab === 'discipline' && <DisciplineTab api={api} ov={ov} reloadKey={reloadKey} />}
           {tab === 'other' && <OtherTab api={api} ov={ov} reloadKey={reloadKey} />}
         </>
       )}
@@ -529,6 +554,7 @@ export const Employee360: React.FC<{
       {modal?.kind === 'discipline' && e?.user_id && <DisciplineModal token={token} userId={e.user_id} onClose={() => setModal(null)} onSaved={() => refresh('Disciplinary action issued.')} />}
       {modal?.kind === 'dossier' && ov && <DossierModal token={token} overview={ov} onClose={() => setModal(null)} />}
     </div>
+    </SelfBook.Provider>
   );
 };
 
@@ -539,15 +565,18 @@ export const Employee360: React.FC<{
 type Api = ReturnType<typeof useHrApi>;
 
 const OverviewTab: React.FC<{ ov: P360Overview; emp: HrOpsEmployee | null; onEditService: () => void }> = ({ ov, emp, onEditService }) => {
+  const self = useContext(SelfBook);
   const e = ov.employee;
   return (
     <div className="grid lg:grid-cols-[300px_1fr] gap-4">
       <Card
         title="Service details"
         action={
-          <button type="button" className="text-[11px] font-semibold text-blue-600 inline-flex items-center gap-1" onClick={onEditService}>
-            <Pencil className="w-3 h-3" /> Edit
-          </button>
+          self ? undefined : (
+            <button type="button" className="text-[11px] font-semibold text-blue-600 inline-flex items-center gap-1" onClick={onEditService}>
+              <Pencil className="w-3 h-3" /> Edit
+            </button>
+          )
         }
       >
         <div className="grid grid-cols-2 gap-3">
@@ -578,6 +607,7 @@ const OverviewTab: React.FC<{ ov: P360Overview; emp: HrOpsEmployee | null; onEdi
 };
 
 const PersonalTab: React.FC<{ api: Api; ov: P360Overview; reloadKey: number; onEdit: (row: any | null) => void; onChanged: () => void }> = ({ api, ov, reloadKey, onEdit, onChanged }) => {
+  const self = useContext(SelfBook);
   const { data, loading } = useSection<any>(api, `/api/hr-ops/p360/${ov.employee.id}/section/records`, reloadKey);
   const p = ov.profile;
   const del = async (id: number) => {
@@ -617,9 +647,11 @@ const PersonalTab: React.FC<{ api: Api; ov: P360Overview; reloadKey: number; onE
       <Card
         title="Family, nominee & emergency contact"
         action={
-          <button type="button" className="text-[11px] font-semibold text-blue-600 inline-flex items-center gap-1" onClick={() => onEdit(null)}>
-            <Plus className="w-3 h-3" /> Add
-          </button>
+          self ? undefined : (
+            <button type="button" className="text-[11px] font-semibold text-blue-600 inline-flex items-center gap-1" onClick={() => onEdit(null)}>
+              <Plus className="w-3 h-3" /> Add
+            </button>
+          )
         }
       >
         {loading && !data ? (
@@ -642,7 +674,7 @@ const PersonalTab: React.FC<{ api: Api; ov: P360Overview; reloadKey: number; onE
                     {f.is_dependent && <Badge tone="na">Dependent</Badge>}
                   </div>
                 </div>
-                <div className="flex gap-1 shrink-0">
+                <div className={self ? 'hidden' : 'flex gap-1 shrink-0'}>
                   <button type="button" className="p-1 text-slate-400 hover:text-blue-600" onClick={() => onEdit(f)} aria-label="Edit">
                     <Pencil className="w-3.5 h-3.5" />
                   </button>
@@ -667,6 +699,7 @@ const CareerTab: React.FC<{ api: Api; token: string; ov: P360Overview; reloadKey
   onEdit,
   onChanged
 }) => {
+  const self = useContext(SelfBook);
   const { data, loading } = useSection<any>(api, `/api/hr-ops/p360/${ov.employee.id}/section/records`, reloadKey);
   const del = async (kind: RecordKind, id: number) => {
     if (!(await confirmDialog('Delete this record?'))) return;
@@ -684,24 +717,33 @@ const CareerTab: React.FC<{ api: Api; token: string; ov: P360Overview; reloadKey
   const rowTools = (kind: RecordKind, r: any) => (
     <div className="flex items-center gap-1 shrink-0">
       {r.has_file && (
-        <button type="button" className="p-1 text-slate-400 hover:text-blue-600" title={r.file_name} onClick={() => openFile(token, `/api/hr-ops/p360/records/${kind}/${r.id}/file`)}>
+        <button type="button" className="p-1 text-slate-400 hover:text-blue-600" title={r.file_name} onClick={() => openFile(token, p360Path(self, `/api/hr-ops/p360/records/${kind}/${r.id}/file`))}>
           <Paperclip className="w-3.5 h-3.5" />
         </button>
       )}
-      {RECORD_FIELDS[kind].hasVerify && (
+      {self && r.verified && (
+        <span className="p-1 text-emerald-600" title="Verified by HR">
+          <CheckCircle2 className="w-3.5 h-3.5" />
+        </span>
+      )}
+      {!self && RECORD_FIELDS[kind].hasVerify && (
         <button type="button" className={`p-1 ${r.verified ? 'text-emerald-600' : 'text-slate-300 hover:text-emerald-600'}`} title={r.verified ? `Verified by ${r.verified_by_name || '—'}${r.verify_note ? ` — ${r.verify_note}` : ''}` : 'Mark verified'} onClick={() => verify(kind, r)}>
           <CheckCircle2 className="w-3.5 h-3.5" />
         </button>
       )}
-      <button type="button" className="p-1 text-slate-400 hover:text-blue-600" onClick={() => onEdit(kind, r)} aria-label="Edit">
-        <Pencil className="w-3.5 h-3.5" />
-      </button>
-      <button type="button" className="p-1 text-slate-400 hover:text-rose-600" onClick={() => del(kind, r.id)} aria-label="Delete">
-        <Trash2 className="w-3.5 h-3.5" />
-      </button>
+      {!self && (
+        <>
+          <button type="button" className="p-1 text-slate-400 hover:text-blue-600" onClick={() => onEdit(kind, r)} aria-label="Edit">
+            <Pencil className="w-3.5 h-3.5" />
+          </button>
+          <button type="button" className="p-1 text-slate-400 hover:text-rose-600" onClick={() => del(kind, r.id)} aria-label="Delete">
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+        </>
+      )}
     </div>
   );
-  const addBtn = (kind: RecordKind) => (
+  const addBtn = (kind: RecordKind) => self ? undefined : (
     <button type="button" className="text-[11px] font-semibold text-blue-600 inline-flex items-center gap-1" onClick={() => onEdit(kind, null)}>
       <Plus className="w-3 h-3" /> Add
     </button>
@@ -803,6 +845,7 @@ const monthsBetweenClient = (from: string, to: string | null) => {
 };
 
 const DocumentsTab: React.FC<{ api: Api; token: string; ov: P360Overview; reloadKey: number; onUpload: (missing: string[]) => void }> = ({ api, token, ov, reloadKey, onUpload }) => {
+  const self = useContext(SelfBook);
   const { data, loading } = useSection<any>(api, `/api/hr-ops/p360/${ov.employee.id}/section/documents`, reloadKey);
   if (loading && !data) return <Loading />;
   if (!data) return null;
@@ -814,20 +857,24 @@ const DocumentsTab: React.FC<{ api: Api; token: string; ov: P360Overview; reload
           <div className="text-xs font-bold text-rose-800 mb-1.5">Missing documents</div>
           <div className="flex flex-wrap gap-1.5">
             {data.missing.map((m: string) => (
-              <button key={m} type="button" onClick={() => onUpload([m])} className="text-[11px] px-2 py-1 rounded-md bg-white border border-rose-200 text-rose-700 hover:bg-rose-100">
+              <button key={m} type="button" disabled={self} onClick={() => onUpload([m])} className="text-[11px] px-2 py-1 rounded-md bg-white border border-rose-200 text-rose-700 hover:bg-rose-100">
                 <Plus className="w-3 h-3 inline" /> {m}
               </button>
             ))}
           </div>
-          <p className="text-[10px] text-rose-700/80 mt-1.5">The required list is set in Settings → Company &amp; Letters.</p>
+          <p className="text-[10px] text-rose-700/80 mt-1.5">
+            {self ? 'HR still needs these from you — hand them to HR or upload them where HR asks (Pending Items).' : 'The required list is set in Settings → Company & Letters.'}
+          </p>
         </div>
       )}
       <Card
         title={`Documents on file (${data.documents.length})`}
         action={
-          <button type="button" className="text-[11px] font-semibold text-blue-600 inline-flex items-center gap-1" onClick={() => onUpload(data.missing)}>
-            <Plus className="w-3 h-3" /> Upload
-          </button>
+          self ? undefined : (
+            <button type="button" className="text-[11px] font-semibold text-blue-600 inline-flex items-center gap-1" onClick={() => onUpload(data.missing)}>
+              <Plus className="w-3 h-3" /> Upload
+            </button>
+          )
         }
       >
         <Table
@@ -842,7 +889,7 @@ const DocumentsTab: React.FC<{ api: Api; token: string; ov: P360Overview; reload
             </span>,
             d.expiry_date ? d.expired ? <Badge tone="rejected">Expired {fmtDate(d.expiry_date)}</Badge> : fmtDate(d.expiry_date) : '—',
             d.requires_signature ? <Badge tone={d.is_signed ? 'approved' : 'pending'}>{d.is_signed ? 'Signed' : 'Awaiting'}</Badge> : '—',
-            <button type="button" className="text-blue-600 font-semibold" onClick={() => openFile(token, `/api/hr-ops/p360/documents/${d.id}/file`)}>
+            <button type="button" className="text-blue-600 font-semibold" onClick={() => openFile(token, p360Path(self, `/api/hr-ops/p360/documents/${d.id}/file`))}>
               Open
             </button>
           ])}
@@ -1099,6 +1146,7 @@ const ClaimsTab: React.FC<{ api: Api; ov: P360Overview; reloadKey: number }> = (
 };
 
 const SalaryTab: React.FC<{ api: Api; ov: P360Overview; reloadKey: number; onNewAction: () => void }> = ({ api, ov, reloadKey, onNewAction }) => {
+  const self = useContext(SelfBook);
   const { data, loading, error } = useSection<any>(api, `/api/hr-ops/p360/${ov.employee.id}/section/salary`, reloadKey);
   if (error) return <Notice msg={{ type: 'error', text: error }} />;
   if (loading && !data) return <Loading />;
@@ -1110,9 +1158,11 @@ const SalaryTab: React.FC<{ api: Api; ov: P360Overview; reloadKey: number; onNew
         <Card
           title="Current salary structure"
           action={
-            <button type="button" className="text-[11px] font-semibold text-blue-600" onClick={onNewAction}>
-              Revise
-            </button>
+            self ? undefined : (
+              <button type="button" className="text-[11px] font-semibold text-blue-600" onClick={onNewAction}>
+                Revise
+              </button>
+            )
           }
         >
           {!cur ? (
@@ -1197,6 +1247,7 @@ const SalaryTab: React.FC<{ api: Api; ov: P360Overview; reloadKey: number; onNew
 };
 
 const LoansTab: React.FC<{ api: Api; ov: P360Overview; reloadKey: number; onNew: () => void }> = ({ api, ov, reloadKey, onNew }) => {
+  const self = useContext(SelfBook);
   const { data, loading, error } = useSection<any>(api, `/api/hr-ops/p360/${ov.employee.id}/section/loans`, reloadKey);
   if (error) return <Notice msg={{ type: 'error', text: error }} />;
   if (loading && !data) return <Loading />;
@@ -1207,9 +1258,11 @@ const LoansTab: React.FC<{ api: Api; ov: P360Overview; reloadKey: number; onNew:
         <div className="text-sm">
           Outstanding: <span className="font-bold">{taka(data.outstanding)}</span>
         </div>
-        <button type="button" className={btnPrimary} onClick={onNew}>
-          <Landmark className="w-3.5 h-3.5" /> Give Loan / Advance
-        </button>
+        {!self && (
+          <button type="button" className={btnPrimary} onClick={onNew}>
+            <Landmark className="w-3.5 h-3.5" /> Give Loan / Advance
+          </button>
+        )}
       </div>
       {data.loans.length === 0 ? (
         <Empty>No loan or salary advance.</Empty>
@@ -1260,6 +1313,73 @@ const LoansTab: React.FC<{ api: Api; ov: P360Overview; reloadKey: number; onNew:
   );
 };
 
+// Every disciplinary action issued to the employee, newest first, with the
+// letter text, acknowledgement and the feedback thread (the employee's
+// explanation and HR's notes).
+const DisciplineTab: React.FC<{ api: Api; ov: P360Overview; reloadKey: number }> = ({ api, ov, reloadKey }) => {
+  const self = useContext(SelfBook);
+  const { data, loading, error } = useSection<any>(api, `/api/hr-ops/p360/${ov.employee.id}/section/discipline`, reloadKey);
+  if (error) return <Notice msg={{ type: 'error', text: error }} />;
+  if (loading && !data) return <Loading />;
+  if (!data) return null;
+  if (!data.linked) return <Empty>{self ? 'No disciplinary record.' : 'This employee has no app login, so no disciplinary action can be recorded against them.'}</Empty>;
+  const actions: any[] = data.actions || [];
+  const open = actions.filter((a) => a.status !== 'closed').length;
+  const byType = actions.reduce((m: Record<string, number>, a) => ({ ...m, [a.action_type]: (m[a.action_type] || 0) + 1 }), {});
+  const statusLabel = (a: any) => (a.status === 'closed' ? 'Closed' : a.acknowledged ? 'Acknowledged' : 'Pending acknowledgement');
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <Tile label="Total actions" value={actions.length} sub={actions[0] ? `latest ${fmtDate(actions[0].issued_at)}` : 'clean record'} />
+        <Tile label="Open" value={open} tone={open ? 'border-amber-200 bg-amber-50/50' : undefined} sub="not closed yet" />
+        <Tile label="Warnings" value={(byType.verbal_warning || 0) + (byType.written_warning || 0)} sub={`${byType.verbal_warning || 0} verbal · ${byType.written_warning || 0} written`} />
+        <Tile
+          label="Show cause / suspension"
+          value={(byType.show_cause || 0) + (byType.suspension || 0) + (byType.termination || 0)}
+          sub={byType.termination ? `${byType.termination} termination` : `${byType.show_cause || 0} show cause · ${byType.suspension || 0} suspension`}
+          tone={byType.suspension || byType.termination ? 'border-rose-200 bg-rose-50/50' : undefined}
+        />
+      </div>
+      <Card title={`Disciplinary history (${actions.length})`}>
+        {actions.length === 0 ? (
+          <Empty>No disciplinary action on record.</Empty>
+        ) : (
+          <div className="space-y-3">
+            {actions.map((a) => (
+              <div key={a.id} className="rounded-lg border border-slate-100 p-3">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold text-rose-700">{DISCIPLINE_LABEL[a.action_type] || a.action_type}</div>
+                    <div className="text-xs text-slate-800 mt-0.5">{a.reason}</div>
+                    <div className="text-[11px] text-slate-400 mt-0.5">
+                      {fmtDate(a.issued_at)}
+                      {a.issued_by ? ` · issued by ${a.issued_by}` : ''}
+                      {a.acknowledged_at ? ` · acknowledged ${fmtDate(a.acknowledged_at)}` : ''}
+                    </div>
+                  </div>
+                  <Badge tone={a.status === 'closed' ? 'na' : a.acknowledged ? 'approved' : 'pending'}>{statusLabel(a)}</Badge>
+                </div>
+                {a.document_text && <div className="mt-2 text-[11px] text-slate-600 whitespace-pre-wrap rounded-md bg-slate-50 p-2">{a.document_text}</div>}
+                {(a.feedback || []).length > 0 && (
+                  <div className="mt-2 space-y-1.5">
+                    {a.feedback.map((f: any, i: number) => (
+                      <div key={i} className={`rounded-md px-2.5 py-1.5 text-[11px] ${f.role === 'named' ? 'bg-blue-50 text-slate-700' : 'bg-slate-50 text-slate-600'}`}>
+                        <span className="font-semibold">{f.role === 'named' ? 'Employee' : 'HR'}{f.by ? ` · ${f.by}` : ''}</span>
+                        {f.at ? <span className="text-slate-400"> · {fmtDate(f.at)}</span> : null}
+                        <div className="whitespace-pre-wrap">{f.message}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+};
+
 const OtherTab: React.FC<{ api: Api; ov: P360Overview; reloadKey: number }> = ({ api, ov, reloadKey }) => {
   const id = ov.employee.id;
   const assets = useSection<any>(api, `/api/hr-ops/p360/${id}/section/assets`, reloadKey);
@@ -1292,18 +1412,7 @@ const OtherTab: React.FC<{ api: Api; ov: P360Overview; reloadKey: number }> = ({
           />
         )}
       </Card>
-      <div className="grid lg:grid-cols-2 gap-4">
-        <Card title="Disciplinary actions">
-          {disc.loading && !disc.data ? (
-            <Loading />
-          ) : (
-            <Table
-              head={['Date', 'Action', 'Reason', 'Status']}
-              empty="None."
-              rows={(disc.data?.actions || []).map((a: any) => [fmtDate(a.issued_at), DISCIPLINE_LABEL[a.action_type] || a.action_type, a.reason, <Badge tone={a.status === 'closed' ? 'na' : 'pending'}>{a.status}</Badge>])}
-            />
-          )}
-        </Card>
+      <div>
         <Card title="Performance reviews">
           {perf.loading && !perf.data ? (
             <Loading />

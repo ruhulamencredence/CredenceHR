@@ -27,14 +27,16 @@ export type SelfServiceFeature =
   | 'can_view_timesheet'
   | 'can_view_leave_application'
   | 'can_view_tasks'
-  | 'can_view_mobile_bill';
+  | 'can_view_mobile_bill'
+  | 'can_view_service_book';
 const SELF_SERVICE_ENDPOINT: Record<SelfServiceFeature, string> = {
   can_view_movement_claims: 'movement-claim-access',
   can_view_conveyance_claims: 'conveyance-claim-access',
   can_view_timesheet: 'timesheet-access',
   can_view_leave_application: 'leave-application-access',
   can_view_tasks: 'tasks-access',
-  can_view_mobile_bill: 'mobile-bill-access'
+  can_view_mobile_bill: 'mobile-bill-access',
+  can_view_service_book: 'service-book-access'
 };
 export const isSelfServiceFeature = (f: TemplateFeature): f is SelfServiceFeature => f in SELF_SERVICE_ENDPOINT;
 
@@ -49,7 +51,8 @@ export const TEMPLATE_FEATURES: { key: TemplateFeature; label: string; selfServi
   { key: 'can_view_timesheet', label: 'Timesheet', selfService: true },
   { key: 'can_view_leave_application', label: 'Leave Application', selfService: true },
   { key: 'can_view_tasks', label: 'My Tasks', selfService: true },
-  { key: 'can_view_mobile_bill', label: 'My Mobile SIM', selfService: true }
+  { key: 'can_view_mobile_bill', label: 'My Mobile SIM', selfService: true },
+  { key: 'can_view_service_book', label: 'My Service Book', selfService: true }
 ];
 
 export interface AccessTemplate {

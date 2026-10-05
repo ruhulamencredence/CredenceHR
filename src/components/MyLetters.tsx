@@ -8,7 +8,9 @@
 // "Acknowledge" the ones that ask for it), requests for a Salary Certificate
 // / Experience Certificate / NOC / Bank Account letter, and the Employee's
 // own service record timeline, and Pending Items — documents / nominee /
-// emergency contact HR has asked for (MyInfoRequests.tsx). Backed by
+// emergency contact HR has asked for (MyInfoRequests.tsx). With
+// users.can_view_service_book also "Service Book": their own Employee 360,
+// read only (HrOps360.tsx in `self` mode). Backed by
 // HROperationsRoutes.ts's /api/hr-ops/my/* routes; works the same in the
 // mobile app.
 
@@ -22,6 +24,7 @@ import { letterFileName } from '../lib/hrLetterPdf';
 import { useHrApi, Badge, fmtDate, letterPdfBytes, saveLetterPdf, inputCls, labelCls, btnPrimary, btnGhost, Notice } from './HrOpsShared';
 import { ServiceTimeline, serviceLength, type ServiceBookData } from './HrOpsServiceBook';
 import { MyInfoRequests, useMyOpenRequests } from './MyInfoRequests';
+import { Employee360 } from './HrOps360';
 
 interface MyLetter {
   id: number;
@@ -42,20 +45,34 @@ interface MyData {
   requestable?: { key: string; label: string }[];
 }
 
-export const MyLetters: React.FC<{ token: string; onBack?: () => void }> = ({ token, onBack }) => {
+export const MyLetters: React.FC<{ token: string; onBack?: () => void; canServiceBook?: boolean }> = ({ token, onBack, canServiceBook = false }) => {
   const isNativeApp = Capacitor.isNativePlatform();
   const api = useHrApi(token);
   // An alert about a request opens straight on Pending Items.
-  const [tab, setTab] = useState<'letters' | 'pending' | 'record'>(() => {
+  const [tab, setTab] = useState<'letters' | 'pending' | 'record' | 'book'>(() => {
     try {
       const t = sessionStorage.getItem('my_letters_tab');
       if (t) sessionStorage.removeItem('my_letters_tab');
       if (t === 'pending' || t === 'record') return t;
+      if (t === 'book' && canServiceBook) return t;
     } catch {
       // storage unavailable
     }
     return 'letters';
   });
+  useEffect(() => {
+    const onTab = (e: Event) => {
+      const t = (e as CustomEvent).detail;
+      if (t === 'letters' || t === 'pending' || t === 'record' || (t === 'book' && canServiceBook)) setTab(t);
+      try {
+        sessionStorage.removeItem('my_letters_tab');
+      } catch {
+        // storage unavailable
+      }
+    };
+    window.addEventListener('credence:my-letters-tab', onTab);
+    return () => window.removeEventListener('credence:my-letters-tab', onTab);
+  }, [canServiceBook]);
   const initialOpen = useMyOpenRequests(token);
   const [openCount, setOpenCount] = useState<number | null>(null);
   const pendingCount = openCount ?? initialOpen;
@@ -145,6 +162,11 @@ export const MyLetters: React.FC<{ token: string; onBack?: () => void }> = ({ to
           <button type="button" onClick={() => setTab('record')} className={`text-xs font-semibold px-3.5 py-2 rounded-lg flex items-center gap-1.5 ${tab === 'record' ? 'bg-blue-600 text-white' : 'text-slate-600'}`}>
             <BookOpen className="w-3.5 h-3.5" /> Service Record
           </button>
+          {canServiceBook && (
+            <button type="button" onClick={() => setTab('book')} className={`text-xs font-semibold px-3.5 py-2 rounded-lg flex items-center gap-1.5 ${tab === 'book' ? 'bg-blue-600 text-white' : 'text-slate-600'}`}>
+              <BookOpen className="w-3.5 h-3.5" /> Service Book
+            </button>
+          )}
         </div>
         <div className="space-y-4">
           <Notice msg={msg} onClose={() => setMsg(null)} />
@@ -154,6 +176,8 @@ export const MyLetters: React.FC<{ token: string; onBack?: () => void }> = ({ to
             </div>
           ) : !data?.employee ? (
             <div className="rounded-2xl bg-white border border-slate-200 p-8 text-center text-sm text-slate-500">Your login isn't linked to an Employee record yet — please contact HR.</div>
+          ) : tab === 'book' && canServiceBook ? (
+            <Employee360 token={token} employeeId={null} self />
           ) : tab === 'pending' ? (
             <MyInfoRequests token={token} onCountChange={setOpenCount} />
           ) : tab === 'letters' ? (

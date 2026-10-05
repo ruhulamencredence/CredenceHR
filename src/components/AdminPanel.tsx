@@ -531,6 +531,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [callsAccessEnabled, setCallsAccessEnabled] = useState(false);
   const [tasksAccessEnabled, setTasksAccessEnabled] = useState(false);
   const [mobileBillAccessEnabled, setMobileBillAccessEnabled] = useState(false);
+  const [serviceBookAccessEnabled, setServiceBookAccessEnabled] = useState(false);
   const [groupDashboardEnabled, setGroupDashboardEnabled] = useState(false);
   const [savingModules, setSavingModules] = useState(false);
 
@@ -556,6 +557,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     setCallsAccessEnabled(!!u.can_use_calls);
     setTasksAccessEnabled(!!u.can_view_tasks);
     setMobileBillAccessEnabled(!!u.can_view_mobile_bill);
+    setServiceBookAccessEnabled(!!u.can_view_service_book);
     setGroupDashboardEnabled(!!u.can_view_group_dashboard);
     // Permission layers — one Set per module in PERMISSION_LAYER_MODULES.
     // Explicit saved rows win; a module this account already has granted
@@ -960,6 +962,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         });
         const mbData = await mbRes.json();
         if (!mbRes.ok) throw new Error(mbData.error || 'Failed to update My Mobile SIM access');
+      }
+
+      if (serviceBookAccessEnabled !== !!managingModulesFor.can_view_service_book) {
+        const sbRes = await fetch(apiUrl(`/api/users/${managingModulesFor.id}/service-book-access`), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ can_view_service_book: serviceBookAccessEnabled })
+        });
+        const sbData = await sbRes.json();
+        if (!sbRes.ok) throw new Error(sbData.error || 'Failed to update My Service Book access');
       }
 
       if (callsAccessEnabled !== !!managingModulesFor.can_use_calls) {
@@ -7441,6 +7453,30 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   <span
                     className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
                       mobileBillAccessEnabled ? 'translate-x-[18px]' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </label>
+              <label className="flex items-center justify-between gap-3 p-3.5 mb-3 bg-violet-50 border border-violet-200 rounded-xl cursor-pointer">
+                <span>
+                  <span className="text-sm font-semibold text-slate-900 block">Also allow My Service Book</span>
+                  <span className="text-[11px] text-slate-500">
+                    Self Service → My Letters &amp; Service Record → Service Book: their own service book — service
+                    history, records, attendance, leave, claims, salary and disciplinary history — read only. Off by default.
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setServiceBookAccessEnabled((v) => !v)}
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${
+                    serviceBookAccessEnabled ? 'bg-emerald-500' : 'bg-slate-300'
+                  }`}
+                  title={serviceBookAccessEnabled ? 'On — click to turn off' : 'Off — click to turn on'}
+                  aria-label="Also allow My Service Book"
+                >
+                  <span
+                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                      serviceBookAccessEnabled ? 'translate-x-[18px]' : 'translate-x-1'
                     }`}
                   />
                 </button>
