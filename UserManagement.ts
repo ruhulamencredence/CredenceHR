@@ -19,6 +19,7 @@
 import type { Express } from "express";
 import bcrypt from "bcryptjs";
 import { activeCompanyId } from "./companyContext";
+import { TEMPLATE_FEATURES, ensureAccessTemplateSchema, ensureDefaultAccessTemplate } from "./AccessTemplateDefaults";
 
 interface UserManagementRouteDeps {
   authenticateToken: any;
@@ -89,7 +90,9 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     )
-  `).catch((err: any) => console.warn("⚠️ Could not ensure access_templates table exists: " + err.message));
+  `)
+    .then(() => ensureAccessTemplateSchema(queryDB))
+    .catch((err: any) => console.warn("⚠️ Could not ensure access_templates table exists: " + err.message));
 
   // Every successful change to one account (PUT/DELETE /api/users/:id/...) is
   // recorded after the response goes out: who did it, which endpoint, and
@@ -158,15 +161,21 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
   // Access Templates — named presets ("Driver", "Field Staff"…): feature
   // switches to turn on and Admin Panel modules to add. Applying one is done
   // by the client through the normal per-user endpoints (so every permission
-  // check and the audit log above still apply per account).
-  const TEMPLATE_FEATURES = ["can_edit_delivery_date", "can_job_edit", "can_use_attendance", "can_use_tracking", "can_view_leave_summary"];
+  // check and the audit log above still apply per account). One template is
+  // the "default for new logins" — Data Import -> Employee Details applies it
+  // to every login it creates (AccessTemplateDefaults.ts).
   function parseTemplateBody(body: any) {
     const name = typeof body?.name === "string" ? body.name.trim().slice(0, 100) : "";
     if (!name) throw Object.assign(new Error("Template name is required."), { status: 400 });
     const description = typeof body?.description === "string" ? body.description.trim().slice(0, 255) : "";
     const features = (Array.isArray(body?.features) ? body.features : []).filter((f: any) => TEMPLATE_FEATURES.includes(f));
     const modules = (Array.isArray(body?.modules) ? body.modules : []).filter((m: any) => adminModuleKeys.includes(m));
-    return { name, description, features, modules };
+    return { name, description, features, modules, is_default: body?.is_default === true };
+  }
+  // Makes `id` the only default among this company's templates.
+  async function setDefaultTemplate(id: number) {
+    const rows: any[] = (await queryDB("SELECT id FROM access_templates")) || [];
+    for (const r of rows) await queryDB("UPDATE access_templates SET is_default = ? WHERE id = ?", [Number(r.id) === id ? 1 : 0, Number(r.id)]);
   }
   function serializeTemplate(r: any) {
     const parse = (v: any) => {
@@ -177,11 +186,19 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
         return [];
       }
     };
-    return { id: Number(r.id), name: r.name, description: r.description || "", features: parse(r.features_json), modules: parse(r.modules_json) };
+    return {
+      id: Number(r.id),
+      name: r.name,
+      description: r.description || "",
+      features: parse(r.features_json),
+      modules: parse(r.modules_json),
+      is_default: Number(r.is_default || 0) === 1
+    };
   }
 
   app.get("/api/access-templates", authenticateToken, requireAdmin, requireModule("users"), async (_req: any, res) => {
     try {
+      await ensureDefaultAccessTemplate(queryDB);
       const rows: any = await queryDB("SELECT * FROM access_templates");
       res.json((rows as any[]).map(serializeTemplate).sort((a, b) => a.name.localeCompare(b.name)));
     } catch (err: any) {
@@ -196,6 +213,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
         "INSERT INTO access_templates (name, description, features_json, modules_json, created_by) VALUES (?, ?, ?, ?, ?)",
         [t.name, t.description, JSON.stringify(t.features), JSON.stringify(t.modules), req.user.id]
       );
+      if (t.is_default) await setDefaultTemplate(Number(result.insertId));
       res.json({ id: Number(result.insertId), ...t });
     } catch (err: any) {
       res.status(err.status || 500).json({ error: err.message });
@@ -211,6 +229,8 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
         [t.name, t.description, JSON.stringify(t.features), JSON.stringify(t.modules), id]
       );
       if (!result.affectedRows) return res.status(404).json({ error: "Template not found." });
+      // Unticking the default only happens by making another one the default.
+      if (t.is_default) await setDefaultTemplate(id);
       res.json({ id, ...t });
     } catch (err: any) {
       res.status(err.status || 500).json({ error: err.message });
@@ -219,6 +239,10 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
 
   app.delete("/api/access-templates/:id", authenticateToken, requireAdmin, requireModule("users"), requireModuleLayer("users", "delete_trash"), async (req: any, res) => {
     try {
+      const rows: any[] = await queryDB("SELECT id, is_default FROM access_templates WHERE id = ?", [Number(req.params.id)]);
+      if (Number(rows[0]?.is_default || 0) === 1) {
+        return res.status(400).json({ error: "This is the default for new logins — make another template the default first." });
+      }
       await queryDB("DELETE FROM access_templates WHERE id = ?", [Number(req.params.id)]);
       res.json({ success: true });
     } catch (err: any) {

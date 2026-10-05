@@ -30,6 +30,7 @@
 
 import type { Express } from "express";
 import bcrypt from "bcryptjs";
+import { applyAccessTemplate, ensureDefaultAccessTemplate } from "./AccessTemplateDefaults";
 import { recordEmployeeEditHistory } from "./EmployeeTransferRoutes";
 import { activeCompanyId } from "./companyContext";
 
@@ -103,7 +104,7 @@ export const IMPORT_KINDS: Kind[] = [
         type: "text",
         aliases: ["user name", "username", "user id", "login", "login email"],
         example: "rahim",
-        note: "Email or username they sign in with. With a Password, creates their login (role User); skipped if they already have one"
+        note: "Email or username they sign in with. With a Password, creates their login (role User) with the default Access Template; skipped if they already have one"
       },
       { key: "login_password", label: "Password", type: "text", aliases: ["pass", "login password"], example: "Rahim@2026", note: "At least 6 characters" }
     ]
@@ -370,7 +371,18 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
           if (l.email) takenLogins.add(String(l.email).toLowerCase());
           if (l.username) takenLogins.add(String(l.username).toLowerCase());
         }
+        // New logins get the company's default Access Template (Admin Panel ->
+        // Users -> Access Templates) — only when the importer may grant
+        // access themself (Superadmin, or "Can grant module access"), the
+        // same rule the Module Access switches follow.
+        let canGrant = ctx.user?.role === "superadmin";
+        if (!canGrant && ctx.user?.id) {
+          const me: any[] = (await queryDB("SELECT can_grant_module_access FROM users WHERE id = ?", [ctx.user.id]).catch(() => [])) || [];
+          canGrant = Number(me[0]?.can_grant_module_access || 0) === 1;
+        }
+        const defaultTemplate = canGrant ? await ensureDefaultAccessTemplate(queryDB).catch(() => null) : null;
         return {
+          defaultTemplate,
           takenLogins,
           dept: new Map(departments.map((d) => [norm(String(d.name)), d])),
           branch: new Map(branches.map((b) => [norm(String(b.branch_name)), b])),
@@ -441,6 +453,11 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
             prep.takenLogins.add(id);
             login = { email: isEmail ? id : null, username: isEmail ? null : id, password };
             notes.push(`Login: ${id}${!isEmail && id !== loginId ? ` (written "${loginId}")` : ""}`);
+            notes.push(
+              prep.defaultTemplate
+                ? `Access: "${prep.defaultTemplate.name}" template`
+                : "Access: none given (only the Superadmin or an account that can grant module access gives the default template)"
+            );
           }
         }
         const createLogin = async (employeeId: number) => {
@@ -453,6 +470,9 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
             hash
           ]);
           await queryDB("UPDATE all_employees SET user_id = ? WHERE id = ?", [u.insertId, employeeId]);
+          if (prep.defaultTemplate) {
+            await applyAccessTemplate(queryDB, Number(u.insertId), prep.defaultTemplate, Number(ctx.user.id) || null, activeCompanyId());
+          }
         };
 
         if (existing) {

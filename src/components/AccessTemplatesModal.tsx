@@ -24,11 +24,12 @@ interface AccessTemplatesModalProps {
   onClose: () => void;
 }
 
-const emptyDraft = { id: 0, name: '', description: '', features: [] as TemplateFeature[], modules: [] as string[] };
+type Draft = Omit<AccessTemplate, 'is_default'> & { is_default?: boolean };
+const emptyDraft: Draft = { id: 0, name: '', description: '', features: [], modules: [], is_default: false };
 
 export function AccessTemplatesModal({ token, canGrantModuleAccess, templates, onChanged, onClose }: AccessTemplatesModalProps) {
   useBackButtonClose(true, onClose);
-  const [draft, setDraft] = useState<typeof emptyDraft | null>(null);
+  const [draft, setDraft] = useState<Draft | null>(null);
   const [moduleQuery, setModuleQuery] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -59,7 +60,7 @@ export function AccessTemplatesModal({ token, canGrantModuleAccess, templates, o
     setSaving(true);
     setError(null);
     try {
-      const body = { name: draft.name, description: draft.description, features: draft.features, modules: draft.modules };
+      const body = { name: draft.name, description: draft.description, features: draft.features, modules: draft.modules, is_default: !!draft.is_default };
       if (draft.id) await call('PUT', `/api/access-templates/${draft.id}`, body);
       else await call('POST', '/api/access-templates', body);
       setDraft(null);
@@ -109,7 +110,14 @@ export function AccessTemplatesModal({ token, canGrantModuleAccess, templates, o
                 {templates.map((t) => (
                   <div key={t.id} className="border border-slate-200 rounded-xl px-4 py-3 flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <div className="text-sm font-semibold text-slate-900">{t.name}</div>
+                      <div className="text-sm font-semibold text-slate-900 flex items-center gap-2">
+                        {t.name}
+                        {t.is_default && (
+                          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
+                            Default for new logins
+                          </span>
+                        )}
+                      </div>
                       {t.description && <div className="text-xs text-slate-500">{t.description}</div>}
                       <div className="mt-1.5 flex flex-wrap gap-1">
                         {t.features.map((f) => (
@@ -134,9 +142,11 @@ export function AccessTemplatesModal({ token, canGrantModuleAccess, templates, o
                       >
                         <Edit2 className="w-4 h-4" />
                       </button>
-                      <button type="button" onClick={() => remove(t)} className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg" title="Delete">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      {!t.is_default && (
+                        <button type="button" onClick={() => remove(t)} className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg" title="Delete">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -177,7 +187,7 @@ export function AccessTemplatesModal({ token, canGrantModuleAccess, templates, o
               <div>
                 <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-600">Switches to turn on</div>
                 <div className="mt-1.5 grid sm:grid-cols-2 gap-1.5">
-                  {TEMPLATE_FEATURES.map((f) => (
+                  {TEMPLATE_FEATURES.filter((f) => !f.selfService).map((f) => (
                     <label key={f.key} className="flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 text-sm cursor-pointer hover:bg-slate-50">
                       <input
                         type="checkbox"
@@ -189,6 +199,40 @@ export function AccessTemplatesModal({ token, canGrantModuleAccess, templates, o
                   ))}
                 </div>
               </div>
+
+              {canGrantModuleAccess && (
+                <div>
+                  <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-600">Self Service — also allow</div>
+                  <div className="mt-1.5 grid sm:grid-cols-2 gap-1.5">
+                    {TEMPLATE_FEATURES.filter((f) => f.selfService).map((f) => (
+                      <label key={f.key} className="flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200 text-sm cursor-pointer hover:bg-slate-50">
+                        <input
+                          type="checkbox"
+                          checked={draft.features.includes(f.key)}
+                          onChange={() => setDraft({ ...draft, features: toggleIn(draft.features, f.key) })}
+                        />
+                        {f.label}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <label className="flex items-start gap-2 px-3 py-2.5 rounded-lg border border-blue-200 bg-blue-50/50 text-sm cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={!!draft.is_default}
+                  disabled={templates.some((t) => t.id === draft.id && t.is_default)}
+                  onChange={(e) => setDraft({ ...draft, is_default: e.target.checked })}
+                />
+                <span>
+                  <span className="font-semibold text-slate-800">Default for new logins</span>
+                  <span className="block text-xs text-slate-500">
+                    Given to every login created by Data Import → Employee Details. Only one template is the default.
+                  </span>
+                </span>
+              </label>
 
               {canGrantModuleAccess && (
                 <div>
