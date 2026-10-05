@@ -2157,14 +2157,12 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
   });
 
   // ---- Dashboard calendar: attendance status -------------------------------
-  // The Dashboard's Global Calendar marks each day with the person's own
-  // Delay / Extreme Delay / Leave. Whose calendar an account may open:
+  // The Dashboard's Global Calendar marks each day with who was late or on
+  // Leave. Whose days an account sees:
   //   - everyone: their own;
   //   - an Admin, or an account granted 'attendance_reports' (Monthly
-  //     Attendance Report): anyone in their own Department;
+  //     Attendance Report): everyone in their own Department;
   //   - the Superadmin: every employee.
-  // The same rule is applied to the people list and to every user_id asked
-  // for, so the picker and the API can never disagree.
   async function calendarViewableEmployees(user: any): Promise<any[]> {
     const rows = (
       await queryDB(
@@ -2181,24 +2179,11 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
     return rows.filter((e: any) => e.department === me.department);
   }
 
-  app.get("/api/calendar-attendance/people", authenticateToken, async (req: any, res) => {
-    try {
-      const people = await calendarViewableEmployees(req.user);
-      res.json({
-        people: people.map((e: any) => ({
-          user_id: Number(e.user_id),
-          name: e.name,
-          employee_code: e.employee_code,
-          department: e.department || null
-        }))
-      });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message || "Failed to load the people list." });
-    }
-  });
-
-  // { days: { "YYYY-MM-DD": { late?: "delay" | "extreme", leave?: { type, status } } } }
-  // for [from, to] (at most ~6 weeks — one calendar grid).
+  // Every Delay / Extreme Delay / Leave in [from, to] (at most ~6 weeks, one
+  // calendar grid) for the people this account may see, as
+  //   { people: [{ user_id, name, department }],
+  //     days: { "YYYY-MM-DD": [{ user_id, kind: "delay" | "extreme" | "leave",
+  //                               leave_type?, status? }] } }
   app.get("/api/calendar-attendance", authenticateToken, async (req: any, res) => {
     try {
       const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -2210,41 +2195,30 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       if ((new Date(to).getTime() - new Date(from).getTime()) / 86400000 > 62) {
         return res.status(400).json({ error: "The range can be at most 62 days." });
       }
-      const targetUserId = req.query.user_id ? Number(req.query.user_id) : Number(req.user.id);
-      const employee = (await calendarViewableEmployees(req.user)).find((e: any) => Number(e.user_id) === targetUserId);
-      if (!employee) {
-        if (targetUserId === Number(req.user.id)) return res.json({ linked: false, days: {} });
-        return res.status(403).json({ error: "You can't view this employee's attendance." });
-      }
+      const employees = await calendarViewableEmployees(req.user);
+      const people = employees.map((e: any) => ({ user_id: Number(e.user_id), name: e.name, department: e.department || null }));
+      if (employees.length === 0) return res.json({ people, days: {} });
 
-      const days: Record<string, { late?: "delay" | "extreme"; leave?: { type: string; status: string } }> = {};
-      const day = (d: string) => (days[d] ||= {});
+      type Mark = { user_id: number; kind: "delay" | "extreme" | "leave"; leave_type?: string; status?: string };
+      const days: Record<string, Mark[]> = {};
+      const userIdByEmployeeId = new Map<number, number>(employees.map((e: any) => [Number(e.id), Number(e.user_id)]));
+      // One mark per person per day: Leave wins over a late check-in.
+      const marked = new Set<string>();
+      const add = (d: string, m: Mark) => {
+        if (marked.has(`${m.user_id}|${d}`)) return;
+        marked.add(`${m.user_id}|${d}`);
+        (days[d] ||= []).push(m);
+      };
 
-      const branchTypeByUserId = await getEmployeeBranchTypeMap(queryDB);
-      const group: HolidayAppliesTo = branchTypeByUserId.get(Number(employee.user_id)) || "head_office";
-      // Late policy is per salary month — resolve each one the range touches.
-      let monthYear = await salaryMonthOf(from);
-      for (let i = 0; i < 4; i++) {
-        const period = await getSalaryPeriod(monthYear);
-        if (period.start > to) break;
-        const monthStart = period.start < from ? from : period.start;
-        const monthEnd = period.end > to ? to : period.end;
-        const holidayMap = await getHolidayMap(queryDB, monthStart, monthEnd, group);
-        const policy = await getLatePolicyForMonth(monthYear);
-        const { lateDatesByEmployee, extremeLateDatesByEmployee } = await computeLateDatesByEmployee(
-          [employee], monthStart, monthEnd, { head_office: holidayMap, project_site: holidayMap }, branchTypeByUserId, policy
-        );
-        for (const d of lateDatesByEmployee.get(Number(employee.id)) || []) day(d).late = "delay";
-        for (const d of extremeLateDatesByEmployee.get(Number(employee.id)) || []) day(d).late = "extreme";
-        monthYear = shiftMonthYear(monthYear, 1);
-      }
-
-      // Approved and still-pending Leave (rejected ones aren't leave at all).
+      // Approved and still-pending Leave (rejected ones aren't leave at all);
+      // approved rows first so a pending one never covers them.
+      const userIds = people.map((p) => p.user_id);
       const leaveRows = await queryDB(
-        `SELECT leave_type, start_date, end_date, status FROM leave_applications
-         WHERE user_id = ? AND status IN ('approved', 'pending') AND start_date <= ? AND end_date >= ?
+        `SELECT user_id, leave_type, start_date, end_date, status FROM leave_applications
+         WHERE user_id IN (${userIds.map(() => "?").join(",")}) AND status IN ('approved', 'pending')
+           AND start_date <= ? AND end_date >= ?
          ORDER BY status = 'approved' DESC`,
-        [employee.user_id, to, from]
+        [...userIds, to, from]
       );
       for (const l of leaveRows) {
         const start = String(l.start_date instanceof Date ? l.start_date.toLocaleDateString("en-CA") : l.start_date).slice(0, 10);
@@ -2254,13 +2228,35 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         for (let guard = 0; guard < 70; guard++) {
           const d = cursor.toLocaleDateString("en-CA");
           if (d > last) break;
-          // Approved rows come first, so a pending one never covers them.
-          if (!day(d).leave) day(d).leave = { type: l.leave_type, status: l.status };
+          add(d, { user_id: Number(l.user_id), kind: "leave", leave_type: l.leave_type, status: l.status });
           cursor.setDate(cursor.getDate() + 1);
         }
       }
 
-      res.json({ linked: true, user_id: Number(employee.user_id), name: employee.name, days });
+      // Lates — same policy, waivers and holiday calendars as the payroll.
+      // The policy is per salary month, so resolve each one the range touches.
+      const branchTypeByUserId = await getEmployeeBranchTypeMap(queryDB);
+      let monthYear = await salaryMonthOf(from);
+      for (let i = 0; i < 4; i++) {
+        const period = await getSalaryPeriod(monthYear);
+        if (period.start > to) break;
+        const monthStart = period.start < from ? from : period.start;
+        const monthEnd = period.end > to ? to : period.end;
+        const holidayMaps = await getHolidayMapsByGroup(queryDB, monthStart, monthEnd);
+        const policy = await getLatePolicyForMonth(monthYear);
+        const { lateDatesByEmployee, extremeLateDatesByEmployee } = await computeLateDatesByEmployee(
+          employees, monthStart, monthEnd, holidayMaps, branchTypeByUserId, policy
+        );
+        for (const [kind, map] of [["extreme", extremeLateDatesByEmployee], ["delay", lateDatesByEmployee]] as const) {
+          for (const [employeeId, dates] of map.entries()) {
+            const userId = userIdByEmployeeId.get(Number(employeeId));
+            if (userId) for (const d of dates) add(d, { user_id: userId, kind });
+          }
+        }
+        monthYear = shiftMonthYear(monthYear, 1);
+      }
+
+      res.json({ people, days });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Failed to load attendance for the calendar." });
     }
