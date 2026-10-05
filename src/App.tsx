@@ -1131,6 +1131,7 @@ export default function App() {
               setShowAlertsPage(false);
               sidebarNavProps.onGoToSelfServiceTab('myCases');
             }}
+            canOpenGrievanceAdmin={!!user && (user.role === 'superadmin' || (user.module_permissions || []).includes('grievance_disciplinary'))}
             onOpenMyLetters={() => {
               setShowAlertsPage(false);
               sidebarNavProps.onGoToSelfServiceTab('myLetters');

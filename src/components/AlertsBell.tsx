@@ -9,6 +9,7 @@ import { BellRing, Check, Trash2, X } from 'lucide-react';
 import { Alert } from '../types';
 import { MyAssetTarget } from '../lib/quickAccess';
 import { apiUrl } from '../lib/api';
+import { isHrSideCaseAlert, openGrievanceAdmin } from '../lib/grievanceNav';
 import { formatDate } from '../lib/formatDate';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
 
@@ -31,8 +32,11 @@ interface AlertsBellProps {
   onOpenMyAsset?: (target: MyAssetTarget) => void;
   // The employee's own resignation updates -> My Resignation.
   onOpenResignation?: () => void;
-  // Grievance / Disciplinary alerts open Self Service -> Grievance & Disciplinary.
+  // Grievance / Disciplinary alerts open Self Service -> Grievance & Disciplinary;
+  // the HR-side ones open the Admin Panel module instead when this account
+  // can see it (canOpenGrievanceAdmin).
   onOpenMyCases?: () => void;
+  canOpenGrievanceAdmin?: boolean;
   // HR Operations: a letter issued to this account -> My Letters; HR-side
   // updates (a letter acknowledged/requested, an action decided) -> the
   // HR Operations module.
@@ -49,7 +53,7 @@ interface AlertsBellProps {
 // unlike the Admin Panel tabs). Polls the lightweight unread-count endpoint
 // so the badge stays current without re-fetching the whole list constantly;
 // the full list is only fetched when the dropdown is actually opened.
-export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplication, onOpenApproveApplications, onOpenVehicleManagement, onOpenConveyanceClaim, onOpenMyAsset, onOpenResignation, onOpenMyCases, onOpenMyLetters, onOpenHrOperations, onViewAll }) => {
+export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplication, onOpenApproveApplications, onOpenVehicleManagement, onOpenConveyanceClaim, onOpenMyAsset, onOpenResignation, onOpenMyCases, canOpenGrievanceAdmin, onOpenMyLetters, onOpenHrOperations, onViewAll }) => {
   const [unreadCount, setUnreadCount] = useState(0);
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [open, setOpen] = useState(false);
@@ -170,7 +174,9 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
         : alert.type === 'resignation'
         ? onOpenResignation
         : alert.type === 'grievance' || alert.type === 'disciplinary'
-        ? onOpenMyCases
+        ? canOpenGrievanceAdmin && isHrSideCaseAlert(alert.title)
+          ? () => openGrievanceAdmin(alert.type === 'disciplinary' ? 'disciplinary' : 'grievances')
+          : onOpenMyCases
         : alert.type === 'hr_action'
         ? /Awaiting Your Approval/.test(alert.title)
           ? onOpenApproveApplications

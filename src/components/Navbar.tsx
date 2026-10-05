@@ -423,6 +423,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             }}
             onOpenResignation={() => onGoToSelfServiceTab('resignation')}
             onOpenMyCases={() => onGoToSelfServiceTab('myCases')}
+            canOpenGrievanceAdmin={user.role === 'superadmin' || (user.module_permissions || []).includes('grievance_disciplinary')}
             onOpenMyLetters={() => onGoToSelfServiceTab('myLetters')}
             onViewAll={onOpenAlerts}
           />
