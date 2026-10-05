@@ -804,6 +804,209 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
     }
   });
 
+  // Self Service -> Approve Application -> History: everything THIS account
+  // has approved or rejected, newest first, with counts. Only the caller's
+  // own decisions, so it needs nothing beyond sign-in — same as the queue.
+  // Covers the Approval Workflow (every request type riding
+  // approval_requests), HR personnel actions, Leave Applications decided
+  // directly or as Reliever, and Exit clearance items.
+  app.get("/api/my-approvals/history", authenticateToken, async (req: any, res) => {
+    try {
+      const myId = Number(req.user.id);
+      const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+      const from = DATE_RE.test(String(req.query.from || "")) ? String(req.query.from) : null;
+      const to = DATE_RE.test(String(req.query.to || "")) ? String(req.query.to) : null;
+      const day = (v: any) => {
+        if (!v) return "";
+        const d = v instanceof Date ? v : new Date(v);
+        return Number.isNaN(d.getTime()) ? String(v).slice(0, 10) : d.toLocaleDateString("en-CA", { timeZone: "Asia/Dhaka" });
+      };
+      const inRange = (at: any) => {
+        const d = day(at);
+        return (!from || d >= from) && (!to || d <= to);
+      };
+      type Row = { key: string; type: string; title: string; requester_id: number | null; action: "approved" | "rejected"; remarks: string | null; acted_at: string; step: number | null };
+      const rows: Row[] = [];
+
+      // 1. Approval Workflow — actions_json carries {approver_id, action, ...}.
+      const reqRows: any[] =
+        (await queryDB("SELECT * FROM approval_requests WHERE actions_json LIKE ?", [`%"approver_id":${myId}%`]).catch(() => [])) || [];
+      const TYPE_TITLE: Record<string, string> = {
+        attendance: "Remote Attendance",
+        claim: "Movement Claim",
+        user_claim: "Conveyance Bill Claim",
+        attendance_correction: "Timesheet Correction",
+        leave_application: "Leave Application",
+        asset_requisition: "Asset Requisition",
+        vehicle_requisition: "Vehicle Requisition",
+        mobile_limit_request: "Mobile Limit Request"
+      };
+      const idsOf = (t: string) => reqRows.filter((r) => r.source_type === t).map((r) => Number(r.source_id));
+      const fetchByIds = (table: string, ids: number[]) =>
+        ids.length === 0 ? Promise.resolve([]) : queryDB(`SELECT * FROM ${table} WHERE id IN (${ids.map(() => "?").join(",")})`, ids).catch(() => []);
+      const [ucs, cls, las, ars, vrs, mls] = await Promise.all([
+        fetchByIds("user_claims", idsOf("user_claim")),
+        fetchByIds("claims", idsOf("claim")),
+        fetchByIds("leave_applications", idsOf("leave_application")),
+        fetchByIds("asset_requisitions", idsOf("asset_requisition")),
+        fetchByIds("vehicle_requisitions", idsOf("vehicle_requisition")),
+        fetchByIds("mobile_limit_requests", idsOf("mobile_limit_request"))
+      ]);
+      const byId = (list: any[]) => new Map<number, any>(list.map((x: any) => [Number(x.id), x]));
+      const ucMap = byId(ucs), clMap = byId(cls), laMap = byId(las), arMap = byId(ars), vrMap = byId(vrs), mlMap = byId(mls);
+      const detailOf = (r: any): string => {
+        const id = Number(r.source_id);
+        if (r.source_type === "user_claim") {
+          const x = ucMap.get(id);
+          return x ? `${x.description || x.category} · ৳${Number(x.approved_amount ?? x.amount).toLocaleString("en-US")}` : "";
+        }
+        if (r.source_type === "claim") return clMap.get(id)?.purpose || "";
+        if (r.source_type === "leave_application") {
+          const x = laMap.get(id);
+          return x ? `${x.leave_type} · ${day(x.start_date)} to ${day(x.end_date)} (${Number(x.day_count)} day${Number(x.day_count) === 1 ? "" : "s"})` : "";
+        }
+        if (r.source_type === "asset_requisition") return arMap.get(id)?.asset_category || "";
+        if (r.source_type === "vehicle_requisition") {
+          const x = vrMap.get(id);
+          return x ? `${x.pickup_location} → ${x.destination}` : "";
+        }
+        if (r.source_type === "mobile_limit_request") {
+          const x = mlMap.get(id);
+          return x ? mobileLimitLabel(x) : "";
+        }
+        return "";
+      };
+      for (const r of reqRows) {
+        let actions: any[] = [];
+        try {
+          actions = JSON.parse(r.actions_json || "[]");
+        } catch {
+          actions = [];
+        }
+        actions.forEach((a: any, n: number) => {
+          if (Number(a.approver_id) !== myId || (a.action !== "approved" && a.action !== "rejected") || !inRange(a.acted_at)) return;
+          const detail = detailOf(r);
+          rows.push({
+            key: `ar-${r.id}-${n}`,
+            type: TYPE_TITLE[r.source_type] || r.source_type,
+            title: detail,
+            requester_id: Number(r.requested_by) || null,
+            action: a.action,
+            remarks: a.remarks || null,
+            acted_at: a.acted_at,
+            step: Number(a.step_order) || null
+          });
+        });
+      }
+
+      // 2. HR personnel actions — history_json carries {action, by, at, step}.
+      const hrRows: any[] = (await queryDB("SELECT * FROM hr_actions WHERE history_json LIKE ?", [`%"by":${myId}%`]).catch(() => [])) || [];
+      if (hrRows.length) {
+        const empIds = Array.from(new Set(hrRows.map((a) => Number(a.employee_id))));
+        const emps = byId(await fetchByIds("all_employees", empIds));
+        for (const a of hrRows) {
+          let hist: any[] = [];
+          try {
+            hist = JSON.parse(a.history_json || "[]");
+          } catch {
+            hist = [];
+          }
+          hist.forEach((h: any, n: number) => {
+            if (Number(h.by) !== myId || (h.action !== "approved" && h.action !== "rejected") || !inRange(h.at)) return;
+            const emp = emps.get(Number(a.employee_id));
+            rows.push({
+              key: `hr-${a.id}-${n}`,
+              type: "HR Action",
+              title: `${String(a.action_type).replace(/_/g, " ")}${emp ? ` · ${emp.name}` : ""} · from ${day(a.effective_date)}`,
+              requester_id: emp?.user_id ? Number(emp.user_id) : null,
+              action: h.action,
+              remarks: h.remarks || null,
+              acted_at: h.at,
+              step: Number(h.step) || null
+            });
+          });
+        }
+      }
+
+      // 3. Leave Applications decided directly (no Approval Workflow) or as Reliever.
+      const viaWorkflow = new Set(reqRows.filter((r) => r.source_type === "leave_application").map((r) => Number(r.source_id)));
+      const direct: any[] =
+        (await queryDB("SELECT * FROM leave_applications WHERE decided_by = ? AND status IN ('approved', 'rejected')", [myId]).catch(() => [])) || [];
+      for (const la of direct) {
+        if (viaWorkflow.has(Number(la.id)) || Number(la.decided_by) !== myId || !inRange(la.decided_at)) continue;
+        rows.push({
+          key: `la-${la.id}`,
+          type: "Leave Application",
+          title: `${la.leave_type} · ${day(la.start_date)} to ${day(la.end_date)} (${Number(la.day_count)} day${Number(la.day_count) === 1 ? "" : "s"})`,
+          requester_id: Number(la.user_id),
+          action: la.status,
+          remarks: la.remarks || null,
+          acted_at: la.decided_at,
+          step: null
+        });
+      }
+      const relieved: any[] =
+        (await queryDB("SELECT * FROM leave_applications WHERE reliever_id = ? AND reliever_status IN ('approved', 'rejected')", [myId]).catch(() => [])) || [];
+      for (const la of relieved) {
+        if (Number(la.reliever_id) !== myId) continue;
+        const at = la.reliever_decided_at || la.updated_at || la.created_at;
+        if (!inRange(at)) continue;
+        rows.push({
+          key: `lr-${la.id}`,
+          type: "Leave (as Reliever)",
+          title: `${la.leave_type} · ${day(la.start_date)} to ${day(la.end_date)}`,
+          requester_id: Number(la.user_id),
+          action: la.reliever_status,
+          remarks: la.reliever_remarks || null,
+          acted_at: at,
+          step: null
+        });
+      }
+
+      // 4. Exit clearance items this account cleared.
+      const cleared: any[] = (await queryDB("SELECT * FROM exit_clearance_items WHERE cleared_by = ?", [myId]).catch(() => [])) || [];
+      if (cleared.length) {
+        const exits = byId(await fetchByIds("exit_requests", Array.from(new Set(cleared.map((c) => Number(c.exit_id))))));
+        for (const c of cleared) {
+          if (Number(c.cleared_by) !== myId || !Number(c.is_cleared) || !inRange(c.cleared_at)) continue;
+          const ex = exits.get(Number(c.exit_id));
+          rows.push({
+            key: `ec-${c.id}`,
+            type: "Exit Clearance",
+            title: `${c.department}${c.item_label ? ` — ${c.item_label}` : ""}${ex ? ` · ${ex.exit_type}` : ""}`,
+            requester_id: ex ? Number(ex.user_id) : null,
+            action: "approved",
+            remarks: c.remarks || null,
+            acted_at: c.cleared_at,
+            step: null
+          });
+        }
+      }
+
+      const requesterIds = Array.from(new Set(rows.map((r) => r.requester_id).filter((x): x is number => !!x)));
+      const names = byId(await fetchByIds("users", requesterIds));
+      const items = rows
+        .map((r) => ({ ...r, requested_by_name: r.requester_id ? names.get(r.requester_id)?.name || null : null }))
+        .sort((a, b) => new Date(b.acted_at).getTime() - new Date(a.acted_at).getTime());
+      const byType: Record<string, { approved: number; rejected: number }> = {};
+      for (const r of items) {
+        byType[r.type] ||= { approved: 0, rejected: 0 };
+        byType[r.type][r.action]++;
+      }
+      res.json({
+        summary: {
+          total: items.length,
+          approved: items.filter((r) => r.action === "approved").length,
+          rejected: items.filter((r) => r.action === "rejected").length,
+          by_type: byType
+        },
+        items
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to load your approval history." });
+    }
+  });
+
   // Approve/Reject a request from the personal queue — same underlying
   // performApprovalAction as the Admin Panel's version, just without the
   // Admin Panel module gate. Still 403s if the caller isn't actually one of
