@@ -36,6 +36,8 @@ import { RunPayrollWizard } from './RunPayrollWizard';
 import { AttendanceOvertimeSummaryPanel } from './AttendanceOvertimeSummaryPanel';
 import { PayslipManagementPanel } from './PayslipManagementPanel';
 import { LoanAdvanceManagementPanel } from './LoanAdvanceManagementPanel';
+import { PayrollApprovalPanel } from './PayrollApprovalPanel';
+import { PayrollActivityLog } from './PayrollActivityLog';
 import { BonusIncentiveManagementPanel } from './BonusIncentiveManagementPanel';
 
 interface PayrollModuleProps {
@@ -544,13 +546,14 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({ token, onBack }) =
   const authHeaders = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
   const [activeTab, setActiveTab] = useState<
-    'dashboard' | 'list' | 'attendance' | 'payslips' | 'loans' | 'bonus' | 'adjustments' | 'setup'
+    'dashboard' | 'list' | 'attendance' | 'payslips' | 'loans' | 'bonus' | 'adjustments' | 'setup' | 'approval' | 'activity'
   >(() => {
     // A Loan / Advance alert opens Loans & Advances straight away.
     try {
       const t = sessionStorage.getItem('payroll_tab');
       sessionStorage.removeItem('payroll_tab');
       if (t === 'loans') return 'loans';
+      if (t === 'approval') return 'approval';
     } catch {
       // storage unavailable
     }
@@ -565,6 +568,47 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({ token, onBack }) =
   const [showProcessModal, setShowProcessModal] = useState(false);
   const [showPayslipModal, setShowPayslipModal] = useState(false);
   const [showReportsModal, setShowReportsModal] = useState(false);
+
+  // Payroll -> Activity Log: every visit here, each page opened and each
+  // report window, recorded with who and when (PayrollApprovalRoutes.ts).
+  const logVisit = useCallback(
+    (kind: 'open' | 'view', area: string, detail?: string) => {
+      fetch(apiUrl('/api/payroll/access-log'), {
+        method: 'POST',
+        headers: { ...authHeaders, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ kind, area, detail })
+      }).catch(() => {});
+    },
+    [authHeaders]
+  );
+  const TAB_NAMES: Record<string, string> = {
+    dashboard: 'Dashboard',
+    list: 'Payroll List',
+    attendance: 'Attendance & OT',
+    payslips: 'Payslips',
+    loans: 'Loans & Advances',
+    bonus: 'Bonus & Incentive',
+    adjustments: 'Allowance & Adjustment',
+    setup: 'Salary Setup',
+    approval: 'Approval',
+    activity: 'Activity Log'
+  };
+  useEffect(() => {
+    logVisit('open', 'Opened Payroll');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  useEffect(() => {
+    logVisit('view', TAB_NAMES[activeTab] || activeTab);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+  // Activity Log tab: only for Payroll's "access_log" layer.
+  const [canSeeLog, setCanSeeLog] = useState(false);
+  useEffect(() => {
+    fetch(apiUrl('/api/payroll/approval-access'), { headers: authHeaders })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setCanSeeLog(!!d?.access_log))
+      .catch(() => {});
+  }, [authHeaders]);
 
   const fetchSummary = useCallback(async () => {
     setLoading(true);
@@ -710,6 +754,24 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({ token, onBack }) =
           >
             Salary Setup
           </button>
+          <button
+            onClick={() => setActiveTab('approval')}
+            className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+              activeTab === 'approval' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-blue-600'
+            }`}
+          >
+            Approval
+          </button>
+          {canSeeLog && (
+            <button
+              onClick={() => setActiveTab('activity')}
+              className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+                activeTab === 'activity' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-blue-600'
+              }`}
+            >
+              Activity Log
+            </button>
+          )}
         </div>
 
         {activeTab === 'list' ? (
@@ -726,6 +788,10 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({ token, onBack }) =
           <PayrollAdjustmentsPanel token={token} />
         ) : activeTab === 'setup' ? (
           <SalaryStructureSetupPanel token={token} />
+        ) : activeTab === 'approval' ? (
+          <PayrollApprovalPanel token={token} monthYear={monthYear} />
+        ) : activeTab === 'activity' && canSeeLog ? (
+          <PayrollActivityLog token={token} />
         ) : forbidden ? (
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-10 text-center">
             <AlertTriangle className="w-8 h-8 text-amber-500 mx-auto mb-3" />
@@ -792,19 +858,28 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({ token, onBack }) =
               <h3 className="text-sm font-semibold text-slate-700 mb-3">Quick Actions</h3>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <button
-                  onClick={() => setShowProcessModal(true)}
+                  onClick={() => {
+                    setShowProcessModal(true);
+                    logVisit('view', 'Run Payroll window', monthYear);
+                  }}
                   className="flex items-center gap-2 px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-xl transition-all justify-center"
                 >
                   <PlayCircle className="w-4 h-4" /> Run Payroll
                 </button>
                 <button
-                  onClick={() => setShowPayslipModal(true)}
+                  onClick={() => {
+                    setShowPayslipModal(true);
+                    logVisit('view', 'Generate Payslips window', monthYear);
+                  }}
                   className="flex items-center gap-2 px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold rounded-xl transition-all justify-center"
                 >
                   <ReceiptText className="w-4 h-4" /> Generate Payslips
                 </button>
                 <button
-                  onClick={() => setShowReportsModal(true)}
+                  onClick={() => {
+                    setShowReportsModal(true);
+                    logVisit('view', 'Download Reports window', monthYear);
+                  }}
                   className="flex items-center gap-2 px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold rounded-xl transition-all justify-center"
                 >
                   <FileSpreadsheet className="w-4 h-4" /> Download Reports

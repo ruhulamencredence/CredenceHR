@@ -20,6 +20,7 @@ import { registerAttendanceRoutes } from "./AttendanceRoutes";
 import { registerApprovalRoutes } from "./ApprovalRoutes";
 import { registerLeaveRoutes } from "./LeaveRoutes";
 import { registerPayrollRoutes, ensurePayrollSchema, arrearForLateLeave } from "./PayrollRoutes";
+import { registerPayrollApprovalRoutes, ensurePayrollApprovalSchema } from "./PayrollApprovalRoutes";
 import { registerPayrollItemsRoutes, ensurePayrollItemsSchema } from "./PayrollItemsRoutes";
 import { registerAssetManagementRoutes, ensureAssetManagementSchema, logAssetRequisitionEvent } from "./AssetManagementRoutes";
 import { registerVehicleManagementRoutes, ensureVehicleManagementSchema } from "./VehicleManagementRoutes";
@@ -243,6 +244,7 @@ async function ensureSchemaMigrations() {
   // table + schema owned by PayrollRoutes.ts, only the call site lives here,
   // same as every other self-healing migration in this function.
   await ensurePayrollSchema(dbPool);
+  await ensurePayrollApprovalSchema(dbPool);
   await ensureLoanRequestSchema(dbPool);
   // Payroll -> Allowance & Adjustment (PayrollItemsRoutes.ts) — after
   // ensurePayrollSchema, since its tables point at payrolls.
@@ -2450,7 +2452,11 @@ const TRACKING_LAYER_KEYS = ["read", "stay_report"] as const;
 // an account it is ticked for (and the Superadmin) can change it.
 // "salary_hold" = holding / releasing one employee's salary for a month
 // (kept out of disbursement until released) — also explicit-only.
-const PAYROLL_LAYER_KEYS = ["read", "salary_month", "salary_hold"] as const;
+// "audit_approve" = Audit approves / returns a month's salary sheet;
+// "accounts_pay" = Accounts pays an approved month; "access_log" = Payroll ->
+// Activity Log (who opened Payroll, what they looked at and did). All
+// explicit-only (PayrollApprovalRoutes.ts).
+const PAYROLL_LAYER_KEYS = ["read", "salary_month", "salary_hold", "audit_approve", "accounts_pay", "access_log"] as const;
 // Mobile Bill's layers: "read" = the module as it was; "limit_history" =
 // Reports -> Limit changes (who changed which SIM's limit, when). Both are
 // reading, so an account with Mobile Bill and no saved layers has both.
@@ -4163,7 +4169,7 @@ async function startServer() {
   // on for a module is never a silent regression; a Superadmin only actually
   // restricts anything once they explicitly save a narrower set in the
   // Module Access modal.
-  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "stay_report" | "salary_month" | "salary_hold" | "block_account" | "limit_history" | "link_pins") =>
+  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "stay_report" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "block_account" | "limit_history" | "link_pins") =>
     async (req: any, res: any, next: any) => {
       if (!req.user) return res.status(401).json({ error: "Access token required" });
       if (req.user.role === "superadmin") return next();
@@ -5448,6 +5454,18 @@ async function startServer() {
   // admin_module_permissions (Admin Panel -> Users -> Module Access);
   // requireAdmin is layered in front of it the same way every other
   // Admin-Panel-gated module route in this file does.
+  // Payroll -> Approval (HR -> Audit -> Accounts) and Activity Log. Registered
+  // before every other payroll route: its logger has to see each /api/payroll
+  // request, and its GET routes would otherwise be caught by GET /api/payroll/:id.
+  registerPayrollApprovalRoutes(app, {
+    authenticateToken,
+    requireAdmin,
+    requireModule: (k: "payroll") => requireModuleLayer(k, "read"),
+    requireModuleLayer,
+    hasModuleLayer,
+    queryDB,
+    createAlert
+  });
   // Registered first: its /api/payroll/pay-items and /api/payroll/adjustments
   // would otherwise be caught by PayrollRoutes' GET /api/payroll/:id.
   registerPayrollItemsRoutes(app, { authenticateToken, requireAdmin, requireModule: (k: "payroll") => requireModuleLayer(k, "read"), queryDB });

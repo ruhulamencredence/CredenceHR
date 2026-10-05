@@ -91,12 +91,19 @@ export const PayrollListPanel: React.FC<PayrollListPanelProps> = ({ token }) => 
   const [actionError, setActionError] = useState('');
   // Payroll -> "Salary Hold / Release" layer.
   const [canHold, setCanHold] = useState(false);
+  const [runAccess, setRunAccess] = useState({ audit: false, pay: false });
   const [holdFor, setHoldFor] = useState<PayrollListRecord | null>(null);
   const [holdReason, setHoldReason] = useState('');
   useEffect(() => {
     fetch(apiUrl('/api/payroll/hold-access'), { headers: authHeaders })
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => setCanHold(!!d?.can_hold))
+      .catch(() => {});
+    // One salary outside the month's approval (e.g. released from hold):
+    // Audit approves it, Accounts pays it (Payroll -> Approval).
+    fetch(apiUrl('/api/payroll/approval-access'), { headers: authHeaders })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setRunAccess({ audit: !!d?.audit_approve, pay: !!d?.accounts_pay }))
       .catch(() => {});
   }, [authHeaders]);
 
@@ -380,13 +387,13 @@ export const PayrollListPanel: React.FC<PayrollListPanelProps> = ({ token }) => 
                       )}
                       {r.payment_status === 'unpaid' && (
                         <>
-                          <button
+                          {runAccess.audit && <button
                             onClick={() => approve(r.id)}
                             disabled={actionId === r.id}
                             className="px-2.5 py-1 text-[11px] font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg disabled:opacity-50"
                           >
                             {actionId === r.id ? <Spinner size={12} /> : 'Approve'}
-                          </button>
+                          </button>}
                           <button
                             onClick={() => removeRecord(r.id)}
                             disabled={actionId === r.id}
@@ -397,7 +404,7 @@ export const PayrollListPanel: React.FC<PayrollListPanelProps> = ({ token }) => 
                           </button>
                         </>
                       )}
-                      {r.payment_status === 'processed' && (
+                      {r.payment_status === 'processed' && runAccess.pay && (
                         <button
                           onClick={() => markPaid(r.id)}
                           disabled={actionId === r.id}
