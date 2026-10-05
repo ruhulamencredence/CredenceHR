@@ -19,7 +19,7 @@ import { registerDepartmentsAndBranchesRoutes } from "./DepartmentsAndBranches";
 import { registerAttendanceRoutes } from "./AttendanceRoutes";
 import { registerApprovalRoutes } from "./ApprovalRoutes";
 import { registerLeaveRoutes } from "./LeaveRoutes";
-import { registerPayrollRoutes, ensurePayrollSchema } from "./PayrollRoutes";
+import { registerPayrollRoutes, ensurePayrollSchema, arrearForLateLeave } from "./PayrollRoutes";
 import { registerPayrollItemsRoutes, ensurePayrollItemsSchema } from "./PayrollItemsRoutes";
 import { registerAssetManagementRoutes, ensureAssetManagementSchema, logAssetRequisitionEvent } from "./AssetManagementRoutes";
 import { registerVehicleManagementRoutes, ensureVehicleManagementSchema } from "./VehicleManagementRoutes";
@@ -3623,6 +3623,26 @@ async function finalizeLeaveApplicationApproval(leaveId: number, approvedBy: num
     relatedType: "leave_application",
     relatedId: application.id
   });
+
+  // Days whose salary already went out as Absent are paid back next month
+  // (PayrollRoutes.ts arrearForLateLeave). Best-effort — never fails the approval.
+  try {
+    const arrears = await arrearForLateLeave(leaveId, approvedBy);
+    const tk = (n: number) => `\u09f3${n.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const ml = (m: string) => new Date(`${m}-01T00:00:00Z`).toLocaleString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" });
+    for (const a of arrears) {
+      await createAlert(queryDB, {
+        userId: application.user_id,
+        type: "leave_application",
+        title: "Salary Deduction Will Be Paid Back",
+        message: `${a.days} day${a.days === 1 ? "" : "s"} cut as Absent from your ${ml(a.for_month)} salary (${tk(a.amount)}) will be paid back with your ${ml(a.start_month)} salary as an Arrear.`,
+        relatedType: "leave_application",
+        relatedId: application.id
+      });
+    }
+  } catch (err: any) {
+    console.warn("⚠️ Could not add the salary arrear for Leave #" + leaveId + ": " + err.message);
+  }
 }
 
 // Rejects a Leave Application at ANY step (Part 5 of 5) — refunds day_count
