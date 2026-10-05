@@ -545,7 +545,17 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({ token, onBack }) =
 
   const [activeTab, setActiveTab] = useState<
     'dashboard' | 'list' | 'attendance' | 'payslips' | 'loans' | 'bonus' | 'adjustments' | 'setup'
-  >('dashboard');
+  >(() => {
+    // A Loan / Advance alert opens Loans & Advances straight away.
+    try {
+      const t = sessionStorage.getItem('payroll_tab');
+      sessionStorage.removeItem('payroll_tab');
+      if (t === 'loans') return 'loans';
+    } catch {
+      // storage unavailable
+    }
+    return 'dashboard';
+  });
   const [monthYear, setMonthYear] = useState(currentMonthYear());
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [loading, setLoading] = useState(false);

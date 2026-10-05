@@ -6,7 +6,7 @@ import {
   BarChart3, FileSpreadsheet, Upload, History, Recycle, Navigation, Bell, ShieldCheck,
   Contact, Calendar, Clock, Fingerprint, Banknote, Package, LayoutDashboard, Server, MessageSquare,
   ChevronsLeft, ChevronsRight, ShieldAlert, Search, PieChart, FileUp,
-  Target, UserPlus, Gavel, FolderLock, Sparkles, ExternalLink, Car,
+  Target, UserPlus, Gavel, FolderLock, Sparkles, ExternalLink, Car, HandCoins,
   ClipboardList, BookOpen, ClipboardCheck, TrendingUp, Settings, Pencil, Check,
 } from 'lucide-react';
 import { User, AdminModuleKey, REPORTS_INSIGHTS_MODULES, DATA_IMPORT_MODULES } from '../types';
@@ -49,7 +49,7 @@ interface GlobalSidebarProps {
   onGoToUserClaims: (target: 'movementClaims' | 'conveyanceBill') => void;
   // Everyday employee self-service items — not Admin-gated, shown to every
   // account regardless of role/module access.
-  onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim') => void;
+  onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans') => void;
   // Admin Panel's own Movement Claims / Conveyance Bill Claim review tabs —
   // separate feature from onGoToUserClaims above, gated by module_permissions
   // like every other Admin Panel module.
@@ -325,6 +325,11 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   if (isSuperAdmin || !!user.can_view_mobile_bill || canSeeModule('mobile_bill')) {
     selfServiceItems.push({ key: 'myMobileSim', label: 'My Mobile SIM', icon: Smartphone, onClick: () => onGoToSelfServiceTab('myMobileSim') });
   }
+  // My Loan / Advance (MyLoans.tsx) — apply for a loan or salary advance.
+  // users.can_view_loan_request.
+  if (isSuperAdmin || !!user.can_view_loan_request) {
+    selfServiceItems.push({ key: 'myLoans', label: 'My Loan / Advance', icon: HandCoins, onClick: () => onGoToSelfServiceTab('myLoans') });
+  }
   if (siteSupervisor.teams > 0) {
     selfServiceItems.push({ key: 'teamAttendance', label: 'Team Attendance', icon: ClipboardCheck, onClick: () => onGoToSelfServiceTab('teamAttendance') });
   }
@@ -597,7 +602,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     { key: 'g_work', label: 'Work & Approvals', icon: ListChecks, entries: pick('myTasks', 'approveApplications', 'teamAttendance') },
     { key: 'g_pepm_op', label: 'PEPM Operation', icon: Briefcase, entries: pick('entry', 'jobs', 'entryDetails', 'jobEdit') },
     { key: 'g_leave_att', label: 'Leave & Attendance', icon: CalendarClock, entries: pick('leaveApplication', 'timesheet') },
-    { key: 'g_requests', label: 'Requests & Claims', icon: Wallet, entries: pick('userMovementClaims', 'userConveyanceClaims', 'vehicleManagement', 'assetManagement', 'myMobileSim', 'myLetters', 'myServiceBook') },
+    { key: 'g_requests', label: 'Requests & Claims', icon: Wallet, entries: pick('userMovementClaims', 'userConveyanceClaims', 'vehicleManagement', 'assetManagement', 'myMobileSim', 'myLoans', 'myLetters', 'myServiceBook') },
     { key: 'g_others', label: 'Others', icon: Users2, entries: pick('chat', 'alerts', 'erp360', 'employeeDirectory', 'myCases', 'resignation') }
   ]);
   const hrAnalyticsItem = itemByKey.get('hr_analytics') || null;
