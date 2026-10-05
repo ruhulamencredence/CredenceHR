@@ -181,6 +181,12 @@ export const NewLeaveApplicationModal: React.FC<NewLeaveApplicationModalProps> =
     [policies, leaveType]
   );
 
+  // Sick Leave, and a backdated application (starting before today), never
+  // need a Reliever — there's no hand-over to arrange for either. Same rule
+  // as POST /api/leave-applications.
+  const isBackdated = !!startDate && startDate < today;
+  const needsReliever = !!selectedPolicy.reliever_required && leaveType !== 'sick' && !isBackdated;
+
   const validate = (): string | null => {
     if (!leaveType) return 'Select a Leave Type.';
     if (!startDate || !endDate) return 'Start Date and End Date are required.';
@@ -199,7 +205,7 @@ export const NewLeaveApplicationModal: React.FC<NewLeaveApplicationModalProps> =
       return `Day Count (${dayCount}) exceeds your remaining balance (${availableBalance}) for this Leave Type.`;
     }
     if (!purpose.trim()) return 'Purpose is required.';
-    if (selectedPolicy.reliever_required && !relieverId) return 'Select a Reliever.';
+    if (needsReliever && !relieverId) return 'Select a Reliever.';
     return null;
   };
 
@@ -224,7 +230,7 @@ export const NewLeaveApplicationModal: React.FC<NewLeaveApplicationModalProps> =
           include_extra_work_dates: includeExtraWorkDates,
           is_foreign_leave: isForeignLeave,
           purpose: purpose.trim(),
-          reliever_id: relieverId ? Number(relieverId) : null
+          reliever_id: needsReliever && relieverId ? Number(relieverId) : null
         })
       });
       const data = await res.json();
@@ -384,7 +390,7 @@ export const NewLeaveApplicationModal: React.FC<NewLeaveApplicationModalProps> =
               the Template-driven Approval Workflow below. When this Leave
               Type's policy doesn't require one, the field is hidden entirely
               and the application skips straight to that Approval Workflow. */}
-          {selectedPolicy.reliever_required && (
+          {needsReliever && (
             <div>
               <label className="block text-[11px] font-semibold text-slate-500 mb-1">
                 Reliever <span className="text-rose-500">*</span>
@@ -427,8 +433,10 @@ export const NewLeaveApplicationModal: React.FC<NewLeaveApplicationModalProps> =
           <div className="flex items-start gap-2 text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5">
             <UserCheck className="w-3.5 h-3.5 shrink-0 mt-0.5 text-blue-600" />
             <span>
-              {selectedPolicy.reliever_required
+              {needsReliever
                 ? "Your Reliever reviews this first. Once they approve, it's routed automatically to your approver(s) — no need to pick anyone else."
+                : selectedPolicy.reliever_required
+                ? `No Reliever needed for ${leaveType === 'sick' ? 'Sick Leave' : 'a backdated application'} — it's routed automatically to your approver(s) once submitted.`
                 : "This Leave Type doesn't require a Reliever — it's routed automatically to your approver(s) once submitted."}
             </span>
           </div>
