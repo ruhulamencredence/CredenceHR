@@ -5274,6 +5274,7 @@ async function startServer() {
     requireModule: (k: "payroll") => requireModuleLayer(k, "read"),
     requireModuleLayer,
     hasModuleLayer,
+    getAdminModules,
     queryDB
   });
 
