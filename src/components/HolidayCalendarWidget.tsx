@@ -40,9 +40,9 @@ const MONTH_LABELS = [
   'July', 'August', 'September', 'October', 'November', 'December'
 ];
 
-// GET /api/calendar-attendance — who was late or on Leave each day. Holds
-// just the viewer unless they're an Admin / Monthly Attendance Report holder
-// (their Department) or the Superadmin (everyone); see PayrollRoutes.ts.
+// GET /api/calendar-attendance — the viewer's own Delay / Extreme Delay, and
+// Leave for just the viewer, or their Department with the Monthly Attendance
+// Report module, or everyone for the Superadmin; see PayrollRoutes.ts.
 interface DayMark {
   user_id: number;
   kind: 'delay' | 'extreme' | 'leave';
@@ -212,6 +212,7 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
 
   // Who was late / on Leave on each day of the visible grid.
   const [people, setPeople] = useState<CalendarPerson[]>([]);
+  const [me, setMe] = useState<number | null>(null);
   const [marksByDate, setMarksByDate] = useState<Record<string, DayMark[]>>({});
   const [filter, setFilter] = useState<MarkFilter>('all');
   const [openDay, setOpenDay] = useState<{ date: string; rect: DOMRect } | null>(null);
@@ -222,6 +223,7 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
     dedupedFetchJson(apiUrl(`/api/calendar-attendance?from=${gridFrom}&to=${gridTo}`), token).then((r: any) => {
       if (cancelled) return;
       setPeople(Array.isArray(r?.people) ? r.people : []);
+      setMe(typeof r?.me === 'number' ? r.me : null);
       setMarksByDate(r?.days || {});
     });
     return () => {
@@ -229,9 +231,8 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
     };
   }, [token, gridFrom, gridTo]);
   const personById = useMemo(() => new Map(people.map((p) => [p.user_id, p])), [people]);
-  // Just the viewer's own calendar: a word under the date reads better than
-  // their own face on every marked day.
-  const solo = people.length <= 1;
+  // Others' Leave shows as faces; the viewer's own day (their Leave or
+  // lateness) is a word under the date.
   const leaveTypes = useMemo(() => {
     const set = new Set<string>();
     for (const list of Object.values(marksByDate)) for (const m of list) if (m.kind === 'leave' && m.leave_type) set.add(m.leave_type);
@@ -239,26 +240,29 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
   }, [marksByDate]);
   const marksFor = (dateStr: string) => (marksByDate[dateStr] || []).filter((m) => matchesFilter(m, filter));
 
-  // Avatars (team) or a status word (own calendar) for one day cell.
+  // The viewer's own mark as a word, everyone else's Leave as faces.
   const renderMarks = (dateStr: string, isToday: boolean) => {
-    const marks = marksFor(dateStr);
-    if (marks.length === 0) return null;
-    if (solo) {
-      const st = markStyle(marks[0]);
-      return (
-        <span
-          className={`inline-flex items-center gap-1 font-bold uppercase tracking-wide ${large ? 'text-[10px]' : 'text-[7px]'} ${
-            isToday && large ? 'text-white' : st.text
-          }`}
-        >
-          {large && <span className={`w-1.5 h-1.5 rounded-full ${st.dot}`} />}
-          {st.label}
-        </span>
-      );
-    }
-    const max = large ? 3 : 2;
+    const all = marksFor(dateStr);
+    if (all.length === 0) return null;
+    const mine = all.find((m) => m.user_id === me);
+    const marks = all.filter((m) => m.user_id !== me);
+    const mineStyle = mine ? markStyle(mine) : null;
+    const word = mineStyle && (
+      <span
+        className={`inline-flex items-center gap-1 font-bold uppercase tracking-wide ${large ? 'text-[10px]' : 'text-[7px]'} ${
+          isToday && large ? 'text-white' : mineStyle.text
+        }`}
+      >
+        {large && <span className={`w-1.5 h-1.5 rounded-full ${mineStyle.dot}`} />}
+        {mineStyle.label}
+      </span>
+    );
+    if (marks.length === 0) return word;
+    const max = large ? (word ? 2 : 3) : word ? 1 : 2;
     return (
-      <span className="flex items-center -space-x-1.5">
+      <>
+        {word}
+        <span className="flex items-center -space-x-1.5">
         {marks.slice(0, max).map((m) => (
           <span key={m.user_id} className={`rounded-full ring-2 ${markStyle(m).ring} bg-white`}>
             <PersonPhoto
@@ -279,6 +283,7 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
           </span>
         )}
       </span>
+      </>
     );
   };
   const openDayMarks = openDay ? marksFor(openDay.date) : [];
@@ -494,7 +499,7 @@ export const HolidayCalendarWidget: React.FC<HolidayCalendarWidgetProps> = ({ to
                   key={cell.dateStr}
                   title={entry ? `${entry.title} (${dayTypeLabel(entry.day_type)})` : undefined}
                   onClick={hasMarks ? (e) => setOpenDay({ date: cell.dateStr, rect: e.currentTarget.getBoundingClientRect() }) : undefined}
-                  className={`${hasMarks ? 'cursor-pointer' : ''} relative ${hasMarks && !solo ? 'h-[60px]' : dates.sub ? 'h-14' : 'h-12'} flex flex-col items-center justify-center gap-0.5 border-b border-r border-white/40 text-[11px] transition-colors ${
+                  className={`${hasMarks ? 'cursor-pointer' : ''} relative ${hasMarks && marksFor(cell.dateStr).some((m) => m.user_id !== me) ? 'h-[60px]' : dates.sub ? 'h-14' : 'h-12'} flex flex-col items-center justify-center gap-0.5 border-b border-r border-white/40 text-[11px] transition-colors ${
                     !cell.inCurrentMonth
                       ? 'text-slate-300'
                       : entry

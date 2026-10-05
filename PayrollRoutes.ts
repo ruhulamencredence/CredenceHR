@@ -2157,11 +2157,11 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
   });
 
   // ---- Dashboard calendar: attendance status -------------------------------
-  // The Dashboard's Global Calendar marks each day with who was late or on
-  // Leave. Whose days an account sees:
+  // The Dashboard's Global Calendar marks each day with Delay / Extreme
+  // Delay — always the viewer's own only — and Leave, whose scope is:
   //   - everyone: their own;
-  //   - an Admin, or an account granted 'attendance_reports' (Monthly
-  //     Attendance Report): everyone in their own Department;
+  //   - an account granted 'attendance_reports' (Monthly Attendance
+  //     Report): everyone in their own Department;
   //   - the Superadmin: every employee.
   async function calendarViewableEmployees(user: any): Promise<any[]> {
     const rows = (
@@ -2174,14 +2174,14 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
     const me = rows.find((e: any) => Number(e.user_id) === Number(user.id));
     if (!me) return [];
     const canSeeDepartment =
-      user.role === "admin" || (user.role === "user" && (await getAdminModules(user.id)).includes("attendance_reports"));
+      (user.role === "admin" || user.role === "user") && (await getAdminModules(user.id)).includes("attendance_reports");
     if (!canSeeDepartment || !me.department) return [me];
     return rows.filter((e: any) => e.department === me.department);
   }
 
-  // Every Delay / Extreme Delay / Leave in [from, to] (at most ~6 weeks, one
-  // calendar grid) for the people this account may see, as
-  //   { people: [{ user_id, name, department }],
+  // The viewer's own Delay / Extreme Delay and the Leave of the people this
+  // account may see, in [from, to] (at most ~6 weeks, one calendar grid):
+  //   { me: user_id, people: [{ user_id, name, department }],
   //     days: { "YYYY-MM-DD": [{ user_id, kind: "delay" | "extreme" | "leave",
   //                               leave_type?, status? }] } }
   app.get("/api/calendar-attendance", authenticateToken, async (req: any, res) => {
@@ -2197,7 +2197,8 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       }
       const employees = await calendarViewableEmployees(req.user);
       const people = employees.map((e: any) => ({ user_id: Number(e.user_id), name: e.name, department: e.department || null }));
-      if (employees.length === 0) return res.json({ people, days: {} });
+      const me = Number(req.user.id);
+      if (employees.length === 0) return res.json({ me, people, days: {} });
 
       type Mark = { user_id: number; kind: "delay" | "extreme" | "leave"; leave_type?: string; status?: string };
       const days: Record<string, Mark[]> = {};
@@ -2233,11 +2234,13 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         }
       }
 
-      // Lates — same policy, waivers and holiday calendars as the payroll.
-      // The policy is per salary month, so resolve each one the range touches.
+      // Lates — the viewer's own only, with the same policy, waivers and
+      // holiday calendars as the payroll. The policy is per salary month, so
+      // resolve each one the range touches.
+      const self = employees.filter((e: any) => Number(e.user_id) === me);
       const branchTypeByUserId = await getEmployeeBranchTypeMap(queryDB);
       let monthYear = await salaryMonthOf(from);
-      for (let i = 0; i < 4; i++) {
+      for (let i = 0; i < 4 && self.length > 0; i++) {
         const period = await getSalaryPeriod(monthYear);
         if (period.start > to) break;
         const monthStart = period.start < from ? from : period.start;
@@ -2245,7 +2248,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         const holidayMaps = await getHolidayMapsByGroup(queryDB, monthStart, monthEnd);
         const policy = await getLatePolicyForMonth(monthYear);
         const { lateDatesByEmployee, extremeLateDatesByEmployee } = await computeLateDatesByEmployee(
-          employees, monthStart, monthEnd, holidayMaps, branchTypeByUserId, policy
+          self, monthStart, monthEnd, holidayMaps, branchTypeByUserId, policy
         );
         for (const [kind, map] of [["extreme", extremeLateDatesByEmployee], ["delay", lateDatesByEmployee]] as const) {
           for (const [employeeId, dates] of map.entries()) {
@@ -2256,7 +2259,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         monthYear = shiftMonthYear(monthYear, 1);
       }
 
-      res.json({ people, days });
+      res.json({ me, people, days });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Failed to load attendance for the calendar." });
     }
