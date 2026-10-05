@@ -125,7 +125,10 @@ export const OWN_TABLES = new Set([
   "mobile_sims",
   "mobile_bills",
   "mobile_limit_policies",
-  "mobile_limit_requests"
+  "mobile_limit_requests",
+  "payroll_batches",
+  "payroll_batch_events",
+  "payroll_access_log"
 ]);
 
 // Shared by every company of a group (PEPM budgets & rate file, chat…) but

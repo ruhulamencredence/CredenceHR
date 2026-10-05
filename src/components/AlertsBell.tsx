@@ -227,6 +227,9 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
             }
             window.dispatchEvent(new CustomEvent('credence:open-task', { detail: { title: alert.title } }));
           }
+        : alert.type === 'payroll_approval' && alert.title !== 'Salary Paid'
+        ? // Audit / Accounts / HR: Payroll -> Approval (App.tsx).
+          () => window.dispatchEvent(new CustomEvent('credence:open-payroll-approval'))
         : alert.type === 'loan_request'
         ? // My Loan / Advance, or Payroll -> Loans & Advances for one to decide (App.tsx).
           () => window.dispatchEvent(new CustomEvent('credence:open-loan', { detail: { title: alert.title } }))

@@ -749,6 +749,24 @@ export default function App() {
     window.addEventListener('credence:open-loan', onOpen);
     return () => window.removeEventListener('credence:open-loan', onOpen);
   }, [user]);
+  // A salary-sheet alert (PayrollApprovalRoutes.ts) opens Payroll -> Approval.
+  useEffect(() => {
+    const onOpen = () => {
+      if (!user || !(user.role === 'superadmin' || (user.module_permissions || []).includes('payroll'))) return;
+      try {
+        sessionStorage.setItem('payroll_tab', 'approval');
+      } catch {
+        // storage unavailable
+      }
+      setShowProfilePage(false);
+      setShowChat(false);
+      setShowAlertsPage(false);
+      setSelfServiceView(null);
+      setTimeout(() => setSelfServiceView('payroll'), 0);
+    };
+    window.addEventListener('credence:open-payroll-approval', onOpen);
+    return () => window.removeEventListener('credence:open-payroll-approval', onOpen);
+  }, [user]);
 
   if (!token || !user) {
     return (

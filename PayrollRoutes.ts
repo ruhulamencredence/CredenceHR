@@ -40,6 +40,7 @@
 import type { Express } from "express";
 import { createAlert } from "./Alerts";
 import { finalizeAdvanceRequest, rejectAdvanceRequest } from "./LoanRequestRoutes";
+import { monthLocked, lockedMessage, settlePaidPayroll, batchFor } from "./PayrollApprovalRoutes";
 import { getHolidayMap, getHolidayMapsByGroup, getEmployeeBranchTypeMap, getEmployeeBranchTypeByEmployeeId, HolidayAppliesTo } from "./holidayRoutes";
 import { loadSiteEntries } from "./SiteAttendanceRoutes";
 import { activeCompanyId } from "./companyContext";
@@ -56,8 +57,8 @@ interface PayrollRouteDeps {
   requireModule: (moduleKey: "payroll") => any;
   // Payroll's permission layers (server.ts PAYROLL_LAYER_KEYS) — used for
   // the salary month setting, which needs "salary_month" ticked.
-  requireModuleLayer: (moduleKey: "payroll", layer: "salary_month" | "salary_hold") => any;
-  hasModuleLayer: (user: any, moduleKey: "payroll", layer: "salary_month" | "salary_hold") => Promise<boolean>;
+  requireModuleLayer: (moduleKey: "payroll", layer: "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log") => any;
+  hasModuleLayer: (user: any, moduleKey: "payroll", layer: "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log") => Promise<boolean>;
   // The account's granted Admin Panel modules — the Dashboard calendar lets
   // an 'attendance_reports' holder open their own Department's calendars.
   getAdminModules: (userId: number) => Promise<string[]>;
@@ -531,6 +532,8 @@ export async function arrearForLateLeave(leaveId: number, actorId: number | null
   return lateLeaveArrearImpl ? lateLeaveArrearImpl(leaveId, actorId) : [];
 }
 export const LATE_LEAVE_ARREAR_PREFIX = "Leave approved after salary";
+
+const todayInDhakaStr = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Dhaka" });
 
 export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
   const { authenticateToken, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer, getAdminModules, queryDB } = deps;
@@ -2782,6 +2785,8 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
     try {
       const monthYear = String(req.body?.month_year || "");
       if (!MONTH_YEAR_RE.test(monthYear)) return res.status(400).json({ error: "month_year must be in 'YYYY-MM' format." });
+      const lock = await monthLocked(queryDB, monthYear);
+      if (lock) return res.status(400).json({ error: lockedMessage(lock) });
       const rows: any[] = Array.isArray(req.body?.employees) ? req.body.employees : [];
       const method = typeof req.body?.payment_method === "string" && req.body.payment_method.trim() ? req.body.payment_method.trim().slice(0, 50) : "Bank Transfer";
 
@@ -2942,6 +2947,8 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       } = req.body || {};
 
       if (!employee_id) return res.status(400).json({ error: "employee_id is required." });
+      const lockG = month_year ? await monthLocked(queryDB, String(month_year)) : null;
+      if (lockG) return res.status(400).json({ error: lockedMessage(lockG) });
       if (!month_year || !MONTH_YEAR_RE.test(String(month_year))) {
         return res.status(400).json({ error: "month_year must be in 'YYYY-MM' format." });
       }
@@ -3065,6 +3072,8 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       if (existing.payment_status === "paid") {
         return res.status(400).json({ error: "A Paid payroll run can't be edited." });
       }
+      const lockE = await monthLocked(queryDB, String(existing.month_year));
+      if (lockE) return res.status(400).json({ error: lockedMessage(lockE) });
 
       const workingDays = Math.max(1, Math.round(num(req.body?.total_working_days, existing.total_working_days)));
       const present = Math.max(0, Math.round(num(req.body?.present_days, existing.present_days)));
@@ -3146,15 +3155,20 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
     }
   });
 
-  // Intermediate step before disbursement — lets Payroll flag a batch as
-  // reviewed/ready without yet committing the irreversible advance-recovery
-  // bookkeeping that only happens on "mark as paid" below.
-  app.post("/api/payroll/:id/process", authenticateToken, requireAdmin, requireModule("payroll"), async (req: any, res) => {
+  // One employee's salary, outside the month's own approval (e.g. a salary
+  // released from hold after Audit approved the month): Audit processes it
+  // (Payroll layer "audit_approve"), Accounts pays it ("accounts_pay").
+  // The month's batch has to be with Audit already (PayrollApprovalRoutes.ts).
+  app.post("/api/payroll/:id/process", authenticateToken, requireAdmin, requireModuleLayer("payroll", "audit_approve"), async (req: any, res) => {
     try {
       const rows = await queryDB("SELECT * FROM payrolls WHERE id = ?", [req.params.id]);
       if (rows.length === 0) return res.status(404).json({ error: "Payroll record not found." });
       if (rows[0].payment_status !== "unpaid") return res.status(400).json({ error: "Only an Unpaid payroll run can be marked Processed." });
       if (Number(rows[0].is_held)) return res.status(400).json({ error: "This salary is on hold. Release it first." });
+      const b = await batchFor(queryDB, String(rows[0].month_year));
+      if (!b || !["submitted", "approved", "paid"].includes(b.status)) {
+        return res.status(400).json({ error: "Submit this month's salary for Audit first (Payroll → Approval)." });
+      }
       await queryDB("UPDATE payrolls SET payment_status = 'processed' WHERE id = ?", [req.params.id]);
       res.json({ success: true });
     } catch (err: any) {
@@ -3164,48 +3178,26 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
 
   // Marks the run as actually disbursed AND, in the same step, applies its
   // advance_deduction against the employee's active advance(s) — the one
-  // moment this app permanently records that money as recovered, mirroring
-  // how Conveyance Disbursement is the one place is_disbursed flips.
-  app.post("/api/payroll/:id/mark-paid", authenticateToken, requireAdmin, requireModule("payroll"), async (req: any, res) => {
+  // moment this app permanently records that money as recovered. Only
+  // Accounts, and only once Audit has processed it.
+  app.post("/api/payroll/:id/mark-paid", authenticateToken, requireAdmin, requireModuleLayer("payroll", "accounts_pay"), async (req: any, res) => {
     try {
       const rows = await queryDB("SELECT * FROM payrolls WHERE id = ?", [req.params.id]);
       if (rows.length === 0) return res.status(404).json({ error: "Payroll record not found." });
       const payroll = rows[0];
       if (payroll.payment_status === "paid") return res.status(400).json({ error: "This payroll run is already marked Paid." });
       if (Number(payroll.is_held)) return res.status(400).json({ error: "This salary is on hold. Release it first." });
-
-      let remainingToRecover = Number(payroll.advance_deduction) || 0;
-      if (remainingToRecover > 0) {
-        const advances = await queryDB(
-          "SELECT * FROM employee_advances WHERE employee_id = ? AND status = 'active' ORDER BY created_at ASC",
-          [payroll.employee_id]
-        );
-        for (const adv of advances) {
-          if (remainingToRecover <= 0) break;
-          const outstanding = Number(adv.total_amount) - Number(adv.paid_amount);
-          if (outstanding <= 0) continue;
-          const recover = money(Math.min(Number(adv.monthly_installment), outstanding, remainingToRecover));
-          if (recover <= 0) continue;
-          const newPaid = money(Number(adv.paid_amount) + recover);
-          const newStatus = newPaid >= Number(adv.total_amount) ? "completed" : "active";
-          await queryDB("UPDATE employee_advances SET paid_amount = ?, status = ? WHERE id = ?", [newPaid, newStatus, adv.id]);
-          remainingToRecover = money(remainingToRecover - recover);
-        }
-      }
-
-      await queryDB(
-        "UPDATE payrolls SET payment_status = 'paid', paid_by = ?, paid_at = CURRENT_TIMESTAMP WHERE id = ?",
-        [req.user.id, req.params.id]
-      );
+      if (payroll.payment_status !== "processed") return res.status(400).json({ error: "Audit has to approve (process) this salary before it can be paid." });
+      const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.body?.payment_date || "")) ? String(req.body.payment_date) : todayInDhakaStr();
+      const method = typeof req.body?.payment_method === "string" ? req.body.payment_method.trim().slice(0, 50) || null : null;
+      const reference = typeof req.body?.payment_reference === "string" ? req.body.payment_reference.trim().slice(0, 150) || null : null;
+      await settlePaidPayroll(queryDB, payroll, req.user.id, { date, method, reference });
       res.json({ success: true });
     } catch (err: any) {
-      res.status(500).json({ error: err.message || "Failed to mark payroll as paid." });
+      res.status(500).json({ error: err.message || "Failed to mark as paid." });
     }
   });
 
-  // A duplicate/mistaken run can be removed before it's Paid; once Paid it's
-  // part of the disbursed record (and its advance recovery already
-  // happened), so it can no longer be deleted from here.
   app.delete("/api/payroll/:id", authenticateToken, requireAdmin, requireModule("payroll"), async (req: any, res) => {
     try {
       const rows = await queryDB("SELECT * FROM payrolls WHERE id = ?", [req.params.id]);
@@ -3213,6 +3205,8 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       if (rows[0].payment_status === "paid") {
         return res.status(400).json({ error: "A Paid payroll run can't be deleted." });
       }
+      const lockD = await monthLocked(queryDB, String(rows[0].month_year));
+      if (lockD) return res.status(400).json({ error: lockedMessage(lockD) });
       await queryDB("DELETE FROM payrolls WHERE id = ?", [req.params.id]);
       res.json({ success: true });
     } catch (err: any) {
