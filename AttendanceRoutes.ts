@@ -187,6 +187,21 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
     }
   };
 
+  // The Projects this account may check in at — the Dashboard's Remote
+  // Attendance card. Same rule check-in itself enforces (getAllowedProjectIds):
+  // the "Allowed project for check-in" an Admin pinned, else the account's
+  // Project access. Separate from GET /api/projects (Budget / Jobs / MPR), so
+  // a pinned check-in Project shows even with no Project access at all.
+  app.get("/api/attendance/my-projects", authenticateToken, requireAttendanceAccess, async (req: any, res) => {
+    try {
+      const allowed = await getAllowedProjectIds(req.user.id, req.user.role);
+      const rows: any[] = await queryDB("SELECT * FROM projects ORDER BY project_name ASC");
+      res.json(allowed ? rows.filter((p: any) => allowed.has(Number(p.id))) : rows);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.post("/api/attendance/check-in", authenticateToken, requireAttendanceAccess, async (req: any, res) => {
     try {
       const parsed = parseAttendanceCoords(req.body);
