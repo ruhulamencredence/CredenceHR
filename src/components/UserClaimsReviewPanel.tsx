@@ -13,6 +13,7 @@ import ClaimLocationMap from './ClaimLocationMap';
 import { Spinner } from './Spinner';
 import { ClaimBillLines } from './ClaimBillLines';
 import { useBillClaimCategoryNames } from '../lib/billClaimCategories';
+import { confirmDialog } from '../lib/confirmDialog';
 
 interface UserClaimsReviewPanelProps {
   token: string;
@@ -177,7 +178,7 @@ export const UserClaimsReviewPanel: React.FC<UserClaimsReviewPanelProps> = ({ to
   };
 
   const handleDelete = async (claim: UserClaim) => {
-    if (!confirm(`Delete this ${claim.category} claim from ${claim.user_name || 'this user'}? This cannot be undone.`)) return;
+    if (!(await confirmDialog(`Delete this ${claim.category} claim from ${claim.user_name || 'this user'}? This cannot be undone.`))) return;
     setDeletingId(claim.id);
     setError('');
     try {

@@ -26,6 +26,7 @@ import { User, ChatRoom, ChatMessage, ChatRoomMember, ChatDirectoryUser, ChatRea
 import { apiUrl } from '../lib/api';
 import { connectChatSocket, getChatSocket } from '../lib/chatSocket';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
+import { confirmDialog } from '../lib/confirmDialog';
 
 interface ChatPanelProps {
   token: string;
@@ -1457,7 +1458,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
           <button
             type="button"
             onClick={async () => {
-              if (!confirm('Leave this chat?')) return;
+              if (!(await confirmDialog('Leave this chat?'))) return;
               await fetch(apiUrl(`/api/chat/rooms/${activeRoom.id}/members/${user.id}`), {
                 method: 'DELETE',
                 headers: { Authorization: `Bearer ${token}` }

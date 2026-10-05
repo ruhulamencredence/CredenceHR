@@ -7,6 +7,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Server, Plus, Trash2, Edit2, X } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
+import { confirmDialog } from '../lib/confirmDialog';
 
 interface ServerProfilesPanelProps {
   token: string;
@@ -120,7 +121,7 @@ export const ServerProfilesPanel: React.FC<ServerProfilesPanelProps> = ({ token 
   };
 
   const handleDelete = async (id: number) => {
-    if (!window.confirm('Remove this server from the list? Any Android device currently set to it will stay pointed there until switched.')) return;
+    if (!(await confirmDialog('Remove this server from the list? Any Android device currently set to it will stay pointed there until switched.'))) return;
     setDeletingId(id);
     try {
       const res = await fetch(apiUrl(`/api/server-profiles/${id}`), { method: 'DELETE', headers: authHeaders });

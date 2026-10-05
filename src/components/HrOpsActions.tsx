@@ -30,6 +30,7 @@ import {
   type HrOpsEmployee,
   type HrOpsMeta
 } from './HrOpsShared';
+import { confirmDialog } from '../lib/confirmDialog';
 
 interface HrAction {
   id: number;
@@ -347,7 +348,7 @@ export const HrOpsActions: React.FC<{ token: string; meta: HrOpsMeta; employees:
   const counts = { all: actions.length, pending: actions.filter((a) => a.status === 'pending').length, approved: actions.filter((a) => a.status === 'approved').length, rejected: actions.filter((a) => a.status === 'rejected').length };
 
   const cancel = async (a: HrAction) => {
-    if (!window.confirm(`Cancel this ${a.action_label} for ${a.employee_name}?`)) return;
+    if (!(await confirmDialog(`Cancel this ${a.action_label} for ${a.employee_name}?`))) return;
     try {
       await api.post(`/api/hr-ops/actions/${a.id}/cancel`);
       load();

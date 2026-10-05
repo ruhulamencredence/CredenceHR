@@ -9,6 +9,7 @@ import { finalizePdfPageNumbers } from '../lib/pdfLetterhead';
 import { drawStandardHeader, loadPdfCompany, pdfMoney, standardTable } from '../lib/pdfStandard';
 import { savePdfCrossPlatform } from '../lib/saveFile';
 import { Spinner } from './Spinner';
+import { confirmDialog } from '../lib/confirmDialog';
 
 // ---- Voucher sections ----
 // The Payment Voucher groups a Bill's lines by category, each with the
@@ -357,7 +358,7 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
   // ---- Undo (mark back to pending) ----
   const [undoingId, setUndoingId] = useState<number | null>(null);
   const handleUndoDisburse = async (id: number) => {
-    if (!confirm('Mark this Bill back as Pending? The Voucher No. will be cleared.')) return;
+    if (!(await confirmDialog('Mark this Bill back as Pending? The Voucher No. will be cleared.'))) return;
     setUndoingId(id);
     try {
       const res = await fetch(apiUrl(`/api/conveyance-bills/${id}/undisburse`), { method: 'POST', headers: authHeaders });

@@ -18,6 +18,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowDownCircle, ArrowUpCircle, Ban, Pencil, Plus, RefreshCw, Scale, Search, Trash2, X } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
+import { confirmDialog } from '../lib/confirmDialog';
 
 interface EmployeeLite {
   id: number;
@@ -329,11 +330,11 @@ export const PayrollAdjustmentsPanel: React.FC<{ token: string }> = ({ token }) 
                               className="p-1.5 rounded-lg text-slate-500 hover:text-rose-700 hover:bg-rose-50"
                               title="Delete"
                               aria-label={`Delete ${it.name} for ${it.employee_name}`}
-                              onClick={() => {
+                              onClick={async () => {
                                 if (
-                                  window.confirm(
+                                  (await confirmDialog(
                                     `Delete ${it.name} for ${it.employee_name}? Payroll runs already generated keep it; new runs won't add it. To stop it from a month on, edit it and set an end month instead.`
-                                  )
+                                  ))
                                 )
                                   run(() => call(`/api/payroll/pay-items/${it.id}`, { method: 'DELETE' }), `${it.name} removed for ${it.employee_name}.`);
                               }}
@@ -427,8 +428,8 @@ export const PayrollAdjustmentsPanel: React.FC<{ token: string }> = ({ token }) 
                               className="p-1.5 rounded-lg text-slate-500 hover:text-amber-700 hover:bg-amber-50"
                               title="Cancel what's left"
                               aria-label={`Cancel ${a.label} for ${a.employee_name}`}
-                              onClick={() => {
-                                if (window.confirm(`Stop ${a.label} for ${a.employee_name}? ${money(a.remaining_amount)} left will not be applied. What runs already carried stays.`))
+                              onClick={async () => {
+                                if ((await confirmDialog(`Stop ${a.label} for ${a.employee_name}? ${money(a.remaining_amount)} left will not be applied. What runs already carried stays.`)))
                                   run(() => call(`/api/payroll/adjustments/${a.id}/cancel`, { method: 'POST' }), `${a.label} stopped.`);
                               }}
                             >
@@ -441,8 +442,8 @@ export const PayrollAdjustmentsPanel: React.FC<{ token: string }> = ({ token }) 
                               className="p-1.5 rounded-lg text-slate-500 hover:text-rose-700 hover:bg-rose-50"
                               title="Delete"
                               aria-label={`Delete ${a.label} for ${a.employee_name}`}
-                              onClick={() => {
-                                if (window.confirm(`Delete ${a.label} for ${a.employee_name}? No payroll run has carried it yet.`))
+                              onClick={async () => {
+                                if ((await confirmDialog(`Delete ${a.label} for ${a.employee_name}? No payroll run has carried it yet.`)))
                                   run(() => call(`/api/payroll/adjustments/${a.id}`, { method: 'DELETE' }), `${a.label} deleted.`);
                               }}
                             >

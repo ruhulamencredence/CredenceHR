@@ -22,6 +22,7 @@ import { Spinner } from './Spinner';
 import { OfficeAttendancePanel } from './OfficeAttendancePanel';
 import { SheetEditor, SheetStatusChip, SiteSheet, Counts } from './TeamAttendance';
 import { useHrApi, Modal, Notice, fmtDate, monthLabel, inputCls, labelCls, btnPrimary, btnGhost } from './HrOpsShared';
+import { confirmDialog } from '../lib/confirmDialog';
 
 interface TeamMember {
   employee_id: number;
@@ -599,7 +600,7 @@ const TeamsView: React.FC<{ token: string; data: TeamsData; reload: () => void }
   const [edit, setEdit] = useState<Team | 'new' | null>(null);
   const [msg, setMsg] = useState<Msg>(null);
   const remove = async (t: Team) => {
-    if (!window.confirm(`Remove "${t.name}"? A team with attendance history is only deactivated.`)) return;
+    if (!(await confirmDialog(`Remove "${t.name}"? A team with attendance history is only deactivated.`))) return;
     try {
       const d = await api.del(`/api/site-attendance/teams/${t.id}`);
       setMsg({ type: 'success', text: d.deactivated ? 'Team deactivated (its attendance history is kept).' : 'Team deleted.' });

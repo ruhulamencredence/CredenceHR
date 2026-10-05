@@ -15,6 +15,7 @@ import { apiUrl } from '../lib/api';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
 import { AccessTemplate, TEMPLATE_FEATURES, TemplateFeature } from '../lib/accessTemplates';
 import { Spinner } from './Spinner';
+import { confirmDialog } from '../lib/confirmDialog';
 
 interface AccessTemplatesModalProps {
   token: string;
@@ -73,7 +74,7 @@ export function AccessTemplatesModal({ token, canGrantModuleAccess, templates, o
   };
 
   const remove = async (t: AccessTemplate) => {
-    if (!confirm(`Delete the template “${t.name}”? Accounts it was applied to keep their access.`)) return;
+    if (!(await confirmDialog(`Delete the template “${t.name}”? Accounts it was applied to keep their access.`))) return;
     try {
       await call('DELETE', `/api/access-templates/${t.id}`);
       onChanged();

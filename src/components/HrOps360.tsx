@@ -78,6 +78,7 @@ import {
   type P360Overview,
   type RecordKind
 } from './HrOps360Parts';
+import { confirmDialog } from '../lib/confirmDialog';
 
 type TabKey = 'overview' | 'personal' | 'career' | 'documents' | 'attendance' | 'leave' | 'claims' | 'salary' | 'loans' | 'other';
 
@@ -580,7 +581,7 @@ const PersonalTab: React.FC<{ api: Api; ov: P360Overview; reloadKey: number; onE
   const { data, loading } = useSection<any>(api, `/api/hr-ops/p360/${ov.employee.id}/section/records`, reloadKey);
   const p = ov.profile;
   const del = async (id: number) => {
-    if (!window.confirm('Delete this family member?')) return;
+    if (!(await confirmDialog('Delete this family member?'))) return;
     await api.del(`/api/hr-ops/p360/records/family/${id}`);
     onChanged();
   };
@@ -668,7 +669,7 @@ const CareerTab: React.FC<{ api: Api; token: string; ov: P360Overview; reloadKey
 }) => {
   const { data, loading } = useSection<any>(api, `/api/hr-ops/p360/${ov.employee.id}/section/records`, reloadKey);
   const del = async (kind: RecordKind, id: number) => {
-    if (!window.confirm('Delete this record?')) return;
+    if (!(await confirmDialog('Delete this record?'))) return;
     await api.del(`/api/hr-ops/p360/records/${kind}/${id}`);
     onChanged('Deleted.');
   };

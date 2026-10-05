@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { FolderLock, Plus, X, AlertTriangle, CheckCircle2, FileText, Trash2, Download, ShieldCheck } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
+import { confirmDialog } from '../lib/confirmDialog';
 
 interface DocumentVaultPanelProps {
   token: string;
@@ -132,7 +133,7 @@ export const DocumentVaultPanel: React.FC<DocumentVaultPanelProps> = ({ token })
   };
 
   const deleteDocument = async (id: number) => {
-    if (!window.confirm('Delete this document? This cannot be undone.')) return;
+    if (!(await confirmDialog('Delete this document? This cannot be undone.'))) return;
     setDeletingId(id);
     setError('');
     try {

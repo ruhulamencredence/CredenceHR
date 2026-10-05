@@ -9,6 +9,7 @@ import { OfficeAttendanceRow } from '../types';
 import { apiUrl } from '../lib/api';
 import { formatDate, todayDateOnlyString } from '../lib/formatDate';
 import { Spinner } from './Spinner';
+import { confirmDialog } from '../lib/confirmDialog';
 
 interface OfficeAttendancePanelProps {
   token: string;
@@ -303,7 +304,7 @@ export const OfficeAttendancePanel: React.FC<OfficeAttendancePanelProps> = ({ to
   };
 
   const handleDeleteDevice = async (device: ZkDeviceStatus) => {
-    if (!window.confirm(`Delete "${device.name}" (${device.ip_address})? Its already-synced punch history is deleted too. This cannot be undone.`)) return;
+    if (!(await confirmDialog(`Delete "${device.name}" (${device.ip_address})? Its already-synced punch history is deleted too. This cannot be undone.`))) return;
     setDeletingDeviceId(device.id);
     try {
       const res = await fetch(apiUrl(`/api/zk-devices/${device.id}`), {

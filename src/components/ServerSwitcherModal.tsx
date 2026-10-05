@@ -7,6 +7,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Server, Check, X, RefreshCw } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
+import { confirmDialog } from '../lib/confirmDialog';
 
 interface CatalogEntry {
   id: number;
@@ -78,8 +79,8 @@ export const ServerSwitcherModal: React.FC<ServerSwitcherModalProps> = ({ token,
     fetchCatalog();
   }, [fetchCatalog]);
 
-  const handleUse = (entry: CatalogEntry) => {
-    if (!window.confirm(`Open "${entry.name}"? This app will reload from that server, and you'll need to sign in there.`)) {
+  const handleUse = async (entry: CatalogEntry) => {
+    if (!(await confirmDialog(`Open "${entry.name}"? This app will reload from that server, and you'll need to sign in there.`))) {
       return;
     }
     const root = entry.url.replace(/\/+$/, '') + '/';

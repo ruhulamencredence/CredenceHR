@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Gavel, Plus, X, AlertTriangle, CheckCircle2, MessageSquareWarning, ShieldAlert } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
+import { confirmDialog } from '../lib/confirmDialog';
 
 interface GrievanceDisciplinaryPanelProps {
   token: string;
@@ -224,7 +225,7 @@ export const GrievanceDisciplinaryPanel: React.FC<GrievanceDisciplinaryPanelProp
   };
 
   const closeAction = async (id: number) => {
-    if (!confirm('Close this disciplinary action? The employee is notified and no more feedback can be added.')) return;
+    if (!(await confirmDialog('Close this disciplinary action? The employee is notified and no more feedback can be added.'))) return;
     try {
       const res = await fetch(apiUrl(`/api/disciplinary-actions/${id}`), {
         method: 'PUT',

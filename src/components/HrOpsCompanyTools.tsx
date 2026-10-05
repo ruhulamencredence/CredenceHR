@@ -13,6 +13,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Building2, CalendarX, Plus } from 'lucide-react';
 import { Spinner } from './Spinner';
 import { useHrApi, Modal, Notice, fmtDate, inputCls, labelCls, btnPrimary, btnGhost } from './HrOpsShared';
+import { confirmDialog } from '../lib/confirmDialog';
 
 interface GroupCompany {
   id: number;
@@ -94,7 +95,7 @@ export const CompanyAssignmentsModal: React.FC<{ token: string; employeeId: numb
     }
   };
   const end = async (a: Assignment) => {
-    if (!window.confirm(`End ${employeeName}'s work at ${a.company_name}?`)) return;
+    if (!(await confirmDialog(`End ${employeeName}'s work at ${a.company_name}?`))) return;
     try {
       await api.post(`/api/companies/assignments/${a.id}/end`, {});
       load();

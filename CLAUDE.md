@@ -37,6 +37,10 @@ the `.liquid-glass*` classes in src/index.css:
 - round close button: `liquid-glass-chip`; main action: `liquid-glass-button rounded-full`
 
 `.liquid-glass` sets `position: relative`, so position the card with a
-wrapper element (fixed/absolute) rather than on the card itself. The mobile
+wrapper element (fixed/absolute) rather than on the card itself.
+
+Never use the browser's `window.confirm()` — ask with
+`await confirmDialog(message)` (src/lib/confirmDialog.tsx), the same
+liquid-glass card, red when the action is destructive. The mobile
 More popup (BottomNav.tsx) already follows this; existing popups are to be
 moved over to it as they are touched.

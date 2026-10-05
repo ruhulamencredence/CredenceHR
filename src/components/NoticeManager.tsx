@@ -8,6 +8,7 @@ import { Notice, NoticeRecipient, User } from '../types';
 import { apiUrl } from '../lib/api';
 import { formatDate } from '../lib/formatDate';
 import { Spinner } from './Spinner';
+import { confirmDialog } from '../lib/confirmDialog';
 
 interface NoticeManagerProps {
   token: string;
@@ -190,7 +191,7 @@ export const NoticeManager: React.FC<NoticeManagerProps> = ({ token, user }) => 
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm('Delete this notice? This cannot be undone.')) return;
+    if (!(await confirmDialog('Delete this notice? This cannot be undone.'))) return;
     setDeletingId(id);
     try {
       const res = await fetch(apiUrl(`/api/notices/${id}`), { method: 'DELETE', headers: authHeaders });

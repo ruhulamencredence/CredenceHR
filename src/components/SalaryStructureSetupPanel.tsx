@@ -39,6 +39,7 @@ import {
 } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
+import { confirmDialog } from '../lib/confirmDialog';
 
 interface SalaryStructureSetupPanelProps {
   token: string;
@@ -198,7 +199,7 @@ const SalaryComponentsPanel: React.FC<{ authHeaders: Record<string, string> }> =
   }, []);
 
   const remove = async (c: SalaryComponent) => {
-    if (!window.confirm(`Delete the "${c.name}" component?`)) return;
+    if (!(await confirmDialog(`Delete the "${c.name}" component?`))) return;
     setActionError('');
     try {
       const res = await fetch(apiUrl(`/api/payroll/salary-components/${c.id}`), { method: 'DELETE', headers: authHeaders });
@@ -478,7 +479,7 @@ const PayGradesPanel: React.FC<{ authHeaders: Record<string, string> }> = ({ aut
   }, []);
 
   const remove = async (g: PayGrade) => {
-    if (!window.confirm(`Delete "${g.grade_name}"? This does not affect employees already assigned this grade's numbers.`)) return;
+    if (!(await confirmDialog(`Delete "${g.grade_name}"? This does not affect employees already assigned this grade's numbers.`))) return;
     setActionError('');
     try {
       const res = await fetch(apiUrl(`/api/payroll/pay-grades/${g.id}`), { method: 'DELETE', headers: authHeaders });
@@ -972,7 +973,7 @@ const IndividualSalaryPanel: React.FC<{ authHeaders: Record<string, string> }> =
   }, []);
 
   const remove = async (r: SalaryStructureRow) => {
-    if (!window.confirm(`Delete this ${money(r.gross_salary)} salary structure for ${r.employee_name} (effective ${r.effective_date})? Payroll runs already generated from it are not affected.`)) return;
+    if (!(await confirmDialog(`Delete this ${money(r.gross_salary)} salary structure for ${r.employee_name} (effective ${r.effective_date})? Payroll runs already generated from it are not affected.`))) return;
     setActionError('');
     try {
       const res = await fetch(apiUrl(`/api/payroll/salary-structures/${r.id}`), { method: 'DELETE', headers: authHeaders });

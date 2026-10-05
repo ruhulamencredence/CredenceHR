@@ -13,6 +13,7 @@ import React, { useEffect, useState } from 'react';
 import { Plus, Trash2, Save, Copy, Star, ArrowUp, ArrowDown, X } from 'lucide-react';
 import { Spinner } from './Spinner';
 import { useHrApi, Notice, Badge, inputCls, labelCls, btnPrimary, btnGhost, type HrOpsMeta } from './HrOpsShared';
+import { confirmDialog } from '../lib/confirmDialog';
 
 type Section = 'company' | 'approvals' | 'templates' | 'onboarding' | 'increments';
 
@@ -356,7 +357,7 @@ const Templates: React.FC<{ token: string; meta: HrOpsMeta }> = ({ token, meta }
                     type="button"
                     className="text-[11px] text-rose-500 hover:text-rose-700 px-2"
                     onClick={async () => {
-                      if (!window.confirm(`Delete template "${t.name}"? Letters already issued are not affected.`)) return;
+                      if (!(await confirmDialog(`Delete template "${t.name}"? Letters already issued are not affected.`))) return;
                       await api.del(`/api/hr-ops/letter-templates/${t.id}`);
                       load();
                     }}
@@ -615,7 +616,7 @@ const IncrementRules: React.FC<{ token: string; meta: HrOpsMeta }> = ({ token, m
                   type="button"
                   className="text-[11px] text-rose-500 px-2"
                   onClick={async () => {
-                    if (!window.confirm(`Delete rule "${p.name}"?`)) return;
+                    if (!(await confirmDialog(`Delete rule "${p.name}"?`))) return;
                     await api.del(`/api/hr-ops/increment-policies/${p.id}`);
                     load();
                   }}

@@ -8,6 +8,7 @@ import { Clock, Plus, Trash2, Save } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { DeliveryDateCondition, DeliveryConditionType, Project, Budget } from '../types';
 import { Spinner } from './Spinner';
+import { confirmDialog } from '../lib/confirmDialog';
 
 interface DeliveryDateConditionsPanelProps {
   token: string;
@@ -134,7 +135,7 @@ const ConditionTypeSection: React.FC<{
   };
 
   const deleteOverride = async (row: DeliveryDateCondition) => {
-    if (!window.confirm(`Remove this ${row.scope === 'project' ? 'Project' : 'Budget'} override? It will fall back to the Global setting above.`)) return;
+    if (!(await confirmDialog(`Remove this ${row.scope === 'project' ? 'Project' : 'Budget'} override? It will fall back to the Global setting above.`))) return;
     setDeletingId(row.id);
     try {
       const res = await fetch(apiUrl(`/api/delivery-date-conditions/${row.id}`), {

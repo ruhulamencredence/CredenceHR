@@ -13,6 +13,7 @@ import { createPortal } from 'react-dom';
 import { AlertTriangle, CalendarDays, CheckCircle2, Clock, MessageSquare, Play, Repeat, Search, Send, UserPlus, X, XCircle } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
+import { confirmDialog } from '../lib/confirmDialog';
 
 export interface TaskPerson {
   id: number;
@@ -703,7 +704,7 @@ export const RecurrenceList: React.FC<{ token: string; scope?: 'team'; reloadKey
             <button
               type="button"
               onClick={async () => {
-                if (!window.confirm(`Delete the repeating task "${r.title}"? Tasks it already created stay.`)) return;
+                if (!(await confirmDialog(`Delete the repeating task "${r.title}"? Tasks it already created stay.`))) return;
                 await api(token, `/api/task-recurrences/${r.id}`, 'DELETE').catch((e) => setError(e.message));
                 void load();
               }}

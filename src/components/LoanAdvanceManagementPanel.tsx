@@ -41,6 +41,7 @@ import {
 } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
+import { confirmDialog } from '../lib/confirmDialog';
 
 interface LoanAdvanceManagementPanelProps {
   token: string;
@@ -148,7 +149,7 @@ export const LoanAdvanceManagementPanel: React.FC<LoanAdvanceManagementPanelProp
   }, []);
 
   const decideRequest = async (request: AdvanceRequest, action: 'approve' | 'reject') => {
-    if (action === 'reject' && !window.confirm(`Reject ${request.employee_name}'s loan/advance request?`)) return;
+    if (action === 'reject' && !(await confirmDialog(`Reject ${request.employee_name}'s loan/advance request?`))) return;
     setDecidingId(request.id);
     setRequestsError('');
     try {
@@ -172,7 +173,7 @@ export const LoanAdvanceManagementPanel: React.FC<LoanAdvanceManagementPanelProp
   };
 
   const markCompleted = async (a: AdvanceRecord) => {
-    if (!window.confirm(`Mark "${a.employee_name}"'s advance as fully settled (Completed)?`)) return;
+    if (!(await confirmDialog(`Mark "${a.employee_name}"'s advance as fully settled (Completed)?`))) return;
     setActionError('');
     try {
       const res = await fetch(apiUrl(`/api/payroll/advances/${a.id}`), {
@@ -192,7 +193,7 @@ export const LoanAdvanceManagementPanel: React.FC<LoanAdvanceManagementPanelProp
   };
 
   const remove = async (a: AdvanceRecord) => {
-    if (!window.confirm(`Delete this advance for "${a.employee_name}"? This cannot be undone.`)) return;
+    if (!(await confirmDialog(`Delete this advance for "${a.employee_name}"? This cannot be undone.`))) return;
     setActionError('');
     try {
       const res = await fetch(apiUrl(`/api/payroll/advances/${a.id}`), { method: 'DELETE', headers: authHeaders });

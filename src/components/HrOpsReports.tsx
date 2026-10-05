@@ -60,6 +60,7 @@ import credenceLogo from '../assets/credence-logo.png';
 import { pdfSafe } from './HrOps360Parts';
 import { FixGapsModal, RequestInfoModal, InfoRequestsReview } from './HrOpsGapTools';
 import { useHrApi, Modal, Notice, Badge, fmtDate, monthLabel, taka, inputCls, labelCls, btnPrimary, btnGhost } from './HrOpsShared';
+import { confirmDialog } from '../lib/confirmDialog';
 
 // ---------------------------------------------------------------------------
 // Types (mirror HrOpsReportsRoutes.ts)
@@ -1366,7 +1367,7 @@ export const HrOpsReports: React.FC<{ token: string; onOpenEmployee: (id: number
                     type="button"
                     className={btnGhost}
                     onClick={async () => {
-                      if (!window.confirm(`Delete "${r.name}"?`)) return;
+                      if (!(await confirmDialog(`Delete "${r.name}"?`))) return;
                       await api.del(`/api/hr-ops/saved-reports/${r.id}`).catch(() => {});
                       loadSaved();
                     }}

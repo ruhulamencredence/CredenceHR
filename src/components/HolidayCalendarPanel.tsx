@@ -9,6 +9,7 @@ import { HolidayEntry, HolidayDayType, HolidayAppliesTo } from '../types';
 import { apiUrl } from '../lib/api';
 import { formatDate } from '../lib/formatDate';
 import { Spinner } from './Spinner';
+import { confirmDialog } from '../lib/confirmDialog';
 
 interface HolidayCalendarPanelProps {
   token: string;
@@ -190,7 +191,7 @@ export const HolidayCalendarPanel: React.FC<HolidayCalendarPanelProps> = ({ toke
   };
 
   const handleDelete = async (id: number) => {
-    if (!window.confirm('Remove this date from the calendar?')) return;
+    if (!(await confirmDialog('Remove this date from the calendar?'))) return;
     setDeletingId(id);
     try {
       const res = await fetch(apiUrl(`/api/holidays/${id}`), { method: 'DELETE', headers: authHeaders });
