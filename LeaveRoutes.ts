@@ -913,8 +913,13 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
         }
       }
 
+      // Sick Leave, and a backdated application (Start Date before today),
+      // never need a Reliever — nothing to hand over for a day already gone
+      // or an illness that wasn't planned. Any reliever_id sent is ignored.
+      const todayRow: any = await queryDB("SELECT CURDATE() AS today");
+      const isBackdated = String(start_date) < String(todayRow[0]?.today || "").slice(0, 10);
       let relieverUserId: number | null = null;
-      if (policy.reliever_required) {
+      if (policy.reliever_required && leave_type !== "sick" && !isBackdated) {
         relieverUserId = Number(reliever_id);
         if (!relieverUserId || !Number.isFinite(relieverUserId)) {
           return res.status(400).json({ error: "Select a Reliever." });
