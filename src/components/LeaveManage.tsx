@@ -5,6 +5,7 @@ import { User, LeaveBalance, LeaveCategoryPolicy, LeaveYearSettings, LeaveBalanc
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
 import { ModulePath } from './ModulePath';
+import { confirmDialog } from '../lib/confirmDialog';
 
 interface LeaveManageProps {
   token: string;
@@ -354,7 +355,7 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
   };
 
   const deleteWorkflow = async (workflowId: number) => {
-    if (!window.confirm('Delete this Leave Balance Workflow? This cannot be undone.')) return;
+    if (!(await confirmDialog('Delete this Leave Balance Workflow? This cannot be undone.'))) return;
     setDeletingWorkflowId(workflowId);
     setWorkflowError('');
     try {

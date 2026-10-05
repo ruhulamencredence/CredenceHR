@@ -46,6 +46,7 @@ import {
   tk
 } from './MobileBillParts';
 import { MobileBillReports } from './MobileBillReports';
+import { confirmDialog } from '../lib/confirmDialog';
 
 type Tab = 'bills' | 'sims' | 'limits' | 'requests' | 'reports';
 const OPERATORS = ['Grameenphone', 'Robi', 'Airtel', 'Banglalink', 'Teletalk'];
@@ -159,7 +160,7 @@ const BillsTab: React.FC<{ token: string }> = ({ token }) => {
 
   const markPaid = async (paid: boolean) => {
     const what = operator ? `${operator} bills` : 'all bills';
-    if (!window.confirm(paid ? `Mark ${what} of ${monthLabel(month)} as paid?` : `Undo "paid" for ${what} of ${monthLabel(month)}?`)) return;
+    if (!(await confirmDialog(paid ? `Mark ${what} of ${monthLabel(month)} as paid?` : `Undo "paid" for ${what} of ${monthLabel(month)}?`))) return;
     setBusy(true);
     try {
       await mbApi(token, '/api/mobile-bill/bills/mark-paid', 'POST', { month, operator: operator || null, paid });
@@ -853,7 +854,7 @@ const SimModal: React.FC<{ token: string; meta: Meta; sim: MbSim | null; onClose
     }
   };
   const remove = async () => {
-    if (!sim || !window.confirm(`Delete ${sim.phone_number}? This can't be undone.`)) return;
+    if (!sim || !(await confirmDialog(`Delete ${sim.phone_number}? This can't be undone.`))) return;
     try {
       await mbApi(token, `/api/mobile-bill/sims/${sim.id}`, 'DELETE');
       onDone();
@@ -1196,7 +1197,7 @@ const LimitsTab: React.FC<{ token: string }> = ({ token }) => {
     }
   };
   const remove = async (p: MbPolicy) => {
-    if (!window.confirm(`Remove the limit for ${p.employee_type || 'Default'}?`)) return;
+    if (!(await confirmDialog(`Remove the limit for ${p.employee_type || 'Default'}?`))) return;
     try {
       await mbApi(token, `/api/mobile-bill/policies/${p.id}`, 'DELETE');
       load();

@@ -14,6 +14,7 @@ import { ArrowLeft, Plus, Smartphone, TrendingUp } from 'lucide-react';
 import { ModulePath } from './ModulePath';
 import { Spinner } from './Spinner';
 import { LimitRequestForm, MbRequest, MbSim, mbApi, monthLabel, OperatorBadge, requestStage, StatusPill, tk } from './MobileBillParts';
+import { confirmDialog } from '../lib/confirmDialog';
 
 type MySim = MbSim & { bills: { month: string; amount: number; limit_amount: number }[] };
 
@@ -33,7 +34,7 @@ export const MyMobileSim: React.FC<{ token: string; onBack?: () => void }> = ({ 
   }, [load]);
 
   const cancel = async (id: number) => {
-    if (!window.confirm('Cancel this request?')) return;
+    if (!(await confirmDialog('Cancel this request?'))) return;
     try {
       await mbApi(token, `/api/mobile-bill/my/requests/${id}/cancel`, 'POST');
       load();

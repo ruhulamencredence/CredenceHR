@@ -5,6 +5,7 @@ import {
 import { ApprovalTemplate, ApprovalTemplateStep, ApprovalRequestType, User } from '../types';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
+import { confirmDialog } from '../lib/confirmDialog';
 
 interface ApprovalTemplateManagerProps {
   token: string;
@@ -296,7 +297,7 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
   };
 
   const handleDelete = async (id: number) => {
-    if (!window.confirm('Delete this template? This cannot be undone.')) return;
+    if (!(await confirmDialog('Delete this template? This cannot be undone.'))) return;
     try {
       const res = await fetch(apiUrl(`/api/approval-templates/${id}`), {
         method: 'DELETE',

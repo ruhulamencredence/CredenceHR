@@ -4,6 +4,7 @@ import { ClaimRecord, User } from '../types';
 import { apiUrl } from '../lib/api';
 import { formatDate } from '../lib/formatDate';
 import { Spinner } from './Spinner';
+import { confirmDialog } from '../lib/confirmDialog';
 
 interface ClaimsPanelProps {
   token: string;
@@ -45,7 +46,7 @@ export const ClaimsPanel: React.FC<ClaimsPanelProps> = ({ token, users }) => {
   }, []);
 
   const handleDelete = async (id: number) => {
-    if (!confirm('Delete this claim? This cannot be undone.')) return;
+    if (!(await confirmDialog('Delete this claim? This cannot be undone.'))) return;
     setDeletingId(id);
     try {
       const res = await fetch(apiUrl(`/api/claims/${id}`), { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });

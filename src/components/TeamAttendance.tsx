@@ -35,6 +35,7 @@ import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
 import { ModulePath } from './ModulePath';
 import { useHrApi, Notice, fmtDate, inputCls, btnPrimary, btnGhost } from './HrOpsShared';
+import { confirmDialog } from '../lib/confirmDialog';
 
 export type SiteStatus = 'present' | 'late' | 'absent' | 'leave';
 export interface SiteTeam {
@@ -338,7 +339,7 @@ export const SheetEditor: React.FC<{
       setOpen((o) => new Set(o).add(missingTime.employee_id));
       return setMsg({ type: 'error', text: `Enter the arrival time for ${missingTime.name} (marked Late).` });
     }
-    if (counts.unmarked && !window.confirm(`${counts.unmarked} ${counts.unmarked === 1 ? 'person is' : 'people are'} not marked yet. Submit anyway?`)) return;
+    if (counts.unmarked && !(await confirmDialog(`${counts.unmarked} ${counts.unmarked === 1 ? 'person is' : 'people are'} not marked yet. Submit anyway?`))) return;
     if (!hrMode && data.settings.require_photo && !photo && !data.sheet?.has_photo) return setMsg({ type: 'error', text: 'Take a team photo first.' });
     setBusy(true);
     setMsg(null);

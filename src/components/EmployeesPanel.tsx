@@ -9,6 +9,7 @@ import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
 import { EmployeeChangeHistory, HistoryEntryCard, buildHistoryTimeline, HISTORY_FILTERS, HistoryFilter } from './EmployeeChangeHistory';
 import { RecordFields, useNameSuggestions, refreshNameSuggestions } from './HrOps360Parts';
+import { confirmDialog } from '../lib/confirmDialog';
 
 // Add/Edit Employee modal tabs — Basic + Employee Info fields live under
 // "info", the rest mirror the reference HR system's own tab split (Status /
@@ -624,7 +625,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
 
   const handleDeleteSupervisor = async (rowId: number) => {
     if (!editingId) return;
-    if (!confirm('Remove this supervisor assignment?')) return;
+    if (!(await confirmDialog('Remove this supervisor assignment?'))) return;
     try {
       const res = await fetch(apiUrl(`/api/employees/${editingId}/supervisors/${rowId}`), { method: 'DELETE', headers: authHeaders });
       if (!res.ok) throw new Error((await res.json()).error || 'Failed to remove');
@@ -724,7 +725,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
 
   const handleDeletePaymentAccount = async (rowId: number) => {
     if (!editingId) return;
-    if (!confirm('Remove this payment account?')) return;
+    if (!(await confirmDialog('Remove this payment account?'))) return;
     try {
       const res = await fetch(apiUrl(`/api/employees/${editingId}/payment-accounts/${rowId}`), { method: 'DELETE', headers: authHeaders });
       if (!res.ok) throw new Error((await res.json()).error || 'Failed to remove');
@@ -852,7 +853,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm('Delete this employee record? This cannot be undone.')) return;
+    if (!(await confirmDialog('Delete this employee record? This cannot be undone.'))) return;
     setDeletingId(id);
     try {
       const res = await fetch(apiUrl(`/api/employees/${id}`), { method: 'DELETE', headers: authHeaders });
@@ -1052,7 +1053,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
   // wrong account got linked. Employee goes back to showing "Create Login" /
   // "Link Existing" afterward.
   const handleUnlinkUser = async (emp: Employee) => {
-    if (!window.confirm(`Unlink ${emp.name}'s login account? This only removes the link — the user account itself (if it still exists) is not deleted.`)) return;
+    if (!(await confirmDialog(`Unlink ${emp.name}'s login account? This only removes the link — the user account itself (if it still exists) is not deleted.`))) return;
     setUnlinkingId(emp.id);
     try {
       const res = await fetch(apiUrl(`/api/employees/${emp.id}/link-user`), { method: 'DELETE', headers: authHeaders });

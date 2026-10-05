@@ -13,6 +13,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Check, Plus, Search, Smartphone, Trash2, X } from 'lucide-react';
 import { Spinner } from './Spinner';
 import { useHrApi, Notice, btnGhost, btnPrimary } from './HrOpsShared';
+import { confirmDialog } from '../lib/confirmDialog';
 
 interface Phone {
   id: number;
@@ -172,8 +173,8 @@ export const DeviceAccess: React.FC<{ token: string }> = ({ token }) => {
                           className="p-1 rounded text-slate-400 hover:text-rose-600 hover:bg-rose-50"
                           aria-label={`Remove ${d.name} from ${a.name}`}
                           title="Remove this phone (it is signed out)"
-                          onClick={() => {
-                            if (window.confirm(`Remove ${d.name} from ${a.name}? That phone is signed out; the next phone they sign in on is allowed straight away.`))
+                          onClick={async () => {
+                            if ((await confirmDialog(`Remove ${d.name} from ${a.name}? That phone is signed out; the next phone they sign in on is allowed straight away.`)))
                               run(() => api.del(`/api/devices/${d.id}`), `${d.name} was removed from ${a.name}.`);
                           }}
                         >

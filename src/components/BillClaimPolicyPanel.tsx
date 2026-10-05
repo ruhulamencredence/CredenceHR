@@ -8,6 +8,7 @@ import { ShieldCheck, Save, Plus, Edit2, Trash2, X, Check, AlertTriangle, Calend
 import { apiUrl } from '../lib/api';
 import { BillClaimCategory, BillClaimPolicyDef, BillClaimPolicyValues } from '../types';
 import { Spinner } from './Spinner';
+import { confirmDialog } from '../lib/confirmDialog';
 
 // Admin Panel -> HRM -> Claims/Bill/Disbursement -> Bill Claim Policy.
 // The rules list is drawn from what the server sends (GET /api/bill-claim-policy
@@ -349,7 +350,7 @@ export const BillClaimPolicyPanel: React.FC<{ token: string }> = ({ token }) => 
   };
 
   const deleteCategory = async (c: BillClaimCategory) => {
-    if (!confirm(`Delete "${c.name}"?\n\nIt won't be offered on new claims. Claims already filed keep it as it is.`)) return;
+    if (!(await confirmDialog(`Delete "${c.name}"?\n\nIt won't be offered on new claims. Claims already filed keep it as it is.`))) return;
     setError('');
     try {
       const res = await fetch(apiUrl(`/api/bill-claim-categories/${c.id}`), { method: 'DELETE', headers });

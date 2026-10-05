@@ -8,6 +8,7 @@ import { createPortal } from 'react-dom';
 import { Search, CheckCircle2, Clock, Banknote, Trash2, RefreshCw, PauseCircle, X } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
+import { confirmDialog } from '../lib/confirmDialog';
 
 interface PayrollListPanelProps {
   token: string;
@@ -205,7 +206,7 @@ export const PayrollListPanel: React.FC<PayrollListPanelProps> = ({ token }) => 
   };
 
   const removeRecord = async (id: number) => {
-    if (!window.confirm('Delete this payroll run? This cannot be undone.')) return;
+    if (!(await confirmDialog('Delete this payroll run? This cannot be undone.'))) return;
     setActionId(id);
     setActionError('');
     try {

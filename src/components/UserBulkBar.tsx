@@ -23,6 +23,7 @@ import {
   setFeatureForUser
 } from '../lib/accessTemplates';
 import { Spinner } from './Spinner';
+import { confirmDialog } from '../lib/confirmDialog';
 
 interface UserBulkBarProps {
   token: string;
@@ -40,7 +41,7 @@ export function UserBulkBar({ token, selected, templates, viewer, onClear, onDon
 
   const run = async (title: string, change: (u: User) => Promise<void>, canChange: (u: User) => boolean = (u) => canEditUserFeatures(u, viewer)) => {
     const eligible = selected.filter(canChange).length;
-    if (!confirm(`${title} for ${eligible} account${eligible === 1 ? '' : 's'}?`)) return;
+    if (!(await confirmDialog(`${title} for ${eligible} account${eligible === 1 ? '' : 's'}?`))) return;
     setResult(null);
     setProgress({ done: 0, total: eligible });
     const r = await runBulk(selected, canChange, change, (done, total) => setProgress({ done, total }));

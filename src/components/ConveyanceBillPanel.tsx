@@ -22,6 +22,7 @@ import ClaimLocationMap from './ClaimLocationMap';
 import { Spinner } from './Spinner';
 import { ClaimBillLines } from './ClaimBillLines';
 import { useBillClaimCategoryNames } from '../lib/billClaimCategories';
+import { confirmDialog } from '../lib/confirmDialog';
 
 interface ConveyanceBillPanelProps {
   token: string;
@@ -134,7 +135,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
   const hasFilters = userFilter || fromFilter || toFilter;
 
   const handleDeleteBill = async (id: number) => {
-    if (!confirm('Delete this bill and all its items? This cannot be undone. (Any Movement Claims used in it become billable again.)')) return;
+    if (!(await confirmDialog('Delete this bill and all its items? This cannot be undone. (Any Movement Claims used in it become billable again.)'))) return;
     setDeletingBillId(id);
     try {
       const res = await fetch(apiUrl(`/api/conveyance-bills/${id}`), { method: 'DELETE', headers: authHeaders });
@@ -385,7 +386,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
 
   const handleDeleteItem = async (itemId: number) => {
     if (!billDetail) return;
-    if (!confirm('Remove this item from the bill?')) return;
+    if (!(await confirmDialog('Remove this item from the bill?'))) return;
     setDeletingItemId(itemId);
     try {
       const res = await fetch(apiUrl(`/api/conveyance-bills/${billDetail.id}/items/${itemId}`), { method: 'DELETE', headers: authHeaders });
@@ -1330,7 +1331,7 @@ const UserClaimDetailModal: React.FC<{
   };
 
   const handleDelete = async () => {
-    if (!confirm(`Delete this ${claim.category} claim from ${claim.user_name || 'this user'}? This cannot be undone.`)) return;
+    if (!(await confirmDialog(`Delete this ${claim.category} claim from ${claim.user_name || 'this user'}? This cannot be undone.`))) return;
     setDeleting(true);
     setError('');
     try {

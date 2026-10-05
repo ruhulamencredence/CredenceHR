@@ -35,6 +35,7 @@ import {
 } from 'lucide-react';
 import { Spinner } from './Spinner';
 import { useHrApi } from './HrOpsShared';
+import { confirmDialog } from '../lib/confirmDialog';
 
 type FieldType = 'text' | 'date' | 'time' | 'number' | 'yesno';
 interface Field {
@@ -388,8 +389,8 @@ export const DataImport: React.FC<{ token: string }> = ({ token }) => {
                   <button
                     type="button"
                     disabled={willWrite === 0 || !!busy}
-                    onClick={() => {
-                      if (window.confirm(`Import ${willWrite} row(s) into ${kind.title}? Rows marked Skip or Error are left out.`)) run(false);
+                    onClick={async () => {
+                      if ((await confirmDialog(`Import ${willWrite} row(s) into ${kind.title}? Rows marked Skip or Error are left out.`))) run(false);
                     }}
                     className="inline-flex items-center gap-1.5 text-xs font-semibold px-3.5 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50"
                   >

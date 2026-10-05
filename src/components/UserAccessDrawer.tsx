@@ -20,6 +20,7 @@ import { useBackButtonClose } from '../lib/useBackButtonClose';
 import { Spinner } from './Spinner';
 import { apiUrl } from '../lib/api';
 import { AccessTemplate } from '../lib/accessTemplates';
+import { confirmDialog } from '../lib/confirmDialog';
 
 export type UserFeatureField =
   | 'can_edit_delivery_date'
@@ -313,9 +314,9 @@ export function UserAccessDrawer({
     setLastChange(null);
     run(field, () => onToggleFeature(field, prev));
   };
-  const applyTemplate = (id: string) => {
+  const applyTemplate = async (id: string) => {
     const t = templates.find((x) => String(x.id) === id);
-    if (!t || !confirm(`Apply “${t.name}” to ${u.name}? It turns its switches on and adds its modules — nothing is removed.`)) return;
+    if (!t || !(await confirmDialog(`Apply “${t.name}” to ${u.name}? It turns its switches on and adds its modules — nothing is removed.`))) return;
     setTemplateMsg(null);
     run('template', async () => {
       try {

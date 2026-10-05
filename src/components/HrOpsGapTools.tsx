@@ -19,6 +19,7 @@ import { Spinner } from './Spinner';
 import { apiUrl } from '../lib/api';
 import { RecordModal, UploadDocumentModal } from './HrOps360Parts';
 import { useHrApi, Modal, Notice, Badge, fmtDate, inputCls, labelCls, btnPrimary, btnGhost } from './HrOpsShared';
+import { confirmDialog } from '../lib/confirmDialog';
 
 async function openFile(token: string, path: string) {
   const res = await fetch(apiUrl(path), { headers: { Authorization: `Bearer ${token}` } });
@@ -453,7 +454,7 @@ export const InfoRequestsReview: React.FC<{ token: string; canApproveDocs: boole
                     type="button"
                     className="text-[11px] font-semibold text-slate-500 hover:text-rose-600"
                     disabled={busy === it.id}
-                    onClick={() => window.confirm('Cancel this request?') && act(it, 'cancel')}
+                    onClick={async () => (await confirmDialog('Cancel this request?')) && act(it, 'cancel')}
                   >
                     Cancel request
                   </button>

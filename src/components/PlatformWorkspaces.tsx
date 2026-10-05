@@ -17,6 +17,7 @@ import { switchCompany } from '../lib/company';
 import { Spinner } from './Spinner';
 import { readFileBase64 } from './HrOps360Parts';
 import { useHrApi, Modal, Notice, TypeToDelete, inputCls, labelCls, btnPrimary, btnGhost } from './HrOpsShared';
+import { confirmDialog } from '../lib/confirmDialog';
 
 interface Workspace {
   id: number;
@@ -234,8 +235,8 @@ const SuperadminsModal: React.FC<{ token: string; ws: Workspace; onClose: () => 
                       type="button"
                       className={btnGhost}
                       disabled={busy}
-                      onClick={() => {
-                        if (window.confirm(`Remove ${u.name} as Superadmin? The account stays as an Admin of ${ws.name}.`))
+                      onClick={async () => {
+                        if ((await confirmDialog(`Remove ${u.name} as Superadmin? The account stays as an Admin of ${ws.name}.`)))
                           run(() => api.del(`/api/platform/workspaces/${ws.id}/superadmins/${u.id}`), `${u.name} is no longer a Superadmin.`);
                       }}
                     >

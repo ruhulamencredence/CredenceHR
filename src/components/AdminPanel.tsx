@@ -54,6 +54,7 @@ import { formatDate, todayDateOnlyString } from '../lib/formatDate';
 import { useStableCallback } from '../lib/useStableCallback';
 import { reverseGeocode } from '../lib/reverseGeocode';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
+import { confirmDialog } from '../lib/confirmDialog';
 
 // Module Access modal (Admin Panel -> Users -> per-Admin/User "Module
 // Access") groups the same Admin Panel tabs into the same labeled clusters
@@ -1160,7 +1161,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const recentlyReviewedJobEditRequests = jobEditRequests.filter((r) => r.status !== 'pending');
 
   const actOnJobEditRequest = async (id: number, action: 'approve' | 'reject') => {
-    if (action === 'reject' && !window.confirm('Reject this Job Edit request?')) return;
+    if (action === 'reject' && !(await confirmDialog('Reject this Job Edit request?'))) return;
     setActingJobEditId(id);
     setJobEditActionError('');
     try {
@@ -1973,7 +1974,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   };
 
   const handlePermanentDelete = async (id: number) => {
-    if (!confirm('Permanently erase this entry? This cannot be undone.')) return;
+    if (!(await confirmDialog('Permanently erase this entry? This cannot be undone.'))) return;
     setErasingEntryId(id);
     try {
       const res = await fetch(apiUrl(`/api/entries/${id}/permanent`), {
@@ -1997,7 +1998,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // delete — the entry moves into the Job Recycle bin (Reports -> Job Recycle) so it
   // can still be restored, rather than being erased outright.
   const handleDeleteEntry = async (id: number) => {
-    if (!confirm('Delete this entry? It will be moved to the Job Recycle bin.')) return;
+    if (!(await confirmDialog('Delete this entry? It will be moved to the Job Recycle bin.'))) return;
     setDeletingEntryId(id);
     try {
       const res = await fetch(apiUrl(`/api/reports/entries/${id}`), {
@@ -2018,7 +2019,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
 
   // Permanent Delete straight from the report (Reports permission layer).
   const handlePermanentDeleteReportEntry = async (ent: Entry) => {
-    if (!confirm(`Permanently delete this entry (${ent.job_no || ''} · ${ent.item_name})? It can't be restored. It will be recorded in the Permanent Delete Log.`)) return;
+    if (!(await confirmDialog(`Permanently delete this entry (${ent.job_no || ''} · ${ent.item_name})? It can't be restored. It will be recorded in the Permanent Delete Log.`))) return;
     setDeletingEntryId(ent.id);
     try {
       const res = await fetch(apiUrl(`/api/reports/entries/${ent.id}/permanent`), {
@@ -2102,7 +2103,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   };
 
   const handleDeleteProject = async (id: number) => {
-    if (!confirm('Are you sure you want to delete this project?')) return;
+    if (!(await confirmDialog('Are you sure you want to delete this project?'))) return;
     try {
       const res = await fetch(apiUrl(`/api/projects/${id}`), {
         method: 'DELETE',
@@ -2154,7 +2155,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   };
 
   const handleDeleteBranch = async (id: number) => {
-    if (!confirm('Are you sure you want to delete this branch?')) return;
+    if (!(await confirmDialog('Are you sure you want to delete this branch?'))) return;
     try {
       const res = await fetch(apiUrl(`/api/branches/${id}`), {
         method: 'DELETE',
@@ -2219,7 +2220,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   };
 
   const handleDeleteDepartment = async (id: number) => {
-    if (!confirm('Delete this Department? Employees linked to it will just lose that link — nothing else about them changes.')) return;
+    if (!(await confirmDialog('Delete this Department? Employees linked to it will just lose that link — nothing else about them changes.'))) return;
     try {
       const res = await fetch(apiUrl(`/api/departments/${id}`), {
         method: 'DELETE',
@@ -2261,7 +2262,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   };
 
   const handleDeleteMpr = async (id: number) => {
-    if (!confirm('Are you sure you want to delete this MPR number?')) return;
+    if (!(await confirmDialog('Are you sure you want to delete this MPR number?'))) return;
     try {
       const res = await fetch(apiUrl(`/api/mpr-numbers/${id}`), {
         method: 'DELETE',
@@ -2311,7 +2312,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // /api/budgets/:id/remove-unused-items's own comment for the exact "used"
   // check. Separate action from the real Delete Budget below.
   const handleRemoveUnusedItems = async (id: number) => {
-    if (!confirm("Remove this budget's unused rows? Rows a User has already submitted an entry against will be kept. This cannot be undone.")) return;
+    if (!(await confirmDialog("Remove this budget's unused rows? Rows a User has already submitted an entry against will be kept. This cannot be undone."))) return;
     longTask.start('Removing unused rows', 'Checking every row against the entries…');
     longTask.creep(95);
     try {
@@ -2346,7 +2347,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // ever submitted under it, not just its imported Excel rows. Separate
   // button from "Remove unused rows" above; this one has no going back.
   const handleDeleteBudget = async (id: number) => {
-    if (!confirm('Delete this budget and all its imported rows, Jobs and Entries? This cannot be undone.')) return;
+    if (!(await confirmDialog('Delete this budget and all its imported rows, Jobs and Entries? This cannot be undone.'))) return;
     longTask.start('Deleting budget', 'Deleting the budget, its imported rows, Jobs and entries…');
     longTask.creep(95);
     try {
@@ -2704,11 +2705,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const handleUnlockSubmission = async (userId: number, job?: { id: number; no: string | null }) => {
     if (!submissionsBudget) return;
     if (
-      !confirm(
+      !(await confirmDialog(
         job
           ? `Unlock Job ${job.no || job.id} for this user? They will be able to change that Job's entries again.`
           : 'Unlock this user\'s Final Submit on this Budget? They will be able to add new entries to it again.'
-      )
+      ))
     )
       return;
     setUnlockingUserId(userId);
@@ -3016,7 +3017,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   };
 
   const handleDeleteUser = async (userId: number) => {
-    if (!confirm('Are you sure you want to delete this user?')) return;
+    if (!(await confirmDialog('Are you sure you want to delete this user?'))) return;
     try {
       const res = await fetch(apiUrl(`/api/users/${userId}`), {
         method: 'DELETE',

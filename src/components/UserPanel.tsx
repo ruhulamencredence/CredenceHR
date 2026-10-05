@@ -45,6 +45,7 @@ import { MyClaimsCard } from './MyClaimsCard';
 import { ConveyanceClaimCard } from './ConveyanceClaimCard';
 import { BottomNav } from './BottomNav';
 import { ModulePath } from './ModulePath';
+import { confirmDialog } from '../lib/confirmDialog';
 
 interface UserPanelProps {
   token: string;
@@ -2539,9 +2540,9 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   const handleSubmitBudget = async (target: { id: number; budget_name: string; submitted?: boolean }) => {
     if (!target || target.submitted) return;
 
-    const confirmed = window.confirm(
+    const confirmed = (await confirmDialog(
       `Submit "${target.budget_name}"? Once submitted, you won't be able to add any more entries to this Budget.`
-    );
+    ));
     if (!confirmed) return;
 
     setSubmittingBudgetId(target.id);
@@ -2573,7 +2574,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // Final Submit ONE Job — only this Job locks; the Budget's other Jobs stay open
   // for more entries and edits (POST /api/jobs/:id/submit).
   const handleSubmitJob = async (job: { job_id: number; job_no: string }) => {
-    if (!window.confirm(`Final Submit Job ${job.job_no}? After this you can't add to or change this Job's entries (other Jobs stay open).`)) return;
+    if (!(await confirmDialog(`Final Submit Job ${job.job_no}? After this you can't add to or change this Job's entries (other Jobs stay open).`))) return;
     setSubmittingJobId(job.job_id);
     setMessage(null);
     try {
@@ -2887,7 +2888,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // delete) — it isn't gone forever, but it disappears from your own list right away
   // and its MPR No becomes usable again.
   const handleDeleteEntry = async (entryId: number) => {
-    if (!confirm('Delete this Job Entry? An Admin will be able to restore it from the Job Recycle bin if needed.')) return;
+    if (!(await confirmDialog('Delete this Job Entry? An Admin will be able to restore it from the Job Recycle bin if needed.'))) return;
     setDeletingEntryId(entryId);
     setDeleteError('');
     try {
