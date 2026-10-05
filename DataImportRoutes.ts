@@ -29,6 +29,7 @@
 // correction writes them. Historical rows don't open approval requests.
 
 import type { Express } from "express";
+import bcrypt from "bcryptjs";
 import { recordEmployeeEditHistory } from "./EmployeeTransferRoutes";
 import { activeCompanyId } from "./companyContext";
 
@@ -66,7 +67,8 @@ export const IMPORT_KINDS: Kind[] = [
   {
     key: "employees",
     title: "Employee Details",
-    description: "Adds new employees and updates existing ones, matched on Employee ID. Empty cells leave what's already saved.",
+    description:
+      "Adds new employees and updates existing ones, matched on Employee ID. Empty cells leave what's already saved. Fill Login ID and Password to create the employee's login in the same upload.",
     module: "employees",
     fields: [
       EMP,
@@ -94,7 +96,16 @@ export const IMPORT_KINDS: Kind[] = [
       { key: "present_address", label: "Present Address", type: "text" },
       { key: "permanent_address", label: "Permanent Address", type: "text" },
       { key: "zk_device_pin", label: "Device PIN", type: "text", aliases: ["attendance pin", "zk pin", "machine id"], note: "Office attendance device PIN" },
-      { key: "is_active", label: "Active", type: "yesno", example: "Yes", note: "Yes / No" }
+      { key: "is_active", label: "Active", type: "yesno", example: "Yes", note: "Yes / No" },
+      {
+        key: "login_id",
+        label: "Login ID",
+        type: "text",
+        aliases: ["user name", "username", "user id", "login", "login email"],
+        example: "rahim",
+        note: "Email or username they sign in with. With a Password, creates their login (role User); skipped if they already have one"
+      },
+      { key: "login_password", label: "Password", type: "text", aliases: ["pass", "login password"], example: "Rahim@2026", note: "At least 6 characters" }
     ]
   },
   {
@@ -352,7 +363,15 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
         const departments: any[] = (await queryDB("SELECT id, name FROM departments").catch(() => [])) || [];
         const branches: any[] = (await queryDB("SELECT id, branch_name FROM branches").catch(() => [])) || [];
         const pins: any[] = (await queryDB("SELECT id, name, zk_device_pin FROM all_employees WHERE zk_device_pin IS NOT NULL").catch(() => [])) || [];
+        // Every existing login — emails and usernames are unique system-wide.
+        const logins: any[] = (await queryDB("/*unscoped*/ SELECT email, username FROM users").catch(() => [])) || [];
+        const takenLogins = new Set<string>();
+        for (const l of logins) {
+          if (l.email) takenLogins.add(String(l.email).toLowerCase());
+          if (l.username) takenLogins.add(String(l.username).toLowerCase());
+        }
         return {
+          takenLogins,
           dept: new Map(departments.map((d) => [norm(String(d.name)), d])),
           branch: new Map(branches.map((b) => [norm(String(b.branch_name)), b])),
           pinOwner: new Map(pins.map((p) => [String(p.zk_device_pin), p])),
@@ -402,10 +421,44 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
           prep.pinOwner.set(pin, { id: existing ? existing.id : -1, name: set.name });
         }
 
+        // Login ID + Password -> the employee's own login (role User), same as
+        // Admin Panel -> Employees -> "Create login". An email signs in as is;
+        // anything else is a username, stored the way sign-in reads it (no
+        // spaces, lower case).
+        let login: { email: string | null; username: string | null; password: string } | null = null;
+        const loginId = str(v.login_id);
+        const password = str(v.login_password);
+        if (loginId || password) {
+          if (!loginId) fail("Password given without a Login ID.");
+          if (!password) fail("Login ID given without a Password.");
+          if (password.length < 6) fail("Password must be at least 6 characters.");
+          if (existing?.user_id) {
+            notes.push("Already has a login — Login ID / Password ignored");
+          } else {
+            const isEmail = loginId.includes("@");
+            const id = isEmail ? loginId.toLowerCase().slice(0, 255) : loginId.replace(/\s+/g, "").toLowerCase().slice(0, 100);
+            if (prep.takenLogins.has(id)) fail(`Login ID "${id}" is already used by another account.`);
+            prep.takenLogins.add(id);
+            login = { email: isEmail ? id : null, username: isEmail ? null : id, password };
+            notes.push(`Login: ${id}${!isEmail && id !== loginId ? ` (written "${loginId}")` : ""}`);
+          }
+        }
+        const createLogin = async (employeeId: number) => {
+          if (!login || ctx.dryRun) return;
+          const hash = await bcrypt.hash(login.password, 10);
+          const u = await queryDB("INSERT INTO users (name, email, username, password_hash, role) VALUES (?, ?, ?, ?, 'user')", [
+            set.name,
+            login.email,
+            login.username,
+            hash
+          ]);
+          await queryDB("UPDATE all_employees SET user_id = ? WHERE id = ?", [u.insertId, employeeId]);
+        };
+
         if (existing) {
           const changed = Object.keys(set).filter((k) => str(existing[k]) !== str(set[k]));
-          if (changed.length === 0) return { status: "skip", message: "Already up to date.", employee: `${set.name} (${code})` };
-          if (!ctx.dryRun) {
+          if (changed.length === 0 && !login) return { status: "skip", message: ["Already up to date", ...notes].join(". "), employee: `${set.name} (${code})` };
+          if (!ctx.dryRun && changed.length > 0) {
             await recordEmployeeEditHistory(queryDB, {
               employeeId: Number(existing.id),
               before: existing,
@@ -416,7 +469,9 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
             }).catch(() => undefined);
             await queryDB(`UPDATE all_employees SET ${changed.map((k) => `${k} = ?`).join(", ")} WHERE id = ?`, [...changed.map((k) => set[k]), Number(existing.id)]);
           }
-          return { status: "update", message: [`Changes: ${changed.join(", ")}`, ...notes].join(". "), employee: `${set.name} (${code})` };
+          await createLogin(Number(existing.id));
+          const what = [changed.length ? `Changes: ${changed.join(", ")}` : null, login ? "New login" : null].filter(Boolean) as string[];
+          return { status: "update", message: [...what, ...notes].join(". "), employee: `${set.name} (${code})` };
         }
         if (!ctx.dryRun) {
           const cols = ["employee_id", ...Object.keys(set)];
@@ -424,8 +479,9 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
           const vals = cols.map((c) => (c === "employee_id" ? code : c === "is_active" && !("is_active" in set) ? 1 : set[c]));
           const r = await queryDB(`INSERT INTO all_employees (${cols.join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`, vals);
           ctx.byCode.set(codeKey, { id: r.insertId, employee_id: code, ...set });
+          await createLogin(Number(r.insertId));
         }
-        return { status: "create", message: ["New employee", ...notes].join(". "), employee: `${set.name} (${code})` };
+        return { status: "create", message: [login ? "New employee with login" : "New employee", ...notes].join(". "), employee: `${set.name} (${code})` };
       }
     },
 
