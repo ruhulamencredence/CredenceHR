@@ -326,7 +326,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
   app.get("/api/users", authenticateToken, requireAdmin, requireModule("users"), async (req: any, res) => {
     try {
       const users = await queryDB(
-        "SELECT id, name, email, username, role, created_at, last_login_lat, last_login_lng, last_login_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, can_use_calls, can_view_group_dashboard, can_view_tasks, can_view_mobile_bill, can_grant_module_access, attendance_project_id FROM users ORDER BY created_at DESC"
+        "SELECT id, name, email, username, role, created_at, last_login_lat, last_login_lng, last_login_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, can_use_calls, can_view_group_dashboard, can_view_tasks, can_view_mobile_bill, can_grant_module_access, attendance_project_id, is_blocked, blocked_reason, blocked_at FROM users ORDER BY created_at DESC"
       );
       // Attach each Admin's module_permissions so the Superadmin's "Module Access"
       // UI has them without a separate round trip per row. Only role='admin' rows

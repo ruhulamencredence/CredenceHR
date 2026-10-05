@@ -54,8 +54,8 @@ interface PayrollRouteDeps {
   requireModule: (moduleKey: "payroll") => any;
   // Payroll's permission layers (server.ts PAYROLL_LAYER_KEYS) — used for
   // the salary month setting, which needs "salary_month" ticked.
-  requireModuleLayer: (moduleKey: "payroll", layer: "salary_month") => any;
-  hasModuleLayer: (user: any, moduleKey: "payroll", layer: "salary_month") => Promise<boolean>;
+  requireModuleLayer: (moduleKey: "payroll", layer: "salary_month" | "salary_hold") => any;
+  hasModuleLayer: (user: any, moduleKey: "payroll", layer: "salary_month" | "salary_hold") => Promise<boolean>;
   // The account's granted Admin Panel modules — the Dashboard calendar lets
   // an 'attendance_reports' holder open their own Department's calendars.
   getAdminModules: (userId: number) => Promise<string[]>;
@@ -370,6 +370,22 @@ export async function ensurePayrollSchema(dbPool: any): Promise<void> {
     } catch (err: any) {
       if (err.code !== "ER_DUP_FIELDNAME") console.warn("⚠️ Could not add payrolls.late_deduction_days column: " + err.message);
     }
+    // Salary Hold — a held run can't be Processed or marked Paid until it is
+    // released (POST /api/payroll/:id/hold, /release; "salary_hold" layer).
+    for (const [name, def] of [
+      ["is_held", "TINYINT(1) NOT NULL DEFAULT 0"],
+      ["hold_reason", "VARCHAR(255) NULL"],
+      ["held_by", "INT NULL"],
+      ["held_at", "DATETIME NULL"],
+      ["released_by", "INT NULL"],
+      ["released_at", "DATETIME NULL"]
+    ]) {
+      try {
+        await dbPool.query(`ALTER TABLE payrolls ADD COLUMN ${name} ${def}`);
+      } catch (err: any) {
+        if (err.code !== "ER_DUP_FIELDNAME") console.warn(`⚠️ Could not add payrolls.${name} column: ` + err.message);
+      }
+    }
     try {
       await dbPool.query(`ALTER TABLE payrolls ADD COLUMN late_deduction_amount DECIMAL(10, 2) NOT NULL DEFAULT 0.00`);
     } catch (err: any) {
@@ -681,7 +697,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         `SELECT p.id, p.employee_id, p.month_year, p.total_working_days, p.present_days,
                 p.basic_amount, p.allowances_total, p.tax_deduction, p.pf_deduction,
                 p.advance_deduction, p.other_deduction, p.absent_deduction, p.total_deduction,
-                p.net_salary, p.payment_status, p.item_earnings, p.item_deductions,
+                p.net_salary, p.payment_status, p.item_earnings, p.item_deductions, p.is_held, p.hold_reason,
                 e.name AS employee_name, e.employee_id AS employee_code, e.designation, e.department
          FROM payrolls p
          JOIN all_employees e ON e.id = p.employee_id
@@ -737,7 +753,9 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
           item_deductions: num(r.item_deductions),
           total_deduction: num(r.total_deduction),
           net_salary: num(r.net_salary),
-          payment_status: r.payment_status
+          payment_status: r.payment_status,
+          is_held: Number(r.is_held || 0) === 1,
+          hold_reason: r.hold_reason || null
         };
       });
 
@@ -1456,6 +1474,47 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       );
       const lines = await loadPayLines(queryDB, rows.map((r: any) => Number(r.id)));
       res.json(rows.map((r: any) => ({ ...r, pay_lines: lines.get(Number(r.id)) || [] })));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Whether this account may hold / release salaries (Payroll -> "Salary
+  // Hold / Release" layer). Registered before GET /api/payroll/:id.
+  app.get("/api/payroll/hold-access", authenticateToken, requireAdmin, requireModule("payroll"), async (req: any, res) => {
+    try {
+      res.json({ can_hold: await hasModuleLayer(req.user, "payroll", "salary_hold") });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Hold one employee's salary for a month: the run stays on the list (and
+  // its payslip), but can't be Processed or marked Paid until released.
+  app.post("/api/payroll/:id/hold", authenticateToken, requireAdmin, requireModuleLayer("payroll", "salary_hold"), async (req: any, res) => {
+    try {
+      const reason = typeof req.body?.reason === "string" ? req.body.reason.trim().slice(0, 255) : "";
+      if (!reason) return res.status(400).json({ error: "Write the reason for holding this salary." });
+      const rows = await queryDB("SELECT id, payment_status, is_held FROM payrolls WHERE id = ?", [req.params.id]);
+      if (rows.length === 0) return res.status(404).json({ error: "Payroll record not found." });
+      if (rows[0].payment_status === "paid") return res.status(400).json({ error: "A Paid salary can't be held." });
+      await queryDB(
+        "UPDATE payrolls SET is_held = 1, hold_reason = ?, held_by = ?, held_at = NOW(), released_by = NULL, released_at = NULL WHERE id = ?",
+        [reason, req.user.id, req.params.id]
+      );
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/payroll/:id/release", authenticateToken, requireAdmin, requireModuleLayer("payroll", "salary_hold"), async (req: any, res) => {
+    try {
+      const rows = await queryDB("SELECT id, is_held FROM payrolls WHERE id = ?", [req.params.id]);
+      if (rows.length === 0) return res.status(404).json({ error: "Payroll record not found." });
+      if (!Number(rows[0].is_held)) return res.status(400).json({ error: "This salary isn't on hold." });
+      await queryDB("UPDATE payrolls SET is_held = 0, released_by = ?, released_at = NOW() WHERE id = ?", [req.user.id, req.params.id]);
+      res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -3067,6 +3126,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       const rows = await queryDB("SELECT * FROM payrolls WHERE id = ?", [req.params.id]);
       if (rows.length === 0) return res.status(404).json({ error: "Payroll record not found." });
       if (rows[0].payment_status !== "unpaid") return res.status(400).json({ error: "Only an Unpaid payroll run can be marked Processed." });
+      if (Number(rows[0].is_held)) return res.status(400).json({ error: "This salary is on hold. Release it first." });
       await queryDB("UPDATE payrolls SET payment_status = 'processed' WHERE id = ?", [req.params.id]);
       res.json({ success: true });
     } catch (err: any) {
@@ -3084,6 +3144,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       if (rows.length === 0) return res.status(404).json({ error: "Payroll record not found." });
       const payroll = rows[0];
       if (payroll.payment_status === "paid") return res.status(400).json({ error: "This payroll run is already marked Paid." });
+      if (Number(payroll.is_held)) return res.status(400).json({ error: "This salary is on hold. Release it first." });
 
       let remainingToRecover = Number(payroll.advance_deduction) || 0;
       if (remainingToRecover > 0) {

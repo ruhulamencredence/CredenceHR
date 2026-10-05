@@ -48,6 +48,7 @@ import type { Express } from "express";
 import type { AlertType } from "./Alerts";
 import { applyDueEmployeeTransfers } from "./EmployeeTransferRoutes";
 import { applyCompanyTransfer } from "./CompanyRoutes";
+import { blockEmployeeLogin } from "./AccountBlock";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 
@@ -846,6 +847,7 @@ async function applyServicePart(queryDB: QueryDB, action: any, to: any, actorId:
       break;
     case "suspension":
       service.service_status = "suspended";
+      if (to.block_login) await blockEmployeeLogin(queryDB, empId, `Suspended from ${eff}`, actorId);
       break;
     case "company_transfer":
       if (to.company_id) await applyCompanyTransfer(queryDB, empId, Number(to.company_id), to.employee_code || null);
@@ -860,6 +862,8 @@ async function applyServicePart(queryDB: QueryDB, action: any, to: any, actorId:
         0,
         empId
       ]);
+      // A separated employee can no longer sign in (AccountBlock.ts).
+      await blockEmployeeLogin(queryDB, empId, `${ACTION_LABEL.get(action.action_type) || "Separated"} from ${eff}`, actorId);
       break;
   }
   if (to.branch_id !== undefined && to.branch_id !== null && to.branch_id !== "") {
@@ -1537,6 +1541,7 @@ export function registerHROperationsRoutes(app: Express, deps: HROperationsRoute
     if (num(raw.basic_salary) !== null) to.basic_salary = num(raw.basic_salary);
     if (raw.probation_end_date) to.probation_end_date = toDate(raw.probation_end_date);
     if (raw.contract_end_date) to.contract_end_date = toDate(raw.contract_end_date);
+    if (type === "suspension" && raw.block_login === true) to.block_login = true;
     if (type === "increment" || type === "salary_adjustment") {
       if (to.gross_salary === undefined) throw bad("Enter the new gross salary.");
     }

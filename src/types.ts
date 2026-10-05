@@ -83,7 +83,7 @@ export const ADMIN_MODULES: { key: AdminModuleKey; label: string }[] = [
 // combination of these per (Admin/User account, module) via Admin Panel ->
 // Users -> Module Access. Independent checkboxes, not hierarchical: having
 // 'delete_trash' does NOT imply 'edit_add' is also granted.
-export type PermissionLayerKey = 'read' | 'edit_add' | 'entry_upload' | 'delete_trash' | 'permanent_delete' | 'submission_status' | 'stay_report' | 'salary_month';
+export type PermissionLayerKey = 'read' | 'edit_add' | 'entry_upload' | 'delete_trash' | 'permanent_delete' | 'submission_status' | 'stay_report' | 'salary_month' | 'salary_hold' | 'block_account';
 
 export const PERMISSION_LAYERS: { key: PermissionLayerKey; label: string }[] = [
   { key: 'read', label: 'Read Only' },
@@ -120,12 +120,15 @@ export const MODULE_LAYER_OPTIONS: Partial<Record<AdminModuleKey, { key: Permiss
   // accounts it is ticked for (EXPLICIT_ONLY_LAYERS).
   payroll: [
     { key: 'read', label: 'Payroll' },
-    { key: 'salary_month', label: 'Salary Month Setting' }
-  ]
+    { key: 'salary_month', label: 'Salary Month Setting' },
+    { key: 'salary_hold', label: 'Salary Hold / Release' }
+  ],
+  // Users -> Block / Unblock a login (only for accounts it is ticked for).
+  users: [...PERMISSION_LAYERS, { key: 'block_account', label: 'Block Account' }]
 };
 // Layers an account has only when explicitly ticked — never part of the
 // "module granted, no layers saved yet" default (requireModuleLayer).
-export const EXPLICIT_ONLY_LAYERS: PermissionLayerKey[] = ['permanent_delete', 'submission_status', 'salary_month'];
+export const EXPLICIT_ONLY_LAYERS: PermissionLayerKey[] = ['permanent_delete', 'submission_status', 'salary_month', 'salary_hold', 'block_account'];
 export const layersFor = (moduleKey: AdminModuleKey) => MODULE_LAYER_OPTIONS[moduleKey] || PERMISSION_LAYERS;
 
 // Leave Manage's own operation-specific layers — same independent-checkbox
@@ -620,6 +623,10 @@ export interface User {
   can_view_timesheet?: boolean;
   // Chat audio/video calls (CallLayer.tsx) — Self Service switch, off by default.
   can_use_calls?: boolean;
+  // Admin Panel -> Users -> Block: this login can't sign in (AccountBlock.ts).
+  is_blocked?: boolean | number;
+  blocked_reason?: string | null;
+  blocked_at?: string | null;
   // Admin Dashboard in the mother company shows every company of the group.
   can_view_group_dashboard?: boolean;
   // Self Service -> My Tasks (MyTasks.tsx) — off until turned on in Module Access.

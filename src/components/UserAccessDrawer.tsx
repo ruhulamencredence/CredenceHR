@@ -12,7 +12,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   X, KeyRound, Lock, Mail, Trash2, LayoutGrid, ChevronRight, MapPin, Fingerprint, Navigation, CalendarDays,
-  CalendarClock, Edit2, ShieldCheck, Eye, History, LayoutTemplate, Undo2
+  CalendarClock, Edit2, ShieldCheck, Eye, History, LayoutTemplate, Undo2, Ban
 } from 'lucide-react';
 import { User, ADMIN_MODULES } from '../types';
 import { formatDate } from '../lib/formatDate';
@@ -196,6 +196,9 @@ interface UserAccessDrawerProps {
   onChangeLoginId: () => void;
   onResetPassword: () => void;
   onDelete: () => void;
+  // Users -> "Block Account" layer: block / unblock this login.
+  canBlock: boolean;
+  onBlock: (blocked: boolean, reason: string) => Promise<void>;
   token: string;
   templates: AccessTemplate[];
   onApplyTemplate: (t: AccessTemplate) => Promise<void>;
@@ -219,6 +222,8 @@ export function UserAccessDrawer({
   onChangeLoginId,
   onResetPassword,
   onDelete,
+  canBlock,
+  onBlock,
   token,
   templates,
   onApplyTemplate
@@ -230,6 +235,19 @@ export function UserAccessDrawer({
   const undoTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [activity, setActivity] = useState<AuditEntry[] | null>(null);
   const [templateMsg, setTemplateMsg] = useState<string | null>(null);
+  const [blockReason, setBlockReason] = useState<string | null>(null);
+  const [blockError, setBlockError] = useState<string | null>(null);
+  const blocked = !!u.is_blocked;
+  const changeBlock = (next: boolean, reason: string) =>
+    run('block', async () => {
+      setBlockError(null);
+      try {
+        await onBlock(next, reason);
+        setBlockReason(null);
+      } catch (err: any) {
+        setBlockError(err.message || 'Could not change the block.');
+      }
+    });
 
   // Re-read the activity list whenever this account's access changes.
   const accessSignature = JSON.stringify([
@@ -342,6 +360,7 @@ export function UserAccessDrawer({
             <div className="text-xs text-slate-500 truncate">{u.email || u.username || '—'}</div>
             <div className="mt-1.5 flex items-center gap-2 text-[11px] text-slate-400">
               <span className={`font-semibold px-2 py-0.5 rounded-full border ${ROLE_BADGE[u.role]}`}>{ROLE_LABEL[u.role]}</span>
+              {blocked && <span className="font-semibold px-2 py-0.5 rounded-full border border-rose-200 bg-rose-50 text-rose-700">Blocked</span>}
               {u.created_at && <span>Joined {formatDate(u.created_at)}</span>}
             </div>
           </div>
@@ -385,6 +404,65 @@ export function UserAccessDrawer({
                 <p className="text-xs text-slate-400 py-2">
                   {isTargetSuper ? 'The Superadmin account has every permission and can’t be edited here.' : 'Only the Superadmin can edit another Admin.'}
                 </p>
+              )}
+              {blocked && (
+                <div className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs text-rose-700">
+                  <div className="font-semibold flex items-center gap-1.5">
+                    <Ban className="w-3.5 h-3.5" /> Login blocked{u.blocked_at ? ` since ${formatDate(u.blocked_at)}` : ''}
+                  </div>
+                  {u.blocked_reason && <div className="mt-0.5 text-rose-600">{u.blocked_reason}</div>}
+                </div>
+              )}
+              {canEdit && canBlock && (
+                <div className="mt-2">
+                  {blocked ? (
+                    <button
+                      type="button"
+                      disabled={busy === 'block'}
+                      onClick={() => changeBlock(false, '')}
+                      className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border border-emerald-200 text-emerald-700 hover:bg-emerald-50 disabled:opacity-60"
+                    >
+                      {busy === 'block' ? <Spinner size={14} /> : <Ban className="w-3.5 h-3.5" />} Unblock login
+                    </button>
+                  ) : blockReason === null ? (
+                    <button
+                      type="button"
+                      onClick={() => setBlockReason('')}
+                      className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border border-rose-200 text-rose-600 hover:bg-rose-50"
+                    >
+                      <Ban className="w-3.5 h-3.5" /> Block login
+                    </button>
+                  ) : (
+                    <div className="rounded-xl border border-rose-200 p-2.5 space-y-2">
+                      <p className="text-xs text-slate-600">They are signed out at once and can’t sign in until unblocked.</p>
+                      <input
+                        autoFocus
+                        value={blockReason}
+                        onChange={(e) => setBlockReason(e.target.value)}
+                        placeholder="Reason (e.g. Suspended pending inquiry)"
+                        className="w-full text-sm px-3 py-1.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-rose-200 focus:outline-none"
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setBlockReason(null)}
+                          className="flex-1 px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!blockReason.trim() || busy === 'block'}
+                          onClick={() => changeBlock(true, blockReason.trim())}
+                          className="flex-1 px-3 py-1.5 text-xs font-semibold rounded-lg bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50"
+                        >
+                          {busy === 'block' ? 'Blocking…' : 'Block'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  {blockError && <p className="mt-1.5 text-xs text-rose-600">{blockError}</p>}
+                </div>
               )}
             </Section>
 
