@@ -4,7 +4,8 @@
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { Search, CheckCircle2, Clock, Banknote, Trash2, RefreshCw } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { Search, CheckCircle2, Clock, Banknote, Trash2, RefreshCw, PauseCircle, X } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
 
@@ -33,6 +34,9 @@ interface PayrollListRecord {
   total_deduction: number;
   net_salary: number;
   payment_status: 'unpaid' | 'processed' | 'paid';
+  // Salary Hold — can't be Approved / marked Paid until released.
+  is_held?: number | boolean;
+  hold_reason?: string | null;
 }
 
 interface Department {
@@ -84,6 +88,16 @@ export const PayrollListPanel: React.FC<PayrollListPanelProps> = ({ token }) => 
   const [error, setError] = useState('');
   const [actionId, setActionId] = useState<number | null>(null);
   const [actionError, setActionError] = useState('');
+  // Payroll -> "Salary Hold / Release" layer.
+  const [canHold, setCanHold] = useState(false);
+  const [holdFor, setHoldFor] = useState<PayrollListRecord | null>(null);
+  const [holdReason, setHoldReason] = useState('');
+  useEffect(() => {
+    fetch(apiUrl('/api/payroll/hold-access'), { headers: authHeaders })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setCanHold(!!d?.can_hold))
+      .catch(() => {});
+  }, [authHeaders]);
 
   // Debounce the free-text search box so every keystroke doesn't fire a request.
   useEffect(() => {
@@ -162,6 +176,29 @@ export const PayrollListPanel: React.FC<PayrollListPanelProps> = ({ token }) => 
       await fetchRecords();
     } catch {
       setActionError('Failed to mark payroll as paid.');
+    } finally {
+      setActionId(null);
+    }
+  };
+
+  const setHold = async (id: number, hold: boolean, reason = '') => {
+    setActionId(id);
+    setActionError('');
+    try {
+      const res = await fetch(apiUrl(`/api/payroll/${id}/${hold ? 'hold' : 'release'}`), {
+        method: 'POST',
+        headers: { ...authHeaders, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setActionError(data.error || 'Failed to change the hold.');
+        return;
+      }
+      setHoldFor(null);
+      await fetchRecords();
+    } catch {
+      setActionError('Failed to change the hold.');
     } finally {
       setActionId(null);
     }
@@ -299,9 +336,47 @@ export const PayrollListPanel: React.FC<PayrollListPanelProps> = ({ token }) => 
                   <td className="px-2.5 py-2.5 whitespace-nowrap text-right text-rose-600">{money(r.other_deduction)}</td>
                   <td className="px-2.5 py-2.5 whitespace-nowrap text-right text-rose-600">{money(r.item_deductions)}</td>
                   <td className="px-2.5 py-2.5 whitespace-nowrap text-right font-semibold text-slate-900">{money(r.net_salary)}</td>
-                  <td className="px-2.5 py-2.5 whitespace-nowrap"><StatusBadge status={r.payment_status} /></td>
+                  <td className="px-2.5 py-2.5 whitespace-nowrap">
+                    {r.is_held ? (
+                      <span
+                        className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-rose-50 text-rose-700"
+                        title={r.hold_reason || undefined}
+                      >
+                        <PauseCircle className="w-2.5 h-2.5" /> On Hold
+                      </span>
+                    ) : (
+                      <StatusBadge status={r.payment_status} />
+                    )}
+                  </td>
                   <td className="px-2.5 py-2.5 whitespace-nowrap text-right">
                     <div className="flex items-center justify-end gap-1.5">
+                      {r.is_held ? (
+                        canHold ? (
+                          <button
+                            onClick={() => setHold(r.id, false)}
+                            disabled={actionId === r.id}
+                            className="px-2.5 py-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-lg disabled:opacity-50"
+                            title={r.hold_reason || undefined}
+                          >
+                            {actionId === r.id ? <Spinner size={12} /> : 'Release'}
+                          </button>
+                        ) : (
+                          <span className="text-slate-300">—</span>
+                        )
+                      ) : (
+                      <>
+                      {canHold && r.payment_status !== 'paid' && (
+                        <button
+                          onClick={() => {
+                            setHoldReason('');
+                            setHoldFor(r);
+                          }}
+                          disabled={actionId === r.id}
+                          className="px-2.5 py-1 text-[11px] font-semibold text-rose-600 bg-rose-50 hover:bg-rose-100 rounded-lg disabled:opacity-50"
+                        >
+                          Hold
+                        </button>
+                      )}
                       {r.payment_status === 'unpaid' && (
                         <>
                           <button
@@ -331,6 +406,8 @@ export const PayrollListPanel: React.FC<PayrollListPanelProps> = ({ token }) => 
                         </button>
                       )}
                       {r.payment_status === 'paid' && <span className="text-slate-300">—</span>}
+                      </>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -346,6 +423,50 @@ export const PayrollListPanel: React.FC<PayrollListPanelProps> = ({ token }) => 
           </table>
         </div>
       )}
+      {holdFor &&
+        createPortal(
+          <div className="liquid-glass-backdrop fixed inset-0 z-[80] flex items-center justify-center p-4" onClick={() => setHoldFor(null)}>
+            <div className="w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
+              <div className="liquid-glass liquid-glass-in rounded-[32px] p-5">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-base font-bold text-slate-900">Hold salary</h3>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      {holdFor.employee_name} · {holdFor.month_year} · {money(holdFor.net_salary)}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setHoldFor(null)}
+                    className="liquid-glass-chip w-8 h-8 rounded-full flex items-center justify-center text-slate-500 shrink-0"
+                    aria-label="Close"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+                <div className="liquid-glass-inset rounded-2xl p-3 mt-4">
+                  <p className="text-xs text-slate-600 mb-2">It stays on the list but can't be approved or paid until released.</p>
+                  <input
+                    autoFocus
+                    value={holdReason}
+                    onChange={(e) => setHoldReason(e.target.value)}
+                    placeholder="Reason (e.g. Clearance pending)"
+                    className="w-full text-sm px-3 py-2 bg-white/80 border border-slate-200 rounded-xl focus:ring-2 focus:ring-rose-200 focus:outline-none"
+                  />
+                </div>
+                <button
+                  type="button"
+                  disabled={!holdReason.trim() || actionId === holdFor.id}
+                  onClick={() => setHold(holdFor.id, true, holdReason.trim())}
+                  className="liquid-glass-button rounded-full w-full mt-4 py-2.5 text-sm font-semibold disabled:opacity-50"
+                >
+                  {actionId === holdFor.id ? 'Holding…' : 'Hold salary'}
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   );
 };

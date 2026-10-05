@@ -27,6 +27,7 @@ import { registerEntriesRoutes } from "./EntriesRoutes";
 import { registerEmployeeTransferRoutes, ensureEmployeeTransferSchema, applyDueEmployeeTransfers, recordEmployeeEditHistory } from "./EmployeeTransferRoutes";
 import { registerAdminDashboardRoutes } from "./AdminDashboardRoutes";
 import { registerDeviceRoutes, ensureDeviceSchema, checkAppDevice, deviceStillAllowed } from "./DeviceRoutes";
+import { ensureAccountBlockSchema, accountBlocked, registerAccountBlockRoutes } from "./AccountBlock";
 import { registerActiveUsersRoutes, ensureActiveUsersSchema, touchSession } from "./ActiveUsersRoutes";
 import { registerDataImportRoutes } from "./DataImportRoutes";
 import { registerCallRoutes, setupCallSocket } from "./CallRoutes";
@@ -794,6 +795,8 @@ async function ensureSchemaMigrations() {
   } catch (err: any) {
     if (err.code !== 'ER_DUP_FIELDNAME') console.warn("⚠️ Could not add users.can_view_timesheet/can_view_leave_application/can_view_my_leave columns: " + err.message);
   }
+  // Admin Panel -> Users -> Block / Unblock (AccountBlock.ts).
+  await ensureAccountBlockSchema(dbPool);
   try {
     // Chat audio/video calls (CallRoutes.ts) — a Self Service switch, OFF
     // until a Superadmin turns it on per account in Module Access.
@@ -2406,6 +2409,9 @@ const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports",
 // here, not imported, same convention as ADMIN_MODULE_KEYS/ADMIN_MODULES
 // above — this file has no import of the frontend's types.ts).
 const PERMISSION_LAYER_KEYS = ["read", "edit_add", "entry_upload", "delete_trash", "permanent_delete"] as const;
+// Users: the generic layers plus "block_account" (Block / Unblock a login,
+// AccountBlock.ts) — never part of the no-saved-layers default.
+const USERS_LAYER_KEYS = [...PERMISSION_LAYER_KEYS, "block_account"] as const;
 // Which modules currently enforce PERMISSION_LAYER_KEYS — mirrors
 // PERMISSION_LAYER_MODULES in src/types.ts. Rolled out module by module.
 const PERMISSION_LAYER_MODULES = ["departments", "projects", "approvals", "users", "reports", "tracking", "payroll"] as const;
@@ -2418,7 +2424,9 @@ const TRACKING_LAYER_KEYS = ["read", "stay_report"] as const;
 // a salary month starts (26 -> "26 to 25"). salary_month changes every
 // payroll figure, so it is never part of the no-saved-layers default: only
 // an account it is ticked for (and the Superadmin) can change it.
-const PAYROLL_LAYER_KEYS = ["read", "salary_month"] as const;
+// "salary_hold" = holding / releasing one employee's salary for a month
+// (kept out of disbursement until released) — also explicit-only.
+const PAYROLL_LAYER_KEYS = ["read", "salary_month", "salary_hold"] as const;
 // PEPM Reports uses four of them: Read Only, Edit, Delete/Trash, Permanent Delete
 // — plus its own "Budget Submission Status" (the second report on that page),
 // which, like Permanent Delete, is never part of the no-saved-rows default:
@@ -2443,7 +2451,7 @@ const MODULE_LAYER_KEY_SETS: Record<string, readonly string[]> = {
   departments: PERMISSION_LAYER_KEYS,
   projects: PERMISSION_LAYER_KEYS,
   approvals: PERMISSION_LAYER_KEYS,
-  users: PERMISSION_LAYER_KEYS,
+  users: USERS_LAYER_KEYS,
   reports: REPORT_LAYER_KEYS,
   tracking: TRACKING_LAYER_KEYS,
   payroll: PAYROLL_LAYER_KEYS,
@@ -3934,6 +3942,12 @@ async function startServer() {
         res.setHeader("X-Device-Revoked", "1");
         return res.status(401).json({ error: "This phone was removed from your account. Sign in again.", code: "DEVICE_REVOKED" });
       }
+      // A blocked account (Admin Panel -> Users -> Block, or an approved
+      // Termination) is signed out of every session it still has.
+      if (user?.id && (await accountBlocked(queryDB, Number(user.id)))) {
+        res.setHeader("X-Account-Blocked", "1");
+        return res.status(401).json({ error: "This account has been blocked. Contact HR.", code: "ACCOUNT_BLOCKED" });
+      }
       req.user = user;
       // Admin Panel -> Active Users: this sign-in's IP, device and last use.
       touchSession(queryDB, req, token, user);
@@ -4076,7 +4090,7 @@ async function startServer() {
   // on for a module is never a silent regression; a Superadmin only actually
   // restricts anything once they explicitly save a narrower set in the
   // Module Access modal.
-  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "stay_report" | "salary_month") =>
+  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "stay_report" | "salary_month" | "salary_hold" | "block_account") =>
     async (req: any, res: any, next: any) => {
       if (!req.user) return res.status(401).json({ error: "Access token required" });
       if (req.user.role === "superadmin") return next();
@@ -4142,6 +4156,9 @@ async function startServer() {
   // reasoning as profileRoutes.ts/holidayRoutes.ts/Alerts.ts/UserManagement.ts
   // above.
   registerDepartmentsAndBranchesRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, queryDB });
+
+  // Admin Panel -> Users -> Block / Unblock a login (AccountBlock.ts).
+  registerAccountBlockRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, queryDB });
 
   // Self Service -> Leave Management: true for a Superadmin (implicit, every
   // account), or for an Admin/User the Superadmin has explicitly granted
@@ -4319,6 +4336,10 @@ async function startServer() {
       }
       const workspaceProblem = await checkWorkspaceLogin(queryDB, req.body.system ? undefined : req.body.workspace, user);
       if (workspaceProblem) return res.status(workspaceProblem.status).json({ error: workspaceProblem.error });
+      // Admin Panel -> Users -> Block, or an approved Termination / Resignation.
+      if (Number(user.is_blocked || 0) === 1 && user.role !== "superadmin") {
+        return res.status(403).json({ error: "This account has been blocked. Contact HR.", code: "ACCOUNT_BLOCKED" });
+      }
 
       // The app signs in on one phone per account unless a Superadmin allows
       // more (DeviceRoutes.ts). The website isn't limited.

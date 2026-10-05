@@ -28,6 +28,7 @@
 
 import type { Express } from "express";
 import type { AlertType } from "./Alerts";
+import { setAccountBlocked } from "./AccountBlock";
 
 const CLEARANCE_DEPARTMENTS: { department: string; item_label: string }[] = [
   { department: "IT", item_label: "Laptop / equipment & system access return" },
@@ -362,6 +363,10 @@ export function registerExitOffboardingRoutes(app: Express, deps: ExitOffboardin
       await queryDB("UPDATE exit_requests SET status = ? WHERE id = ?", [status, id]);
       const rows: any = await queryDB("SELECT * FROM exit_requests WHERE id = ?", [id]);
       const exitRow = rows[0];
+      // Settled = the person has left: their login is blocked (AccountBlock.ts).
+      if (status === "settled" && before[0].status !== "settled") {
+        await setAccountBlocked(queryDB, Number(exitRow.user_id), true, `${exitRow.exit_type === "termination" ? "Terminated" : "Resigned"} (exit settled)`, Number(req.user.id));
+      }
       if (status !== before[0].status) {
         const lwd = fmtDay(exitRow.last_working_day);
         const msg: Record<string, [string, string]> = {
@@ -592,6 +597,8 @@ export function registerExitOffboardingRoutes(app: Express, deps: ExitOffboardin
       );
       if (status === "paid") {
         await queryDB("UPDATE exit_requests SET status = ? WHERE id = ?", ["settled", exitId]);
+        // Settled = the person has left: their login is blocked (AccountBlock.ts).
+        await setAccountBlocked(queryDB, Number(settlement.user_id), true, "Exit settled (final settlement paid)", Number(req.user.id));
       }
       if (status !== settlement.status && (status === "approved" || status === "paid")) {
         const amount = `৳${netPayable.toLocaleString("en-US")}`;

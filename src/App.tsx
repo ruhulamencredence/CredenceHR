@@ -59,7 +59,7 @@ import { initPushNotifications, clearPushToken } from './lib/pushNotifications';
 import { syncWebPush, disableWebPush, listenWebPushOpens } from './lib/webPush';
 import { WebPushPrompt } from './components/WebPushPrompt';
 import { setActiveCompanyId } from './lib/company';
-import { DEVICE_REVOKED_EVENT, setSignedOutReason } from './lib/device';
+import { ACCOUNT_BLOCKED_EVENT, DEVICE_REVOKED_EVENT, setSignedOutReason } from './lib/device';
 import { refreshNotices } from './lib/noticesLive';
 
 export default function App() {
@@ -363,16 +363,24 @@ export default function App() {
     disconnectChatSocket();
   };
 
-  // The Superadmin removed this phone from the account (Device Access): sign
-  // out and say why on the sign-in screen.
+  // The Superadmin removed this phone from the account (Device Access), or
+  // the account was blocked: sign out and say why on the sign-in screen.
   useEffect(() => {
     if (!token) return;
     const onRevoked = () => {
       setSignedOutReason('This phone was removed from your account by your Superadmin. Sign in again to ask for access.');
       handleLogout();
     };
+    const onBlocked = () => {
+      setSignedOutReason('This account has been blocked. Contact HR.');
+      handleLogout();
+    };
     window.addEventListener(DEVICE_REVOKED_EVENT, onRevoked);
-    return () => window.removeEventListener(DEVICE_REVOKED_EVENT, onRevoked);
+    window.addEventListener(ACCOUNT_BLOCKED_EVENT, onBlocked);
+    return () => {
+      window.removeEventListener(DEVICE_REVOKED_EVENT, onRevoked);
+      window.removeEventListener(ACCOUNT_BLOCKED_EVENT, onBlocked);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, user]);
 

@@ -98,6 +98,8 @@ export const NewActionModal: React.FC<{
   const [to, setTo] = useState<Record<string, string>>({});
   const [pct, setPct] = useState('');
   const [reason, setReason] = useState('');
+  // Suspension only: also block the employee's login while it lasts.
+  const [blockLogin, setBlockLogin] = useState(false);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
   const emp = employees.find((e) => e.id === employeeId) || null;
@@ -126,6 +128,7 @@ export const NewActionModal: React.FC<{
     try {
       const payload: Record<string, any> = {};
       for (const k of fields) if (to[k] !== undefined && to[k] !== '') payload[k] = to[k];
+      if (type === 'suspension' && blockLogin) payload.block_login = true;
       const r = await api.post<any>('/api/hr-ops/actions', { employee_id: employeeId, action_type: type, effective_date: eff, to: payload, reason });
       onSaved(r.status);
     } catch (e: any) {
@@ -208,6 +211,20 @@ export const NewActionModal: React.FC<{
             <input type="date" value={eff} onChange={(e) => setEff(e.target.value)} className={inputCls} />
           </div>
         </div>
+        {type === 'suspension' && (
+          <label className="flex items-start gap-2 p-3 rounded-lg border border-rose-200 bg-rose-50/60 text-sm text-slate-700 cursor-pointer">
+            <input type="checkbox" className="mt-0.5" checked={blockLogin} onChange={(e) => setBlockLogin(e.target.checked)} />
+            <span>
+              <span className="font-semibold">Block login during suspension</span>
+              <span className="block text-xs text-slate-500">Once approved and in effect, they're signed out and can't sign in until unblocked (Admin Panel → Users).</span>
+            </span>
+          </label>
+        )}
+        {(type === 'resignation' || type === 'termination' || type === 'retirement') && (
+          <p className="text-xs text-slate-500 p-3 rounded-lg bg-slate-50 border border-slate-200">
+            Once approved and in effect, the employee is marked inactive and their login is blocked automatically.
+          </p>
+        )}
         {fields.map((k) => (
           <div key={k}>
             <label className={labelCls}>

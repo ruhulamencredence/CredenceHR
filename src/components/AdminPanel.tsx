@@ -3007,6 +3007,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     }
   };
 
+  // Users module layers for this account (Module Access -> Users). No saved
+  // layers = the defaults, which never include Block Account.
+  const usersLayer = (key: PermissionLayerKey) => {
+    if (user.role === 'superadmin') return true;
+    const saved = user.module_permission_layers?.users;
+    return saved && saved.length > 0 ? saved.includes(key) : !EXPLICIT_ONLY_LAYERS.includes(key);
+  };
+
   const handleDeleteUser = async (userId: number) => {
     if (!confirm('Are you sure you want to delete this user?')) return;
     try {
@@ -6264,6 +6272,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                       </td>
                       <td className="px-3 py-3">
                         <span className={`inline-block text-[11px] font-semibold px-2 py-0.5 rounded-full border ${ROLE_BADGE[u.role]}`}>{ROLE_LABEL[u.role]}</span>
+                        {!!u.is_blocked && (
+                          <span className="ml-1 inline-block text-[11px] font-semibold px-2 py-0.5 rounded-full border border-rose-200 bg-rose-50 text-rose-700" title={u.blocked_reason || undefined}>
+                            Blocked
+                          </span>
+                        )}
                       </td>
                       <td className="px-3 py-3">
                         <UserAccessChips u={u} projectCount={projectIdsForUser(u.id).size} />
@@ -6319,7 +6332,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-2">
                         <span className="font-semibold text-sm text-slate-900 truncate">{u.name}</span>
-                        <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border shrink-0 ${ROLE_BADGE[u.role]}`}>{ROLE_LABEL[u.role]}</span>
+                        <span className="flex items-center gap-1 shrink-0">
+                          {!!u.is_blocked && (
+                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full border border-rose-200 bg-rose-50 text-rose-700">Blocked</span>
+                          )}
+                          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${ROLE_BADGE[u.role]}`}>{ROLE_LABEL[u.role]}</span>
+                        </span>
                       </div>
                       <div className="text-xs text-slate-500 truncate">{u.email || u.username || '—'}</div>
                       <div className="mt-1.5">
@@ -6997,6 +7015,23 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
               }}
               onDelete={async () => {
                 await handleDeleteUser(mu.id);
+              }}
+              canBlock={usersLayer('block_account')}
+              onBlock={async (blocked, reason) => {
+                const res = await fetch(apiUrl(`/api/users/${mu.id}/block`), {
+                  method: 'PUT',
+                  headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                  body: JSON.stringify({ blocked, reason })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.error || 'Could not change the block.');
+                setUsers((prev) =>
+                  prev.map((x) =>
+                    x.id === mu.id
+                      ? { ...x, is_blocked: blocked, blocked_reason: blocked ? reason : null, blocked_at: blocked ? new Date().toISOString() : null }
+                      : x
+                  )
+                );
               }}
               token={token}
               templates={accessTemplates}

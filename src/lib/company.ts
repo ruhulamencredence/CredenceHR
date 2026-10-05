@@ -14,7 +14,7 @@
 // needing to change.
 
 import { useEffect, useState } from 'react';
-import { DEVICE_REVOKED_EVENT } from './device';
+import { ACCOUNT_BLOCKED_EVENT, DEVICE_REVOKED_EVENT } from './device';
 
 const KEY = 'credence_company_id';
 
@@ -50,6 +50,7 @@ export function installCompanyHeader() {
     const watch = (p: Promise<Response>) =>
       p.then((res) => {
         if (sameOriginApi && res.status === 401 && res.headers.get('X-Device-Revoked')) window.dispatchEvent(new Event(DEVICE_REVOKED_EVENT));
+        if (sameOriginApi && res.status === 401 && res.headers.get('X-Account-Blocked')) window.dispatchEvent(new Event(ACCOUNT_BLOCKED_EVENT));
         return res;
       });
     if (!company || !sameOriginApi) return watch(original(input, init));

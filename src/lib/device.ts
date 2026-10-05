@@ -44,3 +44,5 @@ export function takeSignedOutReason(): string {
   }
 }
 export const DEVICE_REVOKED_EVENT = 'credence:device-revoked';
+// The account was blocked (Admin Panel -> Users -> Block, or a Termination).
+export const ACCOUNT_BLOCKED_EVENT = 'credence:account-blocked';
