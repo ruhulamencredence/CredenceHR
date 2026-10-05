@@ -295,8 +295,16 @@ export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ toke
         setMessage({ type: 'error', text: 'Approved Amount must be a positive number.' });
         return;
       }
-      if (claimAmount != null && approvedAmount > claimAmount) {
-        setMessage({ type: 'error', text: "Approved Amount can't be more than the Claim Amount." });
+      // A Layer may cut the amount but never raise it above what the previous Layer approved.
+      const cap = fallback != null ? Number(fallback) : null;
+      if (cap != null && approvedAmount > cap) {
+        setMessage({
+          type: 'error',
+          text:
+            item.source_approved_amount != null
+              ? `Approved Amount can't be more than ৳${cap.toLocaleString('en-BD')} — the amount the previous Layer approved.`
+              : "Approved Amount can't be more than the Claim Amount."
+        });
         return;
       }
       if (
@@ -485,7 +493,7 @@ export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ toke
                           type="number"
                           step="0.01"
                           min={0}
-                          max={claimAmount ?? undefined}
+                          max={runningAmount ?? undefined}
                           value={draft ?? (runningAmount != null ? String(runningAmount) : '')}
                           onChange={(e) => setApprovedAmountDraft((prev) => ({ ...prev, [item.id]: e.target.value }))}
                           className="w-full text-xs px-2 py-1 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"

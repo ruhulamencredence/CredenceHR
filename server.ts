@@ -2988,6 +2988,18 @@ async function performApprovalAction(
   if (request.source_type === "user_claim" && action === "approved") {
     const ucRows = await queryDB("SELECT amount, approved_amount FROM user_claims WHERE id = ?", [request.source_id]);
     if (ucRows.length > 0) {
+      // Checked before anything is written, so a refused amount leaves the
+      // request exactly where it was.
+      if (approvedAmount != null) {
+        if (!Number.isFinite(Number(approvedAmount)) || Number(approvedAmount) <= 0) {
+          throw new ApprovalActionError(400, "Approved Amount must be a positive number.");
+        }
+        try {
+          assertWithinApprovedCap(ucRows[0], Number(approvedAmount));
+        } catch (capErr: any) {
+          throw new ApprovalActionError(400, capErr.message);
+        }
+      }
       const priorAmount = ucRows[0].approved_amount != null ? Number(ucRows[0].approved_amount) : Number(ucRows[0].amount);
       actionApprovedAmount = approvedAmount != null ? Number(approvedAmount) : priorAmount;
       actionAmountEdited = actionApprovedAmount !== priorAmount;
@@ -3441,9 +3453,7 @@ async function finalizeUserClaimApproval(
     if (!Number.isFinite(amt) || amt <= 0) {
       throw new Error("Approved Amount must be a positive number.");
     }
-    if (amt > Number(uc.amount)) {
-      throw new Error("Approved Amount can't be more than the Claim Amount.");
-    }
+    assertWithinApprovedCap(uc, amt);
     finalAmount = amt;
   }
 
@@ -3531,11 +3541,24 @@ async function updateUserClaimApprovedAmountDraft(userClaimId: number, approvedA
   if (!Number.isFinite(amt) || amt <= 0) {
     throw new Error("Approved Amount must be a positive number.");
   }
+  assertWithinApprovedCap(uc, amt);
+
+  await queryDB("UPDATE user_claims SET approved_amount = ? WHERE id = ?", [amt, userClaimId]);
+}
+
+// A Layer may cut a claim's amount but never raise it: the ceiling is what the
+// previous Layer approved (user_claims.approved_amount, the running draft), or
+// the Claim Amount when no Layer has set one yet.
+function assertWithinApprovedCap(uc: any, amt: number) {
+  const prior = uc.approved_amount != null ? Number(uc.approved_amount) : null;
   if (amt > Number(uc.amount)) {
     throw new Error("Approved Amount can't be more than the Claim Amount.");
   }
-
-  await queryDB("UPDATE user_claims SET approved_amount = ? WHERE id = ?", [amt, userClaimId]);
+  if (prior != null && amt > prior + 0.0001) {
+    throw new Error(
+      `Approved Amount can't be more than the \u09f3${prior.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} the previous Layer approved.`
+    );
+  }
 }
 
 // Rejects a User Claim — frees up any referenced check-in/out(s) (a rejected claim
