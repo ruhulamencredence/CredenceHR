@@ -18,6 +18,7 @@ import {
   TemplateFeature,
   applyTemplateToUser,
   canEditUserFeatures,
+  canEditUserModules,
   runBulk,
   setFeatureForUser
 } from '../lib/accessTemplates';
@@ -37,21 +38,27 @@ export function UserBulkBar({ token, selected, templates, viewer, onClear, onDon
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [result, setResult] = useState<{ title: string; r: BulkResult } | null>(null);
 
-  const run = async (title: string, change: (u: User) => Promise<void>) => {
-    const eligible = selected.filter((u) => canEditUserFeatures(u, viewer)).length;
+  const run = async (title: string, change: (u: User) => Promise<void>, canChange: (u: User) => boolean = (u) => canEditUserFeatures(u, viewer)) => {
+    const eligible = selected.filter(canChange).length;
     if (!confirm(`${title} for ${eligible} account${eligible === 1 ? '' : 's'}?`)) return;
     setResult(null);
     setProgress({ done: 0, total: eligible });
-    const r = await runBulk(selected, (u) => canEditUserFeatures(u, viewer), change, (done, total) => setProgress({ done, total }));
+    const r = await runBulk(selected, canChange, change, (done, total) => setProgress({ done, total }));
     setProgress(null);
     setResult({ title, r });
     onDone();
   };
 
+  const bulkFeatures = TEMPLATE_FEATURES.filter((f) => !f.selfService || viewer.canGrantModuleAccess);
   const onFeature = (value: string, on: boolean) => {
     const f = TEMPLATE_FEATURES.find((x) => x.key === value);
     if (!f) return;
-    run(`Turn ${on ? 'on' : 'off'} “${f.label}”`, (u) => setFeatureForUser(token, u, f.key as TemplateFeature, on));
+    // Self Service switches follow the module-grant rule, like modules do.
+    run(
+      `Turn ${on ? 'on' : 'off'} “${f.label}”`,
+      (u) => setFeatureForUser(token, u, f.key as TemplateFeature, on),
+      f.selfService ? (u) => canEditUserModules(u, viewer) : undefined
+    );
   };
 
   const onTemplate = (value: string) => {
@@ -76,7 +83,7 @@ export function UserBulkBar({ token, selected, templates, viewer, onClear, onDon
           <>
             <select value="" onChange={(e) => onFeature(e.target.value, true)} className={selectClass}>
               <option value="">Turn on…</option>
-              {TEMPLATE_FEATURES.map((f) => (
+              {bulkFeatures.map((f) => (
                 <option key={f.key} value={f.key}>
                   {f.label}
                 </option>
@@ -84,7 +91,7 @@ export function UserBulkBar({ token, selected, templates, viewer, onClear, onDon
             </select>
             <select value="" onChange={(e) => onFeature(e.target.value, false)} className={selectClass}>
               <option value="">Turn off…</option>
-              {TEMPLATE_FEATURES.map((f) => (
+              {bulkFeatures.map((f) => (
                 <option key={f.key} value={f.key}>
                   {f.label}
                 </option>

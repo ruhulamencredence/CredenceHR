@@ -16,14 +16,40 @@ export type TemplateFeature =
   | 'can_job_edit'
   | 'can_use_attendance'
   | 'can_use_tracking'
-  | 'can_view_leave_summary';
+  | 'can_view_leave_summary'
+  | SelfServiceFeature;
 
-export const TEMPLATE_FEATURES: { key: TemplateFeature; label: string }[] = [
+// Module Access -> "Also allow …" Self Service switches. Each has its own
+// endpoint (UserManagement.ts) and, like modules, needs module-grant rights.
+export type SelfServiceFeature =
+  | 'can_view_movement_claims'
+  | 'can_view_conveyance_claims'
+  | 'can_view_timesheet'
+  | 'can_view_leave_application'
+  | 'can_view_tasks'
+  | 'can_view_mobile_bill';
+const SELF_SERVICE_ENDPOINT: Record<SelfServiceFeature, string> = {
+  can_view_movement_claims: 'movement-claim-access',
+  can_view_conveyance_claims: 'conveyance-claim-access',
+  can_view_timesheet: 'timesheet-access',
+  can_view_leave_application: 'leave-application-access',
+  can_view_tasks: 'tasks-access',
+  can_view_mobile_bill: 'mobile-bill-access'
+};
+export const isSelfServiceFeature = (f: TemplateFeature): f is SelfServiceFeature => f in SELF_SERVICE_ENDPOINT;
+
+export const TEMPLATE_FEATURES: { key: TemplateFeature; label: string; selfService?: boolean }[] = [
   { key: 'can_use_attendance', label: 'Remote Attendance' },
   { key: 'can_use_tracking', label: 'Live location tracking' },
   { key: 'can_view_leave_summary', label: 'Leave Summary on Dashboard' },
   { key: 'can_edit_delivery_date', label: 'Edit Delivery Date' },
-  { key: 'can_job_edit', label: 'Job Edit' }
+  { key: 'can_job_edit', label: 'Job Edit' },
+  { key: 'can_view_movement_claims', label: 'Movement Claim', selfService: true },
+  { key: 'can_view_conveyance_claims', label: 'Conveyance Bill Claim', selfService: true },
+  { key: 'can_view_timesheet', label: 'Timesheet', selfService: true },
+  { key: 'can_view_leave_application', label: 'Leave Application', selfService: true },
+  { key: 'can_view_tasks', label: 'My Tasks', selfService: true },
+  { key: 'can_view_mobile_bill', label: 'My Mobile SIM', selfService: true }
 ];
 
 export interface AccessTemplate {
@@ -32,6 +58,8 @@ export interface AccessTemplate {
   description: string;
   features: TemplateFeature[];
   modules: string[];
+  // Given to every login Data Import -> Employee Details creates.
+  is_default?: boolean;
 }
 
 export interface AccessViewer {
@@ -64,8 +92,14 @@ async function put(token: string, path: string, body: unknown, templateName?: st
 // Turns on the template's switches and ADDS its modules — nothing the
 // account already has is taken away.
 export async function applyTemplateToUser(token: string, template: AccessTemplate, u: User, viewer: AccessViewer) {
-  if (template.features.length > 0) {
-    await put(token, `/api/users/${u.id}/feature-permissions`, Object.fromEntries(template.features.map((f) => [f, true])), template.name);
+  const basic = template.features.filter((f) => !isSelfServiceFeature(f));
+  if (basic.length > 0) {
+    await put(token, `/api/users/${u.id}/feature-permissions`, Object.fromEntries(basic.map((f) => [f, true])), template.name);
+  }
+  if (canEditUserModules(u, viewer)) {
+    for (const f of template.features.filter(isSelfServiceFeature)) {
+      if (!u[f]) await put(token, `/api/users/${u.id}/${SELF_SERVICE_ENDPOINT[f]}`, { [f]: true }, template.name);
+    }
   }
   if (template.modules.length > 0 && canEditUserModules(u, viewer)) {
     const current = u.module_permissions || [];
@@ -77,7 +111,8 @@ export async function applyTemplateToUser(token: string, template: AccessTemplat
 }
 
 export async function setFeatureForUser(token: string, u: User, feature: TemplateFeature, value: boolean) {
-  await put(token, `/api/users/${u.id}/feature-permissions`, { [feature]: value });
+  if (isSelfServiceFeature(feature)) await put(token, `/api/users/${u.id}/${SELF_SERVICE_ENDPOINT[feature]}`, { [feature]: value });
+  else await put(token, `/api/users/${u.id}/feature-permissions`, { [feature]: value });
 }
 
 export interface BulkResult {
