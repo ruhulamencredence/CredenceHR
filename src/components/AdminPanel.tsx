@@ -4358,6 +4358,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
               user.role === 'superadmin' ||
               (user.module_permission_layers?.tracking?.length ? user.module_permission_layers.tracking.includes('stay_report') : true)
             }
+            canLive={user.role === 'superadmin' || !!user.module_permission_layers?.tracking?.includes('live')}
           />
         </div>
       )}

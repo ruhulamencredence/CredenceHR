@@ -8,12 +8,13 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { Navigation, RefreshCw, Route, X, BatteryMedium, Clock, MapPin, Search, FileDown, FileText, Timer } from 'lucide-react';
+import { Navigation, Radio, RefreshCw, Route, X, BatteryMedium, Clock, MapPin, Search, FileDown, FileText, Timer } from 'lucide-react';
 import { LocationPing } from '../types';
 import { apiUrl } from '../lib/api';
 import { reverseGeocode } from '../lib/reverseGeocode';
 import { TrackingStatusCards } from './TrackingStatusCards';
 import { TrackingStayReport } from './TrackingStayReport';
+import { LiveFollowModal } from './LiveFollowModal';
 import { formatDate } from '../lib/formatDate';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
 import { savePdfCrossPlatform } from '../lib/saveFile';
@@ -44,6 +45,8 @@ interface EmployeeTrackingPanelProps {
   token: string;
   // Module Access -> Employee Tracking -> "Stay Report" layer.
   canStayReport?: boolean;
+  // Module Access -> Employee Tracking -> "Live Follow" layer.
+  canLive?: boolean;
 }
 
 // How often the Live board silently re-fetches while this tab is open — the
@@ -121,7 +124,9 @@ function agoLabel(iso: string): string {
 //    an interval, green pulsing dot if seen within STALE_AFTER_MIN, grey if not.
 //  - Path playback: click a user's row (or "View Path") to instead draw their
 //    full ping history for an optional date range as a connected purple trail.
-export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ token, canStayReport = false }) => {
+export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ token, canStayReport = false, canLive = false }) => {
+  // Live Follow (LiveFollowModal) — who is open, if anyone.
+  const [following, setFollowing] = useState<{ id: number; name: string } | null>(null);
   // Stay Report (TrackingStayReport.tsx) — the tracking module's "Stay Report" layer.
   const [showStay, setShowStay] = useState(false);
   const [live, setLive] = useState<LocationPing[]>([]);
@@ -403,6 +408,14 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {selectedUser && canLive && (
+            <button
+              onClick={() => setFollowing(selectedUser)}
+              className="liquid-glass-button rounded-full flex items-center gap-1.5 px-3.5 py-2 text-sm font-semibold"
+            >
+              <Radio className="w-3.5 h-3.5" /> Live Follow
+            </button>
+          )}
           {selectedUser && (
             <button
               onClick={() => { setSelectedUser(null); setHistory([]); }}
@@ -519,10 +532,19 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
                 const name = p.user_name || 'User';
                 const photoUrl = photoUrls[p.user_id];
                 return (
+                  <div key={p.user_id} className="relative">
+                  {canLive && (
+                    <button
+                      onClick={() => setFollowing({ id: p.user_id, name })}
+                      title={`Follow ${name} live`}
+                      className="absolute right-2.5 top-2 z-10 inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-bold bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200 hover:bg-emerald-100"
+                    >
+                      <Radio className="w-3 h-3" /> Live
+                    </button>
+                  )}
                   <button
-                    key={p.user_id}
                     onClick={() => setSelectedUser({ id: p.user_id, name })}
-                    className={`w-full text-left px-3 py-2.5 hover:bg-slate-50 transition-colors ${isSelected ? 'bg-violet-50' : ''}`}
+                    className={`w-full text-left px-3 py-2.5 hover:bg-slate-50 transition-colors ${canLive ? 'pr-20' : ''} ${isSelected ? 'bg-violet-50' : ''}`}
                   >
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2 min-w-0">
@@ -541,7 +563,7 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
                         </span>
                         <span className="text-sm font-medium text-slate-800 truncate">{name}</span>
                       </div>
-                      <Route className="w-3.5 h-3.5 text-slate-300 shrink-0" />
+                      {!canLive && <Route className="w-3.5 h-3.5 text-slate-300 shrink-0" />}
                     </div>
                     <div className="mt-1 flex items-center gap-3 text-[11px] text-slate-400 pl-8">
                       <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {agoLabel(p.recorded_at)}</span>
@@ -550,12 +572,17 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
                       )}
                     </div>
                   </button>
+                  </div>
                 );
               })
             )}
           </div>
         </div>
       </div>
+
+      {following && canLive && (
+        <LiveFollowModal token={token} userId={following.id} name={following.name} onClose={() => setFollowing(null)} />
+      )}
 
       {/* History report preview — read it on screen, then download the PDF. */}
       {showReport && selectedUser && (

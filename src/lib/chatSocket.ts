@@ -19,6 +19,7 @@
 // SocketIOServer(httpServer, ...)`), so this needs no separate host/port.
 
 import { io, Socket } from 'socket.io-client';
+import { setLiveUntil } from './backgroundTracking';
 
 let socket: Socket | null = null;
 let connectedToken: string | null = null;
@@ -41,6 +42,9 @@ export function connectChatSocket(token: string): Socket {
     reconnectionDelay: 2000,
     reconnectionDelayMax: 15000
   });
+  // Employee Tracking -> Live Follow: an Admin opened this person (or a ride
+  // started) — report location every few seconds until the given time.
+  socket.on('tracking:live', (d: { until: number | null }) => setLiveUntil(d?.until));
   return socket;
 }
 

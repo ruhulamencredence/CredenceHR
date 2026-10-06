@@ -15,6 +15,7 @@ import { registerHolidayRoutes, ensureHolidayCalendarSchema, getHolidayMap } fro
 import { registerAlertRoutes, ensureAlertsSchema, createAlert } from "./Alerts";
 import { registerUserManagementRoutes } from "./UserManagement";
 import { registerConveyanceBillClaimRoutes } from "./ConveyanceBillClaimRoutes";
+import { registerLiveTrackingRoutes } from "./LiveTrackingRoutes";
 import { registerDepartmentsAndBranchesRoutes } from "./DepartmentsAndBranches";
 import { registerServerProfileRoutes, ensureServerProfilesSchema } from "./ServerProfileRoutes";
 import { registerAttendanceRoutes } from "./AttendanceRoutes";
@@ -2107,7 +2108,10 @@ const PERMISSION_LAYER_MODULES = ["departments", "projects", "approvals", "users
 // Employee Tracking's layers: "read" = the live map, history and status
 // cards; "stay_report" = the Stay Report (TrackingStayReport.ts). Both are
 // reading, so an account with Employee Tracking and no saved layers has both.
-const TRACKING_LAYER_KEYS = ["read", "stay_report"] as const;
+const TRACKING_LAYER_KEYS = ["read", "stay_report", "live"] as const;
+// What an account with the tracking module but no saved layers gets — Live
+// Follow ("live") is explicit-only, so it is left out.
+const TRACKING_DEFAULT_LAYERS = ["read", "stay_report"] as const;
 // PEPM Reports uses four of them: Read Only, Edit, Delete/Trash, Permanent Delete
 // — plus its own "Budget Submission Status" (the second report on that page),
 // which, like Permanent Delete, is never part of the no-saved-rows default:
@@ -3407,7 +3411,7 @@ async function startServer() {
   // on for a module is never a silent regression; a Superadmin only actually
   // restricts anything once they explicitly save a narrower set in the
   // Module Access modal.
-  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "stay_report") =>
+  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "stay_report" | "live") =>
     async (req: any, res: any, next: any) => {
       if (!req.user) return res.status(401).json({ error: "Access token required" });
       if (req.user.role === "superadmin") return next();
@@ -3422,7 +3426,7 @@ async function startServer() {
         const effectiveLayers: string[] = grantedLayers.length > 0
           ? grantedLayers
           : moduleKey === "tracking"
-            ? [...TRACKING_LAYER_KEYS]
+            ? [...TRACKING_DEFAULT_LAYERS]
             : PERMISSION_LAYER_KEYS.filter((k) => k !== "permanent_delete");
         if (!effectiveLayers.includes(layer)) {
           return res.status(403).json({ error: "You don't have permission to do this. Ask your Superadmin to grant it." });
@@ -3432,6 +3436,22 @@ async function startServer() {
         res.status(500).json({ error: err.message });
       }
     };
+
+  // Same rule as requireModuleLayer, as a yes/no for a page that shows or
+  // hides a control.
+  const hasModuleLayer = async (user: any, moduleKey: AdminModuleKey, layer: string): Promise<boolean> => {
+    if (!user) return false;
+    if (user.role === "superadmin") return true;
+    if (user.role !== "admin" && user.role !== "user") return false;
+    const modules = await getAdminModules(user.id);
+    if (!modules.includes(moduleKey)) return false;
+    if (!(PERMISSION_LAYER_MODULES as readonly string[]).includes(moduleKey)) return true;
+    const granted = await getModulePermissionLayersForModule(user.id, moduleKey);
+    if (granted.length > 0) return granted.includes(layer);
+    const defaults: readonly string[] =
+      moduleKey === "tracking" ? TRACKING_DEFAULT_LAYERS : PERMISSION_LAYER_KEYS.filter((k) => k !== "permanent_delete");
+    return defaults.includes(layer);
+  };
 
   // Personal Data / profile-photo routes — kept in their own file
   // (profileRoutes.ts) instead of growing this already-huge file further.
@@ -3930,6 +3950,17 @@ async function startServer() {
     }
   };
 
+  // Live Follow (LiveTrackingRoutes.ts) — pushes each ping to whoever is
+  // watching and tells the phone how long to keep pinging every few seconds.
+  const liveTracking = registerLiveTrackingRoutes(app, {
+    authenticateToken,
+    requireAdmin,
+    requireModule,
+    requireModuleLayer,
+    queryDB,
+    getIo: () => liveIo
+  });
+
   app.post("/api/tracking/ping", authenticateToken, requireTrackingAccess, async (req: any, res) => {
     try {
       const lat = Number(req.body.lat);
@@ -3944,7 +3975,8 @@ async function startServer() {
         "INSERT INTO location_pings (user_id, lat, lng, accuracy_m, battery_pct, recorded_at) VALUES (?, ?, ?, ?, ?, ?)",
         [req.user.id, lat, lng, accuracy_m, battery_pct, recorded_at]
       );
-      res.json({ success: true });
+      const live_until = await liveTracking.onPing(Number(req.user.id), { lat, lng, accuracy_m, battery_pct, recorded_at });
+      res.json({ success: true, live_until });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
