@@ -7,7 +7,7 @@
 // HR (Submit for Audit) -> Audit (Approve / Return, Payroll layer
 // "audit_approve") -> Accounts (Pay, layer "accounts_pay"). Shows where the
 // month is, its totals, salaries on hold (left out), the history, and the
-// payment sheet for the bank.
+// payment sheet for the bank, and — once approved — Bank / MFS wise payment vouchers.
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -16,6 +16,7 @@ import { CheckCircle2, ClipboardCheck, FileSpreadsheet, Landmark, Send, Undo2, X
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
 import { confirmDialog } from '../lib/confirmDialog';
+import { PayrollPaymentVouchers } from './PayrollPaymentVouchers';
 
 interface ApprovalState {
   month_year: string;
@@ -237,6 +238,11 @@ export const PayrollApprovalPanel: React.FC<{ token: string; monthYear?: string 
               <p className="text-[11px] text-slate-400 mt-2">While Audit has it, this month's salaries can't be generated, edited or deleted.</p>
             )}
           </div>
+
+          {/* Bank / MFS wise payment vouchers for Accounts (the software doesn't send money). */}
+          {(data.status === 'approved' || data.status === 'paid') && s!.runs > 0 && (
+            <PayrollPaymentVouchers token={token} month={month} paid={data.status === 'paid'} />
+          )}
 
           {/* History */}
           <div className="bg-white rounded-2xl border border-slate-200 p-4">
