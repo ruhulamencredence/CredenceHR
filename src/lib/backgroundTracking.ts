@@ -37,6 +37,7 @@
 
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { apiUrl } from './api';
+import { getLocationConsent } from './locationDisclosure';
 
 interface BGLocation {
   latitude: number;
@@ -221,6 +222,9 @@ export async function startBackgroundTracking(token: string): Promise<void> {
   // plugin (capacitor.config.ts -> ios.includePlugins).
   if (Capacitor.getPlatform() === 'ios') return;
   requestedToken = token;
+  // Never ask Android for location before the person has agreed on the
+  // disclosure screen (src/lib/locationDisclosure.tsx — a Google Play rule).
+  if (getLocationConsent() !== 'accepted') return;
   if (watcherId && currentToken === token) return; // already running for this account
   if (watcherId) await stopBackgroundTracking();
 

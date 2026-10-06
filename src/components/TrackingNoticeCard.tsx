@@ -28,6 +28,7 @@ import {
   requestForegroundLocation,
   restartBackgroundTracking
 } from '../lib/backgroundTracking';
+import { askLocationDisclosure, getLocationConsent } from '../lib/locationDisclosure';
 
 // In the Android app "Set up Now" does steps 1–2 itself.
 const APP_STEPS: { icon: React.ComponentType<{ className?: string }>; title: string; text: string }[] = [
@@ -79,7 +80,9 @@ export const TrackingNoticeCard: React.FC<Props> = ({ notice, remaining, busy, o
   const [working, setWorking] = useState(false);
   // Set after an attempt that came back without "Allow all the time".
   const [stillMissing, setStillMissing] = useState(false);
-  const allSet = !!access && access.foreground && access.background && access.locationOn;
+  // Agreed on the background-location disclosure (asked by Set up Now).
+  const [consented, setConsented] = useState(() => getLocationConsent() === 'accepted');
+  const allSet = !!access && access.foreground && access.background && access.locationOn && consented;
   // "Allow all the time" (and the rest) is on: the card turns into a thank-you.
   const thanked = allSet;
 
@@ -120,8 +123,14 @@ export const TrackingNoticeCard: React.FC<Props> = ({ notice, remaining, busy, o
 
   const setUpNow = async () => {
     if (!isAndroidApp) return onDone();
+    if (allSet) return onDone();
+    // Google Play: the disclosure screen before any location permission prompt.
+    if (!consented) {
+      if (!(await askLocationDisclosure())) return;
+      setConsented(true);
+    }
     if (access === null) return oldApkSetUp();
-    if (!access || allSet) return onDone();
+    if (!access) return onDone();
     setWorking(true);
     try {
       let s: LocationAccessStatus = access;
@@ -158,7 +167,7 @@ export const TrackingNoticeCard: React.FC<Props> = ({ notice, remaining, busy, o
     ? 'OK, I’ll set it up on my phone'
     : allSet
       ? 'Done'
-      : access && access.foreground && access.background && !access.locationOn
+      : consented && access && access.foreground && access.background && !access.locationOn
         ? 'Turn on Location'
         : 'Set up Now';
 
