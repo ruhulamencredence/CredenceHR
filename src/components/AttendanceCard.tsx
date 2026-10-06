@@ -284,7 +284,7 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
     // actual fix for that.
     <div
       style={{ transform: 'translateZ(0)', WebkitTransform: 'translateZ(0)' }}
-      className={`glass-mask-fix relative rounded-[28px] overflow-hidden border border-white/70 p-4 bg-[radial-gradient(90%_70%_at_100%_100%,rgba(127,0,255,0.22)_0%,rgba(127,0,255,0)_70%),radial-gradient(70%_60%_at_0%_100%,rgba(167,90,255,0.16)_0%,rgba(167,90,255,0)_70%),linear-gradient(to_bottom,rgba(255,255,255,1)_0%,rgba(255,255,255,1)_25%,rgba(255,255,255,0.1)_100%)] shadow-[0_16px_40px_-10px_rgba(127,0,255,0.45),inset_0_1px_0_rgba(255,255,255,0.8),inset_0_-18px_36px_-18px_rgba(127,0,255,0.35)] transition-all md:bg-none md:bg-white md:border-slate-200 md:rounded-2xl md:shadow-sm backdrop-blur-[20px] backdrop-saturate-150 md:backdrop-blur-none md:backdrop-saturate-100`}
+      className={`glass-mask-fix relative rounded-[28px] overflow-hidden border border-white/70 p-4 bg-[radial-gradient(90%_70%_at_100%_100%,rgba(127,0,255,0.12)_0%,rgba(127,0,255,0)_70%),radial-gradient(70%_60%_at_0%_100%,rgba(167,90,255,0.09)_0%,rgba(167,90,255,0)_70%),linear-gradient(to_bottom,rgba(255,255,255,1)_0%,rgba(255,255,255,1)_25%,rgba(255,255,255,0.1)_100%)] shadow-[0_16px_40px_-10px_rgba(127,0,255,0.45),inset_0_1px_0_rgba(255,255,255,0.8),inset_0_-18px_36px_-18px_rgba(127,0,255,0.2)] transition-all md:bg-none md:bg-white md:border-slate-200 md:rounded-2xl md:shadow-sm backdrop-blur-[20px] backdrop-saturate-150 md:backdrop-blur-none md:backdrop-saturate-100`}
     >
       {/* The inner tiles below (In Time/Out Time) keep their own bg-white/70
           — that opacity alone reads as a distinct panel even where a
