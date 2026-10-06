@@ -4,7 +4,7 @@ import { Bell, X } from 'lucide-react';
 import { ActiveNotice, User } from '../types';
 import { apiUrl } from '../lib/api';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
-// Loaded only when a tracking notice is shown (it carries the journey
+// Loaded only when a tracking notice is shown (it carries the tracking
 // animation), so it stays out of the main bundle.
 const TrackingNoticeCard = lazy(() => import('./TrackingNoticeCard').then((m) => ({ default: m.TrackingNoticeCard })));
 
