@@ -1,3 +1,4 @@
+import { ColumnFilterMenu, ColumnToggleMenu } from './ColumnFilterMenu';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
@@ -125,11 +126,11 @@ const reportQty = (ent: Entry): string =>
 type ReportColumnFilterKey =
   | 'job_no' | 'job_name' | 'project_name' | 'mpr_no' | 'item_name' | 'specification' | 'qty'
   | 'delivery_from' | 'delivery_to' | 'rate' | 'amount' | 'entry_date' | 'job_duration'
-  | 'category' | 'logged_by' | 'budget';
+  | 'category' | 'logged_by' | 'budget' | 'sub1' | 'sub2' | 'sub3';
 const EMPTY_REPORT_COLUMN_FILTERS: Record<ReportColumnFilterKey, string> = {
   job_no: '', job_name: '', project_name: '', mpr_no: '', item_name: '', specification: '', qty: '',
   delivery_from: '', delivery_to: '', rate: '', amount: '', entry_date: '', job_duration: '',
-  category: '', logged_by: '', budget: ''
+  category: '', logged_by: '', budget: '', sub1: '', sub2: '', sub3: ''
 };
 const reportColumnText = (ent: Entry, key: ReportColumnFilterKey): string => {
   switch (key) {
@@ -148,8 +149,115 @@ const reportColumnText = (ent: Entry, key: ReportColumnFilterKey): string => {
       return [ent.category_head, ent.category_sub1, ent.category_sub2, ent.category_sub3, ent.category_sector].filter(Boolean).join(' ');
     case 'logged_by': return ent.user_name || 'User';
     case 'budget': return ent.budget_name || '';
+    case 'sub1': return ent.category_sub1 || '';
+    case 'sub2': return ent.category_sub2 || '';
+    case 'sub3': return ent.category_sub3 || '';
     default: return '';
   }
+};
+
+// --- Column menus (sort + tick-to-hide values, like Google Sheets) and optional columns ---
+// Every column that has the menu. Values are the text shown in the cell.
+type ReportMenuKey =
+  | 'job_no' | 'job_name' | 'project_name' | 'mpr_no' | 'item_name' | 'specification' | 'qty'
+  | 'delivery_date' | 'rate' | 'amount' | 'entry_date' | 'job_duration' | 'category'
+  | 'sub1' | 'sub2' | 'sub3' | 'logged_by' | 'budget';
+// Columns the user can hide/show from the "Columns" button. Sub-1/2/3 start hidden
+// (the Category column already shows the path); the rest start shown.
+const REPORT_OPTIONAL_COLS: { key: ReportMenuKey; label: string }[] = [
+  { key: 'job_duration', label: 'Duration' },
+  { key: 'logged_by', label: 'Logged By' },
+  { key: 'budget', label: 'Budget' },
+  { key: 'sub1', label: 'Sub-1' },
+  { key: 'sub2', label: 'Sub-2' },
+  { key: 'sub3', label: 'Sub-3' }
+];
+const REPORT_HIDDEN_DEFAULT: string[] = ['sub1', 'sub2', 'sub3'];
+const REPORT_HIDDEN_STORAGE_KEY = 'credence_report_hidden_cols';
+// Relative widths of every column, in table order (shares of whatever is visible).
+const REPORT_COL_WIDTHS: { key: string; w: number }[] = [
+  { key: 'sl', w: 2.34 }, { key: 'job_no', w: 6.33 }, { key: 'job_name', w: 6.33 }, { key: 'project_name', w: 7.43 },
+  { key: 'mpr_no', w: 6.6 }, { key: 'item_name', w: 8.94 }, { key: 'specification', w: 6.33 }, { key: 'qty', w: 4.68 },
+  { key: 'delivery_date', w: 7.7 }, { key: 'rate', w: 4.4 }, { key: 'amount', w: 5.5 }, { key: 'entry_date', w: 5.5 },
+  { key: 'job_duration', w: 4.68 }, { key: 'category', w: 6.19 }, { key: 'sub1', w: 5.5 }, { key: 'sub2', w: 5.5 },
+  { key: 'sub3', w: 5.5 }, { key: 'logged_by', w: 4.81 }, { key: 'budget', w: 5.36 }, { key: 'actions', w: 6.88 }
+];
+const money2 = (n: number) => n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+// The text a cell shows — what the menu lists and what unticking hides.
+const reportCellValue = (ent: Entry, key: ReportMenuKey, subsShown: boolean): string => {
+  switch (key) {
+    case 'job_no': return ent.job_no || '';
+    case 'job_name': return ent.job_name || '';
+    case 'project_name': return ent.project_name || '';
+    case 'mpr_no': return ent.mpr_no || '';
+    case 'item_name': return ent.item_name || '';
+    case 'specification': return ent.specification || '';
+    case 'qty': return reportQty(ent);
+    case 'delivery_date': return formatDate(ent.delivery_date);
+    case 'rate': return ent.matched_rate != null ? money2(Number(ent.matched_rate)) : '';
+    case 'amount': return ent.matched_rate != null ? money2(Number(ent.computed_amount ?? 0)) : '';
+    case 'entry_date': return formatDate(ent.entry_date);
+    case 'job_duration': return ent.job_duration || '';
+    case 'category': {
+      const path = (subsShown ? [ent.category_head] : [ent.category_head, ent.category_sub1, ent.category_sub2, ent.category_sub3]).filter(Boolean).join(' › ');
+      return [path, ent.category_sector].filter(Boolean).join(' · ');
+    }
+    case 'sub1': return ent.category_sub1 || '';
+    case 'sub2': return ent.category_sub2 || '';
+    case 'sub3': return ent.category_sub3 || '';
+    case 'logged_by': return ent.user_name || 'User';
+    case 'budget': return ent.budget_name || '';
+  }
+};
+// What a column sorts by: numbers as numbers, dates by their ISO day, the rest as text. null = blank (always last).
+const reportSortValue = (ent: Entry, key: ReportMenuKey, subsShown: boolean): string | number | null => {
+  switch (key) {
+    case 'qty': {
+      const n = Number(ent.requisitioned_qty ?? parseFloat(String(ent.req_qty || '')));
+      return Number.isFinite(n) ? n : null;
+    }
+    case 'rate': return ent.matched_rate != null ? Number(ent.matched_rate) : null;
+    case 'amount': return ent.matched_rate != null ? Number(ent.computed_amount ?? 0) : null;
+    case 'delivery_date': return String(ent.delivery_date || '').slice(0, 10) || null;
+    case 'entry_date': return String(ent.entry_date || '').slice(0, 10) || null;
+    default: return reportCellValue(ent, key, subsShown) || null;
+  }
+};
+const compareReportEntries = (a: Entry, b: Entry, key: ReportMenuKey, dir: 'asc' | 'desc', subsShown: boolean): number => {
+  const x = reportSortValue(a, key, subsShown);
+  const y = reportSortValue(b, key, subsShown);
+  if (x === null && y === null) return 0;
+  if (x === null) return 1;
+  if (y === null) return -1;
+  const c = typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y), undefined, { numeric: true, sensitivity: 'base' });
+  return dir === 'asc' ? c : -c;
+};
+interface ReportFilterCtx {
+  text: (readonly [ReportColumnFilterKey, string])[];
+  from: string;
+  to: string;
+  jobNo: string;
+  projectId: string;
+  start: string;
+  end: string;
+  budgetId: string;
+  excluded: (readonly [ReportMenuKey, Set<string>])[];
+  subsShown: boolean;
+}
+// Whether an entry passes every filter — `except` leaves out one column's own tick-list,
+// so that column's menu can still list (and re-tick) the values it has hidden.
+const reportEntryPasses = (ent: Entry, c: ReportFilterCtx, except?: ReportMenuKey): boolean => {
+  for (const [k, q] of c.text) if (!String(reportColumnText(ent, k) || '').toLowerCase().includes(q)) return false;
+  const delivery = String(ent.delivery_date || '').slice(0, 10);
+  if (c.from && (!delivery || delivery < c.from)) return false;
+  if (c.to && (!delivery || delivery > c.to)) return false;
+  if (c.jobNo && !String(ent.job_no || '').toLowerCase().includes(c.jobNo.toLowerCase())) return false;
+  if (c.projectId && ent.project_id.toString() !== c.projectId) return false;
+  if (c.start && !(ent.entry_date >= c.start)) return false;
+  if (c.end && !(ent.entry_date <= c.end)) return false;
+  if (c.budgetId && String(ent.budget_id ?? '') !== c.budgetId) return false;
+  for (const [k, set] of c.excluded) if (k !== except && set.has(reportCellValue(ent, k, c.subsShown))) return false;
+  return true;
 };
 
 // Purely presentational, read-only row — memoized so that typing in the report
@@ -164,10 +272,13 @@ const ReportRow = React.memo(function ReportRow({
   onPermanentDelete,
   can,
   deletingEntryId,
-  sl
+  sl,
+  hidden
 }: {
   ent: Entry;
   sl: number;
+  // Optional columns turned off with the "Columns" button.
+  hidden: ReadonlySet<string>;
   onOpenHistory: (entryId: number) => void;
   onDelete: (entryId: number) => void;
   onEdit: (ent: Entry) => void;
@@ -177,7 +288,9 @@ const ReportRow = React.memo(function ReportRow({
   deletingEntryId: number | null;
 }) {
   const dash = <span className="text-slate-300">—</span>;
-  const categoryPath = [ent.category_head, ent.category_sub1, ent.category_sub2, ent.category_sub3].filter(Boolean);
+  const subsShown = !hidden.has('sub1') || !hidden.has('sub2') || !hidden.has('sub3');
+  // With Sub-1/2/3 columns on, the Category cell keeps just the Head so nothing shows twice.
+  const categoryPath = (subsShown ? [ent.category_head] : [ent.category_head, ent.category_sub1, ent.category_sub2, ent.category_sub3]).filter(Boolean);
   return (
     <tr className="odd:bg-white even:bg-slate-50/70 hover:bg-blue-50/50 transition-colors">
       <td className="px-1.5 py-1.5 border border-slate-200 align-top text-right text-slate-500 tabular-nums">{sl}.</td>
@@ -215,7 +328,7 @@ const ReportRow = React.memo(function ReportRow({
         )}
       </td>
       <td className="px-1.5 py-1.5 border border-slate-200 align-top whitespace-nowrap text-slate-600">{formatDate(ent.entry_date)}</td>
-      <td className="px-1.5 py-1.5 border border-slate-200 align-top text-center text-slate-600">{ent.job_duration || dash}</td>
+      {!hidden.has('job_duration') && <td className="px-1.5 py-1.5 border border-slate-200 align-top text-center text-slate-600">{ent.job_duration || dash}</td>}
       <td className="px-1.5 py-1.5 border border-slate-200 align-top text-slate-600 truncate" title={[categoryPath.join(' › '), ent.category_sector ? `Sector: ${ent.category_sector}` : ''].filter(Boolean).join(' · ')}>
         {categoryPath.length ? (
           <span>{categoryPath.join(' › ')}</span>
@@ -226,8 +339,15 @@ const ReportRow = React.memo(function ReportRow({
         )}
         {ent.category_sector && <span className="text-slate-400"> · {ent.category_sector}</span>}
       </td>
-      <td className="px-1.5 py-1.5 border border-slate-200 align-top text-slate-500" title={ent.user_name || 'User'}><div className="line-clamp-2 break-words">{ent.user_name || 'User'}</div></td>
-      <td className="px-1.5 py-1.5 border border-slate-200 align-top text-blue-700 truncate" title={ent.budget_name || ''}>{ent.budget_name || dash}</td>
+      {(['sub1', 'sub2', 'sub3'] as const).map((k, i) =>
+        hidden.has(k) ? null : (
+          <td key={k} className="px-1.5 py-1.5 border border-slate-200 align-top text-slate-600" title={[ent.category_sub1, ent.category_sub2, ent.category_sub3][i] || ''}>
+            <div className="line-clamp-2 break-words">{[ent.category_sub1, ent.category_sub2, ent.category_sub3][i] || dash}</div>
+          </td>
+        )
+      )}
+      {!hidden.has('logged_by') && <td className="px-1.5 py-1.5 border border-slate-200 align-top text-slate-500" title={ent.user_name || 'User'}><div className="line-clamp-2 break-words">{ent.user_name || 'User'}</div></td>}
+      {!hidden.has('budget') && <td className="px-1.5 py-1.5 border border-slate-200 align-top text-blue-700 truncate" title={ent.budget_name || ''}>{ent.budget_name || dash}</td>}
       <td className="px-1.5 py-1.5 border border-slate-200 align-top">
         <div className="flex items-center justify-center">
           <button
@@ -3179,30 +3299,72 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [reportColFilters, setReportColFilters] = useState(EMPTY_REPORT_COLUMN_FILTERS);
   const deferredReportColFilters = React.useDeferredValue(reportColFilters);
   const setReportColFilter = (key: ReportColumnFilterKey, value: string) => setReportColFilters((f) => ({ ...f, [key]: value }));
-  const hasReportColFilter = Object.values(reportColFilters).some((v) => v.trim() !== '');
+  const hasReportColFilterText = Object.values(reportColFilters).some((v) => v.trim() !== '');
   const reportItemNameOptions = React.useMemo(
     () => [...new Set(entries.map((e) => String(e.item_name || '').trim()).filter(Boolean))].sort(),
     [entries]
   );
-  const filteredEntries = React.useMemo(() => {
-    const textFilters = (Object.keys(deferredReportColFilters) as ReportColumnFilterKey[])
-      .filter((k) => k !== 'delivery_from' && k !== 'delivery_to' && deferredReportColFilters[k].trim() !== '')
-      .map((k) => [k, deferredReportColFilters[k].trim().toLowerCase()] as const);
-    const deliveryFrom = deferredReportColFilters.delivery_from;
-    const deliveryTo = deferredReportColFilters.delivery_to;
-    return entries.filter((ent) => {
-    for (const [k, q] of textFilters) if (!String(reportColumnText(ent, k) || '').toLowerCase().includes(q)) return false;
-    const delivery = String(ent.delivery_date || '').slice(0, 10);
-    if (deliveryFrom && (!delivery || delivery < deliveryFrom)) return false;
-    if (deliveryTo && (!delivery || delivery > deliveryTo)) return false;
-    const matchJob = deferredFilterJobNo ? String(ent.job_no || '').toLowerCase().includes(deferredFilterJobNo.toLowerCase()) : true;
-    const matchProj = filterProjectId ? ent.project_id.toString() === filterProjectId : true;
-    const matchStart = filterStartDate ? ent.entry_date >= filterStartDate : true;
-    const matchEnd = filterEndDate ? ent.entry_date <= filterEndDate : true;
-    const matchBudget = filterBudgetId ? String(ent.budget_id ?? '') === filterBudgetId : true;
-    return matchJob && matchProj && matchStart && matchEnd && matchBudget;
+  // Column menus: values unticked per column (hidden rows), and the active sort.
+  const [reportExcluded, setReportExcluded] = useState<Partial<Record<ReportMenuKey, string[]>>>({});
+  const deferredReportExcluded = React.useDeferredValue(reportExcluded);
+  const [reportSort, setReportSort] = useState<{ key: ReportMenuKey; dir: 'asc' | 'desc' } | null>(null);
+  // Optional columns turned off ("Columns" button) — remembered on this device.
+  const [reportHidden, setReportHidden] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem(REPORT_HIDDEN_STORAGE_KEY);
+      const v = raw ? JSON.parse(raw) : null;
+      return Array.isArray(v) ? v.filter((k) => typeof k === 'string') : REPORT_HIDDEN_DEFAULT;
+    } catch {
+      return REPORT_HIDDEN_DEFAULT;
+    }
   });
-  }, [entries, deferredReportColFilters, deferredFilterJobNo, filterProjectId, filterStartDate, filterEndDate, filterBudgetId]);
+  const reportHiddenSet = React.useMemo(() => new Set(reportHidden), [reportHidden]);
+  const changeReportHidden = (next: string[]) => {
+    setReportHidden(next);
+    try {
+      localStorage.setItem(REPORT_HIDDEN_STORAGE_KEY, JSON.stringify(next));
+    } catch {
+      // Storage blocked — the choice just isn't remembered.
+    }
+  };
+  const reportSubsShown = !reportHiddenSet.has('sub1') || !reportHiddenSet.has('sub2') || !reportHiddenSet.has('sub3');
+  const hasReportExcluded = Object.values(reportExcluded).some((v) => (v || []).length > 0);
+  const hasReportColFilter = hasReportColFilterText || hasReportExcluded;
+  const buildReportFilterCtx = (cols: typeof reportColFilters, jobNo: string, excluded: typeof reportExcluded): ReportFilterCtx => ({
+    text: (Object.keys(cols) as ReportColumnFilterKey[])
+      .filter((k) => k !== 'delivery_from' && k !== 'delivery_to' && cols[k].trim() !== '')
+      .map((k) => [k, cols[k].trim().toLowerCase()] as const),
+    from: cols.delivery_from,
+    to: cols.delivery_to,
+    jobNo,
+    projectId: filterProjectId,
+    start: filterStartDate,
+    end: filterEndDate,
+    budgetId: filterBudgetId,
+    excluded: (Object.keys(excluded) as ReportMenuKey[]).filter((k) => (excluded[k] || []).length > 0).map((k) => [k, new Set(excluded[k])] as const),
+    subsShown: reportSubsShown
+  });
+  const filteredEntries = React.useMemo(() => {
+    const ctx = buildReportFilterCtx(deferredReportColFilters, deferredFilterJobNo, deferredReportExcluded);
+    const list = entries.filter((ent) => reportEntryPasses(ent, ctx));
+    if (!reportSort) return list;
+    return list.sort((a, b) => compareReportEntries(a, b, reportSort.key, reportSort.dir, reportSubsShown));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entries, deferredReportColFilters, deferredReportExcluded, reportSort, reportSubsShown, deferredFilterJobNo, filterProjectId, filterStartDate, filterEndDate, filterBudgetId]);
+  // What a column's menu offers: its values among the rows every OTHER filter leaves.
+  const reportMenuValues = (key: ReportMenuKey): string[] => {
+    const ctx = buildReportFilterCtx(reportColFilters, filterJobNo, reportExcluded);
+    const probe = entries.filter((ent) => reportEntryPasses(ent, ctx, key));
+    const sample = new Map<string, Entry>();
+    for (const ent of probe) {
+      const v = reportCellValue(ent, key, reportSubsShown);
+      if (!sample.has(v)) sample.set(v, ent);
+    }
+    // A hidden value no longer in the rows still gets listed (so it can be re-ticked).
+    return [...sample.entries()]
+      .sort((a, b) => compareReportEntries(a[1], b[1], key, 'asc', reportSubsShown))
+      .map(([v]) => v);
+  };
 
   // The report table shows one page at a time — mounting every entry at once
   // made the Reports tab slow. Excel export still takes every matching entry.
@@ -3296,6 +3458,31 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // Submission Status (BudgetSubmissionReport).
   const [reportView, setReportView] = useState<'entries' | 'submission'>('entries');
 
+  // A header cell: the label plus its sort/filter menu.
+  const reportHeaderCell = (key: ReportMenuKey, label: string, align: 'left' | 'right' | 'center') => (
+    <th key={key} className="px-1.5 py-2 border border-slate-200 font-semibold text-slate-700 align-bottom">
+      <div className={`flex items-center gap-1 ${align === 'right' ? 'justify-end' : align === 'center' ? 'justify-center' : 'justify-start'}`}>
+        <span className="truncate">{label}</span>
+        <ColumnFilterMenu
+          label={label}
+          getValues={() => reportMenuValues(key)}
+          excluded={reportExcluded[key] || []}
+          sortDir={reportSort?.key === key ? reportSort.dir : null}
+          onSort={(dir) => setReportSort(dir ? { key, dir } : null)}
+          onChange={(ex) => setReportExcluded((prev) => ({ ...prev, [key]: ex }))}
+        />
+      </div>
+    </th>
+  );
+  const reportFilterInput = (key: ReportColumnFilterKey, label: string) => (
+    <th key={key} className="px-1.5 py-1 border border-slate-200 bg-white">
+      <input type="text" aria-label={`Filter ${label}`} value={reportColFilters[key]} onChange={(e) => setReportColFilter(key, e.target.value)} placeholder="Filter..." className="w-full min-w-0 px-1.5 py-1 bg-white border border-slate-300 rounded text-slate-700 text-[10px] font-normal focus:ring-1 focus:ring-blue-600 focus:border-blue-600 focus:outline-none placeholder-slate-400" />
+    </th>
+  );
+  // Columns on screen, in order — drives the widths and the footer spans.
+  const reportVisibleCols = REPORT_COL_WIDTHS.filter((c) => !reportHiddenSet.has(c.key));
+  const reportWidthTotal = reportVisibleCols.reduce((n, c) => n + c.w, 0);
+
   const handleDownloadExcel = () => {
     const rows = filteredEntries.map((ent) => ({
       'Job No': ent.job_no,
@@ -3305,7 +3492,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       'Description of Material': ent.item_name,
       Specification: ent.specification || '',
       Qty: reportQty(ent),
-      'Delivery Date': ent.delivery_date,
+      'Delivery Date': formatDate(ent.delivery_date),
       Rate: ent.matched_rate != null ? Number(ent.matched_rate) : '',
       Amount: ent.matched_rate != null ? Number(ent.computed_amount ?? 0) : '',
       'Entry Date': ent.entry_date,
@@ -3516,10 +3703,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
               </div>
             </div>
 
-            {(filterJobNo || filterProjectId || filterStartDate || filterEndDate || filterBudgetId) && (
+            {(filterJobNo || filterProjectId || filterStartDate || filterEndDate || filterBudgetId || hasReportColFilter || reportSort) && (
               <div className="mt-4 flex justify-end">
                 <button
-                  onClick={() => { setFilterJobNo(''); setFilterProjectId(''); setFilterStartDate(''); setFilterEndDate(''); setFilterBudgetId(''); setReportColFilters(EMPTY_REPORT_COLUMN_FILTERS); }}
+                  onClick={() => { setFilterJobNo(''); setFilterProjectId(''); setFilterStartDate(''); setFilterEndDate(''); setFilterBudgetId(''); setReportColFilters(EMPTY_REPORT_COLUMN_FILTERS); setReportExcluded({}); setReportSort(null); }}
                   className="text-xs text-blue-600 hover:underline font-medium"
                 >
                   Clear Filters
@@ -3535,6 +3722,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 <h3 className="text-lg font-bold text-slate-900">All MPR Entries Report</h3>
                 <p className="text-xs text-slate-500">Showing {filteredEntries.length} matching records</p>
               </div>
+              <div className="flex items-center gap-2">
+              <ColumnToggleMenu options={REPORT_OPTIONAL_COLS} hidden={reportHidden} onChange={changeReportHidden} />
               <button
                 onClick={handleDownloadExcel}
                 disabled={filteredEntries.length === 0}
@@ -3543,63 +3732,45 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 <Download className="w-3.5 h-3.5" />
                 Download Excel
               </button>
+              </div>
             </div>
 
             <div className="overflow-auto max-h-[75vh]">
               <table className="w-full min-w-[1280px] table-fixed border-collapse text-[11px] leading-snug">
                 <colgroup>
-                  <col style={{ width: '2.34%' }} />
-                  <col style={{ width: '6.33%' }} />
-                  <col style={{ width: '6.33%' }} />
-                  <col style={{ width: '7.43%' }} />
-                  <col style={{ width: '6.60%' }} />
-                  <col style={{ width: '8.94%' }} />
-                  <col style={{ width: '6.33%' }} />
-                  <col style={{ width: '4.68%' }} />
-                  <col style={{ width: '7.70%' }} />
-                  <col style={{ width: '4.40%' }} />
-                  <col style={{ width: '5.50%' }} />
-                  <col style={{ width: '5.50%' }} />
-                  <col style={{ width: '4.68%' }} />
-                  <col style={{ width: '6.19%' }} />
-                  <col style={{ width: '4.81%' }} />
-                  <col style={{ width: '5.36%' }} />
-                  <col style={{ width: '6.88%' }} />
+                  {reportVisibleCols.map((c) => (
+                    <col key={c.key} style={{ width: `${((c.w / reportWidthTotal) * 100).toFixed(2)}%` }} />
+                  ))}
                 </colgroup>
                 <thead className="sticky top-0 z-10 bg-blue-50">
                   <tr>
                     <th className="px-1.5 py-2 border border-slate-200 font-semibold text-slate-700 align-bottom text-right">Sl</th>
-                    <th className="px-1.5 py-2 border border-slate-200 font-semibold text-slate-700 align-bottom text-left">Job No</th>
-                    <th className="px-1.5 py-2 border border-slate-200 font-semibold text-slate-700 align-bottom text-left">Job Name</th>
-                    <th className="px-1.5 py-2 border border-slate-200 font-semibold text-slate-700 align-bottom text-left">Project Name</th>
-                    <th className="px-1.5 py-2 border border-slate-200 font-semibold text-slate-700 align-bottom text-left">MPR No</th>
-                    <th className="px-1.5 py-2 border border-slate-200 font-semibold text-slate-700 align-bottom text-left">Description of Material</th>
-                    <th className="px-1.5 py-2 border border-slate-200 font-semibold text-slate-700 align-bottom text-left">Specification</th>
-                    <th className="px-1.5 py-2 border border-slate-200 font-semibold text-slate-700 align-bottom text-right">Qty</th>
-                    <th className="px-1.5 py-2 border border-slate-200 font-semibold text-slate-700 align-bottom text-left">Delivery Date</th>
-                    <th className="px-1.5 py-2 border border-slate-200 font-semibold text-slate-700 align-bottom text-right">Rate</th>
-                    <th className="px-1.5 py-2 border border-slate-200 font-semibold text-slate-700 align-bottom text-right">Amount</th>
-                    <th className="px-1.5 py-2 border border-slate-200 font-semibold text-slate-700 align-bottom text-left">Entry Date</th>
-                    <th className="px-1.5 py-2 border border-slate-200 font-semibold text-slate-700 align-bottom text-center">Duration</th>
-                    <th className="px-1.5 py-2 border border-slate-200 font-semibold text-slate-700 align-bottom text-left">Category / Sector</th>
-                    <th className="px-1.5 py-2 border border-slate-200 font-semibold text-slate-700 align-bottom text-left">Logged By</th>
-                    <th className="px-1.5 py-2 border border-slate-200 font-semibold text-slate-700 align-bottom text-left">Budget</th>
+                    {reportHeaderCell('job_no', 'Job No', 'left')}
+                    {reportHeaderCell('job_name', 'Job Name', 'left')}
+                    {reportHeaderCell('project_name', 'Project Name', 'left')}
+                    {reportHeaderCell('mpr_no', 'MPR No', 'left')}
+                    {reportHeaderCell('item_name', 'Description of Material', 'left')}
+                    {reportHeaderCell('specification', 'Specification', 'left')}
+                    {reportHeaderCell('qty', 'Qty', 'right')}
+                    {reportHeaderCell('delivery_date', 'Delivery Date', 'left')}
+                    {reportHeaderCell('rate', 'Rate', 'right')}
+                    {reportHeaderCell('amount', 'Amount', 'right')}
+                    {reportHeaderCell('entry_date', 'Entry Date', 'left')}
+                    {!reportHiddenSet.has('job_duration') && reportHeaderCell('job_duration', 'Duration', 'center')}
+                    {reportHeaderCell('category', 'Category / Sector', 'left')}
+                    {!reportHiddenSet.has('sub1') && reportHeaderCell('sub1', 'Sub-1', 'left')}
+                    {!reportHiddenSet.has('sub2') && reportHeaderCell('sub2', 'Sub-2', 'left')}
+                    {!reportHiddenSet.has('sub3') && reportHeaderCell('sub3', 'Sub-3', 'left')}
+                    {!reportHiddenSet.has('logged_by') && reportHeaderCell('logged_by', 'Logged By', 'left')}
+                    {!reportHiddenSet.has('budget') && reportHeaderCell('budget', 'Budget', 'left')}
                     <th className="px-1.5 py-2 border border-slate-200 font-semibold text-slate-700 align-bottom text-center">Actions</th>
                   </tr>
                   <tr>
                     <th className="px-1.5 py-1 border border-slate-200 bg-white"></th>
-                    <th className="px-1.5 py-1 border border-slate-200 bg-white">
-                      <input type="text" aria-label="Filter Job No" value={reportColFilters.job_no} onChange={(e) => setReportColFilter('job_no', e.target.value)} placeholder="Filter..." className="w-full min-w-0 px-1.5 py-1 bg-white border border-slate-300 rounded text-slate-700 text-[10px] font-normal focus:ring-1 focus:ring-blue-600 focus:border-blue-600 focus:outline-none placeholder-slate-400" />
-                    </th>
-                    <th className="px-1.5 py-1 border border-slate-200 bg-white">
-                      <input type="text" aria-label="Filter Job Name" value={reportColFilters.job_name} onChange={(e) => setReportColFilter('job_name', e.target.value)} placeholder="Filter..." className="w-full min-w-0 px-1.5 py-1 bg-white border border-slate-300 rounded text-slate-700 text-[10px] font-normal focus:ring-1 focus:ring-blue-600 focus:border-blue-600 focus:outline-none placeholder-slate-400" />
-                    </th>
-                    <th className="px-1.5 py-1 border border-slate-200 bg-white">
-                      <input type="text" aria-label="Filter Project Name" value={reportColFilters.project_name} onChange={(e) => setReportColFilter('project_name', e.target.value)} placeholder="Filter..." className="w-full min-w-0 px-1.5 py-1 bg-white border border-slate-300 rounded text-slate-700 text-[10px] font-normal focus:ring-1 focus:ring-blue-600 focus:border-blue-600 focus:outline-none placeholder-slate-400" />
-                    </th>
-                    <th className="px-1.5 py-1 border border-slate-200 bg-white">
-                      <input type="text" aria-label="Filter MPR No" value={reportColFilters.mpr_no} onChange={(e) => setReportColFilter('mpr_no', e.target.value)} placeholder="Filter..." className="w-full min-w-0 px-1.5 py-1 bg-white border border-slate-300 rounded text-slate-700 text-[10px] font-normal focus:ring-1 focus:ring-blue-600 focus:border-blue-600 focus:outline-none placeholder-slate-400" />
-                    </th>
+                    {reportFilterInput('job_no', 'Job No')}
+                    {reportFilterInput('job_name', 'Job Name')}
+                    {reportFilterInput('project_name', 'Project Name')}
+                    {reportFilterInput('mpr_no', 'MPR No')}
                     <th className="px-1.5 py-1 border border-slate-200 bg-white">
                       <input type="text" list="report-item-name-options" aria-label="Filter Description of Material" value={reportColFilters.item_name} onChange={(e) => setReportColFilter('item_name', e.target.value)} placeholder="Type or select..." className="w-full min-w-0 px-1.5 py-1 bg-white border border-slate-300 rounded text-slate-700 text-[10px] font-normal focus:ring-1 focus:ring-blue-600 focus:border-blue-600 focus:outline-none placeholder-slate-400" />
                       <datalist id="report-item-name-options">
@@ -3608,42 +3779,27 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                         ))}
                       </datalist>
                     </th>
-                    <th className="px-1.5 py-1 border border-slate-200 bg-white">
-                      <input type="text" aria-label="Filter Specification" value={reportColFilters.specification} onChange={(e) => setReportColFilter('specification', e.target.value)} placeholder="Filter..." className="w-full min-w-0 px-1.5 py-1 bg-white border border-slate-300 rounded text-slate-700 text-[10px] font-normal focus:ring-1 focus:ring-blue-600 focus:border-blue-600 focus:outline-none placeholder-slate-400" />
-                    </th>
-                    <th className="px-1.5 py-1 border border-slate-200 bg-white">
-                      <input type="text" aria-label="Filter Qty" value={reportColFilters.qty} onChange={(e) => setReportColFilter('qty', e.target.value)} placeholder="Filter..." className="w-full min-w-0 px-1.5 py-1 bg-white border border-slate-300 rounded text-slate-700 text-[10px] font-normal focus:ring-1 focus:ring-blue-600 focus:border-blue-600 focus:outline-none placeholder-slate-400" />
-                    </th>
+                    {reportFilterInput('specification', 'Specification')}
+                    {reportFilterInput('qty', 'Qty')}
                     <th className="px-1.5 py-1 border border-slate-200 bg-white">
                       <div className="flex flex-col gap-0.5">
                         <input type="date" aria-label="Delivery Date from" title="From" value={reportColFilters.delivery_from} onChange={(e) => setReportColFilter('delivery_from', e.target.value)} className="w-full min-w-0 px-1.5 py-1 bg-white border border-slate-300 rounded text-slate-700 text-[10px] font-normal focus:ring-1 focus:ring-blue-600 focus:border-blue-600 focus:outline-none placeholder-slate-400" />
                         <input type="date" aria-label="Delivery Date to" title="To" value={reportColFilters.delivery_to} onChange={(e) => setReportColFilter('delivery_to', e.target.value)} className="w-full min-w-0 px-1.5 py-1 bg-white border border-slate-300 rounded text-slate-700 text-[10px] font-normal focus:ring-1 focus:ring-blue-600 focus:border-blue-600 focus:outline-none placeholder-slate-400" />
                       </div>
                     </th>
-                    <th className="px-1.5 py-1 border border-slate-200 bg-white">
-                      <input type="text" aria-label="Filter Rate" value={reportColFilters.rate} onChange={(e) => setReportColFilter('rate', e.target.value)} placeholder="Filter..." className="w-full min-w-0 px-1.5 py-1 bg-white border border-slate-300 rounded text-slate-700 text-[10px] font-normal focus:ring-1 focus:ring-blue-600 focus:border-blue-600 focus:outline-none placeholder-slate-400" />
-                    </th>
-                    <th className="px-1.5 py-1 border border-slate-200 bg-white">
-                      <input type="text" aria-label="Filter Amount" value={reportColFilters.amount} onChange={(e) => setReportColFilter('amount', e.target.value)} placeholder="Filter..." className="w-full min-w-0 px-1.5 py-1 bg-white border border-slate-300 rounded text-slate-700 text-[10px] font-normal focus:ring-1 focus:ring-blue-600 focus:border-blue-600 focus:outline-none placeholder-slate-400" />
-                    </th>
-                    <th className="px-1.5 py-1 border border-slate-200 bg-white">
-                      <input type="text" aria-label="Filter Entry Date" value={reportColFilters.entry_date} onChange={(e) => setReportColFilter('entry_date', e.target.value)} placeholder="Filter..." className="w-full min-w-0 px-1.5 py-1 bg-white border border-slate-300 rounded text-slate-700 text-[10px] font-normal focus:ring-1 focus:ring-blue-600 focus:border-blue-600 focus:outline-none placeholder-slate-400" />
-                    </th>
-                    <th className="px-1.5 py-1 border border-slate-200 bg-white">
-                      <input type="text" aria-label="Filter Duration" value={reportColFilters.job_duration} onChange={(e) => setReportColFilter('job_duration', e.target.value)} placeholder="Filter..." className="w-full min-w-0 px-1.5 py-1 bg-white border border-slate-300 rounded text-slate-700 text-[10px] font-normal focus:ring-1 focus:ring-blue-600 focus:border-blue-600 focus:outline-none placeholder-slate-400" />
-                    </th>
-                    <th className="px-1.5 py-1 border border-slate-200 bg-white">
-                      <input type="text" aria-label="Filter Category" value={reportColFilters.category} onChange={(e) => setReportColFilter('category', e.target.value)} placeholder="Filter..." className="w-full min-w-0 px-1.5 py-1 bg-white border border-slate-300 rounded text-slate-700 text-[10px] font-normal focus:ring-1 focus:ring-blue-600 focus:border-blue-600 focus:outline-none placeholder-slate-400" />
-                    </th>
-                    <th className="px-1.5 py-1 border border-slate-200 bg-white">
-                      <input type="text" aria-label="Filter Logged By" value={reportColFilters.logged_by} onChange={(e) => setReportColFilter('logged_by', e.target.value)} placeholder="Filter..." className="w-full min-w-0 px-1.5 py-1 bg-white border border-slate-300 rounded text-slate-700 text-[10px] font-normal focus:ring-1 focus:ring-blue-600 focus:border-blue-600 focus:outline-none placeholder-slate-400" />
-                    </th>
-                    <th className="px-1.5 py-1 border border-slate-200 bg-white">
-                      <input type="text" aria-label="Filter Budget" value={reportColFilters.budget} onChange={(e) => setReportColFilter('budget', e.target.value)} placeholder="Filter..." className="w-full min-w-0 px-1.5 py-1 bg-white border border-slate-300 rounded text-slate-700 text-[10px] font-normal focus:ring-1 focus:ring-blue-600 focus:border-blue-600 focus:outline-none placeholder-slate-400" />
-                    </th>
+                    {reportFilterInput('rate', 'Rate')}
+                    {reportFilterInput('amount', 'Amount')}
+                    {reportFilterInput('entry_date', 'Entry Date')}
+                    {!reportHiddenSet.has('job_duration') && reportFilterInput('job_duration', 'Duration')}
+                    {reportFilterInput('category', 'Category')}
+                    {!reportHiddenSet.has('sub1') && reportFilterInput('sub1', 'Sub-1')}
+                    {!reportHiddenSet.has('sub2') && reportFilterInput('sub2', 'Sub-2')}
+                    {!reportHiddenSet.has('sub3') && reportFilterInput('sub3', 'Sub-3')}
+                    {!reportHiddenSet.has('logged_by') && reportFilterInput('logged_by', 'Logged By')}
+                    {!reportHiddenSet.has('budget') && reportFilterInput('budget', 'Budget')}
                     <th className="px-1.5 py-1 border border-slate-200 bg-white text-center">
-                      {hasReportColFilter && (
-                        <button type="button" onClick={() => setReportColFilters(EMPTY_REPORT_COLUMN_FILTERS)} className="text-[10px] font-semibold text-blue-600 hover:text-blue-800">
+                      {(hasReportColFilter || reportSort) && (
+                        <button type="button" onClick={() => { setReportColFilters(EMPTY_REPORT_COLUMN_FILTERS); setReportExcluded({}); setReportSort(null); }} className="text-[10px] font-semibold text-blue-600 hover:text-blue-800">
                           Clear
                         </button>
                       )}
@@ -3653,7 +3809,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 <tbody>
                   {filteredEntries.length === 0 ? (
                     <tr>
-                      <td colSpan={17} className="px-6 py-12 text-center text-slate-400 border border-slate-200">
+                      <td colSpan={reportVisibleCols.length} className="px-6 py-12 text-center text-slate-400 border border-slate-200">
                         No entries found matching the filter criteria.
                       </td>
                     </tr>
@@ -3669,6 +3825,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                         onPermanentDelete={stablePermanentDeleteReportEntry}
                         can={reportCan}
                         deletingEntryId={deletingEntryId}
+                        hidden={reportHiddenSet}
                       />
                     ))
                   )}
@@ -3682,7 +3839,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                       <td className="px-2 py-2 border border-slate-200 text-right tabular-nums">{reportTotals.qty.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
                       <td colSpan={2} className="px-2 py-2 border border-slate-200"></td>
                       <td className="px-2 py-2 border border-slate-200 text-right tabular-nums">{reportTotals.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                      <td colSpan={6} className="px-2 py-2 border border-slate-200"></td>
+                      <td colSpan={Math.max(1, reportVisibleCols.length - 11)} className="px-2 py-2 border border-slate-200"></td>
                     </tr>
                   </tfoot>
                 )}
