@@ -15,6 +15,7 @@ import { registerHolidayRoutes, ensureHolidayCalendarSchema } from "./holidayRou
 import { registerAlertRoutes, ensureAlertsSchema, createAlert } from "./Alerts";
 import { registerUserManagementRoutes } from "./UserManagement";
 import { registerConveyanceBillClaimRoutes, disburseConveyanceBill } from "./ConveyanceBillClaimRoutes";
+import { registerLiveTrackingRoutes } from "./LiveTrackingRoutes";
 import { registerDepartmentsAndBranchesRoutes } from "./DepartmentsAndBranches";
 import { registerAttendanceRoutes } from "./AttendanceRoutes";
 import { registerApprovalRoutes } from "./ApprovalRoutes";
@@ -2444,7 +2445,10 @@ const PERMISSION_LAYER_MODULES = ["departments", "projects", "approvals", "users
 // Employee Tracking's layers: "read" = the live map, history and status
 // cards; "stay_report" = the Stay Report (TrackingStayReport.ts). Both are
 // reading, so an account with Employee Tracking and no saved layers has both.
-const TRACKING_LAYER_KEYS = ["read", "stay_report"] as const;
+const TRACKING_LAYER_KEYS = ["read", "stay_report", "live"] as const;
+// What an account with the tracking module but no saved layers gets — Live
+// Follow ("live") is explicit-only, so it is left out.
+const TRACKING_DEFAULT_LAYERS = ["read", "stay_report"] as const;
 // Payroll's layers: "read" = the whole Payroll module as it was (runs,
 // payslips, salary setup, late policy…); "salary_month" = changing the day
 // a salary month starts (26 -> "26 to 25"). salary_month changes every
@@ -4210,7 +4214,7 @@ async function startServer() {
   // on for a module is never a silent regression; a Superadmin only actually
   // restricts anything once they explicitly save a narrower set in the
   // Module Access modal.
-  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "stay_report" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "block_account" | "limit_history" | "link_pins") =>
+  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "block_account" | "limit_history" | "link_pins") =>
     async (req: any, res: any, next: any) => {
       if (!req.user) return res.status(401).json({ error: "Access token required" });
       if (req.user.role === "superadmin") return next();
@@ -4225,7 +4229,7 @@ async function startServer() {
         const effectiveLayers: string[] = grantedLayers.length > 0
           ? grantedLayers
           : moduleKey === "tracking"
-            ? [...TRACKING_LAYER_KEYS]
+            ? [...TRACKING_DEFAULT_LAYERS]
             : moduleKey === "payroll" || moduleKey === "office_attendance"
               ? ["read"]
               : moduleKey === "mobile_bill"
@@ -4253,7 +4257,7 @@ async function startServer() {
     if (granted.length > 0) return granted.includes(layer);
     const defaults: readonly string[] =
       moduleKey === "tracking"
-        ? TRACKING_LAYER_KEYS
+        ? TRACKING_DEFAULT_LAYERS
         : moduleKey === "payroll" || moduleKey === "office_attendance"
           ? ["read"]
           : moduleKey === "mobile_bill"
@@ -4799,6 +4803,17 @@ async function startServer() {
     }
   };
 
+  // Live Follow (LiveTrackingRoutes.ts) — pushes each ping to whoever is
+  // watching and tells the phone how long to keep pinging every few seconds.
+  const liveTracking = registerLiveTrackingRoutes(app, {
+    authenticateToken,
+    requireAdmin,
+    requireModule,
+    requireModuleLayer,
+    queryDB,
+    getIo: () => liveIo
+  });
+
   app.post("/api/tracking/ping", authenticateToken, requireTrackingAccess, async (req: any, res) => {
     try {
       const lat = Number(req.body.lat);
@@ -4813,7 +4828,8 @@ async function startServer() {
         "INSERT INTO location_pings (user_id, lat, lng, accuracy_m, battery_pct, recorded_at) VALUES (?, ?, ?, ?, ?, ?)",
         [req.user.id, lat, lng, accuracy_m, battery_pct, recorded_at]
       );
-      res.json({ success: true });
+      const live_until = await liveTracking.onPing(Number(req.user.id), { lat, lng, accuracy_m, battery_pct, recorded_at });
+      res.json({ success: true, live_until });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
