@@ -138,7 +138,7 @@ export const LeaveSummaryCard: React.FC<LeaveSummaryCardProps> = ({ token, onOpe
       <div className="px-5 sm:px-6 -mt-4 pb-5">
         <div
           style={{ transform: 'translateZ(0)', WebkitTransform: 'translateZ(0)' }}
-          className={`glass-mask-fix bg-gradient-to-b from-white to-white/10 border border-white/70 rounded-[28px] px-5 py-2.5 shadow-[0_16px_40px_-10px_rgba(42,0,85,0.45),inset_0_1px_0_rgba(255,255,255,0.8)] md:bg-none md:bg-white/75 md:border-white/60 md:rounded-2xl md:shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15),inset_0_1px_0_rgba(255,255,255,0.6)] backdrop-blur-[20px] backdrop-saturate-150 md:backdrop-blur-xl md:backdrop-saturate-100`}
+          className={`glass-mask-fix bg-[linear-gradient(to_bottom,rgba(255,255,255,1),rgba(255,255,255,0.1))] border border-white/70 rounded-[28px] px-5 py-2.5 shadow-[0_16px_40px_-10px_rgba(42,0,85,0.45),inset_0_1px_0_rgba(255,255,255,0.8)] md:bg-none md:bg-white/75 md:border-white/60 md:rounded-2xl md:shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15),inset_0_1px_0_rgba(255,255,255,0.6)] backdrop-blur-[20px] backdrop-saturate-150 md:backdrop-blur-xl md:backdrop-saturate-100`}
         >
           <p className="text-xs font-bold text-slate-900">Total Leave</p>
           <p className="text-[11px] text-slate-500 mt-0.5">Period 1 Jan {year} – 31 Dec {year}</p>
