@@ -284,7 +284,7 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
     // actual fix for that.
     <div
       style={{ transform: 'translateZ(0)', WebkitTransform: 'translateZ(0)' }}
-      className={`glass-mask-fix relative rounded-[28px] overflow-hidden border border-white/70 p-4 bg-gradient-to-b from-white/80 to-white/10 shadow-[0_16px_40px_-10px_rgba(42,0,85,0.45),inset_0_1px_0_rgba(255,255,255,0.8)] transition-all md:bg-none md:bg-white md:border-slate-200 md:rounded-2xl md:shadow-sm backdrop-blur-[20px] backdrop-saturate-150 md:backdrop-blur-none md:backdrop-saturate-100`}
+      className={`glass-mask-fix relative rounded-[28px] overflow-hidden border border-white/70 p-4 bg-gradient-to-b from-white to-white/10 shadow-[0_16px_40px_-10px_rgba(42,0,85,0.45),inset_0_1px_0_rgba(255,255,255,0.8)] transition-all md:bg-none md:bg-white md:border-slate-200 md:rounded-2xl md:shadow-sm backdrop-blur-[20px] backdrop-saturate-150 md:backdrop-blur-none md:backdrop-saturate-100`}
     >
       {/* The inner tiles below (In Time/Out Time) keep their own bg-white/70
           — that opacity alone reads as a distinct panel even where a
