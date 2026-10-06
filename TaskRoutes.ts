@@ -11,8 +11,7 @@
 //   A department head (departments.supervisor_user_id, Admin Panel ->
 //   Departments) gives tasks to the people of that department from Self
 //   Service -> My Tasks -> My Team.
-//   An employee asks HR for something (salary certificate, experience
-//   letter…) from Self Service -> My Tasks -> Request to HR; it lands in HR's
+//   An employee asks HR for something (employment certificate, ID card…) from Self Service -> My Tasks -> Request to HR; it lands in HR's
 //   Requests list, where someone takes it or HR assigns it.
 //
 //   open -> in_progress -> done (the assignee submits it, with a note: that
@@ -44,12 +43,12 @@ interface TaskRouteDeps {
 }
 
 export const TASK_CATEGORIES = ["general", "recruitment", "payroll", "letter", "document", "leave", "attendance", "training", "other"] as const;
-// What an employee can ask HR for.
+// What an employee can ask HR for here. Salary Certificate, Experience
+// Certificate, NOC and the Bank Account Opening Letter are NOT in this list:
+// they are asked for from Self Service -> My Letters (HR Operations), which
+// approves, numbers and files the letter — asking in both places would send HR
+// two requests for the same thing.
 export const TASK_REQUEST_TYPES: { key: string; label: string }[] = [
-  { key: "salary_certificate", label: "Salary Certificate" },
-  { key: "experience_letter", label: "Experience Letter" },
-  { key: "noc", label: "NOC (No Objection Certificate)" },
-  { key: "bank_letter", label: "Bank / Account Opening Letter" },
   { key: "employment_certificate", label: "Employment Certificate" },
   { key: "id_card", label: "ID Card" },
   { key: "visiting_card", label: "Visiting Card" },
@@ -485,7 +484,7 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDeps) {
           title,
           description: details || null,
           source: "request",
-          category: ["salary_certificate", "experience_letter", "noc", "bank_letter", "employment_certificate"].includes(type.key) ? "letter" : "other",
+          category: type.key === "employment_certificate" ? "letter" : "other",
           request_type: type.key,
           priority: "normal",
           due,
