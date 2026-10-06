@@ -14,6 +14,7 @@
 // see profileRoutes.ts). Either path ends up broadcasting the same
 // 'receive_message' socket event to every member's open ChatPanel.
 
+import { UserAvatar } from './UserAvatar';
 import { CHAT_CONVERSATION_BACKGROUND } from '../lib/backgroundTheme';
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Capacitor } from '@capacitor/core';
@@ -52,32 +53,9 @@ interface ChatPanelProps {
 
 // Phone bottom bar: the signed-in account's own photo (initials until /
 // unless one loads).
-const MyAvatar: React.FC<{ token: string; user: User }> = ({ token, user }) => {
-  const [url, setUrl] = useState<string | null>(null);
-  useEffect(() => {
-    let objectUrl: string | null = null;
-    let cancelled = false;
-    fetch(apiUrl(`/api/profile/photo/${user.id}`), { headers: { Authorization: `Bearer ${token}` } })
-      .then((r) => (r.ok ? r.blob() : null))
-      .then((b) => {
-        if (!b || cancelled) return;
-        objectUrl = URL.createObjectURL(b);
-        setUrl(objectUrl);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [token, user.id]);
-  return url ? (
-    <img src={url} alt="" className="w-8 h-8 rounded-full object-cover ring-2 ring-white" />
-  ) : (
-    <span className="w-8 h-8 rounded-full flex items-center justify-center text-white text-[11px] font-semibold ring-2 ring-white" style={{ background: avatarColor(user.name) }}>
-      {initialsOf(user.name)}
-    </span>
-  );
-};
+const MyAvatar: React.FC<{ token: string; user: User }> = ({ token, user }) => (
+  <UserAvatar userId={user.id} name={user.name} token={token} className="w-8 h-8 text-[11px] ring-2 ring-white" />
+);
 
 function timeOnly(iso: string): string {
   const d = new Date(iso);
@@ -971,12 +949,13 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                 }`}
               >
                 <div className="relative shrink-0">
-                  <div
-                    className="w-11 h-11 rounded-full flex items-center justify-center text-white font-semibold text-sm"
-                    style={{ background: avatarColor(name) }}
-                  >
-                    {room.type === 'community' ? <Shield className="w-5 h-5" /> : room.type === 'group' ? <Users className="w-5 h-5" /> : initialsOf(name)}
-                  </div>
+                  <UserAvatar
+                    userId={room.type === 'direct' ? room.other_participant?.id : null}
+                    name={name}
+                    token={token}
+                    className="w-11 h-11 text-sm"
+                    fallback={room.type === 'community' ? <Shield className="w-5 h-5" /> : room.type === 'group' ? <Users className="w-5 h-5" /> : undefined}
+                  />
                   {isOnline && <span className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-500 border-2 border-white rounded-full" />}
                 </div>
                 {listTab === 'calls' && canCall ? (
@@ -1129,12 +1108,13 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                 }}
                 className="flex items-center gap-3 flex-1 min-w-0 text-left"
               >
-                <div
-                  className="w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold text-sm shrink-0"
-                  style={{ background: avatarColor(roomDisplayName(activeRoom, user.id)) }}
-                >
-                  {activeRoom.type === 'community' ? <Shield className="w-5 h-5" /> : activeRoom.type === 'group' ? <Users className="w-5 h-5" /> : initialsOf(roomDisplayName(activeRoom, user.id))}
-                </div>
+                <UserAvatar
+                  userId={activeRoom.type === 'direct' ? activeRoom.other_participant?.id : null}
+                  name={roomDisplayName(activeRoom, user.id)}
+                  token={token}
+                  className="w-10 h-10 text-sm"
+                  fallback={activeRoom.type === 'community' ? <Shield className="w-5 h-5" /> : activeRoom.type === 'group' ? <Users className="w-5 h-5" /> : undefined}
+                />
                 <div className="min-w-0">
                   <h3 className="font-semibold text-sm text-slate-900 truncate">{roomDisplayName(activeRoom, user.id)}</h3>
                   <span className="text-xs text-slate-500">
@@ -1277,12 +1257,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                       onClick={() => insertMention(m.name)}
                       className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-50 text-left text-sm"
                     >
-                      <div
-                        className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-semibold shrink-0"
-                        style={{ background: avatarColor(m.name) }}
-                      >
-                        {initialsOf(m.name)}
-                      </div>
+                      <UserAvatar userId={m.user_id} name={m.name} token={token} className="w-6 h-6 text-[10px]" />
                       {m.name}
                     </button>
                   ))}
@@ -1403,9 +1378,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
             </div>
             {members.map((m) => (
               <div key={m.user_id} className="px-4 py-2 flex items-center gap-3">
-                <div className="w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-semibold shrink-0" style={{ background: avatarColor(m.name) }}>
-                  {initialsOf(m.name)}
-                </div>
+                <UserAvatar userId={m.user_id} name={m.name} token={token} className="w-9 h-9 text-xs" />
                 <div className="flex-1 min-w-0">
                   <div className="text-sm text-slate-900 truncate">{m.name}{m.user_id === user.id ? ' (You)' : ''}</div>
                   {m.role === 'admin' && <div className="text-[11px] text-emerald-600 font-medium">Admin</div>}
@@ -1575,9 +1548,7 @@ const MemberPickerModal: React.FC<{
                 }
                 className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50"
               >
-                <div className="w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-semibold shrink-0" style={{ background: avatarColor(d.name) }}>
-                  {initialsOf(d.name)}
-                </div>
+                <UserAvatar userId={d.id} name={d.name} className="w-9 h-9 text-xs" />
                 <span className="flex-1 text-left text-sm text-slate-900 truncate">{d.name}</span>
                 <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${isSelected ? 'bg-emerald-500 border-emerald-500' : 'border-slate-300'}`}>
                   {isSelected && <Check className="w-3.5 h-3.5 text-white" />}

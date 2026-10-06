@@ -63,6 +63,7 @@ import { WebPushPrompt } from './components/WebPushPrompt';
 import { setActiveCompanyId } from './lib/company';
 import { ACCOUNT_BLOCKED_EVENT, DEVICE_REVOKED_EVENT, setSignedOutReason } from './lib/device';
 import { refreshNotices } from './lib/noticesLive';
+import { refreshAvatars } from './components/UserAvatar';
 
 export default function App() {
   const [token, setToken] = useState<string | null>(localStorage.getItem('mpr_token'));
@@ -358,6 +359,7 @@ export default function App() {
     void disableWebPush(token);
     localStorage.removeItem('mpr_token');
     localStorage.removeItem('mpr_user');
+    refreshAvatars();
     setActiveCompanyId(null);
     setToken(null);
     setUser(null);
@@ -1204,7 +1206,10 @@ export default function App() {
             photoVersion={photoVersion}
             onBack={() => setShowProfilePage(false)}
             onLogout={handleLogout}
-            onPhotoUpdated={() => setPhotoVersion((v) => v + 1)}
+            onPhotoUpdated={() => {
+              refreshAvatars();
+              setPhotoVersion((v) => v + 1);
+            }}
             onProfileNameUpdated={(fullName) => {
               // Keep the header/sidebar avatar+name (and the cached user in
               // localStorage) in sync immediately after Personal Data is
