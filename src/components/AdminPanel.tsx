@@ -6580,7 +6580,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           completed Movement Claims (computing Amount at a Rate/KM) or add items by
           hand, then export a printable PDF bill. */}
       {activeTab === 'conveyance' && (
-        <ConveyanceBillPanel token={token} users={users} />
+        <ConveyanceBillPanel token={token} users={users} currentUserId={user.id} />
       )}
 
       {/* TAB: BILL CLAIM POLICY — same "conveyance" grant as the Bill Claim tab;

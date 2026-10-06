@@ -83,7 +83,7 @@ export const ADMIN_MODULES: { key: AdminModuleKey; label: string }[] = [
 // combination of these per (Admin/User account, module) via Admin Panel ->
 // Users -> Module Access. Independent checkboxes, not hierarchical: having
 // 'delete_trash' does NOT imply 'edit_add' is also granted.
-export type PermissionLayerKey = 'read' | 'edit_add' | 'entry_upload' | 'delete_trash' | 'permanent_delete' | 'submission_status' | 'stay_report' | 'salary_month' | 'salary_hold' | 'block_account' | 'limit_history' | 'link_pins' | 'audit_approve' | 'accounts_pay' | 'access_log' | 'live';
+export type PermissionLayerKey = 'read' | 'edit_add' | 'entry_upload' | 'delete_trash' | 'permanent_delete' | 'submission_status' | 'stay_report' | 'salary_month' | 'salary_hold' | 'block_account' | 'limit_history' | 'link_pins' | 'audit_approve' | 'accounts_pay' | 'access_log' | 'live' | 'on_behalf';
 
 export const PERMISSION_LAYERS: { key: PermissionLayerKey; label: string }[] = [
   { key: 'read', label: 'Read Only' },
@@ -97,7 +97,7 @@ export const PERMISSION_LAYERS: { key: PermissionLayerKey; label: string }[] = [
 // being rolled out one module at a time. A module not listed here still only
 // has the old coarse on/off grant (module_permissions), unaffected by any of
 // this. Start: 'departments', then 'projects', then 'approvals', then 'users'.
-export const PERMISSION_LAYER_MODULES: AdminModuleKey[] = ['departments', 'projects', 'approvals', 'users', 'reports', 'tracking', 'payroll', 'mobile_bill', 'office_attendance'];
+export const PERMISSION_LAYER_MODULES: AdminModuleKey[] = ['departments', 'projects', 'approvals', 'users', 'reports', 'tracking', 'payroll', 'mobile_bill', 'office_attendance', 'conveyance'];
 
 // A module that uses only some of the layers, with its own labels. PEPM
 // Reports: Read Only, Edit, Delete/Trash, Permanent Delete, and Budget
@@ -140,12 +140,18 @@ export const MODULE_LAYER_OPTIONS: Partial<Record<AdminModuleKey, { key: Permiss
     { key: 'read', label: 'Office Attendance' },
     { key: 'link_pins', label: 'Link Device PINs' }
   ],
+  // Conveyance -> Claim on Behalf: file a claim for another employee (it goes
+  // through that employee's approval chain). Explicit only.
+  conveyance: [
+    { key: 'read', label: 'Conveyance Bill Claim' },
+    { key: 'on_behalf', label: 'Claim on Behalf' }
+  ],
   // Users -> Block / Unblock a login (only for accounts it is ticked for).
   users: [...PERMISSION_LAYERS, { key: 'block_account', label: 'Block Account' }]
 };
 // Layers an account has only when explicitly ticked — never part of the
 // "module granted, no layers saved yet" default (requireModuleLayer).
-export const EXPLICIT_ONLY_LAYERS: PermissionLayerKey[] = ['permanent_delete', 'submission_status', 'salary_month', 'salary_hold', 'block_account', 'link_pins', 'audit_approve', 'accounts_pay', 'access_log', 'live'];
+export const EXPLICIT_ONLY_LAYERS: PermissionLayerKey[] = ['permanent_delete', 'submission_status', 'salary_month', 'salary_hold', 'block_account', 'link_pins', 'audit_approve', 'accounts_pay', 'access_log', 'live', 'on_behalf'];
 export const layersFor = (moduleKey: AdminModuleKey) => MODULE_LAYER_OPTIONS[moduleKey] || PERMISSION_LAYERS;
 
 // Leave Manage's own operation-specific layers — same independent-checkbox
@@ -1472,6 +1478,9 @@ export interface UserClaim {
   admin_remarks?: string | null;
   reviewed_by?: number | null;
   reviewed_by_name?: string | null;
+  // Set when an Admin filed this claim for the employee (Conveyance -> Claim on Behalf).
+  filed_by?: number | null;
+  filed_by_name?: string | null;
   reviewed_at?: string | null;
   // Set once an Approved claim has actually been attached as a line item onto a
   // Conveyance Bill (see POST /api/user-claims/:id/decision) — null until then.

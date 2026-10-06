@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { Wallet, Plus, Trash2, X, Route, PenLine, Filter, FileDown, Pencil, Check, Paperclip, MapPin, Clock, Save } from 'lucide-react';
+import { Wallet, Plus, Trash2, X, Route, Filter, FileDown, Pencil, Check, Paperclip, MapPin, Clock, Save } from 'lucide-react';
 import {
   ConveyanceBill,
   ConveyanceBillItem,
@@ -23,10 +23,13 @@ import { Spinner } from './Spinner';
 import { ClaimBillLines } from './ClaimBillLines';
 import { useBillClaimCategoryNames } from '../lib/billClaimCategories';
 import { confirmDialog } from '../lib/confirmDialog';
+import { NewConveyanceClaimModal } from './NewConveyanceClaimModal';
 
 interface ConveyanceBillPanelProps {
   token: string;
   users: User[];
+  // The signed-in account: a bill in its own name can't be changed from here.
+  currentUserId: number;
 }
 
 // Blank draft for both the "Add Manual Item" form and the inline "Edit Item"
@@ -47,7 +50,7 @@ const blankItemDraft = () => ({
 // line items for ONE User into a single claim document; each item either gets
 // pulled in from that User's own completed Movement Claim (see the "Movement
 // Claims" tab) or is added fully by hand.
-export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token, users }) => {
+export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token, users, currentUserId }) => {
   const authHeaders = { Authorization: `Bearer ${token}` };
   const plainUsers = users.filter((u) => u.role === 'user');
 
@@ -147,51 +150,51 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
     }
   };
 
-  // ---- New Bill ----
-  const [showNewBill, setShowNewBill] = useState(false);
-  const [newBillUserId, setNewBillUserId] = useState('');
-  const [newBillDate, setNewBillDate] = useState(todayDateOnlyString());
-  const [newBillRemarks, setNewBillRemarks] = useState('');
-  const [creatingBill, setCreatingBill] = useState(false);
-  const [createBillError, setCreateBillError] = useState('');
+  // ---- Claim on Behalf ----
+  // Bills aren't made by hand any more: a claim filed here for an employee
+  // goes through that employee's approval chain, and its bill is made when it
+  // is approved. Needs Conveyance -> "Claim on Behalf" (explicit-only layer);
+  // never for oneself.
+  const [canClaimOnBehalf, setCanClaimOnBehalf] = useState(false);
+  const [showBehalfPicker, setShowBehalfPicker] = useState(false);
+  const [behalfUserId, setBehalfUserId] = useState('');
+  const [behalfFor, setBehalfFor] = useState<{ id: number; name: string } | null>(null);
+  const behalfCandidates = users.filter((u) => u.id !== currentUserId).sort((a, b) => a.name.localeCompare(b.name));
 
-  const resetNewBillForm = () => {
-    setShowNewBill(false);
-    setNewBillUserId('');
-    setNewBillDate(todayDateOnlyString());
-    setNewBillRemarks('');
-    setCreateBillError('');
-  };
+  useEffect(() => {
+    let cancelled = false;
+    fetch(apiUrl('/api/user-claims/on-behalf/access'), { headers: authHeaders })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!cancelled) setCanClaimOnBehalf(!!d?.on_behalf);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
 
-  const handleCreateBill = async () => {
-    if (!newBillUserId) {
-      setCreateBillError('Select a User for this bill.');
-      return;
-    }
-    setCreatingBill(true);
-    setCreateBillError('');
-    try {
-      const res = await fetch(apiUrl('/api/conveyance-bills'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders },
-        body: JSON.stringify({ user_id: Number(newBillUserId), bill_date: newBillDate, remarks: newBillRemarks })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to create bill');
-      resetNewBillForm();
-      await fetchBills();
-      setViewingBillId(data.id);
-    } catch (err: any) {
-      setCreateBillError(err.message || 'Failed to create bill');
-    } finally {
-      setCreatingBill(false);
-    }
+  const startBehalfClaim = () => {
+    const u = behalfCandidates.find((x) => String(x.id) === behalfUserId);
+    if (!u) return;
+    setShowBehalfPicker(false);
+    setBehalfUserId('');
+    setBehalfFor({ id: u.id, name: u.name });
   };
 
   // ---- Bill detail (view/edit items) ----
   const [viewingBillId, setViewingBillId] = useState<number | null>(null);
   const [billDetail, setBillDetail] = useState<ConveyanceBill | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  // Why this bill can't be changed here, if it can't (the server refuses too).
+  const billLock = !billDetail
+    ? null
+    : Number(billDetail.user_id) === Number(currentUserId)
+      ? "This bill is in your own name, so you can't change it."
+      : billDetail.is_disbursed
+        ? 'This bill has been disbursed and is locked. Undo the disbursement to change it.'
+        : null;
 
   const fetchBillDetail = async (id: number) => {
     setLoadingDetail(true);
@@ -215,7 +218,6 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
     if (viewingBillId === null) {
       setBillDetail(null);
       setShowClaimPicker(false);
-      setShowManualForm(false);
       setEditingItemId(null);
       return;
     }
@@ -243,7 +245,6 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
   const openClaimPicker = async () => {
     if (!billDetail) return;
     setShowClaimPicker(true);
-    setShowManualForm(false);
     setClaimPickerError('');
     setLoadingClaims(true);
     try {
@@ -282,19 +283,6 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
     }
   };
 
-  // ---- Add Manual Item ----
-  const [showManualForm, setShowManualForm] = useState(false);
-  const [manualDraft, setManualDraft] = useState(blankItemDraft());
-  const [savingManual, setSavingManual] = useState(false);
-  const [manualError, setManualError] = useState('');
-
-  const openManualForm = () => {
-    setShowManualForm(true);
-    setShowClaimPicker(false);
-    setManualDraft(blankItemDraft());
-    setManualError('');
-  };
-
   const computedAmount = (d: ReturnType<typeof blankItemDraft>): string => {
     if (d.amount) return d.amount;
     const dist = Number(d.distance_km);
@@ -303,37 +291,6 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
       return String(Math.round(dist * rate * 100) / 100);
     }
     return '';
-  };
-
-  const handleAddManual = async () => {
-    if (!billDetail) return;
-    if (!manualDraft.entry_date || !manualDraft.particulars.trim()) {
-      setManualError('Date and Particulars are required.');
-      return;
-    }
-    const amt = computedAmount(manualDraft);
-    if (!amt || !(Number(amt) > 0)) {
-      setManualError('Enter an Amount (or both Distance and Rate per KM).');
-      return;
-    }
-    setSavingManual(true);
-    setManualError('');
-    try {
-      const res = await fetch(apiUrl(`/api/conveyance-bills/${billDetail.id}/items`), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders },
-        body: JSON.stringify({ source: 'manual', ...manualDraft, amount: amt })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to add item');
-      setShowManualForm(false);
-      setManualDraft(blankItemDraft());
-      await fetchBillDetail(billDetail.id);
-    } catch (err: any) {
-      setManualError(err.message || 'Failed to add item');
-    } finally {
-      setSavingManual(false);
-    }
   };
 
   // ---- Edit / Delete an existing item ----
@@ -538,13 +495,15 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
                 User Claims and Bills together, one row each — click a row to view its details.
               </p>
             </div>
-            <button
-              type="button"
-              onClick={() => setShowNewBill(true)}
-              className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium whitespace-nowrap transition-colors"
-            >
-              <Plus className="w-3.5 h-3.5" /> New Bill
-            </button>
+            {canClaimOnBehalf && (
+              <button
+                type="button"
+                onClick={() => setShowBehalfPicker(true)}
+                className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium whitespace-nowrap transition-colors"
+              >
+                <Plus className="w-3.5 h-3.5" /> Claim on Behalf
+              </button>
+            )}
           </div>
           <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap sm:items-end">
             <div className="min-w-0">
@@ -699,6 +658,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
                             >
                               <Pencil className="w-3.5 h-3.5" />
                             </button>
+                            {Number(row.bill.user_id) !== Number(currentUserId) && !row.bill.is_disbursed && (
                             <button
                               type="button"
                               onClick={(e) => { e.stopPropagation(); handleDeleteBill(row.bill.id); }}
@@ -708,6 +668,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
                             >
                               {deletingBillId === row.bill.id ? <Spinner size={14} /> : <Trash2 className="w-3.5 h-3.5" />}
                             </button>
+                            )}
                           </div>
                         )}
                       </td>
@@ -720,69 +681,61 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
         )}
       </div>
 
-      {/* New Bill modal */}
-      {showNewBill && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md">
-            <div className="flex items-center justify-between gap-4 p-5 border-b border-slate-200">
-              <h3 className="text-base font-bold text-slate-900">New Conveyance Bill</h3>
-              <button onClick={resetNewBillForm} className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors">
-                <X className="w-4.5 h-4.5" />
-              </button>
-            </div>
-            <div className="p-5 space-y-3">
-              {createBillError && <p className="text-xs text-rose-600">{createBillError}</p>}
-              <div>
-                <label className="block text-[11px] font-medium text-slate-500 mb-1">User</label>
-                <select
-                  value={newBillUserId}
-                  onChange={(e) => setNewBillUserId(e.target.value)}
-                  className="w-full px-2.5 py-2 rounded-lg border border-slate-300 text-sm bg-white"
+      {/* Claim on Behalf: pick the employee, then the same claim form they use */}
+      {showBehalfPicker && (
+        <div className="liquid-glass-backdrop fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setShowBehalfPicker(false)}>
+          <div className="w-full max-w-sm" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Claim on Behalf">
+            <div className="liquid-glass liquid-glass-in rounded-[32px] p-5">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Claim on Behalf</h3>
+                  <p className="mt-1 text-xs text-slate-600 leading-relaxed">
+                    File a Conveyance Bill Claim for an employee. It goes through their approval chain; the bill is made when it is approved.
+                  </p>
+                </div>
+                <button type="button" onClick={() => setShowBehalfPicker(false)} className="liquid-glass-chip p-1.5 rounded-full text-slate-600" aria-label="Close">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <label className="block mt-4 text-[11px] font-semibold text-slate-500 mb-1">Employee</label>
+              <select
+                value={behalfUserId}
+                onChange={(e) => setBehalfUserId(e.target.value)}
+                className="liquid-glass-inset w-full px-3 py-2.5 rounded-2xl text-sm text-slate-800 bg-transparent focus:outline-none"
+              >
+                <option value="">Select employee</option>
+                {behalfCandidates.map((u) => (
+                  <option key={u.id} value={u.id}>{u.name}</option>
+                ))}
+              </select>
+              <p className="mt-2 text-[11px] text-slate-500">You can't file a claim for yourself here — use your own Conveyance Bill Claim.</p>
+              <div className="mt-5 flex gap-2.5">
+                <button type="button" onClick={() => setShowBehalfPicker(false)} className="liquid-glass-chip flex-1 rounded-full py-2.5 text-sm font-semibold text-slate-700">
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={!behalfUserId}
+                  onClick={startBehalfClaim}
+                  className="liquid-glass-button flex-1 rounded-full py-2.5 text-sm font-semibold disabled:opacity-50"
                 >
-                  <option value="">Select User</option>
-                  {plainUsers.map((u) => (
-                    <option key={u.id} value={u.id}>{u.name}</option>
-                  ))}
-                </select>
+                  Continue
+                </button>
               </div>
-              <div>
-                <label className="block text-[11px] font-medium text-slate-500 mb-1">Bill Date</label>
-                <input
-                  type="date"
-                  value={newBillDate}
-                  onChange={(e) => setNewBillDate(e.target.value)}
-                  className="w-full px-2.5 py-2 rounded-lg border border-slate-300 text-sm bg-white"
-                />
-              </div>
-              <div>
-                <label className="block text-[11px] font-medium text-slate-500 mb-1">Remarks (optional)</label>
-                <textarea
-                  value={newBillRemarks}
-                  onChange={(e) => setNewBillRemarks(e.target.value)}
-                  rows={2}
-                  className="w-full px-2.5 py-2 rounded-lg border border-slate-300 text-sm bg-white"
-                />
-              </div>
-            </div>
-            <div className="flex items-center gap-2 p-5 pt-0">
-              <button
-                type="button"
-                disabled={creatingBill}
-                onClick={handleCreateBill}
-                className="flex-1 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-xl text-sm font-medium transition-colors"
-              >
-                {creatingBill ? 'Creating…' : 'Create & Add Items'}
-              </button>
-              <button
-                type="button"
-                onClick={resetNewBillForm}
-                className="flex-1 py-2.5 border border-slate-200 text-slate-600 hover:bg-slate-50 rounded-xl text-sm font-medium transition-colors"
-              >
-                Cancel
-              </button>
             </div>
           </div>
         </div>
+      )}
+      {behalfFor && (
+        <NewConveyanceClaimModal
+          token={token}
+          onBehalfOf={behalfFor}
+          onClose={() => setBehalfFor(null)}
+          onSubmitted={() => {
+            setBehalfFor(null);
+            void fetchBills();
+          }}
+        />
       )}
 
       {/* Bill detail modal */}
@@ -816,22 +769,20 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
                 <p className="text-sm text-slate-400 text-center py-10">Loading...</p>
               ) : (
                 <>
-                  <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={openClaimPicker}
-                      className="flex items-center justify-center gap-1.5 text-xs px-3 py-2 rounded-lg bg-blue-50 border border-blue-200 text-blue-700 hover:bg-blue-100 font-medium transition-colors"
-                    >
-                      <Route className="w-3.5 h-3.5" /> Add from Movement Claim
-                    </button>
-                    <button
-                      type="button"
-                      onClick={openManualForm}
-                      className="flex items-center justify-center gap-1.5 text-xs px-3 py-2 rounded-lg bg-slate-50 border border-slate-200 text-slate-700 hover:bg-slate-100 font-medium transition-colors"
-                    >
-                      <PenLine className="w-3.5 h-3.5" /> Add Manual Item
-                    </button>
-                  </div>
+                  {billLock ? (
+                    <p className="text-xs px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-800">{billLock}</p>
+                  ) : (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={openClaimPicker}
+                        className="flex items-center justify-center gap-1.5 text-xs px-3 py-2 rounded-lg bg-blue-50 border border-blue-200 text-blue-700 hover:bg-blue-100 font-medium transition-colors"
+                      >
+                        <Route className="w-3.5 h-3.5" /> Add from Movement Claim
+                      </button>
+                      <span className="text-[11px] text-slate-500">Only approved check-in/outs. Amounts can be lowered here, not raised.</span>
+                    </div>
+                  )}
 
                   {/* Movement Claim picker */}
                   {showClaimPicker && (
@@ -880,37 +831,6 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
                           ))}
                         </ul>
                       )}
-                    </div>
-                  )}
-
-                  {/* Manual item form */}
-                  {showManualForm && (
-                    <div className="p-4 rounded-xl border border-slate-200 bg-slate-50 space-y-3">
-                      <div className="flex items-center justify-between">
-                        <h4 className="text-xs font-bold text-slate-700">Add Manual Item</h4>
-                        <button onClick={() => setShowManualForm(false)} className="text-slate-400 hover:text-slate-700">
-                          <X className="w-4 h-4" />
-                        </button>
-                      </div>
-                      {manualError && <p className="text-xs text-rose-600">{manualError}</p>}
-                      <ItemFields draft={manualDraft} setDraft={setManualDraft} />
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          disabled={savingManual}
-                          onClick={handleAddManual}
-                          className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-medium disabled:opacity-50"
-                        >
-                          {savingManual ? 'Adding…' : 'Add Item'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setShowManualForm(false)}
-                          className="px-3 py-1.5 rounded-lg bg-white border border-slate-300 text-slate-600 text-xs"
-                        >
-                          Cancel
-                        </button>
-                      </div>
                     </div>
                   )}
 
@@ -987,7 +907,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
                                     <Clock className="w-3.5 h-3.5" /> History
                                   </button>
                                 )}
-                                <button
+                                {!billLock && <><button
                                   type="button"
                                   onClick={() => startEditItem(it)}
                                   className="flex-1 flex items-center justify-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-blue-50 border border-blue-200 text-blue-700 font-medium transition-colors"
@@ -1001,7 +921,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
                                   className="flex items-center justify-center gap-1.5 text-xs px-3 py-1.5 text-rose-600 hover:bg-rose-50 rounded-lg transition-colors disabled:opacity-50"
                                 >
                                   {deletingItemId === it.id ? <Spinner size={14} /> : <Trash2 className="w-3.5 h-3.5" />} Remove
-                                </button>
+                                </button></>}
                               </div>
                             </div>
                           )
@@ -1093,7 +1013,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
                                         <Clock className="w-3.5 h-3.5" />
                                       </button>
                                     )}
-                                    <button
+                                    {!billLock && <><button
                                       type="button"
                                       onClick={() => startEditItem(it)}
                                       className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
@@ -1109,7 +1029,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
                                       title="Remove item"
                                     >
                                       {deletingItemId === it.id ? <Spinner size={14} /> : <Trash2 className="w-3.5 h-3.5" />}
-                                    </button>
+                                    </button></>}
                                   </div>
                                 </td>
                               </tr>
