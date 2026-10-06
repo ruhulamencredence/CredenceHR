@@ -7,6 +7,7 @@ import { apiUrl } from '../lib/api';
 import { formatDate } from '../lib/formatDate';
 import { Spinner } from './Spinner';
 import { confirmDialog } from '../lib/confirmDialog';
+import { ClaimChangesNotice, ReclaimTick, ReturnButton } from './ClaimReviewBits';
 
 interface ApprovalManagerProps {
   token: string;
@@ -20,6 +21,13 @@ const StatusPill: React.FC<{ status: ApprovalRequest['status'] }> = ({ status })
     return (
       <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-full bg-emerald-50 text-emerald-700">
         <CheckCircle2 className="w-3 h-3" /> Approved
+      </span>
+    );
+  }
+  if (status === 'returned') {
+    return (
+      <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-full bg-amber-50 text-amber-800">
+        <Clock className="w-3 h-3" /> Returned to employee
       </span>
     );
   }
@@ -183,7 +191,16 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
     }
   };
 
-  const handleAct = async (id: number, action: 'approved' | 'rejected', approvedAmount?: number) => {
+  // Reject with "Allow re-claim" ticked, per request.
+  const [reclaimDraft, setReclaimDraft] = useState<Record<number, boolean>>({});
+
+  const handleAct = async (id: number, action: 'approved' | 'rejected' | 'returned', approvedAmount?: number) => {
+    const target = requests.find((r) => r.id === id);
+    // Conveyance Bill Claim: Return / Reject tell the employee why.
+    if (target?.source_type === 'user_claim' && action !== 'approved' && !(remarksDraft[id] || '').trim()) {
+      setMessage({ type: 'error', text: `Write the reason in Remarks before you ${action === 'returned' ? 'return' : 'reject'} it — the employee sees it.` });
+      return;
+    }
     setActingId(id);
     setMessage(null);
     try {
@@ -198,14 +215,16 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
           remarks: remarksDraft[id] || undefined,
           bill_id: disburse ? undefined : bill_id,
           voucher_no: disburse && action === 'approved' ? voucherDraft[id] || undefined : undefined,
-          approved_amount: action === 'approved' && approvedAmount != null ? approvedAmount : undefined
+          approved_amount: action === 'approved' && approvedAmount != null ? approvedAmount : undefined,
+          claim_version: target?.source_type === 'user_claim' ? target.claim_version : undefined,
+          allow_reclaim: target?.source_type === 'user_claim' && action === 'rejected' ? !!reclaimDraft[id] : undefined
         })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `Failed to ${action === 'approved' ? 'approve' : 'reject'} this request`);
       setMessage({
         type: 'success',
-        text: action !== 'approved' ? 'Rejected.' : data.voucher_no ? `Disbursed — voucher ${data.voucher_no}.` : 'Approved.'
+        text: action === 'returned' ? 'Returned to the employee for correction.' : action !== 'approved' ? 'Rejected.' : data.voucher_no ? `Disbursed — voucher ${data.voucher_no}.` : 'Approved.'
       });
       setRemarksDraft((prev) => ({ ...prev, [id]: '' }));
       setBillChoice((prev) => ({ ...prev, [id]: '' }));
@@ -458,7 +477,8 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
                         <div className="mt-1 space-y-0.5">
                           {r.actions.map((a, i) => (
                             <div key={i} className={a.action === 'approved' ? 'text-emerald-600' : 'text-rose-600'}>
-                              {a.approver_name} {a.action === 'approved' ? 'approved' : 'rejected'}
+                              {a.approver_name}{' '}
+                              {a.action === 'approved' ? 'approved' : a.action === 'returned' ? 'returned it for correction' : a.action === 'resubmitted' ? 'resubmitted it' : 'rejected'}
                               {a.remarks ? ` — "${a.remarks}"` : ''}
                             </div>
                           ))}
@@ -497,13 +517,17 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
                               ))}
                             </select>
                           )}
+                          {r.source_type === 'user_claim' && <ClaimChangesNotice item={r} className="w-full" />}
                           <input
                             type="text"
-                            placeholder="Remarks (optional)"
+                            placeholder={r.source_type === 'user_claim' ? 'Remarks (needed to Return/Reject)' : 'Remarks (optional)'}
                             value={remarksDraft[r.id] || ''}
                             onChange={(e) => setRemarksDraft((prev) => ({ ...prev, [r.id]: e.target.value }))}
                             className="w-40 text-xs px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
                           />
+                          {r.source_type === 'user_claim' && (
+                            <ReclaimTick item={r} checked={!!reclaimDraft[r.id]} onChange={(v) => setReclaimDraft((prev) => ({ ...prev, [r.id]: v }))} />
+                          )}
                           <div className="flex gap-1.5">
                             <button
                               type="button"
@@ -513,6 +537,9 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
                             >
                               Reject
                             </button>
+                            {r.source_type === 'user_claim' && (
+                              <ReturnButton item={r} compact disabled={actingId === r.id} onClick={() => handleAct(r.id, 'returned')} />
+                            )}
                             <button
                               type="button"
                               disabled={actingId === r.id}

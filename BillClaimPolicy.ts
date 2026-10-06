@@ -47,7 +47,7 @@ export type PolicyValue = number | boolean;
 
 export interface PolicyDef {
   key: string;
-  group: "dates" | "amounts" | "claim";
+  group: "dates" | "amounts" | "claim" | "review";
   label: string;
   help: string;
   type: "number" | "boolean";
@@ -92,7 +92,60 @@ export const POLICY_DEFS: PolicyDef[] = [
     key: "rejected_dates_reopen",
     group: "dates",
     label: "Rejected claims don't close their dates",
-    help: "On: if a claim was rejected, its dates can be claimed again.",
+    help:
+      "On: if a claim was rejected, its dates can be claimed again. Only used while \"One claim per date\" is off — with it on, a rejected claim keeps its dates unless the approver ticks \"Allow re-claim\".",
+    type: "boolean",
+    default: true
+  },
+  {
+    key: "one_claim_per_date",
+    group: "dates",
+    label: "One claim per date",
+    help:
+      "A date's bills all go in one claim. To add or change a bill for a date that already has a claim, the employee edits that claim instead of filing a new one.",
+    type: "boolean",
+    default: true
+  },
+  {
+    key: "window_from_first_submit",
+    group: "dates",
+    label: "Count the date window from the day the claim was first filed",
+    help: "On: a claim edited later (e.g. after a Return) still accepts the dates it could take when it was filed. Off: counted from the day of the edit.",
+    type: "boolean",
+    default: true
+  },
+  {
+    key: "edit_lock_layer",
+    group: "review",
+    label: "The employee can edit a claim until this Layer approves it",
+    help: "1 = until the Supervisor (or the template's first Layer) approves. After that the claim is locked; only a Return reopens it.",
+    type: "number",
+    default: 1,
+    min: 1,
+    max: 10,
+    unit: "layer"
+  },
+  {
+    key: "allow_return",
+    group: "review",
+    label: "Approvers can Return a claim for correction",
+    help: "The Layer holding the claim sends it back to the employee with a reason; after the edit it starts again from Layer 1. Not possible once the bill is made.",
+    type: "boolean",
+    default: true
+  },
+  {
+    key: "decision_reason_required",
+    group: "review",
+    label: "A reason is required to Return or Reject",
+    help: "The reason is shown to the employee.",
+    type: "boolean",
+    default: true
+  },
+  {
+    key: "allow_reclaim_on_reject",
+    group: "review",
+    label: "Approvers can allow a re-claim when rejecting",
+    help: "Shows an \"Allow re-claim\" tick on Reject. Ticked: the employee may edit and resubmit the claim. Not ticked: the rejection is final and its dates stay closed.",
     type: "boolean",
     default: true
   },
@@ -435,38 +488,74 @@ export async function loadCategories(queryDB: QueryDB): Promise<BillCategory[]> 
 }
 
 /**
- * Dates (within [from, to]) this user can no longer add bills for: they already
- * have a bill on that date, filed on an earlier day than today.
+ * Dates (within [from, to]) this user can no longer put in a new claim (or in
+ * `excludeClaimId`, the claim being edited), each with the claim that holds it.
+ *
+ * "One claim per date" on: every date that is already in another claim of
+ * theirs, whatever its status (a rejected claim keeps its dates unless the
+ * approver allowed a re-claim — and then it is that same claim that gets
+ * edited). Off: the older rule — a date closes once the day its claim was
+ * filed has passed (rejected claims optionally reopening theirs).
  */
-export async function lockedDates(queryDB: QueryDB, userId: number, today: string, from: string, to: string, policy: PolicyValues): Promise<string[]> {
-  if (!policy.lock_dates_after_day) return [];
+export async function claimedDates(
+  queryDB: QueryDB,
+  userId: number,
+  today: string,
+  from: string,
+  to: string,
+  policy: PolicyValues,
+  excludeClaimId: number | null = null
+): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  const oneClaim = !!policy.one_claim_per_date;
+  if (!oneClaim && !policy.lock_dates_after_day) return out;
   const claims: any[] =
     (await queryDB("SELECT id, status, created_at, from_date, to_date FROM user_claims WHERE user_id = ?", [userId])) || [];
-  const earlier = claims.filter(
-    (c) => dhakaDate(c.created_at) < today && !(policy.rejected_dates_reopen && c.status === "rejected")
-  );
-  if (earlier.length === 0) return [];
-  const ids = earlier.map((c) => Number(c.id));
+  const others = claims.filter((c) => Number(c.id) !== Number(excludeClaimId));
+  const holding = oneClaim
+    ? others
+    : others.filter((c) => dhakaDate(c.created_at) < today && !(policy.rejected_dates_reopen && c.status === "rejected"));
+  if (holding.length === 0) return out;
+  const ids = holding.map((c) => Number(c.id));
   const items: any[] =
     (await queryDB(`SELECT user_claim_id, bill_date FROM user_claim_items WHERE user_claim_id IN (${ids.map(() => "?").join(",")})`, ids)) || [];
   const withItems = new Set(items.map((i) => Number(i.user_claim_id)));
-  const locked = new Set<string>();
-  for (const i of items) locked.add(dhakaDate(i.bill_date));
+  for (const i of items) {
+    const d = dhakaDate(i.bill_date);
+    if (d >= from && d <= to && !out.has(d)) out.set(d, Number(i.user_claim_id));
+  }
   // Claims filed before bill lines existed: their whole From–To range counts.
-  for (const c of earlier) {
+  for (const c of holding) {
     if (withItems.has(Number(c.id))) continue;
     const f = dhakaDate(c.from_date);
     const t = dhakaDate(c.to_date) || f;
     if (!f || t < from || f > to) continue;
-    for (const d of datesBetween(f < from ? from : f, t > to ? to : t)) locked.add(d);
+    for (const d of datesBetween(f < from ? from : f, t > to ? to : t)) if (!out.has(d)) out.set(d, Number(c.id));
   }
-  return [...locked].filter((d) => d >= from && d <= to).sort();
+  return out;
 }
 
-/** The date window the policy allows today. */
-export function dateWindow(policy: PolicyValues, today: string) {
+export async function lockedDates(
+  queryDB: QueryDB,
+  userId: number,
+  today: string,
+  from: string,
+  to: string,
+  policy: PolicyValues,
+  excludeClaimId: number | null = null
+): Promise<string[]> {
+  return [...(await claimedDates(queryDB, userId, today, from, to, policy, excludeClaimId)).keys()].sort();
+}
+
+/**
+ * The date window the policy allows today. `firstFiled` (YYYY-MM-DD) is the
+ * day a claim being edited was first filed: with "count the window from the
+ * day the claim was first filed" on, the window starts from that day instead.
+ */
+export function dateWindow(policy: PolicyValues, today: string, firstFiled?: string | null) {
   const back = Number(policy.backdate_days) || 0;
-  return { min: addDays(today, -back), max: policy.allow_future_dates ? addDays(today, 365) : today };
+  const base = firstFiled && policy.window_from_first_submit && firstFiled < today ? firstFiled : today;
+  return { min: addDays(base, -back), max: policy.allow_future_dates ? addDays(today, 365) : today };
 }
 
 export interface BillLineInput {
@@ -490,12 +579,24 @@ export interface CheckedLine {
  */
 export async function checkClaimBills(
   queryDB: QueryDB,
-  args: { userId: number; today: string; from: string; to: string; lines: BillLineInput[]; extraTotal: number; hasAttachment: boolean }
+  args: {
+    userId: number;
+    today: string;
+    from: string;
+    to: string;
+    lines: BillLineInput[];
+    extraTotal: number;
+    hasAttachment: boolean;
+    // Editing an existing claim: its own id (its dates and its share of the
+    // monthly limits don't count against it) and the day it was first filed.
+    editingClaimId?: number | null;
+    firstFiled?: string | null;
+  }
 ): Promise<{ error: string } | { lines: CheckedLine[]; total: number; categorySummary: string }> {
   const policy = await loadPolicy(queryDB);
   const categories = await loadCategories(queryDB);
   const { userId, today, from, to } = args;
-  const win = dateWindow(policy, today);
+  const win = dateWindow(policy, today, args.firstFiled);
   const fmt = (n: number) => `৳${n.toLocaleString("en-BD", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   if (!isDate(from) || !isDate(to)) return { error: "From Date and To Date are required." };
@@ -531,9 +632,15 @@ export async function checkClaimBills(
     lines.push({ category_id: cat.id, category_name: cat.name, bill_date: date, amount, description: desc });
   }
 
-  const locked = new Set(await lockedDates(queryDB, userId, today, from, to, policy));
-  const closed = [...new Set(lines.map((l) => l.bill_date).filter((d) => locked.has(d)))];
+  const held = await claimedDates(queryDB, userId, today, from, to, policy, args.editingClaimId ?? null);
+  const closed = [...new Set(lines.map((l) => l.bill_date).filter((d) => held.has(d)))];
   if (closed.length) {
+    if (policy.one_claim_per_date) {
+      const owners = [...new Set(closed.map((d) => held.get(d)))];
+      return {
+        error: `${closed.join(", ")} ${closed.length === 1 ? "is" : "are"} already in your claim${owners.length === 1 ? "" : "s"} ${owners.map((o) => `#${o}`).join(", ")} — one date goes in one claim. Edit that claim to add or change its bills.`
+      };
+    }
     return {
       error: `${closed.join(", ")} ${closed.length === 1 ? "was" : "were"} already claimed on an earlier day — more bills can't be added for ${closed.length === 1 ? "that date" : "those dates"}.`
     };
@@ -554,7 +661,7 @@ export async function checkClaimBills(
     const limited = categories.filter((c) => c.monthly_limit != null && lines.some((l) => l.category_id === c.id));
     if (limited.length) {
       const mine: any[] = (await queryDB("SELECT id, status FROM user_claims WHERE user_id = ?", [userId])) || [];
-      const ids = mine.filter((c) => c.status !== "rejected").map((c) => Number(c.id));
+      const ids = mine.filter((c) => c.status !== "rejected" && Number(c.id) !== Number(args.editingClaimId)).map((c) => Number(c.id));
       const past: any[] = ids.length
         ? (await queryDB(`SELECT category_id, category_name, bill_date, amount FROM user_claim_items WHERE user_claim_id IN (${ids.map(() => "?").join(",")})`, ids)) || []
         : [];
@@ -844,14 +951,22 @@ export function registerBillClaimPolicyRoutes(
     try {
       const policy = await loadPolicy(queryDB);
       const today = todayInDhaka();
-      const win = dateWindow(policy, today);
+      // ?claim_id=: the employee's own claim being edited — its dates aren't
+      // closed to it, and its window counts from the day it was first filed.
+      let editing: any = null;
+      if (req.query.claim_id) {
+        const rows: any[] = (await queryDB("SELECT id, user_id, first_submitted_at, created_at FROM user_claims WHERE id = ?", [Number(req.query.claim_id)])) || [];
+        if (rows.length && Number(rows[0].user_id) === Number(req.user.id)) editing = rows[0];
+      }
+      const firstFiled = editing ? dhakaDate(editing.first_submitted_at || editing.created_at) : null;
+      const win = dateWindow(policy, today, firstFiled);
       res.json({
         today,
         min_date: win.min,
         max_date: win.max,
         values: policy,
         categories: (await loadCategories(queryDB)).filter((c) => c.is_active),
-        locked_dates: await lockedDates(queryDB, req.user.id, today, win.min, win.max, policy)
+        locked_dates: await lockedDates(queryDB, req.user.id, today, win.min, win.max, policy, editing ? Number(editing.id) : null)
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
