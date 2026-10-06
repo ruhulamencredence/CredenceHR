@@ -5,7 +5,7 @@
 
 // The "turn on location tracking" notice (sent from Employee Tracking ->
 // Currently Not Tracked), shown by NoticePopup in place of the plain notice:
-// the package-tracking animation on top, the message, step-by-step instructions for the
+// the GPS navigation animation on top, the message, step-by-step instructions for the
 // phone, and "Set up Now". In the Android app that button walks through the
 // permission itself: the in-app dialog ("While using the app"), then
 // CredenceHR's Location permission page ("Allow all the time"), and checks
@@ -18,7 +18,7 @@ import { App } from '@capacitor/app';
 import { BatteryCharging, Check, CheckCircle2, ChevronDown, ChevronUp, Circle, LocateFixed, MapPin, Smartphone, X } from 'lucide-react';
 import { Lottie } from 'lottie-react';
 import { ActiveNotice } from '../types';
-import trackingAnimation from '../assets/tracking-package.json';
+import trackingAnimation from '../assets/gps-navigation.json';
 import {
   getLocationAccess,
   LocationAccessStatus,
@@ -184,9 +184,9 @@ export const TrackingNoticeCard: React.FC<Props> = ({ notice, remaining, busy, o
         <div className="overflow-y-auto">
           {/* Map */}
           <div className="p-3 pb-0">
-            {/* Package-tracking animation (src/assets/tracking-package.json, square). */}
-            <div className="liquid-glass-inset h-56 sm:h-64 rounded-[24px] overflow-hidden pointer-events-none flex items-center justify-center">
-              <Lottie src={trackingAnimation as any} autoplay loop className="h-full aspect-square" />
+            {/* GPS navigation animation (src/assets/gps-navigation.json, ~2:1) — kept short so the message shows without scrolling. */}
+            <div className="liquid-glass-inset h-32 sm:h-36 rounded-[24px] overflow-hidden pointer-events-none flex items-center justify-center px-4">
+              <Lottie src={trackingAnimation as any} autoplay loop className="h-full aspect-[351/174] max-w-full" />
             </div>
           </div>
 
