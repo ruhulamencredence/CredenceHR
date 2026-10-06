@@ -58,17 +58,42 @@ async function getCurrentCoords(): Promise<{ latitude: number; longitude: number
     return { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
   }
 
-  return new Promise((resolve, reject) => {
-    if (!navigator.geolocation) {
-      reject(new Error("This browser can't access your location."));
-      return;
+  if (!navigator.geolocation) {
+    throw new Error("This browser can't access your location.");
+  }
+  // Browsers only give location to a secure page (https:// or localhost).
+  if (typeof window !== 'undefined' && window.isSecureContext === false) {
+    throw new Error('This page is not secure (http://), so the browser blocks location. Open the site with https:// and try again.');
+  }
+  const ask = (highAccuracy: boolean, timeout: number) =>
+    new Promise<{ latitude: number; longitude: number }>((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
+        (err) => reject(err),
+        { enableHighAccuracy: highAccuracy, timeout, maximumAge: 30000 }
+      );
+    });
+  try {
+    return await ask(true, 12000);
+  } catch (first: any) {
+    // A desktop often has no GPS: when the precise fix is slow or unavailable, take the Wi-Fi/network one.
+    if (first?.code === 2 || first?.code === 3) {
+      try {
+        return await ask(false, 15000);
+      } catch (second: any) {
+        first = second;
+      }
     }
-    navigator.geolocation.getCurrentPosition(
-      (pos) => resolve({ latitude: pos.coords.latitude, longitude: pos.coords.longitude }),
-      () => reject(new Error("Couldn't get your location. Please allow location access and try again.")),
-      { enableHighAccuracy: true, timeout: 15000 }
-    );
-  });
+    if (first?.code === 1) {
+      throw new Error(
+        "Location is blocked for this site in Chrome. Click the lock icon next to the web address, set Location to Allow, reload the page and try again. (Windows' own Location switch being on is not enough.)"
+      );
+    }
+    if (first?.code === 2) {
+      throw new Error("Chrome couldn't find your position. Turn on Windows Settings → Privacy & security → Location (and let Chrome use it), then try again.");
+    }
+    throw new Error('Getting your location took too long. Please try again.');
+  }
 }
 
 // A User checks in/out for one of their assigned Projects — the server only
