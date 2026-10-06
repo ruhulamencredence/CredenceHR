@@ -1,3 +1,4 @@
+import { UserAvatar } from './UserAvatar';
 import React, { useState } from 'react';
 import {
   ChevronRight, ChevronDown, X, Building2, FileText, Users, Users2, BarChart3, Upload,
@@ -167,12 +168,13 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
 
         {/* Profile header */}
         <div className={`flex flex-col items-center text-center pb-5 ${collapsed ? 'px-2 pt-7' : 'px-5 pt-3'}`}>
-          <div
-            className="w-11 h-11 rounded-full flex items-center justify-center text-sm font-bold text-white ring-2 ring-white/30"
-            style={{ background: roleAvatarColors[user.role] || '#B36AFF' }}
-          >
-            {initials}
-          </div>
+          <UserAvatar
+            userId={user.id}
+            name={user.name}
+            fallback={initials}
+            className="w-11 h-11 text-sm ring-2 ring-white/30"
+            color={roleAvatarColors[user.role] || '#B36AFF'}
+          />
           {!collapsed && (
             <>
               <p className="mt-2.5 text-[10px] font-semibold tracking-wide text-white/60">
@@ -306,12 +308,13 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
                       onClick={() => selectAndClose('users')}
                       className={`w-full flex items-center gap-2.5 rounded-xl px-2.5 py-2 transition-colors text-white/85 hover:bg-white/10 ${collapsed ? 'justify-center' : ''}`}
                     >
-                      <span
-                        className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white shrink-0"
-                        style={{ background: roleAvatarColors[u.role] || '#B36AFF' }}
-                      >
-                        {uInitials}
-                      </span>
+                      <UserAvatar
+                        userId={u.id}
+                        name={u.name}
+                        fallback={uInitials}
+                        className="w-6 h-6 text-[10px]"
+                        color={roleAvatarColors[u.role] || '#B36AFF'}
+                      />
                       {!collapsed && <span className="text-[12.5px] truncate">{u.name}</span>}
                     </button>
                   );

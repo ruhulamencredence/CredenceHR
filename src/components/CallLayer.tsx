@@ -15,6 +15,7 @@
 // the callee accepts, the caller makes the WebRTC offer and both sides trade
 // ICE candidates through call:signal until the media connects.
 
+import { UserAvatar } from './UserAvatar';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Mic, MicOff, Phone, PhoneOff, Video, VideoOff } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
@@ -426,9 +427,13 @@ export const CallLayer: React.FC<{ token: string }> = ({ token }) => {
 
       <div className={`relative flex-1 flex flex-col items-center justify-center gap-3 px-6 ${showVideo && phase === 'active' && remoteHasVideo ? 'justify-start pt-10' : ''}`}>
         {!(showVideo && phase === 'active' && remoteHasVideo) && (
-          <div className={`w-28 h-28 rounded-full bg-white/10 border border-white/20 flex items-center justify-center text-4xl font-semibold ${phase === 'incoming' || phase === 'outgoing' ? 'animate-pulse' : ''}`}>
-            {initials(peer?.name || '')}
-          </div>
+          <UserAvatar
+            userId={(peer as any)?.id ?? (peer as any)?.user_id}
+            name={peer?.name || ''}
+            fallback={initials(peer?.name || '')}
+            className={`w-28 h-28 text-4xl border border-white/20 ${phase === 'incoming' || phase === 'outgoing' ? 'animate-pulse' : ''}`}
+            color="rgba(255,255,255,0.1)"
+          />
         )}
         <div className="text-2xl font-semibold text-center drop-shadow">{peer?.name}</div>
         <div className="text-sm text-white/70 drop-shadow">{status}</div>

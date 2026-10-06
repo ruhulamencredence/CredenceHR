@@ -17,6 +17,7 @@
 // /api/hr-ops/my/p360 (users.can_view_service_book) and offers no picker,
 // actions or edit buttons.
 
+import { UserAvatar } from './UserAvatar';
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { CompanyAssignmentsModal } from './HrOpsCompanyTools';
 import {
@@ -355,7 +356,7 @@ export const Employee360: React.FC<{
           {/* Header */}
           <div className="rounded-xl border border-slate-200 bg-gradient-to-r from-blue-50/60 to-white p-4">
             <div className="flex flex-wrap items-start gap-4">
-              <div className="w-14 h-14 rounded-full bg-blue-600 text-white flex items-center justify-center text-lg font-bold shrink-0">{initials(e.name)}</div>
+              <UserAvatar userId={(e as any).user_id} name={e.name} className="w-14 h-14 text-lg" color="#2563eb" />
               <div className="flex-1 min-w-[200px]">
                 <div className="flex flex-wrap items-center gap-2">
                   <h2 className="text-base font-bold text-slate-900">{e.name}</h2>

@@ -10,6 +10,7 @@
 // Department, with a search box. GET /api/tracking/status needs the
 // 'tracking' module, so without it this renders nothing (and the API refuses).
 
+import { UserAvatar } from './UserAvatar';
 import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { BarChart3, CheckCircle2, Navigation, Search, Send, X } from 'lucide-react';
@@ -436,9 +437,7 @@ export const TrackingStatusCards: React.FC<Props> = ({ token, variant = 'panel',
                             aria-label={`Select ${r.name}`}
                           />
                         )}
-                        <span className={`w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-bold text-white shrink-0 ${r.tracked ? 'bg-emerald-500' : 'bg-slate-400'}`}>
-                          {initials(r.name)}
-                        </span>
+                        <UserAvatar userId={r.user_id ? Number(r.user_id) : null} name={r.name} className="w-6 h-6 text-[9px]" color={r.tracked ? '#10b981' : '#94a3b8'} />
                         <span className="min-w-0 flex-1">
                           <span className="block text-slate-800 font-semibold truncate">{r.name}</span>
                           <span className="block text-[10px] text-slate-400 truncate">{[r.employee_id, r.designation].filter(Boolean).join(' · ') || '—'}</span>

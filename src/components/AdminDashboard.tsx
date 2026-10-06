@@ -26,6 +26,7 @@
 // than shown greyed. A tile or task with a screen of its own opens it
 // (onNavigate); one listing people opens a list.
 
+import { UserAvatar } from './UserAvatar';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   CalendarClock, CalendarDays, Wallet, Banknote, Package, HandCoins,
@@ -952,12 +953,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
                       {quickViewRows.slice(0, 6).map((r, i) => (
                         <tr key={r.id} className="border-b border-[#f3f1fa] last:border-0">
                           <td className="px-2.5 py-2.5 flex items-center gap-2.5 font-semibold text-slate-900">
-                            <span
-                              className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold text-white shrink-0"
-                              style={{ background: avatarColorFor(i) }}
-                            >
-                              {initialsOf(r.name)}
-                            </span>
+                            <UserAvatar userId={(r as any).user_id} name={r.name} className="w-7 h-7 text-[10px]" color={avatarColorFor(i)} />
                             {r.name}
                           </td>
                           <td className="px-2.5 py-2.5 text-slate-500">{r.designation}</td>
@@ -1128,9 +1124,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
                 <div className="space-y-1.5 overflow-y-auto max-h-72 -mr-1 pr-1">
                   {attendanceMissed.map((m) => (
                     <div key={m.key} className="flex items-center gap-2 text-xs px-2.5 py-1.5 bg-slate-50 border border-slate-100 rounded-lg">
-                      <span className="w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-bold text-white shrink-0" style={{ background: avatarColorFor(m.name.length) }}>
-                        {initialsOf(m.name)}
-                      </span>
+                      <UserAvatar userId={(m as any).user_id} name={m.name} className="w-6 h-6 text-[9px]" color={avatarColorFor(m.name.length)} />
                       <span className="min-w-0 flex-1">
                         <span className="block text-slate-800 font-semibold truncate">{m.name}</span>
                         <span className="block text-[10px] text-slate-400 truncate">{m.designation}</span>
@@ -1197,13 +1191,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
                           {onLeave.length > 0 && cell.inCurrentMonth && (
                             <div className="flex items-center gap-0.5 flex-wrap">
                               {onLeave.slice(0, 2).map((p, i2) => (
-                                <span
+                                <UserAvatar
                                   key={`${p.user_id}-${i2}`}
-                                  className="w-3.5 h-3.5 rounded-full flex items-center justify-center text-[7px] font-bold text-white shrink-0"
-                                  style={{ background: avatarColorFor(p.user_id), opacity: p.isLeave ? 1 : 0.5 }}
-                                >
-                                  {initialsOf(p.name)[0]}
-                                </span>
+                                  userId={p.user_id}
+                                  name={p.name}
+                                  fallback={initialsOf(p.name)[0]}
+                                  className="w-3.5 h-3.5 text-[7px]"
+                                  color={avatarColorFor(p.user_id)}
+                                  style={{ opacity: p.isLeave ? 1 : 0.5 }}
+                                />
                               ))}
                               {onLeave.length > 2 && (
                                 <span className="text-[7px] font-semibold text-slate-400">+{onLeave.length - 2}</span>
@@ -1348,9 +1344,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
                           <tr key={r.id} className="border-b border-slate-50 last:border-0 align-top">
                             <td className="px-2 py-2.5">
                               <div className="flex items-center gap-2">
-                                <span className="w-7 h-7 rounded-full flex items-center justify-center text-[9px] font-bold text-white shrink-0" style={{ background: avatarColorFor(i) }}>
-                                  {initialsOf(r.name)}
-                                </span>
+                                <UserAvatar userId={(r as any).user_id} name={r.name} className="w-7 h-7 text-[9px]" color={avatarColorFor(i)} />
                                 <div className="min-w-0">
                                   <div className="font-semibold text-slate-900">{r.name}</div>
                                   <div className="text-[10px] text-slate-400">
@@ -1403,9 +1397,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
             <div className="overflow-y-auto px-5 py-4 space-y-1.5">
               {openList.rows.map((r) => (
                 <div key={r.key} className="flex items-center gap-2 text-xs px-2.5 py-2 bg-slate-50 border border-slate-100 rounded-lg">
-                  <span className="w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-bold text-white shrink-0" style={{ background: avatarColorFor(r.name.length) }}>
-                    {initialsOf(r.name)}
-                  </span>
+                  <UserAvatar userId={(r as any).user_id} name={r.name} className="w-6 h-6 text-[9px]" color={avatarColorFor(r.name.length)} />
                   <span className="min-w-0 flex-1">
                     <span className="block text-slate-800 font-semibold truncate">{r.name}</span>
                     {r.sub && <span className="block text-[10px] text-slate-400 truncate">{r.sub}</span>}
@@ -1468,12 +1460,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
                   <div className="space-y-1">
                     {g.entries.map((e, idx) => (
                       <div key={`${e.user_id}-${idx}`} className="flex items-center gap-2 text-xs px-2.5 py-1.5 bg-slate-50 border border-slate-100 rounded-lg">
-                        <span
-                          className="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-bold text-white shrink-0"
-                          style={{ background: avatarColorFor(e.user_id) }}
-                        >
-                          {initialsOf(e.name)}
-                        </span>
+                        <UserAvatar userId={e.user_id} name={e.name} className="w-5 h-5 text-[9px]" color={avatarColorFor(e.user_id)} />
                         <span className="text-slate-700 font-medium truncate">{e.name}</span>
                       </div>
                     ))}
