@@ -121,7 +121,7 @@ export const MyTasks: React.FC<{ token: string; user: User; onBack?: () => void 
             <div className="space-y-2">
               {active.length === 0 && (
                 <p className="text-sm text-slate-500 py-8 text-center">
-                  {tab === 'assigned' ? 'No open tasks for you. 🎉' : tab === 'requested' ? 'No open requests. Tap “Request to HR” to ask for a certificate or letter.' : 'No open tasks for your team.'}
+                  {tab === 'assigned' ? 'No open tasks for you. 🎉' : tab === 'requested' ? 'No open requests. Tap “Request to HR” to ask for an ID card, visiting card or something else (salary certificate, NOC and similar letters: My Letters).' : 'No open tasks for your team.'}
                 </p>
               )}
               {active.map((t) => (

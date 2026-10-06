@@ -388,6 +388,9 @@ export const RequestToHrForm: React.FC<{ token: string; types: { key: string; la
             ))}
           </div>
         </div>
+        <p className="text-[11px] text-slate-500 -mt-1">
+          Salary Certificate, Experience Certificate, NOC and Bank Account Opening Letter: ask from <span className="font-semibold">My Letters &amp; Service Record</span> instead.
+        </p>
         {type === 'other' && (
           <div>
             <label className={labelCls}>Name it</label>
