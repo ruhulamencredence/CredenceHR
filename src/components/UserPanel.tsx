@@ -3175,7 +3175,9 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
       <div className={mobileActiveSection === 'claim' && canSeeMovementClaim ? 'block max-md:!mt-0 mobile-page-in' : 'hidden'}>
         <div className="hidden md:block">
           {!isNativeApp && <ModulePath path={['Self Service', 'My HR', 'My Claim/Bill', 'Movement Claims']} />}
-          <ClaimCard token={token} />
+          <ClaimCard token={token} onSuccess={() => setClaimListRefreshKey((k) => k + 1)} />
+          {/* The claim history (Open / Completed) — on the web too, not only in the mobile app. */}
+          <MyClaimsCard token={token} desktop refreshKey={claimListRefreshKey} />
         </div>
         <div className="md:hidden">
           <MyClaimsCard
