@@ -59,19 +59,28 @@ const parseList = (v: any): string[] => {
 };
 
 export async function ensureAccessTemplateSchema(queryDB: QueryDB) {
+  // Add each column only when it's missing, so a normal restart doesn't hit
+  // (and log) a "Duplicate column" error from queryDB.
+  let existing = new Set<string>();
   try {
-    await queryDB("ALTER TABLE access_templates ADD COLUMN is_default TINYINT(1) NOT NULL DEFAULT 0");
-  } catch (err: any) {
-    if (err?.code !== "ER_DUP_FIELDNAME") console.warn("⚠️ Could not add access_templates.is_default column: " + err.message);
+    const cols: any[] = (await queryDB("/*unscoped*/ SHOW COLUMNS FROM access_templates")) || [];
+    existing = new Set(cols.map((c) => String(c.Field)));
+  } catch {
+    // Table check failed — fall through and let the ALTERs report it.
   }
+  const addColumn = async (name: string, ddl: string) => {
+    if (existing.has(name)) return;
+    try {
+      await queryDB(`ALTER TABLE access_templates ADD COLUMN ${name} ${ddl}`);
+    } catch (err: any) {
+      if (err?.code !== "ER_DUP_FIELDNAME") console.warn(`⚠️ Could not add access_templates.${name} column: ` + err.message);
+    }
+  };
+  await addColumn("is_default", "TINYINT(1) NOT NULL DEFAULT 0");
   // One-time additions to the "Default User" template that already exists
   // in a database (features_rev counts them, so a switch HR later removes
   // from the template isn't put back): rev 1 = My Service Book.
-  try {
-    await queryDB("ALTER TABLE access_templates ADD COLUMN features_rev INT NOT NULL DEFAULT 0");
-  } catch (err: any) {
-    if (err?.code !== "ER_DUP_FIELDNAME") console.warn("⚠️ Could not add access_templates.features_rev column: " + err.message);
-  }
+  await addColumn("features_rev", "INT NOT NULL DEFAULT 0");
   // Rows made from now on already have every addition.
   await queryDB("ALTER TABLE access_templates ALTER COLUMN features_rev SET DEFAULT 1").catch(() => undefined);
   try {
