@@ -196,7 +196,7 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
 
   return (
     <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900">
-      <div className="w-full px-2 sm:px-6 lg:px-8 pt-3 pb-8 max-w-3xl mx-auto">
+      <div className="w-full px-2 sm:px-6 lg:px-8 pt-3 pb-8">
         {!isNativeApp && (
           <>
             <ModulePath path={['Self Service', 'Alerts']} />
