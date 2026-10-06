@@ -1663,6 +1663,16 @@ async function ensureSchemaMigrations() {
       console.warn("⚠️ Could not add user_claims.approved_amount column: " + err.message);
     }
   }
+  // Who filed the claim when it isn't the claimant themself — an Admin with
+  // Conveyance -> "Claim on Behalf" (POST /api/user-claims/on-behalf/:userId).
+  // NULL for a claim the employee filed on their own.
+  try {
+    await dbPool.query(`ALTER TABLE user_claims ADD COLUMN filed_by INT NULL`);
+  } catch (err: any) {
+    if (err.code !== "ER_DUP_FIELDNAME") {
+      console.warn("⚠️ Could not add user_claims.filed_by column: " + err.message);
+    }
+  }
   // Lets a Conveyance Bill Claim reference one or more of the User's own completed
   // Movement Claims (check-in/out), each with its own Amount — see the long
   // comment on this table in schema.sql. UNIQUE claim_id means a given check-in/
@@ -2441,7 +2451,7 @@ const PERMISSION_LAYER_KEYS = ["read", "edit_add", "entry_upload", "delete_trash
 const USERS_LAYER_KEYS = [...PERMISSION_LAYER_KEYS, "block_account"] as const;
 // Which modules currently enforce PERMISSION_LAYER_KEYS — mirrors
 // PERMISSION_LAYER_MODULES in src/types.ts. Rolled out module by module.
-const PERMISSION_LAYER_MODULES = ["departments", "projects", "approvals", "users", "reports", "tracking", "payroll", "mobile_bill", "office_attendance"] as const;
+const PERMISSION_LAYER_MODULES = ["departments", "projects", "approvals", "users", "reports", "tracking", "payroll", "mobile_bill", "office_attendance", "conveyance"] as const;
 // Employee Tracking's layers: "read" = the live map, history and status
 // cards; "stay_report" = the Stay Report (TrackingStayReport.ts). Both are
 // reading, so an account with Employee Tracking and no saved layers has both.
@@ -2469,6 +2479,10 @@ const MOBILE_BILL_LAYER_KEYS = ["read", "limit_history"] as const;
 // PINs — tie a device PIN that has punches to an Employee (edits the
 // Employee record, so never part of the no-saved-layers default).
 const OFFICE_ATTENDANCE_LAYER_KEYS = ["read", "link_pins"] as const;
+// Conveyance Bill Claim: "read" = the module as it was; "on_behalf" = file a
+// Conveyance Bill Claim for another employee (it goes through that
+// employee's approval chain like their own would) — explicit-only.
+const CONVEYANCE_LAYER_KEYS = ["read", "on_behalf"] as const;
 // PEPM Reports uses four of them: Read Only, Edit, Delete/Trash, Permanent Delete
 // — plus its own "Budget Submission Status" (the second report on that page),
 // which, like Permanent Delete, is never part of the no-saved-rows default:
@@ -2499,6 +2513,7 @@ const MODULE_LAYER_KEY_SETS: Record<string, readonly string[]> = {
   payroll: PAYROLL_LAYER_KEYS,
   mobile_bill: MOBILE_BILL_LAYER_KEYS,
   office_attendance: OFFICE_ATTENDANCE_LAYER_KEYS,
+  conveyance: CONVEYANCE_LAYER_KEYS,
   leave_manage: LEAVE_MANAGE_LAYER_KEYS,
 };
 
@@ -4214,7 +4229,7 @@ async function startServer() {
   // on for a module is never a silent regression; a Superadmin only actually
   // restricts anything once they explicitly save a narrower set in the
   // Module Access modal.
-  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "block_account" | "limit_history" | "link_pins") =>
+  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "block_account" | "limit_history" | "link_pins" | "on_behalf") =>
     async (req: any, res: any, next: any) => {
       if (!req.user) return res.status(401).json({ error: "Access token required" });
       if (req.user.role === "superadmin") return next();
@@ -4230,7 +4245,7 @@ async function startServer() {
           ? grantedLayers
           : moduleKey === "tracking"
             ? [...TRACKING_DEFAULT_LAYERS]
-            : moduleKey === "payroll" || moduleKey === "office_attendance"
+            : moduleKey === "payroll" || moduleKey === "office_attendance" || moduleKey === "conveyance"
               ? ["read"]
               : moduleKey === "mobile_bill"
                 ? [...MOBILE_BILL_LAYER_KEYS]
@@ -4258,7 +4273,7 @@ async function startServer() {
     const defaults: readonly string[] =
       moduleKey === "tracking"
         ? TRACKING_DEFAULT_LAYERS
-        : moduleKey === "payroll" || moduleKey === "office_attendance"
+        : moduleKey === "payroll" || moduleKey === "office_attendance" || moduleKey === "conveyance"
           ? ["read"]
           : moduleKey === "mobile_bill"
             ? MOBILE_BILL_LAYER_KEYS
@@ -5681,6 +5696,8 @@ async function startServer() {
     requireModule,
     requireAnyModule,
     requireConveyanceClaimAccess,
+    requireModuleLayer,
+    hasModuleLayer,
     queryDB,
     createAlert,
     getAdminModules,

@@ -17,6 +17,9 @@ interface NewConveyanceClaimModalProps {
   token: string;
   onClose: () => void;
   onSubmitted: () => void;
+  // Admin Panel -> Conveyance -> Claim on Behalf: the same form, filed for this
+  // employee (their policy, their check-in/outs, their approval chain).
+  onBehalfOf?: { id: number; name: string } | null;
 }
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024; // 5MB
@@ -63,7 +66,8 @@ const checkInDate = (v: string | null | undefined) => {
   if (Number.isNaN(d.getTime())) return String(v).slice(0, 10);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
-export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = ({ token, onClose, onSubmitted }) => {
+export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = ({ token, onClose, onSubmitted, onBehalfOf }) => {
+  const behalfBase = onBehalfOf ? `/api/user-claims/on-behalf/${onBehalfOf.id}` : null;
   const [policy, setPolicy] = useState<MyBillClaimPolicy | null>(null);
   const [policyError, setPolicyError] = useState('');
   const today = policy?.today || todayDateOnlyString();
@@ -94,7 +98,7 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(apiUrl('/api/bill-claim-policy/mine'), { headers: { Authorization: `Bearer ${token}` } });
+        const res = await fetch(apiUrl(behalfBase ? `${behalfBase}/policy` : '/api/bill-claim-policy/mine'), { headers: { Authorization: `Bearer ${token}` } });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Could not load the Bill Claim Policy.');
         if (cancelled) return;
@@ -109,7 +113,7 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
     return () => {
       cancelled = true;
     };
-  }, [token]);
+  }, [token, behalfBase]);
 
   const locked = new Set(policy?.locked_dates || []);
   const minDate = policy?.min_date || today;
@@ -152,7 +156,7 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
     (async () => {
       setLoadingClaims(true);
       try {
-        const res = await fetch(apiUrl('/api/claims/available'), { headers: { Authorization: `Bearer ${token}` } });
+        const res = await fetch(apiUrl(behalfBase ? `${behalfBase}/available-claims` : '/api/claims/available'), { headers: { Authorization: `Bearer ${token}` } });
         if (res.ok && !cancelled) setAvailableClaims(await res.json());
       } catch {
         // Offline/unreachable — picker just stays empty; manual Amount still works.
@@ -163,7 +167,7 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
     return () => {
       cancelled = true;
     };
-  }, [token]);
+  }, [token, behalfBase]);
 
   const toggleRef = (claimId: number) => {
     setSelectedRefs((prev) => {
@@ -269,7 +273,7 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
         });
       }
 
-      const res = await fetch(apiUrl('/api/user-claims'), {
+      const res = await fetch(apiUrl(behalfBase || '/api/user-claims'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
@@ -322,7 +326,14 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
         style={{ maxHeight: '100%' }}
       >
         <div className="p-5 border-b border-slate-200 flex items-center justify-between shrink-0">
-          <h3 className="text-base font-bold text-slate-900">New Conveyance Claim</h3>
+          <div className="min-w-0">
+            <h3 className="text-base font-bold text-slate-900">{onBehalfOf ? 'Claim on Behalf' : 'New Conveyance Claim'}</h3>
+            {onBehalfOf && (
+              <p className="text-xs text-slate-500 mt-0.5 truncate">
+                For <span className="font-semibold text-slate-700">{onBehalfOf.name}</span> — goes through their approval chain.
+              </p>
+            )}
+          </div>
           <button
             type="button"
             onClick={onClose}
