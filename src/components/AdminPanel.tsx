@@ -19,6 +19,7 @@ import { ApprovalManager } from './ApprovalManager';
 import { ApprovalTemplateManager } from './ApprovalTemplateManager';
 import { ApprovalBadge } from './ApprovalBadge';
 import { EmployeeTrackingPanel } from './EmployeeTrackingPanel';
+import { ActiveUsers } from './ActiveUsers';
 import { OfficeAttendancePanel } from './OfficeAttendancePanel';
 import { DeliveryDateConditionsPanel } from './DeliveryDateConditionsPanel';
 import { HolidayCalendarPanel } from './HolidayCalendarPanel';
@@ -445,7 +446,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // PUT /api/users/:id/module-permissions).
   const canGrantModuleAccess = isSuperAdmin || !!user.can_grant_module_access;
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'my_conveyance' | 'disbursement' | 'holidays' | 'asset_management' | 'servers' | 'permanent_delete_log' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault'>(
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'my_conveyance' | 'disbursement' | 'holidays' | 'asset_management' | 'servers' | 'permanent_delete_log' | 'active_users' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault'>(
     () => {
       // Restores whichever tab this Admin was last looking at — see the
       // "pull down to reload" note in App.tsx: since a reload now has to be
@@ -461,7 +462,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         const savedVisible =
           saved === 'dashboard' ? isAdminRole :
           saved === 'my_conveyance' ? isSuperAdmin || visibleModules.includes('conveyance') :
-          saved === 'servers' || saved === 'permanent_delete_log' ? isSuperAdmin :
+          saved === 'servers' || saved === 'permanent_delete_log' || saved === 'active_users' ? isSuperAdmin :
           isSuperAdmin || visibleModules.includes(saved as AdminModuleKey);
         if (saved && savedVisible) return saved as any;
       } catch {
@@ -509,7 +510,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     // 'servers'/'permanent_delete_log' aren't AdminModuleKey/module_permissions
     // entries either — both Superadmin-only, same reasoning as 'my_conveyance'
     // below.
-    if (adminNavRequest.target === 'servers' || adminNavRequest.target === 'permanent_delete_log') {
+    if (adminNavRequest.target === 'servers' || adminNavRequest.target === 'permanent_delete_log' || adminNavRequest.target === 'active_users') {
       if (isSuperAdmin) setActiveTab(adminNavRequest.target);
       return;
     }
@@ -526,7 +527,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   useEffect(() => {
     const activeTabStillVisible =
       activeTab === 'dashboard' ? isAdminRole :
-      activeTab === 'servers' || activeTab === 'permanent_delete_log' ? isSuperAdmin :
+      activeTab === 'servers' || activeTab === 'permanent_delete_log' || activeTab === 'active_users' ? isSuperAdmin :
       activeTab === 'my_conveyance' ? canSee('conveyance') : canSee(activeTab);
     if (!activeTabStillVisible && visibleModules.length > 0) {
       setActiveTab(visibleModules[0] as any);
@@ -4569,6 +4570,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       {activeTab === 'servers' && (
         <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6">
           <ServerProfilesPanel token={token} />
+        </div>
+      )}
+
+      {/* TAB: ACTIVE USERS — who is signed in right now, with IP and device, Superadmin only (ActiveUsers.tsx). */}
+      {activeTab === 'active_users' && isSuperAdmin && (
+        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-4 sm:p-6">
+          <ActiveUsers token={token} />
         </div>
       )}
 

@@ -16,6 +16,7 @@ import { registerAlertRoutes, ensureAlertsSchema, createAlert } from "./Alerts";
 import { registerUserManagementRoutes } from "./UserManagement";
 import { registerConveyanceBillClaimRoutes } from "./ConveyanceBillClaimRoutes";
 import { registerLiveTrackingRoutes } from "./LiveTrackingRoutes";
+import { registerActiveUsersRoutes, ensureActiveUsersSchema, touchSession } from "./ActiveUsersRoutes";
 import { registerDepartmentsAndBranchesRoutes } from "./DepartmentsAndBranches";
 import { registerServerProfileRoutes, ensureServerProfilesSchema } from "./ServerProfileRoutes";
 import { registerAttendanceRoutes } from "./AttendanceRoutes";
@@ -166,6 +167,9 @@ async function initDB() {
 // pre-existing database) would otherwise hit "Table doesn't exist" the first time this
 // feature is used — CREATE TABLE IF NOT EXISTS here means a normal server restart is
 // enough to pick it up, no manual SQL required.
+// Live socket server (set once it starts) — Live Follow pushes to the phones through it.
+let liveIo: SocketIOServer | null = null;
+
 async function ensureSchemaMigrations() {
   if (!dbPool) return;
   try {
@@ -228,6 +232,9 @@ async function ensureSchemaMigrations() {
   // — table + schema owned by EmployeeTransferRoutes.ts, only the call site
   // lives here, same as every other self-healing migration in this function.
   await ensureEmployeeTransferSchema(dbPool);
+
+  // Admin Panel -> Active Users: one row per sign-in (ActiveUsersRoutes.ts).
+  await ensureActiveUsersSchema(queryDB).catch((e: any) => console.warn("⚠️ Active users table: " + e.message));
 
   // World-class HRM extension modules — Exit/Offboarding, Performance
   // Management, Recruitment/ATS, Grievance & Disciplinary, Document Vault
@@ -3296,6 +3303,8 @@ async function startServer() {
     jwt.verify(token, JWT_SECRET, (err: any, user: any) => {
       if (err) return res.status(403).json({ error: "Invalid or expired token" });
       req.user = user;
+      // Admin Panel -> Active Users: this sign-in's IP, device and last use.
+      touchSession(queryDB, req, token, user);
       next();
     });
   };
@@ -4594,6 +4603,7 @@ async function startServer() {
   registerPerformanceRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB, getAdminModules });
   registerRecruitmentRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB });
   registerGrievanceRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB, getAdminModules });
+  registerActiveUsersRoutes(app, { authenticateToken, requireSuperAdmin, queryDB });
   // Employee Tracking -> Stay Report (time at each place, day by day).
   registerTrackingStayReportRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, queryDB });
   registerHRAnalyticsRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB });
@@ -6664,6 +6674,7 @@ async function startServer() {
   // member management) come from registerChatRoutes; setupChatSocket wires
   // the live 'send_message'/'typing'/'presence_change' events on top of it.
   const io = new SocketIOServer(httpServer, { cors: { origin: "*" } });
+  liveIo = io;
 
   // Step 1 of making this app safe to run as more than one server process
   // behind a load balancer (needed once usage grows past what a single

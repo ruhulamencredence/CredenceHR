@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Capacitor } from '@capacitor/core';
 import { Project, MprNumber, Entry, Budget, BudgetItem, User, MprUsage, ClaimsNavRequest, JobsNavRequest, DashboardNavRequest, LeaveNavRequest } from '../types';
-import { Calendar, Building2, FileText, Package, Clock, Plus, AlertTriangle, CheckCircle2, ChevronRight, X, Trash2, Edit2, Lock, Wallet, ArrowLeft, FolderOpen, ListChecks, Search, Save, Briefcase, FileDown, Scissors, Route, Info, Contact, Bell } from 'lucide-react';
+import { Calendar, Building2, FileText, Package, Clock, Plus, AlertTriangle, CheckCircle2, ChevronRight, X, Trash2, Edit2, Lock, Wallet, ArrowLeft, FolderOpen, ListChecks, Search, Save, Briefcase, FileDown, Scissors, Route, Info, Contact, Bell, Navigation } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { formatDate, todayDateOnlyString, dateRangeOptions, formatDateLabel, latestDateStr, isDateBlockedByLeadTime } from '../lib/formatDate';
 import { useDeliveryLeadTime } from '../lib/useDeliveryLeadTime';
@@ -22,7 +22,7 @@ import { PendingApprovalsCard } from './PendingApprovalsCard';
 import { MyRequestsCard } from './MyRequestsCard';
 import { MyMonthAttendanceCard } from './MyMonthAttendanceCard';
 import { TodayOverviewCard } from './TodayOverviewCard';
-import { TrackingStatusCards } from './TrackingStatusCards';
+import { TrackingStatusCards, useTrackingStatus } from './TrackingStatusCards';
 import { NoticePreviewCard } from './NoticePreviewCard';
 import { HolidayCalendarWidget } from './HolidayCalendarWidget';
 import { LeaveReviewPage } from './LeaveReviewPage';
@@ -986,6 +986,12 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // initializer) so "pull down to reload" — see App.tsx — lands back on the exact
   // same section instead of resetting to the tile menu.
   const userSectionStorageKey = `mpr_user_section_${user.id}`;
+  // Employee Tracking tile (mobile) — counts only for accounts with the
+  // 'tracking' module; its popup opens from the tile.
+  const canSeeTracking = user.role === 'superadmin' || (user.module_permissions || []).includes('tracking');
+  const trackingStatus = useTrackingStatus(token, canSeeTracking);
+  const [trackingChooserOpen, setTrackingChooserOpen] = useState(false);
+
   const [mobileActiveSection, setMobileActiveSection] = useState<'budget' | 'jobs' | 'entries' | 'jobEdit' | 'claim' | 'claims' | 'conveyanceClaim' | 'leave' | 'timesheet' | 'employeeDirectory' | 'noticeBoard' | null>(
     () => {
       try {
@@ -3042,7 +3048,9 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
 
         {/* Employee Tracking quick access — only for accounts with the
             'tracking' module (renders nothing otherwise; its API refuses). */}
-        {!Capacitor.isNativePlatform() && <TrackingStatusCards token={token} variant="card" />}
+        {!Capacitor.isNativePlatform() && canSeeTracking && trackingStatus !== null && (
+          <TrackingStatusCards token={token} variant="card" external status={trackingStatus} />
+        )}
 
         {/* Takes the full row at md, where there are only two columns to
             share — it's an actionable list (remarks input + Approve/Reject
@@ -3356,8 +3364,35 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
             <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">Notice Board</span>
           </button>
           {/* Employee Tracking — only for accounts with the 'tracking' module. */}
-          <TrackingStatusCards token={token} variant="tile" />
+          {canSeeTracking && trackingStatus !== null && (
+            <button
+              type="button"
+              onClick={() => trackingStatus && setTrackingChooserOpen(true)}
+              className="relative flex flex-col items-center justify-center gap-1.5 rounded-[24px] overflow-hidden border border-white/70 p-3 h-[104px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] bg-gradient-to-br from-emerald-100/70 via-white/50 to-teal-50/40 backdrop-blur-xl hover:shadow-lg hover:border-white active:scale-95 transition-all"
+            >
+              <div className="p-2.5 rounded-2xl bg-gradient-to-br from-emerald-400 to-teal-500 shadow-[0_6px_16px_-2px_rgba(5,150,105,0.35)] border border-white/30 relative">
+                <Navigation className="w-6 h-6 text-white" />
+                {!!trackingStatus?.tracked && (
+                  <span className="absolute -top-1.5 -right-1.5 text-[10px] font-semibold bg-emerald-600 text-white rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 border border-white">
+                    {trackingStatus.tracked}
+                  </span>
+                )}
+              </div>
+              <span className="text-xs font-semibold text-slate-700 text-center leading-tight line-clamp-2 flex items-center">Employee Tracking</span>
+            </button>
+          )}
         </div>
+      )}
+      {/* Employee Tracking tile's popup (both numbers -> department lists). */}
+      {trackingStatus && (
+        <TrackingStatusCards
+          token={token}
+          variant="chooser"
+          external
+          status={trackingStatus}
+          chooserOpen={trackingChooserOpen}
+          onChooserClose={() => setTrackingChooserOpen(false)}
+        />
       )}
 
 
