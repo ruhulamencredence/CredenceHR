@@ -4,7 +4,6 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { Capacitor } from '@capacitor/core';
 import { CalendarDays } from 'lucide-react';
 import { Lottie } from 'lottie-react';
 import { LeaveApplication, LeaveBalance } from '../types';
@@ -31,15 +30,9 @@ interface LeaveSummaryCardProps {
 // live in LeaveReviewPage — mirrors how the Conveyance Bill Claim tile
 // summarizes on the Dashboard and opens its own dedicated page for the rest.
 export const LeaveSummaryCard: React.FC<LeaveSummaryCardProps> = ({ token, onOpen }) => {
-  // backdrop-filter is real bug material on the Android system WebView
-  // (small GPU raster budget, every blur layer fights for it) — that's why
-  // this strip could render blurred on one reload and flat on the next. A
-  // JS-side repaint nudge was tried first and didn't hold up, because the
-  // failure is hardware/driver-level, not something JS can force. Dropping
-  // backdrop-blur-xl for the native app build removes the failure mode
-  // instead of chasing it, and costs nothing visually — see the note further
-  // down on what actually sells "glass" here.
-  const isNativeApp = Capacitor.isNativePlatform();
+  // The Total Leave strip's blur is on in the app too (half the old
+  // strength: 20px), with glass-mask-fix + translateZ(0) keeping the strip
+  // from dropping out on Android reloads.
   const [applications, setApplications] = useState<LeaveApplication[]>([]);
   const [balance, setBalance] = useState<LeaveBalance | null>(null);
 
@@ -138,16 +131,14 @@ export const LeaveSummaryCard: React.FC<LeaveSummaryCardProps> = ({ token, onOpe
           "glass" on this screen. bg-white/75: /50 read as a washed-out
           purple smear (no separation from the header); /95 swung the other
           way — flat opaque white, no glass feel. /75 is the middle ground.
-          Which is why it's dropped outright for the native app below: it
-          wasn't buying much visually, but real Android hardware could
-          render it on one reload and silently lose it on the next.
+          The blur (20px) is on in the app as well as the web.
           glass-mask-fix (index.css) covers the broader version of that same
           bug for this strip's own rounded translucent background,
           independent of whether blur is present at all. */}
       <div className="px-5 sm:px-6 -mt-4 pb-5">
         <div
           style={{ transform: 'translateZ(0)', WebkitTransform: 'translateZ(0)' }}
-          className={`glass-mask-fix bg-gradient-to-br from-violet-200/60 via-white/50 to-violet-100/70 border border-white/70 rounded-[28px] px-5 py-2.5 shadow-[0_16px_40px_-10px_rgba(42,0,85,0.45),inset_0_1px_0_rgba(255,255,255,0.8)] md:bg-none md:bg-white/75 md:border-white/60 md:rounded-2xl md:shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15),inset_0_1px_0_rgba(255,255,255,0.6)] ${isNativeApp ? '' : 'backdrop-blur-2xl backdrop-saturate-150 md:backdrop-blur-xl md:backdrop-saturate-100'}`}
+          className={`glass-mask-fix bg-gradient-to-br from-violet-200/60 via-white/50 to-violet-100/70 border border-white/70 rounded-[28px] px-5 py-2.5 shadow-[0_16px_40px_-10px_rgba(42,0,85,0.45),inset_0_1px_0_rgba(255,255,255,0.8)] md:bg-none md:bg-white/75 md:border-white/60 md:rounded-2xl md:shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15),inset_0_1px_0_rgba(255,255,255,0.6)] backdrop-blur-[20px] backdrop-saturate-150 md:backdrop-blur-xl md:backdrop-saturate-100`}
         >
           <p className="text-xs font-bold text-slate-900">Total Leave</p>
           <p className="text-[11px] text-slate-500 mt-0.5">Period 1 Jan {year} – 31 Dec {year}</p>
