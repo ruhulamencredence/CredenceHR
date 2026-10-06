@@ -102,7 +102,7 @@ export const MyLoans: React.FC<{ token: string; onBack?: () => void }> = ({ toke
 
   return (
     <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900">
-      <div className="w-full px-3 sm:px-6 lg:px-8 pt-3 pb-28 md:pb-8 max-w-4xl mx-auto">
+      <div className="w-full px-3 sm:px-6 lg:px-8 pt-3 pb-28 md:pb-8">
         {!isNativeApp && <ModulePath path={['Self Service', 'My Loan / Advance']} />}
         <div className="flex items-center justify-between gap-3 mb-4 mt-2 flex-wrap">
           <div className="flex items-center gap-2">
