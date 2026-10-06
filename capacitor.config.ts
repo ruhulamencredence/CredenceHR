@@ -39,7 +39,7 @@ const REAL_SERVER_URL = USE_IP_INSTEAD_OF_DOMAIN ? REAL_SERVER_IP_URL : REAL_SER
 // PC (LOCAL_SERVER_URL), then rebuild + re-sync as noted above.
 const USE_REAL_SERVER = false;
 
-// CAP_SERVER_URL (set by the cloud iPhone build, .github/workflows/ios.yml)
+// CAP_SERVER_URL (set by the cloud builds, .github/workflows/ios.yml and android.yml)
 // overrides both, so a build can point at any server without editing this file.
 const ACTIVE_SERVER_URL = process.env.CAP_SERVER_URL || (USE_REAL_SERVER ? REAL_SERVER_URL : LOCAL_SERVER_URL);
 
