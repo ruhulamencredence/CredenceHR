@@ -81,6 +81,7 @@ const config = {
     contentInset: 'never',
     includePlugins: [
       '@capacitor/app',
+      '@capacitor/device',
       '@capacitor/filesystem',
       '@capacitor/geolocation',
       '@capacitor/keyboard',
