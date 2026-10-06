@@ -1453,6 +1453,8 @@ export interface MyBillClaimPolicy {
   values: BillClaimPolicyValues;
   categories: BillClaimCategory[];
   locked_dates: string[];
+  // "One new claim per day": the claim this employee already filed today.
+  today_claim_id?: number | null;
 }
 
 export interface UserClaim {

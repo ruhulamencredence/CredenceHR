@@ -107,6 +107,23 @@ export const POLICY_DEFS: PolicyDef[] = [
     default: true
   },
   {
+    key: "lock_whole_range",
+    group: "dates",
+    label: "A claim holds every date from its From Date to its To Date",
+    help:
+      "With \"One claim per date\": no date inside a claim's From–To range can be picked again in another claim, even a date that has no bill in it. Off: only the dates that have a bill are held.",
+    type: "boolean",
+    default: true
+  },
+  {
+    key: "one_claim_per_day",
+    group: "claim",
+    label: "One new claim per day",
+    help: "An employee can file one claim a day (its Claim Date). To add more bills that day they edit that claim instead of filing another.",
+    type: "boolean",
+    default: true
+  },
+  {
     key: "window_from_first_submit",
     group: "dates",
     label: "Count the date window from the day the claim was first filed",
@@ -524,15 +541,25 @@ export async function claimedDates(
     const d = dhakaDate(i.bill_date);
     if (d >= from && d <= to && !out.has(d)) out.set(d, Number(i.user_claim_id));
   }
-  // Claims filed before bill lines existed: their whole From–To range counts.
+  // Claims filed before bill lines existed — and, with "a claim holds every
+  // date from its From Date to its To Date", every claim — hold their whole
+  // From–To range.
+  const wholeRange = oneClaim && !!policy.lock_whole_range;
   for (const c of holding) {
-    if (withItems.has(Number(c.id))) continue;
+    if (withItems.has(Number(c.id)) && !wholeRange) continue;
     const f = dhakaDate(c.from_date);
     const t = dhakaDate(c.to_date) || f;
     if (!f || t < from || f > to) continue;
     for (const d of datesBetween(f < from ? from : f, t > to ? to : t)) if (!out.has(d)) out.set(d, Number(c.id));
   }
   return out;
+}
+
+/** The claim this user already filed on `day` (its Claim Date), if any — for "One new claim per day". */
+export async function claimFiledOn(queryDB: QueryDB, userId: number, day: string, excludeClaimId: number | null = null): Promise<number | null> {
+  const rows: any[] = (await queryDB("SELECT id, claim_date FROM user_claims WHERE user_id = ?", [userId])) || [];
+  const hit = rows.find((r) => Number(r.id) !== Number(excludeClaimId) && dhakaDate(r.claim_date) === day);
+  return hit ? Number(hit.id) : null;
 }
 
 export async function lockedDates(
@@ -633,12 +660,15 @@ export async function checkClaimBills(
   }
 
   const held = await claimedDates(queryDB, userId, today, from, to, policy, args.editingClaimId ?? null);
-  const closed = [...new Set(lines.map((l) => l.bill_date).filter((d) => held.has(d)))];
+  // With whole-range holding, this claim's own From–To range may not overlap
+  // another claim's either (it would hold those dates too).
+  const checkDates = policy.one_claim_per_date && policy.lock_whole_range ? datesBetween(from, to) : lines.map((l) => l.bill_date);
+  const closed = [...new Set(checkDates.filter((d) => held.has(d)))];
   if (closed.length) {
     if (policy.one_claim_per_date) {
       const owners = [...new Set(closed.map((d) => held.get(d)))];
       return {
-        error: `${closed.join(", ")} ${closed.length === 1 ? "is" : "are"} already in your claim${owners.length === 1 ? "" : "s"} ${owners.map((o) => `#${o}`).join(", ")} — one date goes in one claim. Edit that claim to add or change its bills.`
+        error: `${closed.join(", ")} ${closed.length === 1 ? "is" : "are"} already covered by your claim${owners.length === 1 ? "" : "s"} ${owners.map((o) => `#${o}`).join(", ")} — one date goes in one claim. Pick other dates, or edit that claim.`
       };
     }
     return {
@@ -966,7 +996,9 @@ export function registerBillClaimPolicyRoutes(
         max_date: win.max,
         values: policy,
         categories: (await loadCategories(queryDB)).filter((c) => c.is_active),
-        locked_dates: await lockedDates(queryDB, req.user.id, today, win.min, win.max, policy, editing ? Number(editing.id) : null)
+        locked_dates: await lockedDates(queryDB, req.user.id, today, win.min, win.max, policy, editing ? Number(editing.id) : null),
+        // "One new claim per day": the claim already filed today, if any.
+        today_claim_id: policy.one_claim_per_day && !editing ? await claimFiledOn(queryDB, req.user.id, today) : null
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
