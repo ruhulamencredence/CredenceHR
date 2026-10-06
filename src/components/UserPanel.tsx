@@ -2021,10 +2021,33 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // "Recent Entries" now shows every one of the User's own submitted MPR rows directly
   // as a flat "Job Entry Details" table (no more grouped Job list you had to click into
   // to open a popup) — newest first.
-  const sortedEntries: Entry[] = React.useMemo(
-    () => [...entries].sort((a, b) => b.id - a.id),
-    [entries]
-  );
+  //
+  // The parts of one split item (same Budget item cut into several entries — see
+  // splitToneByEntryId) are kept together as one block, part 1, 2, 3… in order,
+  // placed where the newest of them would sit; another MPR's rows never land
+  // between them.
+  const sortedEntries: Entry[] = React.useMemo(() => {
+    const newestFirst = [...entries].sort((a, b) => b.id - a.id);
+    const splitKey = (e: Entry) =>
+      `${e.created_by ?? ''}|${e.budget_item_id ? `bi:${e.budget_item_id}` : `m:${e.mpr_id}|${String(e.item_name || '').trim().toLowerCase()}`}`;
+    const groups = new Map<string, Entry[]>();
+    for (const e of newestFirst) {
+      const k = splitKey(e);
+      const list = groups.get(k);
+      if (list) list.push(e);
+      else groups.set(k, [e]);
+    }
+    const out: Entry[] = [];
+    const placed = new Set<string>();
+    for (const e of newestFirst) {
+      const k = splitKey(e);
+      if (placed.has(k)) continue;
+      placed.add(k);
+      const g = groups.get(k)!;
+      out.push(...(g.length > 1 ? [...g].sort((a, b) => a.id - b.id) : g));
+    }
+    return out;
+  }, [entries]);
 
   // A locked entry (its Budget already Final Submitted) still gets an Edit button —
   // Delivery-Date-only — when the current user has the can_job_edit permission,
