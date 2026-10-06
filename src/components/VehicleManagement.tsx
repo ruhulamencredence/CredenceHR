@@ -19,6 +19,22 @@ import { RideBookingMap } from './RideBookingMap';
 import { useWideWeb } from '../lib/useWideWeb';
 import { takeQuickAccessTab } from '../lib/quickAccess';
 import { RideDestinationPicker, RidePlaces, GLASS_CARD } from './RideDestinationPicker';
+import { ArrowRight, CalendarDays, Car, ClipboardCheck, ListChecks, Map as MapIcon, Navigation, Phone, Timer, UserRound, Zap } from 'lucide-react';
+import {
+  RIDE_CARD,
+  RIDE_WELL,
+  RIDE_LABEL,
+  RIDE_INPUT,
+  RIDE_INPUT_SM,
+  BTN_PRIMARY,
+  BTN_PRIMARY_SM,
+  BTN_SOFT_SM,
+  BTN_GHOST_SM,
+  BTN_WARN_SM,
+  RideStatusChip,
+  RideRoute,
+  RideBanner
+} from './rideTheme';
 
 interface Requisition {
   id: number;
@@ -64,14 +80,6 @@ const STATUS_LABEL: Record<Requisition['status'], string> = {
   completed: 'Completed'
 };
 
-const STATUS_COLOR: Record<Requisition['status'], string> = {
-  pending: 'bg-yellow-100 text-yellow-800',
-  approved: 'bg-teal-100 text-teal-800',
-  ongoing: 'bg-green-100 text-green-800',
-  rejected: 'bg-red-100 text-red-800',
-  cancelled: 'bg-gray-100 text-gray-700',
-  completed: 'bg-blue-100 text-blue-800'
-};
 
 interface AvailableVehicle {
   id: number;
@@ -149,6 +157,9 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
   const wideWeb = useWideWeb();
   const [submitting, setSubmitting] = useState(false);
   const [submitMessage, setSubmitMessage] = useState<string | null>(null);
+
+  // Ride Status summary tiles double as a filter.
+  const [statusFilter, setStatusFilter] = useState<'all' | Requisition['status']>('all');
 
   const [extendingFor, setExtendingFor] = useState<number | null>(null);
   const [extendNote, setExtendNote] = useState('');
@@ -421,64 +432,160 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
 
   const renderExtensionForm = (r: Requisition) =>
     extendingFor === r.id && (
-      <div className="mt-3 border-t pt-3 space-y-2">
+      <div className={`mt-3 p-3 space-y-2 ${RIDE_WELL}`}>
         <textarea
           value={extendNote}
           onChange={(e) => setExtendNote(e.target.value)}
           rows={2}
           placeholder="Why will you be late / how much more time do you need?"
-          className="w-full border border-slate-200 rounded-xl bg-white/80 px-2.5 py-1.5 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
+          className={RIDE_INPUT}
         />
         <div className="flex gap-2">
-          <button
-            onClick={() => requestExtension(r.id)}
-            className="px-3 py-1.5 text-xs font-medium rounded-lg bg-amber-600 text-white hover:bg-amber-700"
-          >
+          <button onClick={() => requestExtension(r.id)} className={BTN_PRIMARY_SM}>
             Submit
           </button>
-          <button
-            onClick={() => setExtendingFor(null)}
-            className="px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50"
-          >
+          <button onClick={() => setExtendingFor(null)} className={BTN_GHOST_SM}>
             Cancel
           </button>
         </div>
       </div>
     );
 
+  // Desktop rows/cards sit on the frosted white card; mobile keeps the glass one.
+  const card = wideWeb ? RIDE_CARD : GLASS_CARD;
+  const hours = (n: number) => `${n} hr${Number(n) === 1 ? '' : 's'}`;
+  const when = (r: Requisition) => `${String(r.ride_date).slice(0, 10)} · ${r.start_time}`;
+  const counts = requisitions.reduce<Record<string, number>>((acc, r) => ({ ...acc, [r.status]: (acc[r.status] || 0) + 1 }), {});
+  const shownRides = statusFilter === 'all' ? requisitions : requisitions.filter((r) => r.status === statusFilter);
+  const emptyState = (text: string) => (
+    <div className={`${card} px-6 py-10 flex flex-col items-center text-center`}>
+      <span className="w-12 h-12 rounded-2xl bg-[var(--g-accent-soft)] flex items-center justify-center mb-3">
+        <Car className="w-6 h-6 text-[color:var(--g-accent)]" />
+      </span>
+      <p className="text-sm text-slate-500">{text}</p>
+    </div>
+  );
+  const vehicleDriverPicker = (
+    value: { vehicle_id: string; driver_user_id: string },
+    set: (v: { vehicle_id: string; driver_user_id: string }) => void
+  ) => (
+    <>
+      <select value={value.vehicle_id} onChange={(e) => set({ ...value, vehicle_id: e.target.value })} className={RIDE_INPUT_SM}>
+        <option value="">Pick a vehicle…</option>
+        {availableVehicles.map((v) => (
+          <option key={v.id} value={v.id}>
+            {v.model} ({v.vehicle_no})
+          </option>
+        ))}
+      </select>
+      <select value={value.driver_user_id} onChange={(e) => set({ ...value, driver_user_id: e.target.value })} className={RIDE_INPUT_SM}>
+        <option value="">Pick a driver…</option>
+        {driverCandidates.map((d) => (
+          <option key={d.id} value={d.id}>
+            {d.name}
+          </option>
+        ))}
+      </select>
+    </>
+  );
+  // A request card for the Approved by Me / Direct Book lists.
+  const requestCard = (r: Requisition, footer: React.ReactNode, showStatus = true) => (
+    <div key={r.id} className={`${card} p-4`}>
+      <div className="flex items-start justify-between gap-3">
+        <RideRoute from={r.pickup_location} to={r.destination} compact />
+        {showStatus && (
+          <div className="shrink-0">
+            <RideStatusChip status={r.status} label={STATUS_LABEL[r.status]} />
+          </div>
+        )}
+      </div>
+      <div className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
+        <span className="inline-flex items-center gap-1">
+          <CalendarDays className="w-3.5 h-3.5" /> {when(r)}
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <Timer className="w-3.5 h-3.5" /> Est. {hours(r.estimated_duration_hours)}
+        </span>
+      </div>
+      {r.purpose && <p className="mt-2 text-sm text-slate-600">{r.purpose}</p>}
+      <div className="mt-3">{footer}</div>
+    </div>
+  );
+
+  const TABS = [
+    { key: 'book' as const, label: 'Book a Ride', icon: Car, count: 0 },
+    { key: 'status' as const, label: 'Ride Status', icon: ListChecks, count: 0 },
+    { key: 'assign' as const, label: wideWeb ? 'Approved by Me' : 'Approved', icon: ClipboardCheck, count: awaitingAssignment.length },
+    ...(isVehicleMaintainer ? [{ key: 'maintainer' as const, label: 'Direct Book', icon: Zap, count: 0 }] : [])
+  ];
+
   return (
     <div className="w-full">
-      <div className={wideWeb ? 'flex gap-1 border-b border-gray-200 mb-4' : 'flex gap-1 p-1 mb-4 rounded-2xl bg-white/60 border border-white/70 shadow-[0_4px_14px_-6px_rgba(15,23,42,0.15)]'}>
-        {([
-          ['book', 'Book a Ride'],
-          ['status', 'Ride Status'],
-          ['assign', `Approved by Me${awaitingAssignment.length > 0 ? ` (${awaitingAssignment.length})` : ''}`],
-          ...(isVehicleMaintainer ? [['maintainer', 'Direct Book'] as const] : [])
-        ] as const).map(([key, label]) => (
-          <button
-            key={key}
-            onClick={() => setTab(key)}
-            className={
-              wideWeb
-                ? `px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
-                    tab === key ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-800'
-                  }`
-                : `flex-1 min-w-0 px-2 py-2 rounded-xl text-xs font-semibold leading-tight transition-colors ${
-                    tab === key ? 'text-white shadow-sm' : 'text-slate-600'
-                  }`
-            }
-            style={!wideWeb && tab === key ? { background: 'var(--g-accent)' } : undefined}
-          >
-            {label}
-          </button>
-        ))}
+      <div
+        className={`${wideWeb ? 'inline-flex' : 'flex'} gap-1 p-1 mb-4 rounded-full bg-white/70 border border-white/80 backdrop-blur-sm shadow-[0_6px_18px_-10px_rgba(85,0,170,0.4)]`}
+      >
+        {TABS.map(({ key, label, icon: Icon, count }) => {
+          const on = tab === key;
+          return (
+            <button
+              key={key}
+              onClick={() => setTab(key)}
+              className={`${wideWeb ? 'px-4' : 'flex-1 min-w-0 px-2'} py-2 rounded-full inline-flex items-center justify-center gap-1.5 text-xs sm:text-[13px] font-semibold leading-tight transition-all ${
+                on ? 'liquid-glass-button' : 'text-slate-600 hover:text-[color:var(--g-accent-700)] hover:bg-white/70'
+              }`}
+            >
+              <Icon className={`w-4 h-4 shrink-0 ${wideWeb ? '' : 'hidden min-[400px]:block'}`} />
+              <span className="truncate">{label}</span>
+              {count > 0 && (
+                <span
+                  className={`min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold inline-flex items-center justify-center ${
+                    on ? 'bg-white text-[color:var(--g-accent-700)]' : 'bg-[var(--g-accent)] text-white'
+                  }`}
+                >
+                  {count}
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
 
-      {error && <div className="mb-3 rounded-lg bg-red-50 text-red-700 text-sm px-3 py-2">{error}</div>}
+      {error && (
+        <div className="mb-3">
+          <RideBanner tone="error">{error}</RideBanner>
+        </div>
+      )}
+
+      {tab === 'book' && (
+        <div className="flex items-center gap-2 mb-3 text-xs font-semibold">
+          {[
+            ['1', 'Route', true],
+            ['2', 'Ride details', !!places]
+          ].map(([n, label, on], i) => (
+            <React.Fragment key={String(n)}>
+              {i > 0 && <span className={`h-px w-8 ${on ? 'bg-[var(--g-accent-300)]' : 'bg-slate-300'}`} />}
+              <span className={`inline-flex items-center gap-1.5 ${on ? 'text-[color:var(--g-accent-700)]' : 'text-slate-400'}`}>
+                <span
+                  className={`w-5 h-5 rounded-full inline-flex items-center justify-center text-[10px] ${
+                    on ? 'bg-[var(--g-accent)] text-white' : 'bg-slate-200 text-slate-500'
+                  }`}
+                >
+                  {n}
+                </span>
+                {label}
+              </span>
+            </React.Fragment>
+          ))}
+        </div>
+      )}
 
       {tab === 'book' && !places && (
         <>
-          {submitMessage && <div className="mb-3 rounded-lg bg-green-50 text-green-800 text-sm px-3 py-2 max-w-xl">{submitMessage}</div>}
+          {submitMessage && (
+            <div className="mb-3 max-w-xl">
+              <RideBanner tone="success">{submitMessage}</RideBanner>
+            </div>
+          )}
           <RideDestinationPicker
             initial={lastPlaces}
             onDone={(picked) => {
@@ -491,148 +598,168 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
 
       {tab === 'book' && places && (
         <div className={wideWeb ? 'grid grid-cols-[minmax(0,1fr)_400px] gap-5 items-start' : ''}>
-        {wideWeb && (
-          <RideBookingMap
-            here={null}
-            pickup={places.pickup_lat != null && places.pickup_lng != null ? { lat: places.pickup_lat, lng: places.pickup_lng } : null}
-            destination={places.destination_lat != null && places.destination_lng != null ? { lat: places.destination_lat, lng: places.destination_lng } : null}
-            className="h-[calc(100vh-200px)] min-h-[480px]"
-          />
-        )}
-        <form
-          onSubmit={submitRequisition}
-          className={wideWeb ? 'space-y-4 bg-white rounded-2xl border border-slate-200 shadow-sm p-4' : `space-y-4 max-w-xl p-4 ${GLASS_CARD}`}
-        >
-          <div className={`rounded-xl border p-3 flex items-start justify-between gap-3 ${wideWeb ? 'border-slate-200 bg-slate-50' : 'border-white/70 bg-white/60'}`}>
-            <div className="min-w-0 text-sm space-y-1.5">
-              <div className="flex items-center gap-2 text-slate-700">
-                <span className="w-2.5 h-2.5 rounded-full bg-blue-600 shrink-0" />
-                <span className="truncate">{places.pickup_location}</span>
-              </div>
-              <div className="flex items-center gap-2 text-slate-900 font-medium">
-                <span className="w-2.5 h-2.5 rounded-sm bg-red-500 shrink-0" />
-                <span className="truncate">{places.destination}</span>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                setLastPlaces(places);
-                setPlaces(null);
-              }}
-              className="text-xs font-medium text-blue-600 hover:underline shrink-0">
-              Change
-            </button>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Purpose</label>
-            <textarea
-              required
-              value={form.purpose}
-              onChange={(e) => setForm({ ...form, purpose: e.target.value })}
-              rows={2}
-              placeholder="Why do you need the ride?"
-              className="w-full border border-slate-200 rounded-xl bg-white/80 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
+          {wideWeb && (
+            <RideBookingMap
+              here={null}
+              pickup={places.pickup_lat != null && places.pickup_lng != null ? { lat: places.pickup_lat, lng: places.pickup_lng } : null}
+              destination={places.destination_lat != null && places.destination_lng != null ? { lat: places.destination_lat, lng: places.destination_lng } : null}
+              className="h-[calc(100vh-230px)] min-h-[480px] !rounded-[28px] !border-white/80 shadow-[0_18px_40px_-24px_rgba(85,0,170,0.45)]"
             />
-          </div>
-          <div className={`grid gap-4 ${wideWeb ? 'grid-cols-2' : 'grid-cols-2 sm:grid-cols-3'}`}>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Ride Date</label>
-              <input
-                required
-                type="date"
-                value={form.ride_date}
-                onChange={(e) => setForm({ ...form, ride_date: e.target.value })}
-                className="w-full border border-slate-200 rounded-xl bg-white/80 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
-              />
+          )}
+          <form onSubmit={submitRequisition} className={`space-y-4 p-5 ${wideWeb ? RIDE_CARD : `max-w-xl ${GLASS_CARD}`}`}>
+            <div className="flex items-center gap-2.5">
+              <span className="w-9 h-9 rounded-xl bg-[var(--g-accent-soft)] flex items-center justify-center">
+                <Car className="w-5 h-5 text-[color:var(--g-accent)]" />
+              </span>
+              <div>
+                <div className="text-base font-bold text-slate-900 leading-tight">Ride details</div>
+                <div className="text-xs text-slate-500">When you need it and why</div>
+              </div>
+            </div>
+            <div className={`p-3 flex items-start justify-between gap-3 ${RIDE_WELL}`}>
+              <RideRoute from={places.pickup_location} to={places.destination} />
+              <button
+                type="button"
+                onClick={() => {
+                  setLastPlaces(places);
+                  setPlaces(null);
+                }}
+                className={`${BTN_SOFT_SM} shrink-0`}
+              >
+                Change
+              </button>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Start Time</label>
-              <input
+              <label className={RIDE_LABEL}>Purpose</label>
+              <textarea
                 required
-                type="time"
-                value={form.start_time}
-                onChange={(e) => setForm({ ...form, start_time: e.target.value })}
-                className="w-full border border-slate-200 rounded-xl bg-white/80 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                value={form.purpose}
+                onChange={(e) => setForm({ ...form, purpose: e.target.value })}
+                rows={2}
+                placeholder="Why do you need the ride?"
+                className={RIDE_INPUT}
               />
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Est. Duration (hrs)</label>
-              <input
-                required
-                type="number"
-                min={0.5}
-                step="0.5"
-                value={form.estimated_duration_hours}
-                onChange={(e) => setForm({ ...form, estimated_duration_hours: Number(e.target.value) })}
-                className="w-full border border-slate-200 rounded-xl bg-white/80 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
-              />
+            <div className={`grid gap-3 ${wideWeb ? 'grid-cols-2' : 'grid-cols-2 sm:grid-cols-3'}`}>
+              <div>
+                <label className={RIDE_LABEL}>Ride Date</label>
+                <input required type="date" value={form.ride_date} onChange={(e) => setForm({ ...form, ride_date: e.target.value })} className={RIDE_INPUT} />
+              </div>
+              <div>
+                <label className={RIDE_LABEL}>Start Time</label>
+                <input required type="time" value={form.start_time} onChange={(e) => setForm({ ...form, start_time: e.target.value })} className={RIDE_INPUT} />
+              </div>
+              <div className={wideWeb ? 'col-span-2' : ''}>
+                <label className={RIDE_LABEL}>Est. Duration (hrs)</label>
+                <input
+                  required
+                  type="number"
+                  min={0.5}
+                  step="0.5"
+                  value={form.estimated_duration_hours}
+                  onChange={(e) => setForm({ ...form, estimated_duration_hours: Number(e.target.value) })}
+                  className={RIDE_INPUT}
+                />
+              </div>
             </div>
-          </div>
-          {submitMessage && <div className="text-sm text-gray-700">{submitMessage}</div>}
-          <button
-            type="submit"
-            disabled={submitting}
-            className={`${wideWeb ? 'w-full' : 'w-full sm:w-auto'} px-4 py-2.5 text-sm font-semibold rounded-xl bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50`}
-          >
-            {submitting ? 'Submitting…' : 'Submit Request'}
-          </button>
-        </form>
+            {submitMessage && <RideBanner tone="error">{submitMessage}</RideBanner>}
+            <button type="submit" disabled={submitting} className={`${BTN_PRIMARY} w-full py-3`}>
+              {submitting ? 'Submitting…' : 'Submit Request'} {!submitting && <ArrowRight className="w-4 h-4" />}
+            </button>
+          </form>
+        </div>
+      )}
+
+      {tab === 'status' && (
+        <div className={`grid gap-2 mb-4 ${wideWeb ? 'grid-cols-5' : 'grid-cols-4'}`}>
+          {(
+            [
+              ['all', 'All', requisitions.length],
+              ['pending', 'Pending', counts.pending || 0],
+              ['ongoing', 'Ongoing', counts.ongoing || 0],
+              ['completed', 'Completed', counts.completed || 0],
+              ...(wideWeb ? [['approved', 'Awaiting car', counts.approved || 0]] : [])
+            ] as [typeof statusFilter, string, number][]
+          ).map(([key, label, n]) => {
+            const on = statusFilter === key;
+            return (
+              <button
+                key={key}
+                onClick={() => setStatusFilter(key)}
+                className={`text-left rounded-2xl ${wideWeb ? 'px-3.5' : 'px-2.5'} py-2.5 border transition-all ${
+                  on
+                    ? 'border-[var(--g-accent-300)] bg-[var(--g-accent-soft)] shadow-[0_8px_20px_-14px_rgba(85,0,170,0.6)]'
+                    : 'border-white/80 bg-white/70 hover:bg-white'
+                }`}
+              >
+                <div className={`text-xl font-bold leading-none ${on ? 'text-[color:var(--g-accent-700)]' : 'text-slate-800'}`}>{n}</div>
+                <div className="text-[11px] font-semibold text-slate-500 mt-1">{label}</div>
+              </button>
+            );
+          })}
         </div>
       )}
 
       {tab === 'status' && wideWeb && (
         // Web: one row per ride, table-style, full content width.
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-          <div className={`grid ${RIDE_LIST_COLS} gap-4 px-5 py-2.5 bg-slate-50 border-b border-slate-200 text-[11px] font-semibold uppercase tracking-wide text-slate-500`}>
+        <div className={`${RIDE_CARD} overflow-hidden`}>
+          <div
+            className={`grid ${RIDE_LIST_COLS} gap-4 px-5 py-3 bg-[var(--g-accent-soft)]/70 border-b border-[var(--g-accent-100)] text-[11px] font-semibold uppercase tracking-wide text-[color:var(--g-accent-800)]`}
+          >
             <div>Route</div>
             <div>Schedule</div>
             <div>Vehicle & Driver</div>
             <div>Status</div>
             <div className="text-right">Actions</div>
           </div>
-          {loading && <div className="px-5 py-4 text-sm text-gray-500">Loading…</div>}
-          {!loading && requisitions.length === 0 && <div className="px-5 py-4 text-sm text-gray-500">No ride requests yet.</div>}
-          {requisitions.map((r) => (
-            <div key={r.id} className="px-5 py-3.5 border-b border-slate-100 last:border-b-0 hover:bg-slate-50/60">
+          {loading && <div className="px-5 py-6 text-sm text-slate-500">Loading…</div>}
+          {!loading && shownRides.length === 0 && <div className="px-5 py-8 text-sm text-slate-500 text-center">No ride requests here yet.</div>}
+          {shownRides.map((r) => (
+            <div key={r.id} className="px-5 py-4 border-b border-slate-100 last:border-b-0 hover:bg-[var(--g-accent-soft)]/30 transition-colors">
               <div className={`grid ${RIDE_LIST_COLS} gap-4 items-start`}>
                 <div className="min-w-0">
-                  <div className="font-semibold text-slate-800 truncate" title={`${r.pickup_location} → ${r.destination}`}>
-                    {r.pickup_location} → {r.destination}
-                  </div>
-                  <div className="text-xs text-slate-500 truncate" title={r.purpose}>
-                    {r.purpose}
-                  </div>
+                  <RideRoute from={r.pickup_location} to={r.destination} compact />
+                  {r.purpose && (
+                    <div className="text-xs text-slate-500 truncate mt-1.5 pl-5" title={r.purpose}>
+                      {r.purpose}
+                    </div>
+                  )}
                 </div>
                 <div className="text-sm text-slate-700">
-                  {String(r.ride_date).slice(0, 10)}
-                  <div className="text-xs text-slate-500">
-                    {r.start_time} · Est. {r.estimated_duration_hours} hr{r.estimated_duration_hours === 1 ? '' : 's'}
+                  <div className="inline-flex items-center gap-1.5 font-medium">
+                    <CalendarDays className="w-3.5 h-3.5 text-[color:var(--g-accent-400)]" />
+                    {String(r.ride_date).slice(0, 10)}
+                  </div>
+                  <div className="text-xs text-slate-500 mt-0.5 pl-5">
+                    {r.start_time} · Est. {hours(r.estimated_duration_hours)}
                   </div>
                 </div>
                 <div className="min-w-0 text-sm text-slate-700">
                   {r.vehicle_no ? (
                     <>
-                      <div className="truncate">
-                        {r.vehicle_model} ({r.vehicle_no})
+                      <div className="truncate font-medium inline-flex items-center gap-1.5 max-w-full">
+                        <Car className="w-3.5 h-3.5 text-[color:var(--g-accent-400)] shrink-0" />
+                        <span className="truncate">
+                          {r.vehicle_model} ({r.vehicle_no})
+                        </span>
                       </div>
-                      <div className="text-xs text-slate-500 truncate">
+                      <div className="text-xs text-slate-500 truncate pl-5">
                         {r.driver_name}
                         {r.driver_mobile ? ` — ${r.driver_mobile}` : ''}
                       </div>
                     </>
                   ) : (
-                    <span className="text-slate-400">—</span>
+                    <span className="text-slate-300">—</span>
                   )}
                 </div>
                 <div className="min-w-0 space-y-1">
-                  <span className={`inline-block text-xs font-medium px-2 py-0.5 rounded ${STATUS_COLOR[r.status]}`}>{STATUS_LABEL[r.status]}</span>
+                  <RideStatusChip status={r.status} label={STATUS_LABEL[r.status]} />
                   {r.status === 'pending' && r.pending_with && (
                     <div className="text-xs text-amber-700 truncate" title={r.pending_with}>
                       Waiting on: <span className="font-medium">{r.pending_with}</span>
                     </div>
                   )}
-                  {r.status === 'rejected' && r.rejection_reason && <div className="text-xs text-red-600">Reason: {r.rejection_reason}</div>}
+                  {r.status === 'rejected' && r.rejection_reason && <div className="text-xs text-rose-600">Reason: {r.rejection_reason}</div>}
                   {r.status === 'ongoing' && r.expected_return_at && (
                     <div className="text-xs text-slate-500">Back by {new Date(r.expected_return_at).toLocaleString()}</div>
                   )}
@@ -651,35 +778,23 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
                 </div>
                 <div className="flex flex-wrap justify-end gap-1.5">
                   {r.status === 'pending' && (
-                    <button
-                      onClick={() => cancelRequisition(r.id)}
-                      className="px-2.5 py-1 text-xs font-medium rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50"
-                    >
+                    <button onClick={() => cancelRequisition(r.id)} className={BTN_GHOST_SM}>
                       Cancel
                     </button>
                   )}
                   {r.status === 'completed' && (
-                    <button
-                      onClick={() => setViewingDetailsFor(r.id)}
-                      className="px-2.5 py-1 text-xs font-medium rounded-lg bg-purple-600 text-white hover:bg-purple-700"
-                    >
-                      Details & Map
+                    <button onClick={() => setViewingDetailsFor(r.id)} className={BTN_SOFT_SM}>
+                      <MapIcon className="w-3.5 h-3.5" /> Details & Map
                     </button>
                   )}
                   {r.status === 'ongoing' && (
                     <>
                       {r.driver_user_id && (
-                        <button
-                          onClick={() => setViewingMapFor(r.id)}
-                          className="px-2.5 py-1 text-xs font-medium rounded-lg bg-purple-600 text-white hover:bg-purple-700"
-                        >
-                          Live Map
+                        <button onClick={() => setViewingMapFor(r.id)} className={BTN_SOFT_SM}>
+                          <Navigation className="w-3.5 h-3.5" /> Live Map
                         </button>
                       )}
-                      <button
-                        onClick={() => completeRide(r.id)}
-                        className="px-2.5 py-1 text-xs font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700"
-                      >
+                      <button onClick={() => completeRide(r.id)} className={BTN_PRIMARY_SM}>
                         Mark Returned
                       </button>
                       {r.time_extension_status === 'none' && (
@@ -688,7 +803,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
                             setExtendingFor(extendingFor === r.id ? null : r.id);
                             setExtendNote('');
                           }}
-                          className="px-2.5 py-1 text-xs font-medium rounded-lg border border-amber-300 text-amber-700 hover:bg-amber-50"
+                          className={BTN_WARN_SM}
                         >
                           Running Late
                         </button>
@@ -705,100 +820,100 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
 
       {tab === 'status' && !wideWeb && (
         <div className="space-y-3">
-          {loading && <div className="text-sm text-gray-500">Loading…</div>}
-          {!loading && requisitions.length === 0 && <div className="text-sm text-gray-500">No ride requests yet.</div>}
-          {requisitions.map((r) => (
-            <div key={r.id} className={wideWeb ? 'border rounded-lg p-4' : `p-4 ${GLASS_CARD}`}>
-              <div className="flex items-center justify-between">
-                <div className="font-semibold text-gray-800">
-                  {r.pickup_location} → {r.destination}
-                </div>
-                <span className={`text-xs font-medium px-2 py-1 rounded ${STATUS_COLOR[r.status]}`}>{STATUS_LABEL[r.status]}</span>
+          {loading && <div className="text-sm text-slate-500">Loading…</div>}
+          {!loading && shownRides.length === 0 && emptyState('No ride requests here yet.')}
+          {shownRides.map((r) => (
+            <div key={r.id} className={`p-4 ${GLASS_CARD}`}>
+              <div className="flex items-start justify-between gap-3">
+                <RideRoute from={r.pickup_location} to={r.destination} compact />
               </div>
-              <div className="text-xs text-gray-500 mt-1">
-                {r.ride_date} at {r.start_time} • Est. {r.estimated_duration_hours} hr{r.estimated_duration_hours === 1 ? '' : 's'}
+              <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                <RideStatusChip status={r.status} label={STATUS_LABEL[r.status]} />
               </div>
-              <div className="text-sm text-gray-600 mt-2">{r.purpose}</div>
+              <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
+                <span className="inline-flex items-center gap-1">
+                  <CalendarDays className="w-3.5 h-3.5" /> {when(r)}
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <Timer className="w-3.5 h-3.5" /> Est. {hours(r.estimated_duration_hours)}
+                </span>
+              </div>
+              {r.purpose && <div className="text-sm text-slate-600 mt-2">{r.purpose}</div>}
 
               {r.status === 'pending' && r.pending_with && (
-                <div className="text-xs text-amber-700 mt-1">
+                <div className="text-xs text-amber-700 mt-1.5">
                   Waiting on: <span className="font-medium">{r.pending_with}</span>
                 </div>
               )}
 
-              {r.status === 'rejected' && r.rejection_reason && (
-                <div className="text-xs text-red-600 mt-2">Reason: {r.rejection_reason}</div>
-              )}
+              {r.status === 'rejected' && r.rejection_reason && <div className="text-xs text-rose-600 mt-2">Reason: {r.rejection_reason}</div>}
 
               {(r.status === 'ongoing' || r.status === 'completed') && r.vehicle_no && (
-                <div className="mt-2 rounded-lg bg-green-50 text-green-800 text-xs px-3 py-2 space-y-0.5">
-                  <div>Vehicle: {r.vehicle_model} ({r.vehicle_no})</div>
-                  <div>Driver: {r.driver_name} — {r.driver_mobile}</div>
-                  {r.expected_return_at && <div>Expected back by: {new Date(r.expected_return_at).toLocaleString()}</div>}
+                <div className={`mt-3 px-3 py-2.5 text-xs text-slate-700 space-y-1 ${RIDE_WELL}`}>
+                  <div className="flex items-center gap-1.5">
+                    <Car className="w-3.5 h-3.5 text-[color:var(--g-accent)]" /> {r.vehicle_model} ({r.vehicle_no})
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <UserRound className="w-3.5 h-3.5 text-[color:var(--g-accent)]" /> {r.driver_name}
+                    {r.driver_mobile && (
+                      <a href={`tel:${r.driver_mobile}`} className="inline-flex items-center gap-1 font-semibold text-[color:var(--g-accent-700)]">
+                        <Phone className="w-3 h-3" /> {r.driver_mobile}
+                      </a>
+                    )}
+                  </div>
+                  {r.expected_return_at && <div className="text-slate-500">Expected back by {new Date(r.expected_return_at).toLocaleString()}</div>}
                 </div>
               )}
 
               {r.status === 'ongoing' && r.time_extension_status !== 'none' && (
-                <div className="text-xs text-amber-700 mt-1">
+                <div className="text-xs text-amber-700 mt-1.5">
                   Time extension {r.time_extension_status}
                   {r.time_extension_note ? `: ${r.time_extension_note}` : ''}
                 </div>
               )}
 
               {r.status === 'completed' && (
-                <div className={`text-xs mt-2 px-3 py-2 rounded ${r.returned_late ? 'bg-amber-50 text-amber-800' : 'bg-gray-50 text-gray-600'}`}>
+                <div className={`text-xs mt-2 ${r.returned_late ? 'text-amber-700' : 'text-slate-500'}`}>
                   {r.returned_late ? 'Returned late' : 'Returned on time'}
                   {r.actual_return_at ? ` — ${new Date(r.actual_return_at).toLocaleString()}` : ''}
                 </div>
               )}
 
-              {r.status === 'completed' && (
-                <button
-                  onClick={() => setViewingDetailsFor(r.id)}
-                  className="mt-3 px-3 py-1.5 text-xs font-medium rounded-lg bg-purple-600 text-white hover:bg-purple-700"
-                >
-                  View Ride Details & Map
-                </button>
-              )}
-
-              {r.status === 'pending' && (
-                <button
-                  onClick={() => cancelRequisition(r.id)}
-                  className="mt-3 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50"
-                >
-                  Cancel Request
-                </button>
-              )}
-
-              {r.status === 'ongoing' && (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {r.driver_user_id && (
-                    <button
-                      onClick={() => setViewingMapFor(r.id)}
-                      className="px-3 py-1.5 text-xs font-medium rounded-lg bg-purple-600 text-white hover:bg-purple-700"
-                    >
-                      View Live Map
-                    </button>
-                  )}
-                  <button
-                    onClick={() => completeRide(r.id)}
-                    className="px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700"
-                  >
-                    Ride Completed / Vehicle Returned
+              <div className="mt-3 flex flex-wrap gap-2 empty:hidden">
+                {r.status === 'completed' && (
+                  <button onClick={() => setViewingDetailsFor(r.id)} className={BTN_SOFT_SM}>
+                    <MapIcon className="w-3.5 h-3.5" /> Ride Details & Map
                   </button>
-                  {r.time_extension_status === 'none' && (
-                    <button
-                      onClick={() => {
-                        setExtendingFor(extendingFor === r.id ? null : r.id);
-                        setExtendNote('');
-                      }}
-                      className="px-3 py-1.5 text-xs font-medium rounded-lg border border-amber-300 text-amber-700 hover:bg-amber-50"
-                    >
-                      Running Late — Request Extension
+                )}
+                {r.status === 'pending' && (
+                  <button onClick={() => cancelRequisition(r.id)} className={BTN_GHOST_SM}>
+                    Cancel Request
+                  </button>
+                )}
+                {r.status === 'ongoing' && (
+                  <>
+                    {r.driver_user_id && (
+                      <button onClick={() => setViewingMapFor(r.id)} className={BTN_SOFT_SM}>
+                        <Navigation className="w-3.5 h-3.5" /> Live Map
+                      </button>
+                    )}
+                    <button onClick={() => completeRide(r.id)} className={BTN_PRIMARY_SM}>
+                      Ride Completed
                     </button>
-                  )}
-                </div>
-              )}
+                    {r.time_extension_status === 'none' && (
+                      <button
+                        onClick={() => {
+                          setExtendingFor(extendingFor === r.id ? null : r.id);
+                          setExtendNote('');
+                        }}
+                        className={BTN_WARN_SM}
+                      >
+                        Running Late
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
 
               {renderExtensionForm(r)}
             </div>
@@ -808,58 +923,23 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
 
       {tab === 'assign' && (
         <div className="space-y-3">
-          <div className="rounded-lg bg-blue-50 text-blue-800 text-xs px-3 py-2">
+          <RideBanner tone="info">
             Ride requests you approved that are still waiting for a vehicle + driver — the flowchart's own "গাড়ি ও ড্রাইভার
             অ্যাসাইনমেন্ট" step, no Vehicle Management Module Access needed.
-          </div>
-          {loading && <div className="text-sm text-gray-500">Loading…</div>}
-          {!loading && awaitingAssignment.length === 0 && (
-            <div className="text-sm text-gray-500">Nothing waiting on you right now.</div>
-          )}
-          {awaitingAssignment.map((r) => (
-            <div key={r.id} className={wideWeb ? 'border rounded-lg p-4' : `p-4 ${GLASS_CARD}`}>
-              <div className="font-semibold text-gray-800">
-                {r.pickup_location} → {r.destination}
-              </div>
-              <div className="text-xs text-gray-500 mt-1">
-                {r.ride_date} at {r.start_time} • Est. {r.estimated_duration_hours} hr{r.estimated_duration_hours === 1 ? '' : 's'}
-              </div>
-              <div className="text-sm text-gray-600 mt-2">{r.purpose}</div>
-
-              <div className="mt-3">
-                {assigningFor === r.id ? (
+          </RideBanner>
+          {loading && <div className="text-sm text-slate-500">Loading…</div>}
+          {!loading && awaitingAssignment.length === 0 && emptyState('Nothing waiting on you right now.')}
+          <div className={wideWeb ? 'grid grid-cols-2 gap-3' : 'space-y-3'}>
+            {awaitingAssignment.map((r) =>
+              requestCard(
+                r,
+                assigningFor === r.id ? (
                   <div className="flex flex-wrap items-center gap-2">
-                    <select
-                      value={assignForm.vehicle_id}
-                      onChange={(e) => setAssignForm({ ...assignForm, vehicle_id: e.target.value })}
-                      className="border rounded px-2 py-1 text-xs"
-                    >
-                      <option value="">Pick a vehicle…</option>
-                      {availableVehicles.map((v) => (
-                        <option key={v.id} value={v.id}>
-                          {v.model} ({v.vehicle_no})
-                        </option>
-                      ))}
-                    </select>
-                    <select
-                      value={assignForm.driver_user_id}
-                      onChange={(e) => setAssignForm({ ...assignForm, driver_user_id: e.target.value })}
-                      className="border rounded px-2 py-1 text-xs"
-                    >
-                      <option value="">Pick a driver…</option>
-                      {driverCandidates.map((d) => (
-                        <option key={d.id} value={d.id}>
-                          {d.name}
-                        </option>
-                      ))}
-                    </select>
-                    <button onClick={() => assignVehicle(r.id)} className="px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-600 text-white">
+                    {vehicleDriverPicker(assignForm, setAssignForm)}
+                    <button onClick={() => assignVehicle(r.id)} className={BTN_PRIMARY_SM}>
                       Confirm Assignment
                     </button>
-                    <button
-                      onClick={() => setAssigningFor(null)}
-                      className="px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-300 text-gray-600"
-                    >
+                    <button onClick={() => setAssigningFor(null)} className={BTN_GHOST_SM}>
                       Cancel
                     </button>
                   </div>
@@ -869,116 +949,121 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
                       setAssigningFor(r.id);
                       setAssignForm({ vehicle_id: '', driver_user_id: '' });
                     }}
-                    className="px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700"
+                    className={BTN_PRIMARY_SM}
                   >
-                    Assign Vehicle &amp; Driver
+                    <Car className="w-3.5 h-3.5" /> Assign Vehicle &amp; Driver
                   </button>
-                )}
-              </div>
-            </div>
-          ))}
+                ),
+                false
+              )
+            )}
+          </div>
         </div>
       )}
 
       {tab === 'maintainer' && isVehicleMaintainer && (
         <div className="space-y-4">
-          <div className="rounded-lg bg-purple-50 text-purple-800 text-xs px-3 py-2">
-            Vehicle Maintainer bypass — books/confirms a ride without going through the Supervisor / HR-Admin
-            Approval Workflow. Use "Book New" for a ride nobody has submitted yet, or "Bypass Existing" to push an
-            already-submitted request straight to Assigned.
-          </div>
+          <RideBanner tone="info">
+            Vehicle Maintainer bypass — books/confirms a ride without going through the Supervisor / HR-Admin Approval Workflow. Use
+            "Book New" for a ride nobody has submitted yet, or "Bypass Existing" to push an already-submitted request straight to
+            Assigned.
+          </RideBanner>
 
-          <div className="flex gap-1 border-b border-gray-100">
+          <div className="flex flex-wrap gap-1.5">
             {([
-              ['new', 'Book New'],
-              ['existing', `Bypass Existing${bypassCandidates.length > 0 ? ` (${bypassCandidates.length})` : ''}`],
-              ['live', `Live Rides${ongoingRides.length > 0 ? ` (${ongoingRides.length})` : ''}`]
-            ] as const).map(([key, label]) => (
+              ['new', 'Book New', 0],
+              ['existing', 'Bypass Existing', bypassCandidates.length],
+              ['live', 'Live Rides', ongoingRides.length]
+            ] as const).map(([key, label, n]) => (
               <button
                 key={key}
                 onClick={() => setDirectBookMode(key)}
-                className={`px-3 py-1.5 text-xs font-medium border-b-2 -mb-px transition-colors ${
-                  directBookMode === key ? 'border-purple-600 text-purple-600' : 'border-transparent text-gray-500 hover:text-gray-800'
-                }`}
+                className={
+                  directBookMode === key
+                    ? BTN_PRIMARY_SM
+                    : 'rounded-full px-3.5 py-1.5 text-xs font-semibold bg-white/70 border border-white/80 text-slate-600 hover:text-[color:var(--g-accent-700)]'
+                }
               >
                 {label}
+                {n > 0 ? ` (${n})` : ''}
               </button>
             ))}
           </div>
 
-          {loading && <div className="text-sm text-gray-500">Loading…</div>}
+          {loading && <div className="text-sm text-slate-500">Loading…</div>}
 
           {directBookMode === 'new' && (
-            <form onSubmit={submitDirectBook} className="space-y-3 max-w-xl">
+            <form onSubmit={submitDirectBook} className={`space-y-3 max-w-2xl p-5 ${card}`}>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Employee</label>
+                <label className={RIDE_LABEL}>Employee</label>
                 <select
                   required
                   value={directBookForm.employee_user_id}
                   onChange={(e) => setDirectBookForm({ ...directBookForm, employee_user_id: e.target.value })}
-                  className="w-full border border-slate-200 rounded-xl bg-white/80 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                  className={RIDE_INPUT}
                 >
                   <option value="">Select an employee…</option>
                   {directoryEmployees.map((e) => (
                     <option key={e.user_id} value={e.user_id as number}>
-                      {e.name}{e.designation ? ` — ${e.designation}` : ''}
+                      {e.name}
+                      {e.designation ? ` — ${e.designation}` : ''}
                     </option>
                   ))}
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Purpose</label>
+                <label className={RIDE_LABEL}>Purpose</label>
                 <textarea
                   required
                   value={directBookForm.purpose}
                   onChange={(e) => setDirectBookForm({ ...directBookForm, purpose: e.target.value })}
                   rows={2}
-                  className="w-full border border-slate-200 rounded-xl bg-white/80 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                  className={RIDE_INPUT}
                 />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Pickup Location</label>
+                  <label className={RIDE_LABEL}>Pickup Location</label>
                   <input
                     required
                     value={directBookForm.pickup_location}
                     onChange={(e) => setDirectBookForm({ ...directBookForm, pickup_location: e.target.value })}
-                    className="w-full border border-slate-200 rounded-xl bg-white/80 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                    className={RIDE_INPUT}
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Destination</label>
+                  <label className={RIDE_LABEL}>Destination</label>
                   <input
                     required
                     value={directBookForm.destination}
                     onChange={(e) => setDirectBookForm({ ...directBookForm, destination: e.target.value })}
-                    className="w-full border border-slate-200 rounded-xl bg-white/80 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                    className={RIDE_INPUT}
                   />
                 </div>
               </div>
               <div className="grid grid-cols-3 gap-3">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Ride Date</label>
+                  <label className={RIDE_LABEL}>Ride Date</label>
                   <input
                     required
                     type="date"
                     value={directBookForm.ride_date}
                     onChange={(e) => setDirectBookForm({ ...directBookForm, ride_date: e.target.value })}
-                    className="w-full border border-slate-200 rounded-xl bg-white/80 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                    className={RIDE_INPUT}
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Start Time</label>
+                  <label className={RIDE_LABEL}>Start Time</label>
                   <input
                     required
                     type="time"
                     value={directBookForm.start_time}
                     onChange={(e) => setDirectBookForm({ ...directBookForm, start_time: e.target.value })}
-                    className="w-full border border-slate-200 rounded-xl bg-white/80 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                    className={RIDE_INPUT}
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Est. Duration (hrs)</label>
+                  <label className={RIDE_LABEL}>Est. Duration (hrs)</label>
                   <input
                     required
                     type="number"
@@ -986,18 +1071,18 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
                     step="0.5"
                     value={directBookForm.estimated_duration_hours}
                     onChange={(e) => setDirectBookForm({ ...directBookForm, estimated_duration_hours: Number(e.target.value) })}
-                    className="w-full border border-slate-200 rounded-xl bg-white/80 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                    className={RIDE_INPUT}
                   />
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Vehicle</label>
+                  <label className={RIDE_LABEL}>Vehicle</label>
                   <select
                     required
                     value={directBookForm.vehicle_id}
                     onChange={(e) => setDirectBookForm({ ...directBookForm, vehicle_id: e.target.value })}
-                    className="w-full border border-slate-200 rounded-xl bg-white/80 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                    className={RIDE_INPUT}
                   >
                     <option value="">Pick a vehicle…</option>
                     {availableVehicles.map((v) => (
@@ -1008,12 +1093,12 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Driver</label>
+                  <label className={RIDE_LABEL}>Driver</label>
                   <select
                     required
                     value={directBookForm.driver_user_id}
                     onChange={(e) => setDirectBookForm({ ...directBookForm, driver_user_id: e.target.value })}
-                    className="w-full border border-slate-200 rounded-xl bg-white/80 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
+                    className={RIDE_INPUT}
                   >
                     <option value="">Pick a driver…</option>
                     {driverCandidates.map((d) => (
@@ -1022,118 +1107,65 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
                       </option>
                     ))}
                   </select>
-                  <p className="text-[11px] text-gray-400 mt-1">Must be a login account — needed for the Live Ride Map's location tracking.</p>
+                  <p className="text-[11px] text-slate-400 mt-1">Must be a login account — needed for the Live Ride Map's location tracking.</p>
                 </div>
               </div>
-              {directBookMessage && <div className="text-sm text-gray-700">{directBookMessage}</div>}
-              <button
-                type="submit"
-                disabled={directBookSubmitting}
-                className="px-4 py-2 text-sm font-medium rounded-lg bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-50"
-              >
-                {directBookSubmitting ? 'Booking…' : 'Book & Confirm Directly'}
+              {directBookMessage && <div className="text-sm text-slate-700">{directBookMessage}</div>}
+              <button type="submit" disabled={directBookSubmitting} className={BTN_PRIMARY}>
+                <Zap className="w-4 h-4" /> {directBookSubmitting ? 'Booking…' : 'Book & Confirm Directly'}
               </button>
             </form>
           )}
 
           {directBookMode === 'existing' && (
-            <div className="space-y-3">
-              {!loading && bypassCandidates.length === 0 && (
-                <div className="text-sm text-gray-500">Nothing pending or approved right now.</div>
-              )}
-              {bypassCandidates.map((r) => (
-                <div key={r.id} className={wideWeb ? 'border rounded-lg p-4' : `p-4 ${GLASS_CARD}`}>
-                  <div className="flex items-center justify-between">
-                    <div className="font-semibold text-gray-800">
-                      {r.pickup_location} → {r.destination}
-                    </div>
-                    <span className={`text-xs font-medium px-2 py-1 rounded ${STATUS_COLOR[r.status]}`}>{STATUS_LABEL[r.status]}</span>
-                  </div>
-                  <div className="text-xs text-gray-500 mt-1">
-                    {r.ride_date} at {r.start_time} • Est. {r.estimated_duration_hours} hr{r.estimated_duration_hours === 1 ? '' : 's'}
-                  </div>
-                  <div className="text-sm text-gray-600 mt-2">{r.purpose}</div>
-
-                  <div className="mt-3">
-                    {bypassingFor === r.id ? (
-                      <div className="flex flex-wrap items-center gap-2">
-                        <select
-                          value={bypassForm.vehicle_id}
-                          onChange={(e) => setBypassForm({ ...bypassForm, vehicle_id: e.target.value })}
-                          className="border rounded px-2 py-1 text-xs"
-                        >
-                          <option value="">Pick a vehicle…</option>
-                          {availableVehicles.map((v) => (
-                            <option key={v.id} value={v.id}>
-                              {v.model} ({v.vehicle_no})
-                            </option>
-                          ))}
-                        </select>
-                        <select
-                          value={bypassForm.driver_user_id}
-                          onChange={(e) => setBypassForm({ ...bypassForm, driver_user_id: e.target.value })}
-                          className="border rounded px-2 py-1 text-xs"
-                        >
-                          <option value="">Pick a driver…</option>
-                          {driverCandidates.map((d) => (
-                            <option key={d.id} value={d.id}>
-                              {d.name}
-                            </option>
-                          ))}
-                        </select>
-                        <button onClick={() => bypassAssign(r.id)} className="px-3 py-1.5 text-xs font-medium rounded-lg bg-purple-600 text-white">
-                          Confirm Directly
-                        </button>
-                        <button
-                          onClick={() => setBypassingFor(null)}
-                          className="px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-300 text-gray-600"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    ) : (
-                      <button
-                        onClick={() => {
-                          setBypassingFor(r.id);
-                          setBypassForm({ vehicle_id: '', driver_user_id: '' });
-                        }}
-                        className="px-3 py-1.5 text-xs font-medium rounded-lg bg-purple-600 text-white hover:bg-purple-700"
-                      >
-                        Bypass & Assign Vehicle
+            <div className={wideWeb ? 'grid grid-cols-2 gap-3' : 'space-y-3'}>
+              {!loading && bypassCandidates.length === 0 && emptyState('Nothing pending or approved right now.')}
+              {bypassCandidates.map((r) =>
+                requestCard(
+                  r,
+                  bypassingFor === r.id ? (
+                    <div className="flex flex-wrap items-center gap-2">
+                      {vehicleDriverPicker(bypassForm, setBypassForm)}
+                      <button onClick={() => bypassAssign(r.id)} className={BTN_PRIMARY_SM}>
+                        Confirm Directly
                       </button>
-                    )}
-                  </div>
-                </div>
-              ))}
+                      <button onClick={() => setBypassingFor(null)} className={BTN_GHOST_SM}>
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        setBypassingFor(r.id);
+                        setBypassForm({ vehicle_id: '', driver_user_id: '' });
+                      }}
+                      className={BTN_PRIMARY_SM}
+                    >
+                      <Zap className="w-3.5 h-3.5" /> Bypass & Assign Vehicle
+                    </button>
+                  )
+                )
+              )}
             </div>
           )}
 
           {directBookMode === 'live' && (
-            <div className="space-y-3">
-              {!loading && ongoingRides.length === 0 && (
-                <div className="text-sm text-gray-500">No rides ongoing right now.</div>
+            <div className={wideWeb ? 'grid grid-cols-2 gap-3' : 'space-y-3'}>
+              {!loading && ongoingRides.length === 0 && emptyState('No rides ongoing right now.')}
+              {ongoingRides.map((r) =>
+                requestCard(
+                  r,
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-xs text-slate-500">
+                      {r.vehicle_model} ({r.vehicle_no}) · {r.driver_name}
+                      {!r.driver_user_id && ' (no tracked account — live map unavailable)'}
+                    </span>
+                    <button onClick={() => setViewingMapFor(r.id)} disabled={!r.driver_user_id} className={BTN_SOFT_SM}>
+                      <Navigation className="w-3.5 h-3.5" /> View Live Map
+                    </button>
+                  </div>
+                )
               )}
-              {ongoingRides.map((r) => (
-                <div key={r.id} className={wideWeb ? 'border rounded-lg p-4' : `p-4 ${GLASS_CARD}`}>
-                  <div className="flex items-center justify-between">
-                    <div className="font-semibold text-gray-800">
-                      {r.pickup_location} → {r.destination}
-                    </div>
-                    <span className={`text-xs font-medium px-2 py-1 rounded ${STATUS_COLOR[r.status]}`}>{STATUS_LABEL[r.status]}</span>
-                  </div>
-                  <div className="text-xs text-gray-500 mt-1">
-                    Vehicle: {r.vehicle_model} ({r.vehicle_no}) • Driver: {r.driver_name}
-                    {!r.driver_user_id && ' (no tracked account — live map unavailable)'}
-                  </div>
-                  <button
-                    onClick={() => setViewingMapFor(r.id)}
-                    disabled={!r.driver_user_id}
-                    className="mt-3 px-3 py-1.5 text-xs font-medium rounded-lg bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-40"
-                  >
-                    View Live Map
-                  </button>
-                </div>
-              ))}
             </div>
           )}
         </div>
