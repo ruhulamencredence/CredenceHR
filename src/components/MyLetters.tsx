@@ -53,8 +53,9 @@ export const MyLetters: React.FC<{ token: string; onBack?: () => void; canServic
     try {
       const t = sessionStorage.getItem('my_letters_tab');
       if (t) sessionStorage.removeItem('my_letters_tab');
-      if (t === 'pending' || t === 'record') return t;
-      if (t === 'book' && canServiceBook) return t;
+      if (t === 'pending') return t;
+      // One of the two: with Service Book, "record" opens Service Book instead.
+      if (t === 'book' || t === 'record') return canServiceBook ? 'book' : 'record';
     } catch {
       // storage unavailable
     }
@@ -63,7 +64,8 @@ export const MyLetters: React.FC<{ token: string; onBack?: () => void; canServic
   useEffect(() => {
     const onTab = (e: Event) => {
       const t = (e as CustomEvent).detail;
-      if (t === 'letters' || t === 'pending' || t === 'record' || (t === 'book' && canServiceBook)) setTab(t);
+      if (t === 'letters' || t === 'pending') setTab(t);
+      else if (t === 'book' || t === 'record') setTab(canServiceBook ? 'book' : 'record');
       try {
         sessionStorage.removeItem('my_letters_tab');
       } catch {
@@ -159,9 +161,13 @@ export const MyLetters: React.FC<{ token: string; onBack?: () => void; canServic
             <ClipboardList className="w-3.5 h-3.5" /> Pending Items
             {pendingCount > 0 && <span className={`text-[10px] rounded-full px-1.5 ${tab === 'pending' ? 'bg-white/25' : 'bg-rose-500 text-white'}`}>{pendingCount}</span>}
           </button>
-          <button type="button" onClick={() => setTab('record')} className={`text-xs font-semibold px-3.5 py-2 rounded-lg flex items-center gap-1.5 ${tab === 'record' ? 'bg-blue-600 text-white' : 'text-slate-600'}`}>
-            <BookOpen className="w-3.5 h-3.5" /> Service Record
-          </button>
+          {/* Service Record or Service Book, never both: Service Book's
+              Overview already has the same service history (and more). */}
+          {!canServiceBook && (
+            <button type="button" onClick={() => setTab('record')} className={`text-xs font-semibold px-3.5 py-2 rounded-lg flex items-center gap-1.5 ${tab === 'record' ? 'bg-blue-600 text-white' : 'text-slate-600'}`}>
+              <BookOpen className="w-3.5 h-3.5" /> Service Record
+            </button>
+          )}
           {canServiceBook && (
             <button type="button" onClick={() => setTab('book')} className={`text-xs font-semibold px-3.5 py-2 rounded-lg flex items-center gap-1.5 ${tab === 'book' ? 'bg-blue-600 text-white' : 'text-slate-600'}`}>
               <BookOpen className="w-3.5 h-3.5" /> Service Book

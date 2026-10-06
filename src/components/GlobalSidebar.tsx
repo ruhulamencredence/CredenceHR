@@ -341,24 +341,8 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   // account (view / download / acknowledge), certificate requests, and the
   // Employee's own service record. Every account.
   selfServiceItems.push({ key: 'myLetters', label: 'My Letters & Service Record', icon: FileText, onClick: () => onGoToSelfServiceTab('myLetters') });
-  // My Service Book — the same page on its "Service Book" tab (own Employee
-  // 360, read only). users.can_view_service_book.
-  if (isSuperAdmin || !!user.can_view_service_book) {
-    selfServiceItems.push({
-      key: 'myServiceBook',
-      label: 'My Service Book',
-      icon: BookOpen,
-      onClick: () => {
-        try {
-          sessionStorage.setItem('my_letters_tab', 'book');
-        } catch {
-          // storage unavailable — opens on Letters
-        }
-        onGoToSelfServiceTab('myLetters');
-        setTimeout(() => window.dispatchEvent(new CustomEvent('credence:my-letters-tab', { detail: 'book' })), 0);
-      }
-    });
-  }
+  // (Service Book has no menu item of its own: with users.can_view_service_book
+  // it is a tab of My Letters & Service Record, in place of Service Record.)
   // Team Attendance (TeamAttendance.tsx) — only for accounts HR made the
   // supervisor (or backup) of a Site Attendance team.
   // My Tasks (MyTasks.tsx) — tasks given to me, requests to HR, a
@@ -648,7 +632,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     { key: 'g_work', label: 'Work & Approvals', icon: ListChecks, entries: pick('myTasks', 'approveApplications', 'teamAttendance') },
     { key: 'g_pepm_op', label: 'PEPM Operation', icon: Briefcase, entries: pick('entry', 'jobs', 'entryDetails', 'jobEdit') },
     { key: 'g_leave_att', label: 'Leave & Attendance', icon: CalendarClock, entries: pick('leaveApplication', 'timesheet') },
-    { key: 'g_requests', label: 'Requests & Claims', icon: Wallet, entries: pick('userMovementClaims', 'userConveyanceClaims', 'vehicleManagement', 'assetManagement', 'myMobileSim', 'myLoans', 'myLetters', 'myServiceBook') },
+    { key: 'g_requests', label: 'Requests & Claims', icon: Wallet, entries: pick('userMovementClaims', 'userConveyanceClaims', 'vehicleManagement', 'assetManagement', 'myMobileSim', 'myLoans', 'myLetters') },
     { key: 'g_others', label: 'Others', icon: Users2, entries: pick('chat', 'alerts', 'erp360', 'employeeDirectory', 'myCases', 'resignation') }
   ]);
   const hrAnalyticsItem = itemByKey.get('hr_analytics') || null;
