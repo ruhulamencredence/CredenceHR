@@ -102,9 +102,9 @@ public class MainActivity extends BridgeActivity {
                 }
             }
 
-            // Legacy overload -- the WebResourceRequest/WebResourceError
-            // version above only fires on API 23+. minSdkVersion here is 22
-            // (Android 5.1), so this keeps those devices covered too.
+            // Legacy overload -- kept for WebView builds that still call it;
+            // the WebResourceRequest/WebResourceError version above covers
+            // every supported device (minSdkVersion 24, Android 7.0).
             @SuppressWarnings("deprecation")
             @Override
             public void onReceivedError(WebView view, int errorCode, String description, String failingUrl) {
