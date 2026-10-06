@@ -269,7 +269,10 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
       if (!b.category_id) return `Bill ${n}: select a category.`;
       if (!b.bill_date) return `Bill ${n}: select the bill's date.`;
       if (b.bill_date < fromDate || b.bill_date > toDate) return `Bill ${n}: the date must be between ${formatDate(fromDate)} and ${formatDate(toDate)}.`;
-      if (locked.has(b.bill_date)) return `Bill ${n}: ${formatDate(b.bill_date)} was already claimed on an earlier day.`;
+      if (locked.has(b.bill_date))
+        return policy.values.one_claim_per_date
+          ? `Bill ${n}: ${formatDate(b.bill_date)} is already in another claim of yours — one date goes in one claim. Open that claim and edit it instead.`
+          : `Bill ${n}: ${formatDate(b.bill_date)} was already claimed on an earlier day.`;
       const amt = billAmount(b);
       if (refsDriveBill(b)) {
         if (!(amt > 0)) return `Bill ${n}: enter the amount of each referenced check-in/out.`;
@@ -519,7 +522,11 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
                         className="w-full text-xs px-2.5 py-2 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
                       />
                     </div>
-                    {dateClosed && <p className="text-[10px] text-rose-600">This date was already claimed on an earlier day.</p>}
+                    {dateClosed && (
+                      <p className="text-[10px] text-rose-600">
+                        {policy?.values.one_claim_per_date ? 'This date is already in another claim — edit that claim.' : 'This date was already claimed on an earlier day.'}
+                      </p>
+                    )}
                     {refsDriveBill(b) && <p className="text-[10px] text-blue-600">Amount = the referenced check-in/outs below ({money(refsTotal)}).</p>}
                     {cat && policy?.values.enforce_category_limits && (cat.max_per_bill != null || cat.monthly_limit != null || cat.receipt_required) && (
                       <p className="text-[10px] text-slate-400">
