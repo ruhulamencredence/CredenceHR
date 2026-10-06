@@ -3,6 +3,7 @@ import { Lock, ArrowUp, MapPin, Download } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import credenceLogo from '../assets/credence-logo.png';
 import { apiUrl } from '../lib/api';
+import { PrivacyPolicy } from './PrivacyPolicy';
 
 // Lazy-loaded: keeps lottie-react (a fairly heavy animation library) out of
 // the very first JS chunk the app has to download+parse before anything
@@ -26,6 +27,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showPrivacy, setShowPrivacy] = useState(false);
   // Shown while we're specifically waiting on the location permission prompt /
   // GPS fix, distinct from the generic "Signing in…" state so the user knows
   // why nothing has happened yet if the OS permission dialog is slow to appear.
@@ -257,6 +259,13 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
               </span>
             </a>
           )}
+
+          <p className="mt-4 text-center text-[11px]" style={{ color: 'var(--g-text-muted)' }}>
+            <button type="button" onClick={() => setShowPrivacy(true)} className="font-semibold underline">
+              Privacy Policy
+            </button>
+          </p>
+          {showPrivacy && <PrivacyPolicy onClose={() => setShowPrivacy(false)} />}
         </div>
         </div>
       </div>
