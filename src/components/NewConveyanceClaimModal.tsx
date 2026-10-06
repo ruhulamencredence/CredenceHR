@@ -23,6 +23,9 @@ interface NewConveyanceClaimModalProps {
   // Edit (or correct & resubmit) this claim instead of filing a new one —
   // its bills, dates, check-in/outs and attachment are filled in.
   editClaim?: UserClaim | null;
+  // "One new claim per day": a claim was already filed today — open that one
+  // for editing instead.
+  onEditExisting?: (claimId: number) => void;
 }
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024; // 5MB
@@ -69,7 +72,7 @@ const checkInDate = (v: string | null | undefined) => {
   if (Number.isNaN(d.getTime())) return String(v).slice(0, 10);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
-export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = ({ token, onClose, onSubmitted, onBehalfOf, editClaim }) => {
+export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = ({ token, onClose, onSubmitted, onBehalfOf, editClaim, onEditExisting }) => {
   const behalfBase = onBehalfOf ? `/api/user-claims/on-behalf/${onBehalfOf.id}` : null;
   const editId = editClaim?.id ?? null;
   // Editing: the attachment already on the claim (kept unless replaced/removed).
@@ -257,10 +260,22 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
     setFile(f);
   };
 
+  // "One new claim per day" — the claim already filed today, if any.
+  const todayClaimId = !editClaim ? policy?.today_claim_id ?? null : null;
+  // "A claim holds every date from its From Date to its To Date": none of
+  // this claim's range may already belong to another claim.
+  const wholeRange = !!policy?.values.one_claim_per_date && !!policy?.values.lock_whole_range;
+  const rangeClash: string[] = [];
+  if (wholeRange && fromDate && toDate && fromDate <= toDate) {
+    for (const d of Array.from(locked).sort()) if (d >= fromDate && d <= toDate) rangeClash.push(d);
+  }
+
   const validate = (): string | null => {
     if (!policy) return policyError || 'Loading the Bill Claim Policy\u2026';
     if (!fromDate || !toDate) return 'From Date and To Date are required.';
     if (toDate < fromDate) return 'To Date can\u2019t be before From Date.';
+    if (todayClaimId) return `A claim was already filed today (#${todayClaimId}) — edit that claim to add bills.`;
+    if (rangeClash.length) return `${rangeClash.map(formatDate).join(', ')} ${rangeClash.length === 1 ? 'is' : 'are'} already covered by another claim of yours — pick other dates.`;
     if (fromDate < minDate || toDate > maxDate) return `Bills can only be claimed for dates from ${formatDate(minDate)} to ${formatDate(maxDate)}.`;
     if (bills.length === 0 && !hasRefs) return 'Add at least one bill.';
     for (let i = 0; i < bills.length; i++) {
@@ -412,6 +427,32 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
               </span>
             )}
           </div>
+
+          {todayClaimId && (
+            <div className="text-xs px-3 py-2.5 rounded-xl bg-amber-50 text-amber-800 border border-amber-200">
+              <div className="font-semibold">You already filed a claim today (#{todayClaimId}).</div>
+              <p className="mt-0.5">One claim a day — add or change today's bills in that claim.</p>
+              {onEditExisting && (
+                <button
+                  type="button"
+                  onClick={() => onEditExisting(todayClaimId)}
+                  className="mt-2 inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-semibold"
+                >
+                  Open today's claim
+                </button>
+              )}
+            </div>
+          )}
+          {locked.size > 0 && (
+            <p className="text-[11px] text-slate-500">
+              Already in your other claims (can't be picked): {Array.from(locked).sort().map(formatDate).join(', ')}
+            </p>
+          )}
+          {rangeClash.length > 0 && (
+            <p className="text-[11px] font-semibold text-rose-600">
+              {rangeClash.map(formatDate).join(', ')} {rangeClash.length === 1 ? 'is' : 'are'} inside this From–To range but already covered by another claim.
+            </p>
+          )}
 
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -680,7 +721,7 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
           <button
             type="button"
             onClick={handleSubmit}
-            disabled={submitting || !policy}
+            disabled={submitting || !policy || !!todayClaimId}
             className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold rounded-xl text-sm transition-all shadow-sm"
           >
             {submitting ? <Spinner size={16} /> : <CheckCircle2 className="w-4 h-4" />}

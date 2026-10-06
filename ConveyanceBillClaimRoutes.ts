@@ -27,7 +27,7 @@
 // in server.ts's ensureSchemaMigrations(), same as every other table.
 
 import type { Express } from "express";
-import { checkClaimBills, loadCategories, attachClaimItems, loadPolicy, dateWindow, lockedDates, dhakaDate } from "./BillClaimPolicy";
+import { checkClaimBills, loadCategories, attachClaimItems, loadPolicy, dateWindow, lockedDates, dhakaDate, claimFiledOn } from "./BillClaimPolicy";
 import { claimEditState, claimRequests, recordClaimHistory, diffSnapshots, type ClaimEditMode } from "./ConveyanceClaimHistory";
 
 interface ConveyanceBillClaimRouteDeps {
@@ -719,6 +719,15 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
           return res.status(409).json({ error: "This claim was changed in the meantime — reopen it and try again." });
         }
         editMode = st.mode;
+      } else if (policyNow.one_claim_per_day) {
+        // One new claim a day: more bills today go in today's claim.
+        const todays = await claimFiledOn(queryDB, claimant.id, today);
+        if (todays) {
+          return res.status(400).json({
+            error: `A claim was already filed today (#${todays}). One claim a day — edit that claim to add or change bills.`,
+            today_claim_id: todays
+          });
+        }
       }
       const from = toDateOnlyString(from_date || claim_date || today) || today;
       const to = toDateOnlyString(to_date || from_date || claim_date || today) || from;
@@ -1079,7 +1088,8 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
           max_date: win.max,
           values: policy,
           categories: (await loadCategories(queryDB)).filter((c) => c.is_active),
-          locked_dates: await lockedDates(queryDB, claimant.id, today, win.min, win.max, policy, editing ? Number(editing.id) : null)
+          locked_dates: await lockedDates(queryDB, claimant.id, today, win.min, win.max, policy, editing ? Number(editing.id) : null),
+          today_claim_id: policy.one_claim_per_day && !editing ? await claimFiledOn(queryDB, claimant.id, today) : null
         });
       } catch (err: any) {
         res.status(500).json({ error: err.message });

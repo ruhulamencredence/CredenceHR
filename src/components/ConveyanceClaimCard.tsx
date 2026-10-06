@@ -302,8 +302,16 @@ export const ConveyanceClaimCard: React.FC<ConveyanceClaimCardProps> = ({ token,
 
       {(showNewClaim || editingClaim) && (
         <NewConveyanceClaimModal
+          key={editingClaim ? `edit-${editingClaim.id}` : 'new'}
           token={token}
           editClaim={editingClaim}
+          onEditExisting={(id) => {
+            const c = claims.find((x) => x.id === id);
+            if (!c) return;
+            setShowNewClaim(false);
+            if (c.editable) setEditingClaim(c);
+            else setViewingClaim(c);
+          }}
           onClose={() => {
             setShowNewClaim(false);
             setEditingClaim(null);
