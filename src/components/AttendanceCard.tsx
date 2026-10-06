@@ -77,17 +77,11 @@ async function getCurrentCoords(): Promise<{ latitude: number; longitude: number
 // visible (not tied to the mobile Budget/Jobs/Entries tile menu) since
 // marking attendance is a quick, separate daily action.
 export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects, loading }) => {
-  // backdrop-filter is real bug material on the Android system WebView, not
-  // just an expensive nice-to-have: its GPU raster budget is much smaller
-  // than desktop Chrome's, and every backdrop-blur layer on screen fights
-  // for that same budget. That's why this could render blurred on one
-  // reload and flat on the next — it's a hardware-dependent failure, not
-  // something a JS-side repaint nudge can reliably force (confirmed: it
-  // didn't). Cutting backdrop-blur for the native app build removes the
-  // failure mode entirely instead of papering over it, and costs nothing
-  // visually here — the inset highlight + gradient + border already do
-  // the actual "glass" work (see the comment further down).
-  const isNativeApp = Capacitor.isNativePlatform();
+  // Blur is on in the Android/iPhone app too (it used to be left out there
+  // because some Android WebViews dropped it on reload); glass-mask-fix +
+  // translateZ(0) on the shell keep the card itself from disappearing. The
+  // blur is half the old strength (20px shell, 8px tiles), which is also
+  // lighter on the WebView's GPU budget.
   const [projectId, setProjectId] = useState<string>('');
   const [status, setStatus] = useState<AttendanceRecord | null>(null);
   const [loadingStatus, setLoadingStatus] = useState(false);
@@ -278,15 +272,9 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
     // Requests) and the tinted-glass treatment made that row read as three
     // unrelated designs pushed together.
     //
-    // backdrop-blur-xl is close to invisible here anyway, since the page
-    // background behind this card is a smooth, textureless gradient — the
-    // inset highlight in the shadow below (a bright top edge, same trick the
-    // floating action buttons use) is what mainly sells the frosted look on
-    // this screen. Which is exactly why it's dropped outright on the native
-    // app build below: it wasn't buying much visually, but it WAS a real bug
-    // there — Android's WebView compositor could render it on one reload and
-    // silently drop it on the next (a GPU-budget/driver issue, not something
-    // fixable from JS — a repaint-nudge hack was tried and didn't hold up).
+    // Blur (20px) is on for the web and the app alike; the inset highlight in
+    // the shadow below (a bright top edge, same trick the floating action
+    // buttons use) does most of the frosted look on this smooth background.
     //
     // Separately (see glass-mask-fix in index.css for the full story): this
     // card's own rounded gradient background was ALSO capable of losing
@@ -296,12 +284,11 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
     // actual fix for that.
     <div
       style={{ transform: 'translateZ(0)', WebkitTransform: 'translateZ(0)' }}
-      className={`glass-mask-fix relative rounded-[28px] overflow-hidden border border-white/70 p-4 bg-gradient-to-br from-violet-200/60 via-white/50 to-violet-100/70 shadow-[0_16px_40px_-10px_rgba(42,0,85,0.45),inset_0_1px_0_rgba(255,255,255,0.8)] transition-all md:bg-none md:bg-white md:border-slate-200 md:rounded-2xl md:shadow-sm ${isNativeApp ? '' : 'backdrop-blur-2xl backdrop-saturate-150 md:backdrop-blur-none md:backdrop-saturate-100'}`}
+      className={`glass-mask-fix relative rounded-[28px] overflow-hidden border border-white/70 p-4 bg-gradient-to-br from-violet-200/60 via-white/50 to-violet-100/70 shadow-[0_16px_40px_-10px_rgba(42,0,85,0.45),inset_0_1px_0_rgba(255,255,255,0.8)] transition-all md:bg-none md:bg-white md:border-slate-200 md:rounded-2xl md:shadow-sm backdrop-blur-[20px] backdrop-saturate-150 md:backdrop-blur-none md:backdrop-saturate-100`}
     >
       {/* The inner tiles below (In Time/Out Time) keep their own bg-white/70
-          — that opacity alone already reads as a distinct panel with or
-          without blur, so backdrop-blur-lg is dropped for the native app
-          right alongside the outer shell's, for the same reason. */}
+          — that opacity alone reads as a distinct panel even where a
+          WebView skips the blur — with a light 8px blur on top. */}
       <h3 className="text-sm font-bold text-slate-900 mb-2 flex items-center gap-2 min-w-0">
         <UserCheck className="w-4 h-4 text-blue-600 shrink-0" />
         <span className="truncate">My Attendance</span>
@@ -315,7 +302,7 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
           <select
             value={projectId}
             onChange={(e) => setProjectId(e.target.value)}
-            className={`w-full text-sm px-3 py-2 bg-white/85 border border-white/60 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none ${isNativeApp ? '' : 'backdrop-blur'}`}
+            className={`w-full text-sm px-3 py-2 bg-white/85 border border-white/60 rounded-xl focus:ring-2 focus:ring-blue-600 focus:outline-none backdrop-blur-[4px]`}
           >
             <option value="">Select a project…</option>
             {projects.map((p) => (
@@ -332,7 +319,7 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
             own distinct tile even where backdrop-blur-lg doesn't render
             (Android WebView — see the note above), while staying low
             enough to keep some translucency instead of a flat opaque box. */}
-        <div className={`relative rounded-xl px-4 py-3 border ${isNativeApp ? '' : 'backdrop-blur-lg'} ${hasCheckedIn ? 'bg-blue-100/70 border-white/60' : 'bg-white/70 border-white/50'}`}>
+        <div className={`relative rounded-xl px-4 py-3 border backdrop-blur-[8px] ${hasCheckedIn ? 'bg-blue-100/70 border-white/60' : 'bg-white/70 border-white/50'}`}>
           {lateWarnings.length > 0 && (
             <div className="absolute top-2 right-2 flex flex-col items-end gap-1">
               {lateWarnings.map((w) => (
@@ -363,7 +350,7 @@ export const AttendanceCard: React.FC<AttendanceCardProps> = ({ token, projects,
 
         {/* Out Time — same "time only" + extra padding/blur treatment as
             In Time above. */}
-        <div className={`rounded-xl px-4 py-3 border ${isNativeApp ? '' : 'backdrop-blur-lg'} ${hasCheckedOut ? 'bg-blue-100/70 border-white/60' : 'bg-white/70 border-white/50'}`}>
+        <div className={`rounded-xl px-4 py-3 border backdrop-blur-[8px] ${hasCheckedOut ? 'bg-blue-100/70 border-white/60' : 'bg-white/70 border-white/50'}`}>
           <div className="text-xs font-medium text-slate-500">Out Time</div>
           {hasCheckedOut && outParts ? (
             <div className="mt-0.5 font-bold text-blue-700">
