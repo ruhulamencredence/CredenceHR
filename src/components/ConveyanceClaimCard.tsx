@@ -25,6 +25,14 @@ interface ConveyanceClaimCardProps {
 
 type ClaimTab = UserClaimStatus;
 
+// One line under a claim in the list when it's back with the employee.
+const ClaimEditNote: React.FC<{ claim: UserClaim }> = ({ claim }) =>
+  claim.edit_mode === 'returned' ? (
+    <div className="text-[11px] font-semibold text-amber-700 mt-0.5">Returned for correction — tap to edit</div>
+  ) : claim.edit_mode === 'reclaim' ? (
+    <div className="text-[11px] font-semibold text-amber-700 mt-0.5">You may correct it and resubmit</div>
+  ) : null;
+
 const TABS: { key: ClaimTab; label: string }[] = [
   { key: 'pending', label: 'Review' },
   { key: 'approved', label: 'Approved' },
@@ -47,6 +55,8 @@ export const ConveyanceClaimCard: React.FC<ConveyanceClaimCardProps> = ({ token,
   const [loading, setLoading] = useState(true);
   const [showNewClaim, setShowNewClaim] = useState(false);
   const [viewingClaim, setViewingClaim] = useState<UserClaim | null>(null);
+  // The claim open in the form for editing / resubmitting.
+  const [editingClaim, setEditingClaim] = useState<UserClaim | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [tab, setTab] = useState<ClaimTab>('pending');
 
@@ -69,7 +79,8 @@ export const ConveyanceClaimCard: React.FC<ConveyanceClaimCardProps> = ({ token,
 
   const handleSubmitted = () => {
     setShowNewClaim(false);
-    setMessage('Claim submitted — it\u2019s now waiting for approval.');
+    setMessage(editingClaim ? 'Claim saved — it\u2019s waiting for approval again.' : 'Claim submitted — it\u2019s now waiting for approval.');
+    setEditingClaim(null);
     fetchClaims();
     setTimeout(() => setMessage(null), 4000);
   };
@@ -189,7 +200,8 @@ export const ConveyanceClaimCard: React.FC<ConveyanceClaimCardProps> = ({ token,
                     <div className="text-xs text-slate-500 mt-0.5">
                       {c.category} &middot; ৳{Number(c.amount).toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </div>
-                    {c.status === 'pending' && c.approval?.current_approver_name && (
+                    <ClaimEditNote claim={c} />
+                    {c.status === 'pending' && c.edit_mode !== 'returned' && c.approval?.current_approver_name && (
                       <div className="text-[11px] text-amber-600 mt-0.5">
                         Waiting on {c.approval.current_approver_name}
                         {c.approval.total_steps > 1 ? ` (Layer ${c.approval.current_step} of ${c.approval.total_steps})` : ''}
@@ -242,7 +254,8 @@ export const ConveyanceClaimCard: React.FC<ConveyanceClaimCardProps> = ({ token,
                       <div className="flex items-center gap-1.5">
                         <UserClaimStatusBadge status={c.status} />
                       </div>
-                      {c.status === 'pending' && c.approval?.current_approver_name && (
+                      <ClaimEditNote claim={c} />
+                      {c.status === 'pending' && c.edit_mode !== 'returned' && c.approval?.current_approver_name && (
                         <div className="text-[10px] text-amber-600 mt-0.5">
                           Waiting on {c.approval.current_approver_name}
                           {c.approval.total_steps > 1 ? ` (Layer ${c.approval.current_step} of ${c.approval.total_steps})` : ''}
@@ -287,10 +300,28 @@ export const ConveyanceClaimCard: React.FC<ConveyanceClaimCardProps> = ({ token,
         <Plus className="w-3.5 h-3.5" /> New Claim
       </button>
 
-      {showNewClaim && (
-        <NewConveyanceClaimModal token={token} onClose={() => setShowNewClaim(false)} onSubmitted={handleSubmitted} />
+      {(showNewClaim || editingClaim) && (
+        <NewConveyanceClaimModal
+          token={token}
+          editClaim={editingClaim}
+          onClose={() => {
+            setShowNewClaim(false);
+            setEditingClaim(null);
+          }}
+          onSubmitted={handleSubmitted}
+        />
       )}
-      {viewingClaim && <ConveyanceClaimDetailModal claim={viewingClaim} onClose={() => setViewingClaim(null)} />}
+      {viewingClaim && (
+        <ConveyanceClaimDetailModal
+          claim={viewingClaim}
+          token={token}
+          onClose={() => setViewingClaim(null)}
+          onEdit={() => {
+            setEditingClaim(viewingClaim);
+            setViewingClaim(null);
+          }}
+        />
+      )}
     </>
   );
 };

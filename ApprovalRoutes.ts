@@ -28,7 +28,8 @@
 // Approval Requests through them), so they're threaded through as deps
 // rather than duplicated or re-imported directly.
 
-import { dhakaDate } from "./BillClaimPolicy";
+import { dhakaDate, loadPolicy } from "./BillClaimPolicy";
+import { claimChangesFor } from "./ConveyanceClaimHistory";
 import type { Express } from "express";
 import type { AlertType } from "./Alerts";
 import { getMyHrActionApprovals } from "./HROperationsRoutes";
@@ -435,7 +436,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
           return true;
         });
 
-      res.json(enriched.slice(0, 1000));
+      res.json(await attachClaimReview(enriched.slice(0, 1000)));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -446,12 +447,53 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
   // Approve on the LAST step marks the whole request 'approved'; otherwise it just
   // advances current_step to the next layer. A Reject is terminal — the chain stops
   // there regardless of which step it happened at.
+  // Conveyance Bill Claims in an approvals list also carry `claim_version`
+  // (sent back with Approve/Return/Reject, so nothing is decided on a version
+  // the approver hasn't seen) and, when the employee has edited it,
+  // `claim_change_note` + `claim_changes` — what changed since the last
+  // Return/Reject or since it was first submitted (ConveyanceClaimHistory.ts).
+  async function attachClaimReview(list: any[]): Promise<any[]> {
+    const ids = [...new Set(list.filter((r: any) => r.source_type === "user_claim").map((r: any) => Number(r.source_id)))];
+    if (!ids.length) return list;
+    const versions = new Map<number, number>(
+      ((await queryDB(`SELECT id, version FROM user_claims WHERE id IN (${ids.map(() => "?").join(",")})`, ids)) || []).map((x: any) => [
+        Number(x.id),
+        Number(x.version || 1)
+      ])
+    );
+    const changes = await claimChangesFor(queryDB, ids);
+    const policy = await loadPolicy(queryDB);
+    return list.map((r: any) => {
+      if (r.source_type !== "user_claim") return r;
+      const c = changes.get(Number(r.source_id));
+      return {
+        ...r,
+        claim_version: versions.get(Number(r.source_id)) ?? 1,
+        claim_change_note: c?.note ?? null,
+        claim_changes: c?.changes ?? [],
+        // Whether this screen offers Return / "Allow re-claim" (Bill Claim Policy).
+        claim_allow_return: !!policy.allow_return && (r.status ?? "pending") === "pending",
+        claim_allow_reclaim: !!policy.allow_reclaim_on_reject && (r.status ?? "pending") === "pending"
+      };
+    });
+  }
+
+  // Shared parsing of an act body: Approve / Reject / Return (Conveyance Bill
+  // Claims only), plus the claim version and the "Allow re-claim" tick.
+  const parseActBody = (body: any) => ({
+    action: body?.action,
+    claimOpts: {
+      claimVersion: body?.claim_version != null && body.claim_version !== "" ? Number(body.claim_version) : null,
+      allowReclaim: body?.allow_reclaim === true || body?.allow_reclaim === 1 || body?.allow_reclaim === "1"
+    }
+  });
+
   app.post("/api/approvals/:id/act", authenticateToken, requireAdmin, requireModule("approvals"), requireModuleLayer("approvals", "edit_add"), async (req: any, res) => {
     try {
       const { id } = req.params;
-      const action = req.body?.action;
-      if (action !== "approved" && action !== "rejected") {
-        return res.status(400).json({ error: "action must be 'approved' or 'rejected'." });
+      const { action, claimOpts } = parseActBody(req.body);
+      if (action !== "approved" && action !== "rejected" && action !== "returned") {
+        return res.status(400).json({ error: "action must be 'approved', 'rejected' or 'returned'." });
       }
       const remarks = typeof req.body?.remarks === "string" ? req.body.remarks.trim().slice(0, 1000) || null : null;
       const billId = req.body?.bill_id ? Number(req.body.bill_id) : null;
@@ -460,7 +502,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       const approvedAmount = req.body?.approved_amount != null && req.body.approved_amount !== "" ? Number(req.body.approved_amount) : null;
 
       const voucherNo = typeof req.body?.voucher_no === "string" ? req.body.voucher_no : null;
-      const { status, current_step, billInfo } = await performApprovalAction(Number(id), req.user, action, remarks, billId, approvedAmount, voucherNo);
+      const { status, current_step, billInfo } = await performApprovalAction(Number(id), req.user, action, remarks, billId, approvedAmount, voucherNo, claimOpts);
       if (action === "approved") await notifyNextStepApprovers(Number(id), status, req.user.name);
       res.json({ success: true, status, current_step, ...billInfo });
     } catch (err: any) {
@@ -841,7 +883,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       // POST /api/hr-ops/actions/:id/decision.
       (combined as any[]).push(...(await getMyHrActionApprovals(queryDB, myId)));
 
-      res.json(await attachClaimRefsToMyApprovals(combined));
+      res.json(await attachClaimReview(await attachClaimRefsToMyApprovals(combined)));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -1063,9 +1105,9 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
   app.post("/api/my-approvals/:id/act", authenticateToken, async (req: any, res) => {
     try {
       const { id } = req.params;
-      const action = req.body?.action;
-      if (action !== "approved" && action !== "rejected") {
-        return res.status(400).json({ error: "action must be 'approved' or 'rejected'." });
+      const { action, claimOpts } = parseActBody(req.body);
+      if (action !== "approved" && action !== "rejected" && action !== "returned") {
+        return res.status(400).json({ error: "action must be 'approved', 'rejected' or 'returned'." });
       }
       const remarks = typeof req.body?.remarks === "string" ? req.body.remarks.trim().slice(0, 1000) || null : null;
       const billId = req.body?.bill_id ? Number(req.body.bill_id) : null;
@@ -1075,7 +1117,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       const approvedAmount = req.body?.approved_amount != null && req.body.approved_amount !== "" ? Number(req.body.approved_amount) : null;
 
       const voucherNo = typeof req.body?.voucher_no === "string" ? req.body.voucher_no : null;
-      const { status, current_step, billInfo } = await performApprovalAction(Number(id), req.user, action, remarks, billId, approvedAmount, voucherNo);
+      const { status, current_step, billInfo } = await performApprovalAction(Number(id), req.user, action, remarks, billId, approvedAmount, voucherNo, claimOpts);
       if (action === "approved") await notifyNextStepApprovers(Number(id), status, req.user.name);
       res.json({ success: true, status, current_step, ...billInfo });
     } catch (err: any) {

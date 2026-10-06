@@ -206,6 +206,7 @@ export const LINKED_TABLES = new Map<string, [string, string]>([
   ["user_access_audit", ["target_user_id", "users"]],
   ["user_claim_references", ["user_claim_id", "user_claims"]],
   ["user_claim_items", ["user_claim_id", "user_claims"]],
+  ["user_claim_history", ["user_claim_id", "user_claims"]],
   ["user_profile_details", ["user_id", "users"]],
   ["user_project_permissions", ["user_id", "users"]],
   ["zk_attendance_logs", ["device_id", "zk_devices"]]

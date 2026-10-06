@@ -456,10 +456,18 @@ export interface ApprovalRequest {
   source_id: number;
   requested_by: number;
   requested_by_name?: string | null;
-  status: 'pending' | 'approved' | 'rejected';
+  status: 'pending' | 'approved' | 'rejected' | 'returned';
   current_step: number;
   total_steps: number;
   actions: ApprovalAction[];
+  // Conveyance Bill Claims only (see ClaimReviewBits.tsx): the claim version
+  // to send back with a decision, what the employee changed since the last
+  // Return/Reject, and whether Return / "Allow re-claim" are offered.
+  claim_version?: number;
+  claim_change_note?: string | null;
+  claim_changes?: string[];
+  claim_allow_return?: boolean;
+  claim_allow_reclaim?: boolean;
   created_at?: string;
   updated_at?: string;
   // Only present on rows from GET /api/approvals (joined server-side) — a short
@@ -489,7 +497,9 @@ export interface ApprovalAction {
   step_order: number;
   approver_id: number;
   approver_name: string;
-  action: 'approved' | 'rejected';
+  // 'returned' / 'resubmitted': Conveyance Bill Claims sent back for
+  // correction, and the employee's resubmission.
+  action: 'approved' | 'rejected' | 'returned' | 'resubmitted';
   remarks: string | null;
   acted_at: string;
   // Only present on a 'user_claim' Approve — the Approved Amount this Layer
@@ -1425,7 +1435,7 @@ export interface BillClaimCategory {
 }
 export interface BillClaimPolicyDef {
   key: string;
-  group: 'dates' | 'amounts' | 'claim';
+  group: 'dates' | 'amounts' | 'claim' | 'review';
   label: string;
   help: string;
   type: 'number' | 'boolean';
@@ -1481,6 +1491,18 @@ export interface UserClaim {
   // Set when an Admin filed this claim for the employee (Conveyance -> Claim on Behalf).
   filed_by?: number | null;
   filed_by_name?: string | null;
+  // Editing (ConveyanceClaimHistory.ts / Bill Claim Policy -> Editing & review):
+  // the employee may edit while `editable`; `edit_mode` says why (still before
+  // the lock Layer, returned for correction, or rejected with re-claim
+  // allowed); `lock_reason` says why not. `version` goes back with the edit.
+  version?: number;
+  edit_state?: 'returned' | null;
+  return_reason?: string | null;
+  reclaim_allowed?: boolean;
+  first_submitted_at?: string | null;
+  editable?: boolean;
+  edit_mode?: 'pending' | 'returned' | 'reclaim' | null;
+  lock_reason?: string | null;
   reviewed_at?: string | null;
   // Set once an Approved claim has actually been attached as a line item onto a
   // Conveyance Bill (see POST /api/user-claims/:id/decision) — null until then.

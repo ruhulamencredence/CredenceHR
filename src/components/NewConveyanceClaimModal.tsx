@@ -6,7 +6,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Paperclip, AlertTriangle, CheckCircle2, Route, Plus, Trash2, Lock, ShieldCheck } from 'lucide-react';
-import { ClaimRecord, MyBillClaimPolicy } from '../types';
+import { ClaimRecord, MyBillClaimPolicy, UserClaim } from '../types';
 import { apiUrl } from '../lib/api';
 import { todayDateOnlyString, formatDate } from '../lib/formatDate';
 import { useKeyboardInset, scrollFocusedFieldIntoView } from '../lib/useKeyboardInset';
@@ -20,6 +20,9 @@ interface NewConveyanceClaimModalProps {
   // Admin Panel -> Conveyance -> Claim on Behalf: the same form, filed for this
   // employee (their policy, their check-in/outs, their approval chain).
   onBehalfOf?: { id: number; name: string } | null;
+  // Edit (or correct & resubmit) this claim instead of filing a new one —
+  // its bills, dates, check-in/outs and attachment are filled in.
+  editClaim?: UserClaim | null;
 }
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024; // 5MB
@@ -66,8 +69,13 @@ const checkInDate = (v: string | null | undefined) => {
   if (Number.isNaN(d.getTime())) return String(v).slice(0, 10);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
-export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = ({ token, onClose, onSubmitted, onBehalfOf }) => {
+export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = ({ token, onClose, onSubmitted, onBehalfOf, editClaim }) => {
   const behalfBase = onBehalfOf ? `/api/user-claims/on-behalf/${onBehalfOf.id}` : null;
+  const editId = editClaim?.id ?? null;
+  // Editing: the attachment already on the claim (kept unless replaced/removed).
+  const hadFile = !!editClaim?.has_file;
+  const [removeOldFile, setRemoveOldFile] = useState(false);
+  const keepsOldFile = hadFile && !removeOldFile;
   const [policy, setPolicy] = useState<MyBillClaimPolicy | null>(null);
   const [policyError, setPolicyError] = useState('');
   const today = policy?.today || todayDateOnlyString();
@@ -98,14 +106,34 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(apiUrl(behalfBase ? `${behalfBase}/policy` : '/api/bill-claim-policy/mine'), { headers: { Authorization: `Bearer ${token}` } });
+        const res = await fetch(apiUrl(`${behalfBase ? `${behalfBase}/policy` : '/api/bill-claim-policy/mine'}${editId ? `?claim_id=${editId}` : ''}`), { headers: { Authorization: `Bearer ${token}` } });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Could not load the Bill Claim Policy.');
         if (cancelled) return;
         setPolicy(data);
-        setFromDate(data.today);
-        setToDate(data.today);
-        setBills([newBill(data.today)]);
+        if (editClaim) {
+          // Fill the form from the claim being edited.
+          const day = (v: string) => String(v || '').slice(0, 10);
+          setFromDate(day(editClaim.from_date));
+          setToDate(day(editClaim.to_date));
+          const cats: { id: number; name: string }[] = data.categories || [];
+          const lines = (editClaim.items || []).map((it) => ({
+            key: nextBillKey++,
+            category_id: String(cats.find((c) => c.id === it.category_id)?.id ?? cats.find((c) => c.name === it.category_name)?.id ?? ''),
+            bill_date: day(it.bill_date),
+            amount: String(it.amount),
+            description: it.description || ''
+          }));
+          setBills(lines.length ? lines : [newBill(day(editClaim.from_date))]);
+          setDescription(editClaim.description || '');
+          const refs: Record<number, string> = {};
+          for (const r of editClaim.claim_refs || []) refs[r.claim_id] = String(r.amount);
+          setSelectedRefs(refs);
+        } else {
+          setFromDate(data.today);
+          setToDate(data.today);
+          setBills([newBill(data.today)]);
+        }
       } catch (err: any) {
         if (!cancelled) setPolicyError(err.message || 'Could not load the Bill Claim Policy.');
       }
@@ -157,7 +185,15 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
       setLoadingClaims(true);
       try {
         const res = await fetch(apiUrl(behalfBase ? `${behalfBase}/available-claims` : '/api/claims/available'), { headers: { Authorization: `Bearer ${token}` } });
-        if (res.ok && !cancelled) setAvailableClaims(await res.json());
+        if (res.ok && !cancelled) {
+          const list: ClaimRecord[] = await res.json();
+          // The check-in/outs already on the claim being edited aren't
+          // "available" any more, but they belong in its picker.
+          const own = (editClaim?.claim_refs || [])
+            .filter((r) => !list.some((c) => c.id === r.claim_id))
+            .map((r) => ({ ...(r as any), id: r.claim_id, status: 'completed' }) as ClaimRecord);
+          setAvailableClaims([...own, ...list]);
+        }
       } catch {
         // Offline/unreachable — picker just stays empty; manual Amount still works.
       } finally {
@@ -249,7 +285,7 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
     }
     const maxTotal = Number(policy.values.max_claim_total) || 0;
     if (maxTotal > 0 && claimTotal > maxTotal) return `A claim can add up to at most ${money(maxTotal)}.`;
-    if (needsReceipt && !file) return 'Attach the receipt \u2014 this claim needs one.';
+    if (needsReceipt && !file && !keepsOldFile) return 'Attach the receipt \u2014 this claim needs one.';
     if (description.length > 500) return 'Description is too long.';
     return null;
   };
@@ -273,7 +309,7 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
         });
       }
 
-      const res = await fetch(apiUrl(behalfBase || '/api/user-claims'), {
+      const res = await fetch(apiUrl(editId ? `/api/user-claims/${editId}/edit` : behalfBase || '/api/user-claims'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
@@ -290,7 +326,8 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
           ...(hasRefs
             ? { claim_refs: Object.entries(selectedRefs).map(([claim_id, amt]) => ({ claim_id: Number(claim_id), amount: Number(amt) })) }
             : {}),
-          ...(file_base64 ? { file_base64, file_name: file!.name, file_mimetype: file!.type } : {})
+          ...(file_base64 ? { file_base64, file_name: file!.name, file_mimetype: file!.type } : {}),
+          ...(editClaim ? { version: editClaim.version, remove_file: hadFile && removeOldFile && !file ? true : undefined } : {})
         })
       });
       const data = await res.json();
@@ -327,7 +364,12 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
       >
         <div className="p-5 border-b border-slate-200 flex items-center justify-between shrink-0">
           <div className="min-w-0">
-            <h3 className="text-base font-bold text-slate-900">{onBehalfOf ? 'Claim on Behalf' : 'New Conveyance Claim'}</h3>
+            <h3 className="text-base font-bold text-slate-900">
+              {editClaim ? (editClaim.edit_mode === 'pending' ? 'Edit Claim' : 'Correct & Resubmit') : onBehalfOf ? 'Claim on Behalf' : 'New Conveyance Claim'}
+            </h3>
+            {editClaim?.edit_mode === 'returned' && editClaim.return_reason && (
+              <p className="text-xs text-amber-700 mt-0.5">Returned: {editClaim.return_reason}</p>
+            )}
             {onBehalfOf && (
               <p className="text-xs text-slate-500 mt-0.5 truncate">
                 For <span className="font-semibold text-slate-700">{onBehalfOf.name}</span> — goes through their approval chain.
@@ -603,6 +645,12 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
               />
             </label>
             {fileError && <p className="mt-1 text-[11px] text-rose-600">{fileError}</p>}
+            {hadFile && !file && (
+              <label className="mt-1.5 flex items-center gap-1.5 text-[11px] text-slate-600">
+                <input type="checkbox" checked={removeOldFile} onChange={(e) => setRemoveOldFile(e.target.checked)} />
+                Remove the current attachment ({editClaim?.file_name || 'file'})
+              </label>
+            )}
           </div>
 
           {error && (
@@ -629,7 +677,7 @@ export const NewConveyanceClaimModal: React.FC<NewConveyanceClaimModalProps> = (
             className="inline-flex items-center gap-1.5 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold rounded-xl text-sm transition-all shadow-sm"
           >
             {submitting ? <Spinner size={16} /> : <CheckCircle2 className="w-4 h-4" />}
-            Submit Claim
+            {editClaim ? (editClaim.edit_mode === 'pending' ? 'Save Changes' : 'Resubmit') : 'Submit Claim'}
           </button>
         </div>
       </div>

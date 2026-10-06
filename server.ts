@@ -50,7 +50,8 @@ import { registerHrReportsRoutes, ensureHrReportsSchema } from "./HrOpsReportsRo
 import { registerReportsInsightsRoutes } from "./ReportsInsightsRoutes";
 import { registerInfoRequestRoutes, ensureInfoRequestsSchema } from "./HrOpsInfoRequestsRoutes";
 import { registerSiteAttendanceRoutes, ensureSiteAttendanceSchema } from "./SiteAttendanceRoutes";
-import { registerBillClaimPolicyRoutes, ensureBillClaimPolicySchema } from "./BillClaimPolicy";
+import { registerBillClaimPolicyRoutes, ensureBillClaimPolicySchema, loadPolicy as loadBillClaimPolicy } from "./BillClaimPolicy";
+import { recordClaimHistory } from "./ConveyanceClaimHistory";
 import { registerCompanyRoutes, ensureCompanySchema, resolveCompanyContext, checkWorkspaceLogin, workspaceStartCompany } from "./CompanyRoutes";
 import { companyStore, activeCompanyId, activeGroupId, type CompanyContext } from "./companyContext";
 import { scopeSql, scopeColumnsFor } from "./companyScope";
@@ -1673,6 +1674,53 @@ async function ensureSchemaMigrations() {
       console.warn("⚠️ Could not add user_claims.filed_by column: " + err.message);
     }
   }
+  // Editing a claim before it is locked (ConveyanceBillClaimRoutes.ts):
+  //   first_submitted_at  the date window ("bills for the last N days") is
+  //                       counted from here, so a returned claim fixed days
+  //                       later still accepts its own dates
+  //   version             +1 on every edit; an approver's Approve/Return/Reject
+  //                       carries the version they looked at, so nothing is
+  //                       approved that they haven't seen
+  //   edit_state          'returned' while sent back to the employee
+  //   return_reason       the approver's reason for the Return
+  //   reclaim_allowed     Rejected, but the approver ticked "allow re-claim":
+  //                       the employee may edit and resubmit it
+  for (const [col, ddl] of [
+    ["first_submitted_at", "DATETIME NULL"],
+    ["version", "INT NOT NULL DEFAULT 1"],
+    ["edit_state", "VARCHAR(20) NULL"],
+    ["return_reason", "TEXT NULL"],
+    ["reclaim_allowed", "TINYINT(1) NOT NULL DEFAULT 0"]
+  ] as const) {
+    try {
+      await dbPool.query(`ALTER TABLE user_claims ADD COLUMN ${col} ${ddl}`);
+      if (col === "first_submitted_at") await dbPool.query(`UPDATE user_claims SET first_submitted_at = created_at WHERE first_submitted_at IS NULL`);
+    } catch (err: any) {
+      if (err.code !== "ER_DUP_FIELDNAME") console.warn(`⚠️ Could not add user_claims.${col} column: ` + err.message);
+    }
+  }
+  // Every submit / edit / return / reject / resubmit of a Conveyance Bill
+  // Claim, with the claim as it stood afterwards (snapshot_json) — what the
+  // approvers' "changed since you last saw it" is worked out from.
+  try {
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS user_claim_history (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_claim_id INT NOT NULL,
+        action VARCHAR(20) NOT NULL,
+        actor_id INT NULL,
+        actor_name VARCHAR(255) NULL,
+        reason TEXT NULL,
+        version INT NOT NULL DEFAULT 1,
+        snapshot_json MEDIUMTEXT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_uch_claim (user_claim_id),
+        FOREIGN KEY (user_claim_id) REFERENCES user_claims(id) ON DELETE CASCADE
+      )
+    `);
+  } catch (err: any) {
+    console.warn("⚠️ Could not ensure user_claim_history table: " + err.message);
+  }
   // Lets a Conveyance Bill Claim reference one or more of the User's own completed
   // Movement Claims (check-in/out), each with its own Amount — see the long
   // comment on this table in schema.sql. UNIQUE claim_id means a given check-in/
@@ -1729,6 +1777,10 @@ async function ensureSchemaMigrations() {
         MODIFY COLUMN source_type ENUM('attendance','claim','user_claim','attendance_correction','leave_application','asset_requisition','vehicle_requisition','mobile_limit_request','advance_request') NOT NULL,
         MODIFY COLUMN event_type ENUM('check_in','check_out','submit') NOT NULL
     `);
+    // 'returned': a Conveyance Bill Claim sent back to the employee to fix
+    // (it leaves every queue until they resubmit; the chain then restarts at
+    // Layer 1). Only user_claim requests use it.
+    await dbPool.query(`ALTER TABLE approval_requests MODIFY COLUMN status ENUM('pending','approved','rejected','returned') NOT NULL DEFAULT 'pending'`);
     // GET /api/my-approvals (PendingApprovalsCard — hit on every Dashboard
     // open, by every account) starts with `WHERE status = 'pending'`, which
     // was an unindexed full table scan of every approval request ever
@@ -2959,11 +3011,15 @@ class ApprovalActionError extends Error {
 async function performApprovalAction(
   requestId: number,
   actorUser: { id: number; name: string; role: string },
-  action: "approved" | "rejected",
+  action: "approved" | "rejected" | "returned",
   remarks: string | null,
   billId: number | null,
   approvedAmount?: number | null,
-  voucherNo?: string | null
+  voucherNo?: string | null,
+  // Conveyance Bill Claims only: `claimVersion` = the claim version the
+  // approver looked at (refused if the employee has edited it since);
+  // `allowReclaim` = Reject, but let the employee edit and resubmit it.
+  claimOpts: { claimVersion?: number | null; allowReclaim?: boolean } = {}
 ): Promise<{ status: string; current_step: number; billInfo: { bill_id: number; bill_item_id: number; voucher_no?: string } | null }> {
   const rows = await queryDB("SELECT * FROM approval_requests WHERE id = ?", [requestId]);
   if (rows.length === 0) throw new ApprovalActionError(404, "Approval request not found.");
@@ -2976,6 +3032,66 @@ async function performApprovalAction(
   const isAssignedApprover = currentApprovers.some((a) => Number(a.user_id) === Number(actorUser.id));
   if (actorUser.role !== "superadmin" && !isAssignedApprover) {
     throw new ApprovalActionError(403, "This request isn't waiting on you yet.");
+  }
+
+  // Conveyance Bill Claim review rules (Bill Claim Policy -> Editing & review).
+  let claimPolicy: any = null;
+  if (request.source_type === "user_claim") {
+    claimPolicy = await loadBillClaimPolicy(queryDB);
+    if (claimOpts.claimVersion != null) {
+      const v = await queryDB("SELECT version FROM user_claims WHERE id = ?", [request.source_id]);
+      if (v.length > 0 && Number(v[0].version || 1) !== Number(claimOpts.claimVersion)) {
+        throw new ApprovalActionError(409, "The employee changed this claim after you opened it — reload it and check the changes first.");
+      }
+    }
+    if ((action === "returned" || action === "rejected") && claimPolicy.decision_reason_required && !remarks) {
+      throw new ApprovalActionError(400, `Write a reason for the ${action === "returned" ? "Return" : "Rejection"} — the employee sees it.`);
+    }
+    if (action === "returned" && !claimPolicy.allow_return) {
+      throw new ApprovalActionError(400, "Returning claims is turned off in the Bill Claim Policy.");
+    }
+  } else if (action === "returned") {
+    throw new ApprovalActionError(400, "Only a Conveyance Bill Claim can be returned for correction.");
+  }
+
+  // Return for correction: the claim goes back to the employee (out of every
+  // queue) and, once they resubmit, starts again from Layer 1.
+  if (action === "returned") {
+    let trail: any[] = [];
+    try {
+      trail = JSON.parse(request.actions_json || "[]");
+    } catch {
+      trail = [];
+    }
+    trail.push({
+      step_order: Number(request.current_step),
+      approver_id: actorUser.id,
+      approver_name: actorUser.name,
+      action: "returned",
+      remarks,
+      acted_at: new Date().toISOString()
+    });
+    await queryDB("UPDATE approval_requests SET status = 'returned', current_step = 1, actions_json = ? WHERE id = ?", [JSON.stringify(trail), requestId]);
+    await queryDB("UPDATE user_claims SET edit_state = 'returned', return_reason = ?, approved_amount = NULL WHERE id = ?", [remarks, request.source_id]);
+    await recordClaimHistory(queryDB, Number(request.source_id), "returned", { id: actorUser.id, name: actorUser.name }, remarks);
+    try {
+      const ucRows = await queryDB("SELECT id, user_id, filed_by FROM user_claims WHERE id = ?", [request.source_id]);
+      const uc = ucRows[0];
+      const notifyIds = [...new Set([Number(uc?.user_id), Number(uc?.filed_by || 0)].filter((x) => x > 0))];
+      for (const uid of notifyIds) {
+        await createAlert(queryDB, {
+          userId: uid,
+          type: "conveyance_claim",
+          title: "Conveyance Bill Claim Returned",
+          message: `${actorUser.name} returned Conveyance Bill Claim #${request.source_id} for correction${remarks ? `: ${remarks}` : "."} Edit it and submit it again.`,
+          relatedType: "user_claim",
+          relatedId: Number(request.source_id)
+        });
+      }
+    } catch (alertErr: any) {
+      console.warn("⚠️ Could not notify about returned Conveyance Bill Claim #" + request.source_id + ": " + alertErr.message);
+    }
+    return { status: "returned", current_step: 1, billInfo: null };
   }
   // The Conveyance Disburser Layer pays out as it approves: the claim gets its
   // own new Bill (never folded into an existing one) and that Bill is marked
@@ -3067,7 +3183,7 @@ async function performApprovalAction(
           billInfo.voucher_no = await disburseConveyanceBill(queryDB, createAlert, todayInDhaka, billInfo.bill_id, actorUser.id, voucherNo);
         }
       } else if (newStatus === "rejected") {
-        await rejectUserClaimRecord(Number(request.source_id), actorUser.id, remarks);
+        await rejectUserClaimRecord(Number(request.source_id), actorUser.id, remarks, !!claimOpts.allowReclaim && !!claimPolicy?.allow_reclaim_on_reject, actorUser.name);
       } else if (action === "approved" && approvedAmount != null) {
         // Approved on a NON-final step (e.g. the Supervisor auto-layer at
         // step 1 of a multi-step chain) with an Approved Amount edit — same
@@ -3584,14 +3700,20 @@ function assertWithinApprovedCap(uc: any, amt: number) {
 // never becomes a Bill line item, so there's no reason to keep them unavailable)
 // and marks the claim 'rejected'. Shared by the same two callers as
 // finalizeUserClaimApproval above.
-async function rejectUserClaimRecord(userClaimId: number, rejectedBy: number, remarks: string | null) {
-  await queryDB("DELETE FROM user_claim_references WHERE user_claim_id = ?", [userClaimId]);
+// allowReclaim: the approver ticked "Allow re-claim" — the employee may edit
+// and resubmit this same claim (its check-in/outs stay with it). Otherwise the
+// rejection is final: its check-in/outs are freed, its dates stay closed.
+async function rejectUserClaimRecord(userClaimId: number, rejectedBy: number, remarks: string | null, allowReclaim = false, rejectedByName = "") {
+  if (!allowReclaim) await queryDB("DELETE FROM user_claim_references WHERE user_claim_id = ?", [userClaimId]);
   await queryDB(
-    "UPDATE user_claims SET status = 'rejected', admin_remarks = ?, reviewed_by = ?, reviewed_at = NOW() WHERE id = ?",
-    [remarks, rejectedBy, userClaimId]
+    "UPDATE user_claims SET status = 'rejected', admin_remarks = ?, reviewed_by = ?, reviewed_at = NOW(), edit_state = NULL, reclaim_allowed = ? WHERE id = ?",
+    [remarks, rejectedBy, allowReclaim ? 1 : 0, userClaimId]
   );
+  await recordClaimHistory(queryDB, userClaimId, "rejected", { id: rejectedBy, name: rejectedByName }, remarks);
   const rows = await queryDB("SELECT * FROM user_claims WHERE id = ?", [userClaimId]);
-  if (rows.length > 0) await notifyUserClaimDecision(rows[0], "rejected", null, remarks);
+  if (rows.length > 0) {
+    await notifyUserClaimDecision(rows[0], "rejected", null, allowReclaim ? `${remarks || ""}${remarks ? " — " : ""}You may edit it and submit it again.` : remarks);
+  }
 }
 
 // Approves a Leave Application (Part 5 of 5) — day_count was ALREADY deducted

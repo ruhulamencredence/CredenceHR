@@ -16,6 +16,7 @@ import { UserClaimReference, UserClaimItem, ClaimRecord } from '../types';
 import ClaimLocationMap from './ClaimLocationMap';
 import { ClaimBillLines } from './ClaimBillLines';
 import { ApprovalHistory } from './ApprovalHistory';
+import { ClaimChangesNotice, ClaimReviewFields, ReclaimTick, ReturnButton } from './ClaimReviewBits';
 
 interface ApproveApplicationsProps {
   token: string;
@@ -24,7 +25,7 @@ interface ApproveApplicationsProps {
 
 // One row from GET /api/my-approvals — see PendingApprovalsCard.tsx for the
 // original, narrower version of this same shape.
-interface MyApprovalItem {
+interface MyApprovalItem extends ClaimReviewFields {
   id: number;
   source_type: 'attendance' | 'claim' | 'user_claim' | 'attendance_correction' | 'leave_application' | 'leave_reliever' | 'leave_direct' | 'exit_clearance' | 'asset_requisition' | 'vehicle_requisition' | 'mobile_limit_request' | 'advance_request' | 'hr_action';
   source_id: number;
@@ -266,8 +267,16 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
 
   const keyFor = (item: MyApprovalItem) => `${item.source_type}-${item.id}`;
 
-  const handleAct = async (item: MyApprovalItem, action: 'approved' | 'rejected', approvedAmount?: number) => {
+  // Reject with "Allow re-claim" ticked, per item.
+  const [reclaimDraft, setReclaimDraft] = useState<Record<string, boolean>>({});
+
+  const handleAct = async (item: MyApprovalItem, action: 'approved' | 'rejected' | 'returned', approvedAmount?: number) => {
     const key = keyFor(item);
+    // Conveyance Bill Claim: Return / Reject tell the employee why.
+    if (item.source_type === 'user_claim' && action !== 'approved' && !(remarksDraft[key] || '').trim()) {
+      setMessage({ type: 'error', text: `Write the reason in Remarks before you ${action === 'returned' ? 'return' : 'reject'} it — the employee sees it.` });
+      return;
+    }
     setActingKey(key);
     setMessage(null);
     try {
@@ -288,14 +297,16 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
           action,
           remarks: remarksDraft[key] || undefined,
           approved_amount: action === 'approved' && approvedAmount != null ? approvedAmount : undefined,
-          voucher_no: action === 'approved' && item.conveyance_disburser_bypass ? voucherDraft[key] || undefined : undefined
+          voucher_no: action === 'approved' && item.conveyance_disburser_bypass ? voucherDraft[key] || undefined : undefined,
+          claim_version: item.source_type === 'user_claim' ? item.claim_version : undefined,
+          allow_reclaim: item.source_type === 'user_claim' && action === 'rejected' ? !!reclaimDraft[key] : undefined
         })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `Failed to ${action === 'approved' ? 'approve' : 'reject'} this request`);
       setMessage({
         type: 'success',
-        text: action !== 'approved' ? 'Rejected.' : data.voucher_no ? `Disbursed — voucher ${data.voucher_no}.` : 'Approved.'
+        text: action === 'returned' ? 'Returned to the employee for correction.' : action !== 'approved' ? 'Rejected.' : data.voucher_no ? `Disbursed — voucher ${data.voucher_no}.` : 'Approved.'
       });
       setRemarksDraft((prev) => ({ ...prev, [key]: '' }));
       setApprovedAmountDraft((prev) => ({ ...prev, [key]: '' }));
@@ -659,6 +670,8 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
                         </div>
                       </div>
                     ) : (
+                      <>
+                      {item.source_type === 'user_claim' && <ClaimChangesNotice item={item} className="mt-3" />}
                       <div className="mt-3 flex flex-col sm:flex-row sm:items-center gap-2" onClick={(e) => e.stopPropagation()}>
                         {item.can_edit_asset_items && item.asset_requisition_details && (
                           <button
@@ -681,7 +694,7 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
                         )}
                         <input
                           type="text"
-                          placeholder="Remarks (optional)"
+                          placeholder={item.source_type === 'user_claim' ? 'Remarks (needed to Return or Reject)' : 'Remarks (optional)'}
                           value={remarksDraft[key] || ''}
                           onChange={(e) => setRemarksDraft((prev) => ({ ...prev, [key]: e.target.value }))}
                           className="flex-1 min-w-[160px] text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
@@ -695,6 +708,9 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
                           >
                             <XCircle className="w-3.5 h-3.5" /> Reject
                           </button>
+                          {item.source_type === 'user_claim' && (
+                            <ReturnButton item={item} compact disabled={actingKey === key} onClick={() => handleAct(item, 'returned')} />
+                          )}
                           <button
                             type="button"
                             disabled={actingKey === key}
@@ -712,6 +728,12 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
                           </button>
                         </div>
                       </div>
+                      {item.source_type === 'user_claim' && (
+                        <div onClick={(e) => e.stopPropagation()}>
+                          <ReclaimTick item={item} checked={!!reclaimDraft[key]} onChange={(v) => setReclaimDraft((prev) => ({ ...prev, [key]: v }))} />
+                        </div>
+                      )}
+                      </>
                     )}
                   </div>
                 );

@@ -159,6 +159,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
   const [showBehalfPicker, setShowBehalfPicker] = useState(false);
   const [behalfUserId, setBehalfUserId] = useState('');
   const [behalfFor, setBehalfFor] = useState<{ id: number; name: string } | null>(null);
+  const [behalfEditClaim, setBehalfEditClaim] = useState<UserClaim | null>(null);
   const behalfCandidates = users.filter((u) => u.id !== currentUserId).sort((a, b) => a.name.localeCompare(b.name));
 
   useEffect(() => {
@@ -1061,6 +1062,27 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
           token={token}
           onClose={() => setViewingUserClaimId(null)}
           onChanged={fetchAll}
+          onFilerEdit={
+            viewingUserClaim.filed_by === currentUserId && viewingUserClaim.editable && canClaimOnBehalf
+              ? () => {
+                  setBehalfEditClaim(viewingUserClaim);
+                  setViewingUserClaimId(null);
+                }
+              : undefined
+          }
+        />
+      )}
+      {/* The Admin who filed a claim on behalf can edit it while it's open. */}
+      {behalfEditClaim && (
+        <NewConveyanceClaimModal
+          token={token}
+          onBehalfOf={{ id: behalfEditClaim.user_id, name: behalfEditClaim.user_name || '' }}
+          editClaim={behalfEditClaim}
+          onClose={() => setBehalfEditClaim(null)}
+          onSubmitted={() => {
+            setBehalfEditClaim(null);
+            void fetchAll();
+          }}
         />
       )}
     </div>
@@ -1137,7 +1159,10 @@ const UserClaimDetailModal: React.FC<{
   token: string;
   onClose: () => void;
   onChanged: () => void;
-}> = ({ claim, token, onClose, onChanged }) => {
+  // Set when this account filed the claim on the employee's behalf and it can
+  // still be edited — opens the claim form for it.
+  onFilerEdit?: () => void;
+}> = ({ claim, token, onClose, onChanged, onFilerEdit }) => {
   const authHeaders = { Authorization: `Bearer ${token}` };
 
   const [editing, setEditing] = useState(false);
@@ -1286,6 +1311,23 @@ const UserClaimDetailModal: React.FC<{
 
         <div className="p-5 space-y-3">
           {error && <p className="text-xs px-3 py-2 rounded-lg bg-rose-50 text-rose-700">{error}</p>}
+          {claim.filed_by_name && (
+            <p className="text-[11px] text-slate-500">Filed on behalf by {claim.filed_by_name}</p>
+          )}
+          {claim.edit_mode === 'returned' && (
+            <p className="text-xs px-3 py-2 rounded-lg bg-amber-50 text-amber-800">
+              Returned to the employee for correction{claim.return_reason ? `: ${claim.return_reason}` : '.'}
+            </p>
+          )}
+          {onFilerEdit && (
+            <button
+              type="button"
+              onClick={onFilerEdit}
+              className="w-full flex items-center justify-center gap-1.5 text-xs px-3 py-2 rounded-lg bg-blue-50 border border-blue-200 text-blue-700 font-semibold"
+            >
+              <Pencil className="w-3.5 h-3.5" /> Edit this claim (you filed it)
+            </button>
+          )}
 
           {editing ? (
             <div className="space-y-2.5 bg-slate-50 border border-slate-200 rounded-xl p-3">

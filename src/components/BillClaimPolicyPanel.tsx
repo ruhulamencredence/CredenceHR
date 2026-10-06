@@ -4,7 +4,7 @@
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { ShieldCheck, Save, Plus, Edit2, Trash2, X, Check, AlertTriangle, CalendarClock, Banknote, Receipt, History, Lock, ShieldAlert } from 'lucide-react';
+import { ShieldCheck, Save, Plus, Edit2, Trash2, X, Check, AlertTriangle, CalendarClock, Banknote, Receipt, History, Lock, ShieldAlert, RotateCcw } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { BillClaimCategory, BillClaimPolicyDef, BillClaimPolicyValues } from '../types';
 import { Spinner } from './Spinner';
@@ -18,7 +18,8 @@ import { confirmDialog } from '../lib/confirmDialog';
 const GROUPS: { key: BillClaimPolicyDef['group']; title: string; icon: React.ElementType }[] = [
   { key: 'dates', title: 'Bill dates', icon: CalendarClock },
   { key: 'amounts', title: 'Amounts & receipts', icon: Banknote },
-  { key: 'claim', title: 'Claim', icon: Receipt }
+  { key: 'claim', title: 'Claim', icon: Receipt },
+  { key: 'review', title: 'Editing & review', icon: RotateCcw }
 ];
 
 interface CategoryDraft {

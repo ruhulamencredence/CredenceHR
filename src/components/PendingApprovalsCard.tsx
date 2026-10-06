@@ -8,10 +8,11 @@ import { AssetRequisitionEditItemsModal } from './AssetRequisitionEditItemsModal
 import { UserClaimReference, UserClaimItem, ClaimRecord } from '../types';
 import ClaimLocationMap from './ClaimLocationMap';
 import { ClaimBillLines } from './ClaimBillLines';
+import { ClaimChangesNotice, ClaimReviewFields, ReclaimTick, ReturnButton } from './ClaimReviewBits';
 
 // One row from GET /api/my-approvals — a trimmed-down ApprovalRequest, just
 // enough for this card (see server.ts for the full shape).
-interface MyApprovalItem {
+interface MyApprovalItem extends ClaimReviewFields {
   id: number;
   source_type: 'attendance' | 'claim' | 'user_claim' | 'attendance_correction' | 'leave_application' | 'leave_reliever' | 'leave_direct' | 'exit_clearance' | 'asset_requisition' | 'vehicle_requisition' | 'mobile_limit_request' | 'advance_request' | 'hr_action';
   source_id: number;
@@ -202,8 +203,16 @@ export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ toke
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [items]);
 
-  const handleAct = async (item: MyApprovalItem, action: 'approved' | 'rejected', approvedAmount?: number) => {
+  // Reject with "Allow re-claim" ticked, per item.
+  const [reclaimDraft, setReclaimDraft] = useState<Record<number, boolean>>({});
+
+  const handleAct = async (item: MyApprovalItem, action: 'approved' | 'rejected' | 'returned', approvedAmount?: number) => {
     const id = item.id;
+    // Conveyance Bill Claim: Return / Reject tell the employee why.
+    if (item.source_type === 'user_claim' && action !== 'approved' && !(remarksDraft[id] || '').trim()) {
+      setMessage({ type: 'error', text: `Write the reason in Remarks before you ${action === 'returned' ? 'return' : 'reject'} it — the employee sees it.` });
+      return;
+    }
     setActingId(id);
     setMessage(null);
     try {
@@ -228,14 +237,16 @@ export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ toke
           action,
           remarks: remarksDraft[id] || undefined,
           approved_amount: action === 'approved' && approvedAmount != null ? approvedAmount : undefined,
-          voucher_no: action === 'approved' && item.conveyance_disburser_bypass ? voucherDraft[id] || undefined : undefined
+          voucher_no: action === 'approved' && item.conveyance_disburser_bypass ? voucherDraft[id] || undefined : undefined,
+          claim_version: item.source_type === 'user_claim' ? item.claim_version : undefined,
+          allow_reclaim: item.source_type === 'user_claim' && action === 'rejected' ? !!reclaimDraft[id] : undefined
         })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `Failed to ${action === 'approved' ? 'approve' : 'reject'} this request`);
       setMessage({
         type: 'success',
-        text: action !== 'approved' ? 'Rejected.' : data.voucher_no ? `Disbursed — voucher ${data.voucher_no}.` : 'Approved.'
+        text: action === 'returned' ? 'Returned to the employee for correction.' : action !== 'approved' ? 'Rejected.' : data.voucher_no ? `Disbursed — voucher ${data.voucher_no}.` : 'Approved.'
       });
       setRemarksDraft((prev) => ({ ...prev, [id]: '' }));
       setApprovedAmountDraft((prev) => ({ ...prev, [id]: '' }));
@@ -584,13 +595,17 @@ export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ toke
                           />
                         </>
                       )}
+                      {item.source_type === 'user_claim' && <ClaimChangesNotice item={item} className="mb-2" />}
                       <input
                         type="text"
-                        placeholder="Remarks (optional)"
+                        placeholder={item.source_type === 'user_claim' ? 'Remarks (a reason is needed to Return or Reject)' : 'Remarks (optional)'}
                         value={remarksDraft[item.id] || ''}
                         onChange={(e) => setRemarksDraft((prev) => ({ ...prev, [item.id]: e.target.value }))}
                         className="w-full text-xs px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
                       />
+                      {item.source_type === 'user_claim' && (
+                        <ReclaimTick item={item} checked={!!reclaimDraft[item.id]} onChange={(v) => setReclaimDraft((prev) => ({ ...prev, [item.id]: v }))} />
+                      )}
                       <div className="flex gap-2 mt-2.5">
                         <button
                           type="button"
@@ -600,6 +615,9 @@ export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ toke
                         >
                           <XCircle className="w-3.5 h-3.5" /> Reject
                         </button>
+                        {item.source_type === 'user_claim' && (
+                          <ReturnButton item={item} disabled={actingId === item.id} onClick={() => handleAct(item, 'returned')} />
+                        )}
                         <button
                           type="button"
                           disabled={actingId === item.id}
