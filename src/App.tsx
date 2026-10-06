@@ -55,6 +55,7 @@ import { installKeyboardScrollFix } from './lib/keyboardScrollFix';
 import { usePullToRefresh } from './lib/usePullToRefresh';
 import { apiUrl } from './lib/api';
 import { startBackgroundTracking, stopBackgroundTracking } from './lib/backgroundTracking';
+import { ensureLocationConsent } from './lib/locationDisclosure';
 import { connectChatSocket, disconnectChatSocket } from './lib/chatSocket';
 import { initPushNotifications, clearPushToken } from './lib/pushNotifications';
 import { syncWebPush, disableWebPush, listenWebPushOpens } from './lib/webPush';
@@ -396,9 +397,18 @@ export default function App() {
   // on the web build. Deliberately NOT tied to which panel (User/Admin) is
   // on screen — an Admin/Superadmin who is also out in the field should
   // still report location while looking at their Admin Panel.
+  // In the Android app the background-location disclosure comes first
+  // (locationDisclosure.tsx); after "Not now" startBackgroundTracking only
+  // remembers the account, so the tracking notice's Set up Now can start it.
   useEffect(() => {
     if (token && user?.can_use_tracking) {
-      startBackgroundTracking(token);
+      let cancelled = false;
+      void ensureLocationConsent().then(() => {
+        if (!cancelled) void startBackgroundTracking(token);
+      });
+      return () => {
+        cancelled = true;
+      };
     } else {
       stopBackgroundTracking();
     }
