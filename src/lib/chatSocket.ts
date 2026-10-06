@@ -20,6 +20,7 @@
 
 import { io, Socket } from 'socket.io-client';
 import { refreshNotices } from './noticesLive';
+import { setLiveUntil } from './backgroundTracking';
 
 let socket: Socket | null = null;
 let connectedToken: string | null = null;
@@ -46,6 +47,9 @@ export function connectChatSocket(token: string): Socket {
   // published while the app was asleep/offline does too.
   socket.on('notices:changed', refreshNotices);
   socket.io.on('reconnect', refreshNotices);
+  // Employee Tracking -> Live Follow: an Admin opened this person (or a ride
+  // started) — report location every few seconds until the given time.
+  socket.on('tracking:live', (d: { until: number | null }) => setLiveUntil(d?.until));
   return socket;
 }
 

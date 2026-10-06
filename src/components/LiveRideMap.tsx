@@ -25,7 +25,9 @@ function authHeaders(): HeadersInit {
   return { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
 }
 
-const LIVE_POLL_MS = 15_000;
+// The driver and rider phones report every few seconds during a ride (Live
+// Follow, LiveTrackingRoutes.ts), so a short poll keeps the map current.
+const LIVE_POLL_MS = 5_000;
 const REROUTE_METERS = 100;
 const TOGETHER_METERS = 150;
 

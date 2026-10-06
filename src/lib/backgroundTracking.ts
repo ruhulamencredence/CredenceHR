@@ -85,6 +85,16 @@ const IDLE_DISTANCE_FILTER_M = 120;
 const IDLE_PING_INTERVAL_MS = 10 * 60 * 1000;
 const IDLE_AFTER_MS = 15 * 60 * 1000;
 
+// "Live" settings — only while an Admin has this person open in Live Follow
+// or they are on an ongoing Book a Ride ride (the server says until when, via
+// the "tracking:live" socket event or the reply to a ping). A fresh fix is
+// sent at once (at most every LIVE_MIN_GAP_MS) plus a heartbeat every
+// LIVE_PING_INTERVAL_MS, so the Admin's map moves like Google Maps. Drops back
+// to active mode by itself when the time runs out.
+const LIVE_DISTANCE_FILTER_M = 5;
+const LIVE_PING_INTERVAL_MS = 5 * 1000;
+const LIVE_MIN_GAP_MS = 3 * 1000;
+
 let watcherId: string | null = null;
 let pingTimer: ReturnType<typeof setInterval> | null = null;
 let idleCheckTimer: ReturnType<typeof setInterval> | null = null;
@@ -94,7 +104,10 @@ let currentToken: string | null = null;
 // failed (no permission yet), so the set-up card can start it once the
 // permission is given.
 let requestedToken: string | null = null;
-let mode: 'active' | 'idle' = 'active';
+let mode: 'active' | 'idle' | 'live' = 'active';
+let liveUntil = 0;
+let lastSentAt = 0;
+let lastSentFixTime = 0;
 let lastFixAt = 0;
 let switchingMode = false;
 
@@ -113,9 +126,17 @@ async function readBatteryPct(): Promise<number | null> {
 
 async function sendPing() {
   if (!latestFix || !currentToken) return;
+  // Live: the heartbeat timer skips a fix that was already sent, unless the
+  // map would otherwise go 30s without hearing from this phone.
+  if (mode === 'live' && latestFix.time === lastSentFixTime && Date.now() - lastSentAt < 30_000) {
+    if (Date.now() > liveUntil) void switchMode('active');
+    return;
+  }
+  lastSentAt = Date.now();
+  lastSentFixTime = latestFix.time;
   const battery_pct = await readBatteryPct();
   try {
-    await fetch(apiUrl('/api/tracking/ping'), {
+    const res = await fetch(apiUrl('/api/tracking/ping'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentToken}` },
       body: JSON.stringify({
@@ -126,6 +147,8 @@ async function sendPing() {
         recorded_at: new Date(latestFix.time).toISOString()
       })
     });
+    const data = await res.json().catch(() => null);
+    if (data && 'live_until' in data) setLiveUntil(data.live_until);
   } catch {
     // Offline or server unreachable — just skip this cycle. The next timer
     // tick (or the next time the app reconnects) will try again with
@@ -163,6 +186,7 @@ async function armWatcher(distanceFilterM: number): Promise<void> {
       if (!location) return;
       latestFix = location;
       lastFixAt = Date.now();
+      if (mode === 'live' && Date.now() - lastSentAt >= LIVE_MIN_GAP_MS) void sendPing();
       // A fix arrived while idle => the device moved past the coarse
       // threshold, i.e. it's moving again. Snap back to active mode so we
       // don't miss the rest of the movement.
@@ -171,13 +195,14 @@ async function armWatcher(distanceFilterM: number): Promise<void> {
   );
 }
 
-async function switchMode(next: 'active' | 'idle') {
+async function switchMode(next: 'active' | 'idle' | 'live') {
   if (mode === next || switchingMode || !currentToken) return;
   switchingMode = true;
   try {
     mode = next;
-    await armWatcher(next === 'active' ? ACTIVE_DISTANCE_FILTER_M : IDLE_DISTANCE_FILTER_M);
-    restartPingTimer(next === 'active' ? ACTIVE_PING_INTERVAL_MS : IDLE_PING_INTERVAL_MS);
+    await armWatcher(next === 'live' ? LIVE_DISTANCE_FILTER_M : next === 'active' ? ACTIVE_DISTANCE_FILTER_M : IDLE_DISTANCE_FILTER_M);
+    restartPingTimer(next === 'live' ? LIVE_PING_INTERVAL_MS : next === 'active' ? ACTIVE_PING_INTERVAL_MS : IDLE_PING_INTERVAL_MS);
+    if (next === 'live') void sendPing();
   } catch {
     // Re-arming failed (permission revoked mid-session, plugin hiccup) —
     // leave whatever watcher/timer state we had; the next idle-check tick
@@ -209,7 +234,8 @@ export async function startBackgroundTracking(token: string): Promise<void> {
     // idle mode. Cheap (just a Date.now() comparison), so this itself costs
     // no meaningful battery.
     idleCheckTimer = setInterval(() => {
-      if (mode === 'active' && Date.now() - lastFixAt >= IDLE_AFTER_MS) {
+      if (mode === 'live' && Date.now() > liveUntil) void switchMode('active');
+      else if (mode === 'active' && Date.now() - lastFixAt >= IDLE_AFTER_MS) {
         void switchMode('idle');
       }
     }, 60 * 1000);
@@ -242,6 +268,20 @@ export async function stopBackgroundTracking(): Promise<void> {
   currentToken = null;
   requestedToken = null;
   mode = 'active';
+  liveUntil = 0;
+}
+
+// Live Follow: the server says this phone should report every few seconds
+// until `until` (ms since epoch), or stop (null/past). Safe to call any time;
+// a no-op when tracking isn't running on this device.
+export function setLiveUntil(until: number | null | undefined): void {
+  liveUntil = Number(until) || 0;
+  if (!watcherId || !currentToken) return;
+  if (liveUntil > Date.now()) {
+    if (mode !== 'live') void switchMode('live');
+  } else if (mode === 'live') {
+    void switchMode('active');
+  }
 }
 
 // Restarts tracking for the signed-in account after the set-up card got
