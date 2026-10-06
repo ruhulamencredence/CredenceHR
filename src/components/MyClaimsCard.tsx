@@ -30,7 +30,12 @@ interface MyClaimsCardProps {
   // disables a new Check In while one is open), so this doesn't need to tell
   // the parent which claim, just that the sheet should open.
   onCheckOut?: () => void;
+  // Web (desktop) Movement Claim page: shown under the Check In/Out form as a
+  // normal card with its own title, instead of the full-screen mobile page.
+  desktop?: boolean;
 }
+
+type ClaimFilter = 'all' | 'open' | 'completed';
 
 // User Dashboard -> "My Claims" — a dedicated card of its own (same visual treatment
 // as the Jobs summary card next to it), listing every Movement Claim this user has
@@ -38,7 +43,9 @@ interface MyClaimsCardProps {
 // In/Check Out happened, same as from the compact history list in MyClaimsModal; a
 // still-open claim also gets its own "Check Out" button so the User can complete it
 // without leaving this list.
-export const MyClaimsCard: React.FC<MyClaimsCardProps> = ({ token, onBack, refreshKey, onCheckOut }) => {
+export const MyClaimsCard: React.FC<MyClaimsCardProps> = ({ token, onBack, refreshKey, onCheckOut, desktop }) => {
+  // All / Open / Completed — so finished claims are easy to find.
+  const [filter, setFilter] = useState<ClaimFilter>('all');
   const [claims, setClaims] = useState<ClaimRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [viewingLocation, setViewingLocation] = useState<ClaimRecord | null>(null);
@@ -91,8 +98,10 @@ export const MyClaimsCard: React.FC<MyClaimsCardProps> = ({ token, onBack, refre
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [claims]);
 
+  const shown = filter === 'all' ? claims : claims.filter((c) => c.status === filter);
+
   return (
-    // This card is only ever rendered as a dedicated mobile page (both call
+    // On mobile this card is rendered as a dedicated page (both call
     // sites in UserPanel are md:hidden — the bottom-nav "Claim" tab and the
     // "Claims" tile), never as a small inline dashboard tile, so it should
     // fill the screen instead of sizing to its own content. min-h matches
@@ -103,7 +112,13 @@ export const MyClaimsCard: React.FC<MyClaimsCardProps> = ({ token, onBack, refre
     // Liquid glass — same Dashboard mobile look as Select a Budget/Jobs/Job
     // Entry Details/Job Edit. This card is mobile-only (see the comment
     // above), so no desktop md: split is needed.
-    <div className="bg-gradient-to-br from-violet-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl border border-white/70 rounded-[28px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] overflow-hidden flex flex-col min-h-[calc(100dvh-14rem)]">
+    <div
+      className={
+        desktop
+          ? 'mt-4 bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden flex flex-col'
+          : 'bg-gradient-to-br from-violet-100/70 via-white/50 to-indigo-50/40 backdrop-blur-xl border border-white/70 rounded-[28px] shadow-[0_8px_24px_-6px_rgba(15,23,42,0.15)] overflow-hidden flex flex-col min-h-[calc(100dvh-14rem)]'
+      }
+    >
       {onBack && (
         <button
           type="button"
@@ -118,22 +133,51 @@ export const MyClaimsCard: React.FC<MyClaimsCardProps> = ({ token, onBack, refre
           page's own "My Claims" title in the logo's place (see
           headerPageTitle.ts in UserPanel.tsx), so repeating it here would be
           a redundant duplicate. The count badge stays (it's live data). */}
-      <div className="flex items-center justify-end px-5 py-4 border-b border-white/40 shrink-0">
-        <span className="text-sm font-semibold text-slate-900 bg-white/50 backdrop-blur px-2.5 py-1 rounded-full">{claims.length}</span>
+      <div className={`flex items-center gap-3 px-5 py-4 border-b shrink-0 ${desktop ? 'border-slate-100' : 'border-white/40'}`}>
+        {desktop && <h3 className="text-sm font-bold text-slate-900">My Movement Claims</h3>}
+        <div className="flex-1 flex items-center gap-1 rounded-full bg-white/60 p-1 text-xs font-semibold max-w-sm ml-auto">
+          {(
+            [
+              ['all', 'All', claims.length],
+              ['open', 'Open', claims.filter((c) => c.status === 'open').length],
+              ['completed', 'Completed', claims.filter((c) => c.status === 'completed').length]
+            ] as [ClaimFilter, string, number][]
+          ).map(([key, label, n]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setFilter(key)}
+              className={`flex-1 inline-flex items-center justify-center gap-1 py-1.5 rounded-full transition-colors ${
+                filter === key ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              {label}
+              <span className={`min-w-[18px] h-[18px] px-1 rounded-full text-[10px] inline-flex items-center justify-center ${filter === key ? 'bg-white/25' : 'bg-slate-200'}`}>
+                {n}
+              </span>
+            </button>
+          ))}
+        </div>
       </div>
 
       {loading ? (
         <div className="flex-1 flex justify-center py-10">
           <Spinner size={20} className="text-slate-400" />
         </div>
-      ) : claims.length === 0 ? (
+      ) : shown.length === 0 ? (
         <div className="flex-1 flex flex-col items-center gap-2 text-center py-10 px-5 text-slate-400">
           <Inbox className="w-5 h-5 text-slate-300" />
-          <p className="text-sm">No claims yet — check in from the Movement Claim card when you head out.</p>
+          <p className="text-sm">
+            {claims.length === 0
+              ? 'No claims yet — check in from the Movement Claim card when you head out.'
+              : filter === 'open'
+                ? 'No open claim.'
+                : 'No completed claims yet.'}
+          </p>
         </div>
       ) : (
-        <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
-          {claims.map((c) => {
+        <div className={desktop ? 'max-h-[32rem] overflow-y-auto p-3 grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3 content-start' : 'flex-1 overflow-y-auto p-3 space-y-2.5'}>
+          {shown.map((c) => {
             // undefined = lookup not resolved yet, null = it resolved to nothing
             // (falls back to plain coordinates below), string = the place name.
             const checkInAddr = addresses[`in-${c.id}`];
