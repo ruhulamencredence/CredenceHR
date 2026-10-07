@@ -239,7 +239,8 @@ export const ColumnToggleMenu: React.FC<{
   options: { key: string; label: string }[];
   hidden: string[];
   onChange: (hidden: string[]) => void;
-}> = ({ options, hidden, onChange }) => {
+  plain?: boolean;
+}> = ({ options, hidden, onChange, plain }) => {
   const btnRef = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   const pos = useAnchoredPosition(open, btnRef, 224);
@@ -258,18 +259,18 @@ export const ColumnToggleMenu: React.FC<{
       </button>
       {open &&
         createPortal(
-          <div className="liquid-glass-backdrop fixed inset-0 z-[1200]" onMouseDown={() => setOpen(false)} role="presentation">
+          <div className={`${plain ? '' : 'liquid-glass-backdrop'} fixed inset-0 z-[1200]`} onMouseDown={() => setOpen(false)} role="presentation">
             <div style={{ position: 'fixed', top: pos.top, left: pos.left, width: 224 }} onMouseDown={(e) => e.stopPropagation()}>
-              <div className="liquid-glass liquid-glass-in rounded-[24px] p-3 text-slate-800" role="dialog" aria-label="Columns">
+              <div className={`${plain ? 'bg-white border border-slate-200 shadow-xl rounded-xl' : 'liquid-glass liquid-glass-in rounded-[24px]'} p-3 text-slate-800`} role="dialog" aria-label="Columns">
                 <div className="flex items-center justify-between mb-1.5 px-1">
                   <span className="text-xs font-bold text-slate-900">Show columns</span>
-                  <button type="button" onClick={() => setOpen(false)} aria-label="Close" className="liquid-glass-chip p-1 rounded-full text-slate-600">
+                  <button type="button" onClick={() => setOpen(false)} aria-label="Close" className={`${plain ? 'bg-slate-100 hover:bg-slate-200' : 'liquid-glass-chip'} p-1 rounded-full text-slate-600`}>
                     <X className="w-3 h-3" />
                   </button>
                 </div>
-                <div className="liquid-glass-inset rounded-xl py-1">
+                <div className={`${plain ? 'bg-slate-50 border border-slate-200' : 'liquid-glass-inset'} rounded-xl py-1`}>
                   {options.map((o) => (
-                    <label key={o.key} className="flex items-center gap-2 px-2.5 py-1.5 text-xs cursor-pointer hover:bg-white/60">
+                    <label key={o.key} className={`flex items-center gap-2 px-2.5 py-1.5 text-xs cursor-pointer ${plain ? 'hover:bg-slate-100' : 'hover:bg-white/60'}`}>
                       <input type="checkbox" checked={!hiddenSet.has(o.key)} onChange={() => toggle(o.key)} className="accent-blue-600" />
                       {o.label}
                     </label>
