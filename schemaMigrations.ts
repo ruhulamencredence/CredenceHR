@@ -1357,6 +1357,32 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
       console.warn("⚠️ Could not add branches.branch_type column: " + err.message);
     }
   }
+  // project_id — the Project (attendance check-in site + PEPM) this Branch
+  // is kept in step with, so Admin Panel -> Branches is the one place to
+  // keep a site's name and map pin. At most one Branch per Project. Only
+  // when the column is first added, every Branch is linked to the Project
+  // of the same name in the same company — no existing id anywhere changes.
+  try {
+    await dbPool.query(`ALTER TABLE branches ADD COLUMN project_id INT NULL`);
+    try {
+      await dbPool.query(`ALTER TABLE branches ADD UNIQUE KEY unique_branch_project (project_id)`);
+      await dbPool.query(`ALTER TABLE branches ADD CONSTRAINT fk_branches_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL`);
+    } catch (err: any) {
+      console.warn("⚠️ Could not index branches.project_id: " + err.message);
+    }
+    try {
+      await dbPool.query(
+        `UPDATE branches b JOIN projects p ON p.project_name = b.branch_name AND p.company_id = b.company_id SET b.project_id = p.id WHERE b.project_id IS NULL`
+      );
+    } catch (err: any) {
+      if (err.code !== "ER_BAD_FIELD_ERROR") throw err;
+      await dbPool.query(`UPDATE branches b JOIN projects p ON p.project_name = b.branch_name SET b.project_id = p.id WHERE b.project_id IS NULL`);
+    }
+  } catch (err: any) {
+    if (err.code !== "ER_DUP_FIELDNAME") {
+      console.warn("⚠️ Could not add branches.project_id column: " + err.message);
+    }
+  }
   // "Movement Claims" — a free-form (not tied to a fixed Project geofence) point A
   // -> point B travel record: a User checks in with a Purpose (why/where they're
   // heading out for office work) then later checks out once they get there/finish.

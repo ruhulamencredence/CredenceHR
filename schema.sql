@@ -113,6 +113,11 @@ CREATE TABLE IF NOT EXISTS branches (
   location_lng DECIMAL(10, 7) NULL,
   location_label VARCHAR(255) NULL,
   location_radius INT NULL,
+  -- Project this Branch is kept in step with (name + map pin) — see
+  -- schemaMigrations.ts. At most one Branch per Project.
+  project_id INT NULL,
+  UNIQUE KEY unique_branch_project (project_id),
+  CONSTRAINT fk_branches_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL,
   FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
 );
 

@@ -18,13 +18,25 @@ export interface RegisterProjectRoutesDeps {
 
 export function registerProjectRoutes(app: Express, deps: RegisterProjectRoutesDeps) {
   const { authenticateToken, queryDB, requireAdmin, requireModule, requireModuleLayer } = deps;
+
+  // Each Project carries the Branch it is linked to (Admin Panel -> Branches,
+  // branches.project_id) and that Branch's type, so a list can tell a Head
+  // Office site from a Project-side one.
+  async function withLinkedBranch(projects: any[]) {
+    const branches: any[] = await queryDB("SELECT * FROM branches");
+    const byProject = new Map<number, any>(branches.filter((b: any) => b.project_id).map((b: any) => [Number(b.project_id), b]));
+    return projects.map((p: any) => {
+      const b = byProject.get(Number(p.id));
+      return { ...p, linked_branch_id: b ? Number(b.id) : null, linked_branch_name: b ? b.branch_name : null, linked_branch_type: b ? b.branch_type : null };
+    });
+  }
   // 2. Projects CRUD
   // Admins see every project. Regular users only see the projects the Admin has
   // explicitly granted them access to via user_project_permissions (Admin Panel ->
   // Users -> Manage Projects). A user with no permissions granted sees none yet.
   app.get("/api/projects", authenticateToken, async (req: any, res) => {
     try {
-      const projects = await queryDB("SELECT * FROM projects ORDER BY project_name ASC");
+      const projects = await withLinkedBranch(await queryDB("SELECT * FROM projects ORDER BY project_name ASC"));
       if (req.user.role === "admin" || req.user.role === "superadmin") {
         return res.json(projects);
       }
@@ -47,7 +59,7 @@ export function registerProjectRoutes(app: Express, deps: RegisterProjectRoutesD
   // approval like normal. Any signed-in account may read this list.
   app.get("/api/projects/all", authenticateToken, async (req: any, res) => {
     try {
-      const projects = await queryDB("SELECT * FROM projects ORDER BY project_name ASC");
+      const projects = await withLinkedBranch(await queryDB("SELECT * FROM projects ORDER BY project_name ASC"));
       res.json(projects);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -118,10 +130,29 @@ export function registerProjectRoutes(app: Express, deps: RegisterProjectRoutesD
       const location = parseProjectLocation(req.body);
       if ("error" in location) return res.status(400).json({ error: location.error });
 
+      const before: any[] = await queryDB("SELECT * FROM projects WHERE id = ?", [id]);
       await queryDB(
         "UPDATE projects SET project_name = ?, location_lat = ?, location_lng = ?, location_label = ?, location_radius = ? WHERE id = ?",
         [project_name.trim(), location.lat, location.lng, location.label, location.radius, id]
       );
+      // The linked Branch keeps the same map pin, and the same name while the
+      // two names still match (see branches.project_id).
+      const linked = (await queryDB("SELECT * FROM branches")).find((b: any) => Number(b.project_id) === Number(id));
+      if (linked) {
+        const nameFollows = before.length > 0 && String(linked.branch_name).trim().toLowerCase() === String(before[0].project_name).trim().toLowerCase();
+        const sync = (name: string) =>
+          queryDB(
+            "UPDATE branches SET branch_name = ?, location_lat = ?, location_lng = ?, location_label = ?, location_radius = ? WHERE id = ?",
+            [name, location.lat, location.lng, location.label, location.radius, linked.id]
+          );
+        try {
+          await sync(nameFollows ? project_name.trim() : linked.branch_name);
+        } catch (err: any) {
+          // Another Branch already has that name — keep this one's own.
+          if (err.code !== "ER_DUP_ENTRY") throw err;
+          await sync(linked.branch_name);
+        }
+      }
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
