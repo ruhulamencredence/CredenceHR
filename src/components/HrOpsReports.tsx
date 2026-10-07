@@ -582,6 +582,7 @@ const ResultView: React.FC<{
                       {c.label} {sort.key === c.key ? (sort.dir === 1 ? '▲' : '▼') : ''}
                     </button>
                     <ColumnFilterMenu
+                      plain
                       label={c.label}
                       getValues={() => menuValues(c)}
                       excluded={excluded[c.key] || []}
