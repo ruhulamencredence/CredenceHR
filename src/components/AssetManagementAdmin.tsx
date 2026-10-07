@@ -97,6 +97,34 @@ export function AssetManagementAdmin() {
   const [resolvingFor, setResolvingFor] = useState<number | null>(null);
   const [resolveNote, setResolveNote] = useState('');
   const [resolveReplacementId, setResolveReplacementId] = useState('');
+  // Inventory tab switch (asset_settings) — hidden unless a Superadmin turns it on.
+  const [inventorySetting, setInventorySetting] = useState<{ show_inventory: boolean; can_change: boolean }>({ show_inventory: false, can_change: false });
+
+  async function loadInventorySetting() {
+    try {
+      const res = await fetch(apiUrl('/api/assets/inventory-setting'), { headers: authHeaders() });
+      if (res.ok) setInventorySetting(await res.json());
+    } catch {
+      // keep hidden
+    }
+  }
+
+  async function toggleInventory() {
+    setError(null);
+    try {
+      const res = await fetch(apiUrl('/api/assets/inventory-setting'), {
+        method: 'PUT',
+        headers: authHeaders(),
+        body: JSON.stringify({ show_inventory: !inventorySetting.show_inventory })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not change the Inventory setting.');
+      setInventorySetting((prev) => ({ ...prev, show_inventory: !!data.show_inventory }));
+      if (!data.show_inventory && tab === 'inventory') setTab('approvals');
+    } catch (err: any) {
+      setError(err.message);
+    }
+  }
 
   async function loadAssets() {
     try {
@@ -135,6 +163,7 @@ export function AssetManagementAdmin() {
     loadAssets();
     loadRequisitions();
     loadClaims();
+    loadInventorySetting();
   }, []);
 
   async function resolveClaim(id: number) {
@@ -181,11 +210,11 @@ export function AssetManagementAdmin() {
 
   return (
     <div className="w-full">
-      <div className="flex gap-1 border-b border-gray-200 mb-4">
+      <div className="flex gap-1 border-b border-gray-200 mb-4 items-end">
         {([
           ['approvals', 'Requisition Approvals'],
           ['claims', `Issue Reports${claims.filter((c) => c.status === 'pending').length > 0 ? ` (${claims.filter((c) => c.status === 'pending').length})` : ''}`],
-          ['inventory', 'Inventory']
+          ...(inventorySetting.show_inventory ? [['inventory', 'Inventory'] as const] : [])
         ] as const).map(([key, label]) => (
           <button
             key={key}
@@ -197,6 +226,12 @@ export function AssetManagementAdmin() {
             {label}
           </button>
         ))}
+        {inventorySetting.can_change && (
+          <label className="ml-auto mb-1.5 inline-flex items-center gap-2 text-xs text-gray-500 cursor-pointer select-none" title="Only a Superadmin sees this switch">
+            <input type="checkbox" checked={inventorySetting.show_inventory} onChange={toggleInventory} className="rounded border-gray-300" />
+            Show Inventory tab
+          </label>
+        )}
       </div>
 
       {error && <div className="mb-3 rounded bg-red-50 text-red-700 text-sm px-3 py-2">{error}</div>}
@@ -338,7 +373,7 @@ export function AssetManagementAdmin() {
         </div>
       )}
 
-      {tab === 'inventory' && (
+      {tab === 'inventory' && inventorySetting.show_inventory && (
         <div className="space-y-6">
           <form onSubmit={addAsset} className="grid grid-cols-4 gap-3 items-end max-w-3xl">
             <div>

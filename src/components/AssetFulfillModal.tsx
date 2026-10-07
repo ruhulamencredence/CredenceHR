@@ -8,14 +8,16 @@
 // types what was actually handed over — Serial No, Asset Tag and a note are
 // optional. There's no picking from inventory: each line becomes the
 // employee's My Asset entry, where they Accept & Acknowledge it or report an
-// issue.
+// issue. Only the requested items can be handed over — a line can be removed
+// or its quantity lowered, but no extra line added or quantity raised (the
+// API checks the same).
 //
 // mode 'fulfill'  -> POST /api/assets/requisitions/:id/fulfill (already Approved)
 // mode 'approve'  -> PUT  /api/assets/requisitions/:id/approve-and-fulfill
 //                    (the Template's Asset Fulfiller Layer on Pending Approvals)
 
 import React, { useState } from 'react';
-import { X, Plus, Trash2, PackageCheck } from 'lucide-react';
+import { X, Trash2, PackageCheck } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
 import { Spinner } from './Spinner';
@@ -38,6 +40,9 @@ interface Line {
   // The requested item's name ("Laptop") — saved as the handed-over item's
   // category, so "Dell Latitude 5440" reads as a Laptop in My Asset.
   category?: string;
+  // Which requested item this line hands over, and its requested quantity.
+  requested_index: number;
+  max_quantity: number | null;
 }
 
 interface AssetFulfillModalProps {
@@ -56,7 +61,7 @@ const inputClass =
 export function AssetFulfillModal({ token, requisitionId, mode, requesterName, items, onClose, onDone }: AssetFulfillModalProps) {
   useBackButtonClose(true, onClose);
   const [lines, setLines] = useState<Line[]>(() =>
-    (items.length > 0 ? items : [{ item_name: '' }]).map((it) => ({
+    (items.length > 0 ? items : [{ item_name: '' }]).map((it: RequestedItem, i) => ({
       item_name: it.item_name || '',
       quantity: it.quantity != null && it.quantity !== '' ? String(Number(it.quantity)) : '1',
       unit: it.unit || 'pcs',
@@ -64,6 +69,8 @@ export function AssetFulfillModal({ token, requisitionId, mode, requesterName, i
       asset_tag: '',
       note: '',
       category: it.item_name || undefined,
+      requested_index: i,
+      max_quantity: it.quantity != null && it.quantity !== '' && Number(it.quantity) > 0 ? Number(it.quantity) : null,
       requested: it.item_name ? `${it.item_name} × ${Number(it.quantity ?? 1)} ${it.unit || 'pcs'}${it.purpose ? ` — ${it.purpose}` : ''}` : undefined
     }))
   );
@@ -79,6 +86,9 @@ export function AssetFulfillModal({ token, requisitionId, mode, requesterName, i
     for (const [i, l] of lines.entries()) {
       if (!l.item_name.trim()) return setError(`Item #${i + 1}: type what you're handing over.`);
       if (!(Number(l.quantity) > 0)) return setError(`Item #${i + 1}: quantity must be greater than 0.`);
+      if (l.max_quantity != null && Number(l.quantity) > l.max_quantity) {
+        return setError(`Item #${i + 1}: at most ${l.max_quantity} ${l.unit || 'pcs'} were requested.`);
+      }
     }
     setSaving(true);
     try {
@@ -94,6 +104,7 @@ export function AssetFulfillModal({ token, requisitionId, mode, requesterName, i
           remarks: remarks.trim() || undefined,
           items: lines.map((l) => ({
             item_name: l.item_name.trim(),
+            requested_index: l.requested_index,
             quantity: Number(l.quantity),
             unit: l.unit.trim() || 'pcs',
             serial_number: l.serial_number.trim() || undefined,
@@ -166,7 +177,7 @@ export function AssetFulfillModal({ token, requisitionId, mode, requesterName, i
                 </label>
                 <label className="col-span-3 sm:col-span-1">
                   <span className="block text-[10px] font-semibold text-slate-500 mb-0.5">Qty *</span>
-                  <input type="number" min={0} step="any" value={l.quantity} onChange={(e) => update(idx, { quantity: e.target.value })} className={inputClass} />
+                  <input type="number" min={0} max={l.max_quantity ?? undefined} step="any" value={l.quantity} onChange={(e) => update(idx, { quantity: e.target.value })} className={inputClass} />
                 </label>
                 <label className="col-span-3 sm:col-span-2">
                   <span className="block text-[10px] font-semibold text-slate-500 mb-0.5">Unit</span>
@@ -188,13 +199,7 @@ export function AssetFulfillModal({ token, requisitionId, mode, requesterName, i
             </div>
           ))}
 
-          <button
-            type="button"
-            onClick={() => setLines((prev) => [...prev, { item_name: '', quantity: '1', unit: 'pcs', serial_number: '', asset_tag: '', note: '' }])}
-            className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl border-2 border-dashed border-slate-200 text-slate-600 hover:border-blue-300 hover:text-blue-700"
-          >
-            <Plus className="w-3.5 h-3.5" /> Add another line
-          </button>
+          <p className="text-[11px] text-slate-400">Only the requested items can be handed over — remove a line or lower its quantity if something isn't given.</p>
 
           <div className="grid sm:grid-cols-2 gap-3">
             <label>
