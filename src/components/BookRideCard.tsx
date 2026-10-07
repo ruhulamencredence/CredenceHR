@@ -24,7 +24,7 @@ export interface Ride {
   destination: string;
   ride_date: string;
   start_time: string;
-  status: 'pending' | 'approved' | 'ongoing' | 'rejected' | 'cancelled' | 'completed';
+  status: 'pending' | 'approved' | 'ongoing' | 'rejected' | 'cancelled' | 'completed' | 'expired';
   vehicle_no: string | null;
   vehicle_model: string | null;
   driver_name: string | null;

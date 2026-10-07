@@ -59,7 +59,7 @@ interface Requisition {
   start_time: string;
   estimated_duration_hours: number;
   expected_return_at: string | null;
-  status: 'pending' | 'approved' | 'ongoing' | 'rejected' | 'cancelled' | 'completed';
+  status: 'pending' | 'approved' | 'ongoing' | 'rejected' | 'cancelled' | 'completed' | 'expired';
   // Who the Approval Workflow is currently waiting on (comma-joined — ANY
   // ONE of them clears the step) — null once past 'pending', or for a
   // legacy requisition with no approval_requests row at all.
@@ -125,6 +125,41 @@ export function VehicleManagementAdmin(_props: VehicleManagementAdminProps) {
   const [emergencyForm, setEmergencyForm] = useState(emptyEmergencyForm());
   const [emergencySubmitting, setEmergencySubmitting] = useState(false);
   const [emergencyMessage, setEmergencyMessage] = useState<string | null>(null);
+
+  // Ride deadline rules (vehicle_ride_settings): a waiting request expires
+  // grace_minutes after its start time; approvers are reminded
+  // reminder_minutes before it. Only a Superadmin edits them.
+  const [rideRules, setRideRules] = useState<{ grace_minutes: number; reminder_minutes: number; can_change: boolean } | null>(null);
+  const [rideRulesDraft, setRideRulesDraft] = useState({ grace_minutes: '30', reminder_minutes: '60' });
+  const [rideRulesMsg, setRideRulesMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch(apiUrl('/api/vehicles/ride-settings'), { headers: authHeaders() })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!d) return;
+        setRideRules(d);
+        setRideRulesDraft({ grace_minutes: String(d.grace_minutes), reminder_minutes: String(d.reminder_minutes) });
+      })
+      .catch(() => {});
+  }, []);
+
+  async function saveRideRules() {
+    setRideRulesMsg(null);
+    try {
+      const res = await fetch(apiUrl('/api/vehicles/ride-settings'), {
+        method: 'PUT',
+        headers: authHeaders(),
+        body: JSON.stringify({ grace_minutes: Number(rideRulesDraft.grace_minutes), reminder_minutes: Number(rideRulesDraft.reminder_minutes) })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not save.');
+      setRideRules((prev) => (prev ? { ...prev, grace_minutes: data.grace_minutes, reminder_minutes: data.reminder_minutes } : prev));
+      setRideRulesMsg('Saved.');
+    } catch (err: any) {
+      setRideRulesMsg(err.message);
+    }
+  }
 
   async function loadVehicles() {
     try {
@@ -294,6 +329,45 @@ export function VehicleManagementAdmin(_props: VehicleManagementAdminProps) {
             is read-only status + Assign Vehicle &amp; Driver once a request is Approved. Who approves the "HR/Admin Review" Layer is
             set from Admin Panel → Approvals → Templates (request type "Vehicle Requisition").
           </div>
+          {rideRules && (
+            <div className="border rounded-lg p-3 flex flex-wrap items-end gap-3 text-xs text-gray-600">
+              <div className="min-w-[220px] flex-1">
+                <div className="font-semibold text-gray-800 text-sm">Ride deadline</div>
+                A request still waiting on approval or a vehicle expires {rideRules.grace_minutes} min after its start time; approvers and
+                Vehicle Maintainers get a reminder {rideRules.reminder_minutes} min before it.
+              </div>
+              {rideRules.can_change && (
+                <>
+                  <label>
+                    <span className="block mb-0.5">Grace time (min)</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={1440}
+                      value={rideRulesDraft.grace_minutes}
+                      onChange={(e) => setRideRulesDraft({ ...rideRulesDraft, grace_minutes: e.target.value })}
+                      className="w-24 border rounded px-2 py-1.5 text-sm"
+                    />
+                  </label>
+                  <label>
+                    <span className="block mb-0.5">Reminder before (min)</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={1440}
+                      value={rideRulesDraft.reminder_minutes}
+                      onChange={(e) => setRideRulesDraft({ ...rideRulesDraft, reminder_minutes: e.target.value })}
+                      className="w-24 border rounded px-2 py-1.5 text-sm"
+                    />
+                  </label>
+                  <button type="button" onClick={saveRideRules} className="px-3 py-1.5 rounded bg-blue-600 text-white text-sm font-medium hover:bg-blue-700">
+                    Save
+                  </button>
+                  {rideRulesMsg && <span className={rideRulesMsg === 'Saved.' ? 'text-emerald-600' : 'text-red-600'}>{rideRulesMsg}</span>}
+                </>
+              )}
+            </div>
+          )}
           {requisitions.length === 0 && <div className="text-sm text-gray-500">No ride requests yet.</div>}
           {requisitions.map((r) => (
             <div key={r.id} className="border rounded-lg p-4">
@@ -549,6 +623,7 @@ export function VehicleManagementAdmin(_props: VehicleManagementAdminProps) {
                 <input
                   required
                   type="date"
+                  min={new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10)}
                   value={emergencyForm.ride_date}
                   onChange={(e) => setEmergencyForm({ ...emergencyForm, ride_date: e.target.value })}
                   className="w-full border rounded px-3 py-2 text-sm"
