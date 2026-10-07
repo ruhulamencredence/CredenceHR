@@ -8,6 +8,7 @@ import { AssetRequisitionEditItemsModal } from './AssetRequisitionEditItemsModal
 import { UserClaimReference, UserClaimItem, ClaimRecord } from '../types';
 import ClaimLocationMap from './ClaimLocationMap';
 import { ClaimBillLines } from './ClaimBillLines';
+import { formatDate } from '../lib/formatDate';
 import { ClaimChangesNotice, ClaimReviewFields, ReclaimTick, ReturnButton } from './ClaimReviewBits';
 
 // One row from GET /api/my-approvals — a trimmed-down ApprovalRequest, just
@@ -481,7 +482,14 @@ export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ toke
                           >
                             <span className="flex items-center gap-1 text-slate-600 min-w-0">
                               <MapPin className="w-3 h-3 text-blue-500 shrink-0" />
-                              <span className="truncate">Movement Claim &middot; {r.purpose}</span>
+                              <span className="truncate">
+                                    Check In/Out &middot; {r.purpose}
+                                    <span className="block text-[10px] text-slate-400 truncate">
+                                      {formatDate(r.check_in_at)} &middot; {new Date(r.check_in_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                      {r.check_out_at ? ` \u2192 ${new Date(r.check_out_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ' \u2192 not checked out'}
+                                      {r.distance_km != null ? ` \u00b7 ${r.distance_km} km` : ''}
+                                    </span>
+                                  </span>
                             </span>
                             <span className="shrink-0 font-semibold text-slate-800">
                               ৳{Number(r.amount).toLocaleString('en-BD', { minimumFractionDigits: 2 })}
