@@ -220,6 +220,21 @@ export async function ensureAssetManagementSchema(dbPool: any): Promise<void> {
       if (err.code !== "ER_DUP_FIELDNAME") console.warn(`⚠️ Could not add asset_requisition_items.${col}: ` + err.message);
     }
   }
+  // Whether Admin Panel -> Asset Management shows its Inventory tab (and
+  // accepts inventory add/edit). Off by default; a Superadmin turns it back
+  // on from that page when stock is to be kept in the app again.
+  try {
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS asset_settings (
+        id INT PRIMARY KEY,
+        show_inventory TINYINT(1) NOT NULL DEFAULT 0,
+        updated_by INT NULL,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      )
+    `);
+  } catch (err: any) {
+    console.warn("⚠️ Could not ensure asset_settings table: " + err.message);
+  }
   // One row per operation on a requisition (submitted, each approval, item
   // edits, hand-over, acknowledge, issue reported/resolved, return…) — the
   // requester's History view reads this.
@@ -891,6 +906,42 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
   // management plus fulfilling an already-approved requisition.
   // ---------------------------------------------------------------------
 
+  async function inventoryShown(): Promise<boolean> {
+    try {
+      const rows: any[] = await queryDB("SELECT * FROM asset_settings WHERE id = 1");
+      return rows.length > 0 && Number(rows[0].show_inventory) === 1;
+    } catch {
+      return false;
+    }
+  }
+
+  // GET/PUT /api/assets/inventory-setting — the Inventory tab switch above
+  // (asset_settings). Anyone with Asset Management reads it; only a
+  // Superadmin changes it. Registered before PUT /api/assets/:id.
+  app.get("/api/assets/inventory-setting", authenticateToken, requireAdmin, requireModule("asset_management"), async (req: any, res) => {
+    try {
+      res.json({ show_inventory: await inventoryShown(), can_change: req.user.role === "superadmin" });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/assets/inventory-setting", authenticateToken, async (req: any, res) => {
+    try {
+      if (req.user.role !== "superadmin") return res.status(403).json({ error: "Only a Superadmin can turn the Inventory tab on or off." });
+      const show = req.body?.show_inventory ? 1 : 0;
+      const rows: any[] = await queryDB("SELECT * FROM asset_settings WHERE id = 1");
+      if (rows.length === 0) {
+        await queryDB("INSERT INTO asset_settings (id, show_inventory, updated_by) VALUES (1, ?, ?)", [show, req.user.id]);
+      } else {
+        await queryDB("UPDATE asset_settings SET show_inventory = ?, updated_by = ? WHERE id = 1", [show, req.user.id]);
+      }
+      res.json({ success: true, show_inventory: show === 1 });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // GET /api/assets — inventory list, optional ?status=&category= filters.
   app.get("/api/assets", authenticateToken, requireAdmin, requireModule("asset_management"), async (req: any, res) => {
     try {
@@ -915,6 +966,7 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
   // POST /api/assets — add a new asset to inventory.
   app.post("/api/assets", authenticateToken, requireAdmin, requireModule("asset_management"), async (req: any, res) => {
     try {
+      if (!(await inventoryShown())) return res.status(403).json({ error: "Inventory is turned off. A Superadmin can turn it on in Asset Management." });
       const { asset_tag, name, category, serial_number, purchase_date, condition_note } = req.body || {};
       const tag = String(asset_tag || "").trim();
       const assetName = String(name || "").trim();
@@ -940,6 +992,7 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
   // PUT /api/assets/:id — edit an inventory item's details/status.
   app.put("/api/assets/:id", authenticateToken, requireAdmin, requireModule("asset_management"), async (req: any, res) => {
     try {
+      if (!(await inventoryShown())) return res.status(403).json({ error: "Inventory is turned off. A Superadmin can turn it on in Asset Management." });
       const { name, category, serial_number, purchase_date, status, condition_note } = req.body || {};
       const rows = await queryDB("SELECT id FROM assets WHERE id = ?", [req.params.id]);
       if (rows.length === 0) return res.status(404).json({ error: "Asset not found." });
@@ -1156,6 +1209,29 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
     });
   }
 
+  // The fulfiller hands over only what was requested: each line points at
+  // one requested item (requested_index, or its position when left out),
+  // no requested item twice, and never more than its requested quantity.
+  // Handing over fewer lines or a smaller quantity is fine.
+  async function checkAgainstRequested(requisition: any, raw: any[], items: ReturnType<typeof cleanHandoverItems>): Promise<string | null> {
+    const [withItems] = await attachItems([requisition]);
+    const requested: any[] = withItems.items || [];
+    if (items.length > requested.length) return `Only the ${requested.length} requested item${requested.length === 1 ? "" : "s"} can be handed over — extra items can't be added.`;
+    const used = new Set<number>();
+    for (let i = 0; i < items.length; i++) {
+      const rawIdx = raw[i]?.requested_index;
+      const idx = rawIdx === undefined || rawIdx === null || rawIdx === "" ? i : Number(rawIdx);
+      if (!Number.isInteger(idx) || idx < 0 || idx >= requested.length) return `Item #${i + 1} isn't one of the requested items.`;
+      if (used.has(idx)) return `Item #${i + 1}: "${requested[idx].item_name}" is already on another line.`;
+      used.add(idx);
+      const max = Number(requested[idx].quantity ?? 1);
+      if (Number.isFinite(max) && max > 0 && items[i].quantity > max) {
+        return `Item #${i + 1}: at most ${max} ${requested[idx].unit || "pcs"} of "${requested[idx].item_name}" were requested.`;
+      }
+    }
+    return null;
+  }
+
   // Hands the typed items over to the requester: each line becomes an
   // inventory record (assets, tagged with the typed Asset Tag or an
   // auto one like AR-12-1) assigned to the employee, so it shows in their
@@ -1254,6 +1330,8 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
       } catch (e: any) {
         return res.status(400).json({ error: e.message });
       }
+      const overRequest = await checkAgainstRequested(requisition, req.body.items, items);
+      if (overRequest) return res.status(400).json({ error: overRequest });
       const condition = ["new", "good"].includes(req.body?.condition_on_assign) ? req.body.condition_on_assign : "good";
       try {
         await handOverItems(requisition, items, condition, req.user);
@@ -1300,6 +1378,8 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
       } catch (e: any) {
         return res.status(400).json({ error: e.message });
       }
+      const overRequest = await checkAgainstRequested(requisition, req.body.items, items);
+      if (overRequest) return res.status(400).json({ error: overRequest });
       const condition = ["new", "good"].includes(req.body?.condition_on_assign) ? req.body.condition_on_assign : "good";
       const remarks = typeof req.body?.remarks === "string" ? req.body.remarks.trim().slice(0, 1000) || null : null;
 
