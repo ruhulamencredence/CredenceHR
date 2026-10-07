@@ -32,7 +32,7 @@ import type { Express } from "express";
 import bcrypt from "bcryptjs";
 import { applyAccessTemplate, ensureDefaultAccessTemplate } from "./AccessTemplateDefaults";
 import { recordEmployeeEditHistory } from "./EmployeeTransferRoutes";
-import { activeCompanyId } from "./companyContext";
+import { activeCompanyId, activeGroupId } from "./companyContext";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 
@@ -42,6 +42,8 @@ interface DataImportDeps {
   queryDB: QueryDB;
   getAdminModules: (userId: number) => Promise<string[]>;
   today: () => string;
+  // Same balance change a Leave Application makes when it's submitted.
+  adjustLeaveTypeBalance: (userId: number, leaveType: string, delta: number) => Promise<void>;
 }
 
 type FieldType = "text" | "date" | "time" | "number" | "yesno";
@@ -112,7 +114,7 @@ export const IMPORT_KINDS: Kind[] = [
   {
     key: "leave",
     title: "Leave History",
-    description: "Past leave per employee. Balances are not changed — set them in Leave Manage. HR's Leave Summary Report sheet (one block per employee) can be uploaded as it is.",
+    description: "Past leave per employee. Approved / Pending leave in the current leave year is taken off the balance; older leave isn't. HR's Leave Summary Report sheet (one block per employee) can be uploaded as it is.",
     module: "leave_applications",
     fields: [
       EMP,
@@ -265,8 +267,13 @@ interface RowResult {
   employee?: string;
 }
 
+// leave_applications.remarks on imported leave: whether the import has
+// already taken it off the balance.
+const IMPORTED = "Imported from Excel";
+const IMPORTED_DEDUCTED = "Imported from Excel (balance deducted)";
+
 export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
-  const { authenticateToken, requireAdmin, queryDB, getAdminModules, today } = deps;
+  const { authenticateToken, requireAdmin, queryDB, getAdminModules, today, adjustLeaveTypeBalance } = deps;
 
   const allowedKinds = async (user: any) => {
     if (user?.role === "superadmin") return IMPORT_KINDS;
@@ -509,8 +516,18 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
     leave: {
       prepare: async () => {
         const cats: any[] = (await queryDB("SELECT category_key, label FROM leave_categories").catch(() => [])) || [];
-        const existing: any[] = (await queryDB("SELECT user_id, start_date, end_date, status FROM leave_applications").catch(() => [])) || [];
-        return { cats, existing };
+        const existing: any[] =
+          (await queryDB("SELECT id, user_id, leave_type, start_date, end_date, day_count, status, remarks FROM leave_applications").catch(() => [])) || [];
+        // Start of the current leave year (Leave Manage -> Year Settings, default 1 Jan).
+        // Leave from that day on comes off this year's balance; older leave doesn't —
+        // its year's balance was already replaced at rollover.
+        const ys: any[] = (await queryDB("SELECT start_month_day FROM leave_year_settings WHERE id = ?", [activeGroupId()]).catch(() => [])) || [];
+        const md = /^(\d{1,2})-(\d{1,2})$/.exec(String(ys[0]?.start_month_day || "01-01").trim());
+        const [sm, sd] = md ? [Number(md[1]), Number(md[2])] : [1, 1];
+        const t = today();
+        const thisYearStart = `${t.slice(0, 4)}-${String(sm).padStart(2, "0")}-${String(sd).padStart(2, "0")}`;
+        const yearStart = t >= thisYearStart ? thisYearStart : `${Number(t.slice(0, 4)) - 1}${thisYearStart.slice(4)}`;
+        return { cats, existing, yearStart };
       },
       row: async (v, ctx, prep) => {
         const { emp, userId } = loginOf(v, ctx);
@@ -541,17 +558,40 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
           (l: any) => Number(l.user_id) === userId && l.status !== "rejected" && String(l.start_date).slice(0, 10) <= to && String(l.end_date).slice(0, 10) >= from
         );
         const who = `${emp.name} (${str(v.employee_id)})`;
-        if (overlap && status !== "rejected")
-          return { status: "skip", message: `Already has leave ${String(overlap.start_date).slice(0, 10)} to ${String(overlap.end_date).slice(0, 10)}.`, employee: who };
+        // Approved / Pending leave in the current leave year comes off the
+        // balance, like a Leave Application does when it's submitted.
+        const deducts = (st: string, start: string) => st !== "rejected" && start >= prep.yearStart;
+        const label = (lt: string) =>
+          lt === "casual" ? "Casual" : lt === "sick" ? "Sick" : lt === "without_pay" ? "Without Pay" : prep.cats.find((c: any) => c.category_key === lt)?.label || lt;
+        if (overlap && status !== "rejected") {
+          // Imported earlier, before imports took leave off the balance: take it off now, once.
+          const s0 = String(overlap.start_date).slice(0, 10);
+          if (overlap.id && overlap.remarks === IMPORTED && deducts(String(overlap.status), s0)) {
+            const d0 = Number(overlap.day_count) || 0;
+            if (!ctx.dryRun) {
+              await adjustLeaveTypeBalance(userId, String(overlap.leave_type), -d0);
+              await queryDB("UPDATE leave_applications SET remarks = ? WHERE id = ?", [IMPORTED_DEDUCTED, overlap.id]);
+            }
+            overlap.remarks = IMPORTED_DEDUCTED;
+            return { status: "update", message: `Already imported — ${d0} day(s) now taken off the ${label(String(overlap.leave_type))} balance.`, employee: who };
+          }
+          return { status: "skip", message: `Already has leave ${s0} to ${String(overlap.end_date).slice(0, 10)}.`, employee: who };
+        }
+        const deduct = deducts(status, from);
         if (!ctx.dryRun) {
+          if (deduct) await adjustLeaveTypeBalance(userId, leaveType!, -days);
           await queryDB(
             `INSERT INTO leave_applications (user_id, leave_type, start_date, end_date, day_count, is_half_day, purpose, status, apply_date, remarks, decided_by, decided_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [userId, leaveType, from, to, days, half ? 1 : 0, str(v.purpose), status, applyDate, "Imported from Excel", status === "pending" ? null : Number(ctx.user.id), status === "pending" ? null : new Date()]
+            [userId, leaveType, from, to, days, half ? 1 : 0, str(v.purpose), status, applyDate, deduct ? IMPORTED_DEDUCTED : IMPORTED, status === "pending" ? null : Number(ctx.user.id), status === "pending" ? null : new Date()]
           );
         }
-        prep.existing.push({ user_id: userId, start_date: from, end_date: to, status });
-        return { status: "create", message: `${days} day(s) ${status}`, employee: who };
+        prep.existing.push({ user_id: userId, leave_type: leaveType, start_date: from, end_date: to, day_count: days, status, remarks: deduct ? IMPORTED_DEDUCTED : IMPORTED });
+        return {
+          status: "create",
+          message: `${days} day(s) ${status}${deduct ? ` — taken off the ${label(leaveType!)} balance` : from < prep.yearStart ? " — earlier leave year, balance not changed" : ""}`,
+          employee: who
+        };
       }
     },
 

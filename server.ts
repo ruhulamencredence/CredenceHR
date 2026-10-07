@@ -2492,7 +2492,7 @@ async function startServer() {
   // Admin Panel -> Data Import (DataImportRoutes.ts): employees, leave,
   // claims and attendance history from an Excel/CSV sheet; each kind needs
   // its own module (a Superadmin has them all).
-  registerDataImportRoutes(app, { authenticateToken, requireAdmin, queryDB, getAdminModules, today: todayInDhaka });
+  registerDataImportRoutes(app, { authenticateToken, requireAdmin, queryDB, getAdminModules, today: todayInDhaka, adjustLeaveTypeBalance });
 
   registerReportsInsightsRoutes(app, {
     authenticateToken,
