@@ -28,6 +28,7 @@ interface TrackingRow {
   tracked: boolean;
   last_ping: string | null;
   minutes_ago: number | null;
+  standing_still?: boolean;
   reason: string | null;
 }
 export interface TrackingStatus {
@@ -221,7 +222,7 @@ export const TrackingStatusCards: React.FC<Props> = ({ token, variant = 'panel',
           {(
             [
               ['tracked', 'Currently Under Tracking', data.tracked, `Sent a location in the last ${data.live_minutes} min`, 'bg-emerald-50 border-emerald-200 text-emerald-700', 'bg-emerald-500'],
-              ['not_tracked', 'Currently Not Tracked', data.not_tracked, 'Tracking off, or no recent location', 'bg-slate-50 border-slate-200 text-slate-700', 'bg-slate-400']
+              ['not_tracked', 'Currently Not Tracked', data.not_tracked, 'Tracking off, Location off, or app not running', 'bg-slate-50 border-slate-200 text-slate-700', 'bg-slate-400']
             ] as const
           ).map(([key, label, count, hint, cls, dot]) => (
             <button
@@ -443,8 +444,8 @@ export const TrackingStatusCards: React.FC<Props> = ({ token, variant = 'panel',
                           <span className="block text-[10px] text-slate-400 truncate">{[r.employee_id, r.designation].filter(Boolean).join(' · ') || '—'}</span>
                         </span>
                         <span className={`text-[10px] font-semibold text-right shrink-0 ${r.tracked ? 'text-emerald-600' : 'text-slate-500'}`}>
-                          {r.tracked ? ago(r.minutes_ago) : r.reason}
-                          {!r.tracked && r.minutes_ago != null && <span className="block font-normal text-slate-400">last {ago(r.minutes_ago)}</span>}
+                          {r.tracked ? (r.standing_still ? 'Phone on, standing still' : ago(r.minutes_ago)) : r.reason}
+                          {(!r.tracked || r.standing_still) && r.minutes_ago != null && <span className="block font-normal text-slate-400">last location {ago(r.minutes_ago)}</span>}
                         </span>
                       </div>
                     ))}
