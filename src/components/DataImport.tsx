@@ -99,6 +99,52 @@ function cellText(v: any, type: FieldType): string {
   return String(v).trim();
 }
 
+// Leave History can also come as HR's "Leave Summary Report" sheet: one block
+// per employee ("Employee Id" in column A, the value in E), then a "Leave Year
+// | Leave Type | Is Paid Leave | Leave From | Leave To | Leave Availed |
+// Remarks" table where Leave Type is written only on its first row, and
+// "Total Leave Availed" lines in between. This turns such a sheet into the
+// plain rows the Leave History import reads (every leave Approved). Returns
+// null when the sheet isn't laid out that way.
+function leaveSummarySheetRows(grid: any[][]): Record<string, any>[] | null {
+  const cell = (line: any[], c: number) => String(line?.[c] ?? '').trim();
+  const isBlockSheet =
+    grid.some((l) => norm(cell(l, 0)) === 'employeeid') && grid.some((l) => norm(cell(l, 6)) === 'leavefrom' && norm(cell(l, 2)) === 'leavetype');
+  if (!isBlockSheet) return null;
+  const out: Record<string, any>[] = [];
+  let employeeId = '';
+  let leaveType = '';
+  for (let i = 0; i < grid.length; i++) {
+    const line = grid[i] || [];
+    const a = norm(cell(line, 0));
+    if (a === 'employeeid') {
+      employeeId = cell(line, 4);
+      leaveType = '';
+      continue;
+    }
+    if (a === 'leaveyear' || a.startsWith('total')) continue;
+    // A leave line has dates under Leave From / Leave To. (Merged cells come
+    // back with the value repeated in every cell, so the employee detail
+    // lines also have text there — they're not dates.)
+    const from = line[6];
+    const to = line[8];
+    const isDate = (v: any) => typeof v === 'number' || v instanceof Date || /^\d{1,4}[-/.]\d{1,2}[-/.]\d{1,4}$/.test(String(v ?? '').trim());
+    if (!isDate(from) || !isDate(to)) continue;
+    if (cell(line, 2)) leaveType = cell(line, 2);
+    out.push({
+      __row: i + 1,
+      employee_id: employeeId,
+      leave_type: leaveType,
+      from_date: cellText(from, 'date'),
+      to_date: cellText(to, 'date'),
+      days: cell(line, 10),
+      status: 'Approved',
+      purpose: cell(line, 12)
+    });
+  }
+  return out;
+}
+
 export const DataImport: React.FC<{ token: string }> = ({ token }) => {
   const api = useHrApi(token);
   const [kinds, setKinds] = useState<Kind[] | null>(null);
@@ -184,6 +230,26 @@ export const DataImport: React.FC<{ token: string }> = ({ token }) => {
       const sheetName = wb.SheetNames.find((n) => n.toLowerCase() === 'data') || wb.SheetNames[0];
       const grid: any[][] = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, raw: true, defval: '' });
       if (!grid.length) throw new Error('The sheet is empty.');
+      const blockRows = kind.key === 'leave' ? leaveSummarySheetRows(grid) : null;
+      if (blockRows) {
+        if (!blockRows.length) throw new Error('No leave rows found in this Leave Summary Report.');
+        if (blockRows.length > maxRows) throw new Error(`${blockRows.length} rows — at most ${maxRows} per upload. Split the sheet.`);
+        const from = (key: string, header: string) => ({ header, field: kind.fields.find((f) => f.key === key)! });
+        setMatched(
+          [
+            from('employee_id', 'Employee Id'),
+            from('leave_type', 'Leave Type'),
+            from('from_date', 'Leave From'),
+            from('to_date', 'Leave To'),
+            from('days', 'Leave Availed'),
+            from('purpose', 'Remarks'),
+            from('status', 'Approved (Leave Summary Report)')
+          ].filter((m) => m.field)
+        );
+        setIgnored(['Leave Year', 'Is Paid Leave', 'Total Leave Availed']);
+        setRows(blockRows);
+        return;
+      }
       const headers = (grid[0] || []).map((h) => String(h || '').trim());
       const fieldFor = (h: string) =>
         kind.fields.find((f) => [f.label, f.key, ...(f.aliases || [])].some((name) => norm(name) === norm(h)));

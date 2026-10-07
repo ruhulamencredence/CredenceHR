@@ -112,7 +112,7 @@ export const IMPORT_KINDS: Kind[] = [
   {
     key: "leave",
     title: "Leave History",
-    description: "Past leave per employee. Balances are not changed — set them in Leave Manage.",
+    description: "Past leave per employee. Balances are not changed — set them in Leave Manage. HR's Leave Summary Report sheet (one block per employee) can be uploaded as it is.",
     module: "leave_applications",
     fields: [
       EMP,
