@@ -55,6 +55,10 @@ interface AssetFulfillModalProps {
   onDone: () => void;
 }
 
+// An input that fills its table cell, the cell border doing the framing.
+const cellInput =
+  'w-full min-w-0 text-[11px] px-1.5 py-1.5 bg-transparent border-0 focus:ring-2 focus:ring-inset focus:ring-blue-600 focus:outline-none placeholder:text-slate-300';
+
 const inputClass =
   'w-full text-xs px-2.5 py-2 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none';
 
@@ -131,7 +135,7 @@ export function AssetFulfillModal({ token, requisitionId, mode, requesterName, i
         if (e.target === e.currentTarget && !saving) onClose();
       }}
     >
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
         <div className="px-5 py-4 border-b border-slate-100 flex items-start justify-between gap-3">
           <div className="flex items-center gap-2.5">
             <div className="w-9 h-9 rounded-full bg-emerald-50 flex items-center justify-center shrink-0">
@@ -152,52 +156,72 @@ export function AssetFulfillModal({ token, requisitionId, mode, requesterName, i
         <div className="flex-1 overflow-y-auto p-5 space-y-3">
           {error && <div className="rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs px-3.5 py-2.5">{error}</div>}
 
-          {lines.map((l, idx) => (
-            <div key={idx} className="border border-slate-200 rounded-xl p-3 bg-slate-50/60">
-              <div className="flex items-center justify-between gap-2 mb-2">
-                <div className="min-w-0">
-                  <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Item {idx + 1}</div>
-                  {l.requested && <div className="text-[11px] text-slate-400 truncate">Requested: {l.requested}</div>}
-                </div>
-                {lines.length > 1 && (
-                  <button
-                    type="button"
-                    onClick={() => setLines((prev) => prev.filter((_, i) => i !== idx))}
-                    className="p-1 text-slate-400 hover:text-rose-600 rounded"
-                    title="Remove this line"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                )}
-              </div>
-              <div className="grid grid-cols-6 gap-2">
-                <label className="col-span-6 sm:col-span-3">
-                  <span className="block text-[10px] font-semibold text-slate-500 mb-0.5">Item handed over *</span>
-                  <input value={l.item_name} onChange={(e) => update(idx, { item_name: e.target.value })} placeholder="e.g. Dell Latitude 5440" className={inputClass} />
-                </label>
-                <label className="col-span-3 sm:col-span-1">
-                  <span className="block text-[10px] font-semibold text-slate-500 mb-0.5">Qty *</span>
-                  <input type="number" min={0} max={l.max_quantity ?? undefined} step="any" value={l.quantity} onChange={(e) => update(idx, { quantity: e.target.value })} className={inputClass} />
-                </label>
-                <label className="col-span-3 sm:col-span-2">
-                  <span className="block text-[10px] font-semibold text-slate-500 mb-0.5">Unit</span>
-                  <input value={l.unit} onChange={(e) => update(idx, { unit: e.target.value })} placeholder="pcs" className={inputClass} />
-                </label>
-                <label className="col-span-3">
-                  <span className="block text-[10px] font-semibold text-slate-500 mb-0.5">Serial No (optional)</span>
-                  <input value={l.serial_number} onChange={(e) => update(idx, { serial_number: e.target.value })} className={inputClass} />
-                </label>
-                <label className="col-span-3">
-                  <span className="block text-[10px] font-semibold text-slate-500 mb-0.5">Asset Tag (optional)</span>
-                  <input value={l.asset_tag} onChange={(e) => update(idx, { asset_tag: e.target.value })} placeholder="Auto if blank" className={inputClass} />
-                </label>
-                <label className="col-span-6">
-                  <span className="block text-[10px] font-semibold text-slate-500 mb-0.5">Note (optional)</span>
-                  <input value={l.note} onChange={(e) => update(idx, { note: e.target.value })} placeholder="Brand, condition, accessories…" className={inputClass} />
-                </label>
-              </div>
-            </div>
-          ))}
+          {/* Same look as the PEPM report table: bordered cells, blue header. */}
+          <div className="overflow-x-auto border border-slate-200 rounded-lg">
+            <table className="w-full min-w-[860px] border-collapse text-[11px] leading-snug">
+              <thead className="bg-blue-50">
+                <tr>
+                  <th className="px-1.5 py-2 border border-slate-200 font-semibold text-slate-700 text-right w-8">Sl</th>
+                  <th className="px-1.5 py-2 border border-slate-200 font-semibold text-slate-700 text-left w-[18%]">Requested</th>
+                  <th className="px-1.5 py-2 border border-slate-200 font-semibold text-slate-700 text-left w-[20%]">Item handed over *</th>
+                  <th className="px-1.5 py-2 border border-slate-200 font-semibold text-slate-700 text-right w-16">Qty *</th>
+                  <th className="px-1.5 py-2 border border-slate-200 font-semibold text-slate-700 text-left w-16">Unit</th>
+                  <th className="px-1.5 py-2 border border-slate-200 font-semibold text-slate-700 text-left">Serial No</th>
+                  <th className="px-1.5 py-2 border border-slate-200 font-semibold text-slate-700 text-left">Asset Tag</th>
+                  <th className="px-1.5 py-2 border border-slate-200 font-semibold text-slate-700 text-left">Note</th>
+                  <th className="px-1.5 py-2 border border-slate-200 font-semibold text-slate-700 text-center w-10"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {lines.map((l, idx) => (
+                  <tr key={idx} className="odd:bg-white even:bg-slate-50/70 hover:bg-blue-50/50 transition-colors">
+                    <td className="px-1.5 py-1.5 border border-slate-200 align-top text-right text-slate-500 tabular-nums">{idx + 1}.</td>
+                    <td className="px-1.5 py-1.5 border border-slate-200 align-top text-slate-700">
+                      <div className="line-clamp-2 break-words" title={l.requested}>{l.requested || '—'}</div>
+                    </td>
+                    <td className="p-0 border border-slate-200 align-top">
+                      <input value={l.item_name} onChange={(e) => update(idx, { item_name: e.target.value })} placeholder="e.g. Dell Latitude 5440" className={cellInput} />
+                    </td>
+                    <td className="p-0 border border-slate-200 align-top">
+                      <input
+                        type="number"
+                        min={0}
+                        max={l.max_quantity ?? undefined}
+                        step="any"
+                        value={l.quantity}
+                        onChange={(e) => update(idx, { quantity: e.target.value })}
+                        className={`${cellInput} text-right tabular-nums`}
+                      />
+                    </td>
+                    <td className="p-0 border border-slate-200 align-top">
+                      <input value={l.unit} onChange={(e) => update(idx, { unit: e.target.value })} placeholder="pcs" className={cellInput} />
+                    </td>
+                    <td className="p-0 border border-slate-200 align-top">
+                      <input value={l.serial_number} onChange={(e) => update(idx, { serial_number: e.target.value })} placeholder="Optional" className={cellInput} />
+                    </td>
+                    <td className="p-0 border border-slate-200 align-top">
+                      <input value={l.asset_tag} onChange={(e) => update(idx, { asset_tag: e.target.value })} placeholder="Auto if blank" className={cellInput} />
+                    </td>
+                    <td className="p-0 border border-slate-200 align-top">
+                      <input value={l.note} onChange={(e) => update(idx, { note: e.target.value })} placeholder="Brand, condition…" className={cellInput} />
+                    </td>
+                    <td className="px-1 py-1 border border-slate-200 align-top text-center">
+                      {lines.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => setLines((prev) => prev.filter((_, i) => i !== idx))}
+                          className="p-1 text-slate-400 hover:text-rose-600 rounded"
+                          title="Remove this line"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
 
           <p className="text-[11px] text-slate-400">Only the requested items can be handed over — remove a line or lower its quantity if something isn't given.</p>
 
