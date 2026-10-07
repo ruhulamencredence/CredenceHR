@@ -1734,7 +1734,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         fetch(apiUrl('/api/projects'), { headers: { Authorization: `Bearer ${token}` } }),
         fetch(apiUrl('/api/branches'), { headers: { Authorization: `Bearer ${token}` } }),
         fetch(apiUrl('/api/mpr-numbers'), { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(apiUrl('/api/entries'), { headers: { Authorization: `Bearer ${token}` } }),
+        fetch(apiUrl('/api/entries?scope=all'), { headers: { Authorization: `Bearer ${token}` } }),
         fetch(apiUrl('/api/users'), { headers: { Authorization: `Bearer ${token}` } }),
         fetch(apiUrl('/api/budgets'), { headers: { Authorization: `Bearer ${token}` } }),
         fetch(apiUrl('/api/permissions'), { headers: { Authorization: `Bearer ${token}` } }),
