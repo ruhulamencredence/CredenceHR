@@ -1235,6 +1235,27 @@ async function ensureSchemaMigrations() {
   } catch (err: any) {
     console.warn("⚠️ Could not ensure location_pings table exists: " + err.message);
   }
+  // What the phone itself says about location, sent with every heartbeat of the
+  // APK's tracking (POST /api/tracking/state) — one row per user. Lets Employee
+  // Tracking tell "Phone Location is OFF" / "permission removed" / "app closed"
+  // / "standing still" apart, instead of only "no ping lately".
+  try {
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS tracking_device_state (
+        user_id INT PRIMARY KEY,
+        location_on TINYINT(1) NULL,
+        foreground_granted TINYINT(1) NULL,
+        background_granted TINYINT(1) NULL,
+        precise_granted TINYINT(1) NULL,
+        mode VARCHAR(10) NULL,
+        battery_pct INT NULL,
+        reported_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      )
+    `);
+  } catch (err: any) {
+    console.warn("⚠️ Could not ensure tracking_device_state table exists: " + err.message);
+  }
   // Notices — Superadmin/Admin -> User popup shown right after the User logs in,
   // with optional custom Lottie animation (pasted JSON or a hosted URL) + free-form
   // text/HTML. See ADMIN_MODULE_KEYS ("notices") and the /api/notices* routes below.
@@ -4951,6 +4972,28 @@ async function startServer() {
     getIo: () => liveIo
   });
 
+  // Remembers what the phone said about itself; a ping (a real fix) proves
+  // Location is on, so it also clears an earlier "off" report.
+  const saveTrackingState = async (userId: number, st: any, fromPing = false) => {
+    const flag = (v: any) => (v === null || v === undefined ? null : v ? 1 : 0);
+    const battery = st?.battery_pct != null && Number.isFinite(Number(st.battery_pct)) ? Math.round(Number(st.battery_pct)) : null;
+    const mode = typeof st?.mode === "string" ? String(st.mode).slice(0, 10) : null;
+    try {
+      await queryDB(
+        `INSERT INTO tracking_device_state (user_id, location_on, foreground_granted, background_granted, precise_granted, mode, battery_pct, reported_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
+         ON DUPLICATE KEY UPDATE location_on = VALUES(location_on),
+           foreground_granted = COALESCE(VALUES(foreground_granted), foreground_granted),
+           background_granted = COALESCE(VALUES(background_granted), background_granted),
+           precise_granted = COALESCE(VALUES(precise_granted), precise_granted),
+           mode = COALESCE(VALUES(mode), mode), battery_pct = COALESCE(VALUES(battery_pct), battery_pct), reported_at = NOW()`,
+        [userId, fromPing ? 1 : flag(st?.location_on), flag(st?.foreground), flag(st?.background), flag(st?.precise), mode, battery]
+      );
+    } catch {
+      // Table missing / in-memory mode — the plain ping history still works.
+    }
+  };
+
   app.post("/api/tracking/ping", authenticateToken, requireTrackingAccess, async (req: any, res) => {
     try {
       const lat = Number(req.body.lat);
@@ -4961,12 +5004,47 @@ async function startServer() {
       const accuracy_m = req.body.accuracy_m != null && Number.isFinite(Number(req.body.accuracy_m)) ? Math.round(Number(req.body.accuracy_m)) : null;
       const battery_pct = req.body.battery_pct != null && Number.isFinite(Number(req.body.battery_pct)) ? Math.round(Number(req.body.battery_pct)) : null;
       const recorded_at = req.body.recorded_at ? new Date(req.body.recorded_at) : new Date();
-      await queryDB(
-        "INSERT INTO location_pings (user_id, lat, lng, accuracy_m, battery_pct, recorded_at) VALUES (?, ?, ?, ?, ?, ?)",
-        [req.user.id, lat, lng, accuracy_m, battery_pct, recorded_at]
-      );
+      // A phone standing still re-sends its last fix as a heartbeat: nothing new
+      // to store (that only added duplicate rows), but it still answers
+      // "should I go live?".
+      if (!req.body.repeat) {
+        // Fixes collected since the last send, oldest first (the batch ends
+        // with the lat/lng above, which is skipped here so it isn't stored twice).
+        const extra: any[] = Array.isArray(req.body.points) ? req.body.points.slice(-300) : [];
+        for (const pt of extra) {
+          const plat = Number(pt?.lat);
+          const plng = Number(pt?.lng);
+          const pat = pt?.recorded_at ? new Date(pt.recorded_at) : null;
+          if (!Number.isFinite(plat) || !Number.isFinite(plng) || !pat || Number.isNaN(pat.getTime())) continue;
+          if (pat.getTime() >= recorded_at.getTime()) continue;
+          await queryDB("INSERT INTO location_pings (user_id, lat, lng, accuracy_m, battery_pct, recorded_at) VALUES (?, ?, ?, ?, ?, ?)", [
+            req.user.id,
+            plat,
+            plng,
+            pt?.accuracy_m != null && Number.isFinite(Number(pt.accuracy_m)) ? Math.round(Number(pt.accuracy_m)) : null,
+            battery_pct,
+            pat
+          ]);
+        }
+        await queryDB(
+          "INSERT INTO location_pings (user_id, lat, lng, accuracy_m, battery_pct, recorded_at) VALUES (?, ?, ?, ?, ?, ?)",
+          [req.user.id, lat, lng, accuracy_m, battery_pct, recorded_at]
+        );
+      }
+      await saveTrackingState(Number(req.user.id), { battery_pct, mode: req.body.mode, foreground: true }, true);
       const live_until = await liveTracking.onPing(Number(req.user.id), { lat, lng, accuracy_m, battery_pct, recorded_at });
       res.json({ success: true, live_until });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Heartbeat from the APK, sent every couple of minutes and whenever the app
+  // comes back to the front — works even with no GPS fix (e.g. Location off).
+  app.post("/api/tracking/state", authenticateToken, requireTrackingAccess, async (req: any, res) => {
+    try {
+      await saveTrackingState(Number(req.user.id), req.body || {});
+      res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -5006,6 +5084,7 @@ async function startServer() {
   // in the last TRACKING_LIVE_MIN minutes (same 20 min the Live map uses
   // before a dot turns grey). Anyone not tracked gets the reason.
   const TRACKING_LIVE_MIN = 20;
+  const TRACKING_STATE_MIN = 8;
   const trackingStatusRows = async () => {
     const employees: any[] = (await queryDB(
       `SELECT e.id, e.employee_id, e.name, e.designation, e.department, e.user_id, u.can_use_tracking
@@ -5019,20 +5098,49 @@ async function startServer() {
       []
     )) || [];
     const byUser = new Map<number, any>(pings.map((p) => [Number(p.user_id), p]));
+    const states: any[] =
+      (await queryDB(
+        `SELECT user_id, location_on, foreground_granted, background_granted, mode, TIMESTAMPDIFF(MINUTE, reported_at, NOW()) AS state_minutes_ago FROM tracking_device_state`,
+        []
+      ).catch(() => [])) || [];
+    const stateByUser = new Map<number, any>(states.map((x) => [Number(x.user_id), x]));
     return employees.map((e) => {
       const p = e.user_id ? byUser.get(Number(e.user_id)) : null;
       const minutesAgo = p && p.minutes_ago != null ? Number(p.minutes_ago) : null;
       const enabled = !!e.user_id && !!Number(e.can_use_tracking);
-      const tracked = enabled && minutesAgo != null && minutesAgo <= TRACKING_LIVE_MIN;
+      // The phone's own heartbeat (every ~2 min while the app runs); older than
+      // TRACKING_STATE_MIN means the app isn't running or the phone is offline.
+      const st = e.user_id ? stateByUser.get(Number(e.user_id)) : null;
+      const stateFresh = !!st && st.state_minutes_ago != null && Number(st.state_minutes_ago) <= TRACKING_STATE_MIN;
+      const locOff = stateFresh && st.location_on !== null && !Number(st.location_on);
+      const noPerm = stateFresh && st.foreground_granted !== null && !Number(st.foreground_granted);
+      const noAllTime = stateFresh && st.background_granted !== null && !Number(st.background_granted);
+      const pingFresh = minutesAgo != null && minutesAgo <= TRACKING_LIVE_MIN;
+      // Fresh heartbeat with Location on = the phone is reporting, even if it
+      // hasn't moved (no new fix is sent while standing still).
+      // …but a phone that has given no GPS fix for 2 hours is not really being
+      // tracked (battery saver / weak signal), whatever its heartbeat says.
+      const gpsOn = stateFresh && !locOff && !noPerm && st.location_on !== null && !!Number(st.location_on);
+      const alive = gpsOn && minutesAgo != null && minutesAgo <= 120;
+      const tracked = enabled && !locOff && !noPerm && (pingFresh || alive);
       const reason = tracked
         ? null
         : !e.user_id
         ? "No login account"
         : !enabled
         ? "Tracking not turned on"
-        : minutesAgo == null
+        : locOff
+        ? "Phone Location (GPS) is OFF"
+        : noPerm
+        ? "Location permission removed in the phone"
+        : noAllTime
+        ? "Location is not set to 'Allow all the time'"
+        : gpsOn
+        ? "Phone is on but gives no GPS fix (battery saver or weak signal)"
+        : minutesAgo == null && !st
         ? "Never sent a location"
-        : "No location in the last 20 min";
+        : "App closed or phone offline";
+      const standing = tracked && !pingFresh;
       return {
         employee_pk: e.id,
         employee_id: e.employee_id || "",
@@ -5044,6 +5152,7 @@ async function startServer() {
         tracked,
         last_ping: p?.last_ping || null,
         minutes_ago: minutesAgo,
+        standing_still: standing,
         reason
       };
     });

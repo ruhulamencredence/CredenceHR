@@ -111,6 +111,15 @@ let lastSentAt = 0;
 let lastSentFixTime = 0;
 let lastFixAt = 0;
 let switchingMode = false;
+// Every fix since the last successful send, oldest first — a trip is sent as
+// its whole path, not just the last point of each interval.
+let pendingFixes: BGLocation[] = [];
+const MAX_PENDING_FIXES = 300;
+// The phone's own heartbeat (is Location on? permission kept?) — sent even
+// when there is no fix, so the admin can tell "Location OFF" from "standing still".
+const STATE_INTERVAL_MS = 2 * 60 * 1000;
+let stateTimer: ReturnType<typeof setInterval> | null = null;
+let onVisible: (() => void) | null = null;
 
 // Best-effort battery percentage — the Web Battery API isn't in every
 // WebView, so this silently returns null rather than ever blocking a ping.
@@ -127,33 +136,68 @@ async function readBatteryPct(): Promise<number | null> {
 
 async function sendPing() {
   if (!latestFix || !currentToken) return;
+  const fix = latestFix;
   // Live: the heartbeat timer skips a fix that was already sent, unless the
   // map would otherwise go 30s without hearing from this phone.
-  if (mode === 'live' && latestFix.time === lastSentFixTime && Date.now() - lastSentAt < 30_000) {
+  if (mode === 'live' && fix.time === lastSentFixTime && Date.now() - lastSentAt < 30_000) {
     if (Date.now() > liveUntil) void switchMode('active');
     return;
   }
+  // Nothing new since the last send (standing still): only a heartbeat — the
+  // server stores no duplicate row but still answers "should I go live?".
+  const repeat = fix.time === lastSentFixTime;
+  const batch = repeat ? [] : pendingFixes.slice();
   lastSentAt = Date.now();
-  lastSentFixTime = latestFix.time;
   const battery_pct = await readBatteryPct();
   try {
     const res = await fetch(apiUrl('/api/tracking/ping'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentToken}` },
       body: JSON.stringify({
-        lat: latestFix.latitude,
-        lng: latestFix.longitude,
-        accuracy_m: latestFix.accuracy,
+        lat: fix.latitude,
+        lng: fix.longitude,
+        accuracy_m: fix.accuracy,
         battery_pct,
-        recorded_at: new Date(latestFix.time).toISOString()
+        recorded_at: new Date(fix.time).toISOString(),
+        repeat,
+        mode,
+        points: batch.map((f) => ({ lat: f.latitude, lng: f.longitude, accuracy_m: f.accuracy, recorded_at: new Date(f.time).toISOString() }))
       })
     });
+    if (res.ok && !repeat) {
+      lastSentFixTime = fix.time;
+      // Drop what was sent; fixes that arrived meanwhile stay for next time.
+      const sentUpTo = batch.length ? batch[batch.length - 1].time : fix.time;
+      pendingFixes = pendingFixes.filter((f) => f.time > sentUpTo);
+    }
     const data = await res.json().catch(() => null);
     if (data && 'live_until' in data) setLiveUntil(data.live_until);
   } catch {
-    // Offline or server unreachable — just skip this cycle. The next timer
-    // tick (or the next time the app reconnects) will try again with
-    // whatever fix is freshest then; we don't queue/retry missed pings.
+    // Offline or server unreachable — the fixes stay queued and go out with
+    // the next successful send, so a tunnel or dead zone leaves no gap in the path.
+  }
+}
+
+// Tells the server what this phone says about location (works with no fix).
+async function sendState() {
+  if (!currentToken) return;
+  const access = await getLocationAccess();
+  const battery_pct = await readBatteryPct();
+  try {
+    await fetch(apiUrl('/api/tracking/state'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${currentToken}` },
+      body: JSON.stringify({
+        location_on: access ? access.locationOn : null,
+        foreground: access ? access.foreground : null,
+        background: access ? access.background : null,
+        precise: access ? access.precise : null,
+        mode,
+        battery_pct
+      })
+    });
+  } catch {
+    // Offline — the next heartbeat tries again.
   }
 }
 
@@ -183,10 +227,17 @@ async function armWatcher(distanceFilterM: number): Promise<void> {
       stale: false,
       distanceFilter: distanceFilterM
     },
-    (location) => {
-      if (!location) return;
+    (location, error) => {
+      if (!location) {
+        // Permission taken away or Location switched off — say so at once
+        // instead of waiting for the next heartbeat.
+        if (error) void sendState();
+        return;
+      }
       latestFix = location;
       lastFixAt = Date.now();
+      pendingFixes.push(location);
+      if (pendingFixes.length > MAX_PENDING_FIXES) pendingFixes = pendingFixes.slice(-MAX_PENDING_FIXES);
       if (mode === 'live' && Date.now() - lastSentAt >= LIVE_MIN_GAP_MS) void sendPing();
       // A fix arrived while idle => the device moved past the coarse
       // threshold, i.e. it's moving again. Snap back to active mode so we
@@ -234,6 +285,15 @@ export async function startBackgroundTracking(token: string): Promise<void> {
   try {
     await armWatcher(ACTIVE_DISTANCE_FILTER_M);
     restartPingTimer(ACTIVE_PING_INTERVAL_MS);
+    void sendState();
+    if (stateTimer) clearInterval(stateTimer);
+    stateTimer = setInterval(() => void sendState(), STATE_INTERVAL_MS);
+    // Back to the front (e.g. after turning Location on in Settings): report at once.
+    if (onVisible) document.removeEventListener('visibilitychange', onVisible);
+    onVisible = () => {
+      if (document.visibilityState === 'visible') void sendState();
+    };
+    document.addEventListener('visibilitychange', onVisible);
     // Checks every minute whether we've gone quiet long enough to drop into
     // idle mode. Cheap (just a Date.now() comparison), so this itself costs
     // no meaningful battery.
@@ -268,6 +328,16 @@ export async function stopBackgroundTracking(): Promise<void> {
     }
     watcherId = null;
   }
+  if (stateTimer) {
+    clearInterval(stateTimer);
+    stateTimer = null;
+  }
+  if (onVisible) {
+    document.removeEventListener('visibilitychange', onVisible);
+    onVisible = null;
+  }
+  pendingFixes = [];
+  lastSentFixTime = 0;
   latestFix = null;
   currentToken = null;
   requestedToken = null;
