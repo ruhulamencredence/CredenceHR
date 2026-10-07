@@ -972,6 +972,30 @@ export function registerHrReportsRoutes(app: Express, deps: HrReportsRouteDeps) 
     }
   });
 
+  // The distinct values one column holds across employees — fills the value
+  // dropdown of a Report Builder filter. Same payroll rule as the catalog.
+  app.get("/api/hr-ops/reports/values", ...gate, async (req: any, res: any) => {
+    try {
+      const col = COLUMN_BY_KEY.get(String(req.query.key || ""));
+      if (!col || (col.payroll && !(await canPayroll(req)))) return res.status(400).json({ error: "Unknown column." });
+      const today = todayInDhaka();
+      const { month, year } = resolvePeriod({ month: "current", year: "current" } as any, today);
+      const facts = await buildFacts(queryDB, today, new Set<Stage>(["base", col.stage]), month, year, req.query.include_inactive === "1");
+      const seen = new Set<string>();
+      for (const f of facts) {
+        const v = f[col.key];
+        const items: any[] = col.type === "list" ? (Array.isArray(v) ? v : []) : [v];
+        for (const it of items) {
+          if (it === null || it === undefined || it === "") continue;
+          seen.add(col.type === "bool" ? (it ? "Yes" : "No") : String(it));
+        }
+      }
+      res.json({ values: [...seen].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).slice(0, 500) });
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
   app.post("/api/hr-ops/reports/run", ...gate, async (req: any, res: any) => {
     try {
       res.json(await runReport(queryDB, todayInDhaka(), cleanConfig(req.body || {}), await canPayroll(req)));
