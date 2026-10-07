@@ -56,6 +56,7 @@ import { useStableCallback } from '../lib/useStableCallback';
 import { reverseGeocode } from '../lib/reverseGeocode';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
 import { confirmDialog } from '../lib/confirmDialog';
+import { LeaveSummaryReport } from './LeaveSummaryReport';
 
 // Module Access modal (Admin Panel -> Users -> per-Admin/User "Module
 // Access") groups the same Admin Panel tabs into the same labeled clusters
@@ -1649,9 +1650,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     }
   };
 
+  // Leave -> its two views, each behind its own layer in Module Access:
+  // 'read' = Monthly Leave Application, 'summary_report' = Employee Leave Summary.
+  const leaveAppLayer = (key: PermissionLayerKey) => {
+    if (user.role === 'superadmin') return true;
+    const saved = user.module_permission_layers?.leave_applications;
+    return saved && saved.length > 0 ? saved.includes(key) : !EXPLICIT_ONLY_LAYERS.includes(key);
+  };
+  const canLeaveList = leaveAppLayer('read');
+  const canLeaveSummary = leaveAppLayer('summary_report');
+  const [leaveAppView, setLeaveAppView] = useState<'list' | 'summary'>('list');
+  const leaveView: 'list' | 'summary' = !canLeaveList ? 'summary' : !canLeaveSummary ? 'list' : leaveAppView;
+
   useEffect(() => {
     if (activeTab !== 'leave_applications') return;
-    fetchLeaveApplicationsReport();
+    if (canLeaveList) fetchLeaveApplicationsReport();
     if (leaveApplicationsReportDepartments.length === 0) fetchLeaveApplicationsReportDepartments();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, leaveApplicationsReportDeptFilter]);
@@ -4590,7 +4603,29 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           "Leave Manage" (can_manage_leave, balances) — this is purely a
           viewing report, the same "Monthly Attendance Report" pattern applied
           to Leave Applications instead of attendance. */}
-      {activeTab === 'leave_applications' && (
+      {activeTab === 'leave_applications' && canLeaveList && canLeaveSummary && (
+        <div className="flex gap-1 p-1 mb-4 bg-slate-100 rounded-xl w-fit">
+          {(
+            [
+              ['list', 'Monthly Leave Application'],
+              ['summary', 'Employee Leave Summary']
+            ] as const
+          ).map(([k, label]) => (
+            <button
+              key={k}
+              type="button"
+              onClick={() => setLeaveAppView(k)}
+              className={`px-3.5 py-1.5 text-xs font-semibold rounded-lg transition-colors ${leaveView === k ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+      {activeTab === 'leave_applications' && leaveView === 'summary' && canLeaveSummary && (
+        <LeaveSummaryReport token={token} departments={leaveApplicationsReportDepartments} />
+      )}
+      {activeTab === 'leave_applications' && leaveView === 'list' && canLeaveList && (
         <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
           <div className="p-6 border-b border-slate-200 flex flex-col gap-4">
             <div>
