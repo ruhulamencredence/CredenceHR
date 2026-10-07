@@ -2152,7 +2152,7 @@ async function startServer() {
   // Branches) — kept in their own file (DepartmentsAndBranches.ts), same
   // reasoning as profileRoutes.ts/holidayRoutes.ts/Alerts.ts/UserManagement.ts
   // above.
-  registerDepartmentsAndBranchesRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, queryDB });
+  registerDepartmentsAndBranchesRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer, queryDB });
 
   // Admin Panel -> Users -> Block / Unblock a login (AccountBlock.ts).
   registerAccountBlockRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, queryDB });

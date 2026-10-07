@@ -678,6 +678,11 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
       filtered.sort((a: any, b: any) => (a.attendance_date < b.attendance_date ? 1 : a.attendance_date > b.attendance_date ? -1 : b.id - a.id));
 
       const withApprovals = await attachApprovalStatuses("attendance", filtered.slice(0, 1000));
+      // Head Office vs Project Side of the check-in site — the type of the
+      // Branch linked to that Project (branches.project_id), if any.
+      const branchTypeByProject = new Map<number, string>(
+        (await queryDB("SELECT * FROM branches")).filter((b: any) => b.project_id).map((b: any) => [Number(b.project_id), b.branch_type])
+      );
       res.json(
         withApprovals.map((r: any) => {
           const proj = projectMap.get(r.project_id);
@@ -685,6 +690,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
           return {
             ...r,
             project_name: proj?.project_name || null,
+            project_office_type: branchTypeByProject.get(Number(r.project_id)) || null,
             location_radius: proj?.location_radius ?? null,
             user_name: u?.name || null
           };

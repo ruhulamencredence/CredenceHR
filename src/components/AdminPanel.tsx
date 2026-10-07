@@ -1754,6 +1754,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // Employee at this Branch — see branches.branch_type / getEmployeeBranchTypeMap.
   const [newBranchType, setNewBranchType] = useState<'head_office' | 'project_site'>('head_office');
   const [editingBranch, setEditingBranch] = useState<Branch | null>(null);
+  // The Project (attendance site + PEPM) this Branch is kept in step with:
+  // 'auto' = link/create the same-name Project, 'none', or a Project id.
+  // Only sent by an account that can see Projects; the API checks Edit/Add.
+  const [branchProjectLink, setBranchProjectLink] = useState<string>('auto');
   const [branchListSearch, setBranchListSearch] = useState('');
   const [showAllBranches, setShowAllBranches] = useState(false);
   const [branchLocation, setBranchLocation] = useState<{ lat: number | null; lng: number | null; label: string | null; radius: number | null }>({
@@ -2281,11 +2285,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           location_lat: branchLocation.lat,
           location_lng: branchLocation.lng,
           location_label: branchLocation.label,
-          location_radius: branchLocation.radius
+          location_radius: branchLocation.radius,
+          ...(canSee('projects') ? { project_link: branchProjectLink } : {})
         })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to save branch');
+      setBranchProjectLink('auto');
 
       setNewBranchName('');
       setNewBranchType('head_office');
@@ -4127,7 +4133,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                     <tr key={r.id} className="hover:bg-slate-50/80 transition-colors">
                       <td className="px-4 py-3 whitespace-nowrap text-slate-600 text-xs">{formatDate(r.attendance_date)}</td>
                       <td className="px-4 py-3 whitespace-nowrap font-semibold text-slate-900 text-xs">{r.user_name || '—'}</td>
-                      <td className="px-4 py-3 whitespace-nowrap text-slate-700 text-xs">{r.project_name || '—'}</td>
+                      <td className="px-4 py-3 whitespace-nowrap text-slate-700 text-xs">
+                        {r.project_name || '—'}
+                        {r.project_office_type && (
+                          <span
+                            className={`ml-1.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full border ${
+                              r.project_office_type === 'project_site'
+                                ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                : 'bg-blue-50 text-blue-700 border-blue-200'
+                            }`}
+                          >
+                            {r.project_office_type === 'project_site' ? 'Project Side' : 'Head Office'}
+                          </span>
+                        )}
+                      </td>
                       <td className="px-4 py-3 whitespace-nowrap text-xs">
                         {r.check_in_at ? (
                           <span className="inline-flex items-center gap-1 text-emerald-700">
@@ -5326,7 +5345,24 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                           <Building2 className="w-5 h-5" />
                         </div>
                         <div>
-                          <span className="font-semibold text-slate-900 text-sm block">{p.project_name}</span>
+                          <span className="font-semibold text-slate-900 text-sm flex items-center gap-1.5 flex-wrap">
+                            {p.project_name}
+                            {p.linked_branch_id && (
+                              <span
+                                className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full border ${
+                                  p.linked_branch_type === 'project_site'
+                                    ? 'bg-amber-50 text-amber-700 border-amber-200'
+                                    : 'bg-blue-50 text-blue-700 border-blue-200'
+                                }`}
+                                title={`Branch: ${p.linked_branch_name}`}
+                              >
+                                {p.linked_branch_type === 'project_site' ? 'Project Side' : 'Head Office'}
+                              </span>
+                            )}
+                          </span>
+                          {p.linked_branch_id && p.linked_branch_name !== p.project_name && (
+                            <span className="block text-[11px] text-slate-500">Branch: {p.linked_branch_name}</span>
+                          )}
                           {p.location_lat != null && p.location_lng != null && (
                             <a
                               href={`https://www.openstreetmap.org/?mlat=${p.location_lat}&mlon=${p.location_lng}#map=17/${p.location_lat}/${p.location_lng}`}
@@ -5444,6 +5480,49 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                     Every Employee assigned to this Branch follows this group's Weekend/Holiday calendar (Admin Panel -&gt; Holidays).
                   </p>
                 </div>
+                {canSee('projects') ? (
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1">
+                      Attendance Project
+                    </label>
+                    <select
+                      value={branchProjectLink}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setBranchProjectLink(v);
+                        // A Branch with no pin of its own takes the Project's.
+                        const p = projects.find((x) => String(x.id) === v);
+                        if (p && branchLocation.lat == null && p.location_lat != null && p.location_lng != null) {
+                          setBranchLocation({
+                            lat: Number(p.location_lat),
+                            lng: Number(p.location_lng),
+                            label: p.location_label ?? null,
+                            radius: p.location_radius != null ? Number(p.location_radius) : null
+                          });
+                        }
+                      }}
+                      className="block w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
+                    >
+                      {!editingBranch?.project_id && <option value="auto">Same name as this Branch (link or create)</option>}
+                      <option value="none">Not linked</option>
+                      {projects.map((p) => {
+                        const takenBy = p.linked_branch_id && p.linked_branch_id !== editingBranch?.id ? p.linked_branch_name : null;
+                        return (
+                          <option key={p.id} value={String(p.id)} disabled={!!takenBy}>
+                            {p.project_name}{takenBy ? ` — linked to ${takenBy}` : ''}
+                          </option>
+                        );
+                      })}
+                    </select>
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      The Project used for attendance check-in (and PEPM). Its name and map location are kept the same as this Branch's.
+                    </p>
+                  </div>
+                ) : editingBranch?.linked_project_name ? (
+                  <p className="text-[11px] text-slate-500">
+                    Linked Project: <span className="font-semibold text-slate-700">{editingBranch.linked_project_name}</span>
+                  </p>
+                ) : null}
                 <div>
                   <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1">
                     Branch Location
@@ -5496,7 +5575,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   {editingBranch && (
                     <button
                       type="button"
-                      onClick={() => { setEditingBranch(null); setNewBranchName(''); setNewBranchType('head_office'); setBranchLocation({ lat: null, lng: null, label: null, radius: null }); }}
+                      onClick={() => { setEditingBranch(null); setNewBranchName(''); setNewBranchType('head_office'); setBranchProjectLink('auto'); setBranchLocation({ lat: null, lng: null, label: null, radius: null }); }}
                       className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold rounded-xl border border-slate-200"
                     >
                       Cancel
@@ -5553,6 +5632,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                               {b.branch_type === 'project_site' ? 'Project' : 'Head Office'}
                             </span>
                           </span>
+                          {b.linked_project_name && (
+                            <span className="block text-[11px] text-slate-500 mt-0.5">Attendance Project: {b.linked_project_name}</span>
+                          )}
                           {b.location_lat != null && b.location_lng != null && (
                             <a
                               href={`https://www.openstreetmap.org/?mlat=${b.location_lat}&mlon=${b.location_lng}#map=17/${b.location_lat}/${b.location_lng}`}
@@ -5577,6 +5659,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                             setEditingBranch(b);
                             setNewBranchName(b.branch_name);
                             setNewBranchType(b.branch_type === 'project_site' ? 'project_site' : 'head_office');
+                            setBranchProjectLink(b.project_id ? String(b.project_id) : 'none');
                             setBranchLocation({
                               lat: b.location_lat != null ? Number(b.location_lat) : null,
                               lng: b.location_lng != null ? Number(b.location_lng) : null,

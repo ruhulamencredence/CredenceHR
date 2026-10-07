@@ -877,6 +877,11 @@ export interface Project {
   location_lng?: number | null;
   location_label?: string | null;
   location_radius?: number | null; // meters — optional site-radius circle around the pin
+  // The Branch this Project is kept in step with (branches.project_id) and
+  // its type — null when no Branch is linked.
+  linked_branch_id?: number | null;
+  linked_branch_name?: string | null;
+  linked_branch_type?: 'head_office' | 'project_site' | null;
 }
 
 // A company Branch (Admin Panel -> Branches, a separate AdminModuleKey from
@@ -903,6 +908,10 @@ export interface Branch {
   location_lng?: number | null;
   location_label?: string | null;
   location_radius?: number | null; // meters — optional site-radius circle around the pin
+  // The Project (attendance check-in site, also PEPM) kept in step with this
+  // Branch — same name and map pin. Null when not linked.
+  project_id?: number | null;
+  linked_project_name?: string | null;
 }
 
 export interface UserProjectPermission {
@@ -1328,6 +1337,8 @@ export interface AttendanceRecord {
   // Only present on rows returned to a User's own history / an Admin's system-wide
   // list (joined server-side) — never trusted as something the client can set.
   project_name?: string;
+  // Head Office vs Project Side of that Project — from its linked Branch.
+  project_office_type?: 'head_office' | 'project_site' | null;
   location_radius?: number | null;
   user_name?: string;
   // Approval Workflow status for this row's Check In / Check Out (Admin Panel ->

@@ -34,11 +34,14 @@ interface DepartmentsAndBranchesRouteDeps {
   // Branches stays on requireModule alone for now. See requireModuleLayer()
   // in server.ts for the exact semantics.
   requireModuleLayer: (moduleKey: "departments" | "branches", layer: "read" | "edit_add" | "entry_upload" | "delete_trash" | "permanent_delete") => any;
+  // Yes/no form of requireModuleLayer — a Branch save that creates, links or
+  // changes its Project needs the Projects module's Edit/Add as well.
+  hasModuleLayer: (user: any, moduleKey: "projects", layer: "edit_add") => Promise<boolean>;
   queryDB: (sql: string, params?: any[]) => Promise<any>;
 }
 
 export function registerDepartmentsAndBranchesRoutes(app: Express, deps: DepartmentsAndBranchesRouteDeps) {
-  const { authenticateToken, requireAdmin, requireModule, requireModuleLayer, queryDB } = deps;
+  const { authenticateToken, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer, queryDB } = deps;
 
   // Branches (Admin Panel -> Branches, its own AdminModuleKey/module permission,
   // separate from Projects). Same GPS-pinned-site shape as a Project, kept in
@@ -50,8 +53,12 @@ export function registerDepartmentsAndBranchesRoutes(app: Express, deps: Departm
   // Remote Attendance/Timesheet reads from this table yet.
   app.get("/api/branches", authenticateToken, async (req, res) => {
     try {
-      const branches = await queryDB("SELECT * FROM branches ORDER BY branch_name ASC");
-      res.json(branches);
+      const [branches, projects]: any[][] = await Promise.all([
+        queryDB("SELECT * FROM branches ORDER BY branch_name ASC"),
+        queryDB("SELECT * FROM projects")
+      ]);
+      const projectName = new Map(projects.map((p: any) => [Number(p.id), p.project_name]));
+      res.json(branches.map((b: any) => ({ ...b, linked_project_name: b.project_id ? projectName.get(Number(b.project_id)) ?? null : null })));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -92,6 +99,121 @@ export function registerDepartmentsAndBranchesRoutes(app: Express, deps: Departm
     return body.branch_type === "project_site" ? "project_site" : "head_office";
   }
 
+  // Branch <-> Project link. A Branch is kept in step with one Project (the
+  // attendance check-in site, also used by PEPM): same name and the same map
+  // pin, so Admin Panel -> Branches is the one place to keep both. The two
+  // tables stay separate — attendance, jobs and PEPM keep their project ids.
+  //
+  // body.project_link: "auto" — link the Project of the same name, or create
+  // it; "none" — no Project; a Project id — link that one. Left out on an
+  // edit, the current link is kept. Creating, linking or changing a Project
+  // needs Projects -> Edit/Add; without it "auto" just leaves the Branch
+  // unlinked, the way Branches worked before.
+  type BranchLocation = { lat: number | null; lng: number | null; label: string | null; radius: number | null };
+  type ProjectPlan =
+    | { error: string; status: number }
+    | { projectId: number | null; create: boolean; project: any | null; location: BranchLocation; projectUpdate: { name: string; location: BranchLocation } | null };
+
+  const sameNum = (a: any, b: any) => (a == null || a === "" ? null : Number(a)) === (b == null || b === "" ? null : Number(b));
+  const sameLocation = (p: any, l: BranchLocation) =>
+    sameNum(p.location_lat, l.lat) && sameNum(p.location_lng, l.lng) && (p.location_label ?? null) === (l.label ?? null) && sameNum(p.location_radius, l.radius);
+
+  async function planProjectLink(req: any, current: any | null, name: string, location: BranchLocation): Promise<ProjectPlan> {
+    const raw = req.body?.project_link;
+    const mode: "auto" | "none" | "keep" | number =
+      raw === undefined || raw === null || raw === ""
+        ? current ? "keep" : "auto"
+        : raw === "none" ? "none" : raw === "auto" ? "auto" : Number(raw);
+    if (typeof mode === "number" && (!Number.isInteger(mode) || mode <= 0)) return { error: "Invalid Project selected", status: 400 };
+
+    const currentId = current?.project_id ? Number(current.project_id) : null;
+    const canEditProjects = await hasModuleLayer(req.user, "projects", "edit_add");
+    const projects: any[] = await queryDB("SELECT * FROM projects");
+    const linkedTo = async (projectId: number) => {
+      const rows: any[] = await queryDB("SELECT * FROM branches");
+      return rows.find((r) => Number(r.project_id) === projectId && Number(r.id) !== Number(current?.id ?? 0)) || null;
+    };
+
+    let projectId: number | null = currentId;
+    let create = false;
+    if (mode === "none") {
+      projectId = null;
+    } else if (typeof mode === "number") {
+      if (!projects.some((p) => Number(p.id) === mode)) return { error: "Selected Project not found", status: 400 };
+      const other = await linkedTo(mode);
+      if (other) return { error: `That Project is already linked to Branch "${other.branch_name}"`, status: 400 };
+      projectId = mode;
+    } else if (mode === "auto" && !currentId) {
+      if (!canEditProjects) {
+        projectId = null;
+      } else {
+        const match = projects.find((p) => String(p.project_name).trim().toLowerCase() === name.toLowerCase());
+        if (match) {
+          const other = await linkedTo(Number(match.id));
+          if (other) return { error: `Project "${match.project_name}" is already linked to Branch "${other.branch_name}"`, status: 400 };
+          projectId = Number(match.id);
+        } else {
+          projectId = null;
+          create = true;
+        }
+      }
+    }
+
+    if ((projectId !== currentId || create) && !canEditProjects) {
+      return { error: "Linking a Branch to a Project needs Projects Edit/Add permission. Ask your Superadmin to grant it.", status: 403 };
+    }
+
+    const project = projectId ? projects.find((p) => Number(p.id) === projectId) || null : null;
+    // One map pin for both: a Branch with no pin of its own takes the
+    // Project's, so linking never clears an existing attendance site.
+    let finalLocation = location;
+    if (project && location.lat == null && project.location_lat != null) {
+      finalLocation = {
+        lat: Number(project.location_lat),
+        lng: Number(project.location_lng),
+        label: project.location_label ?? null,
+        radius: project.location_radius != null ? Number(project.location_radius) : null
+      };
+    }
+    let projectUpdate: { name: string; location: BranchLocation } | null = null;
+    if (project) {
+      // The Project's name follows the Branch only while the two match.
+      const oldName = String(current?.branch_name ?? "").trim().toLowerCase();
+      const nameFollows = String(project.project_name).trim().toLowerCase() === oldName || String(project.project_name).trim().toLowerCase() === name.toLowerCase();
+      const newName = nameFollows ? name : String(project.project_name);
+      if (newName !== project.project_name || !sameLocation(project, finalLocation)) {
+        if (!canEditProjects) {
+          return { error: `This Branch is linked to Project "${project.project_name}" — changing its name or location changes the Project too, which needs Projects Edit/Add permission.`, status: 403 };
+        }
+        if (newName !== project.project_name && projects.some((p) => Number(p.id) !== projectId && String(p.project_name).trim().toLowerCase() === newName.toLowerCase())) {
+          return { error: `Another Project is already named "${newName}"`, status: 400 };
+        }
+        projectUpdate = { name: newName, location: finalLocation };
+      }
+    }
+    return { projectId, create, project, location: finalLocation, projectUpdate };
+  }
+
+  async function applyProjectLink(req: any, branchId: number, name: string, plan: Exclude<ProjectPlan, { error: string }>): Promise<number | null> {
+    let projectId = plan.projectId;
+    const l = plan.location;
+    if (plan.create) {
+      const result = await queryDB(
+        "INSERT INTO projects (project_name, location_lat, location_lng, location_label, location_radius, created_by) VALUES (?, ?, ?, ?, ?, ?)",
+        [name, l.lat, l.lng, l.label, l.radius, req.user.id]
+      );
+      projectId = Number(result.insertId);
+    } else if (projectId && plan.projectUpdate) {
+      const u = plan.projectUpdate;
+      await queryDB(
+        "UPDATE projects SET project_name = ?, location_lat = ?, location_lng = ?, location_label = ?, location_radius = ? WHERE id = ?",
+        [u.name, u.location.lat, u.location.lng, u.location.label, u.location.radius, projectId]
+      );
+    }
+    await queryDB("UPDATE branches SET project_id = ? WHERE id = ?", [projectId, branchId]);
+    return projectId;
+  }
+
   app.post("/api/branches", authenticateToken, requireAdmin, requireModule("branches"), async (req: any, res) => {
     try {
       const { branch_name } = req.body;
@@ -99,19 +221,25 @@ export function registerDepartmentsAndBranchesRoutes(app: Express, deps: Departm
       const location = parseBranchLocation(req.body);
       if ("error" in location) return res.status(400).json({ error: location.error });
       const branchType = parseBranchType(req.body);
+      const name = branch_name.trim();
+      const plan = await planProjectLink(req, null, name, location);
+      if ("error" in plan) return res.status(plan.status).json({ error: plan.error });
+      const loc = plan.location;
 
       const result = await queryDB(
         "INSERT INTO branches (branch_name, branch_type, location_lat, location_lng, location_label, location_radius, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        [branch_name.trim(), branchType, location.lat, location.lng, location.label, location.radius, req.user.id]
+        [name, branchType, loc.lat, loc.lng, loc.label, loc.radius, req.user.id]
       );
+      const projectId = await applyProjectLink(req, Number(result.insertId), name, plan);
       res.json({
         id: result.insertId,
-        branch_name: branch_name.trim(),
+        branch_name: name,
         branch_type: branchType,
-        location_lat: location.lat,
-        location_lng: location.lng,
-        location_label: location.label,
-        location_radius: location.radius
+        location_lat: loc.lat,
+        location_lng: loc.lng,
+        location_label: loc.label,
+        location_radius: loc.radius,
+        project_id: projectId
       });
     } catch (err: any) {
       if (err.code === "ER_DUP_ENTRY" || err.message?.includes("already exists")) {
@@ -129,12 +257,19 @@ export function registerDepartmentsAndBranchesRoutes(app: Express, deps: Departm
       const location = parseBranchLocation(req.body);
       if ("error" in location) return res.status(400).json({ error: location.error });
       const branchType = parseBranchType(req.body);
+      const name = branch_name.trim();
+      const rows: any[] = await queryDB("SELECT * FROM branches WHERE id = ?", [id]);
+      if (rows.length === 0) return res.status(404).json({ error: "Branch not found" });
+      const plan = await planProjectLink(req, rows[0], name, location);
+      if ("error" in plan) return res.status(plan.status).json({ error: plan.error });
+      const loc = plan.location;
 
       await queryDB(
         "UPDATE branches SET branch_name = ?, branch_type = ?, location_lat = ?, location_lng = ?, location_label = ?, location_radius = ? WHERE id = ?",
-        [branch_name.trim(), branchType, location.lat, location.lng, location.label, location.radius, id]
+        [name, branchType, loc.lat, loc.lng, loc.label, loc.radius, id]
       );
-      res.json({ success: true });
+      const projectId = await applyProjectLink(req, Number(id), name, plan);
+      res.json({ success: true, project_id: projectId });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
