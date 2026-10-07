@@ -3464,6 +3464,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       <div className={`flex items-center gap-1 ${align === 'right' ? 'justify-end' : align === 'center' ? 'justify-center' : 'justify-start'}`}>
         <span className="truncate">{label}</span>
         <ColumnFilterMenu
+          plain
           label={label}
           getValues={() => reportMenuValues(key)}
           excluded={reportExcluded[key] || []}
@@ -3723,7 +3724,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 <p className="text-xs text-slate-500">Showing {filteredEntries.length} matching records</p>
               </div>
               <div className="flex items-center gap-2">
-              <ColumnToggleMenu options={REPORT_OPTIONAL_COLS} hidden={reportHidden} onChange={changeReportHidden} />
+              <ColumnToggleMenu plain options={REPORT_OPTIONAL_COLS} hidden={reportHidden} onChange={changeReportHidden} />
               <button
                 onClick={handleDownloadExcel}
                 disabled={filteredEntries.length === 0}
