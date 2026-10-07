@@ -8277,6 +8277,7 @@ async function startServer() {
     requireAdmin,
     requireSuperAdmin,
     requireModule,
+    getAdminModules,
     requireModuleLayer,
     requireBudgetModuleAccess,
     queryDB,

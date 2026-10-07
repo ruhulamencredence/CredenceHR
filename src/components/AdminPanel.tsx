@@ -1894,7 +1894,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     projects: '/api/projects',
     branches: '/api/branches',
     mprNumbers: '/api/mpr-numbers',
-    entries: '/api/entries',
+    entries: '/api/entries?scope=all',
     users: '/api/users',
     budgets: '/api/budgets',
     permissions: '/api/permissions',
