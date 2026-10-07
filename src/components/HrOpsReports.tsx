@@ -61,6 +61,7 @@ import { pdfSafe } from './HrOps360Parts';
 import { FixGapsModal, RequestInfoModal, InfoRequestsReview } from './HrOpsGapTools';
 import { useHrApi, Modal, Notice, Badge, fmtDate, monthLabel, taka, inputCls, labelCls, btnPrimary, btnGhost } from './HrOpsShared';
 import { confirmDialog } from '../lib/confirmDialog';
+import { ColumnFilterMenu } from './ColumnFilterMenu';
 
 // ---------------------------------------------------------------------------
 // Types (mirror HrOpsReportsRoutes.ts)
@@ -354,6 +355,9 @@ const OPS: Record<ColType, [string, string][]> = {
     ['is_false', 'is No']
   ]
 };
+// Filters whose value is one of the column's existing values get a dropdown.
+const pickable = (c: ColumnDef, op: string) =>
+  (c.type === 'text' && (op === 'eq' || op === 'neq')) || (c.type === 'list' && (op === 'contains' || op === 'not_contains'));
 const NO_VALUE = new Set(['empty', 'not_empty', 'is_true', 'is_false']);
 
 function display(v: any, type: ColType): string {
@@ -457,6 +461,9 @@ const ResultView: React.FC<{
   const showFix = !!gapTools && [...result.columns.map((c) => c.key), result.group_by?.key].some((k) => k && GAP_KEYS.has(k));
   const [sort, setSort] = useState<{ key: string; dir: 1 | -1 }>({ key: 'name', dir: 1 });
   const [q, setQ] = useState('');
+  // Per-column filter (values un-ticked in the column menu are hidden).
+  const [excluded, setExcluded] = useState<Record<string, string[]>>({});
+  useEffect(() => setExcluded({}), [result]);
   useEffect(() => setGroupKey(null), [result]);
   const group = result.groups?.find((g) => g.key === groupKey) || null;
   const rows = useMemo(() => {
@@ -467,6 +474,13 @@ const ResultView: React.FC<{
     }
     const needle = q.trim().toLowerCase();
     if (needle) rs = rs.filter((r) => result.columns.some((c) => display(r[c.key], c.type).toLowerCase().includes(needle)));
+    for (const c of result.columns) {
+      const ex = excluded[c.key];
+      if (ex && ex.length) {
+        const hide = new Set(ex);
+        rs = rs.filter((r) => !hide.has(display(r[c.key], c.type)));
+      }
+    }
     const col = result.columns.find((c) => c.key === sort.key);
     return [...rs].sort((a, b) => {
       const av = a[sort.key];
@@ -475,7 +489,13 @@ const ResultView: React.FC<{
       if (col?.type === 'list') return ((av?.length || 0) - (bv?.length || 0)) * sort.dir;
       return String(av ?? '').localeCompare(String(bv ?? '')) * sort.dir;
     });
-  }, [result, group, q, sort]);
+  }, [result, group, q, sort, excluded]);
+  const menuValues = (c: ColumnDef) => {
+    const ids = group ? new Set(group.employee_ids) : null;
+    const set = new Set<string>();
+    for (const r of result.rows) if (!ids || ids.has(r.employee_id)) set.add(display(r[c.key], c.type));
+    return [...set];
+  };
   const maxCount = Math.max(1, ...(result.groups || []).map((g) => g.count));
   const allVisibleSelected = rows.length > 0 && rows.every((r) => selected.has(r.employee_id));
   const requestTargets = (selected.size ? result.rows.filter((r) => selected.has(r.employee_id)) : rows).map((r) => ({ employee_id: r.employee_id, name: r.name }));
@@ -489,10 +509,10 @@ const ResultView: React.FC<{
           {result.truncated && <span className="text-amber-600"> · showing first 5,000</span>}
         </div>
         <div className="flex gap-2">
-          <button type="button" className={btnGhost} onClick={() => exportExcel(title, result)}>
+          <button type="button" className={btnGhost} onClick={() => exportExcel(title, { ...result, rows, total: rows.length })}>
             <FileSpreadsheet className="w-3.5 h-3.5" /> Excel
           </button>
-          <button type="button" className={btnGhost} onClick={() => exportPdf(title, result, filtersText || '')}>
+          <button type="button" className={btnGhost} onClick={() => exportPdf(title, { ...result, rows, total: rows.length }, filtersText || '')}>
             <FileDown className="w-3.5 h-3.5" /> PDF
           </button>
         </div>
@@ -552,12 +572,24 @@ const ResultView: React.FC<{
                 </th>
               )}
               {result.columns.map((c) => (
-                <th
-                  key={c.key}
-                  onClick={() => setSort((s) => ({ key: c.key, dir: s.key === c.key ? (s.dir === 1 ? -1 : 1) : 1 }))}
-                  className="px-3 py-2 text-left font-semibold whitespace-nowrap cursor-pointer select-none hover:text-slate-800"
-                >
-                  {c.label} {sort.key === c.key ? (sort.dir === 1 ? '▲' : '▼') : ''}
+                <th key={c.key} className="px-3 py-2 text-left font-semibold whitespace-nowrap select-none">
+                  <span className="inline-flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setSort((s) => ({ key: c.key, dir: s.key === c.key ? (s.dir === 1 ? -1 : 1) : 1 }))}
+                      className="hover:text-slate-800"
+                    >
+                      {c.label} {sort.key === c.key ? (sort.dir === 1 ? '▲' : '▼') : ''}
+                    </button>
+                    <ColumnFilterMenu
+                      label={c.label}
+                      getValues={() => menuValues(c)}
+                      excluded={excluded[c.key] || []}
+                      sortDir={sort.key === c.key ? (sort.dir === 1 ? 'asc' : 'desc') : null}
+                      onSort={(d) => setSort(d ? { key: c.key, dir: d === 'asc' ? 1 : -1 } : { key: 'name', dir: 1 })}
+                      onChange={(ex) => setExcluded((m) => ({ ...m, [c.key]: ex }))}
+                    />
+                  </span>
                 </th>
               ))}
               {showFix && <th className="px-3 py-2" />}
@@ -667,6 +699,24 @@ const Builder: React.FC<{
     group_by: c.group_by && colBy.has(c.group_by) ? c.group_by : null
   });
   const [config, setConfig] = useState<ReportConfig>(() => clean(initial.config));
+  // Distinct values per column, fetched when a filter uses it (value dropdown).
+  const [valuesFor, setValuesFor] = useState<Record<string, string[]>>({});
+  const loadValues = (key: string) => {
+    if (valuesFor[key]) return;
+    setValuesFor((v) => ({ ...v, [key]: [] }));
+    api
+      .get<{ values: string[] }>(`/api/hr-ops/reports/values?key=${encodeURIComponent(key)}&include_inactive=${config.include_inactive ? 1 : 0}`)
+      .then((r) => setValuesFor((v) => ({ ...v, [key]: r.values })))
+      .catch(() => setValuesFor((v) => {
+        const n = { ...v };
+        delete n[key];
+        return n;
+      }));
+  };
+  useEffect(() => {
+    for (const f of config.filters) loadValues(f.key);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config.filters.map((f) => f.key).join(',')]);
   const [title, setTitle] = useState(initial.title);
   const [result, setResult] = useState<ReportResult | null>(null);
   const [running, setRunning] = useState(false);
@@ -828,7 +878,22 @@ const Builder: React.FC<{
                       ))}
                     </select>
                     {!NO_VALUE.has(f.op) &&
-                      (f.op === 'between' ? (
+                      (pickable(c, f.op) ? (
+                        <select
+                          value={f.value ?? ''}
+                          onChange={(e) => set({ value: e.target.value })}
+                          onFocus={() => loadValues(f.key)}
+                          className={`${inputCls} !py-1 !text-xs`}
+                        >
+                          <option value="">Select {c.label}…</option>
+                          {f.value && !(valuesFor[f.key] || []).includes(String(f.value)) && <option value={f.value}>{f.value}</option>}
+                          {(valuesFor[f.key] || []).map((v) => (
+                            <option key={v} value={v}>
+                              {v}
+                            </option>
+                          ))}
+                        </select>
+                      ) : f.op === 'between' ? (
                         <>
                           <input
                             type={c.type === 'date' ? 'date' : 'number'}
@@ -850,9 +915,16 @@ const Builder: React.FC<{
                           onChange={(e) => set({ value: e.target.value })}
                           className={`${inputCls} !py-1 !text-xs`}
                           placeholder={c.type === 'list' ? 'e.g. XYZ Company' : ''}
+                          list={c.type === 'text' ? `vals-${i}` : undefined}
+                          onFocus={() => loadValues(f.key)}
                         />
                       ))}
                   </div>
+                  <datalist id={`vals-${i}`}>
+                    {(valuesFor[f.key] || []).map((v) => (
+                      <option key={v} value={v} />
+                    ))}
+                  </datalist>
                 </div>
               );
             })}
