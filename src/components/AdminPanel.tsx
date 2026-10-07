@@ -4644,6 +4644,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                       <th className="px-4 py-3">Start Date</th>
                       <th className="px-4 py-3">End Date</th>
                       <th className="px-4 py-3">Days</th>
+                      <th className="px-4 py-3">Purpose</th>
                       <th className="px-4 py-3">Status</th>
                       <th className="px-4 py-3">Approver</th>
                     </tr>
@@ -4659,6 +4660,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                           <td className="px-4 py-3 text-slate-600">{formatDate(a.start_date)}</td>
                           <td className="px-4 py-3 text-slate-600">{formatDate(a.end_date)}</td>
                           <td className="px-4 py-3 text-slate-600">{a.day_count}</td>
+                          <td className="px-4 py-3 text-slate-600 max-w-[260px]">
+                            <span className="line-clamp-2 break-words" title={a.purpose || ''}>{a.purpose || '—'}</span>
+                          </td>
                           <td className="px-4 py-3">
                             <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold ${
                               a.status === 'approved' ? 'bg-emerald-50 text-emerald-700' :
@@ -4672,7 +4676,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                       ))}
                     {leaveApplicationsReport.length === 0 && (
                       <tr>
-                        <td colSpan={8} className="px-4 py-10 text-center text-slate-400">No Leave Applications found.</td>
+                        <td colSpan={9} className="px-4 py-10 text-center text-slate-400">No Leave Applications found.</td>
                       </tr>
                     )}
                   </tbody>
@@ -4704,6 +4708,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                         <CalendarClock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                         {a.leave_type.replace('_', ' ')} &middot; {a.day_count} day{Number(a.day_count) === 1 ? '' : 's'}
                       </div>
+                      {a.purpose && <p className="text-xs text-slate-600 break-words">{a.purpose}</p>}
 
                       <div className="flex items-center justify-between text-xs">
                         <span className="text-slate-500">
