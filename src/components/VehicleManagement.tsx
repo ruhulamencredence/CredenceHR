@@ -157,6 +157,9 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
   const wideWeb = useWideWeb();
   const [submitting, setSubmitting] = useState(false);
   const [submitMessage, setSubmitMessage] = useState<string | null>(null);
+  // Shown on Ride Status right after a request is submitted (the screen
+  // moves there so the requester sees the new request and its status).
+  const [submittedNotice, setSubmittedNotice] = useState<string | null>(null);
 
   // Ride Status summary tiles double as a filter.
   const [statusFilter, setStatusFilter] = useState<'all' | Requisition['status']>('all');
@@ -359,10 +362,14 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Could not submit request.');
-      setSubmitMessage('Ride request submitted successfully.');
+      setSubmitMessage(null);
       setForm(emptyForm());
       setPlaces(null);
       setLastPlaces(null);
+      setSubmittedNotice('Ride request submitted successfully. You can follow its status here.');
+      setStatusFilter('all');
+      if (tab === 'status') loadRequisitions();
+      else setTab('status');
     } catch (err: any) {
       setSubmitMessage(err.message);
     } finally {
@@ -529,7 +536,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
           return (
             <button
               key={key}
-              onClick={() => setTab(key)}
+              onClick={() => { setTab(key); setSubmittedNotice(null); }}
               className={`${wideWeb ? 'px-4' : 'flex-1 min-w-0 px-2'} py-2 rounded-full inline-flex items-center justify-center gap-1.5 text-xs sm:text-[13px] font-semibold leading-tight transition-all ${
                 on ? 'liquid-glass-button' : 'text-slate-600 hover:text-[color:var(--g-accent-700)] hover:bg-white/70'
               }`}
@@ -667,6 +674,12 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
               {submitting ? 'Submitting…' : 'Submit Request'} {!submitting && <ArrowRight className="w-4 h-4" />}
             </button>
           </form>
+        </div>
+      )}
+
+      {tab === 'status' && submittedNotice && (
+        <div className="mb-3">
+          <RideBanner tone="success">{submittedNotice}</RideBanner>
         </div>
       )}
 
