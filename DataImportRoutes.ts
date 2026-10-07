@@ -44,6 +44,8 @@ interface DataImportDeps {
   today: () => string;
   // Same balance change a Leave Application makes when it's submitted.
   adjustLeaveTypeBalance: (userId: number, leaveType: string, delta: number) => Promise<void>;
+  // Gives an account with no leave balance yet its default one; returns who got it.
+  ensureDefaultLeaveBalances: (userIds: number[]) => Promise<Set<number>>;
 }
 
 type FieldType = "text" | "date" | "time" | "number" | "yesno";
@@ -273,7 +275,7 @@ const IMPORTED = "Imported from Excel";
 const IMPORTED_DEDUCTED = "Imported from Excel (balance deducted)";
 
 export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
-  const { authenticateToken, requireAdmin, queryDB, getAdminModules, today, adjustLeaveTypeBalance } = deps;
+  const { authenticateToken, requireAdmin, queryDB, getAdminModules, today, adjustLeaveTypeBalance, ensureDefaultLeaveBalances } = deps;
 
   const allowedKinds = async (user: any) => {
     if (user?.role === "superadmin") return IMPORT_KINDS;
@@ -569,7 +571,10 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
           if (overlap.id && overlap.remarks === IMPORTED && deducts(String(overlap.status), s0)) {
             const d0 = Number(overlap.day_count) || 0;
             if (!ctx.dryRun) {
-              await adjustLeaveTypeBalance(userId, String(overlap.leave_type), -d0);
+              // An account getting its default balance only now already has this
+              // leave counted in it (the default is minus leave taken this year).
+              const fresh = await ensureDefaultLeaveBalances([userId]);
+              if (!fresh.has(userId)) await adjustLeaveTypeBalance(userId, String(overlap.leave_type), -d0);
               await queryDB("UPDATE leave_applications SET remarks = ? WHERE id = ?", [IMPORTED_DEDUCTED, overlap.id]);
             }
             overlap.remarks = IMPORTED_DEDUCTED;

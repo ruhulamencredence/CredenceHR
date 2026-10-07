@@ -254,7 +254,7 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
   // year-end auto-rollover (checkAndRunLeaveYearRollover below). Returns how
   // many (workflow, account) balance writes actually happened, so callers can
   // tell "nothing to apply" apart from a real 0-account workflow.
-  async function applyAllActiveWorkflows(actingUserId: number, onlyWorkflowId?: number): Promise<number> {
+  async function applyAllActiveWorkflows(actingUserId: number | null, onlyWorkflowId?: number, onlyUserIds?: number[]): Promise<number> {
     const workflows: any = onlyWorkflowId
       ? await queryDB("SELECT * FROM leave_balance_workflows WHERE id = ? AND is_active = 1", [onlyWorkflowId])
       : await queryDB("SELECT * FROM leave_balance_workflows WHERE is_active = 1");
@@ -276,7 +276,8 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
       if (!itemsByWorkflow.has(wid)) itemsByWorkflow.set(wid, []);
       itemsByWorkflow.get(wid)!.push(it);
     }
-    const allUserIds = users.map((u: any) => Number(u.id));
+    const only = onlyUserIds ? new Set(onlyUserIds.map(Number)) : null;
+    const allUserIds = users.map((u: any) => Number(u.id)).filter((id: number) => !only || only.has(id));
 
     let appliedCount = 0;
     for (const wf of workflows) {
@@ -299,7 +300,7 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
       }
       if (Object.keys(fixedValues).length === 0 && Object.keys(customValues).length === 0) continue;
 
-      await applyBalancesToTargets(targetIds, fixedValues, customValues, actingUserId);
+      await applyBalancesToTargets(targetIds, fixedValues, customValues, actingUserId as number);
       appliedCount += targetIds.length;
     }
     return appliedCount;
@@ -371,6 +372,34 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
     }
   }
 
+  // Default balance for an account that has never had one (a new employee's
+  // login, an imported login, …): the active Balance Workflows (General, then
+  // its Designation's) are applied to it the first time a balance is needed —
+  // same values and the same "minus leave already taken this year" as
+  // Apply Now. An account with any balance row is never touched. Returns the
+  // accounts that got their default balance just now.
+  async function ensureDefaultLeaveBalances(userIds: number[]): Promise<Set<number>> {
+    const ids = [...new Set(userIds.map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+    if (!ids.length) return new Set();
+    try {
+      const ph = ids.map(() => "?").join(",");
+      const [users, withFixed, withCustom] = await Promise.all([
+        queryDB(`SELECT id FROM users WHERE role IN ('admin', 'user') AND id IN (${ph})`, ids),
+        queryDB(`SELECT user_id FROM leave_balances WHERE user_id IN (${ph})`, ids),
+        queryDB(`SELECT user_id FROM leave_category_balances WHERE user_id IN (${ph})`, ids)
+      ]);
+      const has = new Set<number>([...(withFixed || []), ...(withCustom || [])].map((r: any) => Number(r.user_id)));
+      const missing = (users || []).map((u: any) => Number(u.id)).filter((id: number) => !has.has(id));
+      if (!missing.length) return new Set();
+      const sa: any[] = (await queryDB("SELECT id FROM users WHERE role = 'superadmin' LIMIT 1")) || [];
+      await applyAllActiveWorkflows(sa[0] ? Number(sa[0].id) : null, undefined, missing);
+      return new Set(missing);
+    } catch (err: any) {
+      console.warn("⚠️ Could not set the default leave balance: " + err.message);
+      return new Set();
+    }
+  }
+
   // Self Service -> Leave Application / Leave Summary card (own balance only).
   // Always returns the requesting account's own single row, even if that
   // account also holds can_manage_leave (Leave Manager) access — unlike
@@ -380,6 +409,7 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
   // leave_balances row just reads as 0/0/0.
   app.get("/api/leave-balances/mine", authenticateToken, async (req: any, res) => {
     try {
+      await ensureDefaultLeaveBalances([Number(req.user.id)]);
       const [rows, categories, myCategoryBalances] = await Promise.all([
         queryDB("SELECT * FROM leave_balances WHERE user_id = ?", [req.user.id]),
         queryDB("SELECT id, category_key, label FROM leave_categories"),
@@ -421,6 +451,7 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
 
       if (canManageAll) {
         const users: any = await queryDB("SELECT id, name, role FROM users WHERE role IN ('admin', 'user')");
+        await ensureDefaultLeaveBalances(users.map((u: any) => Number(u.id)));
         const [balances, employees, categories, categoryBalances] = await Promise.all([
           queryDB("SELECT * FROM leave_balances"),
           // Department comes from the Employee Directory row linked to this
@@ -1596,4 +1627,6 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
   // hours — see checkAndRunLeaveYearRollover's own doc comment above.
   checkAndRunLeaveYearRollover();
   setInterval(checkAndRunLeaveYearRollover, 6 * 60 * 60 * 1000);
+
+  return { ensureDefaultLeaveBalances };
 }
