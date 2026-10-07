@@ -33,7 +33,6 @@ interface LeaveRouteDeps {
   // toggle, a different feature).
   requireAdmin: (req: any, res: any, next: any) => Promise<any>;
   requireModule: (moduleKey: string) => any;
-  requireModuleLayer: (moduleKey: any, layer: any) => any;
   // Department-wise scope for the 'leave_applications' module — see
   // leave_application_department_access table comment in server.ts's initDB().
   getLeaveApplicationDeptScope: (userId: number) => Promise<string[] | null>;
@@ -79,7 +78,6 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
     queryDB,
     requireAdmin,
     requireModule,
-    requireModuleLayer,
     getLeaveApplicationDeptScope,
     requireLeaveManager,
     requireLeaveManagerLayer,
@@ -1177,108 +1175,6 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
     }
   });
 
-  // Employee Leave Summary (Admin Panel -> Leave -> Employee Leave Summary):
-  // every approved leave between ?from and ?to (YYYY-MM-DD, by start date),
-  // grouped employee -> leave year -> leave type, with the employee's header
-  // details — the client lays it out like HR's "Leave Summary Report" sheet.
-  // Its own layer ('summary_report', ticked per account in Module Access) and
-  // the same Department scope as the Monthly Leave Application list.
-  app.get(
-    "/api/leave-applications/summary-report",
-    authenticateToken,
-    requireAdmin,
-    requireModule("leave_applications"),
-    requireModuleLayer("leave_applications", "summary_report"),
-    async (req: any, res) => {
-      try {
-        const iso = /^\d{4}-\d{2}-\d{2}$/;
-        const from = String(req.query.from || "");
-        const to = String(req.query.to || "");
-        if (!iso.test(from) || !iso.test(to) || from > to) return res.status(400).json({ error: "Pick a valid From and To date." });
-        const requestedDepartment = req.query.department ? String(req.query.department).trim() : null;
-        const deptScope = req.user.role === "superadmin" ? null : await getLeaveApplicationDeptScope(req.user.id);
-        if (deptScope && requestedDepartment && !deptScope.includes(requestedDepartment)) {
-          return res.status(403).json({ error: "You don't have access to this Department's Leave Applications." });
-        }
-        const employeeId = req.query.employee_id ? Number(req.query.employee_id) : null;
-
-        const leaves: any[] =
-          (await queryDB(
-            `SELECT id, user_id, leave_type, start_date, end_date, day_count, is_half_day, purpose
-               FROM leave_applications
-              WHERE status = 'approved' AND start_date >= ? AND start_date <= ?
-              ORDER BY start_date, id`,
-            [from, to]
-          )) || [];
-        const userIds = [...new Set(leaves.map((l) => Number(l.user_id)))];
-        if (userIds.length === 0) return res.json({ from, to, employees: [] });
-
-        const emps: any[] =
-          (await queryDB(
-            `SELECT id, employee_id, name, designation, department, branch, division, job_status, is_active, joining_date, user_id
-               FROM all_employees WHERE user_id IN (${userIds.map(() => "?").join(",")})`,
-            userIds
-          )) || [];
-        const users: any[] = (await queryDB(`SELECT id, name FROM users WHERE id IN (${userIds.map(() => "?").join(",")})`, userIds)) || [];
-        const empByUser = new Map<number, any>(emps.map((e) => [Number(e.user_id), e]));
-        const userName = new Map<number, string>(users.map((u) => [Number(u.id), u.name]));
-
-        const cats: any[] = (await queryDB("SELECT category_key, label FROM leave_categories").catch(() => [])) || [];
-        const fixed: Record<string, string> = { casual: "Casual Leave", sick: "Sick Leave", without_pay: "Leave Without Pay" };
-        const typeLabel = (t: string) => fixed[t] || cats.find((c) => c.category_key === t)?.label || t;
-        const isPaid = (t: string, label: string) => t !== "without_pay" && !/without\s*pay/i.test(label);
-        const d10 = (v: any) => (v ? String(v instanceof Date ? v.toISOString() : v).slice(0, 10) : null);
-
-        const byUser = new Map<number, any[]>();
-        for (const l of leaves) {
-          const uid = Number(l.user_id);
-          if (!byUser.has(uid)) byUser.set(uid, []);
-          byUser.get(uid)!.push(l);
-        }
-        const employees: any[] = [];
-        for (const [uid, list] of byUser) {
-          const e = empByUser.get(uid) || null;
-          // Department scope: an applicant with no Employee row only shows to an unscoped viewer.
-          if (deptScope && (!e || !deptScope.includes(e.department))) continue;
-          if (requestedDepartment && (!e || e.department !== requestedDepartment)) continue;
-          if (employeeId && (!e || Number(e.id) !== employeeId)) continue;
-          const years = new Map<string, Map<string, any>>();
-          for (const l of list) {
-            const year = String(d10(l.start_date)).slice(0, 4);
-            const label = typeLabel(String(l.leave_type));
-            if (!years.has(year)) years.set(year, new Map());
-            const types = years.get(year)!;
-            if (!types.has(label)) types.set(label, { leave_type: label, is_paid: isPaid(String(l.leave_type), label), rows: [] });
-            types.get(label)!.rows.push({
-              from: d10(l.start_date),
-              to: d10(l.end_date),
-              days: Number(l.day_count) || 0,
-              remarks: l.purpose || ""
-            });
-          }
-          employees.push({
-            employee_pk: e ? Number(e.id) : null,
-            employee_id: e?.employee_id || "",
-            name: e?.name || userName.get(uid) || `User #${uid}`,
-            designation: e?.designation || "",
-            branch: e?.branch || "",
-            division: e?.division || "",
-            department: e?.department || "",
-            job_status: e?.job_status || (e ? (Number(e.is_active ?? 1) ? "Active" : "Inactive") : ""),
-            joining_date: d10(e?.joining_date),
-            years: [...years.entries()]
-              .sort((a, b) => a[0].localeCompare(b[0]))
-              .map(([year, types]) => ({ year, types: [...types.values()].sort((a, b) => a.leave_type.localeCompare(b.leave_type)) }))
-          });
-        }
-        employees.sort((a, b) => String(a.employee_id).localeCompare(String(b.employee_id), undefined, { numeric: true }) || a.name.localeCompare(b.name));
-        res.json({ from, to, employees });
-      } catch (err: any) {
-        res.status(500).json({ error: err.message });
-      }
-    }
-  );
-
   // GET: every submitted Leave Application (every applicant, every status),
   // each enriched with the applicant's Department — unlike GET
   // /api/leave-applications above, visibility here is driven ENTIRELY by the
@@ -1292,7 +1188,7 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
   // "uncategorized". An optional ?department= filter narrows further (or is
   // rejected 403 if it names a Department outside the caller's own scope,
   // same convention GET /api/attendance/report/monthly uses).
-  app.get("/api/leave-applications/report", authenticateToken, requireAdmin, requireModule("leave_applications"), requireModuleLayer("leave_applications", "read"), async (req: any, res) => {
+  app.get("/api/leave-applications/report", authenticateToken, requireAdmin, requireModule("leave_applications"), async (req: any, res) => {
     try {
       const requestedDepartment = req.query.department ? String(req.query.department).trim() : null;
 
