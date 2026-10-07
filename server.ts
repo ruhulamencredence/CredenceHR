@@ -1483,7 +1483,13 @@ async function getLeaveTypeLabel(leaveType: string): Promise<string> {
 // This account's current balance for a Leave Type — fixed types read the
 // matching leave_balances column; a custom category reads its
 // leave_category_balances row (0 if that account has never had one set).
+// Set once LeaveRoutes.ts is registered: gives an account that has never had
+// a leave balance its default one (the active Balance Workflows) — see
+// ensureDefaultLeaveBalances there. Called before any balance is read or moved.
+let ensureDefaultLeaveBalances: (userIds: number[]) => Promise<Set<number>> = async () => new Set();
+
 async function getLeaveTypeBalance(userId: number, leaveType: string): Promise<number> {
+  await ensureDefaultLeaveBalances([userId]);
   if (isFixedLeaveType(leaveType)) {
     const balanceColumn = leaveType === "casual" ? "casual_leave" : leaveType === "sick" ? "sick_leave" : "leave_without_pay";
     const rows = await queryDB("SELECT * FROM leave_balances WHERE user_id = ?", [userId]);
@@ -1504,6 +1510,7 @@ async function getLeaveTypeBalance(userId: number, leaveType: string): Promise<n
 // approver-picked decision route), so a day_count is always moved the exact
 // same way regardless of which kind of Leave Type it's for.
 async function adjustLeaveTypeBalance(userId: number, leaveType: string, delta: number): Promise<void> {
+  await ensureDefaultLeaveBalances([userId]);
   if (isFixedLeaveType(leaveType)) {
     const balanceColumn = leaveType === "casual" ? "casual_leave" : leaveType === "sick" ? "sick_leave" : "leave_without_pay";
     const rows = await queryDB("SELECT * FROM leave_balances WHERE user_id = ?", [userId]);
@@ -2492,7 +2499,7 @@ async function startServer() {
   // Admin Panel -> Data Import (DataImportRoutes.ts): employees, leave,
   // claims and attendance history from an Excel/CSV sheet; each kind needs
   // its own module (a Superadmin has them all).
-  registerDataImportRoutes(app, { authenticateToken, requireAdmin, queryDB, getAdminModules, today: todayInDhaka, adjustLeaveTypeBalance });
+  registerDataImportRoutes(app, { authenticateToken, requireAdmin, queryDB, getAdminModules, today: todayInDhaka, adjustLeaveTypeBalance, ensureDefaultLeaveBalances: (ids: number[]) => ensureDefaultLeaveBalances(ids) });
 
   registerReportsInsightsRoutes(app, {
     authenticateToken,
@@ -2618,7 +2625,7 @@ async function startServer() {
   // file (LeaveRoutes.ts), same reasoning as profileRoutes.ts/holidayRoutes.ts/
   // Alerts.ts/UserManagement.ts/ConveyanceBillClaimRoutes.ts/AttendanceRoutes.ts
   // above.
-  registerLeaveRoutes(app, {
+  ({ ensureDefaultLeaveBalances } = registerLeaveRoutes(app, {
     authenticateToken,
     queryDB,
     requireAdmin,
@@ -2638,7 +2645,7 @@ async function startServer() {
     createTemplateApprovalRequest,
     finalizeLeaveApplicationApproval,
     notifyLeaveFirstApprovers
-  });
+  }));
 
   // --- Vite Middleware / Static Serving ---
   // Node http.Server created up front (not app.listen yet) so Vite's HMR
