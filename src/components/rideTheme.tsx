@@ -32,7 +32,7 @@ export const BTN_GHOST_SM =
 export const BTN_WARN_SM =
   'rounded-full inline-flex items-center justify-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 transition-colors';
 
-export type RideStatus = 'pending' | 'approved' | 'ongoing' | 'rejected' | 'cancelled' | 'completed';
+export type RideStatus = 'pending' | 'approved' | 'ongoing' | 'rejected' | 'cancelled' | 'completed' | 'expired';
 
 const CHIP: Record<RideStatus, { cls: string; dot: string }> = {
   pending: { cls: 'bg-amber-50 text-amber-700 ring-amber-200', dot: 'bg-amber-500' },
@@ -40,7 +40,8 @@ const CHIP: Record<RideStatus, { cls: string; dot: string }> = {
   ongoing: { cls: 'bg-emerald-50 text-emerald-700 ring-emerald-200', dot: 'bg-emerald-500 animate-pulse' },
   rejected: { cls: 'bg-rose-50 text-rose-700 ring-rose-200', dot: 'bg-rose-500' },
   cancelled: { cls: 'bg-slate-100 text-slate-600 ring-slate-200', dot: 'bg-slate-400' },
-  completed: { cls: 'bg-sky-50 text-sky-700 ring-sky-200', dot: 'bg-sky-500' }
+  completed: { cls: 'bg-sky-50 text-sky-700 ring-sky-200', dot: 'bg-sky-500' },
+  expired: { cls: 'bg-orange-50 text-orange-700 ring-orange-200', dot: 'bg-orange-500' }
 };
 
 export function RideStatusChip({ status, label }: { status: RideStatus; label: string }) {

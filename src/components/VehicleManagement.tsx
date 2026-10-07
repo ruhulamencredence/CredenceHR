@@ -45,7 +45,7 @@ interface Requisition {
   start_time: string;
   estimated_duration_hours: number;
   expected_return_at: string | null;
-  status: 'pending' | 'approved' | 'ongoing' | 'rejected' | 'cancelled' | 'completed';
+  status: 'pending' | 'approved' | 'ongoing' | 'rejected' | 'cancelled' | 'completed' | 'expired';
   // Who the Approval Workflow is currently waiting on (comma-joined — ANY
   // ONE of them clears the step) — null once past 'pending'.
   pending_with: string | null;
@@ -77,7 +77,9 @@ const STATUS_LABEL: Record<Requisition['status'], string> = {
   ongoing: 'Vehicle Assigned — Ride Ongoing',
   rejected: 'Rejected',
   cancelled: 'Cancelled',
-  completed: 'Completed'
+  completed: 'Completed',
+  // Start time (+ grace) passed before it was approved / given a vehicle.
+  expired: 'Expired — Not Confirmed in Time'
 };
 
 
@@ -352,8 +354,13 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
 
   async function submitRequisition(e: React.FormEvent) {
     e.preventDefault();
-    setSubmitting(true);
     setSubmitMessage(null);
+    // Same rule the API applies: no booking for a time already gone.
+    if (form.ride_date && form.start_time && new Date(`${form.ride_date}T${form.start_time}`).getTime() < Date.now() - 60 * 1000) {
+      setSubmitMessage('The ride date and start time have already passed — pick a time from now on.');
+      return;
+    }
+    setSubmitting(true);
     try {
       const res = await fetch(apiUrl('/api/vehicles/requisitions'), {
         method: 'POST',
@@ -650,7 +657,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
             <div className={`grid gap-3 ${wideWeb ? 'grid-cols-2' : 'grid-cols-2 sm:grid-cols-3'}`}>
               <div>
                 <label className={RIDE_LABEL}>Ride Date</label>
-                <input required type="date" value={form.ride_date} onChange={(e) => setForm({ ...form, ride_date: e.target.value })} className={RIDE_INPUT} />
+                <input required type="date" min={todayLocal()} value={form.ride_date} onChange={(e) => setForm({ ...form, ride_date: e.target.value })} className={RIDE_INPUT} />
               </div>
               <div>
                 <label className={RIDE_LABEL}>Start Time</label>
@@ -1060,6 +1067,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
                   <input
                     required
                     type="date"
+                    min={todayLocal()}
                     value={directBookForm.ride_date}
                     onChange={(e) => setDirectBookForm({ ...directBookForm, ride_date: e.target.value })}
                     className={RIDE_INPUT}

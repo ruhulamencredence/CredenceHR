@@ -158,6 +158,41 @@ export async function ensureVehicleManagementSchema(dbPool: any): Promise<void> 
       console.warn("⚠️ Could not add vehicle_requisitions.driver_user_id: " + err.message);
     }
   }
+  // 'expired' — the ride's start time (plus the grace time below) passed
+  // while the request was still waiting on approval or a vehicle. See
+  // expireOverdueRides.
+  try {
+    await dbPool.query(
+      `ALTER TABLE vehicle_requisitions MODIFY COLUMN status ENUM('pending','approved','ongoing','rejected','cancelled','completed','expired') NOT NULL DEFAULT 'pending'`
+    );
+  } catch (err: any) {
+    console.warn("⚠️ Could not widen vehicle_requisitions.status to include 'expired': " + err.message);
+  }
+  // When the "ride starts soon" reminder went out, and when the request expired.
+  for (const col of ["deadline_reminded_at", "expired_at"]) {
+    try {
+      await dbPool.query(`ALTER TABLE vehicle_requisitions ADD COLUMN ${col} DATETIME NULL`);
+    } catch (err: any) {
+      if (err.code !== "ER_DUP_FIELDNAME") console.warn(`⚠️ Could not add vehicle_requisitions.${col}: ` + err.message);
+    }
+  }
+  // Ride deadline rules (Admin Panel -> Vehicle Management -> Ride Deadline):
+  // grace_minutes — how long after the start time a waiting request can still
+  // be approved / given a vehicle before it expires; reminder_minutes — how
+  // long before the start time the approvers get a reminder.
+  try {
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS vehicle_ride_settings (
+        id INT PRIMARY KEY,
+        grace_minutes INT NOT NULL DEFAULT 30,
+        reminder_minutes INT NOT NULL DEFAULT 60,
+        updated_by INT NULL,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      )
+    `);
+  } catch (err: any) {
+    console.warn("⚠️ Could not ensure vehicle_ride_settings table: " + err.message);
+  }
   // Geocoded destination for the Live Ride Map's road route — filled lazily
   // the first time the map is opened (see geocodeDestination below), since
   // destination itself is free text typed by the requester.
@@ -172,7 +207,7 @@ export async function ensureVehicleManagementSchema(dbPool: any): Promise<void> 
   }
 }
 
-export function registerVehicleManagementRoutes(app: Express, deps: VehicleManagementRouteDeps) {
+export function registerVehicleManagementRoutes(app: Express, deps: VehicleManagementRouteDeps): { expireOverdueRides: () => Promise<void> } {
   const {
     authenticateToken,
     requireAdmin,
@@ -213,6 +248,142 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
   // validation regardless of whether the result goes through the Approval
   // Workflow or is booked+confirmed directly. Throws a plain Error with a
   // message safe to send straight back to the client on bad input.
+  // A ride's start as a real instant. ride_date + start_time are Bangladesh
+  // local time (no DST), whatever timezone the server process runs in.
+  function rideStartAt(rideDate: any, startTime: any): Date | null {
+    const d = String(rideDate || "").slice(0, 10);
+    const m = /^(\d{1,2}):(\d{2})/.exec(String(startTime || ""));
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || !m) return null;
+    const t = new Date(`${d}T${m[1].padStart(2, "0")}:${m[2]}:00+06:00`);
+    return Number.isNaN(t.getTime()) ? null : t;
+  }
+
+  async function loadRideSettings(): Promise<{ grace_minutes: number; reminder_minutes: number }> {
+    try {
+      const rows: any[] = await queryDB("SELECT * FROM vehicle_ride_settings WHERE id = 1");
+      if (rows.length > 0) {
+        return { grace_minutes: Number(rows[0].grace_minutes) || 0, reminder_minutes: Number(rows[0].reminder_minutes) || 0 };
+      }
+    } catch {
+      // table not there yet — defaults
+    }
+    return { grace_minutes: 30, reminder_minutes: 60 };
+  }
+
+  // Who can still act on a waiting request: the current approval step's
+  // approvers (pending) or whoever gave the final approval plus Vehicle
+  // Management (approved, waiting on a vehicle) — and the Vehicle
+  // Maintainers, who can direct-assign either.
+  async function rideActors(r: any): Promise<number[]> {
+    const ids = new Set<number>();
+    const requestRows: any = await queryDB("SELECT * FROM approval_requests WHERE source_type = ?", ["vehicle_requisition"]);
+    const request = requestRows.find((x: any) => Number(x.source_id) === Number(r.id) && (r.status === "pending" ? x.status === "pending" : true));
+    if (r.status === "pending" && request) {
+      for (const a of await getCurrentStepApprovers(request)) ids.add(Number(a.user_id));
+    }
+    if (r.status === "approved" && request) {
+      try {
+        const actions: any[] = JSON.parse(request.actions_json || "[]");
+        const last = actions[actions.length - 1];
+        if (last?.approver_id) ids.add(Number(last.approver_id));
+      } catch {
+        // no actions recorded
+      }
+    }
+    const modules: any[] = await queryDB("SELECT user_id, module_key FROM admin_module_permissions");
+    for (const m of modules) {
+      if (m.module_key === "vehicle_maintainer" || (r.status === "approved" && m.module_key === "vehicle_management")) ids.add(Number(m.user_id));
+    }
+    ids.delete(Number(r.employee_user_id));
+    // Nobody else holds it (e.g. auto-approved, no Vehicle Management grant
+    // yet) — the Superadmins still hear about it.
+    if (ids.size === 0) {
+      const users: any[] = await queryDB("SELECT * FROM users WHERE role = ? OR id = ?", ["superadmin", r.employee_user_id]);
+      const groupOf = (u: any) => (u?.group_id == null ? null : Number(u.group_id));
+      const employeeGroup = groupOf(users.find((u) => Number(u.id) === Number(r.employee_user_id)));
+      for (const u of users) {
+        if (u.role === "superadmin" && Number(u.id) !== Number(r.employee_user_id) && groupOf(u) === employeeGroup) ids.add(Number(u.id));
+      }
+    }
+    return [...ids];
+  }
+
+  // Expires every request still waiting (pending / approved without a
+  // vehicle) whose start time + grace has passed, and sends the "starts
+  // soon" reminder for those inside the reminder window. Runs every minute
+  // and before any action that could approve or assign a ride, so nothing
+  // can be approved or assigned once its time is up.
+  let rideCheckRunning: Promise<void> | null = null;
+  function expireOverdueRides(): Promise<void> {
+    if (!rideCheckRunning) {
+      rideCheckRunning = (async () => {
+        const { grace_minutes, reminder_minutes } = await loadRideSettings();
+        const now = Date.now();
+        const rows: any[] = await queryDB("SELECT * FROM vehicle_requisitions WHERE status IN (?, ?)", ["pending", "approved"]);
+        for (const r of rows) {
+          const start = rideStartAt(r.ride_date, r.start_time);
+          if (!start) continue;
+          const route = `${r.pickup_location} → ${r.destination}`;
+          const when = `${String(r.ride_date).slice(0, 10)} ${String(r.start_time).slice(0, 5)}`;
+          if (now > start.getTime() + grace_minutes * 60 * 1000) {
+            const actors = await rideActors(r);
+            const done: any = await queryDB("UPDATE vehicle_requisitions SET status = ?, expired_at = ? WHERE id = ? AND status = ?", [
+              "expired",
+              new Date(),
+              r.id,
+              r.status
+            ]);
+            if (Number(done?.affectedRows ?? 1) === 0) continue;
+            const requestRows: any = await queryDB("SELECT * FROM approval_requests WHERE source_type = ?", ["vehicle_requisition"]);
+            const pendingRequest = requestRows.find((x: any) => Number(x.source_id) === Number(r.id) && x.status === "pending");
+            if (pendingRequest) await queryDB("UPDATE approval_requests SET status = ? WHERE id = ?", ["rejected", pendingRequest.id]);
+            const stage = r.status === "pending" ? "approved" : "given a vehicle";
+            await createAlert(queryDB, {
+              userId: Number(r.employee_user_id),
+              type: "vehicle_requisition" as AlertType,
+              title: "Ride Request Expired",
+              message: `Your ride request (${route}, ${when}) expired — it wasn't ${stage} in time. Please book again if you still need a ride.`,
+              relatedType: "vehicle_requisition",
+              relatedId: Number(r.id)
+            });
+            for (const uid of actors) {
+              await createAlert(queryDB, {
+                userId: uid,
+                type: "vehicle_approval" as AlertType,
+                title: "Ride Request Expired",
+                message: `Ride request #${r.id} (${route}, ${when}) expired — it wasn't ${stage} in time.`,
+                relatedType: "vehicle_requisition",
+                relatedId: Number(r.id)
+              });
+            }
+          } else if (!r.deadline_reminded_at && reminder_minutes > 0 && now >= start.getTime() - reminder_minutes * 60 * 1000) {
+            await queryDB("UPDATE vehicle_requisitions SET deadline_reminded_at = ? WHERE id = ?", [new Date(), r.id]);
+            const need = r.status === "pending" ? "approval" : "a vehicle and driver";
+            for (const uid of await rideActors(r)) {
+              await createAlert(queryDB, {
+                userId: uid,
+                type: "vehicle_approval" as AlertType,
+                title: "Ride Starts Soon — Still Waiting",
+                message: `Ride request #${r.id} (${route}) starts at ${when} and still needs ${need}. It expires ${grace_minutes} min after the start time.`,
+                relatedType: "vehicle_requisition",
+                relatedId: Number(r.id)
+              });
+            }
+          }
+        }
+      })()
+        .catch((err: any) => console.warn("⚠️ Ride deadline check failed: " + err.message))
+        .finally(() => {
+          rideCheckRunning = null;
+        });
+    }
+    return rideCheckRunning;
+  }
+  setInterval(() => void expireOverdueRides(), 60 * 1000);
+  setTimeout(() => void expireOverdueRides(), 15 * 1000);
+
+  const EXPIRED_MSG = "This ride request has expired — its start time (plus the grace time) has passed.";
+
   function validateRideFields(body: any) {
     const purpose = typeof body.purpose === "string" ? body.purpose.trim().slice(0, 2000) : "";
     const pickup = typeof body.pickup_location === "string" ? body.pickup_location.trim().slice(0, 255) : "";
@@ -229,6 +400,10 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
     if (!Number.isFinite(duration) || duration <= 0) {
       throw new Error("Estimated duration must be greater than 0 hours.");
     }
+    const start = rideStartAt(rideDate, startTime);
+    if (!start) throw new Error("Ride date or start time is not valid.");
+    // A minute of slack for a form filled in right at the current time.
+    if (start.getTime() < Date.now() - 60 * 1000) throw new Error("The ride date and start time have already passed — pick a time from now on.");
 
     const expectedReturn = computeExpectedReturn(rideDate, startTime, duration);
     return { purpose, pickup, destination, rideDate, startTime, duration, expectedReturn };
@@ -349,6 +524,7 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
       pickup_location: r.pickup_location,
       destination: r.destination,
       ride_date: r.ride_date,
+      expired_at: r.expired_at || null,
       start_time: r.start_time,
       estimated_duration_hours: Number(r.estimated_duration_hours),
       expected_return_at: r.expected_return_at,
@@ -399,6 +575,7 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
   // Panel's "Ride Requests" board from one endpoint).
   app.get("/api/vehicles/requisitions", authenticateToken, async (req: any, res: any) => {
     try {
+      await expireOverdueRides();
       const manage = await canManage(req.user.id, req.user.role);
       const { rows, userById, vehicleById } = await loadContext();
       const scoped = manage ? rows : rows.filter((r: any) => Number(r.employee_user_id) === Number(req.user.id));
@@ -422,6 +599,7 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
   // on top of already being trusted as an approver.
   app.get("/api/vehicles/requisitions/awaiting-my-assignment", authenticateToken, async (req: any, res: any) => {
     try {
+      await expireOverdueRides();
       const { rows, userById, vehicleById } = await loadContext();
       const approved = rows.filter((r: any) => r.status === "approved");
       const mine: any[] = [];
@@ -735,6 +913,36 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
   // here — see the design note above registerVehicleManagementRoutes.
   // ---------------------------------------------------------------------
 
+  // GET/PUT /api/vehicles/ride-settings — the ride deadline rules
+  // (vehicle_ride_settings). Vehicle Management reads them; only a
+  // Superadmin changes them.
+  app.get("/api/vehicles/ride-settings", ...adminGate, async (req: any, res: any) => {
+    try {
+      res.json({ ...(await loadRideSettings()), can_change: req.user.role === "superadmin" });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put("/api/vehicles/ride-settings", authenticateToken, async (req: any, res: any) => {
+    try {
+      if (req.user.role !== "superadmin") return res.status(403).json({ error: "Only a Superadmin can change the ride deadline rules." });
+      const grace = Number(req.body?.grace_minutes);
+      const reminder = Number(req.body?.reminder_minutes);
+      if (!Number.isInteger(grace) || grace < 0 || grace > 1440) return res.status(400).json({ error: "Grace time must be 0–1440 minutes." });
+      if (!Number.isInteger(reminder) || reminder < 0 || reminder > 1440) return res.status(400).json({ error: "Reminder time must be 0–1440 minutes." });
+      const rows: any[] = await queryDB("SELECT * FROM vehicle_ride_settings WHERE id = 1");
+      if (rows.length === 0) {
+        await queryDB("INSERT INTO vehicle_ride_settings (id, grace_minutes, reminder_minutes, updated_by) VALUES (?, ?, ?, ?)", [1, grace, reminder, req.user.id]);
+      } else {
+        await queryDB("UPDATE vehicle_ride_settings SET grace_minutes = ?, reminder_minutes = ?, updated_by = ? WHERE id = 1", [grace, reminder, req.user.id]);
+      }
+      res.json({ success: true, grace_minutes: grace, reminder_minutes: reminder });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/vehicles", ...adminGate, async (_req: any, res: any) => {
     try {
       const rows: any = await queryDB("SELECT * FROM vehicles");
@@ -809,9 +1017,11 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
           .json({ error: "You need Vehicle Management access, or to be this request's approver, to assign a vehicle." });
       }
 
+      await expireOverdueRides();
       const reqRows: any = await queryDB("SELECT * FROM vehicle_requisitions WHERE id = ?", [id]);
       const requisition = reqRows[0];
       if (!requisition) return res.status(404).json({ error: "Requisition not found." });
+      if (requisition.status === "expired") return res.status(400).json({ error: EXPIRED_MSG });
       if (requisition.status !== "approved") {
         return res.status(400).json({ error: "This requisition must be Approved (by the Approval Workflow) before a vehicle can be assigned." });
       }
@@ -860,9 +1070,11 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
   app.put("/api/vehicles/requisitions/:id/approve-and-assign", authenticateToken, async (req: any, res: any) => {
     try {
       const id = Number(req.params.id);
+      await expireOverdueRides();
       const reqRows: any = await queryDB("SELECT * FROM vehicle_requisitions WHERE id = ?", [id]);
       const requisition = reqRows[0];
       if (!requisition) return res.status(404).json({ error: "Requisition not found." });
+      if (requisition.status === "expired") return res.status(400).json({ error: EXPIRED_MSG });
       if (requisition.status !== "pending") {
         return res.status(400).json({ error: "This requisition isn't waiting on an approval right now." });
       }
@@ -1027,9 +1239,11 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
   app.put("/api/vehicles/requisitions/:id/direct-assign", ...maintainerGate, async (req: any, res: any) => {
     try {
       const id = Number(req.params.id);
+      await expireOverdueRides();
       const reqRows: any = await queryDB("SELECT * FROM vehicle_requisitions WHERE id = ?", [id]);
       const requisition = reqRows[0];
       if (!requisition) return res.status(404).json({ error: "Requisition not found." });
+      if (requisition.status === "expired") return res.status(400).json({ error: EXPIRED_MSG });
       if (!["pending", "approved"].includes(requisition.status)) {
         return res.status(400).json({ error: "Only a pending or approved requisition can be bypassed like this." });
       }
@@ -1411,4 +1625,6 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
       res.status(500).json({ error: err.message });
     }
   });
+
+  return { expireOverdueRides };
 }

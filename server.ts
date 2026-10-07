@@ -744,6 +744,14 @@ async function performApprovalAction(
   const rows = await queryDB("SELECT * FROM approval_requests WHERE id = ?", [requestId]);
   if (rows.length === 0) throw new ApprovalActionError(404, "Approval request not found.");
   const request = rows[0];
+  // A ride request whose start time (+ grace) has passed can't be approved.
+  if (request.source_type === "vehicle_requisition") {
+    await expireOverdueRides();
+    const ride = await queryDB("SELECT status FROM vehicle_requisitions WHERE id = ?", [request.source_id]);
+    if (ride.length > 0 && ride[0].status === "expired") {
+      throw new ApprovalActionError(400, "This ride request has expired — its start time (plus the grace time) has passed.");
+    }
+  }
   if (request.status !== "pending") {
     throw new ApprovalActionError(400, `This request was already ${request.status}.`);
   }
@@ -1226,6 +1234,11 @@ async function rejectAssetRequisitionRecord(requisitionId: number, rejectedBy: n
 // two-step shape as finalizeAssetRequisitionApproval/POST .../fulfill above.
 // Shared by performApprovalAction's 'vehicle_requisition' branch and the
 // auto-approve path on POST /api/vehicles/requisitions.
+// Expires waiting ride requests whose start time + grace has passed (see
+// VehicleManagementRoutes.ts) — bound once the routes register; called
+// before any approval action on a ride so an expired one can't be approved.
+let expireOverdueRides: () => Promise<void> = async () => {};
+
 async function finalizeVehicleRequisitionApproval(requisitionId: number, approvedBy: number, remarks: string | null) {
   const rows = await queryDB("SELECT * FROM vehicle_requisitions WHERE id = ?", [requisitionId]);
   if (rows.length === 0) throw new Error("Requisition not found");
@@ -2436,7 +2449,7 @@ async function startServer() {
   // Admin Panel -> Approvals / "My Approvals" like every other module, and
   // this file's own PUT .../assign is only the post-approval "assign a
   // vehicle + driver" step (mirrors POST /api/assets/requisitions/:id/fulfill).
-  registerVehicleManagementRoutes(app, {
+  ({ expireOverdueRides } = registerVehicleManagementRoutes(app, {
     authenticateToken,
     requireAdmin,
     requireModule,
@@ -2447,7 +2460,7 @@ async function startServer() {
     getCurrentStepApprovers,
     isVehicleMaintainerStep,
     finalizeVehicleRequisitionApproval
-  });
+  }));
 
   // 360 ERP SSO (Sidebar -> "360 ERP") — kept in its own file, same reasoning
   // as AssetManagementRoutes.ts/PayrollRoutes.ts above.
