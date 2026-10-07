@@ -23,6 +23,7 @@ interface EntriesRouteDeps {
   requireAdmin: any;
   requireSuperAdmin: any;
   requireModule: (moduleKey: string) => any;
+  getAdminModules: (userId: number) => Promise<string[]>;
   // Per-module action layers (server.ts) — PEPM Reports: read / edit_add /
   // delete_trash / permanent_delete.
   requireModuleLayer: (moduleKey: any, layer: any) => any;
@@ -40,6 +41,7 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
     requireAdmin,
     requireSuperAdmin,
     requireModule,
+    getAdminModules,
     requireBudgetModuleAccess,
     queryDB,
     todayInDhaka,
@@ -187,7 +189,14 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
         WHERE e.deleted_at IS NULL
       `;
       const params: any[] = [];
-      if (req.user.role !== "admin" && req.user.role !== "superadmin") {
+      // A plain User sees only their own entries — except in the Admin Panel
+      // (?scope=all) when the Superadmin granted them the Reports module, who
+      // otherwise got "0 matching records" in PEPM Reports.
+      let seesAll = req.user.role === "admin" || req.user.role === "superadmin";
+      if (!seesAll && req.query.scope === "all") {
+        seesAll = (await getAdminModules(Number(req.user.id))).includes("reports");
+      }
+      if (!seesAll) {
         sql += ` AND e.created_by = ?`;
         params.push(req.user.id);
       }
