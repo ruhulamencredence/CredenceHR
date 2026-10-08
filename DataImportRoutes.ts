@@ -133,16 +133,21 @@ export const IMPORT_KINDS: Kind[] = [
   {
     key: "movement_claims",
     title: "Movement Claim History",
-    description: "Past Movement Claims (check in / check out for official movement).",
+    description:
+      "Past Movement Claims (check in / check out for official movement). The \"Multiple Check In/Out Details Report\" sheet can be uploaded as it is — each Check In is paired with the same person's next Check Out.",
     module: "claims",
     fields: [
       EMP,
       { key: "date", label: "Date", type: "date", required: true, example: "2026-08-12" },
       { key: "check_in", label: "Check In", type: "time", required: true, aliases: ["in time", "start time"], example: "10:15" },
       { key: "check_out", label: "Check Out", type: "time", aliases: ["out time", "end time"], example: "13:40" },
-      { key: "purpose", label: "Purpose", type: "text", required: true, example: "Site visit - Mirpur" },
+      { key: "check_out_date", label: "Check Out Date", type: "date", aliases: ["out date"], note: "Only when the Check Out was on a later day" },
+      { key: "purpose", label: "Purpose", type: "text", required: true, aliases: ["visited company"], example: "Site visit - Mirpur" },
       { key: "distance_km", label: "Distance (km)", type: "number", aliases: ["distance", "km"], example: 12.5 },
-      { key: "remarks", label: "Remarks", type: "text" }
+      { key: "remarks", label: "Remarks", type: "text", aliases: ["check in remarks"] },
+      { key: "check_in_place", label: "Check In Address", type: "text", aliases: ["check in place"] },
+      { key: "check_out_remarks", label: "Check Out Remarks", type: "text" },
+      { key: "check_out_place", label: "Check Out Address", type: "text", aliases: ["check out place"] }
     ]
   },
   {
@@ -606,24 +611,43 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
       row: async (v, ctx, prep) => {
         const { emp, userId } = loginOf(v, ctx);
         const date = dateOf(v, "date", "Date") as string;
-        const tin = timeOf(v, "check_in", "Check In") || fail("Check In is empty.");
         const tout = timeOf(v, "check_out", "Check Out");
-        if (tout && tout < tin) fail("Check Out is before Check In.");
+        const tin = timeOf(v, "check_in", "Check In") || fail(tout ? "Only a Check Out in the file — there's no Check In before it." : "Check In is empty.");
+        const outDate = (dateOf(v, "check_out_date", "Check Out Date", false) as string | null) || date;
+        if (tout && `${outDate} ${tout}` < `${date} ${tin}`) fail("Check Out is before Check In.");
         const dist = str(v.distance_km) ? parseNumber(v.distance_km) : null;
         if (dist !== null && (!Number.isFinite(dist) || dist < 0)) fail(`Distance "${str(v.distance_km)}" isn't a number.`);
         const inAt = `${date} ${tin}`;
         const who = `${emp.name} (${str(v.employee_id)})`;
         if (prep.existing.some((c: any) => Number(c.user_id) === userId && String(c.check_in_at).slice(0, 16) === inAt.slice(0, 16)))
           return { status: "skip", message: `Already has a claim checked in at ${inAt.slice(0, 16)}.`, employee: who };
+        // Remarks plus the address, when the file has one.
+        const note = (remarks: string, place: string) => [remarks, place ? `Address: ${place}` : ""].filter(Boolean).join("\n") || null;
         if (!ctx.dryRun) {
+          // A past visit with no Check Out is saved as finished (no check-out
+          // time) — an imported 'open' claim would stop the employee from
+          // checking in to a new one.
           await queryDB(
             `INSERT INTO claims (user_id, purpose, status, check_in_at, check_in_remarks, check_out_at, check_out_remarks, distance_km)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-            [userId, str(v.purpose).slice(0, 255), tout ? "completed" : "open", inAt, str(v.remarks) || "Imported from Excel", tout ? `${date} ${tout}` : null, null, dist]
+            [
+              userId,
+              str(v.purpose).slice(0, 255),
+              "completed",
+              inAt,
+              note(str(v.remarks), str(v.check_in_place)) || "Imported from Excel",
+              tout ? `${outDate} ${tout}` : null,
+              tout ? note(str(v.check_out_remarks), str(v.check_out_place)) : null,
+              dist
+            ]
           );
         }
         prep.existing.push({ user_id: userId, check_in_at: inAt });
-        return { status: "create", message: tout ? `${tin.slice(0, 5)} – ${tout.slice(0, 5)}` : `Checked in ${tin.slice(0, 5)} (still open)`, employee: who };
+        return {
+          status: "create",
+          message: tout ? `${tin.slice(0, 5)} – ${tout.slice(0, 5)}${outDate !== date ? ` (${outDate})` : ""}` : `Checked in ${tin.slice(0, 5)} — no Check Out in the file`,
+          employee: who
+        };
       }
     },
 
