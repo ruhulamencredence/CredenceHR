@@ -5,7 +5,6 @@
 
 import React, { Suspense, lazy } from 'react';
 import { User } from './types';
-import { AppLoader } from './components/AppLoader';
 import { CallLayer } from './components/CallLayer';
 
 // Lazy-loaded the same way App.tsx loads it, so Chat's own Socket.IO client
@@ -61,7 +60,7 @@ export default function ChatStandalone() {
           open) are handled here too — App.tsx's CallLayer lives in the
           other tab. */}
       {(user.role === 'superadmin' || user.can_use_calls) && <CallLayer token={token} />}
-      <Suspense fallback={<AppLoader />}>
+      <Suspense fallback={null}>
         <ChatPanel
           user={user}
           token={token}
