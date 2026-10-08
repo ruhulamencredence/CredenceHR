@@ -1133,12 +1133,12 @@ export default function App() {
       <main className="flex-1">
         {/* The User Dashboard gets a placeholder in its own layout (see
             UserDashboardSkeleton) so nothing jumps when it arrives. The Admin
-            Panel shows nothing while its code loads — the Admin Dashboard has
-            its own skeleton, and two skeletons one after the other just
-            flicker. Every other page keeps the generic loader. */}
+            Panel, Chat and Alerts show nothing while their code loads — each
+            has its own loading state, and a generic skeleton first just
+            flickers. Every other page keeps the generic loader. */}
         <Suspense
           fallback={
-            isAdminView && !showChat && !showAlertsPage && !showProfilePage && !selfServiceView ? null : !showChat && !showAlertsPage && !showProfilePage && !selfServiceView ? (
+            showChat || showAlertsPage || (isAdminView && !showProfilePage && !selfServiceView) ? null : !showProfilePage && !selfServiceView ? (
               <UserDashboardSkeleton showAttendance={!!user?.can_use_attendance} showLeaveSummary={!!user?.can_view_leave_summary} showTracking={user?.role === 'superadmin' || (user?.module_permissions || []).includes('tracking')} />
             ) : (
               <AppLoader />
@@ -1382,7 +1382,7 @@ export default function App() {
             >
               <X className="w-4 h-4" />
             </button>
-            <Suspense fallback={<AppLoader />}>
+            <Suspense fallback={null}>
               <ChatPanel
                 user={user}
                 token={token || ''}
