@@ -24,7 +24,9 @@ interface AlertsPageProps {
   // assign a vehicle on a Vehicle Maintainer Layer) -> Approve Application.
   // 'vehicle_requisition' = the requester's own ride updates -> Book a Ride.
   onOpenApproveApplications?: () => void;
-  onOpenVehicleManagement?: () => void;
+  // 'assign' — a ride already approved that still needs a vehicle (or one
+  // that expired): open where vehicles are assigned instead of Approvals.
+  onOpenVehicleManagement?: (target?: 'status' | 'assign') => void;
   // The claimant's own Conveyance Bill Claim updates -> Conveyance Bill Claim.
   onOpenConveyanceClaim?: () => void;
   // The requester's own Asset Requisition updates -> My Asset (Status for
@@ -103,13 +105,17 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
 
   const handleAlertClick = (alert: Alert) => {
     if (!alert.is_read) markRead(alert.id);
+    const rideNeedsVehicle =
+      alert.type === 'vehicle_approval' && (/Needs a Vehicle|Ride Request Expired/.test(alert.title) || /still needs a vehicle/.test(alert.message || ''));
     const target =
       alert.type === 'leave_application'
         ? onOpenLeaveApplication
+        : rideNeedsVehicle && onOpenVehicleManagement
+        ? () => onOpenVehicleManagement('assign')
         : alert.type === 'vehicle_approval' || alert.type === 'leave_approval' || alert.type === 'conveyance_approval' || alert.type === 'asset_approval' || alert.type === 'exit_clearance' || alert.type === 'mobile_limit_approval' || alert.type === 'loan_approval'
         ? onOpenApproveApplications
-        : alert.type === 'vehicle_requisition'
-        ? onOpenVehicleManagement
+        : alert.type === 'vehicle_requisition' && onOpenVehicleManagement
+        ? () => onOpenVehicleManagement('status')
         : alert.type === 'conveyance_claim' || alert.type === 'conveyance_disbursed'
         ? onOpenConveyanceClaim
         : alert.type === 'asset_requisition' && onOpenMyAsset
