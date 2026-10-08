@@ -363,7 +363,9 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
               await createAlert(queryDB, {
                 userId: uid,
                 type: "vehicle_approval" as AlertType,
-                title: "Ride Starts Soon — Still Waiting",
+                // "Needs a Vehicle" opens the assign screens, not Approvals
+                // (see the alert click handling in AlertsBell/AlertsPage).
+                title: r.status === "pending" ? "Ride Starts Soon — Awaiting Approval" : "Ride Starts Soon — Needs a Vehicle",
                 message: `Ride request #${r.id} (${route}) starts at ${when} and still needs ${need}. It expires ${grace_minutes} min after the start time.`,
                 relatedType: "vehicle_requisition",
                 relatedId: Number(r.id)

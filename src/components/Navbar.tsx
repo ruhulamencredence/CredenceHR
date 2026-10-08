@@ -411,9 +411,10 @@ export const Navbar: React.FC<NavbarProps> = ({
             token={token}
             onOpenLeaveApplication={() => onGoToSelfServiceTab('leaveApplication')}
             onOpenApproveApplications={() => onGoToSelfServiceTab('approveApplications')}
-            onOpenVehicleManagement={() => {
-              // A ride update is about an existing ride — open Ride Status.
-              requestQuickAccessTab('bookRide', 'status');
+            onOpenVehicleManagement={(target) => {
+              // A ride update is about an existing ride — open Ride Status
+              // (or the assign screens for one still needing a vehicle).
+              requestQuickAccessTab('bookRide', target || 'status');
               onGoToSelfServiceTab('vehicleManagement');
             }}
             onOpenConveyanceClaim={onGoToConveyanceBillClaim}

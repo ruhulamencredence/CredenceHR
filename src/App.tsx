@@ -1169,9 +1169,9 @@ export default function App() {
               setShowAlertsPage(false);
               sidebarNavProps.onGoToSelfServiceTab('approveApplications');
             }}
-            onOpenVehicleManagement={() => {
+            onOpenVehicleManagement={(target) => {
               setShowAlertsPage(false);
-              requestQuickAccessTab('bookRide', 'status');
+              requestQuickAccessTab('bookRide', target || 'status');
               sidebarNavProps.onGoToSelfServiceTab('vehicleManagement');
             }}
             onOpenConveyanceClaim={() => {

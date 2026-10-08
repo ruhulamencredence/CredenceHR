@@ -11,7 +11,7 @@
 // read/write split and fetch-with-Bearer-token pattern AssetManagement.tsx
 // already uses.
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { apiUrl } from '../lib/api';
 import { LiveRideMap } from './LiveRideMap';
 import { RideDetails } from './RideDetails';
@@ -141,9 +141,15 @@ interface VehicleManagementProps {
 
 export function VehicleManagement({ user }: VehicleManagementProps) {
   const isVehicleMaintainer = user?.role === 'superadmin' || !!(user?.module_permissions || []).includes('vehicle_maintainer');
+  // Opened from a "ride needs a vehicle" alert: start on Approved by Me; if
+  // nothing there is this account's to assign, go to Direct Book (Vehicle
+  // Maintainer) or Admin Panel -> Vehicle Management instead.
+  const wantAssignRef = useRef(false);
   const [tab, setTab] = useState<'book' | 'status' | 'assign' | 'maintainer'>(() => {
     // One-shot tab request from the Dashboard's Book a Ride quick access.
-    return takeQuickAccessTab('bookRide') === 'status' ? 'status' : 'book';
+    const requested = takeQuickAccessTab('bookRide');
+    if (requested === 'assign') wantAssignRef.current = true;
+    return requested === 'status' ? 'status' : requested === 'assign' ? 'assign' : 'book';
   });
   const [requisitions, setRequisitions] = useState<Requisition[]>([]);
   const [loading, setLoading] = useState(false);
@@ -333,6 +339,14 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
       if (!vehRes.ok) throw new Error(vehData.error || 'Failed to load available vehicles.');
       setAwaitingAssignment(reqData);
       setAvailableVehicles(vehData);
+      if (wantAssignRef.current) {
+        wantAssignRef.current = false;
+        if (Array.isArray(reqData) && reqData.length === 0) {
+          const canAdmin = user?.role === 'superadmin' || (user?.module_permissions || []).includes('vehicle_management');
+          if (isVehicleMaintainer) setTab('maintainer');
+          else if (canAdmin) window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'vehicle_management' }));
+        }
+      }
     } catch (err: any) {
       if (!silent) setError(err.message);
     } finally {
