@@ -145,6 +145,102 @@ function leaveSummarySheetRows(grid: any[][]): Record<string, any>[] | null {
   return out;
 }
 
+// Movement Claim History can also come as the "Multiple Check In/Out Details
+// Report": a few title lines, then "SL | Employee Code | Employee Name | Type |
+// Check In/Out Time | Visited Company | Address | Remarks", one line per Check
+// In or Check Out ("01-10-2026 08:44 AM"). Each person's lines are put in time
+// order and every Check In is paired with that person's next line when it is a
+// Check Out; a Check In with no Check Out after it, or a Check Out with no
+// Check In before it, stays on its own (the import says so for that row).
+// Returns null when the sheet isn't laid out that way.
+function checkInOutSheetRows(grid: any[][]): Record<string, any>[] | null {
+  const cell = (line: any[], c: number) => String(line?.[c] ?? '').trim();
+  const headerAt = grid.findIndex(
+    (l) => (l || []).some((v: any) => norm(String(v ?? '')) === 'checkinouttime') && (l || []).some((v: any) => norm(String(v ?? '')) === 'type')
+  );
+  if (headerAt < 0) return null;
+  const header = (grid[headerAt] || []).map((h: any) => norm(String(h ?? '')));
+  const col = (...names: string[]) => header.findIndex((h: string) => names.includes(h));
+  const cCode = col('employeecode', 'employeeid', 'empid');
+  const cType = col('type');
+  const cTime = col('checkinouttime');
+  const cCompany = col('visitedcompany');
+  const cAddress = col('address');
+  const cRemarks = col('remarks');
+  if (cCode < 0 || cType < 0 || cTime < 0) return null;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  // "01-10-2026 08:44 AM" (day first), or an Excel date number.
+  const when = (v: any): { date: string; time: string; key: string } | null => {
+    if (typeof v === 'number') {
+      const d = XLSX.SSF.parse_date_code(v);
+      if (!d) return null;
+      const date = `${d.y}-${pad(d.m)}-${pad(d.d)}`;
+      const time = `${pad(d.H)}:${pad(d.M)}`;
+      return { date, time, key: `${date} ${time}` };
+    }
+    const m = /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})\s+(\d{1,2}):(\d{2})(?::\d{2})?\s*([AaPp][Mm])?$/.exec(String(v ?? '').trim());
+    if (!m) return null;
+    let h = Number(m[4]);
+    if (m[6]) h = (h % 12) + (/p/i.test(m[6]) ? 12 : 0);
+    const date = `${m[3]}-${pad(Number(m[2]))}-${pad(Number(m[1]))}`;
+    const time = `${pad(h)}:${m[5]}`;
+    return { date, time, key: `${date} ${time}` };
+  };
+  type Ev = { row: number; code: string; isIn: boolean; at: { date: string; time: string; key: string } | null; raw: string; company: string; address: string; remarks: string };
+  const byPerson = new Map<string, Ev[]>();
+  const out: Record<string, any>[] = [];
+  for (let i = headerAt + 1; i < grid.length; i++) {
+    const line = grid[i] || [];
+    const code = cell(line, cCode);
+    const type = norm(cell(line, cType));
+    if (!code || (type !== 'checkin' && type !== 'checkout')) continue;
+    const ev: Ev = {
+      row: i + 1,
+      code,
+      isIn: type === 'checkin',
+      at: when(line[cTime]),
+      raw: cell(line, cTime),
+      company: cCompany >= 0 ? cell(line, cCompany) : '',
+      address: cAddress >= 0 ? cell(line, cAddress) : '',
+      remarks: cRemarks >= 0 ? cell(line, cRemarks) : ''
+    };
+    if (!ev.at) {
+      // Left for the import to report: "Date ... isn't a date".
+      out.push({ __row: ev.row, employee_id: code, date: ev.raw, check_in: ev.isIn ? ev.raw : '', purpose: ev.company || ev.remarks });
+      continue;
+    }
+    if (!byPerson.has(code)) byPerson.set(code, []);
+    byPerson.get(code)!.push(ev);
+  }
+  for (const evs of byPerson.values()) {
+    evs.sort((a, b) => (a.at!.key < b.at!.key ? -1 : a.at!.key > b.at!.key ? 1 : a.row - b.row));
+    for (let k = 0; k < evs.length; k++) {
+      const e = evs[k];
+      if (e.isIn) {
+        const next = evs[k + 1];
+        const outEv = next && !next.isIn ? next : null;
+        out.push({
+          __row: e.row,
+          employee_id: e.code,
+          date: e.at!.date,
+          check_in: e.at!.time,
+          check_out: outEv ? outEv.at!.time : '',
+          check_out_date: outEv && outEv.at!.date !== e.at!.date ? outEv.at!.date : '',
+          purpose: e.company || e.remarks || 'Movement',
+          remarks: e.remarks,
+          check_in_place: e.address,
+          check_out_remarks: outEv ? outEv.remarks : '',
+          check_out_place: outEv ? outEv.address : ''
+        });
+        if (outEv) k++;
+      } else {
+        out.push({ __row: e.row, employee_id: e.code, date: e.at!.date, check_in: '', check_out: e.at!.time, purpose: e.company || e.remarks || 'Movement' });
+      }
+    }
+  }
+  return out.sort((a, b) => a.__row - b.__row);
+}
+
 export const DataImport: React.FC<{ token: string }> = ({ token }) => {
   const api = useHrApi(token);
   const [kinds, setKinds] = useState<Kind[] | null>(null);
@@ -248,6 +344,29 @@ export const DataImport: React.FC<{ token: string }> = ({ token }) => {
         );
         setIgnored(['Leave Year', 'Is Paid Leave', 'Total Leave Availed']);
         setRows(blockRows);
+        return;
+      }
+      const visitRows = kind.key === 'movement_claims' ? checkInOutSheetRows(grid) : null;
+      if (visitRows) {
+        if (!visitRows.length) throw new Error('No Check In / Check Out lines found in this report.');
+        if (visitRows.length > maxRows) throw new Error(`${visitRows.length} rows — at most ${maxRows} per upload. Split the sheet.`);
+        const from = (key: string, header: string) => ({ header, field: kind.fields.find((f) => f.key === key)! });
+        setMatched(
+          [
+            from('employee_id', 'Employee Code'),
+            from('date', 'Check In/Out Time (date)'),
+            from('check_in', 'Check In (time)'),
+            from('check_out', 'Next Check Out (time)'),
+            from('check_out_date', 'Check Out date, when a later day'),
+            from('purpose', 'Visited Company'),
+            from('remarks', 'Remarks (Check In)'),
+            from('check_in_place', 'Address (Check In)'),
+            from('check_out_remarks', 'Remarks (Check Out)'),
+            from('check_out_place', 'Address (Check Out)')
+          ].filter((m) => m.field)
+        );
+        setIgnored(['SL', 'Employee Name']);
+        setRows(visitRows);
         return;
       }
       const headers = (grid[0] || []).map((h) => String(h || '').trim());
