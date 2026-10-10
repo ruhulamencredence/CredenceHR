@@ -292,10 +292,11 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
             instead — see the lg:hidden duplicate block below. */}
         <div className="hidden lg:flex lg:w-1/2 flex-col items-center text-center">
           <BrandLogo workspace={ownerMode ? null : workspace} className="h-14 w-auto mb-4" />
-          <div className="w-80 h-80 pointer-events-none">
+          <div className="relative isolate w-80 h-80 pointer-events-none">
             <Suspense fallback={<div className="w-full h-full" />}>
               <AuthHeroLottie className="w-full h-full" />
             </Suspense>
+            <HeroSpotlight />
           </div>
         </div>
 
@@ -306,10 +307,11 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
             screen — less blank space above the logo instead. */}
         <div className="flex lg:hidden flex-col items-center text-center mb-3 sm:mb-4 -mt-2">
           <BrandLogo workspace={ownerMode ? null : workspace} className="h-9 sm:h-11 w-auto mb-1.5 sm:mb-2" />
-          <div className="w-52 h-52 sm:w-60 sm:h-60 pointer-events-none">
+          <div className="relative isolate w-52 h-52 sm:w-60 sm:h-60 pointer-events-none">
             <Suspense fallback={<div className="w-full h-full" />}>
               <AuthHeroLottie className="w-full h-full" />
             </Suspense>
+            <HeroSpotlight />
           </div>
         </div>
 
@@ -494,6 +496,18 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
     </div>
   );
 };
+
+// A spotlight shining down from just under the logo onto the hero
+// illustration: a small bright source, a widening beam and a pool of light
+// on the floor (styles: .hero-spot-* in index.css). Sits over the
+// illustration, sized in % of it.
+const HeroSpotlight: React.FC = () => (
+  <>
+    <div className="hero-spot hero-spot-beam" style={{ top: '-6%', width: '115%', height: '102%', zIndex: -1 }} />
+    <div className="hero-spot hero-spot-pool" style={{ bottom: '4%', width: '110%', height: '18%', zIndex: -1 }} />
+    <div className="hero-spot hero-spot-source" style={{ top: '-7%' }} />
+  </>
+);
 
 // The workspace's own logo on its sign-in page; the app's logo before a
 // workspace is chosen (and for the original workspace until it uploads one).

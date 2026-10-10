@@ -373,3 +373,32 @@ body::before {
   100% { transform: scale(1); }
 }
 .liquid-glass-pop { animation: liquid-glass-pop 0.5s cubic-bezier(0.2, 0.9, 0.3, 1.2) both; }
+
+/* Sign-in page: a spotlight shining down from the logo onto the hero
+   illustration (AuthScreen.tsx, HeroSpotlight). */
+.hero-spot { position: absolute; left: 50%; pointer-events: none; transform: translateX(-50%); }
+.hero-spot-source {
+  width: 46px; height: 14px; border-radius: 9999px;
+  background: radial-gradient(ellipse at center, rgba(255, 255, 255, 1) 0%, rgba(255, 247, 214, 0.85) 35%, rgba(255, 220, 150, 0) 75%);
+  filter: blur(2px);
+  animation: hero-spot-breathe 5s ease-in-out infinite;
+}
+.hero-spot-beam {
+  clip-path: polygon(45% 0, 55% 0, 100% 100%, 0 100%);
+  background: linear-gradient(180deg, rgba(255, 236, 170, 0.75) 0%, rgba(255, 232, 170, 0.45) 40%, rgba(255, 236, 190, 0.28) 75%, rgba(255, 240, 200, 0.05) 100%);
+  filter: blur(5px);
+  animation: hero-spot-breathe 5s ease-in-out infinite;
+}
+.hero-spot-pool {
+  border-radius: 50%;
+  background: radial-gradient(ellipse at center, rgba(255, 226, 150, 0.7) 0%, rgba(255, 232, 170, 0.35) 45%, rgba(255, 255, 255, 0) 72%);
+  filter: blur(4px);
+  animation: hero-spot-breathe 5s ease-in-out infinite;
+}
+@keyframes hero-spot-breathe {
+  0%, 100% { opacity: 0.75; }
+  50% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero-spot-source, .hero-spot-beam, .hero-spot-pool { animation: none; }
+}
