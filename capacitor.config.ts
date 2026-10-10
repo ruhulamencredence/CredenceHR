@@ -23,7 +23,7 @@
 // so the phone's localhost:3000 reaches the server on this PC. (The old LAN
 // address, http://192.168.66.11:3001, still loads the app over WiFi but
 // calls can't get the microphone there.)
-const LOCAL_SERVER_URL = 'http://localhost:3000';
+const LOCAL_SERVER_URL = 'http://192.168.66.11:3000';
 
 // The live server. The domain (HTTPS) is the normal address — the iPhone app
 // only loads HTTPS pages, so it always uses this one. The public IP (plain
