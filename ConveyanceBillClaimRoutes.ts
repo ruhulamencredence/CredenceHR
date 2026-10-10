@@ -61,7 +61,7 @@ interface ConveyanceBillClaimRouteDeps {
   // (leave/timesheet/attendance) routes through.
   createTemplateApprovalRequest: (
     requestType: "conveyance" | "leave" | "timesheet",
-    sourceType: string,
+    sourceType: "user_claim",
     sourceId: number,
     employeeUserId: number
   ) => Promise<{ autoApproved: boolean; [key: string]: any }>;

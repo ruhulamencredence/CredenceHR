@@ -210,7 +210,7 @@ export function buildStayReport(rawPings: any[], o: StayOptions) {
   };
 }
 
-export function registerTrackingStayReportRoutes(app: Express, deps: { authenticateToken: any; requireAdmin: any; requireModule: (k: string) => any; requireModuleLayer: (k: any, l: any) => any; queryDB: QueryDB }) {
+export function registerTrackingStayReportRoutes(app: Express, deps: { authenticateToken: any; requireAdmin: any; requireModule: (k: any) => any; requireModuleLayer: (k: any, l: any) => any; queryDB: QueryDB }) {
   const { authenticateToken, requireAdmin, requireModule, requireModuleLayer, queryDB } = deps;
   const num = (v: any, def: number, min: number, max: number) => {
     const n = Number(v);

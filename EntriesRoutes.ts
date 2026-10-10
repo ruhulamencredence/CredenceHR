@@ -22,7 +22,7 @@ interface EntriesRouteDeps {
   authenticateToken: any;
   requireAdmin: any;
   requireSuperAdmin: any;
-  requireModule: (moduleKey: string) => any;
+  requireModule: (moduleKey: any) => any;
   getAdminModules: (userId: number) => Promise<string[]>;
   // Per-module action layers (server.ts) — PEPM Reports: read / edit_add /
   // delete_trash / permanent_delete.

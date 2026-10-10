@@ -39,14 +39,14 @@ interface ApprovalRouteDeps {
   authenticateToken: any;
   requireAdmin: any;
   requireSuperAdmin: any;
-  requireModule: (moduleKey: string) => any;
+  requireModule: (moduleKey: any) => any;
   // Per-module action gate (Read Only/Edit-Add/Entry-Upload/Delete-Trash/
   // Permanent Delete) — Approvals is wired up to "edit_add" for the two
   // write actions module-gated here (acting on a pending approval,
   // reassigning Templates); Template CRUD itself is Superadmin-only already
   // (see requireSuperAdmin further down), so it never needs this. See
   // requireModuleLayer() in server.ts for the exact semantics.
-  requireModuleLayer: (moduleKey: string, layer: "read" | "edit_add" | "entry_upload" | "delete_trash" | "permanent_delete") => any;
+  requireModuleLayer: (moduleKey: any, layer: "read" | "edit_add" | "entry_upload" | "delete_trash" | "permanent_delete") => any;
   queryDB: (sql: string, params?: any[]) => Promise<any>;
   getApprovalChain: () => Promise<any[]>;
   performApprovalAction: (...args: any[]) => Promise<any>;
