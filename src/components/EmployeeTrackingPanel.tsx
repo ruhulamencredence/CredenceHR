@@ -8,7 +8,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { Navigation, Radio, RefreshCw, Route, X, BatteryMedium, Clock, MapPin, Search, FileDown, FileText, Timer } from 'lucide-react';
+import { Navigation, Radio, RefreshCw, Route, X, BatteryMedium, Clock, MapPin, Search, FileDown, FileText, Timer, Maximize2, Minimize2 } from 'lucide-react';
 import { LocationPing } from '../types';
 import { apiUrl } from '../lib/api';
 import { reverseGeocode } from '../lib/reverseGeocode';
@@ -129,6 +129,8 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
   const [following, setFollowing] = useState<{ id: number; name: string } | null>(null);
   // Stay Report (TrackingStayReport.tsx) — the tracking module's "Stay Report" layer.
   const [showStay, setShowStay] = useState(false);
+  // The map filling the whole screen (button on the map, Esc to leave).
+  const [mapFull, setMapFull] = useState(false);
   const [live, setLive] = useState<LocationPing[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -343,15 +345,31 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
   // Initialize the map once.
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
-    const map = L.map(mapContainerRef.current, { zoomControl: true }).setView([23.8103, 90.4125], 12);
+    // Half-step zoom, and two levels past the tiles' own 19 (the last tiles
+    // are enlarged) so a single street or building can be looked at closely.
+    const map = L.map(mapContainerRef.current, { zoomControl: true, zoomSnap: 0.5, zoomDelta: 0.5, wheelPxPerZoomLevel: 90, maxZoom: 21 }).setView([23.8103, 90.4125], 12);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '&copy; OpenStreetMap contributors',
-      maxZoom: 19
+      maxNativeZoom: 19,
+      maxZoom: 21
     }).addTo(map);
+    L.control.scale({ imperial: false }).addTo(map);
     markersLayerRef.current = L.layerGroup().addTo(map);
     mapRef.current = map;
     setTimeout(() => map.invalidateSize(), 100);
   }, []);
+
+  // Full screen on/off: Leaflet has to re-measure its box.
+  useEffect(() => {
+    const t = setTimeout(() => mapRef.current?.invalidateSize(), 60);
+    if (!mapFull) return () => clearTimeout(t);
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setMapFull(false);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      clearTimeout(t);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [mapFull]);
 
   // Redraw whenever the live board OR the selected user's path changes.
   useEffect(() => {
@@ -372,7 +390,7 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
           `<div style="font-size:12px;"><b>${i === 0 ? 'Start' : i === sorted.length - 1 ? 'Latest' : 'Point ' + (i + 1)}</b><br/>${formatDate(p.recorded_at)}${p.battery_pct != null ? `<br/>Battery: ${p.battery_pct}%` : ''}</div>`
         );
       });
-      map.fitBounds(L.latLngBounds(latlngs), { padding: [40, 40], maxZoom: 16 });
+      map.fitBounds(L.latLngBounds(latlngs), { padding: [40, 40], maxZoom: 17 });
     } else {
       // Live board mode — one dot (now an avatar/photo) per user, latest
       // position only, restricted to whoever matches the employee filter.
@@ -507,11 +525,26 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-2 rounded-xl overflow-hidden border border-slate-200" style={{ height: 460 }}>
+        <div
+          className={
+            mapFull
+              ? 'fixed inset-0 z-[1040] bg-white'
+              : 'relative lg:col-span-2 rounded-xl overflow-hidden border border-slate-200 h-[460px] lg:h-[max(560px,calc(100vh-300px))]'
+          }
+        >
           <div ref={mapContainerRef} className="w-full h-full" />
+          <button
+            type="button"
+            onClick={() => setMapFull((v) => !v)}
+            className="absolute top-2.5 right-2.5 z-[1000] w-9 h-9 flex items-center justify-center rounded-lg bg-white border border-slate-300 shadow-sm text-slate-700 hover:bg-slate-50"
+            title={mapFull ? 'Exit full screen (Esc)' : 'Full screen map'}
+            aria-label={mapFull ? 'Exit full screen' : 'Full screen map'}
+          >
+            {mapFull ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+          </button>
         </div>
 
-        <div className="border border-slate-200 rounded-xl overflow-hidden flex flex-col" style={{ height: 460 }}>
+        <div className="border border-slate-200 rounded-xl overflow-hidden flex flex-col h-[460px] lg:h-[max(560px,calc(100vh-300px))]">
           <div className="px-3 py-2 bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-500 flex items-center gap-1.5">
             <MapPin className="w-3.5 h-3.5" /> Reporting now
           </div>
