@@ -61,7 +61,7 @@ import { initPushNotifications, clearPushToken } from './lib/pushNotifications';
 import { syncWebPush, disableWebPush, listenWebPushOpens } from './lib/webPush';
 import { WebPushPrompt } from './components/WebPushPrompt';
 import { setActiveCompanyId } from './lib/company';
-import { ACCOUNT_BLOCKED_EVENT, DEVICE_REVOKED_EVENT, setSignedOutReason } from './lib/device';
+import { ACCOUNT_BLOCKED_EVENT, DEVICE_REVOKED_EVENT, SESSION_ENDED_EVENT, setSignedOutReason } from './lib/device';
 import { refreshNotices } from './lib/noticesLive';
 import { refreshAvatars } from './components/UserAvatar';
 
@@ -330,7 +330,15 @@ export default function App() {
           setShowAlertsPage(false);
   };
 
+  // True once the server has said this sign-in is over — then there is
+  // nothing left to log out of.
+  const sessionEndedRef = useRef(false);
   const handleLogout = () => {
+    // The sign-in ends on the server too, so a copy of the token is useless.
+    if (token && !sessionEndedRef.current) {
+      void fetch('/api/auth/logout', { method: 'POST', headers: { Authorization: `Bearer ${token}` }, keepalive: true }).catch(() => {});
+    }
+    sessionEndedRef.current = false;
     // Also drop this account's remembered mobile/desktop User Panel section
     // (see UserPanel.tsx) — otherwise the next login on this device restores
     // whichever section (e.g. Claims) was on screen when this account last
@@ -383,14 +391,86 @@ export default function App() {
       );
       handleLogout();
     };
+    // The sign-in itself ended (SessionSecurity.ts).
+    const onEnded = (e: Event) => {
+      if (sessionEndedRef.current) return;
+      sessionEndedRef.current = true;
+      const why = (e as CustomEvent).detail;
+      setSignedOutReason(
+        why === 'idle'
+          ? 'You were signed out because the session was not used for a while. Sign in again.'
+          : why === 'signed_out'
+            ? 'This sign-in was ended. Sign in again.'
+            : why === 'password'
+              ? 'The password of this account was changed. Sign in again with the new password.'
+              : 'Your session has expired. Sign in again.'
+      );
+      handleLogout();
+    };
     window.addEventListener(DEVICE_REVOKED_EVENT, onRevoked);
     window.addEventListener(ACCOUNT_BLOCKED_EVENT, onBlocked);
+    window.addEventListener(SESSION_ENDED_EVENT, onEnded);
     return () => {
       window.removeEventListener(DEVICE_REVOKED_EVENT, onRevoked);
       window.removeEventListener(ACCOUNT_BLOCKED_EVENT, onBlocked);
+      window.removeEventListener(SESSION_ENDED_EVENT, onEnded);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, user]);
+
+  // Website only: signs out after the Superadmin's "idle minutes" with no
+  // mouse, keyboard or touch in any tab of this site (the alerts poll keeps
+  // the server side alive while a tab is open, so the page watches this
+  // itself). The app is left to the server — it runs in the background.
+  useEffect(() => {
+    if (!token || Capacitor.isNativePlatform()) return;
+    const KEY = 'credence_last_activity';
+    let idleMs = 0;
+    let lastWrite = 0;
+    const mark = () => {
+      const now = Date.now();
+      if (now - lastWrite < 15000) return;
+      lastWrite = now;
+      try {
+        localStorage.setItem(KEY, String(now));
+      } catch {}
+    };
+    const last = () => {
+      try {
+        return Number(localStorage.getItem(KEY)) || lastWrite;
+      } catch {
+        return lastWrite;
+      }
+    };
+    const check = () => {
+      if (idleMs > 0 && Date.now() - last() > idleMs) {
+        const idleMinutes = Math.round(idleMs / 60000);
+        idleMs = 0;
+        setSignedOutReason(`You were signed out after ${idleMinutes} minutes without activity. Sign in again.`);
+        handleLogout();
+      }
+    };
+    lastWrite = 0;
+    mark();
+    fetch('/api/session-policy', { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        idleMs = Math.max(0, Number(d?.idle_minutes) || 0) * 60000;
+      })
+      .catch(() => {});
+    const events = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'wheel', 'scroll'];
+    events.forEach((ev) => window.addEventListener(ev, mark, { passive: true, capture: true }));
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') check();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    const t = setInterval(check, 30000);
+    return () => {
+      events.forEach((ev) => window.removeEventListener(ev, mark, { capture: true } as any));
+      document.removeEventListener('visibilitychange', onVisible);
+      clearInterval(t);
+    };
+  }, [token]);
 
   // Employee Tracking (Admin Panel -> Employee Tracking): starts/stops the
   // APK's background location watcher whenever can_use_tracking changes for

@@ -174,9 +174,11 @@ export function registerActiveUsersRoutes(app: Express, deps: ActiveUsersDeps) {
         (u: any) => Number(u.group_id ?? DEFAULT_GROUP_ID) === gid
       );
       const byId = new Map(users.map((u) => [Number(u.id), u]));
-      const rows: any[] = ((await queryDB("SELECT * FROM user_sessions WHERE last_seen_at >= ?", [new Date(weekAgo)])) || []).filter((r: any) =>
-        byId.has(Number(r.user_id))
+      // Ended sign-ins (Logout, Sign out, password change, unused) aren't listed.
+      const rows: any[] = ((await queryDB("SELECT * FROM user_sessions WHERE last_seen_at >= ?", [new Date(weekAgo)])) || []).filter(
+        (r: any) => byId.has(Number(r.user_id)) && !r.revoked_at
       );
+      const myKey = crypto.createHash("sha1").update(String(req.headers["authorization"] || "").split(" ")[1] || "").digest("hex");
       const devices: any[] = (await queryDB("SELECT id, device_name, platform FROM user_devices").catch(() => [])) || [];
       const devName = new Map(devices.map((d: any) => [Number(d.id), d.device_name || null]));
 
@@ -206,7 +208,8 @@ export function registerActiveUsersRoutes(app: Express, deps: ActiveUsersDeps) {
             ip: r.ip || null,
             signed_in_at: iso(r.signed_in_at || r.first_seen_at),
             last_seen_at: iso(r.last_seen_at),
-            online: now - seen(r) < ONLINE_MS
+            online: now - seen(r) < ONLINE_MS,
+            current: r.session_key === myKey
           };
         });
 

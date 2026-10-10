@@ -5,6 +5,7 @@
 
 import { ensureAccountBlockSchema } from "./AccountBlock";
 import { ensureActiveUsersSchema } from "./ActiveUsersRoutes";
+import { ensureSessionSecuritySchema } from "./SessionSecurity";
 import { ensureAlertsSchema } from "./Alerts";
 import { ensureAssetManagementSchema } from "./AssetManagementRoutes";
 import { ensureBillClaimPolicySchema } from "./BillClaimPolicy";
@@ -143,6 +144,7 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
   // Mobile app device access (DeviceRoutes.ts).
   await ensureDeviceSchema(queryDB).catch((e: any) => console.warn("⚠️ Device access tables: " + e.message));
   await ensureActiveUsersSchema(queryDB).catch((e: any) => console.warn("⚠️ Active users table: " + e.message));
+  await ensureSessionSecuritySchema(queryDB).catch((e: any) => console.warn("⚠️ Session security: " + e.message));
 
   // Desktop/browser notifications (WebPushService.ts).
   await ensureWebPushSchema(queryDB).catch((e: any) => console.warn("⚠️ Web push tables: " + e.message));

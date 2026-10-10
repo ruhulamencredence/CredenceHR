@@ -28,6 +28,7 @@
 // authenticateToken in server.ts (see companyContext.ts).
 
 import type { Express } from "express";
+import { endAllSessions } from "./SessionSecurity";
 import bcrypt from "bcryptjs";
 import { DEFAULT_COMPANY_ID, DEFAULT_GROUP_ID, activeCompanyId, activeGroupId, companyStore, type CompanyContext } from "./companyContext";
 import { SHARE_KINDS, CONFIG_TABLES, OWN_TABLES, GROUP_TABLES, GROUP_BACKFILL } from "./companyScope";
@@ -1244,6 +1245,7 @@ export function registerCompanyRoutes(app: Express, deps: CompanyRouteDeps) {
       const password = String(req.body?.password || "");
       if (password.length < 8) throw bad("The password must be at least 8 characters.");
       await queryDB("/*unscoped*/ UPDATE users SET password_hash = ? WHERE id = ?", [await bcrypt.hash(password, 10), Number(u.id)]);
+      await endAllSessions(queryDB, Number(u.id), "password");
       res.json({ success: true });
     } catch (err) {
       fail(res, err);

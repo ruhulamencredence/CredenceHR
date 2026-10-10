@@ -7,6 +7,7 @@
 // The shared helpers they use are passed in by startServer().
 
 import { checkWorkspaceLogin } from "./CompanyRoutes";
+import { sessionLifetimeSeconds } from "./SessionSecurity";
 import { resolveCompanyContext } from "./CompanyRoutes";
 import { workspaceStartCompany } from "./CompanyRoutes";
 import { checkAppDevice } from "./DeviceRoutes";
@@ -116,9 +117,10 @@ export function registerAuthRoutes(app: Express, deps: RegisterAuthRoutesDeps) {
       }
 
       const token = jwt.sign(
-        { id: user.id, email: user.email, username: user.username, role: user.role, name: user.name, ...(deviceRowId ? { dev: deviceRowId } : {}) },
+        { id: user.id, email: user.email, username: user.username, role: user.role, name: user.name, cl: isAppClient ? "app" : "web", iat_ms: Date.now(), ...(deviceRowId ? { dev: deviceRowId } : {}) },
         JWT_SECRET,
-        { expiresIn: "7d" }
+        // Admin Panel -> Active Users -> Session security (SessionSecurity.ts).
+        { expiresIn: await sessionLifetimeSeconds(queryDB, isAppClient) }
       );
       // The account's default company — its Module Access below is that company's.
       // (The system owner signing in through another group's workspace starts inside it.)

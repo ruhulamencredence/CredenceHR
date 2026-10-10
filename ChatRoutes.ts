@@ -46,6 +46,7 @@
 // `room:<id>`, via the one shared insertChatMessage() helper below.
 
 import type { Express } from "express";
+import { checkSession } from "./SessionSecurity";
 import type { Server as SocketIOServer } from "socket.io";
 import jwt from "jsonwebtoken";
 import { sendPushToRoomMembers } from "./PushNotificationService";
@@ -718,11 +719,13 @@ export function setupChatSocket(io: SocketIOServer, deps: ChatSocketDeps) {
   // first connect / last disconnect for that user, not every socket.
   const onlineSockets = new Map<number, Set<string>>();
 
-  io.use((socket, next) => {
+  io.use(async (socket, next) => {
     try {
       const token = (socket.handshake.auth as any)?.token as string | undefined;
       if (!token) return next(new Error("Authentication required"));
       const payload: any = jwt.verify(token, jwtSecret);
+      // Same rule as every request (logged out, ended, unused too long).
+      if (await checkSession(queryDB, token, payload)) return next(new Error("Session ended"));
       (socket.data as any).user = payload;
       next();
     } catch {

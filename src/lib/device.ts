@@ -47,3 +47,6 @@ export const DEVICE_REVOKED_EVENT = 'credence:device-revoked';
 // The account was blocked (Admin Panel -> Users -> Block, or a Termination),
 // or no longer exists — the event's detail is "removed" then.
 export const ACCOUNT_BLOCKED_EVENT = 'credence:account-blocked';
+// The sign-in itself ended (SessionSecurity.ts): its detail says why —
+// expired / idle / signed_out / password.
+export const SESSION_ENDED_EVENT = 'credence:session-ended';

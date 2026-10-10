@@ -6,12 +6,14 @@
 // Admin Panel -> Active Users (Superadmin only): who is using the app or the
 // website right now, from which IP address and on which device
 // (ActiveUsersRoutes.ts). One row per sign-in, so an account open on a phone
-// and a laptop shows twice. Refreshes itself every 30 seconds.
+// and a laptop shows twice. Refreshes itself every 30 seconds. Also where
+// the Superadmin sets how long a sign-in lasts and ends one (SessionSecurity.ts).
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Activity, Globe, Monitor, RefreshCw, Search, Smartphone, Users } from 'lucide-react';
+import { Activity, Globe, LogOut, Monitor, RefreshCw, Search, ShieldCheck, Smartphone, Users } from 'lucide-react';
 import { Spinner } from './Spinner';
-import { useHrApi, Notice } from './HrOpsShared';
+import { useHrApi, Notice, inputCls } from './HrOpsShared';
+import { confirmDialog } from '../lib/confirmDialog';
 
 interface Session {
   id: number;
@@ -27,6 +29,7 @@ interface Session {
   signed_in_at: string | null;
   last_seen_at: string;
   online: boolean;
+  current?: boolean;
 }
 interface Data {
   range: Range;
@@ -36,6 +39,105 @@ interface Data {
   sessions: Session[];
 }
 type Range = 'online' | 'today' | '7d';
+interface Policy {
+  web_hours: number;
+  web_idle_minutes: number;
+  app_days: number;
+  app_idle_days: number;
+}
+type PolicyKey = keyof Policy;
+const POLICY_FIELDS: [PolicyKey, string, string][] = [
+  ['web_hours', 'Website sign-in lasts', 'hours'],
+  ['web_idle_minutes', 'Website signs out when unused for', 'minutes (0 = never)'],
+  ['app_days', 'App sign-in lasts', 'days'],
+  ['app_idle_days', 'App signs out when not opened for', 'days (0 = never)'],
+];
+
+// How long a sign-in lasts. Changes apply to sign-ins already open too.
+const SessionSecurityCard: React.FC<{ api: ReturnType<typeof useHrApi>; onMsg: (m: Msg) => void }> = ({ api, onMsg }) => {
+  const [policy, setPolicy] = useState<Policy | null>(null);
+  const [form, setForm] = useState<Record<PolicyKey, string> | null>(null);
+  const [limits, setLimits] = useState<Record<PolicyKey, [number, number]> | null>(null);
+  const [saving, setSaving] = useState(false);
+  const toForm = (p: Policy) => Object.fromEntries(POLICY_FIELDS.map(([k]) => [k, String(p[k])])) as Record<PolicyKey, string>;
+  useEffect(() => {
+    api
+      .get('/api/session-policy')
+      .then((d) => {
+        if (!d.policy) return;
+        setPolicy(d.policy);
+        setForm(toForm(d.policy));
+        setLimits(d.limits || null);
+      })
+      .catch((e) => onMsg({ type: 'error', text: e.message }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [api]);
+  if (!policy || !form) return null;
+  const changed = POLICY_FIELDS.some(([k]) => form[k] !== String(policy[k]));
+  const save = async () => {
+    setSaving(true);
+    try {
+      const body = Object.fromEntries(POLICY_FIELDS.map(([k]) => [k, Number(form[k])]));
+      const d = await api.put('/api/session-policy', body);
+      setPolicy(d.policy);
+      setForm(toForm(d.policy));
+      onMsg({ type: 'success', text: 'Session security saved. It applies to sign-ins already open too.' });
+    } catch (e: any) {
+      onMsg({ type: 'error', text: e.message });
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-3.5 space-y-3">
+      <div>
+        <div className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
+          <ShieldCheck className="w-4 h-4 text-emerald-600" /> Session security
+        </div>
+        <p className="text-[11px] text-slate-500 mt-0.5">
+          After this, the person has to sign in again. Logout, a changed password and Sign out below end a sign-in at once.
+        </p>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+        {POLICY_FIELDS.map(([k, label, unit]) => (
+          <label key={k} className="block">
+            <span className="text-[11px] font-semibold text-slate-600">{label}</span>
+            <div className="flex items-center gap-1.5 mt-1">
+              <input
+                type="number"
+                min={limits?.[k]?.[0]}
+                max={limits?.[k]?.[1]}
+                value={form[k]}
+                onChange={(e) => setForm({ ...form, [k]: e.target.value })}
+                className={`${inputCls} w-24`}
+              />
+              <span className="text-[11px] text-slate-500">{unit}</span>
+            </div>
+          </label>
+        ))}
+      </div>
+      {changed && (
+        <div className="flex gap-2">
+          <button
+            type="button"
+            disabled={saving}
+            onClick={save}
+            className="text-xs font-semibold px-3 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60"
+          >
+            {saving ? 'Saving…' : 'Save'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setForm(toForm(policy))}
+            className="text-xs font-semibold px-3 py-2 rounded-lg border border-slate-200 text-slate-700 bg-white hover:bg-slate-50"
+          >
+            Undo
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
 type Msg = { type: 'success' | 'error'; text: string } | null;
 
 const RANGES: [Range, string][] = [
@@ -107,6 +209,27 @@ export const ActiveUsers: React.FC<{ token: string }> = ({ token }) => {
     return list.filter((s) => [s.name, s.login, s.ip, deviceLabel(s)].some((v) => String(v || '').toLowerCase().includes(needle)));
   }, [data, q]);
 
+  const signOut = async (s: Session) => {
+    if (!(await confirmDialog(`End this sign-in of ${s.name} (${deviceLabel(s)})? They will have to sign in again on it.`, { confirmLabel: 'Sign out', tone: 'danger' })))
+      return;
+    try {
+      await api.post(`/api/active-users/${s.id}/sign-out`);
+      setMsg({ type: 'success', text: `${s.name} was signed out on ${deviceLabel(s)}.` });
+      load();
+    } catch (e: any) {
+      setMsg({ type: 'error', text: e.message });
+    }
+  };
+  const SignOutButton: React.FC<{ s: Session }> = ({ s }) => (
+    <button
+      type="button"
+      onClick={() => void signOut(s)}
+      className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-md border border-red-200 text-red-600 bg-white hover:bg-red-50"
+    >
+      <LogOut className="w-3 h-3" /> Sign out
+    </button>
+  );
+
   if (!data) return <div className="py-10 flex justify-center"><Spinner /></div>;
   const sum = data.summary;
   const cards: [string, number, React.ReactNode, string][] = [
@@ -146,6 +269,8 @@ export const ActiveUsers: React.FC<{ token: string }> = ({ token }) => {
           <span className="font-mono">proxy_set_header X-Real-IP $remote_addr;</span> — then sign in again.
         </div>
       )}
+
+      <SessionSecurityCard api={api} onMsg={setMsg} />
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5">
         {cards.map(([label, n, icon, tone]) => (
@@ -216,6 +341,11 @@ export const ActiveUsers: React.FC<{ token: string }> = ({ token }) => {
                   </span>
                   <span>Signed in {when(s.signed_in_at)}</span>
                 </div>
+                {!s.current && (
+                  <div className="flex justify-end">
+                    <SignOutButton s={s} />
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -231,6 +361,7 @@ export const ActiveUsers: React.FC<{ token: string }> = ({ token }) => {
                   <th className="px-3 py-2 font-semibold">Device</th>
                   <th className="px-3 py-2 font-semibold whitespace-nowrap">Signed in</th>
                   <th className="px-3 py-2 font-semibold whitespace-nowrap">Last activity</th>
+                  <th className="px-3 py-2" />
                 </tr>
               </thead>
               <tbody>
@@ -258,6 +389,9 @@ export const ActiveUsers: React.FC<{ token: string }> = ({ token }) => {
                     <td className="px-3 py-2.5 text-slate-600 whitespace-nowrap">
                       {when(s.last_seen_at)}
                       <div className="text-[10px] text-slate-400">{ago(s.last_seen_at)}</div>
+                    </td>
+                    <td className="px-3 py-2.5 text-right whitespace-nowrap">
+                      {s.current ? <span className="text-[10px] text-slate-400">This sign-in</span> : <SignOutButton s={s} />}
                     </td>
                   </tr>
                 ))}
