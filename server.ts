@@ -1369,7 +1369,7 @@ async function finalizeUserClaimApproval(
   );
   await notifyUserClaimDecision(uc, "approved", finalAmount, remarks);
 
-  return { bill_id: targetBillId, bill_item_id: item.insertId };
+  return { bill_id: Number(targetBillId), bill_item_id: Number(item.insertId) };
 }
 
 // Tells the claimant their Conveyance Bill Claim was approved or rejected.
@@ -1838,6 +1838,7 @@ const PEPM_API_RE = /^\/api\/(budgets|budget-items|entries|jobs|job-edits|mpr-nu
 
 // dbPool.execute with the same multi-company separation as queryDB.
 function scopedExecute(sql: string, params?: any[]) {
+  if (!dbPool) throw new Error("Database is not connected.");
   return dbPool.execute(scopeSql(sql), params);
 }
 

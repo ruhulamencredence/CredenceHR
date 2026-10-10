@@ -32,7 +32,7 @@ import { getHolidayMapsByGroup, getEmployeeBranchTypeMap } from "./holidayRoutes
 interface AttendanceRouteDeps {
   authenticateToken: any;
   requireAdmin: any;
-  requireModule: (moduleKey: string) => any;
+  requireModule: (moduleKey: any) => any;
   queryDB: (sql: string, params?: any[]) => Promise<any>;
   haversineMeters: (lat1: number, lng1: number, lat2: number, lng2: number) => number;
   todayInDhaka: () => string;

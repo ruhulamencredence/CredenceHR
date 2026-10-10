@@ -32,7 +32,7 @@ interface LeaveRouteDeps {
   // separate from requireLeaveManager below (that's the can_manage_leave
   // toggle, a different feature).
   requireAdmin: (req: any, res: any, next: any) => Promise<any>;
-  requireModule: (moduleKey: string) => any;
+  requireModule: (moduleKey: any) => any;
   // Department-wise scope for the 'leave_applications' module — see
   // leave_application_department_access table comment in server.ts's initDB().
   getLeaveApplicationDeptScope: (userId: number) => Promise<string[] | null>;
