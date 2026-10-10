@@ -246,6 +246,63 @@ const emptyTransferForm: TransferFormState = {
   reason: ''
 };
 
+// Loading placeholder for the directory: the same white card, header row
+// and columns as the real table, so nothing jumps when the list arrives.
+const SKELETON_COLS = ['Employee', 'Designation', 'Department', 'Contact', 'Status', 'Login', 'Actions'];
+const EmployeesTableSkeleton: React.FC = () => {
+  const bar = (w: string, tone = 'bg-slate-200/80') => <div className={`h-3 rounded ${tone} ${w}`} />;
+  return (
+    <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden animate-pulse" aria-busy="true" aria-label="Loading employees">
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="bg-slate-50 border-b border-slate-200">
+              {SKELETON_COLS.map((c) => (
+                <th key={c} className={`px-4 py-3 text-[11px] font-semibold uppercase tracking-wider text-slate-400 ${c === 'Actions' ? 'text-right' : 'text-left'}`}>
+                  {c}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <tr key={i}>
+                <td className="px-4 py-3.5">
+                  <div className="space-y-1.5">
+                    {bar(i % 3 === 0 ? 'w-32' : i % 3 === 1 ? 'w-24' : 'w-28')}
+                    {bar('w-16 h-2.5', 'bg-slate-100')}
+                  </div>
+                </td>
+                <td className="px-4 py-3.5">{bar(i % 2 ? 'w-24' : 'w-32')}</td>
+                <td className="px-4 py-3.5">{bar(i % 2 ? 'w-28' : 'w-20')}</td>
+                <td className="px-4 py-3.5">
+                  <div className="space-y-1.5">
+                    {bar('w-36', 'bg-slate-100')}
+                    {bar('w-24', 'bg-slate-100')}
+                  </div>
+                </td>
+                <td className="px-4 py-3.5">
+                  <div className="h-5 w-14 rounded-full bg-emerald-50 border border-emerald-100" />
+                </td>
+                <td className="px-4 py-3.5">
+                  <div className="h-5 w-20 rounded-full bg-slate-100" />
+                </td>
+                <td className="px-4 py-3.5">
+                  <div className="flex justify-end gap-1.5">
+                    {[0, 1, 2].map((k) => (
+                      <div key={k} className="w-7 h-7 rounded-lg bg-slate-100" />
+                    ))}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
+
 export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) => {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1180,9 +1237,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
       {view === 'history' ? (
         <EmployeeChangeHistory token={token} />
       ) : loading ? (
-        <div className="flex items-center justify-center py-16 text-slate-400 gap-2 text-sm">
-          <Spinner size={16} /> Loading employees…
-        </div>
+        <EmployeesTableSkeleton />
       ) : filtered.length === 0 ? (
         <div className="bg-white border border-dashed border-slate-300 rounded-2xl p-10 text-center">
           <Contact className="w-8 h-8 text-slate-300 mx-auto mb-2" />
