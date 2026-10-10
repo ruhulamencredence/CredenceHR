@@ -76,6 +76,10 @@ export async function ensureSessionSecuritySchema(queryDB: QueryDB) {
     ["users", "sessions_valid_after", "DATETIME(3) NULL"]
   ]) {
     try {
+      // Only when missing — queryDB logs every failed query, so don't lean on ER_DUP_FIELDNAME.
+      const have: any[] =
+        (await queryDB("/*unscoped*/ SELECT 1 FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?", [table, col])) || [];
+      if (have.length) continue;
       await queryDB(`/*unscoped*/ ALTER TABLE ${table} ADD COLUMN ${col} ${ddl}`);
     } catch (err: any) {
       if (err?.code !== "ER_DUP_FIELDNAME") console.warn(`⚠️ Could not add ${table}.${col}: ${err?.message}`);
