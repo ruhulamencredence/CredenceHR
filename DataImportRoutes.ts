@@ -153,18 +153,21 @@ export const IMPORT_KINDS: Kind[] = [
   {
     key: "bill_claims",
     title: "Conveyance Bill Claim History",
-    description: "Past Conveyance Bill Claims with their amounts and status.",
+    description: "Past Conveyance Bill Claims with their amounts and status — or the \"Claim Report\" exactly as it comes.",
     module: "conveyance",
     fields: [
       EMP,
-      { key: "claim_date", label: "Claim Date", type: "date", required: true, aliases: ["date"], example: "2026-08-31" },
+      { key: "claim_no", label: "Claim No.", type: "text", aliases: ["claim no", "claim number"], example: "087703", note: "Same Claim No. again is skipped" },
+      { key: "claim_date", label: "Claim Date", type: "date", required: true, aliases: ["date", "bill date"], example: "2026-08-31", note: "The day of the bill" },
+      { key: "created_date", label: "Created Date", type: "date", aliases: ["submitted date", "submission date"], example: "2026-09-02", note: "The day it was filed; empty = Claim Date" },
       { key: "from_date", label: "Bills From", type: "date", aliases: ["from date", "period from"], example: "2026-08-01" },
       { key: "to_date", label: "Bills To", type: "date", aliases: ["to date", "period to"], example: "2026-08-31" },
-      { key: "category", label: "Category", type: "text", example: "Transport" },
+      { key: "category", label: "Category", type: "text", aliases: ["categories", "claim category"], example: "Transport" },
       { key: "amount", label: "Amount", type: "number", required: true, aliases: ["claim amount"], example: 1850 },
       { key: "approved_amount", label: "Approved Amount", type: "number", example: 1800 },
+      { key: "disbursed_amount", label: "Disbursed Amount", type: "number", aliases: ["sanctioned / disbursed amount", "sanctioned amount", "paid amount"], example: 1800 },
       { key: "description", label: "Description", type: "text", aliases: ["details", "remarks"] },
-      { key: "status", label: "Status", type: "text", example: "Approved", note: "Approved / Pending / Rejected (default Approved)" }
+      { key: "status", label: "Status", type: "text", example: "Approved", note: "Approved / Disbursed / Pending / Rejected (default Approved)" }
     ]
   },
   {
@@ -653,39 +656,81 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
 
     // ---- Conveyance bill claims ----------------------------------------
     bill_claims: {
-      prepare: async () => ({ existing: ((await queryDB("SELECT user_id, claim_date, category, amount FROM user_claims").catch(() => [])) || []) as any[] }),
+      prepare: async () => {
+        const existing: any[] = (await queryDB("SELECT user_id, claim_date, category, amount, admin_remarks FROM user_claims").catch(() => [])) || [];
+        const cats: any[] = (await queryDB("SELECT id, name FROM bill_claim_categories").catch(() => [])) || [];
+        // Bills earlier imports made for disbursed claims, one per employee per month.
+        const bills: any[] = (await queryDB("SELECT id, user_id, remarks FROM conveyance_bills WHERE remarks LIKE 'Imported from Excel%'").catch(() => [])) || [];
+        return {
+          existing,
+          claimNos: new Set(existing.map((c) => /Claim No\. (\S+)/.exec(String(c.admin_remarks || ""))?.[1]).filter(Boolean) as string[]),
+          cats: new Map(cats.map((c) => [norm(String(c.name)), c])),
+          bills: new Map<string, number>(bills.map((b) => [`${b.user_id}|${b.remarks}`, Number(b.id)]))
+        };
+      },
       row: async (v, ctx, prep) => {
         const { emp, userId } = loginOf(v, ctx);
-        const claimDate = dateOf(v, "claim_date", "Claim Date") as string;
-        const from = (dateOf(v, "from_date", "Bills From", false) as string | null) || claimDate;
+        const billDate = dateOf(v, "claim_date", "Claim Date") as string;
+        const claimDate = (dateOf(v, "created_date", "Created Date", false) as string | null) || billDate;
+        const from = (dateOf(v, "from_date", "Bills From", false) as string | null) || billDate;
         const to = (dateOf(v, "to_date", "Bills To", false) as string | null) || from;
         if (to < from) fail("Bills To is before Bills From.");
         const amount = parseNumber(v.amount);
         if (amount === null || !Number.isFinite(amount) || amount <= 0) fail(`Amount "${str(v.amount)}" isn't a number above 0.`);
-        const approvedRaw = str(v.approved_amount) ? parseNumber(v.approved_amount) : null;
-        if (approvedRaw !== null && (!Number.isFinite(approvedRaw) || approvedRaw < 0)) fail(`Approved Amount "${str(v.approved_amount)}" isn't a number.`);
-        const status = parseStatus(v.status) || fail(`Status "${str(v.status)}" — write Approved, Pending or Rejected.`);
-        const category = str(v.category).slice(0, 255) || "Others";
-        const approved = status === "approved" ? (approvedRaw ?? amount) : approvedRaw;
+        const money = (key: string, label: string) => {
+          const n = str(v[key]) ? parseNumber(v[key]) : null;
+          if (n !== null && (!Number.isFinite(n) || n < 0)) fail(`${label} "${str(v[key])}" isn't a number.`);
+          return n;
+        };
+        const approvedRaw = money("approved_amount", "Approved Amount");
+        const disbursedRaw = money("disbursed_amount", "Disbursed Amount");
+        // "Disbursed" (or "Paid") is Approved and already paid out.
+        const disbursed = /^(disburs|paid|sanction)/i.test(str(v.status));
+        const status = disbursed ? "approved" : parseStatus(v.status) || fail(`Status "${str(v.status)}" — write Approved, Disbursed, Pending or Rejected.`);
+        const category = str(v.category).slice(0, 100) || "Others";
+        const approved = disbursed ? (disbursedRaw || approvedRaw || amount) : status === "approved" ? (approvedRaw ?? amount) : approvedRaw;
+        const claimNo = str(v.claim_no);
         const who = `${emp.name} (${str(v.employee_id)})`;
-        if (
-          prep.existing.some(
+        if (claimNo ? prep.claimNos.has(claimNo) : prep.existing.some(
             (c: any) => Number(c.user_id) === userId && String(c.claim_date).slice(0, 10) === claimDate && String(c.category) === category && Number(c.amount) === Number(amount)
-          )
-        )
-          return { status: "skip", message: `Same claim (${claimDate}, ${category}, ${amount}) is already there.`, employee: who };
+          ))
+          return { status: "skip", message: claimNo ? `Claim No. ${claimNo} is already there.` : `Same claim (${claimDate}, ${category}, ${amount}) is already there.`, employee: who };
+        const billKey = `${userId}|Imported from Excel — disbursed claims ${claimDate.slice(0, 7)}`;
         if (!ctx.dryRun) {
-          await queryDB(
-            `INSERT INTO user_claims (user_id, claim_date, from_date, to_date, category, amount, approved_amount, description, status, admin_remarks, reviewed_by, reviewed_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          const res = await queryDB(
+            `INSERT INTO user_claims (user_id, claim_date, from_date, to_date, category, amount, approved_amount, description, status, admin_remarks, reviewed_by, reviewed_at, first_submitted_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
-              userId, claimDate, from, to, category, amount, approved, str(v.description) || null, status, "Imported from Excel",
-              status === "pending" ? null : Number(ctx.user.id), status === "pending" ? null : new Date()
+              userId, claimDate, from, to, category, amount, approved, str(v.description) || null, status,
+              claimNo ? `Imported from Excel — Claim No. ${claimNo}` : "Imported from Excel",
+              status === "pending" ? null : Number(ctx.user.id), status === "pending" ? null : new Date(), `${claimDate} 00:00:00`
             ]
           );
+          const cat = prep.cats.get(norm(category));
+          await queryDB(
+            "INSERT INTO user_claim_items (user_claim_id, category_id, category_name, bill_date, amount, description) VALUES (?, ?, ?, ?, ?, ?)",
+            [res.insertId, cat ? Number(cat.id) : null, cat ? String(cat.name) : category, billDate, amount, str(v.description).slice(0, 500) || null]
+          );
+          if (disbursed) {
+            let billId = prep.bills.get(billKey);
+            if (!billId) {
+              const b = await queryDB(
+                "INSERT INTO conveyance_bills (user_id, bill_date, remarks, created_by, is_disbursed, disbursed_at, disbursed_by) VALUES (?, ?, ?, ?, 1, ?, ?)",
+                [userId, claimDate, billKey.slice(billKey.indexOf("|") + 1), Number(ctx.user.id), `${claimDate} 12:00:00`, Number(ctx.user.id)]
+              );
+              billId = Number(b.insertId);
+              prep.bills.set(billKey, billId);
+            }
+            await queryDB(
+              `INSERT INTO conveyance_bill_items (bill_id, source, user_claim_id, entry_date, particulars, amount, remarks)
+               VALUES (?, 'user_claim', ?, ?, ?, ?, ?)`,
+              [billId, res.insertId, billDate, (str(v.description) || `${category} claim`).slice(0, 255), approved, claimNo ? `Claim No. ${claimNo}` : null]
+            );
+          }
         }
+        if (claimNo) prep.claimNos.add(claimNo);
         prep.existing.push({ user_id: userId, claim_date: claimDate, category, amount });
-        return { status: "create", message: `${category} ${amount} — ${status}`, employee: who };
+        return { status: "create", message: `${category} ${amount} — ${disbursed ? `disbursed ${approved}` : status}${claimNo ? ` (Claim No. ${claimNo})` : ""}`, employee: who };
       }
     },
 
