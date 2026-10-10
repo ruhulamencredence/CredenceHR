@@ -1382,3 +1382,18 @@ CREATE TABLE IF NOT EXISTS approval_requests (
 -- nothing shows to an Admin or User until the Superadmin explicitly grants it:
 -- ALTER TABLE users ADD COLUMN can_view_movement_claims TINYINT(1) NOT NULL DEFAULT 0;
 -- ALTER TABLE users ADD COLUMN can_view_conveyance_claims TINYINT(1) NOT NULL DEFAULT 0;
+
+-- Session security (SessionSecurity.ts; Admin Panel -> Active Users, Superadmin
+-- only): how long a sign-in lasts, plus what ends one early. The server
+-- creates / adds these on startup too.
+CREATE TABLE IF NOT EXISTS session_policy (
+  id INT PRIMARY KEY,
+  web_hours INT NOT NULL DEFAULT 12,
+  web_idle_minutes INT NOT NULL DEFAULT 60,
+  app_days INT NOT NULL DEFAULT 7,
+  app_idle_days INT NOT NULL DEFAULT 3,
+  updated_by INT NULL,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+-- ALTER TABLE user_sessions ADD COLUMN revoked_at DATETIME NULL, ADD COLUMN revoked_reason VARCHAR(20) NULL;
+-- ALTER TABLE users ADD COLUMN sessions_valid_after DATETIME(3) NULL;

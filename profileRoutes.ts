@@ -23,6 +23,7 @@
 // client renders as "Not linked to an Employee record".
 
 import type { Express } from "express";
+import { endAllSessions, sessionKeyOf } from "./SessionSecurity";
 import bcrypt from "bcryptjs";
 
 interface ProfileRouteDeps {
@@ -213,6 +214,8 @@ export function registerProfileRoutes(app: Express, deps: ProfileRouteDeps) {
 
       const password_hash = await bcrypt.hash(newPassword, 10);
       await queryDB("UPDATE users SET password_hash = ? WHERE id = ?", [password_hash, userId]);
+      // Every other sign-in of this account ends; this one stays.
+      await endAllSessions(queryDB, Number(userId), "password", sessionKeyOf(String(req.headers["authorization"] || "").split(" ")[1] || ""));
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });

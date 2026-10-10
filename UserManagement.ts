@@ -17,6 +17,7 @@
 // changed, only moved.
 
 import type { Express } from "express";
+import { endAllSessions } from "./SessionSecurity";
 import bcrypt from "bcryptjs";
 import { activeCompanyId } from "./companyContext";
 import { TEMPLATE_FEATURES, ensureAccessTemplateSchema, ensureDefaultAccessTemplate } from "./AccessTemplateDefaults";
@@ -306,6 +307,8 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
 
       const password_hash = await bcrypt.hash(String(new_password), 10);
       await queryDB("UPDATE users SET password_hash = ? WHERE id = ?", [password_hash, id]);
+      // Whoever was signed in with the old password is signed out.
+      await endAllSessions(queryDB, Number(id), "password");
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Failed to reset password" });

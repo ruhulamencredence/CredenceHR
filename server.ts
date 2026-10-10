@@ -41,6 +41,7 @@ import { registerAdminDashboardRoutes } from "./AdminDashboardRoutes";
 import { registerDeviceRoutes, ensureDeviceSchema, checkAppDevice, deviceStillAllowed } from "./DeviceRoutes";
 import { ensureAccountBlockSchema, accountState, registerAccountBlockRoutes } from "./AccountBlock";
 import { registerActiveUsersRoutes, ensureActiveUsersSchema, touchSession } from "./ActiveUsersRoutes";
+import { registerSessionSecurityRoutes, checkSession, sessionEndMessage } from "./SessionSecurity";
 import { registerDataImportRoutes } from "./DataImportRoutes";
 import { registerCallRoutes, setupCallSocket } from "./CallRoutes";
 import { registerWebPushRoutes, ensureWebPushSchema } from "./WebPushService";
@@ -75,6 +76,12 @@ import { memoryDb, queryMemoryDb, EMPLOYEE_BOOL_FIELDS } from "./memoryDbFallbac
 dotenv.config();
 
 const JWT_SECRET = process.env.JWT_SECRET || "mpr_tracker_secret_key_2026";
+// Anyone who knows the signing key can make a token for any account, so a
+// key that is missing or the one written in .env.example must be replaced
+// with a long random one on a live server.
+if (!process.env.JWT_SECRET || ["super_secret_jwt_key_mpr_tracker_2026", "mpr_tracker_secret_key_2026"].includes(process.env.JWT_SECRET) || process.env.JWT_SECRET.length < 32) {
+  console.warn("⚠️ JWT_SECRET is missing, a published default or too short — set a long random value (e.g. `openssl rand -hex 48`) in .env.");
+}
 const PORT = Number(process.env.PORT) || 3000;
 
 // Normalizes a MySQL DATE value (which mysql2 may return as a JS Date object or as a
@@ -1931,7 +1938,11 @@ async function startServer() {
     if (!token) return res.status(401).json({ error: "Access token required" });
 
     jwt.verify(token, JWT_SECRET, async (err: any, user: any) => {
-      if (err) return res.status(403).json({ error: "Invalid or expired token" });
+      // Out of date or not ours: the page signs out and says so (App.tsx).
+      if (err) {
+        res.setHeader("X-Session-Ended", "expired");
+        return res.status(401).json({ error: sessionEndMessage("expired"), code: "SESSION_ENDED" });
+      }
       // A phone the Superadmin removed from this account is signed out.
       if (user?.dev && !(await deviceStillAllowed(queryDB, Number(user.dev)))) {
         res.setHeader("X-Device-Revoked", "1");
@@ -1948,6 +1959,13 @@ async function startServer() {
       if (state === "removed") {
         res.setHeader("X-Account-Blocked", "removed");
         return res.status(401).json({ error: "This account no longer exists. Sign in again.", code: "ACCOUNT_REMOVED" });
+      }
+      // Logged out, signed out by a Superadmin, unused for too long, older
+      // than the lifetime now set, or the password changed since (SessionSecurity.ts).
+      const ended = await checkSession(queryDB, token, user, req);
+      if (ended) {
+        res.setHeader("X-Session-Ended", ended);
+        return res.status(401).json({ error: sessionEndMessage(ended), code: "SESSION_ENDED" });
       }
       req.user = user;
       // Admin Panel -> Active Users: this sign-in's IP, device and last use.
@@ -2546,6 +2564,7 @@ async function startServer() {
   registerAdminDashboardRoutes(app, { authenticateToken, queryDB, getAdminModules, todayInDhaka });
   registerDeviceRoutes(app, { authenticateToken, requireSuperAdmin, queryDB });
   registerActiveUsersRoutes(app, { authenticateToken, requireSuperAdmin, queryDB });
+  registerSessionSecurityRoutes(app, { authenticateToken, requireSuperAdmin, queryDB });
   registerWebPushRoutes(app, { authenticateToken, queryDB });
   registerEmployeeDirectoryRoutes(app, {
     authenticateToken,
