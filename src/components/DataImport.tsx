@@ -241,6 +241,59 @@ function checkInOutSheetRows(grid: any[][]): Record<string, any>[] | null {
   return out.sort((a, b) => a.__row - b.__row);
 }
 
+// Conveyance Bill Claim History can also come as the "Claim Report": title
+// lines, then "Serial | Employee | Designation | Department | Claim No. |
+// Created Date | Categories | Description | Claim Date | Status | ... | Claim
+// Amount | Approved Amount | Sanctioned / Disbursed Amount | ...", one line per
+// claim. The employee ("Md. Rasel [241210176]") is written only on their
+// first claim, so it carries down to the lines under it. Returns null when the
+// sheet isn't laid out that way.
+function claimReportSheetRows(grid: any[][]): Record<string, any>[] | null {
+  const headerAt = grid.findIndex(
+    (l) => (l || []).some((v: any) => norm(String(v ?? '')) === 'claimno') && (l || []).some((v: any) => norm(String(v ?? '')) === 'categories')
+  );
+  if (headerAt < 0) return null;
+  const header = (grid[headerAt] || []).map((h: any) => norm(String(h ?? '')));
+  const col = (...names: string[]) => header.findIndex((h: string) => names.includes(h));
+  const c = {
+    employee: col('employee', 'employeename'),
+    claimNo: col('claimno'),
+    created: col('createddate'),
+    category: col('categories'),
+    description: col('description'),
+    claimDate: col('claimdate'),
+    status: col('status'),
+    amount: col('claimamount'),
+    approved: col('approvedamount'),
+    disbursed: col('sanctioneddisbursedamount', 'disbursedamount')
+  };
+  if (c.employee < 0 || c.claimNo < 0 || c.claimDate < 0 || c.amount < 0) return null;
+  const at = (line: any[], i: number, type: FieldType = 'text') => (i < 0 ? '' : cellText(line?.[i], type));
+  const out: Record<string, any>[] = [];
+  let employee = '';
+  for (let i = headerAt + 1; i < grid.length; i++) {
+    const line = grid[i] || [];
+    const who = at(line, c.employee);
+    if (who) employee = /\[([^\]]+)\]\s*$/.exec(who)?.[1].trim() || who;
+    const claimNo = at(line, c.claimNo);
+    if (!claimNo || norm(String(line[0] ?? '')).startsWith('total')) continue;
+    out.push({
+      __row: i + 1,
+      employee_id: employee,
+      claim_no: claimNo,
+      created_date: at(line, c.created, 'date'),
+      category: at(line, c.category),
+      description: at(line, c.description),
+      claim_date: at(line, c.claimDate, 'date'),
+      status: at(line, c.status),
+      amount: at(line, c.amount),
+      approved_amount: at(line, c.approved),
+      disbursed_amount: at(line, c.disbursed)
+    });
+  }
+  return out;
+}
+
 export const DataImport: React.FC<{ token: string }> = ({ token }) => {
   const api = useHrApi(token);
   const [kinds, setKinds] = useState<Kind[] | null>(null);
@@ -367,6 +420,29 @@ export const DataImport: React.FC<{ token: string }> = ({ token }) => {
         );
         setIgnored(['SL', 'Employee Name']);
         setRows(visitRows);
+        return;
+      }
+      const claimRows = kind.key === 'bill_claims' ? claimReportSheetRows(grid) : null;
+      if (claimRows) {
+        if (!claimRows.length) throw new Error('No claims found in this Claim Report.');
+        if (claimRows.length > maxRows) throw new Error(`${claimRows.length} rows — at most ${maxRows} per upload. Split the sheet.`);
+        const from = (key: string, header: string) => ({ header, field: kind.fields.find((f) => f.key === key)! });
+        setMatched(
+          [
+            from('employee_id', 'Employee [code]'),
+            from('claim_no', 'Claim No.'),
+            from('created_date', 'Created Date'),
+            from('category', 'Categories'),
+            from('description', 'Description'),
+            from('claim_date', 'Claim Date'),
+            from('status', 'Status'),
+            from('amount', 'Claim Amount'),
+            from('approved_amount', 'Approved Amount'),
+            from('disbursed_amount', 'Sanctioned / Disbursed Amount')
+          ].filter((m) => m.field)
+        );
+        setIgnored(['Serial', 'Designation', 'Department', 'Adv. Date', 'Adv. Amount', 'Remaining Amount', 'Total Disbursed Amount']);
+        setRows(claimRows);
         return;
       }
       const headers = (grid[0] || []).map((h) => String(h || '').trim());
