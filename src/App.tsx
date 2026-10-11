@@ -64,6 +64,7 @@ import { setActiveCompanyId } from './lib/company';
 import { ACCOUNT_BLOCKED_EVENT, DEVICE_REVOKED_EVENT, SESSION_ENDED_EVENT, setSignedOutReason } from './lib/device';
 import { refreshNotices } from './lib/noticesLive';
 import { refreshAvatars } from './components/UserAvatar';
+import { SESSION_CHANGED_EVENT } from './components/OnboardingShell';
 
 export default function App() {
   const [token, setToken] = useState<string | null>(localStorage.getItem('mpr_token'));
@@ -314,6 +315,11 @@ export default function App() {
   const handleLoginSuccess = (newToken: string, newUser: User) => {
     localStorage.setItem('mpr_token', newToken);
     localStorage.setItem('mpr_user', JSON.stringify(newUser));
+    // A new joiner's temporary login opens only My Onboarding (main.tsx).
+    if (newUser.is_onboarding) {
+      window.dispatchEvent(new Event(SESSION_CHANGED_EVENT));
+      return;
+    }
     setToken(newToken);
     setUser(newUser);
     // Every fresh login lands on the User Panel dashboard — regardless of

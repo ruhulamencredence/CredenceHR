@@ -213,7 +213,8 @@ export function registerProfileRoutes(app: Express, deps: ProfileRouteDeps) {
       if (!valid) return res.status(400).json({ error: "Current password is incorrect." });
 
       const password_hash = await bcrypt.hash(newPassword, 10);
-      await queryDB("UPDATE users SET password_hash = ? WHERE id = ?", [password_hash, userId]);
+      // Also clears "must change password" (a new joiner's temporary password).
+      await queryDB("UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?", [password_hash, userId]);
       // Every other sign-in of this account ends; this one stays.
       await endAllSessions(queryDB, Number(userId), "password", sessionKeyOf(String(req.headers["authorization"] || "").split(" ")[1] || ""));
       res.json({ success: true });

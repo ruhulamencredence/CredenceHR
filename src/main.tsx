@@ -1,9 +1,11 @@
 import './lib/polyfills.ts';
-import {StrictMode} from 'react';
+import {StrictMode, useEffect, useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import ChatStandalone from './ChatStandalone.tsx';
 import PrivacyPolicy from './components/PrivacyPolicy.tsx';
+import { OnboardingShell, SESSION_CHANGED_EVENT } from './components/OnboardingShell.tsx';
+import type { User } from './types.ts';
 import { applyBackgroundTheme, getSavedBackgroundTheme } from './lib/backgroundTheme.ts';
 import './index.css';
 import { installCompanyHeader } from './lib/company.ts';
@@ -27,8 +29,35 @@ const isStandaloneChat = window.location.pathname === '/chat';
 const isPrivacyPolicy = /^\/privacy\/?$/.test(window.location.pathname);
 if (isPrivacyPolicy) document.title = 'Privacy Policy · CredenceHR';
 
+// A new joiner's temporary login (HR Operations -> Onboarding -> New Joiners)
+// gets only "My Onboarding", never the normal app — so none of the app's
+// background calls run for it. App.tsx's sign-in hands over by saving the
+// session and firing SESSION_CHANGED_EVENT.
+const onboardingSession = (): { token: string; user: User } | null => {
+  try {
+    const token = localStorage.getItem('mpr_token');
+    const user = JSON.parse(localStorage.getItem('mpr_user') || 'null');
+    return token && user?.is_onboarding ? { token, user } : null;
+  } catch {
+    return null;
+  }
+};
+function Root() {
+  const [onb, setOnb] = useState(onboardingSession);
+  useEffect(() => {
+    const check = () => setOnb(onboardingSession());
+    window.addEventListener(SESSION_CHANGED_EVENT, check);
+    window.addEventListener('storage', check);
+    return () => {
+      window.removeEventListener(SESSION_CHANGED_EVENT, check);
+      window.removeEventListener('storage', check);
+    };
+  }, []);
+  return onb ? <OnboardingShell token={onb.token} user={onb.user} /> : <App />;
+}
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    {isPrivacyPolicy ? <PrivacyPolicy /> : isStandaloneChat ? <ChatStandalone /> : <App />}
+    {isPrivacyPolicy ? <PrivacyPolicy /> : isStandaloneChat ? <ChatStandalone /> : <Root />}
   </StrictMode>,
 );

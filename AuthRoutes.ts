@@ -88,6 +88,15 @@ export function registerAuthRoutes(app: Express, deps: RegisterAuthRoutesDeps) {
       if (Number(user.is_blocked || 0) === 1 && user.role !== "superadmin") {
         return res.status(403).json({ error: "This account has been blocked. Contact HR.", code: "ACCOUNT_BLOCKED" });
       }
+      // A new joiner's temporary login (OnboardingSelfServiceRoutes.ts) is open
+      // until its expiry while the joiner hasn't submitted yet.
+      const isOnboarding = Number(user.is_onboarding || 0) === 1;
+      const onbExpired = isOnboarding
+        ? Number((await queryDB("/*unscoped*/ SELECT (onboarding_expires_at IS NOT NULL AND onboarding_expires_at < NOW()) AS expired FROM users WHERE id = ?", [user.id]))[0]?.expired || 0) === 1
+        : false;
+      if (onbExpired) {
+        return res.status(403).json({ error: "Your onboarding login has expired. Contact HR.", code: "ONBOARDING_EXPIRED" });
+      }
 
       // The app signs in on one phone per account unless a Superadmin allows
       // more (DeviceRoutes.ts). The website isn't limited.
@@ -117,7 +126,7 @@ export function registerAuthRoutes(app: Express, deps: RegisterAuthRoutesDeps) {
       }
 
       const token = jwt.sign(
-        { id: user.id, email: user.email, username: user.username, role: user.role, name: user.name, cl: isAppClient ? "app" : "web", iat_ms: Date.now(), ...(deviceRowId ? { dev: deviceRowId } : {}) },
+        { id: user.id, email: user.email, username: user.username, role: user.role, name: user.name, cl: isAppClient ? "app" : "web", iat_ms: Date.now(), ...(deviceRowId ? { dev: deviceRowId } : {}), ...(isOnboarding ? { onb: 1 } : {}) },
         JWT_SECRET,
         // Admin Panel -> Active Users -> Session security (SessionSecurity.ts).
         { expiresIn: await sessionLifetimeSeconds(queryDB, isAppClient) }
@@ -137,6 +146,10 @@ export function registerAuthRoutes(app: Express, deps: RegisterAuthRoutesDeps) {
           email: user.email,
           username: user.username,
           role: user.role,
+          // New joiner (temporary login): the app shows only My Onboarding.
+          is_onboarding: isOnboarding,
+          must_change_password: !!Number(user.must_change_password || 0),
+          onboarding_expires_at: isOnboarding ? user.onboarding_expires_at ?? null : null,
           can_edit_delivery_date: user.can_edit_delivery_date === undefined ? true : !!Number(user.can_edit_delivery_date),
           can_job_edit: !!Number(user.can_job_edit) && pepmEnabled(companyCtx.groupId),
           // Superadmin-granted (or implicit for the Superadmin itself): shows the
@@ -219,7 +232,7 @@ export function registerAuthRoutes(app: Express, deps: RegisterAuthRoutesDeps) {
   app.get("/api/auth/me", authenticateToken, async (req: any, res) => {
     try {
       const users = await queryDB(
-        "SELECT id, name, email, role, created_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, can_use_calls, can_view_tasks, can_view_mobile_bill, can_view_service_book, can_view_loan_request, can_grant_module_access, attendance_project_id FROM users WHERE id = ?",
+        "SELECT id, name, email, role, created_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, can_use_calls, can_view_tasks, can_view_mobile_bill, can_view_service_book, can_view_loan_request, can_grant_module_access, attendance_project_id, is_onboarding, must_change_password, onboarding_expires_at FROM users WHERE id = ?",
         [req.user.id]
       );
       if (users.length === 0) return res.status(404).json({ error: "User not found" });
@@ -228,6 +241,9 @@ export function registerAuthRoutes(app: Express, deps: RegisterAuthRoutesDeps) {
         ...u,
         active_company_id: activeCompanyId(),
         pepm_enabled: pepmEnabled(activeGroupId()),
+        is_onboarding: !!Number(u.is_onboarding || 0),
+        must_change_password: !!Number(u.must_change_password || 0),
+        onboarding_expires_at: Number(u.is_onboarding || 0) ? u.onboarding_expires_at ?? null : null,
         can_edit_delivery_date: u.can_edit_delivery_date === undefined ? true : !!Number(u.can_edit_delivery_date),
         can_job_edit: !!Number(u.can_job_edit) && pepmEnabled(activeGroupId()),
         can_use_attendance: u.role === "superadmin" ? true : !!Number(u.can_use_attendance),

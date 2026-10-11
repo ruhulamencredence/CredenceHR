@@ -16,6 +16,7 @@ import { ClipboardCheck, PlayCircle, Paperclip, CheckCircle2, Circle, MinusCircl
 import { Spinner } from './Spinner';
 import { apiUrl } from '../lib/api';
 import { LetterComposer, type ComposerInit } from './HrOpsLetters';
+import { HrOpsJoinerOnboarding, type OnboardingAccess } from './HrOpsJoinerOnboarding';
 import { useHrApi, Notice, Badge, fmtDate, inputCls, btnPrimary, btnGhost, type HrOpsEmployee, type HrOpsMeta } from './HrOpsShared';
 
 interface Joiner {
@@ -48,7 +49,48 @@ interface Item {
 // Items that open a letter composer instead of a plain tick.
 const LETTER_FOR_TASK: Record<string, string> = { appointment_letter: 'appointment', bank_letter: 'bank_account', joining_report: 'joining' };
 
+// Onboarding has two parts: the self-service New Joiners (only for an
+// account with one of its layers) and the checklist of Employees who joined.
 export const HrOpsOnboarding: React.FC<{ token: string; meta: HrOpsMeta; employees: HrOpsEmployee[] }> = ({ token, meta, employees }) => {
+  const api = useHrApi(token);
+  const [access, setAccess] = useState<OnboardingAccess | null>(null);
+  const [part, setPart] = useState<'joiners' | 'checklist'>('checklist');
+  useEffect(() => {
+    api
+      .get<OnboardingAccess>('/api/hr-ops/joiner-onboarding/access')
+      .then((a) => {
+        setAccess(a);
+        if (a.onboarding_create || a.onboarding_review || a.onboarding_approve) setPart('joiners');
+      })
+      .catch(() => setAccess({ onboarding_create: false, onboarding_review: false, onboarding_approve: false }));
+  }, [api]);
+  const showJoiners = !!access && (access.onboarding_create || access.onboarding_review || access.onboarding_approve);
+  if (!showJoiners) return <OnboardingChecklist token={token} meta={meta} employees={employees} />;
+  return (
+    <div className="space-y-4">
+      <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5">
+        {(
+          [
+            ['joiners', 'New Joiners'],
+            ['checklist', 'Checklist']
+          ] as const
+        ).map(([k, label]) => (
+          <button
+            key={k}
+            type="button"
+            onClick={() => setPart(k)}
+            className={`text-xs font-semibold px-3.5 py-1.5 rounded-md transition-colors ${part === k ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {part === 'joiners' ? <HrOpsJoinerOnboarding token={token} meta={meta} access={access!} /> : <OnboardingChecklist token={token} meta={meta} employees={employees} />}
+    </div>
+  );
+};
+
+const OnboardingChecklist: React.FC<{ token: string; meta: HrOpsMeta; employees: HrOpsEmployee[] }> = ({ token, meta, employees }) => {
   const api = useHrApi(token);
   const [joiners, setJoiners] = useState<Joiner[]>([]);
   const [loading, setLoading] = useState(true);
