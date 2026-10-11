@@ -60,7 +60,7 @@ interface Requisition {
   start_time: string;
   estimated_duration_hours: number;
   expected_return_at: string | null;
-  status: 'pending' | 'approved' | 'ongoing' | 'rejected' | 'cancelled' | 'completed' | 'expired';
+  status: 'pending' | 'approved' | 'assigned' | 'ongoing' | 'rejected' | 'cancelled' | 'completed' | 'expired';
   // Who the Approval Workflow is currently waiting on (comma-joined — ANY
   // ONE of them clears the step) — null once past 'pending', or for a
   // legacy requisition with no approval_requests row at all.
@@ -70,6 +70,9 @@ interface Requisition {
   vehicle_model: string | null;
   driver_name: string | null;
   driver_mobile: string | null;
+  // Start Ride: set once an assigned ride is started.
+  started_at: string | null;
+  started_by_name: string | null;
   actual_return_at: string | null;
   returned_late: boolean | null;
   time_extension_status: 'none' | 'requested' | 'approved' | 'rejected';
@@ -257,6 +260,18 @@ useLiveRefresh(() => loadRequisitions());
     }
   }
 
+  // Start Ride: an assigned ride becomes ongoing (live map + tracking on).
+  async function startRide(id: number) {
+    try {
+      const res = await fetch(apiUrl(`/api/vehicles/requisitions/${id}/start`), { method: 'POST', headers: authHeaders() });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not start this ride.');
+      loadRequisitions();
+    } catch (err: any) {
+      setError(err.message);
+    }
+  }
+
   async function decideExtension(id: number, decision: 'approved' | 'rejected') {
     try {
       const res = await fetch(apiUrl(`/api/vehicles/requisitions/${id}/extension-decision`), {
@@ -378,7 +393,7 @@ useLiveRefresh(() => loadRequisitions());
                 <div className="font-semibold text-gray-800">
                   {r.employee_name} — {r.pickup_location} → {r.destination}
                 </div>
-                <span className="text-xs font-medium px-2 py-1 rounded bg-gray-100 text-gray-700">{r.status}</span>
+                <span className="text-xs font-medium px-2 py-1 rounded bg-gray-100 text-gray-700">{r.status === 'assigned' ? 'assigned — not started' : r.status}</span>
               </div>
               <div className="text-xs text-gray-500 mt-1">
                 {r.ride_date} at {r.start_time} • Est. {r.estimated_duration_hours} hr{r.estimated_duration_hours === 1 ? '' : 's'}
@@ -391,11 +406,20 @@ useLiveRefresh(() => loadRequisitions());
                 </div>
               )}
 
-              {(r.status === 'ongoing' || r.status === 'completed') && r.vehicle_no && (
+              {(r.status === 'assigned' || r.status === 'ongoing' || r.status === 'completed') && r.vehicle_no && (
                 <div className="mt-2 rounded bg-green-50 text-green-800 text-xs px-3 py-2 space-y-0.5">
                   <div>Vehicle: {r.vehicle_model} ({r.vehicle_no})</div>
                   <div>Driver: {r.driver_name} — {r.driver_mobile}</div>
                   {r.expected_return_at && <div>Expected back by: {new Date(r.expected_return_at).toLocaleString()}</div>}
+                  {r.started_at && <div>Started: {new Date(r.started_at).toLocaleString()}{r.started_by_name ? ` by ${r.started_by_name}` : ''}</div>}
+                  {r.status === 'assigned' && (
+                    <button
+                      onClick={() => startRide(r.id)}
+                      className="mt-1.5 px-2.5 py-1 text-xs font-medium rounded bg-emerald-600 text-white hover:bg-emerald-700"
+                    >
+                      Start Ride
+                    </button>
+                  )}
                   {r.status === 'ongoing' && (
                     <button
                       onClick={() => setViewingMapFor(r.id)}

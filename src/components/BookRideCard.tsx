@@ -25,7 +25,7 @@ export interface Ride {
   destination: string;
   ride_date: string;
   start_time: string;
-  status: 'pending' | 'approved' | 'ongoing' | 'rejected' | 'cancelled' | 'completed' | 'expired';
+  status: 'pending' | 'approved' | 'assigned' | 'ongoing' | 'rejected' | 'cancelled' | 'completed' | 'expired';
   vehicle_no: string | null;
   vehicle_model: string | null;
   driver_name: string | null;
@@ -34,6 +34,7 @@ export interface Ride {
 export const ACTIVE_LABEL: Record<string, { text: string; color: string }> = {
   pending: { text: 'Awaiting approval', color: 'bg-yellow-100 text-yellow-800' },
   approved: { text: 'Awaiting vehicle', color: 'bg-teal-100 text-teal-800' },
+  assigned: { text: 'Car assigned — not started', color: 'bg-indigo-100 text-indigo-800' },
   ongoing: { text: 'Ride ongoing', color: 'bg-green-100 text-green-800' }
 };
 
@@ -115,7 +116,7 @@ export const BookRideCard: React.FC<BookRideCardProps> = ({ token, userId, onOpe
               </div>
               <div className="text-xs text-slate-500 mt-0.5 truncate">
                 {String(r.ride_date).slice(0, 10)} at {r.start_time}
-                {r.status === 'ongoing' && r.vehicle_no ? ` · ${r.vehicle_model || ''} (${r.vehicle_no})${r.driver_name ? ` · ${r.driver_name}` : ''}` : ''}
+                {(r.status === 'ongoing' || r.status === 'assigned') && r.vehicle_no ? ` · ${r.vehicle_model || ''} (${r.vehicle_no})${r.driver_name ? ` · ${r.driver_name}` : ''}` : ''}
               </div>
             </button>
           ))

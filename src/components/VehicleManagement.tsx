@@ -14,13 +14,14 @@
 import { useLiveRefresh } from '../lib/liveRefresh';
 import React, { useEffect, useRef, useState } from 'react';
 import { apiUrl } from '../lib/api';
+import { confirmDialog } from '../lib/confirmDialog';
 import { LiveRideMap } from './LiveRideMap';
 import { RideDetails } from './RideDetails';
 import { RideBookingMap } from './RideBookingMap';
 import { useWideWeb } from '../lib/useWideWeb';
 import { takeQuickAccessTab } from '../lib/quickAccess';
 import { RideDestinationPicker, RidePlaces, GLASS_CARD } from './RideDestinationPicker';
-import { ArrowRight, CalendarDays, Car, ClipboardCheck, ListChecks, Map as MapIcon, Navigation, Phone, Timer, UserRound, Zap } from 'lucide-react';
+import { ArrowRight, CalendarDays, Car, ClipboardCheck, ListChecks, Map as MapIcon, CarFront, Navigation, Phone, Play, Timer, UserRound, Zap } from 'lucide-react';
 import {
   RIDE_CARD,
   RIDE_WELL,
@@ -39,6 +40,7 @@ import {
 
 interface Requisition {
   id: number;
+  employee_name?: string | null;
   purpose: string;
   pickup_location: string;
   destination: string;
@@ -46,7 +48,7 @@ interface Requisition {
   start_time: string;
   estimated_duration_hours: number;
   expected_return_at: string | null;
-  status: 'pending' | 'approved' | 'ongoing' | 'rejected' | 'cancelled' | 'completed' | 'expired';
+  status: 'pending' | 'approved' | 'assigned' | 'ongoing' | 'rejected' | 'cancelled' | 'completed' | 'expired';
   // Who the Approval Workflow is currently waiting on (comma-joined — ANY
   // ONE of them clears the step) — null once past 'pending'.
   pending_with: string | null;
@@ -61,6 +63,11 @@ interface Requisition {
   // unlocks "View Live Map" (LiveRideMap needs Employee Tracking pings from
   // both this and employee_user_id).
   driver_user_id: number | null;
+  // Start Ride: who gave the vehicle (may start the ride too), and when it started.
+  assigned_by: number | null;
+  assigned_by_name: string | null;
+  started_at: string | null;
+  started_by_name: string | null;
   actual_return_at: string | null;
   returned_late: boolean | null;
   time_extension_status: 'none' | 'requested' | 'approved' | 'rejected';
@@ -75,7 +82,10 @@ const STATUS_LABEL: Record<Requisition['status'], string> = {
   // Could be with the Supervisor or HR/Admin — "Waiting on" names who.
   pending: 'Pending Approval',
   approved: 'Approved — Awaiting Vehicle Assignment',
-  ongoing: 'Vehicle Assigned — Ride Ongoing',
+  // A vehicle is given but the ride hasn't started — it turns Ongoing only
+  // when the driver (or whoever assigned it) presses Start Ride.
+  assigned: 'Vehicle Assigned — Waiting to Start',
+  ongoing: 'Ride Ongoing',
   rejected: 'Rejected',
   cancelled: 'Cancelled',
   completed: 'Completed',
@@ -137,7 +147,7 @@ interface VehicleManagementProps {
   // The logged-in account — only used here to decide whether the "Direct
   // Book" tab (the Vehicle Maintainer bypass) shows at all. A Superadmin
   // implicitly has every module, same convention as requireModule server-side.
-  user?: { role?: string; module_permissions?: string[] } | null;
+  user?: { id?: number; role?: string; module_permissions?: string[] } | null;
 }
 
 export function VehicleManagement({ user }: VehicleManagementProps) {
@@ -146,11 +156,11 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
   // nothing there is this account's to assign, go to Direct Book (Vehicle
   // Maintainer) or Admin Panel -> Vehicle Management instead.
   const wantAssignRef = useRef(false);
-  const [tab, setTab] = useState<'book' | 'status' | 'assign' | 'maintainer'>(() => {
+  const [tab, setTab] = useState<'book' | 'status' | 'assign' | 'trips' | 'maintainer'>(() => {
     // One-shot tab request from the Dashboard's Book a Ride quick access.
     const requested = takeQuickAccessTab('bookRide');
     if (requested === 'assign') wantAssignRef.current = true;
-    return requested === 'status' ? 'status' : requested === 'assign' ? 'assign' : 'book';
+    return requested === 'status' ? 'status' : requested === 'assign' ? 'assign' : requested === 'trips' ? 'trips' : 'book';
   });
   const [requisitions, setRequisitions] = useState<Requisition[]>([]);
   const [loading, setLoading] = useState(false);
@@ -170,8 +180,12 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
   // moves there so the requester sees the new request and its status).
   const [submittedNotice, setSubmittedNotice] = useState<string | null>(null);
 
-  // Ride Status summary tiles double as a filter.
-  const [statusFilter, setStatusFilter] = useState<'all' | Requisition['status']>('all');
+  // Ride Status summary tiles double as a filter ('active' = assigned or ongoing).
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | Requisition['status']>('all');
+
+  // My Trips — rides this account drives or gave the vehicle for (GET
+  // /api/vehicles/requisitions/my-trips), where Start Ride is pressed.
+  const [myTrips, setMyTrips] = useState<Requisition[]>([]);
 
   const [extendingFor, setExtendingFor] = useState<number | null>(null);
   const [extendNote, setExtendNote] = useState('');
@@ -303,6 +317,31 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
     }
   }
 
+  async function loadMyTrips() {
+    try {
+      const res = await fetch(apiUrl('/api/vehicles/requisitions/my-trips'), { headers: authHeaders() });
+      const data = await res.json();
+      if (res.ok && Array.isArray(data)) setMyTrips(data);
+    } catch {
+      // keeps the last list
+    }
+  }
+
+  // Start Ride: an assigned ride becomes Ongoing (Live Map + live tracking on).
+  async function startRide(id: number) {
+    setError(null);
+    try {
+      const res = await fetch(apiUrl(`/api/vehicles/requisitions/${id}/start`), { method: 'POST', headers: authHeaders() });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not start this ride.');
+      void loadMyTrips();
+      if (tab === 'status') void loadRequisitions(true);
+      if (tab === 'maintainer') void loadMaintainerData();
+    } catch (err: any) {
+      setError(err.message);
+    }
+  }
+
   async function loadRequisitions(silent = false) {
     if (!silent) {
       setLoading(true);
@@ -368,12 +407,14 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
   useLiveRefresh(() => {
     if (tab === 'status') void loadRequisitions(true);
     void loadAwaitingAssignment(true);
+    void loadMyTrips();
   });
 
   // Runs once on mount, regardless of which tab is active, purely so the
-  // "Approved by Me" tab shows its real count right away.
+  // "Approved by Me" and "My Trips" tabs show their real count right away.
   useEffect(() => {
     loadAwaitingAssignment(true);
+    loadMyTrips();
   }, []);
 
   async function submitRequisition(e: React.FormEvent) {
@@ -409,6 +450,14 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
   }
 
   async function cancelRequisition(id: number) {
+    const ride = [...requisitions, ...myTrips].find((r) => r.id === id);
+    const ok = await confirmDialog(
+      ride?.status === 'assigned'
+        ? 'Cancel this ride? The vehicle is released and the rider and driver are told.'
+        : 'Cancel this ride request?',
+      { tone: 'danger' }
+    );
+    if (!ok) return;
     try {
       const res = await fetch(apiUrl(`/api/vehicles/requisitions/${id}/cancel`), { method: 'POST', headers: authHeaders() });
       const data = await res.json();
@@ -424,7 +473,8 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
       const res = await fetch(apiUrl(`/api/vehicles/requisitions/${id}/complete`), { method: 'POST', headers: authHeaders() });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Could not mark the ride completed.');
-      loadRequisitions();
+      loadRequisitions(true);
+      void loadMyTrips();
     } catch (err: any) {
       setError(err.message);
     }
@@ -494,7 +544,12 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
   const hours = (n: number) => `${n} hr${Number(n) === 1 ? '' : 's'}`;
   const when = (r: Requisition) => `${String(r.ride_date).slice(0, 10)} · ${r.start_time}`;
   const counts = requisitions.reduce<Record<string, number>>((acc, r) => ({ ...acc, [r.status]: (acc[r.status] || 0) + 1 }), {});
-  const shownRides = statusFilter === 'all' ? requisitions : requisitions.filter((r) => r.status === statusFilter);
+  const shownRides =
+    statusFilter === 'all'
+      ? requisitions
+      : statusFilter === 'active'
+        ? requisitions.filter((r) => r.status === 'assigned' || r.status === 'ongoing')
+        : requisitions.filter((r) => r.status === statusFilter);
   const emptyState = (text: string) => (
     <div className={`${card} px-6 py-10 flex flex-col items-center text-center`}>
       <span className="w-12 h-12 rounded-2xl bg-[var(--g-accent-soft)] flex items-center justify-center mb-3">
@@ -554,6 +609,8 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
     { key: 'book' as const, label: 'Book a Ride', icon: Car, count: 0 },
     { key: 'status' as const, label: 'Ride Status', icon: ListChecks, count: 0 },
     { key: 'assign' as const, label: wideWeb ? 'Approved by Me' : 'Approved', icon: ClipboardCheck, count: awaitingAssignment.length },
+    // Only for someone who drives or gave the vehicle for a current ride.
+    ...(myTrips.length > 0 || tab === 'trips' ? [{ key: 'trips' as const, label: wideWeb ? 'My Trips' : 'Trips', icon: CarFront, count: myTrips.filter((r) => r.status === 'assigned').length }] : []),
     ...(isVehicleMaintainer ? [{ key: 'maintainer' as const, label: 'Direct Book', icon: Zap, count: 0 }] : [])
   ];
 
@@ -572,7 +629,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
                 on ? 'liquid-glass-button' : 'text-slate-600 hover:text-[color:var(--g-accent-700)] hover:bg-white/70'
               }`}
             >
-              <Icon className={`w-4 h-4 shrink-0 ${wideWeb ? '' : 'hidden min-[400px]:block'}`} />
+              <Icon className={`w-4 h-4 shrink-0 ${wideWeb ? '' : TABS.length > 3 ? 'hidden' : 'hidden min-[400px]:block'}`} />
               <span className="truncate">{label}</span>
               {count > 0 && (
                 <span
@@ -720,7 +777,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
             [
               ['all', 'All', requisitions.length],
               ['pending', 'Pending', counts.pending || 0],
-              ['ongoing', 'Ongoing', counts.ongoing || 0],
+              ['active', 'Active', (counts.assigned || 0) + (counts.ongoing || 0)],
               ['completed', 'Completed', counts.completed || 0],
               ...(wideWeb ? [['approved', 'Awaiting car', counts.approved || 0]] : [])
             ] as [typeof statusFilter, string, number][]
@@ -804,6 +861,10 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
                     </div>
                   )}
                   {r.status === 'rejected' && r.rejection_reason && <div className="text-xs text-rose-600">Reason: {r.rejection_reason}</div>}
+                  {r.status === 'assigned' && <div className="text-xs text-indigo-700">Starts when the driver presses Start Ride</div>}
+                  {r.status === 'ongoing' && r.started_at && (
+                    <div className="text-xs text-slate-500">Started {new Date(r.started_at).toLocaleString()}</div>
+                  )}
                   {r.status === 'ongoing' && r.expected_return_at && (
                     <div className="text-xs text-slate-500">Back by {new Date(r.expected_return_at).toLocaleString()}</div>
                   )}
@@ -821,7 +882,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
                   )}
                 </div>
                 <div className="flex flex-wrap justify-end gap-1.5">
-                  {r.status === 'pending' && (
+                  {(r.status === 'pending' || r.status === 'assigned') && (
                     <button onClick={() => cancelRequisition(r.id)} className={BTN_GHOST_SM}>
                       Cancel
                     </button>
@@ -892,7 +953,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
 
               {r.status === 'rejected' && r.rejection_reason && <div className="text-xs text-rose-600 mt-2">Reason: {r.rejection_reason}</div>}
 
-              {(r.status === 'ongoing' || r.status === 'completed') && r.vehicle_no && (
+              {(r.status === 'assigned' || r.status === 'ongoing' || r.status === 'completed') && r.vehicle_no && (
                 <div className={`mt-3 px-3 py-2.5 text-xs text-slate-700 space-y-1 ${RIDE_WELL}`}>
                   <div className="flex items-center gap-1.5">
                     <Car className="w-3.5 h-3.5 text-[color:var(--g-accent)]" /> {r.vehicle_model} ({r.vehicle_no})
@@ -905,6 +966,8 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
                       </a>
                     )}
                   </div>
+                  {r.status === 'assigned' && <div className="text-indigo-700 font-medium">Starts when the driver presses Start Ride</div>}
+                  {r.started_at && <div className="text-slate-500">Started {new Date(r.started_at).toLocaleString()}</div>}
                   {r.expected_return_at && <div className="text-slate-500">Expected back by {new Date(r.expected_return_at).toLocaleString()}</div>}
                 </div>
               )}
@@ -929,7 +992,7 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
                     <MapIcon className="w-3.5 h-3.5" /> Ride Details & Map
                   </button>
                 )}
-                {r.status === 'pending' && (
+                {(r.status === 'pending' || r.status === 'assigned') && (
                   <button onClick={() => cancelRequisition(r.id)} className={BTN_GHOST_SM}>
                     Cancel Request
                   </button>
@@ -999,6 +1062,60 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
                   </button>
                 ),
                 false
+              )
+            )}
+          </div>
+        </div>
+      )}
+
+      {tab === 'trips' && (
+        <div className="space-y-3">
+          <RideBanner tone="info">
+            Rides you drive or gave the vehicle for. A ride shows as Ongoing (with the Live Map) only after you press Start Ride.
+          </RideBanner>
+          {myTrips.length === 0 && emptyState('No trips waiting on you right now.')}
+          <div className={wideWeb ? 'grid grid-cols-2 gap-3' : 'space-y-3'}>
+            {myTrips.map((r) =>
+              requestCard(
+                r,
+                <div className="space-y-2.5">
+                  <div className={`px-3 py-2.5 text-xs text-slate-700 space-y-1 ${RIDE_WELL}`}>
+                    <div className="flex items-center gap-1.5">
+                      <UserRound className="w-3.5 h-3.5 text-[color:var(--g-accent)]" /> Rider: {r.employee_name || '—'}
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <Car className="w-3.5 h-3.5 text-[color:var(--g-accent)]" /> {r.vehicle_model} ({r.vehicle_no}) · Driver: {r.driver_name}
+                    </div>
+                    {r.started_at && <div className="text-slate-500">Started {new Date(r.started_at).toLocaleString()}</div>}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {r.status === 'assigned' ? (
+                      <>
+                        <button onClick={() => startRide(r.id)} className={BTN_PRIMARY_SM}>
+                          <Play className="w-3.5 h-3.5" /> Start Ride
+                        </button>
+                        <button
+                          onClick={async () => {
+                            await cancelRequisition(r.id);
+                            void loadMyTrips();
+                          }}
+                          className={BTN_GHOST_SM}
+                        >
+                          Cancel Ride
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button onClick={() => setViewingMapFor(r.id)} className={BTN_SOFT_SM}>
+                          <Navigation className="w-3.5 h-3.5" /> Live Map
+                        </button>
+                        <button onClick={() => completeRide(r.id)} className={BTN_PRIMARY_SM}>
+                          Ride Completed
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
               )
             )}
           </div>
@@ -1205,9 +1322,15 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
                       {r.vehicle_model} ({r.vehicle_no}) · {r.driver_name}
                       {!r.driver_user_id && ' (no tracked account — live map unavailable)'}
                     </span>
-                    <button onClick={() => setViewingMapFor(r.id)} disabled={!r.driver_user_id} className={BTN_SOFT_SM}>
-                      <Navigation className="w-3.5 h-3.5" /> View Live Map
-                    </button>
+                    {r.status === 'assigned' ? (
+                      <button onClick={() => startRide(r.id)} className={BTN_PRIMARY_SM}>
+                        <Play className="w-3.5 h-3.5" /> Start Ride
+                      </button>
+                    ) : (
+                      <button onClick={() => setViewingMapFor(r.id)} disabled={!r.driver_user_id} className={BTN_SOFT_SM}>
+                        <Navigation className="w-3.5 h-3.5" /> View Live Map
+                      </button>
+                    )}
                   </div>
                 )
               )}

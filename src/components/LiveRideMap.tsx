@@ -81,6 +81,32 @@ const pinIcon = (bg: string, emoji: string) =>
   });
 const employeeIcon = pinIcon('#2563eb', '🧑');
 const driverIcon = pinIcon('#059669', '🚗');
+
+const escapeHtml = (v: string) => v.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
+const initialsOf = (name: string) =>
+  name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0]!.toUpperCase())
+    .join('') || '?';
+
+// The person's profile photo (or initials) in a ring of their colour, with a
+// small badge saying who they are (🧑 employee, 🚗 driver).
+const personIcon = (bg: string, badge: string, name: string, photo: string | null) =>
+  L.divIcon({
+    className: '',
+    html: `<div style="position:relative;width:44px;height:44px;">
+      <div style="width:44px;height:44px;border-radius:9999px;background:${bg};border:3px solid ${bg};box-shadow:0 2px 6px rgba(0,0,0,0.45);overflow:hidden;display:flex;align-items:center;justify-content:center;color:#fff;font:700 14px system-ui,sans-serif;">${
+        photo ? `<img src="${photo}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:9999px;background:#fff;" />` : escapeHtml(initialsOf(name))
+      }</div>
+      <div style="position:absolute;right:-4px;bottom:-4px;width:20px;height:20px;border-radius:9999px;background:${bg};border:2px solid white;display:flex;align-items:center;justify-content:center;font-size:11px;">${badge}</div>
+    </div>`,
+    iconSize: [44, 44],
+    iconAnchor: [22, 22],
+    popupAnchor: [0, -22]
+  });
+
 const destinationIcon = pinIcon('#dc2626', '🏁');
 
 interface LiveRideMapProps {
@@ -97,6 +123,8 @@ export function LiveRideMap({ requisitionId, onClose }: LiveRideMapProps) {
   const [data, setData] = useState<LiveLocationResponse | null>(null);
   const [route, setRoute] = useState<RouteResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Profile photos (object URLs) by user id — GET /api/profile/photo/:userId.
+  const [photos, setPhotos] = useState<Record<number, string | null>>({});
 
   const fetchLocation = useCallback(async () => {
     try {
@@ -133,6 +161,39 @@ export function LiveRideMap({ requisitionId, onClose }: LiveRideMapProps) {
       mapRef.current = null;
     };
   }, []);
+
+  // Load each person's photo once (null = none on file -> initials).
+  const employeeId = data?.employee?.user_id ?? null;
+  const driverId = data?.driver?.user_id ?? null;
+  useEffect(() => {
+    const ids = [employeeId, driverId].filter((id): id is number => !!id && !(id in photos));
+    if (ids.length === 0) return;
+    let cancelled = false;
+    const token = localStorage.getItem('mpr_token');
+    for (const id of ids) {
+      fetch(apiUrl(`/api/profile/photo/${id}`), { headers: { Authorization: `Bearer ${token}` } })
+        .then((r) => (r.ok ? r.blob() : null))
+        .then((blob) => {
+          if (cancelled) return;
+          setPhotos((prev) => ({ ...prev, [id]: blob && blob.size > 0 ? URL.createObjectURL(blob) : null }));
+        })
+        .catch(() => {
+          if (!cancelled) setPhotos((prev) => ({ ...prev, [id]: null }));
+        });
+    }
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [employeeId, driverId]);
+  const photosRef = useRef(photos);
+  photosRef.current = photos;
+  useEffect(
+    () => () => {
+      for (const url of Object.values(photosRef.current)) if (url) URL.revokeObjectURL(url);
+    },
+    []
+  );
 
   const employeePos: LatLng | null =
     data?.employee?.lat != null && data?.employee?.lng != null ? [data.employee.lat, data.employee.lng] : null;
@@ -197,8 +258,16 @@ export function LiveRideMap({ requisitionId, onClose }: LiveRideMapProps) {
       popup.textContent = label;
       L.marker(pos, { icon }).addTo(layer).bindPopup(popup);
     };
-    if (employeePos && data.employee) addMarker(employeePos, employeeIcon, `${data.employee.name} (Employee) — ${agoLabel(data.employee.recorded_at)}`);
-    if (driverPos && data.driver) addMarker(driverPos, driverIcon, `${data.driver.name} (Driver) — ${agoLabel(data.driver.recorded_at)}`);
+    if (employeePos && data.employee) {
+      const photo = photos[data.employee.user_id];
+      const icon = photo === undefined ? employeeIcon : personIcon('#2563eb', '🧑', data.employee.name || '', photo);
+      addMarker(employeePos, icon, `${data.employee.name} (Employee) — ${agoLabel(data.employee.recorded_at)}`);
+    }
+    if (driverPos && data.driver) {
+      const photo = photos[data.driver.user_id];
+      const icon = photo === undefined ? driverIcon : personIcon('#059669', '🚗', data.driver.name || '', photo);
+      addMarker(driverPos, icon, `${data.driver.name} (Driver) — ${agoLabel(data.driver.recorded_at)}`);
+    }
     if (destinationPos) addMarker(destinationPos, destinationIcon, `Destination — ${data.destination}`);
 
     if (route) {
@@ -214,7 +283,7 @@ export function LiveRideMap({ requisitionId, onClose }: LiveRideMapProps) {
       hasFittedRef.current = true;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, route]);
+  }, [data, route, photos]);
 
   // Opens turn-by-turn navigation in the phone's own maps app (Google Maps
   // app on Android, or the browser) — free, no API key.
@@ -223,6 +292,11 @@ export function LiveRideMap({ requisitionId, onClose }: LiveRideMapProps) {
       ? `https://www.google.com/maps/dir/?api=1&destination=${destinationPos[0]},${destinationPos[1]}&travelmode=driving`
       : `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(data.destination)}&travelmode=driving`
     : null;
+
+  const miniAvatar = (id: number | null, fallback: string) => {
+    const url = id ? photos[id] : null;
+    return url ? <img src={url} alt="" className="w-5 h-5 rounded-full object-cover shrink-0" /> : <span>{fallback}</span>;
+  };
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
@@ -255,9 +329,13 @@ export function LiveRideMap({ requisitionId, onClose }: LiveRideMapProps) {
         <div ref={mapContainerRef} style={{ height: 380 }} />
 
         <div className="px-4 py-3 border-t text-xs text-gray-600 space-y-1">
-          <div>🧑 Employee: {employeePos ? `updated ${agoLabel(data?.employee?.recorded_at ?? null)}` : 'waiting for location…'}</div>
-          <div>
-            🚗 Driver: {data?.driver ? (driverPos ? `updated ${agoLabel(data.driver.recorded_at)}` : 'waiting for location…') : 'no driver account linked'}
+          <div className="flex items-center gap-1.5">
+            {miniAvatar(employeeId, '🧑')} Employee{data?.employee?.name ? ` (${data.employee.name})` : ''}:{' '}
+            {employeePos ? `updated ${agoLabel(data?.employee?.recorded_at ?? null)}` : 'waiting for location…'}
+          </div>
+          <div className="flex items-center gap-1.5">
+            {miniAvatar(driverId, '🚗')} Driver{data?.driver?.name ? ` (${data.driver.name})` : ''}:{' '}
+            {data?.driver ? (driverPos ? `updated ${agoLabel(data.driver.recorded_at)}` : 'waiting for location…') : 'no driver account linked'}
           </div>
           <div>🏁 Destination: {destinationPos ? data?.destination : data ? `"${data.destination}" couldn't be found on the map` : '…'}</div>
           <div className="flex items-center justify-between gap-2 pt-1">
