@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { LogOut, Plus, X, CheckCircle2, AlertTriangle, ChevronDown, ChevronUp, Save, Ban, ShieldCheck } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
+import { ExitDuesCard, DuesBlockedModal, type ExitDue } from './ExitDuesCard';
 
 interface ExitOffboardingPanelProps {
   token: string;
@@ -78,6 +79,18 @@ export const ExitOffboardingPanel: React.FC<ExitOffboardingPanelProps> = ({ toke
   const [creating, setCreating] = useState(false);
 
   const [settlementDrafts, setSettlementDrafts] = useState<Record<number, Record<string, string>>>({});
+  // Dues from other modules (layer "exit_dues"): whether to show the card,
+  // a counter to reload it, and the popup when Paid / Settled is refused.
+  const [canSeeDues, setCanSeeDues] = useState(false);
+  const [duesRefresh, setDuesRefresh] = useState(0);
+  const [duesBlocked, setDuesBlocked] = useState<{ message: string; items: ExitDue[] } | null>(null);
+  useEffect(() => {
+    fetch(apiUrl('/api/exit-dues/access'), { headers: authHeaders })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((a) => setCanSeeDues(!!a?.exit_dues))
+      .catch(() => setCanSeeDues(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [savingSettlementId, setSavingSettlementId] = useState<number | null>(null);
 
   // Clearance Approvers — which login account routes each of the 4 fixed
@@ -183,6 +196,10 @@ export const ExitOffboardingPanel: React.FC<ExitOffboardingPanelProps> = ({ toke
         body: JSON.stringify({ status })
       });
       const data = await res.json();
+      if (res.status === 409 && data.blocking) {
+        setDuesBlocked({ message: data.error, items: data.blocking });
+        return;
+      }
       if (!res.ok) throw new Error(data.error || 'Failed to update status');
       setRequests((prev) => prev.map((r) => (r.id === id ? data : r)));
     } catch (err: any) {
@@ -210,8 +227,8 @@ export const ExitOffboardingPanel: React.FC<ExitOffboardingPanelProps> = ({ toke
     }
   };
 
-  const openSettlement = async (exitId: number) => {
-    if (settlementDrafts[exitId]) return;
+  const openSettlement = async (exitId: number, force = false) => {
+    if (settlementDrafts[exitId] && !force) return;
     try {
       const res = await fetch(apiUrl(`/api/exit-requests/${exitId}/settlement`), { headers: authHeaders });
       const data = await res.json();
@@ -255,6 +272,11 @@ export const ExitOffboardingPanel: React.FC<ExitOffboardingPanelProps> = ({ toke
         })
       });
       const data = await res.json();
+      if (res.status === 409 && data.blocking) {
+        setDuesBlocked({ message: data.error, items: data.blocking });
+        setDuesRefresh((n) => n + 1);
+        return;
+      }
       if (!res.ok) throw new Error(data.error || 'Failed to save settlement');
       setRequests((prev) => prev.map((r) => (r.id === exitId ? { ...r, settlement: data, status: markStatus === 'paid' ? 'settled' : r.status } : r)));
     } catch (err: any) {
@@ -510,6 +532,16 @@ export const ExitOffboardingPanel: React.FC<ExitOffboardingPanelProps> = ({ toke
                       </div>
                     </div>
 
+                    {canSeeDues && (
+                      <ExitDuesCard
+                        token={token}
+                        exitId={r.id}
+                        settlementPaid={r.settlement?.status === 'paid'}
+                        refreshKey={duesRefresh}
+                        onAdded={() => openSettlement(r.id, true)}
+                      />
+                    )}
+
                     <div>
                       <p className="text-xs font-bold text-slate-700 mb-2">Full &amp; Final Settlement</p>
                       {!draft ? (
@@ -582,6 +614,7 @@ export const ExitOffboardingPanel: React.FC<ExitOffboardingPanelProps> = ({ toke
           {requests.length === 0 && <p className="px-2 py-10 text-center text-xs text-slate-400">No exit requests yet.</p>}
         </div>
       )}
+      {duesBlocked && <DuesBlockedModal message={duesBlocked.message} items={duesBlocked.items} onClose={() => setDuesBlocked(null)} />}
     </div>
   );
 };

@@ -41,6 +41,8 @@ interface ExitOffboardingRouteDeps {
   authenticateToken: any;
   requireAdmin: any;
   requireModule: (moduleKey: "exit_offboarding") => any;
+  requireModuleLayer: (moduleKey: "exit_offboarding", layer: "exit_dues") => any;
+  hasModuleLayer: (user: any, moduleKey: "exit_offboarding", layer: string) => Promise<boolean>;
   queryDB: (sql: string, params?: any[]) => Promise<any>;
   getAdminModules: (userId: number) => Promise<string[]>;
   createAlert: (
@@ -164,10 +166,121 @@ export async function ensureExitOffboardingSchema(dbPool: any): Promise<void> {
   } catch (err: any) {
     console.warn("⚠️ Could not ensure final_settlements table exists: " + err.message);
   }
+  // Which dues (loans / advances from other modules) HR has already added to
+  // this settlement — see POST /api/exit-requests/:id/settlement/add-dues.
+  try {
+    await dbPool.query("ALTER TABLE final_settlements ADD COLUMN dues_json TEXT NULL");
+  } catch (err: any) {
+    if (err.code !== "ER_DUP_FIELDNAME") console.warn("⚠️ Could not add final_settlements.dues_json column: " + err.message);
+  }
+}
+
+// One thing an exiting Employee still has or owes in another module.
+//   blocking — the settlement can't be marked Paid while it is open: an
+//              asset not returned, a SIM still on, a loan / advance balance
+//              not yet added to the settlement.
+//   amount   — money the Employee owes (loans / advances) or is owed (claims).
+export interface ExitDue {
+  key: string;
+  kind: "asset" | "sim" | "loan" | "loan_request" | "claim" | "bill" | "vehicle";
+  label: string;
+  detail: string | null;
+  amount: number | null;
+  blocking: boolean;
+  added: boolean;
+}
+
+const money = (v: any) => Math.round((Number(v) || 0) * 100) / 100;
+
+export function parseAddedDues(raw: any): { key: string; label: string; amount: number; added_at: string; added_by: number }[] {
+  try {
+    const v = typeof raw === "string" ? JSON.parse(raw) : raw;
+    return Array.isArray(v) ? v.filter((x: any) => x && typeof x.key === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+// Everything the exiting account (users.id) still has open elsewhere. Each
+// source is read on its own and a missing table just adds nothing.
+export async function collectExitDues(queryDB: (sql: string, params?: any[]) => Promise<any>, userId: number, settlement: any): Promise<ExitDue[]> {
+  const safe = (sql: string, params?: any[]) => queryDB(sql, params).catch(() => [] as any[]);
+  const emps: any[] = await safe("SELECT id, name FROM all_employees WHERE user_id = ?", [userId]);
+  const empIds = new Set((emps || []).filter((e: any) => e).map((e: any) => Number(e.id)));
+  const added = new Set(parseAddedDues(settlement?.dues_json).map((d) => d.key));
+  const out: ExitDue[] = [];
+  const [assignments, assets, sims, advances, requests, claims, bills, billItems, rides]: any[][] = await Promise.all([
+    safe("SELECT * FROM asset_assignments WHERE employee_user_id = ?", [userId]),
+    safe("SELECT id, name, asset_tag FROM assets"),
+    safe("SELECT * FROM mobile_sims"),
+    safe("SELECT * FROM employee_advances"),
+    safe("SELECT * FROM advance_requests"),
+    safe("SELECT id, user_id, claim_date, category, amount, status FROM user_claims WHERE user_id = ?", [userId]),
+    safe("SELECT id, user_id, bill_date, is_disbursed FROM conveyance_bills WHERE user_id = ?", [userId]),
+    safe("SELECT bill_id, amount FROM conveyance_bill_items"),
+    safe("SELECT id, employee_user_id, purpose, ride_date, status FROM vehicle_requisitions WHERE employee_user_id = ?", [userId])
+  ]);
+  for (const a of (assignments || []).filter((x: any) => Number(x.employee_user_id) === userId && !x.returned_date)) {
+    const asset = (assets || []).find((x: any) => Number(x.id) === Number(a.asset_id));
+    out.push({
+      key: `asset:${a.id}`,
+      kind: "asset",
+      label: asset ? `${asset.name}${asset.asset_tag ? ` (${asset.asset_tag})` : ""}` : `Asset #${a.asset_id}`,
+      detail: `Assigned ${String(a.assigned_date || "").slice(0, 10)} — not returned`,
+      amount: null,
+      blocking: true,
+      added: false
+    });
+  }
+  for (const m of (sims || []).filter((x: any) => empIds.has(Number(x.employee_id)) && x.status === "active"))
+    out.push({ key: `sim:${m.id}`, kind: "sim", label: `SIM ${m.phone_number} (${m.operator})`, detail: "Still active — turn it off or move it in Mobile Bill", amount: null, blocking: true, added: false });
+  for (const a of (advances || []).filter((x: any) => empIds.has(Number(x.employee_id)) && x.status === "active")) {
+    const balance = money(Number(a.total_amount) - Number(a.paid_amount || 0));
+    if (balance <= 0) continue;
+    const key = `loan:${a.id}`;
+    out.push({
+      key,
+      kind: "loan",
+      label: `Loan / advance #${a.id}${a.reason ? ` — ${a.reason}` : ""}`,
+      detail: `৳${money(a.total_amount).toLocaleString("en-US")} given, ৳${money(a.paid_amount).toLocaleString("en-US")} repaid`,
+      amount: balance,
+      blocking: !added.has(key),
+      added: added.has(key)
+    });
+  }
+  for (const r of (requests || []).filter((x: any) => empIds.has(Number(x.employee_id)) && x.status === "pending"))
+    out.push({
+      key: `loan_request:${r.id}`,
+      kind: "loan_request",
+      label: `${r.request_kind === "loan" ? "Loan" : "Salary advance"} request #${r.id}`,
+      detail: "Waiting for a decision",
+      amount: money(r.total_amount),
+      blocking: false,
+      added: false
+    });
+  for (const c of (claims || []).filter((x: any) => Number(x.user_id) === userId && x.status === "pending"))
+    out.push({ key: `claim:${c.id}`, kind: "claim", label: `${c.category || "Claim"} — ${String(c.claim_date || "").slice(0, 10)}`, detail: "Claim waiting for a decision", amount: money(c.amount), blocking: false, added: false });
+  for (const b of (bills || []).filter((x: any) => Number(x.user_id) === userId && !Number(x.is_disbursed))) {
+    const total = money((billItems || []).filter((i: any) => Number(i.bill_id) === Number(b.id)).reduce((t: number, i: any) => t + Number(i.amount || 0), 0));
+    out.push({ key: `bill:${b.id}`, kind: "bill", label: `Conveyance bill ${String(b.bill_date || "").slice(0, 10)}`, detail: "Not paid out yet", amount: total || null, blocking: false, added: false });
+  }
+  for (const v of (rides || []).filter((x: any) => Number(x.employee_user_id) === userId && ["pending", "approved", "assigned", "ongoing"].includes(x.status)))
+    out.push({ key: `vehicle:${v.id}`, kind: "vehicle", label: `Vehicle requisition — ${String(v.ride_date || "").slice(0, 10)}`, detail: v.purpose ? `${v.status}: ${v.purpose}` : v.status, amount: null, blocking: false, added: false });
+  return out;
 }
 
 export function registerExitOffboardingRoutes(app: Express, deps: ExitOffboardingRouteDeps) {
-  const { authenticateToken, requireAdmin, requireModule, queryDB, getAdminModules, createAlert } = deps;
+  const { authenticateToken, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer, queryDB, getAdminModules, createAlert } = deps;
+  const duesGate = [authenticateToken, requireAdmin, requireModule("exit_offboarding"), requireModuleLayer("exit_offboarding", "exit_dues")];
+  const settlementOf = async (exitId: number) => {
+    const rows: any[] = await queryDB("SELECT * FROM final_settlements");
+    return rows.find((s: any) => Number(s.exit_id) === exitId) || null;
+  };
+  // The dues that stop a settlement being paid / an exit being settled.
+  const blockingDues = async (exitRow: any) =>
+    (await collectExitDues(queryDB, Number(exitRow.user_id), await settlementOf(Number(exitRow.id)))).filter((d) => d.blocking);
+  const duesError = (blocking: ExitDue[]) =>
+    `Still open in other modules: ${blocking.map((d) => d.label + (d.kind === "loan" ? " (balance not added to the settlement)" : "")).join("; ")}. Clear them first.`;
 
   async function canManageExits(userId: number, role: string): Promise<boolean> {
     if (role === "superadmin") return true;
@@ -217,13 +330,18 @@ export function registerExitOffboardingRoutes(app: Express, deps: ExitOffboardin
     const items: any = await queryDB("SELECT * FROM exit_clearance_items");
     const users: any = await queryDB("SELECT id, name FROM users");
     const who = users.find((u: any) => Number(u.id) === Number(exitRow.user_id))?.name || "An employee";
+    // What each department should collect, from the other modules.
+    const dues = await collectExitDues(queryDB, Number(exitRow.user_id), await settlementOf(Number(exitRow.id))).catch(() => [] as ExitDue[]);
+    const listOf = (kinds: ExitDue["kind"][]) => dues.filter((d) => kinds.includes(d.kind)).map((d) => d.label + (d.amount ? ` ৳${d.amount.toLocaleString("en-US")}` : ""));
+    const forDept: Record<string, string[]> = { IT: listOf(["asset", "sim"]), Admin: listOf(["asset", "sim"]), Finance: listOf(["loan", "loan_request", "claim", "bill"]) };
     for (const it of items) {
       if (Number(it.exit_id) !== Number(exitRow.id) || Number(it.is_cleared) || it.approver_user_id == null) continue;
+      const open = forDept[it.department] || [];
       await notify(
         [it.approver_user_id],
         "exit_clearance",
         `${it.department} Clearance Awaiting Your Approval`,
-        `${who} is leaving${exitRow.last_working_day ? ` (last working day ${fmtDay(exitRow.last_working_day)})` : ""} — ${it.item_label}. Review it in Approve Application.`,
+        `${who} is leaving${exitRow.last_working_day ? ` (last working day ${fmtDay(exitRow.last_working_day)})` : ""} — ${it.item_label}.${open.length ? ` On record: ${open.slice(0, 5).join("; ")}${open.length > 5 ? ` and ${open.length - 5} more` : ""}.` : ""} Review it in Approve Application.`,
         Number(exitRow.id)
       );
     }
@@ -360,6 +478,10 @@ export function registerExitOffboardingRoutes(app: Express, deps: ExitOffboardin
       }
       const before: any = await queryDB("SELECT * FROM exit_requests WHERE id = ?", [id]);
       if (before.length === 0) return res.status(404).json({ error: "Exit request not found." });
+      if (status === "settled" && before[0].status !== "settled") {
+        const blocking = await blockingDues(before[0]);
+        if (blocking.length) return res.status(409).json({ error: duesError(blocking), blocking });
+      }
       await queryDB("UPDATE exit_requests SET status = ? WHERE id = ?", [status, id]);
       const rows: any = await queryDB("SELECT * FROM exit_requests WHERE id = ?", [id]);
       const exitRow = rows[0];
@@ -515,6 +637,59 @@ export function registerExitOffboardingRoutes(app: Express, deps: ExitOffboardin
   // every other figure is left for the preparer to fill in by hand
   // (gratuity/outstanding dues aren't auto-computed — no gratuity formula or
   // loan ledger wired up yet).
+  // ---------- Dues from other modules (layer "exit_dues") ----------
+
+  // Whether this account sees the dues card (the page asks once).
+  app.get("/api/exit-dues/access", authenticateToken, requireAdmin, requireModule("exit_offboarding"), async (req: any, res) => {
+    try {
+      res.json({ exit_dues: await hasModuleLayer(req.user, "exit_offboarding", "exit_dues") });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/exit-requests/:id/dues", ...duesGate, async (req: any, res) => {
+    try {
+      const exitId = Number(req.params.id);
+      const exitRows: any = await queryDB("SELECT * FROM exit_requests WHERE id = ?", [exitId]);
+      if (exitRows.length === 0) return res.status(404).json({ error: "Exit request not found." });
+      const settlement = await settlementOf(exitId);
+      const items = await collectExitDues(queryDB, Number(exitRows[0].user_id), settlement);
+      res.json({ items, added: parseAddedDues(settlement?.dues_json), settlement_status: settlement?.status || null });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Adds the chosen loan / advance balances to the settlement's outstanding
+  // dues (once each) and recomputes the net payable.
+  app.post("/api/exit-requests/:id/settlement/add-dues", ...duesGate, async (req: any, res) => {
+    try {
+      const exitId = Number(req.params.id);
+      const keys: string[] = Array.isArray(req.body?.keys) ? req.body.keys.map(String) : [];
+      if (!keys.length) return res.status(400).json({ error: "Pick at least one balance to add." });
+      const exitRows: any = await queryDB("SELECT * FROM exit_requests WHERE id = ?", [exitId]);
+      if (exitRows.length === 0) return res.status(404).json({ error: "Exit request not found." });
+      const settlement = await settlementOf(exitId);
+      if (!settlement) return res.status(404).json({ error: "Open the Full & Final Settlement first to create its draft." });
+      if (settlement.status === "paid") return res.status(409).json({ error: "This settlement is already paid." });
+      const dues = await collectExitDues(queryDB, Number(exitRows[0].user_id), settlement);
+      const picked = dues.filter((d) => d.kind === "loan" && keys.includes(d.key) && !d.added && d.amount);
+      if (!picked.length) return res.status(409).json({ error: "Those balances are already in the settlement." });
+      const list = parseAddedDues(settlement.dues_json);
+      const now = new Date().toISOString();
+      for (const d of picked) list.push({ key: d.key, label: d.label, amount: d.amount!, added_at: now, added_by: Number(req.user.id) });
+      const outstanding = money(Number(settlement.outstanding_dues) + picked.reduce((t, d) => t + Number(d.amount), 0));
+      const net = money(
+        Number(settlement.unused_leave_encashment) + Number(settlement.gratuity_amount) + Number(settlement.other_additions) - outstanding - Number(settlement.other_deductions)
+      );
+      await queryDB("UPDATE final_settlements SET outstanding_dues = ?, net_payable = ?, dues_json = ? WHERE id = ?", [outstanding, net, JSON.stringify(list), Number(settlement.id)]);
+      res.json({ success: true, added: picked.map((d) => d.key), outstanding_dues: outstanding, net_payable: net });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.get("/api/exit-requests/:id/settlement", authenticateToken, requireAdmin, requireModule("exit_offboarding"), async (req: any, res) => {
     try {
       const exitId = Number(req.params.id);
@@ -575,6 +750,11 @@ export function registerExitOffboardingRoutes(app: Express, deps: ExitOffboardin
       const settlementRows: any = await queryDB("SELECT * FROM final_settlements");
       const settlement = settlementRows.find((s: any) => Number(s.exit_id) === exitId);
       if (!settlement) return res.status(404).json({ error: "Settlement not found — open it first to create the draft." });
+      if (status === "paid" && settlement.status !== "paid") {
+        const exitRows: any = await queryDB("SELECT * FROM exit_requests WHERE id = ?", [exitId]);
+        const blocking = exitRows[0] ? await blockingDues(exitRows[0]) : [];
+        if (blocking.length) return res.status(409).json({ error: duesError(blocking), blocking });
+      }
 
       await queryDB(
         `UPDATE final_settlements SET unused_leave_days = ?, unused_leave_encashment = ?, gratuity_amount = ?,
