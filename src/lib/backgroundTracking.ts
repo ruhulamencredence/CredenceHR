@@ -254,7 +254,11 @@ async function switchMode(next: 'active' | 'idle' | 'live') {
     mode = next;
     await armWatcher(next === 'live' ? LIVE_DISTANCE_FILTER_M : next === 'active' ? ACTIVE_DISTANCE_FILTER_M : IDLE_DISTANCE_FILTER_M);
     restartPingTimer(next === 'live' ? LIVE_PING_INTERVAL_MS : next === 'active' ? ACTIVE_PING_INTERVAL_MS : IDLE_PING_INTERVAL_MS);
-    if (next === 'live') void sendPing();
+    if (next === 'live') {
+      // Answer at once (even standing still) so the watcher sees the phone is live.
+      lastSentAt = 0;
+      void sendPing();
+    }
   } catch {
     // Re-arming failed (permission revoked mid-session, plugin hiccup) —
     // leave whatever watcher/timer state we had; the next idle-check tick

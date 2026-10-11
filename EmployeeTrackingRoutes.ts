@@ -83,7 +83,7 @@ export function registerEmployeeTrackingRoutes(app: Express, deps: RegisterEmplo
         );
       }
       await saveTrackingState(Number(req.user.id), { battery_pct, mode: req.body.mode, foreground: true }, true);
-      const live_until = await liveTracking.onPing(Number(req.user.id), { lat, lng, accuracy_m, battery_pct, recorded_at });
+      const live_until = await liveTracking.onPing(Number(req.user.id), { lat, lng, accuracy_m, battery_pct, recorded_at, still: !!req.body.repeat });
       res.json({ success: true, live_until });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
