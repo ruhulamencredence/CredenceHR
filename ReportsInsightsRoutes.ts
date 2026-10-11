@@ -856,7 +856,7 @@ const REPORTS: ReportDef[] = [
     modules: ["vehicle_management"],
     filters: ["date", "department", "employee", "status"],
     dateLabel: "Ride date",
-    statuses: ["pending", "approved", "ongoing", "completed", "rejected", "cancelled"].map((v) => ({ value: v, label: titleCase(v) })),
+    statuses: ["pending", "approved", "assigned", "ongoing", "completed", "rejected", "cancelled"].map((v) => ({ value: v, label: titleCase(v) })),
     async run({ from, to, queryDB, people, status }) {
       const [rides, vehicles] = await Promise.all([
         queryDB("SELECT * FROM vehicle_requisitions").catch(() => []),
@@ -919,7 +919,7 @@ const REPORTS: ReportDef[] = [
       ]);
       const stats = new Map<number, { rides: number; completed: number; hours: number; late: number }>();
       for (const r of rides) {
-        if (!r.assigned_vehicle_id || !inRange(d10(r.ride_date), from, to) || !["approved", "ongoing", "completed"].includes(r.status)) continue;
+        if (!r.assigned_vehicle_id || !inRange(d10(r.ride_date), from, to) || !["approved", "assigned", "ongoing", "completed"].includes(r.status)) continue;
         const k = Number(r.assigned_vehicle_id);
         const s = stats.get(k) || { rides: 0, completed: 0, hours: 0, late: 0 };
         s.rides += 1;

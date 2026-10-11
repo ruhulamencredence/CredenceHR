@@ -50,6 +50,9 @@ export interface LiveTracking {
     userId: number,
     ping: { lat: number; lng: number; accuracy_m: number | null; battery_pct: number | null; recorded_at: Date; still?: boolean }
   ) => Promise<number | null>;
+  // A Book a Ride ride just started or ended for these people: re-check at
+  // once (no 30s cache wait) and tell / wake their phones.
+  rideChanged: (userIds: number[]) => Promise<void>;
 }
 
 export function registerLiveTrackingRoutes(app: Express, deps: Deps): LiveTracking {
@@ -195,6 +198,18 @@ export function registerLiveTrackingRoutes(app: Express, deps: Deps): LiveTracki
   );
 
   return {
+    rideChanged: async (userIds) => {
+      for (const userId of userIds) {
+        if (!userId) continue;
+        rideCache.delete(userId);
+        const until = await liveUntil(userId);
+        tellPhone(userId, until);
+        if (until) {
+          wakes.delete(userId);
+          wakePhone(userId, until);
+        }
+      }
+    },
     onPing: async (userId, ping) => {
       lastHeard.set(userId, Date.now());
       const ws = activeWatchers(userId);

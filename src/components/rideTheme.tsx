@@ -32,11 +32,12 @@ export const BTN_GHOST_SM =
 export const BTN_WARN_SM =
   'rounded-full inline-flex items-center justify-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 transition-colors';
 
-export type RideStatus = 'pending' | 'approved' | 'ongoing' | 'rejected' | 'cancelled' | 'completed' | 'expired';
+export type RideStatus = 'pending' | 'approved' | 'assigned' | 'ongoing' | 'rejected' | 'cancelled' | 'completed' | 'expired';
 
 const CHIP: Record<RideStatus, { cls: string; dot: string }> = {
   pending: { cls: 'bg-amber-50 text-amber-700 ring-amber-200', dot: 'bg-amber-500' },
   approved: { cls: 'bg-[var(--g-accent-soft)] text-[color:var(--g-accent-700)] ring-[var(--g-accent-200)]', dot: 'bg-[var(--g-accent)]' },
+  assigned: { cls: 'bg-indigo-50 text-indigo-700 ring-indigo-200', dot: 'bg-indigo-500' },
   ongoing: { cls: 'bg-emerald-50 text-emerald-700 ring-emerald-200', dot: 'bg-emerald-500 animate-pulse' },
   rejected: { cls: 'bg-rose-50 text-rose-700 ring-rose-200', dot: 'bg-rose-500' },
   cancelled: { cls: 'bg-slate-100 text-slate-600 ring-slate-200', dot: 'bg-slate-400' },

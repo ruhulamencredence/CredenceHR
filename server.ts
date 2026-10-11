@@ -2481,7 +2481,8 @@ async function startServer() {
     createTemplateApprovalRequest,
     getCurrentStepApprovers,
     isVehicleMaintainerStep,
-    finalizeVehicleRequisitionApproval
+    finalizeVehicleRequisitionApproval,
+    rideChanged: (userIds: number[]) => liveTracking.rideChanged(userIds)
   }));
 
   // 360 ERP SSO (Sidebar -> "360 ERP") — kept in its own file, same reasoning
