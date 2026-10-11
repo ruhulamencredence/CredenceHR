@@ -49,6 +49,36 @@ export function getFirebaseApp(): admin.app.App | null {
   return firebaseApp;
 }
 
+// A data-only, high-priority push: nothing is shown on the phone; it only
+// wakes the app (out of Doze, with its socket asleep) so it can act on
+// `data` — e.g. Live Follow telling a phone to start reporting. Expires
+// after ttlMs if the phone can't be reached by then. Never throws.
+export async function sendSilentPushToUserIds(
+  queryDB: (sql: string, params?: any[]) => Promise<any>,
+  userIds: number[],
+  data: Record<string, string>,
+  ttlMs = 60_000
+): Promise<number> {
+  const app = getFirebaseApp();
+  if (!app || userIds.length === 0) return 0;
+  try {
+    const rows = await queryDB(
+      `/*unscoped*/ SELECT token FROM chat_push_tokens WHERE platform = 'android' AND user_id IN (${userIds.map(() => "?").join(",")})`,
+      userIds
+    );
+    if (rows.length === 0) return 0;
+    const result = await admin.messaging(app).sendEachForMulticast({
+      tokens: rows.map((r: any) => r.token),
+      data,
+      android: { priority: "high", ttl: ttlMs }
+    });
+    return result.successCount;
+  } catch (err: any) {
+    console.warn("⚠️ Silent push failed: " + err.message);
+    return 0;
+  }
+}
+
 // Sends to every registered device of the given user ids (minus excludeUserId,
 // if any) and prunes any token Firebase reports as no-longer-registered
 // (app uninstalled/reinstalled without re-registering). Best-effort — never

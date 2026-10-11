@@ -19,6 +19,7 @@
 
 import { Capacitor } from '@capacitor/core';
 import { apiUrl } from './api';
+import { setLiveUntil } from './backgroundTracking';
 
 let registeredToken: string | null = null;
 
@@ -83,6 +84,12 @@ export async function initPushNotifications(token: string, handlers: PushTapHand
       // Device/Firebase-side registration failed — this device simply won't
       // get pushes; every other Chat/Alerts path (open app, Socket.IO/REST)
       // is unaffected.
+    });
+    // Silent pushes (nothing shown): Live Follow waking this phone while the
+    // app is in the background — start reporting every few seconds.
+    PushNotifications.addListener('pushNotificationReceived', (n) => {
+      const data: any = n?.data || {};
+      if (data.type === 'tracking_live') setLiveUntil(Number(data.until) || null);
     });
     PushNotifications.addListener('pushNotificationActionPerformed', (action) => {
       const data = action.notification?.data || {};
