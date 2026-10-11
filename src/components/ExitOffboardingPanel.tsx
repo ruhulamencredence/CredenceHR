@@ -1,3 +1,4 @@
+import { activePeople } from '../lib/activePeople';
 import React, { useEffect, useState } from 'react';
 import { LogOut, Plus, X, CheckCircle2, AlertTriangle, ChevronDown, ChevronUp, Save, Ban, ShieldCheck } from 'lucide-react';
 import { apiUrl } from '../lib/api';
@@ -326,7 +327,7 @@ export const ExitOffboardingPanel: React.FC<ExitOffboardingPanelProps> = ({ toke
                   className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
                 >
                   <option value="">Unassigned</option>
-                  {users.map((u) => (
+                  {activePeople(users, a.approver_user_id).map((u) => (
                     <option key={u.id} value={u.id}>
                       {u.name}
                     </option>
@@ -349,7 +350,7 @@ export const ExitOffboardingPanel: React.FC<ExitOffboardingPanelProps> = ({ toke
                 className="w-52 px-3 py-2 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <option value="">Select…</option>
-                {users.map((u) => (
+                {activePeople(users, newUserId).map((u) => (
                   <option key={u.id} value={u.id}>
                     {u.name}
                   </option>

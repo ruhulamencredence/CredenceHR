@@ -883,6 +883,12 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       // POST /api/hr-ops/actions/:id/decision.
       (combined as any[]).push(...(await getMyHrActionApprovals(queryDB, myId)));
 
+      // Newest request first (Approve Applications, Pending Approvals card).
+      const t = (x: any) => {
+        const v = new Date(x?.created_at || 0).getTime();
+        return Number.isFinite(v) ? v : 0;
+      };
+      combined.sort((a: any, b: any) => t(b) - t(a) || Number(b.id) - Number(a.id));
       res.json(await attachClaimReview(await attachClaimRefsToMyApprovals(combined)));
     } catch (err: any) {
       res.status(500).json({ error: err.message });

@@ -1,3 +1,4 @@
+import { activePeople } from '../lib/activePeople';
 import React, { useEffect, useState } from 'react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -160,7 +161,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
   const [behalfUserId, setBehalfUserId] = useState('');
   const [behalfFor, setBehalfFor] = useState<{ id: number; name: string } | null>(null);
   const [behalfEditClaim, setBehalfEditClaim] = useState<UserClaim | null>(null);
-  const behalfCandidates = users.filter((u) => u.id !== currentUserId).sort((a, b) => a.name.localeCompare(b.name));
+  const behalfCandidates = activePeople(users.filter((u) => u.id !== currentUserId)).sort((a, b) => a.name.localeCompare(b.name));
 
   useEffect(() => {
     let cancelled = false;

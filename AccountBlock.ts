@@ -56,6 +56,28 @@ export async function accountState(queryDB: QueryDB, userId: number): Promise<Ac
   return state;
 }
 
+// Job Status values that mean the person no longer works here: they are
+// never "active" and never offered in a picker. "Hold" / "Regain" come from
+// older imported sheets.
+export const SEPARATED_JOB_STATUSES = ["resigned", "terminated", "inactive", "hold", "regain"];
+export const isSeparatedJobStatus = (v: any) => SEPARATED_JOB_STATUSES.includes(String(v ?? "").trim().toLowerCase());
+const SEPARATED_SQL = SEPARATED_JOB_STATUSES.map((s) => `'${s}'`).join(", ");
+
+// Blocking a login marks its Employee record inactive; unblocking makes it
+// active again unless its Job Status says the person has left.
+async function syncEmployeeActive(queryDB: QueryDB, userId: number, blocked: boolean) {
+  try {
+    if (blocked) await queryDB("/*unscoped*/ UPDATE all_employees SET is_active = 0 WHERE user_id = ?", [userId]);
+    else
+      await queryDB(
+        `/*unscoped*/ UPDATE all_employees SET is_active = 1 WHERE user_id = ? AND (job_status IS NULL OR LOWER(TRIM(job_status)) NOT IN (${SEPARATED_SQL}))`,
+        [userId]
+      );
+  } catch {
+    // The login change stands even if the Employee record can't be touched.
+  }
+}
+
 // Returns false when the account is a Superadmin (never blocked) or missing.
 export async function setAccountBlocked(
   queryDB: QueryDB,
@@ -75,6 +97,7 @@ export async function setAccountBlocked(
   } else {
     await queryDB("/*unscoped*/ UPDATE users SET is_blocked = 0, blocked_reason = NULL, blocked_at = NULL, blocked_by = NULL WHERE id = ?", [userId]);
   }
+  await syncEmployeeActive(queryDB, userId, blocked);
   cache.delete(userId);
   return true;
 }

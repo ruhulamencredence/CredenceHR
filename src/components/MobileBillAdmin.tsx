@@ -836,7 +836,11 @@ const SimModal: React.FC<{ token: string; meta: Meta; sim: MbSim | null; onClose
   const typeLimit = emp ? emp.type_limit : meta.policies.find((p) => !p.employee_type)?.limit_amount ?? null;
   const empOptions = useMemo(() => {
     const s = empQ.trim().toLowerCase();
-    return meta.employees.filter((e) => !s || String(e.id) === f.employee_id || [e.name, e.employee_code, e.department, e.designation].some((v) => String(v || '').toLowerCase().includes(s))).slice(0, 300);
+    // Only people still here — whoever the SIM is already given to stays listed.
+    return meta.employees
+      .filter((e: any) => e.is_active !== false || String(e.id) === f.employee_id)
+      .filter((e) => !s || String(e.id) === f.employee_id || [e.name, e.employee_code, e.department, e.designation].some((v) => String(v || '').toLowerCase().includes(s)))
+      .slice(0, 300);
   }, [meta.employees, empQ, f.employee_id]);
 
   const save = async () => {

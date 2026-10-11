@@ -205,7 +205,9 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDeps) {
   // Accounts of the people in those departments (not the head).
   async function teamMembers(userId: number, depts: { id: number; name: string }[]): Promise<any[]> {
     if (!depts.length) return [];
-    const emps: any[] = (await queryDB("SELECT id, employee_id, name, designation, department, department_id, user_id FROM all_employees WHERE user_id IS NOT NULL")) || [];
+    // Only people still here (Resigned / Terminated / blocked records are inactive).
+    const emps: any[] =
+      (await queryDB("SELECT id, employee_id, name, designation, department, department_id, user_id FROM all_employees WHERE user_id IS NOT NULL AND is_active = 1")) || [];
     const ids = new Set(depts.map((d) => d.id));
     const names = new Set(depts.map((d) => d.name.toLowerCase()));
     return emps
@@ -357,8 +359,12 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDeps) {
     try {
       const a = await access(req.user);
       if (!a.hr && !(a.myTasks && a.hod)) return res.status(403).json({ error: "You can't assign tasks." });
-      const users: any[] = (await queryDB("SELECT id, name, email, role, can_view_tasks FROM users")) || [];
-      const emps: any[] = (await queryDB("SELECT employee_id, name, designation, department, user_id FROM all_employees WHERE user_id IS NOT NULL")) || [];
+      // Blocked logins and inactive Employee records can't be given a task.
+      const emps: any[] = (await queryDB("SELECT employee_id, name, designation, department, user_id, is_active FROM all_employees WHERE user_id IS NOT NULL")) || [];
+      const inactive = new Set(emps.filter((e) => Number(e.is_active) === 0).map((e) => Number(e.user_id)));
+      const users: any[] = ((await queryDB("SELECT id, name, email, role, can_view_tasks, is_blocked FROM users")) || []).filter(
+        (u: any) => !Number(u.is_blocked) && !inactive.has(Number(u.id))
+      );
       const empByUser = new Map<number, any>(emps.map((e) => [Number(e.user_id), e]));
       const hrIds = new Set(await hrUserIds());
       let pool = users;
