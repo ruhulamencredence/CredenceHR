@@ -124,7 +124,16 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   // temporary login stays open until they submit, and whether the person who
   // opened an application may also approve it ("1" = they may not).
   onboarding_expiry_days: "14",
-  onboarding_creator_cannot_approve: "1"
+  onboarding_creator_cannot_approve: "1",
+  // HR reminders (HrRemindersRoutes.ts): on/off, how many days before each
+  // date to remind (comma-separated; 0 = on the day / overdue), whether the
+  // Employee's direct supervisor is told too, the retirement age, and which
+  // kinds of dates are watched.
+  reminders_enabled: "1",
+  reminder_lead_days: "30,15,7,0",
+  reminder_notify_supervisor: "1",
+  retirement_age: "60",
+  reminder_kinds: "probation,contract,document,retirement,increment"
 };
 
 const DEFAULT_ONBOARDING_TASKS: { task_key: string; label: string; category: string; due_days: number }[] = [
@@ -614,7 +623,7 @@ const addMonths = (d: string, months: number): string => {
 // Today's date in Dhaka (the route deps carry their own todayInDhaka; this
 // is for module-level helpers).
 const todayInDhakaLocal = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Dhaka" }).format(new Date());
-const addDays = (d: string, days: number): string => {
+export const addDays = (d: string, days: number): string => {
   const [y, m, day] = d.split("-").map(Number);
   return new Date(Date.UTC(y, m - 1, day + days)).toISOString().slice(0, 10);
 };
@@ -653,6 +662,73 @@ export function takaInWords(value: any): string {
     rest ? threeDigits(rest) : ""
   ].filter(Boolean);
   return "Taka " + parts.join(" ") + " Only";
+}
+
+// Employees whose increment falls due between from and to under an
+// increment policy (the active one unless policyId names another) — the
+// Increments page and the HR reminders (HrRemindersRoutes.ts) both use it.
+export async function computeIncrementsDue(queryDB: QueryDB, today: string, opts: { policyId?: any; from?: any; to?: any } = {}) {
+  const policies: any[] = await queryDB("SELECT * FROM hr_increment_policies").catch(() => []);
+  const policy = policies.find((p: any) => Number(p.id) === Number(opts.policyId)) || policies.find((p: any) => Number(p.is_active));
+  if (!policy) return { policy: null, from: null, to: null, rows: [] as any[] };
+  const winFrom = toDate(opts.from) || today.slice(0, 8) + "01";
+  const winTo = toDate(opts.to) || addDays(addMonths(winFrom, 3), -1);
+  const world = await loadEmployeeWorld(queryDB);
+  const actions: any[] = await queryDB("SELECT * FROM hr_actions");
+  const rows: any[] = [];
+  for (const e of world.employees) {
+    if (Number(e.is_active ?? 1) === 0) continue;
+    const snap = snapshotOf(world, Number(e.id))!;
+    const cur = currentValues(snap);
+    if (policy.department_id && Number(policy.department_id) !== Number(cur.department_id)) continue;
+    if (policy.grade && String(policy.grade) !== String(cur.grade || "")) continue;
+    if (policy.job_base && String(policy.job_base) !== String(e.job_base || "")) continue;
+    const joining = toDate(e.joining_date);
+    if (!joining) continue;
+    const salaries = world.salaries
+      .filter((s: any) => Number(s.employee_id) === Number(e.id))
+      .sort((a: any, b: any) => (toDate(a.effective_date) || "").localeCompare(toDate(b.effective_date) || ""));
+    let lastIncrement: string | null = null;
+    for (let i = 1; i < salaries.length; i++) {
+      if (Number(salaries[i].gross_salary) > Number(salaries[i - 1].gross_salary)) lastIncrement = toDate(salaries[i].effective_date);
+    }
+    const pending = actions.find(
+      (a: any) => Number(a.employee_id) === Number(e.id) && (a.action_type === "increment" || a.action_type === "salary_adjustment") && a.status === "pending"
+    );
+    let due: string;
+    if (policy.basis === "fixed_month") {
+      const fm = String(policy.fixed_month).padStart(2, "0");
+      due = `${winFrom.slice(0, 4)}-${fm}-01`;
+      if (due < winFrom) due = `${Number(winFrom.slice(0, 4)) + 1}-${fm}-01`;
+    } else {
+      const base = lastIncrement || joining;
+      due = addMonths(base, 12);
+      while (due < winFrom && monthsBetween(due, winFrom) >= 12) due = addMonths(due, 12);
+    }
+    if (due > winTo) continue;
+    if (monthsBetween(joining, due) < Number(policy.min_service_months || 0)) continue;
+    if (lastIncrement && monthsBetween(lastIncrement, due) < 11) continue;
+    const pct = Number(policy.default_percent || 0);
+    const gross = cur.gross_salary;
+    rows.push({
+      employee_id: Number(e.id),
+      name: e.name,
+      employee_code: e.employee_id,
+      designation: e.designation,
+      department: e.department,
+      grade: cur.grade,
+      joining_date: joining,
+      last_increment: lastIncrement,
+      due_date: due,
+      overdue: due < today,
+      current_gross: gross,
+      percent: pct,
+      new_gross: gross ? Math.round(gross * (1 + pct / 100)) : null,
+      pending_action_id: pending ? Number(pending.id) : null
+    });
+  }
+  rows.sort((a, b) => a.due_date.localeCompare(b.due_date) || String(a.name).localeCompare(String(b.name)));
+  return { policy, from: winFrom, to: winTo, rows };
 }
 
 // ---------------------------------------------------------------------------
@@ -2434,68 +2510,9 @@ export function registerHROperationsRoutes(app: Express, deps: HROperationsRoute
   app.get("/api/hr-ops/increments/due", ...gate, async (req: any, res: any) => {
     try {
       await sweep();
-      const policies: any[] = await queryDB("SELECT * FROM hr_increment_policies");
-      const policy = policies.find((p: any) => Number(p.id) === Number(req.query.policy_id)) || policies.find((p: any) => Number(p.is_active));
-      if (!policy) return res.json({ policy: null, rows: [] });
-      const today = todayInDhaka();
-      const winFrom = toDate(req.query.from) || today.slice(0, 8) + "01";
-      const winTo = toDate(req.query.to) || addDays(addMonths(winFrom, 3), -1);
-      const world = await loadEmployeeWorld(queryDB);
-      const actions: any[] = await queryDB("SELECT * FROM hr_actions");
-      const rows: any[] = [];
-      for (const e of world.employees) {
-        if (Number(e.is_active ?? 1) === 0) continue;
-        const snap = snapshotOf(world, Number(e.id))!;
-        const cur = currentValues(snap);
-        if (policy.department_id && Number(policy.department_id) !== Number(cur.department_id)) continue;
-        if (policy.grade && String(policy.grade) !== String(cur.grade || "")) continue;
-        if (policy.job_base && String(policy.job_base) !== String(e.job_base || "")) continue;
-        const joining = toDate(e.joining_date);
-        if (!joining) continue;
-        const salaries = world.salaries
-          .filter((s: any) => Number(s.employee_id) === Number(e.id))
-          .sort((a: any, b: any) => (toDate(a.effective_date) || "").localeCompare(toDate(b.effective_date) || ""));
-        let lastIncrement: string | null = null;
-        for (let i = 1; i < salaries.length; i++) {
-          if (Number(salaries[i].gross_salary) > Number(salaries[i - 1].gross_salary)) lastIncrement = toDate(salaries[i].effective_date);
-        }
-        const pending = actions.find(
-          (a: any) => Number(a.employee_id) === Number(e.id) && (a.action_type === "increment" || a.action_type === "salary_adjustment") && a.status === "pending"
-        );
-        let due: string;
-        if (policy.basis === "fixed_month") {
-          const fm = String(policy.fixed_month).padStart(2, "0");
-          due = `${winFrom.slice(0, 4)}-${fm}-01`;
-          if (due < winFrom) due = `${Number(winFrom.slice(0, 4)) + 1}-${fm}-01`;
-        } else {
-          const base = lastIncrement || joining;
-          due = addMonths(base, 12);
-          while (due < winFrom && monthsBetween(due, winFrom) >= 12) due = addMonths(due, 12);
-        }
-        if (due > winTo) continue;
-        if (monthsBetween(joining, due) < Number(policy.min_service_months || 0)) continue;
-        if (lastIncrement && monthsBetween(lastIncrement, due) < 11) continue;
-        const pct = Number(policy.default_percent || 0);
-        const gross = cur.gross_salary;
-        rows.push({
-          employee_id: Number(e.id),
-          name: e.name,
-          employee_code: e.employee_id,
-          designation: e.designation,
-          department: e.department,
-          grade: cur.grade,
-          joining_date: joining,
-          last_increment: lastIncrement,
-          due_date: due,
-          overdue: due < today,
-          current_gross: gross,
-          percent: pct,
-          new_gross: gross ? Math.round(gross * (1 + pct / 100)) : null,
-          pending_action_id: pending ? Number(pending.id) : null
-        });
-      }
-      rows.sort((a, b) => a.due_date.localeCompare(b.due_date) || String(a.name).localeCompare(String(b.name)));
-      res.json({ policy, from: winFrom, to: winTo, rows });
+      const r = await computeIncrementsDue(queryDB, todayInDhaka(), { policyId: req.query.policy_id, from: req.query.from, to: req.query.to });
+      if (!r.policy) return res.json({ policy: null, rows: [] });
+      res.json(r);
     } catch (err) {
       fail(res, err);
     }

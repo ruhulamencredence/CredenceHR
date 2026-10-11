@@ -89,13 +89,14 @@ export const NewActionModal: React.FC<{
   employees: HrOpsEmployee[];
   initialEmployeeId?: number | null;
   initialType?: string;
+  initialEffectiveDate?: string;
   onClose: () => void;
   onSaved: (status: string) => void;
-}> = ({ token, meta, employees, initialEmployeeId, initialType, onClose, onSaved }) => {
+}> = ({ token, meta, employees, initialEmployeeId, initialType, initialEffectiveDate, onClose, onSaved }) => {
   const api = useHrApi(token);
   const [employeeId, setEmployeeId] = useState<number | null>(initialEmployeeId ?? null);
   const [type, setType] = useState(initialType || 'promotion');
-  const [eff, setEff] = useState('');
+  const [eff, setEff] = useState(initialEffectiveDate || '');
   const [to, setTo] = useState<Record<string, string>>({});
   const [pct, setPct] = useState('');
   const [reason, setReason] = useState('');

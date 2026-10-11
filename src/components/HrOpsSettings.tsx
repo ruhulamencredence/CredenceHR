@@ -91,6 +91,56 @@ const CompanySettings: React.FC<{ token: string; meta: HrOpsMeta; onSaved: () =>
           always approve.
         </p>
       </div>
+      <div className="rounded-xl border border-slate-200 p-4 space-y-3">
+        <div className="text-xs font-bold text-slate-700">Reminders</div>
+        <label className="flex items-center gap-2 text-xs text-slate-700">
+          <input type="checkbox" checked={String(s.reminders_enabled ?? '1') === '1'} onChange={(e) => setS({ ...s, reminders_enabled: e.target.checked ? '1' : '0' })} />
+          Send reminders (alert and push) before these dates
+        </label>
+        <div className="flex flex-wrap gap-x-4 gap-y-2">
+          {[
+            ['probation', 'Probation ends'],
+            ['contract', 'Contract ends'],
+            ['document', 'Document expires'],
+            ['retirement', 'Retirement'],
+            ['increment', 'Increment due']
+          ].map(([k, label]) => {
+            const kinds = String(s.reminder_kinds ?? 'probation,contract,document,retirement,increment').split(',').filter(Boolean);
+            return (
+              <label key={k} className="flex items-center gap-1.5 text-xs text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={kinds.includes(k)}
+                  onChange={(e) => setS({ ...s, reminder_kinds: (e.target.checked ? [...kinds, k] : kinds.filter((x) => x !== k)).join(',') })}
+                />
+                {label}
+              </label>
+            );
+          })}
+        </div>
+        <div className="grid sm:grid-cols-2 gap-3 items-end">
+          <div>
+            <label className={labelCls}>Remind this many days before (comma-separated)</label>
+            <input value={s.reminder_lead_days ?? ''} onChange={(e) => setS({ ...s, reminder_lead_days: e.target.value })} placeholder="30,15,7,0" className={inputCls} />
+          </div>
+          <div>
+            <label className={labelCls}>Retirement age</label>
+            <input type="number" min={40} max={80} value={s.retirement_age ?? ''} onChange={(e) => setS({ ...s, retirement_age: e.target.value })} placeholder="60" className={inputCls} />
+          </div>
+        </div>
+        <label className="flex items-center gap-2 text-xs text-slate-700">
+          <input
+            type="checkbox"
+            checked={String(s.reminder_notify_supervisor ?? '1') === '1'}
+            onChange={(e) => setS({ ...s, reminder_notify_supervisor: e.target.checked ? '1' : '0' })}
+          />
+          Also tell the employee's direct supervisor
+        </label>
+        <p className="text-[11px] text-slate-500">
+          Reminders go to accounts ticked for "Reminders — receive &amp; view" (Users → Module Access → HR Operations), once at each step; 0 means on the day or as soon as it
+          is overdue. A date with a matching personnel action already pending (confirmation, contract renewal…) is not reminded.
+        </p>
+      </div>
       <button
         type="button"
         className={btnPrimary}
