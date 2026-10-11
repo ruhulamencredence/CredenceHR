@@ -30,7 +30,10 @@ import bcrypt from "bcryptjs";
 import type { Express } from "express";
 import { activeCompanyId } from "./companyContext";
 import { endAllSessions } from "./SessionSecurity";
-import { loadSettings } from "./HROperationsRoutes";
+import { loadSettings, startOnboardingChecklist } from "./HROperationsRoutes";
+import { nextEmployeeCode } from "./CompanyRoutes";
+import { setAccountBlocked } from "./AccountBlock";
+import { applyAccessTemplate, ensureDefaultAccessTemplate } from "./AccessTemplateDefaults";
 import { requiredDocuments, missingDocuments } from "./HrOps360Routes";
 import { createAlert } from "./Alerts";
 
@@ -281,12 +284,13 @@ export async function findOnboardingDuplicates(q: QueryDB, a: any, data: Onboard
   const phones = [data.personal.mobile, a.phone].map(phoneKey).filter((x) => x.length >= 8);
   const emails = [data.personal.personal_email, a.email].map(lower).filter(Boolean);
   const [emps, users]: any[][] = await Promise.all([
-    q("/*unscoped*/ SELECT id, name, employee_id, nid_ssn, mobile, phone, email, personal_email FROM all_employees"),
+    q("/*unscoped*/ SELECT id, name, employee_id, user_id, nid_ssn, mobile, phone, email, personal_email FROM all_employees"),
     q("/*unscoped*/ SELECT id, name, email, username FROM users WHERE id <> ?", [Number(a.user_id)])
   ]);
   const out: { field: string; value: string; match: string }[] = [];
   const who = (e: any) => `Employee ${e.name}${e.employee_id ? ` (${e.employee_id})` : ""}`;
-  for (const e of emps || []) {
+  // The joiner's own Employee record (once approved) is not a clash.
+  for (const e of (emps || []).filter((e: any) => Number(e.user_id) !== Number(a.user_id))) {
     if (nid && nid.length >= 6 && digits(e.nid_ssn) === nid) out.push({ field: "NID", value: String(data.personal.nid_ssn), match: who(e) });
     for (const p of phones) if ([e.mobile, e.phone].some((x) => phoneKey(x) === p)) out.push({ field: "Mobile", value: p, match: who(e) });
     for (const m of emails) if ([e.email, e.personal_email].some((x) => lower(x) === m)) out.push({ field: "Email", value: m, match: who(e) });
@@ -332,6 +336,7 @@ function serialize(a: any, lookups: { users: any[]; departments: any[]; branches
     reviewed_by_name: userName(a.reviewed_by),
     reviewed_at: a.reviewed_at,
     employee_id: a.employee_id != null ? Number(a.employee_id) : null,
+    employee_code: a.employee_code ?? null,
     created_by: a.created_by != null ? Number(a.created_by) : null,
     created_by_name: userName(a.created_by),
     expires_at: a.expires_at,
@@ -395,9 +400,10 @@ export function registerOnboardingRoutes(app: Express, deps: OnboardingDeps) {
 
   app.get("/api/hr-ops/joiner-onboarding", ...hr("onboarding_create", "onboarding_review", "onboarding_approve"), async (_req: any, res: any) => {
     try {
+      await expireOverdue(queryDB);
       const [apps, users, departments, branches, docs] = await Promise.all([
         queryDB(
-          "/*unscoped*/ SELECT a.*, TIMESTAMPDIFF(SECOND, NOW(), a.expires_at) AS expires_in_seconds FROM onboarding_applications a WHERE a.company_id = ? ORDER BY a.id DESC",
+          "/*unscoped*/ SELECT a.*, TIMESTAMPDIFF(SECOND, NOW(), a.expires_at) AS expires_in_seconds, e.employee_id AS employee_code FROM onboarding_applications a LEFT JOIN all_employees e ON e.id = a.employee_id WHERE a.company_id = ? ORDER BY a.id DESC",
           [activeCompanyId()]
         ),
         queryDB("/*unscoped*/ SELECT id, name FROM users"),
@@ -733,7 +739,9 @@ export function registerOnboardingRoutes(app: Express, deps: OnboardingDeps) {
       res.json({
         ...serialize(a, { users, departments, branches }),
         ...state,
-        duplicates: await findOnboardingDuplicates(queryDB, a, state.data)
+        duplicates: ["approved", "cancelled", "expired"].includes(a.status) ? [] : await findOnboardingDuplicates(queryDB, a, state.data),
+        // Why this account may not approve it, if so (the button says it).
+        approve_blocked: await approveBlockedReason(req.user, a)
       });
     } catch (err) {
       fail(res, err);
@@ -750,4 +758,235 @@ export function registerOnboardingRoutes(app: Express, deps: OnboardingDeps) {
       fail(res, err);
     }
   });
+
+  // ---- decisions ----
+
+  // "The person who opened an application may not approve it" (HR Ops
+  // Settings, on by default). A Superadmin is never held back.
+  const approveBlockedReason = async (user: any, a: any): Promise<string | null> => {
+    if (user.role === "superadmin") return null;
+    const settings = await loadSettings(queryDB);
+    if (String(settings.onboarding_creator_cannot_approve ?? "1") === "1" && Number(a.created_by) === Number(user.id))
+      return "You opened this application, so someone else has to approve it.";
+    return null;
+  };
+
+  // Turns the application into an Employee — all or nothing. A second click
+  // (or a second HR person at the same moment) finds it approved and does
+  // nothing.
+  app.post("/api/hr-ops/joiner-onboarding/:id/approve", ...hr("onboarding_approve"), async (req: any, res: any) => {
+    try {
+      if (!withTransaction) throw bad("Approving needs the MySQL database.", 503);
+      const id = Number(req.params.id);
+      const pre = await companyApp(id);
+      if (pre.status === "approved") return res.json({ success: true, already_approved: true, employee_id: Number(pre.employee_id) });
+      const blocked = await approveBlockedReason(req.user, pre);
+      if (blocked) throw bad(blocked, 403);
+      // The company's own lists and settings, read before the transaction
+      // (its connection sees every company).
+      const [departments, branches] = await Promise.all([queryDB("SELECT * FROM departments"), queryDB("SELECT * FROM branches")]);
+      const required = await requiredDocs();
+      const failAt = (step: number) => {
+        // Phase 4 tests: make the transaction fail part-way (never in production).
+        if (process.env.NODE_ENV === "test" && process.env.ONBOARDING_FAIL_AFTER_STEP === String(step)) throw new Error(`Test failure after step ${step}`);
+      };
+
+      let result: { already: boolean; employeeId: number; code: string; userId: number } | null = null;
+      await withTransaction(async (q) => {
+        // 1. Lock the application.
+        const rows: any[] = await q("SELECT * FROM onboarding_applications WHERE id = ? AND company_id = ? FOR UPDATE", [id, Number(pre.company_id)]);
+        const a = rows[0];
+        if (!a) throw bad("Application not found.", 404);
+        if (a.status === "approved") {
+          result = { already: true, employeeId: Number(a.employee_id), code: "", userId: Number(a.user_id) };
+          return;
+        }
+        if (a.status !== "submitted") throw bad("Only a submitted application can be approved.", 409);
+        const data = parseOnboardingData(a.data_json);
+        const docs: any[] = await q("SELECT doc_type FROM onboarding_documents WHERE application_id = ?", [id]);
+        const missing = onboardingMissing(data, docs.map((d: any) => d.doc_type), required);
+        if (missing.length) throw bad(`Still missing: ${missing.join(", ")}.`, 409);
+        // 2. Nobody else already has this NID / mobile / email.
+        const dups = await findOnboardingDuplicates(q, a, data);
+        if (dups.length) throw Object.assign(bad(`Already on file: ${dups.map((d) => `${d.field} ${d.value} — ${d.match}`).join("; ")}.`, 409), { duplicates: dups });
+        failAt(2);
+        // 3. The next Employee ID (the company row is locked so two approvals
+        //    can't pick the same one).
+        await q("SELECT id FROM companies WHERE id = ? FOR UPDATE", [Number(a.company_id)]);
+        const { code } = await nextEmployeeCode(q, Number(a.company_id));
+        const taken: any[] = await q("SELECT id FROM users WHERE username = ? AND id <> ?", [code, Number(a.user_id)]);
+        if (taken.length) throw bad(`Employee ID ${code} is already a login name. Rename that login first.`, 409);
+        // 4. The Employee.
+        const dept = departments.find((d: any) => Number(d.id) === Number(a.department_id));
+        const branch = branches.find((b: any) => Number(b.id) === Number(a.branch_id));
+        const p = data.personal;
+        const cols: Record<string, any> = {
+          employee_id: code,
+          name: a.name,
+          designation: a.designation,
+          department: dept?.name ?? null,
+          department_id: dept ? Number(dept.id) : null,
+          branch: branch?.branch_name ?? null,
+          branch_id: branch ? Number(branch.id) : null,
+          email: a.email || p.personal_email || null,
+          phone: p.mobile || a.phone || null,
+          is_active: 1,
+          user_id: Number(a.user_id),
+          company_id: Number(a.company_id),
+          joining_date: toDate(a.joining_date)
+        };
+        for (const f of [...PERSONAL_TEXT_FIELDS, ...PERSONAL_DATE_FIELDS]) cols[f] = p[f] ?? null;
+        const keys = Object.keys(cols);
+        const ins: any = await q(`INSERT INTO all_employees (${keys.join(", ")}) VALUES (${keys.map(() => "?").join(", ")})`, keys.map((k) => cols[k]));
+        const employeeId = Number(ins.insertId);
+        failAt(4);
+        // 5. The same login becomes the Employee's own.
+        await q(
+          "UPDATE users SET username = ?, email = ?, name = ?, is_onboarding = 0, onboarding_expires_at = NULL, must_change_password = 1 WHERE id = ? AND is_onboarding = 1",
+          [code, p.personal_email || null, a.name, Number(a.user_id)]
+        );
+        // 6. Documents -> Document Vault (same login, so the key holds).
+        await q(
+          "INSERT INTO employee_documents (user_id, doc_type, file_name, file_mimetype, file_data, uploaded_by) SELECT ?, doc_type, file_name, file_mime, file_data, ? FROM onboarding_documents WHERE application_id = ? ORDER BY id",
+          [Number(a.user_id), Number(a.user_id), id]
+        );
+        failAt(6);
+        // 7. Emergency contacts and nominees -> family (one row per person).
+        const people = new Map<string, PersonEntry & { is_nominee: number; is_emergency: number }>();
+        const keyOf = (x: PersonEntry) => `${x.name.toLowerCase()}|${String(x.relation || "").toLowerCase()}`;
+        for (const c of data.contacts) people.set(keyOf(c), { ...c, is_nominee: 0, is_emergency: 1 });
+        for (const n of data.nominees) {
+          const k = keyOf(n);
+          const had = people.get(k);
+          people.set(k, {
+            ...(had || n),
+            phone: had?.phone || n.phone,
+            nid: n.nid || had?.nid || null,
+            date_of_birth: n.date_of_birth || had?.date_of_birth || null,
+            address: had?.address || n.address,
+            nominee_percent: n.nominee_percent,
+            is_nominee: 1,
+            is_emergency: had ? 1 : 0
+          });
+        }
+        for (const x of people.values())
+          await q(
+            "INSERT INTO hr_emp_family (employee_id, name, relation, date_of_birth, phone, nid, address, is_nominee, nominee_percent, is_emergency, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [employeeId, x.name, x.relation, x.date_of_birth, x.phone, x.nid, x.address, x.is_nominee, x.nominee_percent, x.is_emergency, req.user.id]
+          );
+        // 8. Onboarding checklist + default probation.
+        await startOnboardingChecklist(queryDB, q, { id: employeeId, joining_date: toDate(a.joining_date) }, req.user.id);
+        failAt(8);
+        // 9. The application is done.
+        await q("UPDATE onboarding_applications SET status = 'approved', employee_id = ?, reviewed_by = ?, reviewed_at = NOW(), expires_at = NULL WHERE id = ?", [
+          employeeId,
+          req.user.id,
+          id
+        ]);
+        // 10. Change log.
+        await q("INSERT INTO employee_change_log (employee_id, field_name, old_value, new_value, action_by) VALUES (?, ?, ?, ?, ?)", [
+          employeeId,
+          "created",
+          null,
+          `Created from onboarding ${a.onb_code}`,
+          req.user.id
+        ]);
+        result = { already: false, employeeId, code, userId: Number(a.user_id) };
+      });
+      const r = result as unknown as { already: boolean; employeeId: number; code: string; userId: number };
+      if (r.already) return res.json({ success: true, already_approved: true, employee_id: r.employeeId });
+
+      // After the commit — none of this undoes the approval if it fails.
+      forgetOnboarding(r.userId);
+      await endAllSessions(queryDB, r.userId, "signed_out").catch(() => {});
+      let accessApplied = false;
+      if (req.user.role === "superadmin") {
+        try {
+          await applyAccessTemplate(queryDB, r.userId, await ensureDefaultAccessTemplate(queryDB), req.user.id, Number(pre.company_id));
+          accessApplied = true;
+        } catch {
+          // HR can still set access by hand.
+        }
+      }
+      await createAlert(queryDB, {
+        userId: r.userId,
+        type: "hr_action",
+        title: `Welcome — your Employee ID is ${r.code}`,
+        message: `Your onboarding is approved. Sign in with ${r.code} (or your email) and your password; you'll be asked to set a new password.`,
+        relatedType: "employee",
+        relatedId: r.employeeId
+      }).catch(() => {});
+      if (pre.created_by && Number(pre.created_by) !== Number(req.user.id))
+        await createAlert(queryDB, {
+          userId: Number(pre.created_by),
+          type: "hr_action",
+          title: `New joiner approved: ${pre.name} (${r.code})`,
+          message: `${pre.name} is now Employee ${r.code}. The onboarding checklist has started.`,
+          relatedType: "onboarding_application",
+          relatedId: id
+        }).catch(() => {});
+      res.json({ success: true, employee_id: r.employeeId, employee_code: r.code, access_applied: accessApplied });
+    } catch (err: any) {
+      if (err?.duplicates) return res.status(409).json({ error: err.message, duplicates: err.duplicates });
+      fail(res, err);
+    }
+  });
+
+  // Sends the details back to the joiner with a reason; their login stays
+  // open (expiry starts again) so they can fix and resubmit.
+  app.post("/api/hr-ops/joiner-onboarding/:id/reject", ...hr("onboarding_review"), async (req: any, res: any) => {
+    try {
+      const a = await companyApp(Number(req.params.id));
+      const reason = clean(req.body?.reason, 500);
+      if (!reason) throw bad("Write what the joiner needs to fix.");
+      const days = await onboardingExpiryDays(queryDB);
+      const r: any = await queryDB(
+        "/*unscoped*/ UPDATE onboarding_applications SET status = 'rejected', review_remarks = ?, reviewed_by = ?, reviewed_at = NOW(), expires_at = DATE_ADD(NOW(), INTERVAL ? DAY) WHERE id = ? AND status = 'submitted'",
+        [reason, req.user.id, days, Number(a.id)]
+      );
+      if (!Number(r?.affectedRows)) throw bad("Only a submitted application can be sent back.", 409);
+      await queryDB("/*unscoped*/ UPDATE users SET onboarding_expires_at = DATE_ADD(NOW(), INTERVAL ? DAY) WHERE id = ? AND is_onboarding = 1", [days, Number(a.user_id)]);
+      res.json({ success: true });
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+  // Closes an application for good: the temporary login is blocked and no
+  // Employee is ever created.
+  app.post("/api/hr-ops/joiner-onboarding/:id/cancel", ...hr("onboarding_review"), async (req: any, res: any) => {
+    try {
+      const a = await companyApp(Number(req.params.id));
+      const r: any = await queryDB(
+        "/*unscoped*/ UPDATE onboarding_applications SET status = 'cancelled', review_remarks = COALESCE(?, review_remarks), reviewed_by = ?, reviewed_at = NOW(), expires_at = NULL WHERE id = ? AND status IN ('draft', 'submitted', 'rejected')",
+        [clean(req.body?.reason, 500), req.user.id, Number(a.id)]
+      );
+      if (!Number(r?.affectedRows)) throw bad("This application is already closed.", 409);
+      await closeLogin(Number(a.user_id), "Onboarding cancelled", req.user.id);
+      res.json({ success: true });
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+  const closeLogin = async (userId: number, reason: string, actorId: number | null) => {
+    await setAccountBlocked(queryDB, userId, true, reason, actorId);
+    forgetOnboarding(userId);
+    await endAllSessions(queryDB, userId, "signed_out").catch(() => {});
+  };
+
+  // Draft / sent-back applications whose login has run out: expired, and the
+  // login blocked. Runs hourly, at start-up and whenever HR opens the list.
+  const expireOverdue = async (q: QueryDB) => {
+    const due: any[] =
+      (await q("/*unscoped*/ SELECT id, user_id FROM onboarding_applications WHERE status IN ('draft', 'rejected') AND expires_at IS NOT NULL AND expires_at < NOW()").catch(
+        () => []
+      )) || [];
+    for (const a of due) {
+      const r: any = await q("/*unscoped*/ UPDATE onboarding_applications SET status = 'expired' WHERE id = ? AND status IN ('draft', 'rejected')", [Number(a.id)]);
+      if (Number(r?.affectedRows)) await closeLogin(Number(a.user_id), "Onboarding expired", null).catch(() => {});
+    }
+  };
+  setTimeout(() => expireOverdue(queryDB).catch(() => {}), 30_000).unref?.();
+  setInterval(() => expireOverdue(queryDB).catch(() => {}), 60 * 60 * 1000).unref?.();
 }

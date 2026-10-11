@@ -74,7 +74,15 @@ const ShellSkeleton: React.FC = () => (
   </div>
 );
 
-const ChangeTempPassword: React.FC<{ token: string; onDone: () => void }> = ({ token, onDone }) => {
+// Replacing a password HR set (the joiner's temporary one, or after
+// approval). Also used by App.tsx when must_change_password is on.
+export const ChangeTempPassword: React.FC<{ token: string; onDone: () => void; intro?: string; currentLabel?: string; bare?: boolean }> = ({
+  token,
+  onDone,
+  intro = 'HR gave you a temporary password. Replace it with one only you know before you continue.',
+  currentLabel = 'Temporary password',
+  bare = false
+}) => {
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -85,7 +93,7 @@ const ChangeTempPassword: React.FC<{ token: string; onDone: () => void }> = ({ t
     setError('');
     if (next.length < 6) return setError('New password must be at least 6 characters.');
     if (next !== confirm) return setError('New password and confirmation do not match.');
-    if (next === current) return setError('Choose a password different from the temporary one.');
+    if (next === current) return setError('Choose a password different from the current one.');
     setSaving(true);
     try {
       const res = await fetch(apiUrl('/api/profile/password'), {
@@ -103,12 +111,12 @@ const ChangeTempPassword: React.FC<{ token: string; onDone: () => void }> = ({ t
     }
   };
   return (
-    <form onSubmit={submit} className="rounded-2xl border border-slate-200 bg-white p-5 space-y-3">
+    <form onSubmit={submit} className={bare ? 'space-y-3' : 'rounded-2xl border border-slate-200 bg-white p-5 space-y-3'}>
       <div className="flex items-center gap-2 text-sm font-bold text-slate-900">
         <Lock className="w-4 h-4 text-blue-600" /> Set your own password
       </div>
-      <p className="text-xs text-slate-500">HR gave you a temporary password. Replace it with one only you know before you continue.</p>
-      <input type="password" autoComplete="current-password" placeholder="Temporary password" value={current} onChange={(e) => setCurrent(e.target.value)} className={inputCls} />
+      <p className="text-xs text-slate-500">{intro}</p>
+      <input type="password" autoComplete="current-password" placeholder={currentLabel} value={current} onChange={(e) => setCurrent(e.target.value)} className={inputCls} />
       <input type="password" autoComplete="new-password" placeholder="New password (at least 6 characters)" value={next} onChange={(e) => setNext(e.target.value)} className={inputCls} />
       <input type="password" autoComplete="new-password" placeholder="Confirm new password" value={confirm} onChange={(e) => setConfirm(e.target.value)} className={inputCls} />
       {error && <div className="text-xs text-rose-600">{error}</div>}

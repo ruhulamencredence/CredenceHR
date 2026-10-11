@@ -38,6 +38,7 @@ interface Application {
   created_by_name: string | null;
   created_at: string | null;
   documents: number;
+  employee_code: string | null;
 }
 interface HiredCandidate {
   id: number;
@@ -278,6 +279,8 @@ interface ReviewDetail extends Omit<Application, 'documents'>, OnboardingFormSta
   reviewed_by_name: string | null;
   reviewed_at: string | null;
   duplicates: { field: string; value: string; match: string }[];
+  approve_blocked: string | null;
+  employee_code: string | null;
 }
 
 const DrawerSkeleton: React.FC = () => (
@@ -298,14 +301,60 @@ const DrawerSkeleton: React.FC = () => (
 
 // HR's look at one application: what the joiner gave, their documents, what
 // is still missing and any Employee / login it would clash with.
-const ReviewDrawer: React.FC<{ token: string; id: number; access: OnboardingAccess; onClose: () => void }> = ({ token, id, access, onClose }) => {
+const ReviewDrawer: React.FC<{ token: string; id: number; access: OnboardingAccess; onClose: () => void; onChanged: () => void }> = ({ token, id, access, onClose, onChanged }) => {
   const api = useHrApi(token);
   const [d, setD] = useState<ReviewDetail | null>(null);
   const [error, setError] = useState('');
+  const [msg, setMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [rejecting, setRejecting] = useState(false);
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const load = () => api.get<ReviewDetail>(`/api/hr-ops/joiner-onboarding/${id}`).then(setD).catch((e) => setError(e.message));
   useEffect(() => {
-    api.get<ReviewDetail>(`/api/hr-ops/joiner-onboarding/${id}`).then(setD).catch((e) => setError(e.message));
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [api, id]);
-  const decided = d && !['submitted'].includes(d.status);
+  const act = async (fn: () => Promise<string>) => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      setMsg({ type: 'success', text: await fn() });
+      setRejecting(false);
+      setReason('');
+      await load();
+      onChanged();
+    } catch (e: any) {
+      setMsg({ type: 'error', text: e.message });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const approve = async () => {
+    if (!d) return;
+    if (!(await confirmDialog(`Approve ${d.name}? This creates their Employee record with a new Employee ID, and their login becomes a normal account.`, { title: 'Approve new joiner', confirmLabel: 'Approve', tone: 'default' })))
+      return;
+    act(async () => {
+      const r = await api.post<{ employee_code?: string; already_approved?: boolean; access_applied?: boolean }>(`/api/hr-ops/joiner-onboarding/${d.id}/approve`);
+      if (r.already_approved) return 'This application was already approved.';
+      return `Approved — ${d.name} is now Employee ${r.employee_code}.${r.access_applied ? ' Default access was applied.' : ' Set their Module Access in Users.'}`;
+    });
+  };
+  const cancel = async () => {
+    if (!d) return;
+    if (!(await confirmDialog(`Cancel ${d.name}'s onboarding? Their temporary login is blocked and no Employee is created.`, { title: 'Cancel onboarding', confirmLabel: 'Cancel onboarding', cancelLabel: 'Keep', tone: 'danger' })))
+      return;
+    act(async () => {
+      await api.post(`/api/hr-ops/joiner-onboarding/${d.id}/cancel`);
+      return 'Onboarding cancelled and the login blocked.';
+    });
+  };
+  const sendBack = () =>
+    d &&
+    act(async () => {
+      await api.post(`/api/hr-ops/joiner-onboarding/${d.id}/reject`, { reason });
+      return `Sent back to ${d.name}. They can fix it and submit again.`;
+    });
+  const open = d && ['draft', 'submitted', 'rejected'].includes(d.status);
   return (
     <div className="liquid-glass-backdrop fixed inset-0 z-[80] flex justify-end" onClick={onClose} role="presentation">
       <div className="w-full sm:max-w-2xl h-full p-0 sm:p-3" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Review new joiner">
@@ -323,6 +372,7 @@ const ReviewDrawer: React.FC<{ token: string; id: number; access: OnboardingAcce
           </div>
           <div className="flex-1 overflow-y-auto px-5 pb-5 space-y-4">
             {error && <Notice msg={{ type: 'error', text: error }} />}
+            <Notice msg={msg} onClose={() => setMsg(null)} />
             {!d ? (
               !error && <DrawerSkeleton />
             ) : (
@@ -332,9 +382,19 @@ const ReviewDrawer: React.FC<{ token: string; id: number; access: OnboardingAcce
                   {d.submitted_at && <span className="text-[11px] text-slate-500">Submitted {String(d.submitted_at).slice(0, 16)}</span>}
                   {d.created_by_name && <span className="text-[11px] text-slate-500">· Opened by {d.created_by_name}</span>}
                 </div>
-                {d.status === 'rejected' && d.review_remarks && (
+                {d.status === 'approved' && d.employee_code && (
+                  <div className="liquid-glass-inset rounded-2xl px-4 py-3 text-xs text-emerald-800 flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4" /> Employee <b>{d.employee_code}</b>
+                    {d.reviewed_by_name ? ` · approved by ${d.reviewed_by_name}` : ''}
+                  </div>
+                )}
+                {['rejected', 'cancelled'].includes(d.status) && d.review_remarks && (
                   <div className="liquid-glass-inset rounded-2xl px-4 py-3 text-xs text-rose-700">
-                    <b>Sent back{d.reviewed_by_name ? ` by ${d.reviewed_by_name}` : ''}:</b> {d.review_remarks}
+                    <b>
+                      {d.status === 'cancelled' ? 'Cancelled' : 'Sent back'}
+                      {d.reviewed_by_name ? ` by ${d.reviewed_by_name}` : ''}:
+                    </b>{' '}
+                    {d.review_remarks}
                   </div>
                 )}
                 {d.duplicates.length > 0 && (
@@ -401,23 +461,55 @@ const ReviewDrawer: React.FC<{ token: string; id: number; access: OnboardingAcce
               </>
             )}
           </div>
-          {d && !decided && (access.onboarding_review || access.onboarding_approve) && (
-            <div className="px-5 py-4 flex flex-wrap gap-2.5 border-t border-white/60">
-              {/* Approve / Reject / Cancel go live with the approval step (phase 3). */}
-              {access.onboarding_review && (
-                <button type="button" disabled title="Coming with the approval step" className="liquid-glass-chip flex-1 rounded-full py-2.5 text-sm font-semibold text-slate-400 inline-flex items-center justify-center gap-1.5">
-                  <Ban className="w-4 h-4" /> Cancel
-                </button>
-              )}
-              {access.onboarding_review && (
-                <button type="button" disabled title="Coming with the approval step" className="liquid-glass-chip flex-1 rounded-full py-2.5 text-sm font-semibold text-slate-400 inline-flex items-center justify-center gap-1.5">
-                  <XCircle className="w-4 h-4" /> Send back
-                </button>
-              )}
-              {access.onboarding_approve && (
-                <button type="button" disabled title="Coming with the approval step" className="liquid-glass-button flex-1 rounded-full py-2.5 text-sm font-semibold opacity-50 inline-flex items-center justify-center gap-1.5">
-                  <CheckCircle2 className="w-4 h-4" /> Approve
-                </button>
+          {d && open && (access.onboarding_review || access.onboarding_approve) && (
+            <div className="px-5 py-4 border-t border-white/60 space-y-2.5">
+              {rejecting ? (
+                <>
+                  <textarea
+                    autoFocus
+                    rows={3}
+                    value={reason}
+                    onChange={(e) => setReason(e.target.value)}
+                    placeholder="What should the joiner fix? They see this."
+                    className="liquid-glass-inset w-full rounded-2xl px-4 py-3 text-sm focus:outline-none"
+                  />
+                  <div className="flex gap-2.5">
+                    <button type="button" onClick={() => setRejecting(false)} className="liquid-glass-chip flex-1 rounded-full py-2.5 text-sm font-semibold text-slate-700">
+                      Back
+                    </button>
+                    <button type="button" disabled={busy || !reason.trim()} onClick={sendBack} className="liquid-glass-button flex-1 rounded-full py-2.5 text-sm font-semibold disabled:opacity-50">
+                      {busy ? 'Sending…' : 'Send back'}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  {d.status === 'submitted' && access.onboarding_approve && (d.approve_blocked || d.duplicates.length > 0) && (
+                    <p className="text-[11px] text-slate-500">{d.approve_blocked || 'Sort out the records already on file before approving.'}</p>
+                  )}
+                  <div className="flex flex-wrap gap-2.5">
+                    {access.onboarding_review && (
+                      <button type="button" disabled={busy} onClick={cancel} className="liquid-glass-chip flex-1 rounded-full py-2.5 text-sm font-semibold text-rose-600 inline-flex items-center justify-center gap-1.5 disabled:opacity-50">
+                        <Ban className="w-4 h-4" /> Cancel
+                      </button>
+                    )}
+                    {access.onboarding_review && d.status === 'submitted' && (
+                      <button type="button" disabled={busy} onClick={() => setRejecting(true)} className="liquid-glass-chip flex-1 rounded-full py-2.5 text-sm font-semibold text-slate-700 inline-flex items-center justify-center gap-1.5 disabled:opacity-50">
+                        <XCircle className="w-4 h-4" /> Send back
+                      </button>
+                    )}
+                    {access.onboarding_approve && d.status === 'submitted' && (
+                      <button
+                        type="button"
+                        disabled={busy || !!d.approve_blocked || d.duplicates.length > 0 || d.missing.length > 0}
+                        onClick={approve}
+                        className="liquid-glass-button flex-1 rounded-full py-2.5 text-sm font-semibold inline-flex items-center justify-center gap-1.5 disabled:opacity-50"
+                      >
+                        <CheckCircle2 className="w-4 h-4" /> {busy ? 'Working…' : 'Approve'}
+                      </button>
+                    )}
+                  </div>
+                </>
               )}
             </div>
           )}
@@ -498,7 +590,10 @@ export const HrOpsJoinerOnboarding: React.FC<{ token: string; meta: HrOpsMeta; a
                   <tr key={a.id} className="border-t border-slate-100 align-top">
                     <td className="px-3 py-2.5">
                       <div className="font-semibold text-slate-800">{a.name}</div>
-                      <div className="text-slate-500 font-mono">{a.onb_code}</div>
+                      <div className="text-slate-500 font-mono">
+                        {a.onb_code}
+                        {a.employee_code ? ` → ${a.employee_code}` : ''}
+                      </div>
                     </td>
                     <td className="px-3 py-2.5 text-slate-600">{[a.designation, a.department, a.branch].filter(Boolean).join(' · ') || '—'}</td>
                     <td className="px-3 py-2.5">
@@ -543,7 +638,7 @@ export const HrOpsJoinerOnboarding: React.FC<{ token: string; meta: HrOpsMeta; a
         />
       )}
       {creds && <CredentialsCard creds={creds} onClose={() => setCreds(null)} />}
-      {reviewing && <ReviewDrawer token={token} id={reviewing} access={access} onClose={() => setReviewing(null)} />}
+      {reviewing && <ReviewDrawer token={token} id={reviewing} access={access} onClose={() => setReviewing(null)} onChanged={load} />}
     </div>
   );
 };
