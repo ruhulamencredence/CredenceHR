@@ -16,6 +16,10 @@
 //   office_attendance  zk_attendance_logs (office In/Out punches, kept on an
 //                      inactive "Imported attendance" device so the ZKTeco
 //                      sync never touches them)
+//   salary             salary_structures (Payroll -> Salary Setup): one row
+//                      per (employee, effective date) — only Gross, or Gross
+//                      split into Basic / House Rent / … Needs the Payroll
+//                      layer "salary_bulk_upload" as well as the module.
 //
 // Every kind is one POST with the sheet's rows (already matched to field
 // keys by the page): dry_run=true only checks and says what each row would
@@ -41,6 +45,8 @@ interface DataImportDeps {
   requireAdmin: any;
   queryDB: QueryDB;
   getAdminModules: (userId: number) => Promise<string[]>;
+  // A kind with a `layer` also needs that permission layer of its module.
+  hasModuleLayer: (user: any, moduleKey: any, layer: string) => Promise<boolean>;
   today: () => string;
   // Same balance change a Leave Application makes when it's submitted.
   adjustLeaveTypeBalance: (userId: number, leaveType: string, delta: number) => Promise<void>;
@@ -63,6 +69,7 @@ interface Kind {
   title: string;
   description: string;
   module: string;
+  layer?: string;
   fields: Field[];
 }
 
@@ -185,6 +192,26 @@ export const IMPORT_KINDS: Kind[] = [
     ]
   },
   {
+    key: "salary",
+    title: "Salary Structure",
+    description:
+      "Each employee's monthly salary from an effective date. Fill only Gross, or split it into Basic, House Rent, Medical, Conveyance and Other — then Gross is their total. Earlier salaries stay on file.",
+    module: "payroll",
+    layer: "salary_bulk_upload",
+    fields: [
+      EMP,
+      { key: "effective_date", label: "Effective Date", type: "date", required: true, aliases: ["effective from", "from date", "with effect from", "w.e.f"], example: "2026-10-01" },
+      { key: "gross_salary", label: "Gross Salary", type: "number", aliases: ["gross", "total salary", "monthly salary", "salary"], example: 45000, note: "Alone: the whole salary. With the parts below: must equal their total (or leave it empty)" },
+      { key: "basic_salary", label: "Basic", type: "number", aliases: ["basic salary"], note: "Optional split — when any part is filled, Basic is required" },
+      { key: "house_rent", label: "House Rent", type: "number", aliases: ["house rent allowance", "hra"] },
+      { key: "medical_allowance", label: "Medical", type: "number", aliases: ["medical allowance"] },
+      { key: "conveyance_allowance", label: "Conveyance", type: "number", aliases: ["conveyance allowance", "transport allowance"] },
+      { key: "other_allowance", label: "Other Allowance", type: "number", aliases: ["other", "others"] },
+      { key: "tax_deduction", label: "Tax (monthly)", type: "number", aliases: ["tax", "income tax"] },
+      { key: "pf_deduction", label: "PF (monthly)", type: "number", aliases: ["pf", "provident fund"] }
+    ]
+  },
+  {
     key: "office_attendance",
     title: "Attendance (Office In / Out)",
     description: "Daily office In and Out times, counted like device punches in every attendance report and payroll.",
@@ -283,12 +310,18 @@ const IMPORTED = "Imported from Excel";
 const IMPORTED_DEDUCTED = "Imported from Excel (balance deducted)";
 
 export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
-  const { authenticateToken, requireAdmin, queryDB, getAdminModules, today, adjustLeaveTypeBalance, ensureDefaultLeaveBalances } = deps;
+  const { authenticateToken, requireAdmin, queryDB, getAdminModules, hasModuleLayer, today, adjustLeaveTypeBalance, ensureDefaultLeaveBalances } = deps;
 
   const allowedKinds = async (user: any) => {
     if (user?.role === "superadmin") return IMPORT_KINDS;
     const mods = await getAdminModules(Number(user.id)).catch(() => [] as string[]);
-    return IMPORT_KINDS.filter((k) => mods.includes(k.module));
+    const out: Kind[] = [];
+    for (const k of IMPORT_KINDS) {
+      if (!mods.includes(k.module)) continue;
+      if (k.layer && !(await hasModuleLayer(user, k.module, k.layer).catch(() => false))) continue;
+      out.push(k);
+    }
+    return out;
   };
 
   app.get("/api/data-import/kinds", authenticateToken, requireAdmin, async (req: any, res) => {
@@ -783,6 +816,82 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
     },
 
     // ---- Office attendance (In / Out punches) ---------------------------
+    // ---- Salary structure -------------------------------------------------
+    salary: {
+      prepare: async () => {
+        const rows: any[] = (await queryDB("SELECT * FROM salary_structures").catch(() => [])) || [];
+        const generated: any[] = (await queryDB("SELECT employee_id, month_year FROM payrolls").catch(() => [])) || [];
+        return {
+          // (employee, date) -> the row already on file
+          byKey: new Map<string, any>(rows.map((r: any) => [`${r.employee_id}|${String(parseDate(r.effective_date) || r.effective_date).slice(0, 10)}`, r])),
+          generated: new Set(generated.map((g: any) => `${g.employee_id}|${g.month_year}`))
+        };
+      },
+      row: async (v, ctx, prep) => {
+        const emp = empOf(v, ctx);
+        const who = `${emp.name} (${str(v.employee_id)})`;
+        const date = dateOf(v, "effective_date", "Effective Date") as string;
+        const amount = (key: string, label: string) => {
+          const n = parseNumber(v[key]);
+          if (n === null) return null;
+          if (Number.isNaN(n) || n < 0) fail(`${label} "${str(v[key])}" isn't an amount.`);
+          return Math.round(n * 100) / 100;
+        };
+        const gross = amount("gross_salary", "Gross Salary");
+        const parts = {
+          basic: amount("basic_salary", "Basic"),
+          house: amount("house_rent", "House Rent"),
+          medical: amount("medical_allowance", "Medical"),
+          conveyance: amount("conveyance_allowance", "Conveyance"),
+          other: amount("other_allowance", "Other Allowance")
+        };
+        const tax = amount("tax_deduction", "Tax") || 0;
+        const pf = amount("pf_deduction", "PF") || 0;
+        const split = Object.values(parts).some((x) => x !== null);
+        let s: { basic: number; house: number; medical: number; conveyance: number; other: number; gross: number };
+        if (split) {
+          if (!parts.basic) fail("Basic is required when the salary is split into parts.");
+          const total = Math.round(((parts.basic || 0) + (parts.house || 0) + (parts.medical || 0) + (parts.conveyance || 0) + (parts.other || 0)) * 100) / 100;
+          if (gross !== null && Math.abs(gross - total) > 0.5) fail(`Gross ${gross} doesn't match the parts' total ${total}.`);
+          s = { basic: parts.basic || 0, house: parts.house || 0, medical: parts.medical || 0, conveyance: parts.conveyance || 0, other: parts.other || 0, gross: total };
+        } else {
+          if (gross === null) fail("Gross Salary is empty — fill Gross, or Basic and the other parts.");
+          // Gross only: it is all Basic (payroll prices days off on the gross).
+          s = { basic: gross!, house: 0, medical: 0, conveyance: 0, other: 0, gross: gross! };
+        }
+        if (s.gross <= 0) fail("The salary must be more than 0.");
+        const desc = split ? `Gross ৳${s.gross.toLocaleString("en-US")} (Basic ${s.basic.toLocaleString("en-US")} + allowances)` : `Gross ৳${s.gross.toLocaleString("en-US")}`;
+        const note = prep.generated.has(`${emp.id}|${date.slice(0, 7)}`) ? ` Payroll for ${date.slice(0, 7)} is already generated — regenerate it to use this salary.` : "";
+        const key = `${emp.id}|${date}`;
+        const had = prep.byKey.get(key);
+        const values = [s.basic, s.house, s.medical, s.conveyance, s.other, s.gross, tax, pf];
+        if (had) {
+          const same =
+            [had.basic_salary, had.house_rent, had.medical_allowance, had.conveyance_allowance, had.other_allowance, had.gross_salary, had.tax_deduction, had.pf_deduction].every(
+              (x: any, i: number) => Math.abs(Number(x || 0) - values[i]) < 0.005
+            );
+          if (same) return { status: "skip", message: `Same salary from ${date} is already there.`, employee: who };
+          if (!ctx.dryRun)
+            await queryDB(
+              "UPDATE salary_structures SET basic_salary = ?, house_rent = ?, medical_allowance = ?, conveyance_allowance = ?, other_allowance = ?, gross_salary = ?, tax_deduction = ?, pf_deduction = ? WHERE id = ?",
+              [...values, Number(had.id)]
+            );
+          return { status: "update", message: `Salary from ${date} corrected: ৳${Number(had.gross_salary).toLocaleString("en-US")} → ${desc}.${note}`, employee: who };
+        }
+        if (!ctx.dryRun) {
+          const r = await queryDB(
+            `INSERT INTO salary_structures
+               (employee_id, basic_salary, house_rent, medical_allowance, conveyance_allowance, other_allowance, gross_salary, tax_deduction, pf_deduction, effective_date, created_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [Number(emp.id), ...values, date, ctx.user.id]
+          );
+          prep.byKey.set(key, { id: r.insertId, basic_salary: s.basic, house_rent: s.house, medical_allowance: s.medical, conveyance_allowance: s.conveyance, other_allowance: s.other, gross_salary: s.gross, tax_deduction: tax, pf_deduction: pf });
+        } else {
+          prep.byKey.set(key, { id: 0, basic_salary: s.basic, house_rent: s.house, medical_allowance: s.medical, conveyance_allowance: s.conveyance, other_allowance: s.other, gross_salary: s.gross, tax_deduction: tax, pf_deduction: pf });
+        }
+        return { status: "create", message: `${desc} from ${date}.${note}`, employee: who };
+      }
+    },
     office_attendance: {
       prepare: async (ctx) => {
         const devices: any[] = (await queryDB("SELECT id, name, ip_address FROM zk_devices").catch(() => [])) || [];

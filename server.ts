@@ -251,7 +251,9 @@ const TRACKING_DEFAULT_LAYERS = ["read", "stay_report"] as const;
 // "accounts_pay" = Accounts pays an approved month; "access_log" = Payroll ->
 // Activity Log (who opened Payroll, what they looked at and did). All
 // explicit-only (PayrollApprovalRoutes.ts).
-const PAYROLL_LAYER_KEYS = ["read", "salary_month", "salary_hold", "audit_approve", "accounts_pay", "access_log"] as const;
+// "salary_bulk_upload" (explicit-only): Payroll -> Salary Setup -> Bulk Upload
+// and the Salary Structure kind of HR Data Import (DataImportRoutes.ts).
+const PAYROLL_LAYER_KEYS = ["read", "salary_month", "salary_hold", "audit_approve", "accounts_pay", "access_log", "salary_bulk_upload"] as const;
 // Mobile Bill's layers: "read" = the module as it was; "limit_history" =
 // Reports -> Limit changes (who changed which SIM's limit, when). Both are
 // reading, so an account with Mobile Bill and no saved layers has both.
@@ -2143,7 +2145,7 @@ async function startServer() {
   // on for a module is never a silent regression; a Superadmin only actually
   // restricts anything once they explicitly save a narrower set in the
   // Module Access modal.
-  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "block_account" | "limit_history" | "link_pins" | "on_behalf" | "onboarding_create" | "onboarding_review" | "onboarding_approve" | "exit_dues" | "reminders_receive") =>
+  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "block_account" | "limit_history" | "link_pins" | "on_behalf" | "onboarding_create" | "onboarding_review" | "onboarding_approve" | "exit_dues" | "reminders_receive" | "salary_bulk_upload") =>
     async (req: any, res: any, next: any) => {
       if (!req.user) return res.status(401).json({ error: "Access token required" });
       if (req.user.onb) return res.status(403).json({ error: "Admin access required" });
@@ -2575,7 +2577,7 @@ async function startServer() {
   // Admin Panel -> Data Import (DataImportRoutes.ts): employees, leave,
   // claims and attendance history from an Excel/CSV sheet; each kind needs
   // its own module (a Superadmin has them all).
-  registerDataImportRoutes(app, { authenticateToken, requireAdmin, queryDB, getAdminModules, today: todayInDhaka, adjustLeaveTypeBalance, ensureDefaultLeaveBalances: (ids: number[]) => ensureDefaultLeaveBalances(ids) });
+  registerDataImportRoutes(app, { authenticateToken, requireAdmin, queryDB, getAdminModules, hasModuleLayer, today: todayInDhaka, adjustLeaveTypeBalance, ensureDefaultLeaveBalances: (ids: number[]) => ensureDefaultLeaveBalances(ids) });
 
   registerReportsInsightsRoutes(app, {
     authenticateToken,
