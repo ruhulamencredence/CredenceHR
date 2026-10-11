@@ -10,8 +10,9 @@
 //   - someone with the tracking "live" layer has that person open in Live
 //     Follow (POST .../watch, renewed every WATCH_TTL_MS by the open page), or
 //   - the person is the requester or the driver of an ongoing Book a Ride ride.
-// The phone learns it is live from a socket event ("tracking:live") and, as a
-// fallback, from the reply to its own ping ({ live_until }). Every ping that
+// The phone learns it is live from a socket event ("tracking:live"), a silent
+// push that wakes it when the app is in the background (its socket asleep),
+// and, as a last fallback, from the reply to its own ping ({ live_until }). Every ping that
 // arrives while someone is watching is pushed straight to the watchers'
 // sockets ("tracking:location"), so the map moves without polling.
 //
@@ -20,6 +21,7 @@
 
 import type { Express } from "express";
 import type { Server as SocketIOServer } from "socket.io";
+import { sendSilentPushToUserIds } from "./PushNotificationService";
 
 interface Deps {
   authenticateToken: any;
@@ -99,6 +101,21 @@ export function registerLiveTrackingRoutes(app: Express, deps: Deps): LiveTracki
     getIo()?.to(`user:${userId}`).emit("tracking:live", { until });
   };
 
+  // Silent push for "go live": sent when following starts, and again on a
+  // renewal while the phone still hasn't answered (at most every
+  // WAKE_RETRY_MS, WAKE_MAX_TRIES times per follow).
+  const WAKE_RETRY_MS = 60_000;
+  const WAKE_MAX_TRIES = 3;
+  const lastHeard = new Map<number, number>();
+  const wakes = new Map<number, { at: number; tries: number }>();
+  const wakePhone = (userId: number, until: number | null) => {
+    if (!until) return;
+    const w = wakes.get(userId);
+    if (w && (w.tries >= WAKE_MAX_TRIES || Date.now() - w.at < WAKE_RETRY_MS)) return;
+    wakes.set(userId, { at: Date.now(), tries: (w?.tries || 0) + 1 });
+    void sendSilentPushToUserIds(queryDB, [userId], { type: "tracking_live", until: String(until) });
+  };
+
   // Start (or renew) following someone. Also returns their latest ping and
   // today's path so the map has something to draw at once.
   app.post(
@@ -129,7 +146,14 @@ export function registerLiveTrackingRoutes(app: Express, deps: Deps): LiveTracki
         if (!m) watchers.set(userId, (m = new Map()));
         m.set(Number(req.user.id), Date.now() + WATCH_TTL_MS);
         const until = await liveUntil(userId);
-        if (!wasLive) tellPhone(userId, until);
+        if (!wasLive) {
+          tellPhone(userId, until);
+          wakes.delete(userId);
+          wakePhone(userId, until);
+        } else if ((lastHeard.get(userId) || 0) < (wakes.get(userId)?.at || 0)) {
+          // Followed, but not a word from the phone since the last wake-up.
+          wakePhone(userId, until);
+        }
 
         // The first call of a session also sends today's path; renewals skip it.
         let trail: any[] = [];
@@ -172,6 +196,7 @@ export function registerLiveTrackingRoutes(app: Express, deps: Deps): LiveTracki
 
   return {
     onPing: async (userId, ping) => {
+      lastHeard.set(userId, Date.now());
       const ws = activeWatchers(userId);
       if (ws.length) {
         const io = getIo();
