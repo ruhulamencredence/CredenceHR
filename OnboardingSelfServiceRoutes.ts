@@ -786,9 +786,12 @@ export function registerOnboardingRoutes(app: Express, deps: OnboardingDeps) {
       // (its connection sees every company).
       const [departments, branches] = await Promise.all([queryDB("SELECT * FROM departments"), queryDB("SELECT * FROM branches")]);
       const required = await requiredDocs();
+      // tests/onboarding.test.ts: a server started with NODE_ENV=test fails
+      // the transaction after the step named in this header, to prove it
+      // rolls back. Ignored in every other environment.
+      const failAfter = process.env.NODE_ENV === "test" ? String(req.headers["x-onboarding-test-fail-after"] || "") : "";
       const failAt = (step: number) => {
-        // Phase 4 tests: make the transaction fail part-way (never in production).
-        if (process.env.NODE_ENV === "test" && process.env.ONBOARDING_FAIL_AFTER_STEP === String(step)) throw new Error(`Test failure after step ${step}`);
+        if (failAfter === String(step)) throw new Error(`Test failure after step ${step}`);
       };
 
       let result: { already: boolean; employeeId: number; code: string; userId: number } | null = null;
@@ -891,6 +894,7 @@ export function registerOnboardingRoutes(app: Express, deps: OnboardingDeps) {
           `Created from onboarding ${a.onb_code}`,
           req.user.id
         ]);
+        failAt(10);
         result = { already: false, employeeId, code, userId: Number(a.user_id) };
       });
       const r = result as unknown as { already: boolean; employeeId: number; code: string; userId: number };
