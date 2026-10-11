@@ -23,6 +23,7 @@
 // popup-button treatment as Leave Application, instead of what used to be a
 // third in-page tab.
 
+import { useLiveRefresh } from '../lib/liveRefresh';
 import React, { useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import {
@@ -230,33 +231,37 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
   });
   const [reportingSubmitting, setReportingSubmitting] = useState(false);
 
-  async function loadMyAssets() {
-    setLoading(true);
-    setError(null);
+  async function loadMyAssets(silent = false) {
+    if (!silent) {
+      setLoading(true);
+      setError(null);
+    }
     try {
       const res = await fetch(apiUrl('/api/assets/my'), { headers: authHeaders() });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to load your assets.');
       setMyAssets(data);
     } catch (err: any) {
-      setError(err.message);
+      if (!silent) setError(err.message);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }
 
-  async function loadRequisitions() {
-    setLoading(true);
-    setError(null);
+  async function loadRequisitions(silent = false) {
+    if (!silent) {
+      setLoading(true);
+      setError(null);
+    }
     try {
       const res = await fetch(apiUrl('/api/assets/requisitions/my'), { headers: authHeaders() });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to load your requisitions.');
       setRequisitions(data);
     } catch (err: any) {
-      setError(err.message);
+      if (!silent) setError(err.message);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }
 
@@ -291,6 +296,15 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
       loadMyClaims();
     }
   }, [tab]);
+
+  // Live refresh: approvals, fulfilment and hand-overs show up without a
+  // page reload (src/lib/liveRefresh.ts).
+  useLiveRefresh(() => {
+    if (tab === 'my-assets') void loadMyAssets(true);
+    if (tab === 'status') void loadRequisitions(true);
+    if (tab === 'fulfill') void loadMyClaims();
+    void loadAwaitingFulfillment(true);
+  });
 
   // Runs once on mount, regardless of which tab is active, purely so the
   // "Approved by Me" tab shows its real count right away.

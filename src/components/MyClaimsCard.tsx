@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { useLiveTick } from '../lib/liveRefresh';
 import React, { useEffect, useState } from 'react';
 import { ArrowLeft, LogIn, LogOut, Inbox } from 'lucide-react';
 import { ClaimRecord } from '../types';
@@ -56,10 +57,13 @@ export const MyClaimsCard: React.FC<MyClaimsCardProps> = ({ token, onBack, refre
   // lookup failed/found nothing (falls back to the plain coordinates).
   const [addresses, setAddresses] = useState<Record<string, string | null>>({});
 
+  // Live refresh: claim statuses update without a page reload.
+  const liveTick = useLiveTick();
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      setLoading(true);
+      // A live refresh updates quietly; only the first load shows the spinner.
+      if (liveTick === 0) setLoading(true);
       try {
         const res = await fetch(apiUrl('/api/claims/mine'), { headers: { Authorization: `Bearer ${token}` } });
         if (res.ok && !cancelled) setClaims(await res.json());
@@ -72,7 +76,7 @@ export const MyClaimsCard: React.FC<MyClaimsCardProps> = ({ token, onBack, refre
     return () => {
       cancelled = true;
     };
-  }, [token, refreshKey]);
+  }, [token, refreshKey, liveTick]);
 
   useEffect(() => {
     let cancelled = false;

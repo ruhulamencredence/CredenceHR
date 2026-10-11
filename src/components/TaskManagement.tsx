@@ -7,6 +7,7 @@
 // employees' requests to HR, every task of the company, repeating tasks and
 // the monthly report (PDF / Excel).
 
+import { useLiveRefresh } from '../lib/liveRefresh';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -51,6 +52,8 @@ export const TaskManagement: React.FC<{ token: string; user: User }> = ({ token,
   const [status, setStatus] = useState<'active' | Task['status'] | 'overdue' | 'all'>('active');
   const [source, setSource] = useState<'all' | Task['source']>('all');
 
+// Live refresh: reload when a request changes (src/lib/liveRefresh.ts).
+useLiveRefresh(() => load());
   const load = useCallback(() => {
     api<Task[]>(token, '/api/tasks/all')
       .then(setTasks)

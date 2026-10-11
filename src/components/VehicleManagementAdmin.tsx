@@ -25,6 +25,7 @@
 // instead of relying on that employee's own auto-resolved Direct/Department
 // Supervisor (POST /api/vehicles/requisitions/admin-create).
 
+import { useLiveRefresh } from '../lib/liveRefresh';
 import React, { useEffect, useState } from 'react';
 import { apiUrl } from '../lib/api';
 import { User } from '../types';
@@ -172,6 +173,8 @@ export function VehicleManagementAdmin(_props: VehicleManagementAdminProps) {
     }
   }
 
+// Live refresh: reload when a request changes (src/lib/liveRefresh.ts).
+useLiveRefresh(() => loadRequisitions());
   async function loadRequisitions() {
     try {
       const res = await fetch(apiUrl('/api/vehicles/requisitions'), { headers: authHeaders() });

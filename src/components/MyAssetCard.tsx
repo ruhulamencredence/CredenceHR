@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { useLiveTick } from '../lib/liveRefresh';
 import React, { useEffect, useState } from 'react';
 import { Package, Plus, ChevronRight } from 'lucide-react';
 import { apiUrl } from '../lib/api';
@@ -24,6 +25,8 @@ export interface MyAssetSummary {
 // waiting for this account's acknowledgement, and requisitions not yet closed.
 export function useMyAssetSummary(token: string): MyAssetSummary | null {
   const [summary, setSummary] = useState<MyAssetSummary | null>(null);
+  // Live refresh: counts update without a page reload.
+  const liveTick = useLiveTick();
   useEffect(() => {
     let cancelled = false;
     const headers = { Authorization: `Bearer ${token}` };
@@ -45,7 +48,7 @@ export function useMyAssetSummary(token: string): MyAssetSummary | null {
     return () => {
       cancelled = true;
     };
-  }, [token]);
+  }, [token, liveTick]);
   return summary;
 }
 

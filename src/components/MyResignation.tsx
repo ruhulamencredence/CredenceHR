@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { useLiveRefresh } from '../lib/liveRefresh';
 import React, { useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { ArrowLeft, LogOut, Plus, X, CheckCircle2, Clock, Ban, AlertTriangle } from 'lucide-react';
@@ -87,8 +88,10 @@ export const MyResignation: React.FC<MyResignationProps> = ({ token, onBack }) =
   const [lastWorkingDay, setLastWorkingDay] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  const load = async () => {
-    setLoading(true);
+// Live refresh: reload when a request changes (src/lib/liveRefresh.ts).
+useLiveRefresh(() => load(true));
+  const load = async (silent?: unknown) => {
+    if (silent !== true) setLoading(true);
     setError('');
     try {
       const res = await fetch(apiUrl('/api/exit-requests'), { headers: authHeaders });

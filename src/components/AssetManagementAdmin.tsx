@@ -16,6 +16,7 @@
 // (request_type 'asset') exactly like Conveyance/Leave/Timesheet. See the
 // design note above registerAssetManagementRoutes in AssetManagementRoutes.ts.
 
+import { useLiveRefresh } from '../lib/liveRefresh';
 import React, { useEffect, useState } from 'react';
 import { apiUrl } from '../lib/api';
 import { AssetFulfillModal } from './AssetFulfillModal';
@@ -137,6 +138,11 @@ export function AssetManagementAdmin() {
     }
   }
 
+// Live refresh: reload when a request changes (src/lib/liveRefresh.ts).
+useLiveRefresh(() => {
+    void loadRequisitions();
+    void loadClaims();
+  });
   async function loadRequisitions() {
     try {
       const res = await fetch(apiUrl('/api/assets/requisitions'), { headers: authHeaders() });

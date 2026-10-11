@@ -8,6 +8,7 @@
 // tasks given to my team, plus their repeating tasks. Shown only to accounts
 // with users.can_view_tasks (Module Access) or the task_management module.
 
+import { useLiveRefresh } from '../lib/liveRefresh';
 import React, { useCallback, useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { ArrowLeft, ClipboardList, Plus, Send } from 'lucide-react';
@@ -30,6 +31,8 @@ export const MyTasks: React.FC<{ token: string; user: User; onBack?: () => void 
   const [newRequest, setNewRequest] = useState(false);
   const [repeatKey, setRepeatKey] = useState(0);
 
+// Live refresh: reload when a request changes (src/lib/liveRefresh.ts).
+useLiveRefresh(() => load());
   const load = useCallback(() => {
     api(token, '/api/tasks/mine')
       .then(setData)

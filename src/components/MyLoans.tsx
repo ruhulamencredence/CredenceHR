@@ -8,6 +8,7 @@
 // it through its approvers, and see each loan's installments and what's
 // left. One request at a time, and not while a loan is still being repaid.
 
+import { useLiveRefresh } from '../lib/liveRefresh';
 import React, { useCallback, useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { ArrowLeft, HandCoins, Plus, X } from 'lucide-react';
@@ -88,6 +89,8 @@ export const MyLoans: React.FC<{ token: string; onBack?: () => void }> = ({ toke
   useEffect(() => {
     load();
   }, [load]);
+  // Live refresh: approvals show up without a page reload.
+  useLiveRefresh(load);
 
   const cancel = async (r: MyLoanRequest) => {
     if (!(await confirmDialog(`Cancel your ${r.kind === 'advance' ? 'salary advance' : 'loan'} request of ${tk(r.total_amount)}?`))) return;

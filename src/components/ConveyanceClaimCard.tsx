@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { useLiveRefresh } from '../lib/liveRefresh';
 import React, { useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { Wallet, Plus, ChevronRight, Inbox, Paperclip } from 'lucide-react';
@@ -60,8 +61,10 @@ export const ConveyanceClaimCard: React.FC<ConveyanceClaimCardProps> = ({ token,
   const [message, setMessage] = useState<string | null>(null);
   const [tab, setTab] = useState<ClaimTab>('pending');
 
-  const fetchClaims = async () => {
-    setLoading(true);
+// Live refresh: reload when a request changes (src/lib/liveRefresh.ts).
+useLiveRefresh(() => fetchClaims(true));
+  const fetchClaims = async (silent?: unknown) => {
+    if (silent !== true) setLoading(true);
     try {
       const res = await fetch(apiUrl('/api/user-claims/mine'), { headers: { Authorization: `Bearer ${token}` } });
       if (res.ok) setClaims(await res.json());

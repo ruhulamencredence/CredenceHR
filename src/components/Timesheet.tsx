@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { useLiveRefresh } from '../lib/liveRefresh';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { Clock, CalendarDays, CalendarRange, Inbox, CheckCircle2, XCircle, MapPin, Pencil, AlarmClock, Plane } from 'lucide-react';
@@ -301,6 +302,8 @@ export const Timesheet: React.FC<TimesheetProps> = ({ token, onBack, attendanceP
   const [rangeFrom, setRangeFrom] = useState(firstOfThisMonth);
   const [rangeTo, setRangeTo] = useState(today);
 
+// Live refresh: reload when a request changes (src/lib/liveRefresh.ts).
+useLiveRefresh(() => loadData());
   const loadData = async (cancelledRef?: { cancelled: boolean }) => {
     try {
       // Which calendar (Head Office vs Project site) applies to THIS account

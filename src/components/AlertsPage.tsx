@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { useLiveRefresh } from '../lib/liveRefresh';
 import React, { useCallback, useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { BellRing, Check, ChevronLeft, Trash2 } from 'lucide-react';
@@ -68,6 +69,8 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
       setLoading(false);
     }
   }, [token]);
+  // New alerts appear without a page reload.
+  useLiveRefresh(() => fetchAlerts());
 
   useEffect(() => {
     fetchAlerts();

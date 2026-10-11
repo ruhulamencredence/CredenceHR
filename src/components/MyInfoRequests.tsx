@@ -10,6 +10,7 @@
 // and is added to the record only once HR approves it; if HR sends it back,
 // the reason shows here and it can be submitted again.
 
+import { useLiveRefresh } from '../lib/liveRefresh';
 import React, { useEffect, useState } from 'react';
 import { Camera, CheckCircle2, Clock, Paperclip, Plus, Send, Trash2, XCircle } from 'lucide-react';
 import { Spinner } from './Spinner';
@@ -198,6 +199,8 @@ export const MyInfoRequests: React.FC<{ token: string; onCountChange?: (n: numbe
   const [data, setData] = useState<{ items: MyItem[]; open: number; family: any[] } | null>(null);
   const [openId, setOpenId] = useState<number | null>(null);
   const [msg, setMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+// Live refresh: reload when a request changes (src/lib/liveRefresh.ts).
+useLiveRefresh(() => load());
   const load = () =>
     api
       .get<any>('/api/hr-ops/my/info-requests')

@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { useLiveRefresh } from '../lib/liveRefresh';
 import React, { useEffect, useState } from 'react';
 import { ArrowLeft, CalendarDays, CheckCircle2, XCircle, Clock, Inbox, Plus } from 'lucide-react';
 import { LeaveApplication, LeaveBalance } from '../types';
@@ -60,8 +61,10 @@ export const LeaveReviewPage: React.FC<LeaveReviewPageProps> = ({ token, onBack 
   const [balance, setBalance] = useState<LeaveBalance | null>(null);
   const [balanceLoading, setBalanceLoading] = useState(true);
 
-  const load = async () => {
-    setLoading(true);
+// Live refresh: reload when a request changes (src/lib/liveRefresh.ts).
+useLiveRefresh(() => load(true));
+  const load = async (silent?: unknown) => {
+    if (silent !== true) setLoading(true);
     try {
       const res = await fetch(apiUrl('/api/leave-applications/mine'), { headers: { Authorization: `Bearer ${token}` } });
       if (res.ok) setApplications(await res.json());

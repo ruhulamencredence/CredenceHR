@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { useLiveTick } from '../lib/liveRefresh';
 import React, { useEffect, useState } from 'react';
 import { Car, MapPin, ChevronRight } from 'lucide-react';
 import { Lottie } from 'lottie-react';
@@ -40,6 +41,8 @@ export const ACTIVE_LABEL: Record<string, { text: string; color: string }> = {
 // vehicle, or ongoing), newest first.
 export function useActiveRides(token: string, userId: number): Ride[] | null {
   const [active, setActive] = useState<Ride[] | null>(null);
+  // Live refresh: the ride's status updates without a page reload.
+  const liveTick = useLiveTick();
   useEffect(() => {
     let cancelled = false;
     fetch(apiUrl('/api/vehicles/requisitions'), { headers: { Authorization: `Bearer ${token}` } })
@@ -52,7 +55,7 @@ export function useActiveRides(token: string, userId: number): Ride[] | null {
     return () => {
       cancelled = true;
     };
-  }, [token, userId]);
+  }, [token, userId, liveTick]);
   return active;
 }
 
