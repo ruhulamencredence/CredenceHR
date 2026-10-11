@@ -247,7 +247,7 @@ export function LiveFollowModal({ token, userId, name, onClose }: Props) {
                     Updated {ago}
                     {!fresh &&
                       fix &&
-                      ' — waiting for their phone to answer. With the app open this takes seconds; with the app closed or the phone in battery saver, up to 3 minutes.'}
+                      ' — waiting for their phone to answer. With the app open this takes seconds; with the app closed or the phone in battery saver, up to 10 minutes.'}
                   </>
                 )}
               </p>
