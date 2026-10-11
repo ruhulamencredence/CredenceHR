@@ -62,6 +62,35 @@ const CompanySettings: React.FC<{ token: string; meta: HrOpsMeta; onSaved: () =>
           document type matches when either name contains the other ("NID Card" covers "NID").
         </p>
       </div>
+      <div className="rounded-xl border border-slate-200 p-4 space-y-3">
+        <div className="text-xs font-bold text-slate-700">New Joiner Onboarding</div>
+        <div className="grid sm:grid-cols-2 gap-3 items-end">
+          <div>
+            <label className={labelCls}>Joiner login stays open for (days)</label>
+            <input
+              type="number"
+              min={1}
+              max={365}
+              value={s.onboarding_expiry_days || ''}
+              onChange={(e) => setS({ ...s, onboarding_expiry_days: e.target.value })}
+              placeholder="14"
+              className={inputCls}
+            />
+          </div>
+          <label className="flex items-center gap-2 text-xs text-slate-700 pb-2">
+            <input
+              type="checkbox"
+              checked={String(s.onboarding_creator_cannot_approve ?? '1') === '1'}
+              onChange={(e) => setS({ ...s, onboarding_creator_cannot_approve: e.target.checked ? '1' : '0' })}
+            />
+            Whoever opens an application can't approve it
+          </label>
+        </div>
+        <p className="text-[11px] text-slate-500">
+          Counted until the joiner submits; sending it back starts the count again. When it runs out the application expires and its login is blocked. A Superadmin may
+          always approve.
+        </p>
+      </div>
       <button
         type="button"
         className={btnPrimary}

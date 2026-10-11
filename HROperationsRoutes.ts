@@ -611,6 +611,9 @@ const addMonths = (d: string, months: number): string => {
   dt.setUTCDate(Math.min(day, last));
   return dt.toISOString().slice(0, 10);
 };
+// Today's date in Dhaka (the route deps carry their own todayInDhaka; this
+// is for module-level helpers).
+const todayInDhakaLocal = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Dhaka" }).format(new Date());
 const addDays = (d: string, days: number): string => {
   const [y, m, day] = d.split("-").map(Number);
   return new Date(Date.UTC(y, m - 1, day + days)).toISOString().slice(0, 10);
@@ -731,6 +734,51 @@ export function currentValues(snap: EmployeeSnapshot) {
     job_base: e.job_base || null,
     service_status: snap.service?.service_status || null
   };
+}
+
+// Onboarding checklist for one Employee: copies every active task (HR Ops
+// Settings -> Onboarding) not already on it, due N days from the joining
+// date, and sets the default probation when the Employee has none yet.
+// Reads the company's tasks / settings through `read`; writes through
+// `write` — the same function, or a transaction's connection when a New
+// Joiner is approved (OnboardingSelfServiceRoutes.ts). Returns how many
+// items were added.
+export async function startOnboardingChecklist(
+  read: QueryDB,
+  write: QueryDB,
+  emp: { id: number; joining_date: string | null },
+  actorId: number | null
+): Promise<number> {
+  const empId = emp.id;
+  const [tasks, items]: any[][] = await Promise.all([
+    read("SELECT * FROM hr_onboarding_tasks"),
+    write("SELECT id, employee_id, task_key FROM hr_onboarding_items WHERE employee_id = ?", [empId])
+  ]);
+  const base = emp.joining_date || todayInDhakaLocal();
+  const have = new Set((items || []).filter((i: any) => Number(i.employee_id) === empId).map((i: any) => i.task_key));
+  let added = 0;
+  for (const t of (tasks || []).filter((t: any) => Number(t.is_active) !== 0).sort((a: any, b: any) => Number(a.sort_order) - Number(b.sort_order))) {
+    if (have.has(t.task_key)) continue;
+    have.add(t.task_key);
+    await write("INSERT INTO hr_onboarding_items (employee_id, task_key, label, category, sort_order, status, due_date) VALUES (?, ?, ?, ?, ?, ?, ?)", [
+      empId,
+      t.task_key,
+      t.label,
+      t.category,
+      Number(t.sort_order),
+      "pending",
+      addDays(base, Number(t.due_days) || 0)
+    ]);
+    added++;
+  }
+  // Default probation for a brand-new Employee with none set yet.
+  const services: any[] = await write("SELECT id, employee_id FROM hr_employee_service WHERE employee_id = ?", [empId]);
+  if (!(services || []).some((s: any) => Number(s.employee_id) === empId) && emp.joining_date) {
+    const settings = await loadSettings(read);
+    const months = Number(settings.default_probation_months || 6);
+    await upsertService(write, empId, { probation_months: months, probation_end_date: addMonths(emp.joining_date, months), service_status: "probation" }, actorId);
+  }
+  return added;
 }
 
 async function upsertService(queryDB: QueryDB, employeeId: number, patch: Record<string, any>, actorId: number | null) {
@@ -2242,32 +2290,10 @@ export function registerHROperationsRoutes(app: Express, deps: HROperationsRoute
   app.post("/api/hr-ops/onboarding/:employeeId/start", ...gate, async (req: any, res: any) => {
     try {
       const empId = Number(req.params.employeeId);
-      const [emps, tasks, items] = await Promise.all([queryDB("SELECT * FROM all_employees"), queryDB("SELECT * FROM hr_onboarding_tasks"), queryDB("SELECT * FROM hr_onboarding_items")]);
+      const emps: any[] = await queryDB("SELECT * FROM all_employees");
       const e = emps.find((x: any) => Number(x.id) === empId);
       if (!e) throw bad("Employee not found.", 404);
-      const base = toDate(e.joining_date) || todayInDhaka();
-      const have = new Set(items.filter((i: any) => Number(i.employee_id) === empId).map((i: any) => i.task_key));
-      let added = 0;
-      for (const t of tasks.filter((t: any) => Number(t.is_active) !== 0).sort((a: any, b: any) => Number(a.sort_order) - Number(b.sort_order))) {
-        if (have.has(t.task_key)) continue;
-        await queryDB("INSERT INTO hr_onboarding_items (employee_id, task_key, label, category, sort_order, status, due_date) VALUES (?, ?, ?, ?, ?, ?, ?)", [
-          empId,
-          t.task_key,
-          t.label,
-          t.category,
-          Number(t.sort_order),
-          "pending",
-          addDays(base, Number(t.due_days) || 0)
-        ]);
-        added++;
-      }
-      // Default probation for a brand-new Employee with none set yet.
-      const services: any[] = await queryDB("SELECT * FROM hr_employee_service");
-      if (!services.some((s: any) => Number(s.employee_id) === empId) && toDate(e.joining_date)) {
-        const settings = await loadSettings(queryDB);
-        const months = Number(settings.default_probation_months || 6);
-        await upsertService(queryDB, empId, { probation_months: months, probation_end_date: addMonths(toDate(e.joining_date)!, months), service_status: "probation" }, req.user.id);
-      }
+      const added = await startOnboardingChecklist(queryDB, queryDB, { id: empId, joining_date: toDate(e.joining_date) }, req.user.id);
       res.json({ success: true, added });
     } catch (err) {
       fail(res, err);

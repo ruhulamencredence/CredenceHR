@@ -64,7 +64,7 @@ import { setActiveCompanyId } from './lib/company';
 import { ACCOUNT_BLOCKED_EVENT, DEVICE_REVOKED_EVENT, SESSION_ENDED_EVENT, setSignedOutReason } from './lib/device';
 import { refreshNotices } from './lib/noticesLive';
 import { refreshAvatars } from './components/UserAvatar';
-import { SESSION_CHANGED_EVENT } from './components/OnboardingShell';
+import { SESSION_CHANGED_EVENT, ChangeTempPassword } from './components/OnboardingShell';
 
 export default function App() {
   const [token, setToken] = useState<string | null>(localStorage.getItem('mpr_token'));
@@ -1059,6 +1059,33 @@ export default function App() {
       className="min-h-screen flex flex-col selection:bg-indigo-500 selection:text-white"
       style={{ color: 'var(--g-text)' }}
     >
+      {/* A password HR set (e.g. a New Joiner just approved) is replaced
+          before anything else. */}
+      {user.must_change_password && (
+        <div className="liquid-glass-backdrop fixed inset-0 z-[1100] flex items-center justify-center p-4" role="presentation">
+          <div className="w-full max-w-sm" role="dialog" aria-modal="true" aria-label="Set a new password">
+            <div className="liquid-glass liquid-glass-in rounded-[32px] p-5">
+              <ChangeTempPassword
+                bare
+                token={token}
+                currentLabel="Current password"
+                intro="Welcome! Set a new password only you know before you start."
+                onDone={() =>
+                  setUser((prev) => {
+                    if (!prev) return prev;
+                    const next = { ...prev, must_change_password: false };
+                    localStorage.setItem('mpr_user', JSON.stringify(next));
+                    return next;
+                  })
+                }
+              />
+              <button type="button" onClick={handleLogout} className="mt-3 w-full text-xs font-semibold text-slate-500 hover:text-slate-800">
+                Sign out
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {pullToRefreshIndicator}
       {pullToRefreshFullscreenLoader}
       {backToServerBadge}
