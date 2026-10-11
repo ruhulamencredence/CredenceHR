@@ -12,10 +12,11 @@
 //   retirement  — date of birth + the retirement age (HR Ops Settings)
 //   increment   — the active increment policy (computeIncrementsDue)
 //
-// Who is told: accounts ticked for the HR Operations layer
-// "reminders_receive" in that company (explicit-only — a Superadmin too only
-// when ticked, so a group's Superadmins aren't flooded), plus the Employee's
-// direct supervisor when HR Ops Settings say so.
+// Who is told: Admin / User accounts ticked for the HR Operations layer
+// "reminders_receive" in that company (explicit-only), plus the Employee's
+// direct supervisor when HR Ops Settings say so. Superadmins can't be given
+// layers (Module Access), so they see the list on the dashboard but get no
+// alerts — a group's Superadmins aren't flooded.
 //
 // When: HR Ops Settings -> reminder_lead_days, e.g. "30,15,7,0" — one
 // reminder as each of those days-before is reached (0 = on the day, or the
@@ -229,15 +230,15 @@ export async function collectHrEvents(queryDB: QueryDB, today: string, settings:
 
 type CreateAlert = (queryDB: QueryDB, params: { userId: number; type: any; title: string; message: string; relatedType?: string; relatedId?: number }) => Promise<void>;
 
-// Accounts of this company ticked for "reminders_receive" (and still holding
-// HR Operations itself, unless Superadmin), not blocked.
+// Accounts of this company ticked for "reminders_receive" and still holding
+// HR Operations itself, not blocked.
 async function reminderRecipients(queryDB: QueryDB, companyId: number): Promise<number[]> {
   const rows: any[] = await queryDB(
     `/*unscoped*/ SELECT DISTINCT u.id FROM admin_module_permission_layers l
        JOIN users u ON u.id = l.user_id
-       LEFT JOIN admin_module_permissions p ON p.user_id = l.user_id AND p.module_key = 'hr_operations' AND p.company_id = l.company_id
+       JOIN admin_module_permissions p ON p.user_id = l.user_id AND p.module_key = 'hr_operations' AND p.company_id = l.company_id
       WHERE l.module_key = 'hr_operations' AND l.layer_key = 'reminders_receive' AND l.company_id = ?
-        AND (p.id IS NOT NULL OR u.role = 'superadmin') AND COALESCE(u.is_blocked, 0) = 0`,
+        AND u.role IN ('admin', 'user') AND COALESCE(u.is_blocked, 0) = 0`,
     [companyId]
   ).catch(() => []);
   return (rows || []).map((r: any) => Number(r.id));
