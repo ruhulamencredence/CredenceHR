@@ -31,6 +31,8 @@ import type { Express } from "express";
 import { activeCompanyId } from "./companyContext";
 import { endAllSessions } from "./SessionSecurity";
 import { loadSettings } from "./HROperationsRoutes";
+import { requiredDocuments, missingDocuments } from "./HrOps360Routes";
+import { createAlert } from "./Alerts";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 type Tx = (fn: (q: QueryDB) => Promise<void>) => Promise<void>;
@@ -175,6 +177,124 @@ const toDate = (v: any): string | null => {
   return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
 };
 const clean = (v: any, max = 255) => (v === undefined || v === null || !String(v).trim() ? null : String(v).trim().slice(0, max));
+
+// ---------------------------------------------------------------------------
+// What the joiner fills in (data_json)
+// ---------------------------------------------------------------------------
+
+// The joiner's own fields — the personal part of all_employees
+// (EMPLOYEE_TEXT_FIELDS / EMPLOYEE_DATE_FIELDS in server.ts). Job details
+// (designation, department, branch, joining date) are HR's and not here.
+export const PERSONAL_TEXT_FIELDS = [
+  "gender", "nid_ssn", "nationality", "marital_status", "blood_group", "religion",
+  "mobile", "telephone", "personal_email",
+  "present_address", "present_city", "present_state", "present_zip", "present_country",
+  "permanent_address", "permanent_city", "permanent_state", "permanent_zip", "permanent_country"
+] as const;
+export const PERSONAL_DATE_FIELDS = ["date_of_birth"] as const;
+// Must be filled in before Submit.
+export const REQUIRED_FIELDS = ["gender", "date_of_birth", "nid_ssn", "mobile", "present_address", "permanent_address"] as const;
+export const FIELD_LABELS: Record<string, string> = {
+  gender: "Gender", date_of_birth: "Date of birth", nid_ssn: "NID", nationality: "Nationality", marital_status: "Marital status",
+  blood_group: "Blood group", religion: "Religion", mobile: "Mobile", telephone: "Telephone", personal_email: "Personal email",
+  present_address: "Present address", present_city: "Present city", present_state: "Present state / division", present_zip: "Present post code",
+  present_country: "Present country", permanent_address: "Permanent address", permanent_city: "Permanent city",
+  permanent_state: "Permanent state / division", permanent_zip: "Permanent post code", permanent_country: "Permanent country"
+};
+
+// Emergency contacts and nominees — the shape hr_emp_family keeps them in.
+export interface PersonEntry {
+  name: string;
+  relation: string | null;
+  phone: string | null;
+  nid: string | null;
+  date_of_birth: string | null;
+  address: string | null;
+  nominee_percent: number | null;
+}
+export interface OnboardingData {
+  personal: Record<string, string | null>;
+  contacts: PersonEntry[];
+  nominees: PersonEntry[];
+}
+
+const cleanPerson = (p: any, nominee: boolean): PersonEntry | null => {
+  const name = clean(p?.name, 150);
+  if (!name) return null;
+  const pct = Number(p?.nominee_percent);
+  return {
+    name,
+    relation: clean(p?.relation, 60),
+    phone: clean(p?.phone, 60),
+    nid: clean(p?.nid, 60),
+    date_of_birth: toDate(p?.date_of_birth),
+    address: clean(p?.address, 500),
+    nominee_percent: nominee && p?.nominee_percent !== "" && p?.nominee_percent != null && Number.isFinite(pct) ? Math.max(0, Math.min(100, Math.round(pct * 100) / 100)) : null
+  };
+};
+
+// Only known fields are kept, trimmed and length-limited.
+export function cleanOnboardingData(body: any): OnboardingData {
+  const personal: Record<string, string | null> = {};
+  for (const f of PERSONAL_TEXT_FIELDS) personal[f] = clean(body?.personal?.[f], f.endsWith("_address") ? 1000 : f === "gender" || f === "blood_group" ? 20 : 255);
+  for (const f of PERSONAL_DATE_FIELDS) personal[f] = toDate(body?.personal?.[f]);
+  const list = (v: any, nominee: boolean) =>
+    (Array.isArray(v) ? v : [])
+      .slice(0, 10)
+      .map((p: any) => cleanPerson(p, nominee))
+      .filter(Boolean) as PersonEntry[];
+  return { personal, contacts: list(body?.contacts, false), nominees: list(body?.nominees, true) };
+}
+
+export function parseOnboardingData(json: any): OnboardingData {
+  let raw: any = {};
+  try {
+    raw = typeof json === "string" ? JSON.parse(json || "{}") : json || {};
+  } catch {
+    raw = {};
+  }
+  return cleanOnboardingData(raw);
+}
+
+// What still stops Submit: empty required fields, no emergency contact / no
+// nominee, nominee shares not adding up to 100 %, missing required documents.
+export function onboardingMissing(data: OnboardingData, docTypes: string[], required: string[]): string[] {
+  const out: string[] = [];
+  for (const f of REQUIRED_FIELDS) if (!data.personal[f]) out.push(FIELD_LABELS[f]);
+  if (data.personal.personal_email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(data.personal.personal_email)) out.push("A valid personal email");
+  if (!data.contacts.some((c) => c.phone)) out.push("An emergency contact with a phone number");
+  if (data.nominees.length === 0) out.push("A nominee");
+  const shares = data.nominees.map((n) => n.nominee_percent).filter((x): x is number => x !== null);
+  if (shares.length > 0 && Math.abs(shares.reduce((a, b) => a + b, 0) - 100) > 0.01) out.push("Nominee shares adding up to 100 %");
+  for (const d of missingDocuments(required, docTypes)) out.push(`Document: ${d}`);
+  return out;
+}
+
+// Records this person would clash with if approved — an Employee or login
+// with the same NID, mobile or email. Shown to HR while reviewing; approval
+// refuses while any remain.
+export async function findOnboardingDuplicates(q: QueryDB, a: any, data: OnboardingData): Promise<{ field: string; value: string; match: string }[]> {
+  const digits = (v: any) => String(v || "").replace(/\D/g, "");
+  const phoneKey = (v: any) => digits(v).slice(-10);
+  const lower = (v: any) => String(v || "").trim().toLowerCase();
+  const nid = digits(data.personal.nid_ssn);
+  const phones = [data.personal.mobile, a.phone].map(phoneKey).filter((x) => x.length >= 8);
+  const emails = [data.personal.personal_email, a.email].map(lower).filter(Boolean);
+  const [emps, users]: any[][] = await Promise.all([
+    q("/*unscoped*/ SELECT id, name, employee_id, nid_ssn, mobile, phone, email, personal_email FROM all_employees"),
+    q("/*unscoped*/ SELECT id, name, email, username FROM users WHERE id <> ?", [Number(a.user_id)])
+  ]);
+  const out: { field: string; value: string; match: string }[] = [];
+  const who = (e: any) => `Employee ${e.name}${e.employee_id ? ` (${e.employee_id})` : ""}`;
+  for (const e of emps || []) {
+    if (nid && nid.length >= 6 && digits(e.nid_ssn) === nid) out.push({ field: "NID", value: String(data.personal.nid_ssn), match: who(e) });
+    for (const p of phones) if ([e.mobile, e.phone].some((x) => phoneKey(x) === p)) out.push({ field: "Mobile", value: p, match: who(e) });
+    for (const m of emails) if ([e.email, e.personal_email].some((x) => lower(x) === m)) out.push({ field: "Email", value: m, match: who(e) });
+  }
+  for (const u of users || []) for (const m of emails) if (lower(u.email) === m) out.push({ field: "Email", value: m, match: `Login ${u.name}` });
+  // One line per (field, value, match).
+  return out.filter((x, i) => out.findIndex((y) => y.field === x.field && y.value === x.value && y.match === x.match) === i);
+}
 
 // Next ONB-#### across every company (usernames are unique system-wide).
 async function nextOnbCode(q: QueryDB): Promise<string> {
@@ -451,8 +571,181 @@ export function registerOnboardingRoutes(app: Express, deps: OnboardingDeps) {
         review_remarks: s.review_remarks,
         submitted_at: s.submitted_at,
         expires_in_seconds: me[0]?.expires_in_seconds != null ? Number(me[0].expires_in_seconds) : null,
-        must_change_password: !!Number(me[0]?.must_change_password || 0)
+        must_change_password: !!Number(me[0]?.must_change_password || 0),
+        ...(await formState(a))
       });
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+  const EDITABLE = ["draft", "rejected"];
+  const docsOf = async (applicationId: number) =>
+    ((await queryDB("/*unscoped*/ SELECT id, application_id, doc_type, file_name, file_mime, LENGTH(file_data) AS size, uploaded_at FROM onboarding_documents WHERE application_id = ? ORDER BY id", [
+      applicationId
+    ])) || []) as any[];
+  const requiredDocs = async () => requiredDocuments(await loadSettings(queryDB));
+  // The form's data, documents and what's still missing — the joiner's page
+  // and HR's review both use it.
+  const formState = async (a: any) => {
+    const data = parseOnboardingData(a.data_json);
+    const docs = await docsOf(Number(a.id));
+    const required = await requiredDocs();
+    return {
+      data,
+      documents: docs.map((d: any) => ({ id: Number(d.id), doc_type: d.doc_type, file_name: d.file_name, file_mime: d.file_mime, size: Number(d.size || 0), uploaded_at: d.uploaded_at })),
+      required_documents: required,
+      required_fields: REQUIRED_FIELDS.map((f) => FIELD_LABELS[f]),
+      missing: onboardingMissing(
+        data,
+        docs.map((d: any) => d.doc_type),
+        required
+      )
+    };
+  };
+  const myEditableApp = async (userId: number) => {
+    const a = await myApp(userId);
+    if (!a) throw bad("No onboarding application for this account.", 404);
+    if (!EDITABLE.includes(a.status)) throw bad(a.status === "submitted" ? "Your details are with HR now and can't be changed." : "This onboarding is closed.", 409);
+    return a;
+  };
+
+  // Save as draft (any part may still be empty).
+  app.put("/api/onboarding/me", authenticateToken, async (req: any, res: any) => {
+    try {
+      const a = await myEditableApp(Number(req.user.id));
+      const data = cleanOnboardingData(req.body || {});
+      await queryDB("/*unscoped*/ UPDATE onboarding_applications SET data_json = ? WHERE id = ?", [JSON.stringify(data), Number(a.id)]);
+      res.json({ success: true, ...(await formState({ ...a, data_json: JSON.stringify(data) })) });
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+  // One file per document type; a new upload replaces the old one.
+  app.post("/api/onboarding/me/documents", authenticateToken, async (req: any, res: any) => {
+    try {
+      const a = await myEditableApp(Number(req.user.id));
+      const b = req.body || {};
+      const docType = clean(b.doc_type, 100);
+      const fileName = clean(b.file_name, 255);
+      if (!docType || !fileName || !b.file_base64) throw bad("Choose the document type and a file.");
+      const buf = Buffer.from(String(b.file_base64), "base64");
+      if (buf.length === 0) throw bad("The file is empty.");
+      if (buf.length > 8 * 1024 * 1024) throw bad("File is larger than 8 MB.");
+      const mime = clean(b.file_mime, 100) || "application/octet-stream";
+      if (!/^(image\/|application\/pdf$)/.test(mime)) throw bad("Upload a PDF or an image (JPG, PNG…).");
+      const existing: any[] = await queryDB("/*unscoped*/ SELECT COUNT(*) AS n FROM onboarding_documents WHERE application_id = ?", [Number(a.id)]);
+      const same: any[] = await queryDB("/*unscoped*/ SELECT id FROM onboarding_documents WHERE application_id = ? AND doc_type = ?", [Number(a.id), docType]);
+      if (!same.length && Number(existing[0]?.n || 0) >= 20) throw bad("At most 20 documents.");
+      await queryDB(
+        `/*unscoped*/ INSERT INTO onboarding_documents (application_id, doc_type, file_name, file_mime, file_data) VALUES (?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE file_name = VALUES(file_name), file_mime = VALUES(file_mime), file_data = VALUES(file_data), uploaded_at = CURRENT_TIMESTAMP`,
+        [Number(a.id), docType, fileName, mime, buf]
+      );
+      res.json({ success: true, ...(await formState(a)) });
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+  const sendFile = (res: any, d: any) => {
+    const buf: Buffer = Buffer.isBuffer(d.file_data) ? d.file_data : Buffer.from(d.file_data || "");
+    res.setHeader("Content-Type", d.file_mime || "application/octet-stream");
+    res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(d.file_name || "document")}"`);
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.send(buf);
+  };
+
+  app.get("/api/onboarding/me/documents/:docId", authenticateToken, async (req: any, res: any) => {
+    try {
+      const a = await myApp(Number(req.user.id));
+      if (!a) throw bad("Not found.", 404);
+      const rows: any[] = await queryDB("/*unscoped*/ SELECT * FROM onboarding_documents WHERE id = ? AND application_id = ?", [Number(req.params.docId), Number(a.id)]);
+      if (!rows[0]) throw bad("Not found.", 404);
+      sendFile(res, rows[0]);
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+  app.delete("/api/onboarding/me/documents/:docId", authenticateToken, async (req: any, res: any) => {
+    try {
+      const a = await myEditableApp(Number(req.user.id));
+      await queryDB("/*unscoped*/ DELETE FROM onboarding_documents WHERE id = ? AND application_id = ?", [Number(req.params.docId), Number(a.id)]);
+      res.json({ success: true, ...(await formState(a)) });
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+  // Hands the form to HR. The login's expiry stops while HR reviews.
+  app.post("/api/onboarding/me/submit", authenticateToken, async (req: any, res: any) => {
+    try {
+      const a = await myEditableApp(Number(req.user.id));
+      // The form as saved with this request (the page sends it along).
+      const data = req.body && (req.body.personal || req.body.contacts || req.body.nominees) ? cleanOnboardingData(req.body) : parseOnboardingData(a.data_json);
+      const state = await formState({ ...a, data_json: JSON.stringify(data) });
+      if (state.missing.length) return res.status(400).json({ error: `Still missing: ${state.missing.join(", ")}.`, missing: state.missing });
+      const r: any = await queryDB(
+        "/*unscoped*/ UPDATE onboarding_applications SET data_json = ?, status = 'submitted', submitted_at = NOW(), expires_at = NULL WHERE id = ? AND status IN ('draft', 'rejected')",
+        [JSON.stringify(data), Number(a.id)]
+      );
+      if (!Number(r?.affectedRows)) throw bad("This application changed meanwhile — reload the page.", 409);
+      await queryDB("/*unscoped*/ UPDATE users SET onboarding_expires_at = NULL WHERE id = ? AND is_onboarding = 1", [Number(a.user_id)]);
+      await notifyReviewers(a, `New joiner submitted: ${a.name}`, `${a.name} (${a.onb_code}) sent their onboarding details. Review them in HR Operations -> Onboarding -> New Joiners.`);
+      res.json({ success: true });
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+  // Everyone who may review or approve onboarding in this company (ticked
+  // layers), plus the person who opened it and the group's Superadmins.
+  const notifyReviewers = async (a: any, title: string, message: string) => {
+    try {
+      const [layers, supers]: any[][] = await Promise.all([
+        queryDB("/*unscoped*/ SELECT DISTINCT user_id FROM admin_module_permission_layers WHERE module_key = 'hr_operations' AND layer_key IN ('onboarding_review', 'onboarding_approve') AND company_id = ?", [
+          Number(a.company_id)
+        ]),
+        queryDB("/*unscoped*/ SELECT u.id FROM users u JOIN companies c ON c.group_id = u.group_id WHERE u.role = 'superadmin' AND c.id = ?", [Number(a.company_id)])
+      ]);
+      const ids = new Set<number>([...(layers || []).map((r: any) => Number(r.user_id)), ...(supers || []).map((r: any) => Number(r.id))]);
+      if (a.created_by) ids.add(Number(a.created_by));
+      for (const userId of ids)
+        await createAlert(queryDB, { userId, type: "hr_action", title, message, relatedType: "onboarding_application", relatedId: Number(a.id) });
+    } catch {
+      // An alert never fails the action itself.
+    }
+  };
+
+  // ---- HR review ----
+
+  app.get("/api/hr-ops/joiner-onboarding/:id", ...hr("onboarding_review", "onboarding_approve"), async (req: any, res: any) => {
+    try {
+      const a = await companyApp(Number(req.params.id));
+      const [users, departments, branches] = await Promise.all([
+        queryDB("/*unscoped*/ SELECT id, name FROM users WHERE id IN (?, ?)", [a.created_by || 0, a.reviewed_by || 0]),
+        queryDB("SELECT * FROM departments"),
+        queryDB("SELECT * FROM branches")
+      ]);
+      const state = await formState(a);
+      res.json({
+        ...serialize(a, { users, departments, branches }),
+        ...state,
+        duplicates: await findOnboardingDuplicates(queryDB, a, state.data)
+      });
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+  app.get("/api/hr-ops/joiner-onboarding/:id/documents/:docId", ...hr("onboarding_review", "onboarding_approve"), async (req: any, res: any) => {
+    try {
+      const a = await companyApp(Number(req.params.id));
+      const rows: any[] = await queryDB("/*unscoped*/ SELECT * FROM onboarding_documents WHERE id = ? AND application_id = ?", [Number(req.params.docId), Number(a.id)]);
+      if (!rows[0]) throw bad("Not found.", 404);
+      sendFile(res, rows[0]);
     } catch (err) {
       fail(res, err);
     }

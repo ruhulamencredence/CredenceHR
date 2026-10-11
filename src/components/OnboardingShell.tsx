@@ -14,10 +14,11 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { ClipboardCheck, Lock, LogOut, Clock, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import type { User } from '../types';
+import { OnboardingForm, type OnboardingFormState } from './OnboardingForm';
 
 export const SESSION_CHANGED_EVENT = 'credence:session-changed';
 
-interface MyApplication {
+interface MyApplication extends OnboardingFormState {
   id: number;
   onb_code: string;
   name: string;
@@ -215,10 +216,16 @@ export const OnboardingShell: React.FC<{ token: string; user: User }> = ({ token
                 }}
               />
             ) : (
-              <section className="rounded-2xl border border-dashed border-slate-300 bg-white p-6 text-center">
-                <div className="text-sm font-semibold text-slate-800">Your details form</div>
-                <p className="text-xs text-slate-500 mt-1">Personal details, address, emergency contact, nominee and documents will be filled in here.</p>
-              </section>
+              <OnboardingForm
+                key={`${app.id}:${app.status}`}
+                token={token}
+                initial={app}
+                editable={app.status === 'draft' || app.status === 'rejected'}
+                onSubmitted={() => {
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                  load();
+                }}
+              />
             )}
           </>
         )}
