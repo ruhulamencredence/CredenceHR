@@ -31,6 +31,7 @@ import {
   RotateCcw,
   Upload,
   UserPlus,
+  Wallet,
   X,
 } from 'lucide-react';
 import { Spinner } from './Spinner';
@@ -73,6 +74,7 @@ const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   bill_claims: Receipt,
   remote_attendance: Clock,
   office_attendance: Fingerprint,
+  salary: Wallet,
 };
 const STATUS: Record<RowResult['status'], { label: string; tone: string }> = {
   create: { label: 'New', tone: 'bg-emerald-50 text-emerald-700' },
@@ -320,7 +322,9 @@ const DataImportSkeleton: React.FC = () => (
   </div>
 );
 
-export const DataImport: React.FC<{ token: string }> = ({ token }) => {
+// onlyKind: just that one import, without the picker — e.g. Payroll -> Salary
+// Setup -> Bulk Upload (kind "salary").
+export const DataImport: React.FC<{ token: string; onlyKind?: string }> = ({ token, onlyKind }) => {
   const api = useHrApi(token);
   const [kinds, setKinds] = useState<Kind[] | null>(null);
   const [maxRows, setMaxRows] = useState(5000);
@@ -340,8 +344,9 @@ export const DataImport: React.FC<{ token: string }> = ({ token }) => {
     api
       .get('/api/data-import/kinds')
       .then((d) => {
-        setKinds(d.kinds);
+        setKinds(onlyKind ? d.kinds.filter((k: Kind) => k.key === onlyKind) : d.kinds);
         setMaxRows(d.max_rows || 5000);
+        if (onlyKind) setKindKey(onlyKind);
       })
       .catch((e) => {
         setKinds([]);
@@ -541,50 +546,64 @@ export const DataImport: React.FC<{ token: string }> = ({ token }) => {
     XLSX.writeFile(wb, `Import_${done ? 'Result' : 'Check'}_${kind.title.replace(/[^A-Za-z0-9]+/g, '_')}.xlsx`);
   };
 
-  if (!kinds) return <DataImportSkeleton />;
+  if (!kinds)
+    return onlyKind ? (
+      <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-5 space-y-3 animate-pulse" aria-busy="true" aria-label="Loading upload">
+        <div className="h-4 w-40 rounded bg-slate-200" />
+        <div className="h-3 w-full max-w-lg rounded bg-slate-100" />
+        <div className="h-24 rounded-xl bg-slate-100" />
+      </div>
+    ) : (
+      <DataImportSkeleton />
+    );
 
   const willWrite = check ? check.summary.create + check.summary.update : 0;
 
+  if (onlyKind && kinds.length === 0)
+    return <p className="text-sm text-slate-500 bg-white border border-slate-200 rounded-2xl p-5">You don't have access to this upload. {error}</p>;
+
   return (
     <div className="space-y-4">
-      <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-5">
-        <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-          <FileSpreadsheet className="w-5 h-5 text-blue-600" /> HR Data Import
-        </h2>
-        <p className="text-xs text-slate-500 mt-0.5 max-w-3xl">
-          Bring existing records in from Excel or CSV — download the template, fill it, upload it, check what each row will do, then import. Rows already in
-          the system are skipped, so a sheet can be uploaded again safely.
-        </p>
-        {kinds.length === 0 ? (
-          <p className="mt-4 text-sm text-slate-500">You don't have access to any import. {error}</p>
-        ) : (
-          <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2.5">
-            {kinds.map((k) => {
-              const Icon = ICONS[k.key] || FileSpreadsheet;
-              const on = k.key === kindKey;
-              return (
-                <button
-                  key={k.key}
-                  type="button"
-                  onClick={() => pickKind(k.key)}
-                  className={`text-left rounded-xl border p-3.5 flex gap-3 transition-colors ${
-                    on ? 'border-blue-400 bg-blue-50/60 ring-2 ring-blue-200' : 'border-slate-200 bg-white hover:bg-slate-50'
-                  }`}
-                >
-                  <span className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${on ? 'bg-blue-600 text-white' : 'bg-blue-50 text-blue-600'}`}>
-                    <Icon className="w-4 h-4" />
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block text-sm font-semibold text-slate-800">{k.title}</span>
-                    <span className="block text-[11px] text-slate-500 mt-0.5">{k.description}</span>
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
+      {!onlyKind && (
+        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-5">
+          <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+            <FileSpreadsheet className="w-5 h-5 text-blue-600" /> HR Data Import
+          </h2>
+          <p className="text-xs text-slate-500 mt-0.5 max-w-3xl">
+            Bring existing records in from Excel or CSV — download the template, fill it, upload it, check what each row will do, then import. Rows already in
+            the system are skipped, so a sheet can be uploaded again safely.
+          </p>
+          {kinds.length === 0 ? (
+            <p className="mt-4 text-sm text-slate-500">You don't have access to any import. {error}</p>
+          ) : (
+            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2.5">
+              {kinds.map((k) => {
+                const Icon = ICONS[k.key] || FileSpreadsheet;
+                const on = k.key === kindKey;
+                return (
+                  <button
+                    key={k.key}
+                    type="button"
+                    onClick={() => pickKind(k.key)}
+                    className={`text-left rounded-xl border p-3.5 flex gap-3 transition-colors ${
+                      on ? 'border-blue-400 bg-blue-50/60 ring-2 ring-blue-200' : 'border-slate-200 bg-white hover:bg-slate-50'
+                    }`}
+                  >
+                    <span className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${on ? 'bg-blue-600 text-white' : 'bg-blue-50 text-blue-600'}`}>
+                      <Icon className="w-4 h-4" />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-sm font-semibold text-slate-800">{k.title}</span>
+                      <span className="block text-[11px] text-slate-500 mt-0.5">{k.description}</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
 
+      )}
       {kind && (
         <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-5 space-y-4">
           <div className="flex flex-wrap items-start justify-between gap-3">

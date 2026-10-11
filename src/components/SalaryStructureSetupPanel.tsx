@@ -35,9 +35,11 @@ import {
   TrendingUp,
   TrendingDown,
   RefreshCw,
-  CalendarRange
+  CalendarRange,
+  Upload
 } from 'lucide-react';
 import { apiUrl } from '../lib/api';
+import { DataImport } from './DataImport';
 import { Spinner } from './Spinner';
 import { confirmDialog } from '../lib/confirmDialog';
 
@@ -104,11 +106,20 @@ const money = (n: number | null | undefined) =>
 
 export const SalaryStructureSetupPanel: React.FC<SalaryStructureSetupPanelProps> = ({ token }) => {
   const authHeaders = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
-  const [subTab, setSubTab] = useState<'components' | 'grades' | 'individual' | 'late_policy' | 'salary_month'>('components');
+  const [subTab, setSubTab] = useState<'components' | 'grades' | 'individual' | 'late_policy' | 'salary_month' | 'bulk'>('components');
+  // Bulk Upload: only for accounts with the Payroll layer "salary_bulk_upload"
+  // (the import kind is listed for them only; the server checks it too).
+  const [canBulk, setCanBulk] = useState(false);
+  useEffect(() => {
+    fetch(apiUrl('/api/data-import/kinds'), { headers: authHeaders })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setCanBulk(!!d?.kinds?.some((k: any) => k.key === 'salary')))
+      .catch(() => setCanBulk(false));
+  }, [authHeaders]);
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-xl p-1 w-fit">
+      <div className="flex items-center gap-1 bg-white border border-slate-200 rounded-xl p-1 max-w-full w-fit overflow-x-auto [&>button]:whitespace-nowrap [&>button]:shrink-0">
         <button
           onClick={() => setSubTab('components')}
           className={`flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
@@ -149,6 +160,16 @@ export const SalaryStructureSetupPanel: React.FC<SalaryStructureSetupPanelProps>
         >
           <CalendarRange className="w-3.5 h-3.5" /> Salary Month
         </button>
+        {canBulk && (
+          <button
+            onClick={() => setSubTab('bulk')}
+            className={`flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+              subTab === 'bulk' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-blue-600'
+            }`}
+          >
+            <Upload className="w-3.5 h-3.5" /> Bulk Upload
+          </button>
+        )}
       </div>
 
       {subTab === 'components' ? (
@@ -159,6 +180,8 @@ export const SalaryStructureSetupPanel: React.FC<SalaryStructureSetupPanelProps>
         <IndividualSalaryPanel authHeaders={authHeaders} />
       ) : subTab === 'salary_month' ? (
         <SalaryMonthPanel authHeaders={authHeaders} />
+      ) : subTab === 'bulk' && canBulk ? (
+        <DataImport token={token} onlyKind="salary" />
       ) : (
         <LatePolicyPanel authHeaders={authHeaders} />
       )}
