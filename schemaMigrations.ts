@@ -4,6 +4,7 @@
  */
 
 import { ensureAccountBlockSchema } from "./AccountBlock";
+import { ensureOnboardingSchema } from "./OnboardingSelfServiceRoutes";
 import { ensureActiveUsersSchema } from "./ActiveUsersRoutes";
 import { ensureSessionSecuritySchema } from "./SessionSecurity";
 import { ensureAlertsSchema } from "./Alerts";
@@ -649,6 +650,8 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
   }
   // Admin Panel -> Users -> Block / Unblock (AccountBlock.ts).
   await ensureAccountBlockSchema(dbPool);
+  // New Joiner Onboarding: temporary-login columns + its two tables.
+  await ensureOnboardingSchema(dbPool);
   try {
     // Chat audio/video calls (CallRoutes.ts) — a Self Service switch, OFF
     // until a Superadmin turns it on per account in Module Access.

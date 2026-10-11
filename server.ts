@@ -40,6 +40,7 @@ import { registerEmployeeTransferRoutes, ensureEmployeeTransferSchema, applyDueE
 import { registerAdminDashboardRoutes } from "./AdminDashboardRoutes";
 import { registerDeviceRoutes, ensureDeviceSchema, checkAppDevice, deviceStillAllowed } from "./DeviceRoutes";
 import { ensureAccountBlockSchema, accountState, registerAccountBlockRoutes } from "./AccountBlock";
+import { registerOnboardingRoutes, onboardingPathAllowed, accountOnboarding } from "./OnboardingSelfServiceRoutes";
 import { registerActiveUsersRoutes, ensureActiveUsersSchema, touchSession } from "./ActiveUsersRoutes";
 import { registerSessionSecurityRoutes, checkSession, sessionEndMessage } from "./SessionSecurity";
 import { registerDataImportRoutes } from "./DataImportRoutes";
@@ -230,7 +231,7 @@ const PERMISSION_LAYER_KEYS = ["read", "edit_add", "entry_upload", "delete_trash
 const USERS_LAYER_KEYS = [...PERMISSION_LAYER_KEYS, "block_account"] as const;
 // Which modules currently enforce PERMISSION_LAYER_KEYS — mirrors
 // PERMISSION_LAYER_MODULES in src/types.ts. Rolled out module by module.
-const PERMISSION_LAYER_MODULES = ["departments", "projects", "approvals", "users", "reports", "tracking", "payroll", "mobile_bill", "office_attendance", "conveyance"] as const;
+const PERMISSION_LAYER_MODULES = ["departments", "projects", "approvals", "users", "reports", "tracking", "payroll", "mobile_bill", "office_attendance", "conveyance", "hr_operations"] as const;
 // Employee Tracking's layers: "read" = the live map, history and status
 // cards; "stay_report" = the Stay Report (TrackingStayReport.ts). Both are
 // reading, so an account with Employee Tracking and no saved layers has both.
@@ -262,6 +263,12 @@ const OFFICE_ATTENDANCE_LAYER_KEYS = ["read", "link_pins"] as const;
 // Conveyance Bill Claim for another employee (it goes through that
 // employee's approval chain like their own would) — explicit-only.
 const CONVEYANCE_LAYER_KEYS = ["read", "on_behalf"] as const;
+// HR Operations: "read" = the module as it was; New Joiner Onboarding
+// (OnboardingSelfServiceRoutes.ts) adds "onboarding_create" (open an
+// application and its temporary login), "onboarding_review" (see, reject,
+// cancel) and "onboarding_approve" (create the Employee). All three are
+// explicit-only — the no-saved-layers default is "read" alone.
+const HR_OPS_LAYER_KEYS = ["read", "onboarding_create", "onboarding_review", "onboarding_approve"] as const;
 // PEPM Reports uses four of them: Read Only, Edit, Delete/Trash, Permanent Delete
 // — plus its own "Budget Submission Status" (the second report on that page),
 // which, like Permanent Delete, is never part of the no-saved-rows default:
@@ -293,6 +300,7 @@ const MODULE_LAYER_KEY_SETS: Record<string, readonly string[]> = {
   mobile_bill: MOBILE_BILL_LAYER_KEYS,
   office_attendance: OFFICE_ATTENDANCE_LAYER_KEYS,
   conveyance: CONVEYANCE_LAYER_KEYS,
+  hr_operations: HR_OPS_LAYER_KEYS,
   leave_manage: LEAVE_MANAGE_LAYER_KEYS,
 };
 
@@ -1964,6 +1972,16 @@ async function startServer() {
         res.setHeader("X-Account-Blocked", "removed");
         return res.status(401).json({ error: "This account no longer exists. Sign in again.", code: "ACCOUNT_REMOVED" });
       }
+      // A new joiner's temporary login (OnboardingSelfServiceRoutes.ts) may
+      // only reach its own onboarding page, its password/photo and sign-out.
+      // The token's claim or the account row — either one is enough.
+      const onboarding = !!user?.onb || (user?.id ? await accountOnboarding(queryDB, Number(user.id)) : false);
+      if (onboarding) {
+        user.onb = 1;
+        if (!onboardingPathAllowed(req.method, String(req.originalUrl || req.url || ""), Number(user.id))) {
+          return res.status(403).json({ error: "Finish your onboarding first — this account can only open My Onboarding.", code: "ONBOARDING_ONLY" });
+        }
+      }
       // Logged out, signed out by a Superadmin, unused for too long, older
       // than the lifetime now set, or the password changed since (SessionSecurity.ts).
       const ended = await checkSession(queryDB, token, user, req);
@@ -2010,7 +2028,7 @@ async function startServer() {
   // module for the route being called. A User with no grants at all is still
   // blocked here, same as before this feature existed.
   const requireAdmin = async (req: any, res: any, next: any) => {
-    if (!req.user) return res.status(403).json({ error: "Admin access required" });
+    if (!req.user || req.user.onb) return res.status(403).json({ error: "Admin access required" });
     if (req.user.role === "admin" || req.user.role === "superadmin") return next();
     if (req.user.role === "user") {
       try {
@@ -2030,7 +2048,7 @@ async function startServer() {
   // through the API — only the .env-seeded account (see seedAdminFromEnv) is
   // ever a superadmin.
   const requireSuperAdmin = (req: any, res: any, next: any) => {
-    if (!req.user || req.user.role !== "superadmin") {
+    if (!req.user || req.user.role !== "superadmin" || req.user.onb) {
       return res.status(403).json({ error: "Superadmin access required" });
     }
     next();
@@ -2046,6 +2064,7 @@ async function startServer() {
   // Admin can only ever grant/revoke Module Access for a plain 'user' account.
   const requireModuleGrantAccess = async (req: any, res: any, next: any) => {
     if (!req.user) return res.status(401).json({ error: "Access token required" });
+    if (req.user.onb) return res.status(403).json({ error: "Admin access required" });
     if (req.user.role === "superadmin") return next();
     try {
       // The JWT payload only ever carries id/email/username/role/name (see
@@ -2066,6 +2085,7 @@ async function startServer() {
   // actually enforced server-side, not just hidden in the UI.
   const requireModule = (moduleKey: AdminModuleKey) => async (req: any, res: any, next: any) => {
     if (!req.user) return res.status(401).json({ error: "Access token required" });
+    if (req.user.onb) return res.status(403).json({ error: "Admin access required" });
     if (req.user.role === "superadmin") return next();
     if (req.user.role !== "admin" && req.user.role !== "user") return res.status(403).json({ error: "Admin access required" });
     try {
@@ -2086,6 +2106,7 @@ async function startServer() {
   // only has one of the two to also be granted the other.
   const requireAnyModule = (moduleKeys: AdminModuleKey[]) => async (req: any, res: any, next: any) => {
     if (!req.user) return res.status(401).json({ error: "Access token required" });
+    if (req.user.onb) return res.status(403).json({ error: "Admin access required" });
     if (req.user.role === "superadmin") return next();
     if (req.user.role !== "admin" && req.user.role !== "user") return res.status(403).json({ error: "Admin access required" });
     try {
@@ -2113,9 +2134,10 @@ async function startServer() {
   // on for a module is never a silent regression; a Superadmin only actually
   // restricts anything once they explicitly save a narrower set in the
   // Module Access modal.
-  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "block_account" | "limit_history" | "link_pins" | "on_behalf") =>
+  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "block_account" | "limit_history" | "link_pins" | "on_behalf" | "onboarding_create" | "onboarding_review" | "onboarding_approve") =>
     async (req: any, res: any, next: any) => {
       if (!req.user) return res.status(401).json({ error: "Access token required" });
+      if (req.user.onb) return res.status(403).json({ error: "Admin access required" });
       if (req.user.role === "superadmin") return next();
       if (req.user.role !== "admin" && req.user.role !== "user") return res.status(403).json({ error: "Admin access required" });
       try {
@@ -2129,7 +2151,7 @@ async function startServer() {
           ? grantedLayers
           : moduleKey === "tracking"
             ? [...TRACKING_DEFAULT_LAYERS]
-            : moduleKey === "payroll" || moduleKey === "office_attendance" || moduleKey === "conveyance"
+            : moduleKey === "payroll" || moduleKey === "office_attendance" || moduleKey === "conveyance" || moduleKey === "hr_operations"
               ? ["read"]
               : moduleKey === "mobile_bill"
                 ? [...MOBILE_BILL_LAYER_KEYS]
@@ -2146,7 +2168,7 @@ async function startServer() {
   // Same rule as requireModuleLayer, as a yes/no for a page that shows or
   // hides a control (e.g. Payroll's salary month setting).
   const hasModuleLayer = async (user: any, moduleKey: AdminModuleKey, layer: string): Promise<boolean> => {
-    if (!user) return false;
+    if (!user || user.onb) return false;
     if (user.role === "superadmin") return true;
     if (user.role !== "admin" && user.role !== "user") return false;
     const modules = await getAdminModules(user.id);
@@ -2157,7 +2179,7 @@ async function startServer() {
     const defaults: readonly string[] =
       moduleKey === "tracking"
         ? TRACKING_DEFAULT_LAYERS
-        : moduleKey === "payroll" || moduleKey === "office_attendance" || moduleKey === "conveyance"
+        : moduleKey === "payroll" || moduleKey === "office_attendance" || moduleKey === "conveyance" || moduleKey === "hr_operations"
           ? ["read"]
           : moduleKey === "mobile_bill"
             ? MOBILE_BILL_LAYER_KEYS
@@ -2215,6 +2237,7 @@ async function startServer() {
   // admin_module_permissions.
   const requireMovementClaimAccess = async (req: any, res: any, next: any) => {
     if (!req.user) return res.status(401).json({ error: "Access token required" });
+    if (req.user.onb) return res.status(403).json({ error: "Admin access required" });
     if (req.user.role === "superadmin") return next();
     try {
       const rows: any = await queryDB("SELECT can_view_movement_claims FROM users WHERE id = ?", [req.user.id]);
@@ -2231,6 +2254,7 @@ async function startServer() {
   // they file / see their own claims from Self Service like everyone else.
   const requireConveyanceClaimAccess = async (req: any, res: any, next: any) => {
     if (!req.user) return res.status(401).json({ error: "Access token required" });
+    if (req.user.onb) return res.status(403).json({ error: "Admin access required" });
     if (req.user.role === "superadmin") return next();
     try {
       const rows: any = await queryDB("SELECT can_view_conveyance_claims FROM users WHERE id = ?", [req.user.id]);
@@ -2252,6 +2276,7 @@ async function startServer() {
   // the separately-gated Job Edit feature (can_job_edit) also depend on them.
   const requireBudgetModuleAccess = async (req: any, res: any, next: any) => {
     if (!req.user) return res.status(401).json({ error: "Access token required" });
+    if (req.user.onb) return res.status(403).json({ error: "Admin access required" });
     if (req.user.role === "superadmin") return next();
     try {
       const rows: any = await queryDB("SELECT can_view_budget_module FROM users WHERE id = ?", [req.user.id]);
@@ -2294,6 +2319,7 @@ async function startServer() {
   // exactly as before until a Superadmin explicitly narrows it.
   const requireLeaveManagerLayer = (layer: typeof LEAVE_MANAGE_LAYER_KEYS[number]) => async (req: any, res: any, next: any) => {
     if (!req.user) return res.status(401).json({ error: "Access token required" });
+    if (req.user.onb) return res.status(403).json({ error: "Admin access required" });
     if (req.user.role === "superadmin") return next();
     try {
       const ok = await hasLeaveManageAccess(req.user.id, req.user.role);
@@ -2348,6 +2374,7 @@ async function startServer() {
   // the DB (an Admin can revoke mid-session).
   const requireTrackingAccess = async (req: any, res: any, next: any) => {
     if (!req.user) return res.status(401).json({ error: "Access token required" });
+    if (req.user.onb) return res.status(403).json({ error: "Admin access required" });
     if (req.user.role === "superadmin") return next();
     try {
       const rows: any = await queryDB("SELECT can_use_tracking FROM users WHERE id = ?", [req.user.id]);
@@ -2524,6 +2551,7 @@ async function startServer() {
   registerHRAnalyticsRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB });
   registerDocumentVaultRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB, getAdminModules });
   registerHROperationsRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB, getAdminModules, todayInDhaka, createAlert });
+  registerOnboardingRoutes(app, { authenticateToken, requireModule, hasModuleLayer, queryDB, withTransaction: isMySQLConnected && dbPool ? withDbTransaction : undefined });
   // Employee 360 (HR Operations -> Service Book): experience / education /
   // family / training records + every other module's data for one Employee.
   registerEmployee360Routes(app, { authenticateToken, requireModule, queryDB, getAdminModules, todayInDhaka });

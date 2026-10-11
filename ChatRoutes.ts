@@ -50,6 +50,7 @@ import { checkSession } from "./SessionSecurity";
 import type { Server as SocketIOServer } from "socket.io";
 import jwt from "jsonwebtoken";
 import { sendPushToRoomMembers } from "./PushNotificationService";
+import { accountOnboarding } from "./OnboardingSelfServiceRoutes";
 
 interface ChatRouteDeps {
   authenticateToken: any;
@@ -726,6 +727,8 @@ export function setupChatSocket(io: SocketIOServer, deps: ChatSocketDeps) {
       const payload: any = jwt.verify(token, jwtSecret);
       // Same rule as every request (logged out, ended, unused too long).
       if (await checkSession(queryDB, token, payload)) return next(new Error("Session ended"));
+      // A new joiner's temporary login has no chat or calls (OnboardingSelfServiceRoutes.ts).
+      if (payload?.onb || (await accountOnboarding(queryDB, Number(payload?.id)))) return next(new Error("Not available during onboarding"));
       (socket.data as any).user = payload;
       next();
     } catch {

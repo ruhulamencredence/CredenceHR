@@ -119,7 +119,12 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   default_probation_months: "6",
   // Employee 360 -> Documents: the document types every Employee should have
   // on file (one per line); anything not uploaded is listed as missing.
-  required_documents: "NID\nPhotograph\nCV / Resume\nEducational Certificate\nAppointment Letter (signed)"
+  required_documents: "NID\nPhotograph\nCV / Resume\nEducational Certificate\nAppointment Letter (signed)",
+  // New Joiner Onboarding (OnboardingSelfServiceRoutes.ts): days a joiner's
+  // temporary login stays open until they submit, and whether the person who
+  // opened an application may also approve it ("1" = they may not).
+  onboarding_expiry_days: "14",
+  onboarding_creator_cannot_approve: "1"
 };
 
 const DEFAULT_ONBOARDING_TASKS: { task_key: string; label: string; category: string; due_days: number }[] = [
