@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { useLiveRefresh } from '../lib/liveRefresh';
 import React, { useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { ArrowLeft, ShieldCheck, Inbox, CheckCircle2, XCircle, RefreshCw, MapPin, X, Package, Paperclip, Car, Wallet } from 'lucide-react';
@@ -249,8 +250,10 @@ export const ApproveApplications: React.FC<ApproveApplicationsProps> = ({ token,
     check_out_approval: ref.check_out_approval
   });
 
-  const load = async () => {
-    setLoading(true);
+// Live refresh: reload when a request changes (src/lib/liveRefresh.ts).
+useLiveRefresh(() => load(true));
+  const load = async (silent?: unknown) => {
+    if (silent !== true) setLoading(true);
     try {
       const res = await fetch(apiUrl('/api/my-approvals'), { headers: authHeaders });
       if (res.ok) setItems(await res.json());

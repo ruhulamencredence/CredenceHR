@@ -1,3 +1,4 @@
+import { useLiveRefresh } from '../lib/liveRefresh';
 import React, { useEffect, useState } from 'react';
 import { ShieldCheck, CheckCircle2, XCircle, AlertCircle, MapPin, ChevronRight, ArrowLeft, X, Package, Paperclip, Car, Wallet } from 'lucide-react';
 import { apiUrl, dedupedFetchJson } from '../lib/api';
@@ -176,6 +177,8 @@ export const PendingApprovalsCard: React.FC<PendingApprovalsCardProps> = ({ toke
     check_out_approval: ref.check_out_approval
   });
 
+// Live refresh: reload when a request changes (src/lib/liveRefresh.ts).
+useLiveRefresh(() => load());
   const load = async () => {
     try {
       // This card mounts twice on every Dashboard load (mobile + desktop

@@ -12,7 +12,7 @@ import { syncAllZkDevices, syncZkDevice, startZkSyncSchedule, ensureZkSchema } f
 import { resolveMinLeadDays, addDaysToDateStr, DeliveryConditionType } from "./deliveryDateConditions";
 import { registerProfileRoutes } from "./profileRoutes";
 import { registerHolidayRoutes, ensureHolidayCalendarSchema } from "./holidayRoutes";
-import { registerAlertRoutes, ensureAlertsSchema, createAlert } from "./Alerts";
+import { registerAlertRoutes, ensureAlertsSchema, createAlert, setAlertsIo, notifyRecordChanged } from "./Alerts";
 import { registerUserManagementRoutes } from "./UserManagement";
 import { registerConveyanceBillClaimRoutes, disburseConveyanceBill } from "./ConveyanceBillClaimRoutes";
 import { registerLiveTrackingRoutes } from "./LiveTrackingRoutes";
@@ -902,6 +902,9 @@ async function performApprovalAction(
     JSON.stringify(actions),
     requestId
   ]);
+  // Open pages of the requester (Ride Status, My Leave…) and the approver's
+  // other tabs refresh at once, even when this layer sends no alert.
+  notifyRecordChanged([Number(request.requested_by), Number(actorUser.id)], { type: "approval", relatedType: request.source_type, relatedId: Number(request.source_id) });
 
   // Only a 'user_claim' request actually gates something further — a
   // Conveyance Bill Claim only becomes a real Bill line item the moment its
@@ -2700,6 +2703,7 @@ async function startServer() {
   // the live 'send_message'/'typing'/'presence_change' events on top of it.
   const io = new SocketIOServer(httpServer, { cors: { origin: "*" } });
   liveIo = io;
+  setAlertsIo(io);
 
   // Step 1 of making this app safe to run as more than one server process
   // behind a load balancer (needed once usage grows past what a single

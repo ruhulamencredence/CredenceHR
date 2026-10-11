@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { useLiveRefresh } from '../lib/liveRefresh';
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { BellRing, Check, Trash2, X } from 'lucide-react';
@@ -104,6 +105,12 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
   useEffect(() => {
     if (open) fetchAlerts();
   }, [open, fetchAlerts]);
+
+  // A new alert arrives over the socket: the badge (and the open list) update at once.
+  useLiveRefresh(() => {
+    void fetchUnreadCount();
+    if (open) void fetchAlerts();
+  });
 
   useEffect(() => {
     if (!open) return;

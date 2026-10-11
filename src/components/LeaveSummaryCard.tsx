@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { useLiveRefresh } from '../lib/liveRefresh';
 import React, { useEffect, useState } from 'react';
 import { CalendarDays } from 'lucide-react';
 import { Lottie } from 'lottie-react';
@@ -36,6 +37,8 @@ export const LeaveSummaryCard: React.FC<LeaveSummaryCardProps> = ({ token, onOpe
   const [applications, setApplications] = useState<LeaveApplication[]>([]);
   const [balance, setBalance] = useState<LeaveBalance | null>(null);
 
+// Live refresh: reload when a request changes (src/lib/liveRefresh.ts).
+useLiveRefresh(() => load());
   const load = async () => {
     try {
       // This card mounts twice on every Dashboard load (mobile + desktop

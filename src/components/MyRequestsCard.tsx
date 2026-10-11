@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { useLiveTick } from '../lib/liveRefresh';
 import React, { useEffect, useState } from 'react';
 import { ClipboardList, Route, CreditCard, CalendarClock, Clock, ChevronRight } from 'lucide-react';
 import { LeaveApplication, ClaimRecord, UserClaim, AttendanceCorrection } from '../types';
@@ -82,6 +83,8 @@ export const MyRequestsCard: React.FC<MyRequestsCardProps> = ({
   const [rows, setRows] = useState<RequestRow[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Live refresh: statuses update without a page reload.
+  const liveTick = useLiveTick();
   useEffect(() => {
     let cancelled = false;
 
@@ -186,7 +189,7 @@ export const MyRequestsCard: React.FC<MyRequestsCardProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [token, canSeeMovementClaim, canSeeConveyanceClaim, canSeeTimesheet]);
+  }, [token, canSeeMovementClaim, canSeeConveyanceClaim, canSeeTimesheet, liveTick]);
 
   const waitingCount = rows.filter((r) => isWaiting(r.status)).length;
   const visible = rows.slice(0, MAX_ROWS);

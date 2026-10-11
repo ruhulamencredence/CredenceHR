@@ -13,6 +13,7 @@
 // NOT wired into the app shell yet — suggested spot: Self Service header
 // menu, next to Leave Approvals. See CHANGES_asset_management.md.
 
+import { useLiveRefresh } from '../lib/liveRefresh';
 import React, { useEffect, useState } from 'react';
 import { apiUrl } from '../lib/api';
 
@@ -42,6 +43,8 @@ export function AssetManagerApprovals() {
   const [requisitions, setRequisitions] = useState<Requisition[]>([]);
   const [error, setError] = useState<string | null>(null);
 
+// Live refresh: reload when a request changes (src/lib/liveRefresh.ts).
+useLiveRefresh(() => load());
   async function load() {
     try {
       const res = await fetch(apiUrl('/api/assets/requisitions/for-manager-approval'), { headers: authHeaders() });

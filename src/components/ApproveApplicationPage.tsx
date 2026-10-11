@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { useLiveRefresh } from '../lib/liveRefresh';
 import React, { useEffect, useState } from 'react';
 import { ArrowLeft, ShieldCheck, CheckCircle2, XCircle, AlertCircle, Inbox, RefreshCw } from 'lucide-react';
 import { apiUrl } from '../lib/api';
@@ -66,8 +67,10 @@ export const ApproveApplicationPage: React.FC<ApproveApplicationPageProps> = ({ 
   const [remarksDraft, setRemarksDraft] = useState<Record<number, string>>({});
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  const load = async () => {
-    setLoading(true);
+// Live refresh: reload when a request changes (src/lib/liveRefresh.ts).
+useLiveRefresh(() => load(true));
+  const load = async (silent?: unknown) => {
+    if (silent !== true) setLoading(true);
     try {
       const res = await fetch(apiUrl('/api/my-approvals'), { headers: { Authorization: `Bearer ${token}` } });
       if (res.ok) setItems(await res.json());

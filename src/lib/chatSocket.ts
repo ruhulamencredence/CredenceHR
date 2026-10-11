@@ -21,6 +21,7 @@
 import { io, Socket } from 'socket.io-client';
 import { refreshNotices } from './noticesLive';
 import { setLiveUntil } from './backgroundTracking';
+import { RECORDS_CHANGED_EVENT } from './liveRefresh';
 
 let socket: Socket | null = null;
 let connectedToken: string | null = null;
@@ -50,6 +51,10 @@ export function connectChatSocket(token: string): Socket {
   // Employee Tracking -> Live Follow: an Admin opened this person (or a ride
   // started) — report location every few seconds until the given time.
   socket.on('tracking:live', (d: { until: number | null }) => setLiveUntil(d?.until));
+  // A request of this account changed, or a new one waits for it: open pages
+  // refresh (src/lib/liveRefresh.ts). After a reconnect everything refreshes once.
+  socket.on('records:changed', (d: any) => window.dispatchEvent(new CustomEvent(RECORDS_CHANGED_EVENT, { detail: d })));
+  socket.io.on('reconnect', () => window.dispatchEvent(new CustomEvent(RECORDS_CHANGED_EVENT, { detail: null })));
   return socket;
 }
 

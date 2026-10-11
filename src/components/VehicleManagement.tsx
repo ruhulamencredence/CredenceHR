@@ -11,6 +11,7 @@
 // read/write split and fetch-with-Bearer-token pattern AssetManagement.tsx
 // already uses.
 
+import { useLiveRefresh } from '../lib/liveRefresh';
 import React, { useEffect, useRef, useState } from 'react';
 import { apiUrl } from '../lib/api';
 import { LiveRideMap } from './LiveRideMap';
@@ -302,18 +303,20 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
     }
   }
 
-  async function loadRequisitions() {
-    setLoading(true);
-    setError(null);
+  async function loadRequisitions(silent = false) {
+    if (!silent) {
+      setLoading(true);
+      setError(null);
+    }
     try {
       const res = await fetch(apiUrl('/api/vehicles/requisitions'), { headers: authHeaders() });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to load your ride requests.');
       setRequisitions(data);
     } catch (err: any) {
-      setError(err.message);
+      if (!silent) setError(err.message);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }
 
@@ -359,6 +362,13 @@ export function VehicleManagement({ user }: VehicleManagementProps) {
     if (tab === 'assign') loadAwaitingAssignment();
     if (tab === 'maintainer') loadMaintainerData();
   }, [tab]);
+
+  // Live refresh: an approval, assignment or status change shows up without
+  // a page reload (src/lib/liveRefresh.ts).
+  useLiveRefresh(() => {
+    if (tab === 'status') void loadRequisitions(true);
+    void loadAwaitingAssignment(true);
+  });
 
   // Runs once on mount, regardless of which tab is active, purely so the
   // "Approved by Me" tab shows its real count right away.

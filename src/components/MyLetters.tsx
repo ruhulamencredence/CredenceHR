@@ -14,6 +14,7 @@
 // HROperationsRoutes.ts's /api/hr-ops/my/* routes; works the same in the
 // mobile app.
 
+import { useLiveRefresh } from '../lib/liveRefresh';
 import React, { useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { ArrowLeft, FileText, CheckCircle2, Clock, Download, Eye, Send, BookOpen, Inbox, ClipboardList } from 'lucide-react';
@@ -88,8 +89,10 @@ export const MyLetters: React.FC<{ token: string; onBack?: () => void; canServic
   const [sending, setSending] = useState(false);
   const [acking, setAcking] = useState<number | null>(null);
 
-  const load = async () => {
-    setLoading(true);
+// Live refresh: reload when a request changes (src/lib/liveRefresh.ts).
+useLiveRefresh(() => load(true));
+  const load = async (silent?: unknown) => {
+    if (silent !== true) setLoading(true);
     try {
       const [d, b] = await Promise.all([api.get<MyData>('/api/hr-ops/my/letters'), api.get<ServiceBookData>('/api/hr-ops/my/service-book')]);
       setData(d);

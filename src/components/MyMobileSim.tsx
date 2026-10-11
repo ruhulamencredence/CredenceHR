@@ -8,6 +8,7 @@
 // limit (through the approval chain to HR). Shown only to accounts with
 // users.can_view_mobile_bill (Module Access) or the mobile_bill module.
 
+import { useLiveRefresh } from '../lib/liveRefresh';
 import React, { useCallback, useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { ArrowLeft, Plus, Smartphone, TrendingUp } from 'lucide-react';
@@ -24,6 +25,8 @@ export const MyMobileSim: React.FC<{ token: string; onBack?: () => void }> = ({ 
   const [error, setError] = useState('');
   const [asking, setAsking] = useState<number | null>(null);
 
+// Live refresh: reload when a request changes (src/lib/liveRefresh.ts).
+useLiveRefresh(() => load());
   const load = useCallback(() => {
     mbApi(token, '/api/mobile-bill/my')
       .then(setData)
