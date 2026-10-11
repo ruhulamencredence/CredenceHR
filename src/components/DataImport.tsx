@@ -294,6 +294,32 @@ function claimReportSheetRows(grid: any[][]): Record<string, any>[] | null {
   return out;
 }
 
+// First load: the same layout as the page — title card and the import tiles.
+const DataImportSkeleton: React.FC = () => (
+  <div className="space-y-4 animate-pulse" aria-busy="true" aria-label="Loading HR Data Import">
+    <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-5">
+      <div className="flex items-center gap-2">
+        <div className="w-5 h-5 rounded bg-slate-200" />
+        <div className="h-5 w-40 rounded bg-slate-200" />
+      </div>
+      <div className="h-3 w-full max-w-xl rounded bg-slate-100 mt-2" />
+      <div className="h-3 w-2/3 max-w-md rounded bg-slate-100 mt-1.5" />
+      <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2.5">
+        {Array.from({ length: 6 }, (_, i) => (
+          <div key={i} className="rounded-xl border border-slate-200 p-3.5 flex gap-3">
+            <div className="w-9 h-9 rounded-lg bg-slate-100 shrink-0" />
+            <div className="flex-1 space-y-1.5 pt-0.5">
+              <div className={`h-3.5 rounded bg-slate-200 ${i % 2 ? 'w-28' : 'w-36'}`} />
+              <div className="h-2.5 w-full rounded bg-slate-100" />
+              <div className="h-2.5 w-3/4 rounded bg-slate-100" />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  </div>
+);
+
 export const DataImport: React.FC<{ token: string }> = ({ token }) => {
   const api = useHrApi(token);
   const [kinds, setKinds] = useState<Kind[] | null>(null);
@@ -515,7 +541,7 @@ export const DataImport: React.FC<{ token: string }> = ({ token }) => {
     XLSX.writeFile(wb, `Import_${done ? 'Result' : 'Check'}_${kind.title.replace(/[^A-Za-z0-9]+/g, '_')}.xlsx`);
   };
 
-  if (!kinds) return <div className="py-16 flex justify-center"><Spinner /></div>;
+  if (!kinds) return <DataImportSkeleton />;
 
   const willWrite = check ? check.summary.create + check.summary.update : 0;
 
