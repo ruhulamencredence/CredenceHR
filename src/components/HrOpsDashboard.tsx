@@ -18,7 +18,8 @@ import { Spinner } from './Spinner';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
 import { savePdfCrossPlatform } from '../lib/saveFile';
 import credenceLogo from '../assets/credence-logo.png';
-import { useHrApi, taka, fmtDate, monthLabel, btnGhost, inputCls, labelCls, Notice } from './HrOpsShared';
+import { useHrApi, taka, fmtDate, monthLabel, btnGhost, inputCls, labelCls, Notice, type HrOpsMeta, type HrOpsEmployee } from './HrOpsShared';
+import { HrRemindersCard } from './HrRemindersCard';
 
 const DIM_LABEL: Record<string, string> = {
   department: 'Department',
@@ -50,8 +51,23 @@ const thisMonth = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 };
 
-export const HrOpsDashboard: React.FC<{ token: string; onOpenEmployee?: (id: number) => void }> = ({ token, onOpenEmployee }) => {
+export const HrOpsDashboard: React.FC<{
+  token: string;
+  onOpenEmployee?: (id: number) => void;
+  meta?: HrOpsMeta;
+  employees?: HrOpsEmployee[];
+  onChanged?: () => void;
+}> = ({ token, onOpenEmployee, meta, employees, onChanged }) => {
   const api = useHrApi(token);
+  // Accounts with the "reminders_receive" layer see every watched date (with
+  // its next step) instead of the two probation / contract lists.
+  const [remindersAccess, setRemindersAccess] = useState(false);
+  useEffect(() => {
+    api
+      .get<{ reminders_receive: boolean }>('/api/hr-ops/reminders/access')
+      .then((r) => setRemindersAccess(!!r.reminders_receive))
+      .catch(() => setRemindersAccess(false));
+  }, [api]);
   const [month, setMonth] = useState(thisMonth());
   const [groupBy, setGroupBy] = useState('department');
   const [filterBy, setFilterBy] = useState('');
@@ -385,38 +401,42 @@ export const HrOpsDashboard: React.FC<{ token: string; onOpenEmployee?: (id: num
             </div>
           </div>
 
-          <div className="grid md:grid-cols-2 gap-4">
-            {[
-              { key: 'probation_ending', label: 'Probation ending (next 60 days)' },
-              { key: 'contract_ending', label: 'Contract ending (next 60 days)' }
-            ].map((u) => {
-              const rows = (report.upcoming as any)[u.key] as any[];
-              return (
-                <div key={u.key} className="rounded-xl border border-slate-200 bg-white overflow-hidden">
-                  <div className="px-4 py-2.5 border-b border-slate-100 text-xs font-bold text-slate-700 flex items-center gap-1.5">
-                    <AlertTriangle className="w-3.5 h-3.5 text-amber-500" /> {u.label}
+          {remindersAccess && meta && employees ? (
+            <HrRemindersCard token={token} meta={meta} employees={employees} onOpenEmployee={onOpenEmployee} onChanged={onChanged} />
+          ) : (
+            <div className="grid md:grid-cols-2 gap-4">
+              {[
+                { key: 'probation_ending', label: 'Probation ending (next 60 days)' },
+                { key: 'contract_ending', label: 'Contract ending (next 60 days)' }
+              ].map((u) => {
+                const rows = (report.upcoming as any)[u.key] as any[];
+                return (
+                  <div key={u.key} className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+                    <div className="px-4 py-2.5 border-b border-slate-100 text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                      <AlertTriangle className="w-3.5 h-3.5 text-amber-500" /> {u.label}
+                    </div>
+                    {rows.length === 0 ? (
+                      <p className="px-4 py-5 text-xs text-slate-400 text-center">None.</p>
+                    ) : (
+                      <ul className="divide-y divide-slate-100">
+                        {rows.map((r) => (
+                          <li key={r.employee_id} className="px-4 py-2 flex items-center justify-between gap-2 text-xs cursor-pointer hover:bg-slate-50" onClick={() => onOpenEmployee?.(r.employee_id)}>
+                            <span>
+                              <span className="font-semibold text-slate-800">{r.name}</span> <span className="text-slate-400">{r.designation}</span>
+                            </span>
+                            <span className={r.overdue ? 'text-rose-600 font-semibold' : 'text-slate-600'}>
+                              {fmtDate(r.date)}
+                              {r.overdue ? ' · overdue' : ''}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                   </div>
-                  {rows.length === 0 ? (
-                    <p className="px-4 py-5 text-xs text-slate-400 text-center">None.</p>
-                  ) : (
-                    <ul className="divide-y divide-slate-100">
-                      {rows.map((r) => (
-                        <li key={r.employee_id} className="px-4 py-2 flex items-center justify-between gap-2 text-xs cursor-pointer hover:bg-slate-50" onClick={() => onOpenEmployee?.(r.employee_id)}>
-                          <span>
-                            <span className="font-semibold text-slate-800">{r.name}</span> <span className="text-slate-400">{r.designation}</span>
-                          </span>
-                          <span className={r.overdue ? 'text-rose-600 font-semibold' : 'text-slate-600'}>
-                            {fmtDate(r.date)}
-                            {r.overdue ? ' · overdue' : ''}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </>
       )}
     </div>

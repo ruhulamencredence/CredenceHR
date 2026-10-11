@@ -83,7 +83,7 @@ export const ADMIN_MODULES: { key: AdminModuleKey; label: string }[] = [
 // combination of these per (Admin/User account, module) via Admin Panel ->
 // Users -> Module Access. Independent checkboxes, not hierarchical: having
 // 'delete_trash' does NOT imply 'edit_add' is also granted.
-export type PermissionLayerKey = 'read' | 'edit_add' | 'entry_upload' | 'delete_trash' | 'permanent_delete' | 'submission_status' | 'stay_report' | 'salary_month' | 'salary_hold' | 'block_account' | 'limit_history' | 'link_pins' | 'audit_approve' | 'accounts_pay' | 'access_log' | 'live' | 'on_behalf' | 'onboarding_create' | 'onboarding_review' | 'onboarding_approve' | 'exit_dues';
+export type PermissionLayerKey = 'read' | 'edit_add' | 'entry_upload' | 'delete_trash' | 'permanent_delete' | 'submission_status' | 'stay_report' | 'salary_month' | 'salary_hold' | 'block_account' | 'limit_history' | 'link_pins' | 'audit_approve' | 'accounts_pay' | 'access_log' | 'live' | 'on_behalf' | 'onboarding_create' | 'onboarding_review' | 'onboarding_approve' | 'exit_dues' | 'reminders_receive';
 
 export const PERMISSION_LAYERS: { key: PermissionLayerKey; label: string }[] = [
   { key: 'read', label: 'Read Only' },
@@ -153,7 +153,8 @@ export const MODULE_LAYER_OPTIONS: Partial<Record<AdminModuleKey, { key: Permiss
     { key: 'read', label: 'HR Operations' },
     { key: 'onboarding_create', label: 'Onboarding — Create login' },
     { key: 'onboarding_review', label: 'Onboarding — Review / Reject' },
-    { key: 'onboarding_approve', label: 'Onboarding — Approve' }
+    { key: 'onboarding_approve', label: 'Onboarding — Approve' },
+    { key: 'reminders_receive', label: 'Reminders — receive & view' }
   ],
   // Exit / Offboarding -> the exiting Employee's dues from other modules
   // (assets, SIM, loans / advances, claims) and adding them to the
@@ -167,7 +168,7 @@ export const MODULE_LAYER_OPTIONS: Partial<Record<AdminModuleKey, { key: Permiss
 };
 // Layers an account has only when explicitly ticked — never part of the
 // "module granted, no layers saved yet" default (requireModuleLayer).
-export const EXPLICIT_ONLY_LAYERS: PermissionLayerKey[] = ['permanent_delete', 'submission_status', 'salary_month', 'salary_hold', 'block_account', 'link_pins', 'audit_approve', 'accounts_pay', 'access_log', 'live', 'on_behalf', 'onboarding_create', 'onboarding_review', 'onboarding_approve', 'exit_dues'];
+export const EXPLICIT_ONLY_LAYERS: PermissionLayerKey[] = ['permanent_delete', 'submission_status', 'salary_month', 'salary_hold', 'block_account', 'link_pins', 'audit_approve', 'accounts_pay', 'access_log', 'live', 'on_behalf', 'onboarding_create', 'onboarding_review', 'onboarding_approve', 'exit_dues', 'reminders_receive'];
 export const layersFor = (moduleKey: AdminModuleKey) => MODULE_LAYER_OPTIONS[moduleKey] || PERMISSION_LAYERS;
 
 // Leave Manage's own operation-specific layers — same independent-checkbox
@@ -1658,7 +1659,8 @@ export type AlertType =
   | 'loan_approval'
   // Payroll -> Approval (PayrollApprovalRoutes.ts): a salary month waiting on
   // Audit / Accounts, returned, or paid -> Payroll -> Approval.
-  | 'payroll_approval';
+  | 'payroll_approval'
+  | 'hr_reminder';
 
 export interface Alert {
   id: number;

@@ -41,6 +41,7 @@ import { registerAdminDashboardRoutes } from "./AdminDashboardRoutes";
 import { registerDeviceRoutes, ensureDeviceSchema, checkAppDevice, deviceStillAllowed } from "./DeviceRoutes";
 import { ensureAccountBlockSchema, accountState, registerAccountBlockRoutes } from "./AccountBlock";
 import { registerOnboardingRoutes, onboardingPathAllowed, accountOnboarding } from "./OnboardingSelfServiceRoutes";
+import { registerHrReminderRoutes } from "./HrRemindersRoutes";
 import { registerActiveUsersRoutes, ensureActiveUsersSchema, touchSession } from "./ActiveUsersRoutes";
 import { registerSessionSecurityRoutes, checkSession, sessionEndMessage } from "./SessionSecurity";
 import { registerDataImportRoutes } from "./DataImportRoutes";
@@ -268,7 +269,9 @@ const CONVEYANCE_LAYER_KEYS = ["read", "on_behalf"] as const;
 // application and its temporary login), "onboarding_review" (see, reject,
 // cancel) and "onboarding_approve" (create the Employee). All three are
 // explicit-only — the no-saved-layers default is "read" alone.
-const HR_OPS_LAYER_KEYS = ["read", "onboarding_create", "onboarding_review", "onboarding_approve"] as const;
+// "reminders_receive" (explicit-only too): HR reminders of probation,
+// contract, document, retirement and increment dates (HrRemindersRoutes.ts).
+const HR_OPS_LAYER_KEYS = ["read", "onboarding_create", "onboarding_review", "onboarding_approve", "reminders_receive"] as const;
 // Exit / Offboarding: "read" is the module as it always was; "exit_dues" is
 // the dues an exiting Employee still has in other modules (assets, SIM,
 // loans / advances, claims, rides) and adding them to the Full & Final
@@ -2140,7 +2143,7 @@ async function startServer() {
   // on for a module is never a silent regression; a Superadmin only actually
   // restricts anything once they explicitly save a narrower set in the
   // Module Access modal.
-  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "block_account" | "limit_history" | "link_pins" | "on_behalf" | "onboarding_create" | "onboarding_review" | "onboarding_approve" | "exit_dues") =>
+  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "block_account" | "limit_history" | "link_pins" | "on_behalf" | "onboarding_create" | "onboarding_review" | "onboarding_approve" | "exit_dues" | "reminders_receive") =>
     async (req: any, res: any, next: any) => {
       if (!req.user) return res.status(401).json({ error: "Access token required" });
       if (req.user.onb) return res.status(403).json({ error: "Admin access required" });
@@ -2558,6 +2561,9 @@ async function startServer() {
   registerDocumentVaultRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB, getAdminModules });
   registerHROperationsRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB, getAdminModules, todayInDhaka, createAlert });
   registerOnboardingRoutes(app, { authenticateToken, requireModule, hasModuleLayer, queryDB, withTransaction: isMySQLConnected && dbPool ? withDbTransaction : undefined });
+  // HR reminders (probation / contract / document / retirement / increment
+  // dates) — alerts + push, hourly; HR Operations -> Dashboard lists them.
+  registerHrReminderRoutes(app, { authenticateToken, requireModule, requireModuleLayer, hasModuleLayer, queryDB, createAlert, todayInDhaka, schedule: !!(isMySQLConnected && dbPool) });
   // Employee 360 (HR Operations -> Service Book): experience / education /
   // family / training records + every other module's data for one Employee.
   registerEmployee360Routes(app, { authenticateToken, requireModule, queryDB, getAdminModules, todayInDhaka });

@@ -137,7 +137,7 @@ export const HROperationsPanel: React.FC<{ token: string; canGrievance?: boolean
             </div>
           )
         ) : tab === 'dashboard' ? (
-          <HrOpsDashboard token={token} onOpenEmployee={openEmployee} />
+          <HrOpsDashboard token={token} onOpenEmployee={openEmployee} meta={meta} employees={employees} onChanged={changed} />
         ) : tab === 'actions' ? (
           <HrOpsActions token={token} meta={meta} employees={employees} onChanged={changed} refreshKey={refreshKey} />
         ) : tab === 'service_book' ? (
