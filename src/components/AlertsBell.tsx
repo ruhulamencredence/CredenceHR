@@ -194,6 +194,17 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
         ? canOpenGrievanceAdmin && isHrSideCaseAlert(alert.title)
           ? () => openGrievanceAdmin(alert.type === 'disciplinary' ? 'disciplinary' : 'grievances')
           : onOpenMyCases
+        : alert.type === 'hr_action' && alert.related_type === 'onboarding_application'
+        ? () => {
+            // HR: Onboarding -> New Joiners.
+            try {
+              sessionStorage.setItem('hr_ops_tab', 'onboarding');
+            } catch {
+              // storage unavailable
+            }
+            (onOpenHrOperations || (() => window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'hr_operations' }))))();
+            setTimeout(() => window.dispatchEvent(new CustomEvent('credence:hr-ops-tab', { detail: 'onboarding' })), 0);
+          }
         : alert.type === 'hr_action'
         ? /Awaiting Your Approval/.test(alert.title)
           ? onOpenApproveApplications
