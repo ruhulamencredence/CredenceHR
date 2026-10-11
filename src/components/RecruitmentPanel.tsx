@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { UserPlus, Plus, X, AlertTriangle, ChevronDown, ChevronUp, Star } from 'lucide-react';
+import { UserPlus, Plus, X, AlertTriangle, ChevronDown, ChevronUp, Star, ClipboardCheck } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
+import { StartJoinerOnboarding, type OnboardingAccess } from './HrOpsJoinerOnboarding';
 
 interface RecruitmentPanelProps {
   token: string;
@@ -27,6 +28,23 @@ interface Candidate {
   status: string;
   notes: string | null;
 }
+
+// A candidate's New Joiner Onboarding (HR Operations), from
+// /api/hr-ops/joiner-onboarding/by-candidate.
+interface CandidateOnboarding {
+  id: number;
+  onb_code: string;
+  status: 'draft' | 'submitted' | 'approved' | 'rejected' | 'cancelled' | 'expired';
+  employee_code: string | null;
+}
+const ONBOARDING_CHIP: Record<CandidateOnboarding['status'], { label: string; cls: string }> = {
+  draft: { label: 'Onboarding: waiting for joiner', cls: 'bg-amber-50 text-amber-700 border-amber-200' },
+  submitted: { label: 'Onboarding: submitted', cls: 'bg-blue-50 text-blue-700 border-blue-200' },
+  rejected: { label: 'Onboarding: sent back', cls: 'bg-rose-50 text-rose-700 border-rose-200' },
+  approved: { label: 'Joined', cls: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+  cancelled: { label: 'Onboarding: cancelled', cls: 'bg-slate-100 text-slate-500 border-slate-200' },
+  expired: { label: 'Onboarding: expired', cls: 'bg-slate-100 text-slate-500 border-slate-200' }
+};
 
 const CANDIDATE_STATUSES = ['applied', 'shortlisted', 'interview_scheduled', 'interviewed', 'offered', 'hired', 'rejected'];
 
@@ -70,6 +88,31 @@ export const RecruitmentPanel: React.FC<RecruitmentPanelProps> = ({ token }) => 
   const [newCandEmail, setNewCandEmail] = useState('');
   const [newCandPhone, setNewCandPhone] = useState('');
   const [newCandSource, setNewCandSource] = useState('');
+
+  // New Joiner Onboarding, shown only to accounts with an onboarding layer
+  // in HR Operations (the server checks the same layers).
+  const [onbAccess, setOnbAccess] = useState<OnboardingAccess | null>(null);
+  const [onbByCandidate, setOnbByCandidate] = useState<Record<number, CandidateOnboarding>>({});
+  const [startingFor, setStartingFor] = useState<number | null>(null);
+  const canSeeOnboarding = !!onbAccess && (onbAccess.onboarding_create || onbAccess.onboarding_review || onbAccess.onboarding_approve);
+  const loadOnboarding = async () => {
+    try {
+      const res = await fetch(apiUrl('/api/hr-ops/joiner-onboarding/by-candidate'), { headers: authHeaders });
+      if (res.ok) setOnbByCandidate(await res.json());
+    } catch {
+      // the chips just don't show
+    }
+  };
+  useEffect(() => {
+    fetch(apiUrl('/api/hr-ops/joiner-onboarding/access'), { headers: authHeaders })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((a: OnboardingAccess | null) => {
+        setOnbAccess(a);
+        if (a && (a.onboarding_create || a.onboarding_review || a.onboarding_approve)) loadOnboarding();
+      })
+      .catch(() => setOnbAccess(null));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const fetchPostings = async () => {
     setLoading(true);
@@ -324,8 +367,8 @@ export const RecruitmentPanel: React.FC<RecruitmentPanelProps> = ({ token }) => 
 
                     <div className="space-y-2">
                       {candidates.map((c) => (
-                        <div key={c.id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-100 px-3 py-2">
-                          <div>
+                        <div key={c.id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-lg border border-slate-100 px-3 py-2">
+                          <div className="min-w-0">
                             <p className="text-xs font-semibold text-slate-800 flex items-center gap-1">
                               {c.name}
                               {c.status === 'hired' && <Star className="w-3 h-3 text-amber-500 fill-amber-500" />}
@@ -333,6 +376,28 @@ export const RecruitmentPanel: React.FC<RecruitmentPanelProps> = ({ token }) => 
                             <p className="text-[11px] text-slate-400">
                               {c.email || '—'} · {c.phone || '—'} · {c.source || '—'}
                             </p>
+                            {c.status === 'hired' && canSeeOnboarding && (() => {
+                              const o = onbByCandidate[c.id];
+                              const reopen = !o || o.status === 'cancelled' || o.status === 'expired';
+                              return (
+                                <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                                  {o && (
+                                    <span className={`inline-flex whitespace-nowrap text-[10px] font-semibold px-2 py-0.5 rounded-full border ${ONBOARDING_CHIP[o.status].cls}`}>
+                                      {ONBOARDING_CHIP[o.status].label} · {o.employee_code ? `${o.onb_code} → ${o.employee_code}` : o.onb_code}
+                                    </span>
+                                  )}
+                                  {reopen && onbAccess?.onboarding_create && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setStartingFor(c.id)}
+                                      className="inline-flex items-center gap-1 whitespace-nowrap text-[10px] font-semibold px-2 py-0.5 rounded-full bg-blue-600 hover:bg-blue-700 text-white"
+                                    >
+                                      <ClipboardCheck className="w-3 h-3" /> Start onboarding
+                                    </button>
+                                  )}
+                                </div>
+                              );
+                            })()}
                           </div>
                           <select
                             value={c.status}
@@ -357,6 +422,7 @@ export const RecruitmentPanel: React.FC<RecruitmentPanelProps> = ({ token }) => 
           {postings.length === 0 && <p className="px-2 py-10 text-center text-xs text-slate-400">No job postings yet.</p>}
         </div>
       )}
+      {startingFor !== null && <StartJoinerOnboarding token={token} candidateId={startingFor} onClose={() => setStartingFor(null)} onCreated={loadOnboarding} />}
     </div>
   );
 };

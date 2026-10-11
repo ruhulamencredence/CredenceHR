@@ -73,6 +73,13 @@ export async function ensureRecruitmentSchema(dbPool: any): Promise<void> {
   } catch (err: any) {
     console.warn("⚠️ Could not ensure job_candidates table exists: " + err.message);
   }
+  // The Employee a Hired candidate became, set when their New Joiner
+  // Onboarding (OnboardingSelfServiceRoutes.ts) is approved.
+  try {
+    await dbPool.query("ALTER TABLE job_candidates ADD COLUMN employee_id INT NULL");
+  } catch (err: any) {
+    if (err.code !== "ER_DUP_FIELDNAME") console.warn("⚠️ Could not add job_candidates.employee_id column: " + err.message);
+  }
   try {
     await dbPool.query(`
       CREATE TABLE IF NOT EXISTS candidate_interviews (
@@ -185,6 +192,15 @@ export function registerRecruitmentRoutes(app: Express, deps: RecruitmentRouteDe
       const existing = existingRows[0];
       const validStatuses = ["applied", "shortlisted", "interview_scheduled", "interviewed", "offered", "hired", "rejected"];
       const status = validStatuses.includes(body.status) ? body.status : existing.status;
+      // A Hired candidate with a New Joiner Onboarding under way (or done)
+      // stays Hired — otherwise their temporary login would be left hanging.
+      if (existing.status === "hired" && status !== "hired") {
+        const apps: any[] = await queryDB("/*unscoped*/ SELECT status FROM onboarding_applications WHERE candidate_id = ?", [id]).catch(() => []);
+        if (apps.some((a: any) => a.status === "approved"))
+          return res.status(409).json({ error: "This candidate has already joined as an Employee, so they stay Hired." });
+        if (apps.some((a: any) => ["draft", "submitted", "rejected"].includes(a.status)))
+          return res.status(409).json({ error: "This candidate's onboarding is still open. Cancel it in HR Operations → Onboarding → New Joiners first." });
+      }
       const notes = typeof body.notes === "string" ? body.notes.trim().slice(0, 2000) : existing.notes;
       await queryDB("UPDATE job_candidates SET status = ?, notes = ? WHERE id = ?", [status, notes, id]);
       const rows: any = await queryDB("SELECT * FROM job_candidates WHERE id = ?", [id]);

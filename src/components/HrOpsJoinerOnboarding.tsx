@@ -39,6 +39,7 @@ interface Application {
   created_at: string | null;
   documents: number;
   employee_code: string | null;
+  posting_title: string | null;
 }
 interface HiredCandidate {
   id: number;
@@ -147,7 +148,13 @@ const CredentialsCard: React.FC<{ creds: Credentials; onClose: () => void }> = (
   );
 };
 
-const NewJoinerForm: React.FC<{ token: string; meta: HrOpsMeta; onClose: () => void; onCreated: (c: Credentials) => void }> = ({ token, meta, onClose, onCreated }) => {
+const NewJoinerForm: React.FC<{ token: string; meta: HrOpsMeta; candidateId?: number; onClose: () => void; onCreated: (c: Credentials) => void }> = ({
+  token,
+  meta,
+  candidateId: startCandidate,
+  onClose,
+  onCreated
+}) => {
   const api = useHrApi(token);
   const [candidates, setCandidates] = useState<HiredCandidate[] | null>(null);
   const [candidateId, setCandidateId] = useState<number | ''>('');
@@ -172,6 +179,11 @@ const NewJoinerForm: React.FC<{ token: string; meta: HrOpsMeta; onClose: () => v
       department_id: dept ? String(dept.id) : p.department_id
     }));
   };
+  // Opened from Recruitment for one candidate: pick them as soon as the list is in.
+  useEffect(() => {
+    if (startCandidate && candidates?.some((c) => c.id === startCandidate)) pick(String(startCandidate));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [candidates, startCandidate]);
   const submit = async () => {
     setError('');
     if (!f.name.trim()) return setError('Name is required.');
@@ -274,6 +286,47 @@ const NewJoinerForm: React.FC<{ token: string; meta: HrOpsMeta; onClose: () => v
   );
 };
 
+// Recruitment (RecruitmentPanel.tsx) -> a Hired candidate's "Start onboarding":
+// the same New joiner form with that candidate picked, then their login.
+export const StartJoinerOnboarding: React.FC<{ token: string; candidateId: number; onClose: () => void; onCreated: () => void }> = ({ token, candidateId, onClose, onCreated }) => {
+  const api = useHrApi(token);
+  const [meta, setMeta] = useState<HrOpsMeta | null>(null);
+  const [error, setError] = useState('');
+  const [creds, setCreds] = useState<Credentials | null>(null);
+  useEffect(() => {
+    api.get<HrOpsMeta>('/api/hr-ops/meta').then(setMeta).catch((e) => setError(e.message));
+  }, [api]);
+  if (creds) return <CredentialsCard creds={creds} onClose={onClose} />;
+  if (error)
+    return (
+      <GlassModal title="New joiner" onClose={onClose}>
+        <div className="text-sm text-rose-600">{error}</div>
+      </GlassModal>
+    );
+  if (!meta)
+    return (
+      <GlassModal title="New joiner" onClose={onClose}>
+        <div className="space-y-3 animate-pulse" aria-busy="true" aria-label="Loading">
+          {Array.from({ length: 5 }, (_, i) => (
+            <div key={i} className="h-9 rounded-lg bg-slate-100" />
+          ))}
+        </div>
+      </GlassModal>
+    );
+  return (
+    <NewJoinerForm
+      token={token}
+      meta={meta}
+      candidateId={candidateId}
+      onClose={onClose}
+      onCreated={(c) => {
+        setCreds(c);
+        onCreated();
+      }}
+    />
+  );
+};
+
 interface ReviewDetail extends Omit<Application, 'documents'>, OnboardingFormState {
   review_remarks: string | null;
   reviewed_by_name: string | null;
@@ -365,6 +418,7 @@ const ReviewDrawer: React.FC<{ token: string; id: number; access: OnboardingAcce
               <div className="text-xs text-slate-500">
                 {d ? [d.onb_code, d.designation, d.department, d.branch, d.joining_date ? `joins ${fmtDate(d.joining_date)}` : null].filter(Boolean).join(' · ') : ' '}
               </div>
+              {d?.posting_title && <div className="text-[11px] text-violet-700 mt-0.5">From Recruitment: {d.posting_title}</div>}
             </div>
             <button type="button" onClick={onClose} className="liquid-glass-chip p-1.5 rounded-full text-slate-600 hover:text-slate-900 shrink-0" aria-label="Close">
               <X className="w-4 h-4" />
@@ -595,7 +649,10 @@ export const HrOpsJoinerOnboarding: React.FC<{ token: string; meta: HrOpsMeta; a
                         {a.employee_code ? ` → ${a.employee_code}` : ''}
                       </div>
                     </td>
-                    <td className="px-3 py-2.5 text-slate-600">{[a.designation, a.department, a.branch].filter(Boolean).join(' · ') || '—'}</td>
+                    <td className="px-3 py-2.5 text-slate-600">
+                      {[a.designation, a.department, a.branch].filter(Boolean).join(' · ') || '—'}
+                      {a.posting_title && <div className="text-[10px] text-violet-700 mt-0.5">From Recruitment: {a.posting_title}</div>}
+                    </td>
                     <td className="px-3 py-2.5">
                       <span className={`inline-flex text-[10px] font-semibold px-2 py-0.5 rounded-full border whitespace-nowrap ${STATUS[a.status].cls}`}>{STATUS[a.status].label}</span>
                       {left !== null && (

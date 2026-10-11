@@ -321,6 +321,8 @@ function serialize(a: any, lookups: { users: any[]; departments: any[]; branches
     onb_code: a.onb_code,
     user_id: Number(a.user_id),
     candidate_id: a.candidate_id != null ? Number(a.candidate_id) : null,
+    // The Recruitment job posting this joiner was hired for, if any.
+    posting_title: a.posting_title ?? null,
     name: a.name,
     designation: a.designation,
     department_id: a.department_id != null ? Number(a.department_id) : null,
@@ -403,7 +405,7 @@ export function registerOnboardingRoutes(app: Express, deps: OnboardingDeps) {
       await expireOverdue(queryDB);
       const [apps, users, departments, branches, docs] = await Promise.all([
         queryDB(
-          "/*unscoped*/ SELECT a.*, TIMESTAMPDIFF(SECOND, NOW(), a.expires_at) AS expires_in_seconds, e.employee_id AS employee_code FROM onboarding_applications a LEFT JOIN all_employees e ON e.id = a.employee_id WHERE a.company_id = ? ORDER BY a.id DESC",
+          "/*unscoped*/ SELECT a.*, TIMESTAMPDIFF(SECOND, NOW(), a.expires_at) AS expires_in_seconds, e.employee_id AS employee_code, jp.title AS posting_title FROM onboarding_applications a LEFT JOIN all_employees e ON e.id = a.employee_id LEFT JOIN job_candidates jc ON jc.id = a.candidate_id LEFT JOIN job_postings jp ON jp.id = jc.posting_id WHERE a.company_id = ? ORDER BY a.id DESC",
           [activeCompanyId()]
         ),
         queryDB("/*unscoped*/ SELECT id, name FROM users"),
@@ -448,6 +450,29 @@ export function registerOnboardingRoutes(app: Express, deps: OnboardingDeps) {
     }
   });
 
+  // Recruitment page: each candidate's onboarding (latest application), so a
+  // Hired candidate shows where they are — or a "Start onboarding" button.
+  app.get("/api/hr-ops/joiner-onboarding/by-candidate", ...hr("onboarding_create", "onboarding_review", "onboarding_approve"), async (_req: any, res: any) => {
+    try {
+      const apps: any[] = await queryDB(
+        "/*unscoped*/ SELECT a.id, a.candidate_id, a.onb_code, a.status, a.employee_id, e.employee_id AS employee_code FROM onboarding_applications a LEFT JOIN all_employees e ON e.id = a.employee_id WHERE a.company_id = ? AND a.candidate_id IS NOT NULL ORDER BY a.id",
+        [activeCompanyId()]
+      );
+      const out: Record<number, any> = {};
+      for (const a of apps || [])
+        out[Number(a.candidate_id)] = {
+          id: Number(a.id),
+          onb_code: a.onb_code,
+          status: a.status,
+          employee_id: a.employee_id != null ? Number(a.employee_id) : null,
+          employee_code: a.employee_code ?? null
+        };
+      res.json(out);
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
   // Opens an application and its temporary login. The password is returned
   // here only — it is never stored readable and never shown again.
   app.post("/api/hr-ops/joiner-onboarding", ...hr("onboarding_create"), async (req: any, res: any) => {
@@ -456,6 +481,7 @@ export function registerOnboardingRoutes(app: Express, deps: OnboardingDeps) {
       const b = req.body || {};
       const companyId = activeCompanyId();
       const candidateId = b.candidate_id ? Number(b.candidate_id) : null;
+      let posting: any = null;
       let name = clean(b.name);
       let email = clean(b.email);
       let phone = clean(b.phone, 60);
@@ -467,12 +493,21 @@ export function registerOnboardingRoutes(app: Express, deps: OnboardingDeps) {
         name = name || clean(c.name);
         email = email || clean(c.email);
         phone = phone || clean(c.phone, 60);
+        // What HR left blank comes from the job posting the candidate was hired for.
+        const postings: any[] = await queryDB("SELECT * FROM job_postings WHERE id = ?", [Number(c.posting_id)]).catch(() => []);
+        posting = postings.find((p: any) => Number(p.id) === Number(c.posting_id)) || null;
       }
       if (!name) throw bad("Name is required.");
       const joiningDate = toDate(b.joining_date);
       if (!joiningDate) throw bad("Joining date is required.");
-      const designation = clean(b.designation);
-      const departmentId = b.department_id ? Number(b.department_id) : null;
+      const designation = clean(b.designation) || clean(posting?.designation) || clean(posting?.title);
+      let departmentId = b.department_id ? Number(b.department_id) : null;
+      if (!departmentId && posting?.department) {
+        const ds: any[] = await queryDB("SELECT id, name FROM departments");
+        const want = String(posting.department).trim().toLowerCase();
+        const d = ds.find((x: any) => String(x.name || "").trim().toLowerCase() === want);
+        if (d) departmentId = Number(d.id);
+      }
       const branchId = b.branch_id ? Number(b.branch_id) : null;
       if (departmentId) {
         const d: any[] = await queryDB("SELECT id FROM departments WHERE id = ?", [departmentId]);
@@ -730,11 +765,15 @@ export function registerOnboardingRoutes(app: Express, deps: OnboardingDeps) {
   app.get("/api/hr-ops/joiner-onboarding/:id", ...hr("onboarding_review", "onboarding_approve"), async (req: any, res: any) => {
     try {
       const a = await companyApp(Number(req.params.id));
-      const [users, departments, branches] = await Promise.all([
+      const [users, departments, branches, postings] = await Promise.all([
         queryDB("/*unscoped*/ SELECT id, name FROM users WHERE id IN (?, ?)", [a.created_by || 0, a.reviewed_by || 0]),
         queryDB("SELECT * FROM departments"),
-        queryDB("SELECT * FROM branches")
+        queryDB("SELECT * FROM branches"),
+        a.candidate_id
+          ? queryDB("/*unscoped*/ SELECT jp.title FROM job_candidates jc JOIN job_postings jp ON jp.id = jc.posting_id WHERE jc.id = ?", [Number(a.candidate_id)]).catch(() => [])
+          : Promise.resolve([])
       ]);
+      a.posting_title = (postings as any[])[0]?.title ?? null;
       const state = await formState(a);
       res.json({
         ...serialize(a, { users, departments, branches }),
@@ -902,6 +941,8 @@ export function registerOnboardingRoutes(app: Express, deps: OnboardingDeps) {
 
       // After the commit — none of this undoes the approval if it fails.
       forgetOnboarding(r.userId);
+      if (pre.candidate_id)
+        await queryDB("/*unscoped*/ UPDATE job_candidates SET employee_id = ? WHERE id = ?", [r.employeeId, Number(pre.candidate_id)]).catch(() => {});
       await endAllSessions(queryDB, r.userId, "signed_out").catch(() => {});
       let accessApplied = false;
       if (req.user.role === "superadmin") {
