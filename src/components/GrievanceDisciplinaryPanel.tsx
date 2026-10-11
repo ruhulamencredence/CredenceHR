@@ -1,3 +1,4 @@
+import { activePeople } from '../lib/activePeople';
 import React, { useEffect, useState } from 'react';
 import { Gavel, Plus, X, AlertTriangle, CheckCircle2, MessageSquareWarning, ShieldAlert } from 'lucide-react';
 import { apiUrl } from '../lib/api';
@@ -361,7 +362,7 @@ export const GrievanceDisciplinaryPanel: React.FC<GrievanceDisciplinaryPanelProp
                     className="text-xs px-2.5 py-1.5 border border-slate-200 rounded-lg"
                   >
                     <option value="">Assign investigator…</option>
-                    {users.map((u) => (
+                    {activePeople(users, g.assigned_to).map((u) => (
                       <option key={u.id} value={u.id}>
                         {u.name}
                       </option>

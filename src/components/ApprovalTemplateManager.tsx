@@ -1,3 +1,4 @@
+import { activePeople } from '../lib/activePeople';
 import React, { useEffect, useState } from 'react';
 import {
   LayoutTemplate, Users2, Plus, Trash2, X, GripVertical, Star, StarOff, Power, AlertCircle, CheckCircle2, Pencil, ChevronUp, ChevronDown
@@ -659,10 +660,10 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
                 <label className="text-xs font-semibold text-slate-600 block">Layers</label>
                 {stepsDraft.map((step, idx) => {
                   const isVirtualSupervisor = idx === 0 && step.approver_type === 'supervisor';
-                  const pickerUsers =
-                    step.approver_type === 'admin'
-                      ? users.filter((u) => isAdminRole(u.role))
-                      : users;
+                  const pickerUsers = activePeople(
+                    step.approver_type === 'admin' ? users.filter((u) => isAdminRole(u.role)) : users,
+                    ...step.approver_user_ids
+                  );
                   const isLastLayer = idx === stepsDraft.length - 1;
                   return (
                     <div

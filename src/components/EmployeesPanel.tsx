@@ -1721,7 +1721,13 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                   <div>
                     <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2">Job Status &amp; Base</p>
                     <div className="grid sm:grid-cols-2 gap-4">
-                      <SelectField label="Job Status" value={form.job_status} onChange={(v) => setForm((f) => ({ ...f, job_status: v }))} options={JOB_STATUS_OPTIONS} />
+                      <SelectField
+                        label="Job Status"
+                        value={form.job_status}
+                        // Resigned / Terminated / Inactive: no longer an active employee (the server enforces it too).
+                        onChange={(v) => setForm((f) => ({ ...f, job_status: v, is_active: ['Resigned', 'Terminated', 'Inactive'].includes(v) ? false : f.is_active }))}
+                        options={JOB_STATUS_OPTIONS}
+                      />
                       <DateField label="Job Status Effective Date" value={form.job_status_effective_date} onChange={(v) => setForm((f) => ({ ...f, job_status_effective_date: v }))} />
                       <SelectField label="Job Base" value={form.job_base} onChange={(v) => setForm((f) => ({ ...f, job_base: v }))} options={JOB_BASE_OPTIONS} />
                       <DateField label="Job Base Effective Date" value={form.job_base_effective_date} onChange={(v) => setForm((f) => ({ ...f, job_base_effective_date: v }))} />

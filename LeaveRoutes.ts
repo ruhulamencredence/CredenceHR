@@ -262,7 +262,10 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
     workflows.sort((a: any, b: any) => (a.scope_type === "general" ? 0 : 1) - (b.scope_type === "general" ? 0 : 1));
 
     const [users, employees, items] = await Promise.all([
-      queryDB("SELECT id FROM users WHERE role IN ('admin', 'user')"),
+      // People still here only (see the bulk balance set below).
+      queryDB(
+        "SELECT id FROM users u WHERE u.role IN ('admin', 'user') AND COALESCE(u.is_blocked, 0) = 0 AND NOT EXISTS (SELECT 1 FROM all_employees e WHERE e.user_id = u.id AND e.is_active = 0)"
+      ),
       queryDB("SELECT * FROM all_employees WHERE user_id IS NOT NULL"),
       queryDB("SELECT * FROM leave_balance_workflow_items")
     ]);
@@ -689,7 +692,10 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
         ? body.departments.map((d: any) => String(d).trim()).filter(Boolean)
         : [];
 
-      const users: any = await queryDB("SELECT id, name, role FROM users WHERE role IN ('admin', 'user')");
+      // People still here only — blocked logins and inactive Employee records are left out.
+      const users: any = await queryDB(
+        "SELECT id, name, role FROM users u WHERE u.role IN ('admin', 'user') AND COALESCE(u.is_blocked, 0) = 0 AND NOT EXISTS (SELECT 1 FROM all_employees e WHERE e.user_id = u.id AND e.is_active = 0)"
+      );
 
       let targetIds: number[];
       if (departments.length === 0) {

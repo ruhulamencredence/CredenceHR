@@ -1,3 +1,4 @@
+import { activePeople } from '../lib/activePeople';
 import React, { useEffect, useState } from 'react';
 import { FolderLock, Plus, X, AlertTriangle, CheckCircle2, FileText, Trash2, Download, ShieldCheck } from 'lucide-react';
 import { apiUrl } from '../lib/api';
@@ -175,7 +176,7 @@ export const DocumentVaultPanel: React.FC<DocumentVaultPanelProps> = ({ token })
             <label className="block text-[10px] font-semibold text-slate-500 mb-1">Employee</label>
             <select value={uploadUserId} onChange={(e) => setUploadUserId(e.target.value)} className="w-44 px-3 py-2 text-xs border border-slate-200 rounded-xl">
               <option value="">Select…</option>
-              {users.map((u) => (
+              {activePeople(users, uploadUserId).map((u) => (
                 <option key={u.id} value={u.id}>
                   {u.name}
                   {u.employee_code ? ` (${u.employee_code})` : ''}

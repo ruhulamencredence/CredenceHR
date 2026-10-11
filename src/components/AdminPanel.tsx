@@ -1,3 +1,4 @@
+import { activePeople } from '../lib/activePeople';
 import { ColumnFilterMenu, ColumnToggleMenu } from './ColumnFilterMenu';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import * as XLSX from 'xlsx';
@@ -6671,7 +6672,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                     className="block w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
                   >
                     <option value="">— None —</option>
-                    {users.map((u) => (
+                    {activePeople(users, deptForm.supervisor_user_id).map((u) => (
                       <option key={u.id} value={u.id}>{u.name} ({u.role})</option>
                     ))}
                   </select>

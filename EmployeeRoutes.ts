@@ -10,6 +10,7 @@ import { applyDueEmployeeTransfers } from "./EmployeeTransferRoutes";
 import { recordEmployeeEditHistory } from "./EmployeeTransferRoutes";
 import { applyDueHrActions } from "./HROperationsRoutes";
 import { activeCompanyId } from "./companyContext";
+import { isSeparatedJobStatus } from "./AccountBlock";
 import { EMPLOYEE_BOOL_FIELDS } from "./memoryDbFallback";
 import bcrypt from "bcryptjs";
 import type { Express } from "express";
@@ -258,7 +259,8 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
         branch.branch_id,
         email && String(email).trim() ? String(email).trim() : null,
         phone && String(phone).trim() ? String(phone).trim() : null,
-        is_active === false ? 0 : 1,
+        // Resigned / Terminated / Inactive (or an imported Hold / Regain) is never active.
+        is_active === false || isSeparatedJobStatus(req.body.job_status) ? 0 : 1,
         newUserId,
         ...extValues
       ];
@@ -303,7 +305,8 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
       const newDesignation = designation && String(designation).trim() ? String(designation).trim() : null;
       const newEmail = email && String(email).trim() ? String(email).trim() : null;
       const newPhone = phone && String(phone).trim() ? String(phone).trim() : null;
-      const newIsActive = is_active === false ? 0 : 1;
+      // Resigned / Terminated / Inactive (or an imported Hold / Regain) is never active.
+      const newIsActive = is_active === false || isSeparatedJobStatus(req.body.job_status) ? 0 : 1;
 
       // Audit trail — Department/Designation changes go to employee_transfers
       // (so they appear in the same Transfer History as a Transfer-modal

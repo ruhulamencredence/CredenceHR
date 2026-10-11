@@ -339,7 +339,7 @@ export function registerMobileBillRoutes(app: Express, deps: MobileBillRouteDeps
   // ---- reading -----------------------------------------------------------
   async function employees(): Promise<any[]> {
     return (
-      (await queryDB("SELECT id, employee_id, name, designation, department, branch, employment_category, user_id, mobile FROM all_employees")) || []
+      (await queryDB("SELECT id, employee_id, name, designation, department, branch, employment_category, user_id, mobile, is_active FROM all_employees")) || []
     ).map((e: any) => ({
       id: Number(e.id),
       employee_code: e.employee_id || null,
@@ -349,7 +349,8 @@ export function registerMobileBillRoutes(app: Express, deps: MobileBillRouteDeps
       work_station: e.branch || null,
       employee_type: e.employment_category || null,
       user_id: e.user_id ? Number(e.user_id) : null,
-      mobile: e.mobile || null
+      mobile: e.mobile || null,
+      is_active: e.is_active === undefined || e.is_active === null ? true : !!Number(e.is_active)
     }));
   }
   async function policies(): Promise<any[]> {

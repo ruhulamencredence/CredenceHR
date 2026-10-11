@@ -392,8 +392,13 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
         ? users
         : users.filter((u: any) => u.role !== "superadmin");
 
+      // Whether the linked Employee record is active (no record: counts as active),
+      // so pickers can leave out people who have left.
+      const empRows: any[] = (await queryDB("SELECT user_id, is_active FROM all_employees WHERE user_id IS NOT NULL").catch(() => [])) || [];
+      const inactiveUsers = new Set(empRows.filter((e: any) => Number(e.is_active) === 0).map((e: any) => Number(e.user_id)));
       res.json(visibleUsers.map((u: any) => ({
         ...u,
+        employee_active: !inactiveUsers.has(Number(u.id)),
         last_login_lat: canSeeLocation ? u.last_login_lat : undefined,
         last_login_lng: canSeeLocation ? u.last_login_lng : undefined,
         last_login_at: canSeeLocation ? u.last_login_at : undefined,

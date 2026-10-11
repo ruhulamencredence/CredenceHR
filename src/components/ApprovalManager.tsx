@@ -1,3 +1,4 @@
+import { activePeople } from '../lib/activePeople';
 import React, { useEffect, useState } from 'react';
 import {
   ShieldCheck, ArrowRight, CheckCircle2, XCircle, Clock, Settings2, X, GripVertical, Trash2, Plus, AlertCircle
@@ -134,7 +135,7 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
   // left out when none is listed, so Remote Attendance rows aren't squeezed.
   const hasClaims = requests.some((r) => r.source_type === 'user_claim');
   // Only Admins/Superadmins are eligible to be added to the chain.
-  const eligibleApprovers = users.filter((u) => u.role === 'admin' || u.role === 'superadmin');
+  const eligibleApprovers = activePeople(users.filter((u) => u.role === 'admin' || u.role === 'superadmin'));
 
   const openChainModal = () => {
     setChainDraft(chain.map((s) => s.user_id));
