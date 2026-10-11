@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8" ?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <!-- allowBackup=false: with it true (Android's default), the WebView's
          localStorage — including the login JWT (see App.tsx's mpr_token) —
          got swept into Android Auto Backup and silently restored on a fresh
@@ -34,6 +35,25 @@
             android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
         </provider>
+
+        <!-- Live Follow (LiveWakeMessagingService.java / LiveTrackingService.java):
+             our Firebase service replaces the push plugin's own (it passes every
+             message on to it), so a silent "go live" push starts native live
+             reporting even with the app in Recent apps or swiped away. -->
+        <service
+            android:name="com.capacitorjs.plugins.pushnotifications.MessagingService"
+            tools:node="remove" />
+        <service
+            android:name=".LiveWakeMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+        <service
+            android:name=".LiveTrackingService"
+            android:exported="false"
+            android:foregroundServiceType="location" />
     </application>
 
     <!-- Permissions -->
