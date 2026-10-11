@@ -391,6 +391,21 @@ export function registerOnboardingRoutes(app: Express, deps: OnboardingDeps) {
     return a;
   };
 
+  // Appointment Letters already issued (HR Operations -> Letters), by
+  // Employee, and whether an active Appointment Letter template exists — an
+  // approved joiner's next step is that letter.
+  const appointmentLetters = async () => {
+    const [letters, templates]: any[][] = await Promise.all([
+      queryDB("SELECT id, ref_no, employee_id, letter_type, status FROM hr_letters").catch(() => []),
+      queryDB("SELECT id, letter_type, is_active FROM hr_letter_templates").catch(() => [])
+    ]);
+    const byEmployee = new Map<number, { id: number; ref_no: string }>();
+    for (const l of letters || [])
+      if (l.letter_type === "appointment" && l.status === "issued") byEmployee.set(Number(l.employee_id), { id: Number(l.id), ref_no: l.ref_no });
+    const templateExists = (templates || []).some((t: any) => t.letter_type === "appointment" && Number(t.is_active) !== 0);
+    return { byEmployee, templateExists };
+  };
+
   // What this account may do here — the page shows only those controls.
   app.get("/api/hr-ops/joiner-onboarding/access", authenticateToken, requireModule("hr_operations"), async (req: any, res: any) => {
     try {
@@ -414,7 +429,14 @@ export function registerOnboardingRoutes(app: Express, deps: OnboardingDeps) {
         queryDB("/*unscoped*/ SELECT application_id, COUNT(*) AS n FROM onboarding_documents GROUP BY application_id")
       ]);
       const docCounts = new Map<number, number>((docs || []).map((d: any) => [Number(d.application_id), Number(d.n)]));
-      res.json((apps || []).map((a: any) => serialize(a, { users, departments, branches, docCounts })));
+      const letters = await appointmentLetters();
+      res.json(
+        (apps || []).map((a: any) => ({
+          ...serialize(a, { users, departments, branches, docCounts }),
+          appointment_letter: a.employee_id ? letters.byEmployee.get(Number(a.employee_id)) || null : null,
+          appointment_template: letters.templateExists
+        }))
+      );
     } catch (err) {
       fail(res, err);
     }
@@ -774,9 +796,16 @@ export function registerOnboardingRoutes(app: Express, deps: OnboardingDeps) {
           : Promise.resolve([])
       ]);
       a.posting_title = (postings as any[])[0]?.title ?? null;
+      if (a.employee_id) {
+        const emp: any[] = await queryDB("/*unscoped*/ SELECT employee_id FROM all_employees WHERE id = ?", [Number(a.employee_id)]);
+        a.employee_code = emp[0]?.employee_id ?? null;
+      }
       const state = await formState(a);
+      const letters = await appointmentLetters();
       res.json({
         ...serialize(a, { users, departments, branches }),
+        appointment_letter: a.employee_id ? letters.byEmployee.get(Number(a.employee_id)) || null : null,
+        appointment_template: letters.templateExists,
         ...state,
         duplicates: ["approved", "cancelled", "expired"].includes(a.status) ? [] : await findOnboardingDuplicates(queryDB, a, state.data),
         // Why this account may not approve it, if so (the button says it).
@@ -970,7 +999,15 @@ export function registerOnboardingRoutes(app: Express, deps: OnboardingDeps) {
           relatedType: "onboarding_application",
           relatedId: id
         }).catch(() => {});
-      res.json({ success: true, employee_id: r.employeeId, employee_code: r.code, access_applied: accessApplied });
+      // Next: the Appointment Letter, which HR reads and issues from Letters.
+      const letters = await appointmentLetters().catch(() => ({ templateExists: false }));
+      res.json({
+        success: true,
+        employee_id: r.employeeId,
+        employee_code: r.code,
+        access_applied: accessApplied,
+        appointment_letter: { template_exists: letters.templateExists }
+      });
     } catch (err: any) {
       if (err?.duplicates) return res.status(409).json({ error: err.message, duplicates: err.duplicates });
       fail(res, err);

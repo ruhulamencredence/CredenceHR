@@ -11,8 +11,9 @@
 // onboarding_review / onboarding_approve); the server checks them too.
 
 import React, { useEffect, useState } from 'react';
-import { UserPlus, X, Copy, Check, KeyRound, Clock, Eye, FileText, AlertTriangle, CheckCircle2, XCircle, Ban, ShieldAlert } from 'lucide-react';
-import { useHrApi, Notice, fmtDate, inputCls, labelCls, btnPrimary, btnGhost, type HrOpsMeta } from './HrOpsShared';
+import { UserPlus, X, Copy, Check, KeyRound, Clock, Eye, FileText, AlertTriangle, CheckCircle2, XCircle, Ban, ShieldAlert, FileSignature } from 'lucide-react';
+import { useHrApi, Notice, fmtDate, inputCls, labelCls, btnPrimary, btnGhost, type HrOpsMeta, type HrOpsEmployee } from './HrOpsShared';
+import { LetterComposer } from './HrOpsLetters';
 import { confirmDialog } from '../lib/confirmDialog';
 import { OnboardingSummary, openOnboardingFile, type OnboardingFormState } from './OnboardingForm';
 
@@ -39,7 +40,11 @@ interface Application {
   created_at: string | null;
   documents: number;
   employee_code: string | null;
+  employee_id: number | null;
   posting_title: string | null;
+  // The approved joiner's Appointment Letter, once issued (HR Operations -> Letters).
+  appointment_letter: { id: number; ref_no: string } | null;
+  appointment_template: boolean;
 }
 interface HiredCandidate {
   id: number;
@@ -354,7 +359,14 @@ const DrawerSkeleton: React.FC = () => (
 
 // HR's look at one application: what the joiner gave, their documents, what
 // is still missing and any Employee / login it would clash with.
-const ReviewDrawer: React.FC<{ token: string; id: number; access: OnboardingAccess; onClose: () => void; onChanged: () => void }> = ({ token, id, access, onClose, onChanged }) => {
+const ReviewDrawer: React.FC<{
+  token: string;
+  id: number;
+  access: OnboardingAccess;
+  onClose: () => void;
+  onChanged: () => void;
+  onIssueLetter: (employeeId: number, name: string) => void;
+}> = ({ token, id, access, onClose, onChanged, onIssueLetter }) => {
   const api = useHrApi(token);
   const [d, setD] = useState<ReviewDetail | null>(null);
   const [error, setError] = useState('');
@@ -389,7 +401,7 @@ const ReviewDrawer: React.FC<{ token: string; id: number; access: OnboardingAcce
     act(async () => {
       const r = await api.post<{ employee_code?: string; already_approved?: boolean; access_applied?: boolean }>(`/api/hr-ops/joiner-onboarding/${d.id}/approve`);
       if (r.already_approved) return 'This application was already approved.';
-      return `Approved — ${d.name} is now Employee ${r.employee_code}.${r.access_applied ? ' Default access was applied.' : ' Set their Module Access in Users.'}`;
+      return `Approved — ${d.name} is now Employee ${r.employee_code}.${r.access_applied ? ' Default access was applied.' : ' Set their Module Access in Users.'} Next: issue their Appointment Letter.`;
     });
   };
   const cancel = async () => {
@@ -437,9 +449,25 @@ const ReviewDrawer: React.FC<{ token: string; id: number; access: OnboardingAcce
                   {d.created_by_name && <span className="text-[11px] text-slate-500">· Opened by {d.created_by_name}</span>}
                 </div>
                 {d.status === 'approved' && d.employee_code && (
-                  <div className="liquid-glass-inset rounded-2xl px-4 py-3 text-xs text-emerald-800 flex items-center gap-2">
-                    <CheckCircle2 className="w-4 h-4" /> Employee <b>{d.employee_code}</b>
-                    {d.reviewed_by_name ? ` · approved by ${d.reviewed_by_name}` : ''}
+                  <div className="liquid-glass-inset rounded-2xl px-4 py-3 text-xs space-y-2.5">
+                    <div className="text-emerald-800 flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4" /> Employee <b>{d.employee_code}</b>
+                      {d.reviewed_by_name ? ` · approved by ${d.reviewed_by_name}` : ''}
+                    </div>
+                    {d.appointment_letter ? (
+                      <div className="flex items-center gap-2 text-slate-700">
+                        <FileSignature className="w-4 h-4 text-emerald-600" /> Appointment Letter <b className="font-mono">{d.appointment_letter.ref_no}</b> issued.
+                      </div>
+                    ) : d.appointment_template && d.employee_id ? (
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="text-slate-600">Appointment Letter not issued yet.</span>
+                        <button type="button" className="liquid-glass-button rounded-full px-4 py-2 text-xs font-semibold inline-flex items-center gap-1.5" onClick={() => onIssueLetter(d.employee_id!, d.name)}>
+                          <FileSignature className="w-3.5 h-3.5" /> Issue Appointment Letter
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="text-amber-700">No active Appointment Letter template — add one in Settings → Letter Templates, then issue the letter from here.</div>
+                    )}
                   </div>
                 )}
                 {['rejected', 'cancelled'].includes(d.status) && d.review_remarks && (
@@ -580,6 +608,21 @@ export const HrOpsJoinerOnboarding: React.FC<{ token: string; meta: HrOpsMeta; a
   const [creating, setCreating] = useState(false);
   const [creds, setCreds] = useState<Credentials | null>(null);
   const [reviewing, setReviewing] = useState<number | null>(null);
+  // Appointment Letter for an approved joiner: the normal Letters composer,
+  // with the new Employee and the Appointment Letter type already picked.
+  const [letterFor, setLetterFor] = useState<{ employeeId: number; name: string } | null>(null);
+  const [employees, setEmployees] = useState<HrOpsEmployee[] | null>(null);
+  const issueLetter = (employeeId: number, name: string) => {
+    setReviewing(null);
+    setLetterFor({ employeeId, name });
+    api
+      .get<HrOpsEmployee[]>('/api/hr-ops/employees')
+      .then(setEmployees)
+      .catch((e) => {
+        setLetterFor(null);
+        setMsg({ type: 'error', text: e.message });
+      });
+  };
   const canReview = access.onboarding_review || access.onboarding_approve;
 
   const load = () =>
@@ -655,6 +698,24 @@ export const HrOpsJoinerOnboarding: React.FC<{ token: string; meta: HrOpsMeta; a
                     </td>
                     <td className="px-3 py-2.5">
                       <span className={`inline-flex text-[10px] font-semibold px-2 py-0.5 rounded-full border whitespace-nowrap ${STATUS[a.status].cls}`}>{STATUS[a.status].label}</span>
+                      {a.status === 'approved' &&
+                        a.employee_id &&
+                        (a.appointment_letter ? (
+                          <div className="mt-1 flex items-center gap-1 text-[10px] text-emerald-700 whitespace-nowrap">
+                            <FileSignature className="w-3 h-3" /> {a.appointment_letter.ref_no}
+                          </div>
+                        ) : a.appointment_template ? (
+                          <button
+                            type="button"
+                            onClick={() => issueLetter(a.employee_id!, a.name)}
+                            className="mt-1 flex items-center gap-1 text-[10px] font-semibold text-amber-700 hover:text-amber-800 whitespace-nowrap"
+                            title="Issue the Appointment Letter"
+                          >
+                            <FileSignature className="w-3 h-3" /> Appointment letter: not issued
+                          </button>
+                        ) : (
+                          <div className="mt-1 text-[10px] text-amber-700 whitespace-nowrap">Appointment letter: not issued</div>
+                        ))}
                       {left !== null && (
                         <div className={`mt-1 flex items-center gap-1 text-[10px] ${left <= 3 ? 'text-amber-700' : 'text-slate-400'}`}>
                           <Clock className="w-3 h-3" /> {left} day{left === 1 ? '' : 's'} left
@@ -695,7 +756,21 @@ export const HrOpsJoinerOnboarding: React.FC<{ token: string; meta: HrOpsMeta; a
         />
       )}
       {creds && <CredentialsCard creds={creds} onClose={() => setCreds(null)} />}
-      {reviewing && <ReviewDrawer token={token} id={reviewing} access={access} onClose={() => setReviewing(null)} onChanged={load} />}
+      {letterFor && employees && (
+        <LetterComposer
+          token={token}
+          meta={meta}
+          employees={employees}
+          init={{ employee_id: letterFor.employeeId, letter_type: 'appointment' }}
+          onClose={() => setLetterFor(null)}
+          onIssued={(ref) => {
+            setMsg({ type: 'success', text: `Appointment Letter ${ref} issued to ${letterFor.name}.` });
+            setLetterFor(null);
+            load();
+          }}
+        />
+      )}
+      {reviewing && <ReviewDrawer token={token} id={reviewing} access={access} onClose={() => setReviewing(null)} onChanged={load} onIssueLetter={issueLetter} />}
     </div>
   );
 };
