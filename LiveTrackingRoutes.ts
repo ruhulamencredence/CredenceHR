@@ -43,7 +43,11 @@ const RIDE_LIVE_MS = 2 * 60_000;
 export interface LiveTracking {
   // Called by POST /api/tracking/ping after the ping is stored. Pushes it to
   // anyone watching and returns when the phone should stay live until (ms).
-  onPing: (userId: number, ping: { lat: number; lng: number; accuracy_m: number | null; battery_pct: number | null; recorded_at: Date }) => Promise<number | null>;
+  // still = a heartbeat re-sending the last fix (the phone hasn't moved).
+  onPing: (
+    userId: number,
+    ping: { lat: number; lng: number; accuracy_m: number | null; battery_pct: number | null; recorded_at: Date; still?: boolean }
+  ) => Promise<number | null>;
 }
 
 export function registerLiveTrackingRoutes(app: Express, deps: Deps): LiveTracking {
@@ -115,6 +119,9 @@ export function registerLiveTrackingRoutes(app: Express, deps: Deps): LiveTracki
         );
         if (latest.length === 0) return res.status(404).json({ error: "This employee hasn't sent a location yet." });
         const userRows = await queryDB("SELECT id, name FROM users WHERE id = ?", [userId]);
+        // Last time the phone checked in at all (pings and heartbeats).
+        const stateRows: any[] =
+          (await queryDB("SELECT reported_at FROM tracking_device_state WHERE user_id = ?", [userId]).catch(() => [])) || [];
         if (userRows.length === 0) return res.status(404).json({ error: "Employee not found." });
 
         let m = watchers.get(userId);
@@ -137,6 +144,7 @@ export function registerLiveTrackingRoutes(app: Express, deps: Deps): LiveTracki
           latest: latest[0],
           trail: trail.map((p: any) => ({ lat: Number(p.lat), lng: Number(p.lng), recorded_at: p.recorded_at })),
           live_until: until,
+          heard_at: stateRows[0]?.reported_at ? new Date(stateRows[0].reported_at).toISOString() : null,
           on_ride: await onRide(userId)
         });
       } catch (err: any) {
@@ -173,7 +181,10 @@ export function registerLiveTrackingRoutes(app: Express, deps: Deps): LiveTracki
           lng: ping.lng,
           accuracy_m: ping.accuracy_m,
           battery_pct: ping.battery_pct,
-          recorded_at: ping.recorded_at.toISOString()
+          recorded_at: ping.recorded_at.toISOString(),
+          // When the phone answered — differs from recorded_at while it stands still.
+          heard_at: new Date().toISOString(),
+          still: !!ping.still
         };
         for (const w of ws) io?.to(`user:${w}`).emit("tracking:location", payload);
       }
