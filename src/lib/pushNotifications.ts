@@ -19,7 +19,7 @@
 
 import { Capacitor } from '@capacitor/core';
 import { apiUrl } from './api';
-import { setLiveUntil } from './backgroundTracking';
+import { hasNativeLiveTracking, setLiveUntil } from './backgroundTracking';
 
 let registeredToken: string | null = null;
 
@@ -89,7 +89,8 @@ export async function initPushNotifications(token: string, handlers: PushTapHand
     // app is in the background — start reporting every few seconds.
     PushNotifications.addListener('pushNotificationReceived', (n) => {
       const data: any = n?.data || {};
-      if (data.type === 'tracking_live') setLiveUntil(Number(data.until) || null);
+      // An APK with native Live Follow already started it from the push itself.
+      if (data.type === 'tracking_live' && !hasNativeLiveTracking()) setLiveUntil(Number(data.until) || null);
     });
     PushNotifications.addListener('pushNotificationActionPerformed', (action) => {
       const data = action.notification?.data || {};

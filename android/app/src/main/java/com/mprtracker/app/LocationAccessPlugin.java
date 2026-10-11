@@ -100,6 +100,33 @@ public class LocationAccessPlugin extends Plugin {
         call.resolve();
     }
 
+    // Live Follow runs natively (LiveTrackingService): it needs this
+    // account's sign-in and the server address to send pings on its own.
+    @PluginMethod
+    public void setTrackingSession(PluginCall call) {
+        String token = call.getString("token");
+        String baseUrl = call.getString("baseUrl");
+        if (token == null || baseUrl == null) {
+            call.reject("token and baseUrl are required");
+            return;
+        }
+        getContext()
+            .getSharedPreferences(LiveTrackingService.PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putString(LiveTrackingService.KEY_TOKEN, token)
+            .putString(LiveTrackingService.KEY_BASE, baseUrl.replaceAll("/+$", ""))
+            .apply();
+        call.resolve();
+    }
+
+    // Logout / tracking turned off: forget the sign-in and stop any live reporting.
+    @PluginMethod
+    public void clearTrackingSession(PluginCall call) {
+        getContext().getSharedPreferences(LiveTrackingService.PREFS, Context.MODE_PRIVATE).edit().clear().apply();
+        LiveTrackingService.stop(getContext());
+        call.resolve();
+    }
+
     // The phone's Location (GPS) switch.
     @PluginMethod
     public void openLocationSettings(PluginCall call) {

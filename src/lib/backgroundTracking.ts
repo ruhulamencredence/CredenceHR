@@ -107,6 +107,9 @@ let currentToken: string | null = null;
 let requestedToken: string | null = null;
 let mode: 'active' | 'idle' | 'live' = 'active';
 let liveUntil = 0;
+// This APK reports Live Follow natively (see startBackgroundTracking).
+let nativeLive = false;
+export const hasNativeLiveTracking = () => nativeLive;
 let lastSentAt = 0;
 let lastSentFixTime = 0;
 let lastFixAt = 0;
@@ -286,6 +289,17 @@ export async function startBackgroundTracking(token: string): Promise<void> {
   currentToken = token;
   mode = 'active';
   lastFixAt = Date.now();
+  // Lets the app report live by itself, even in Recent apps (silent push ->
+  // LiveTrackingService). Older APKs don't have it; the page then does it.
+  if (isAndroidApp()) {
+    LocationAccess.setTrackingSession({ token, baseUrl: window.location.origin })
+      .then(() => {
+        nativeLive = true;
+      })
+      .catch(() => {
+        nativeLive = false;
+      });
+  }
   try {
     await armWatcher(ACTIVE_DISTANCE_FILTER_M);
     restartPingTimer(ACTIVE_PING_INTERVAL_MS);
@@ -343,6 +357,8 @@ export async function stopBackgroundTracking(): Promise<void> {
   pendingFixes = [];
   lastSentFixTime = 0;
   latestFix = null;
+  if (isAndroidApp()) void LocationAccess.clearTrackingSession().catch(() => undefined);
+  nativeLive = false;
   currentToken = null;
   requestedToken = null;
   mode = 'active';
@@ -397,6 +413,9 @@ interface LocationAccessPlugin {
   requestBackground(): Promise<LocationAccessStatus>;
   openAppSettings(): Promise<void>;
   openLocationSettings(): Promise<void>;
+  // APKs with native Live Follow (LiveTrackingService.java) only.
+  setTrackingSession(o: { token: string; baseUrl: string }): Promise<void>;
+  clearTrackingSession(): Promise<void>;
 }
 
 const LocationAccess = registerPlugin<LocationAccessPlugin>('LocationAccess');
