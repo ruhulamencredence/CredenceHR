@@ -11,7 +11,6 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { Check, Plus, Search, Smartphone, Trash2, X } from 'lucide-react';
-import { Spinner } from './Spinner';
 import { useHrApi, Notice, btnGhost, btnPrimary } from './HrOpsShared';
 import { confirmDialog } from '../lib/confirmDialog';
 
@@ -36,6 +35,45 @@ interface Account {
   pending: Phone[];
 }
 type Msg = { type: 'success' | 'error'; text: string } | null;
+
+// Loading placeholder in the page's own shape: title, search box and the
+// Account / Phones / Phones allowed table.
+const DeviceAccessSkeleton: React.FC = () => {
+  const bar = (w: string, tone = 'bg-slate-200/80') => <div className={`h-3 rounded ${tone} ${w}`} />;
+  return (
+    <div className="space-y-4 animate-pulse" aria-busy="true" aria-label="Loading device access">
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          <div className="w-5 h-5 rounded bg-blue-100" />
+          {bar('w-36 h-4')}
+        </div>
+        {bar('w-full max-w-xl', 'bg-slate-100')}
+      </div>
+      <div className="h-8 max-w-xs rounded-lg border border-slate-200 bg-white" />
+      <div className="rounded-xl border border-slate-200 overflow-hidden">
+        <div className="bg-slate-50 px-3 py-2.5 grid grid-cols-[2fr_3fr_1fr] gap-4">
+          {bar('w-16', 'bg-slate-200')}
+          {bar('w-14', 'bg-slate-200')}
+          {bar('w-24', 'bg-slate-200')}
+        </div>
+        {Array.from({ length: 7 }, (_, i) => (
+          <div key={i} className="border-t border-slate-100 px-3 py-3 grid grid-cols-[2fr_3fr_1fr] gap-4 items-start">
+            <div className="space-y-1.5">
+              {bar(i % 2 ? 'w-28' : 'w-36')}
+              {bar(i % 3 ? 'w-40' : 'w-32', 'bg-slate-100')}
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3.5 h-3.5 rounded bg-slate-200" />
+              {bar(i % 2 ? 'w-24' : 'w-32')}
+              {bar('w-20', 'bg-slate-100')}
+            </div>
+            <div className="h-6 w-12 rounded-lg border border-slate-200 bg-white" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
 
 const when = (v: string | null) => (v ? String(v).replace('T', ' ').slice(0, 16) : '—');
 
@@ -71,7 +109,7 @@ export const DeviceAccess: React.FC<{ token: string }> = ({ token }) => {
     }
   };
 
-  if (!accounts) return <div className="py-10 flex justify-center"><Spinner /></div>;
+  if (!accounts) return <DeviceAccessSkeleton />;
   const waiting = accounts.filter((a) => a.pending.length > 0);
   const shown = accounts.filter((a) => !q.trim() || [a.name, a.email].some((v) => String(v || '').toLowerCase().includes(q.trim().toLowerCase())));
 
