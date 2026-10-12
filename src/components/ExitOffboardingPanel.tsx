@@ -1,9 +1,10 @@
 import { activePeople } from '../lib/activePeople';
 import React, { useEffect, useState } from 'react';
-import { LogOut, Plus, X, CheckCircle2, AlertTriangle, ChevronDown, ChevronUp, Save, Ban, ShieldCheck } from 'lucide-react';
+import { LogOut, Plus, X, CheckCircle2, AlertTriangle, ChevronDown, ChevronUp, Save, Ban, ShieldCheck, FileDown } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
 import { ExitDuesCard, DuesBlockedModal, type ExitDue } from './ExitDuesCard';
+import { saveClearanceCertificatePdf, saveSettlementSheetPdf, type ExitDocuments } from '../lib/exitDocuments';
 
 interface ExitOffboardingPanelProps {
   token: string;
@@ -82,13 +83,36 @@ export const ExitOffboardingPanel: React.FC<ExitOffboardingPanelProps> = ({ toke
   // Dues from other modules (layer "exit_dues"): whether to show the card,
   // a counter to reload it, and the popup when Paid / Settled is refused.
   const [canSeeDues, setCanSeeDues] = useState(false);
+  // Clearance Certificate / Settlement Sheet PDFs (layer "exit_pdf").
+  const [canPdf, setCanPdf] = useState(false);
+  const [pdfBusy, setPdfBusy] = useState<string | null>(null);
+  const downloadPdf = async (exitId: number, which: 'clearance' | 'settlement') => {
+    setError('');
+    setPdfBusy(`${exitId}:${which}`);
+    try {
+      const res = await fetch(apiUrl(`/api/exit-requests/${exitId}/documents`), { headers: authHeaders });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not load the document');
+      await (which === 'clearance' ? saveClearanceCertificatePdf(data as ExitDocuments) : saveSettlementSheetPdf(data as ExitDocuments));
+    } catch (err: any) {
+      setError(err.message || 'Could not make the PDF');
+    } finally {
+      setPdfBusy(null);
+    }
+  };
   const [duesRefresh, setDuesRefresh] = useState(0);
   const [duesBlocked, setDuesBlocked] = useState<{ message: string; items: ExitDue[] } | null>(null);
   useEffect(() => {
     fetch(apiUrl('/api/exit-dues/access'), { headers: authHeaders })
       .then((r) => (r.ok ? r.json() : null))
-      .then((a) => setCanSeeDues(!!a?.exit_dues))
-      .catch(() => setCanSeeDues(false));
+      .then((a) => {
+        setCanSeeDues(!!a?.exit_dues);
+        setCanPdf(!!a?.exit_pdf);
+      })
+      .catch(() => {
+        setCanSeeDues(false);
+        setCanPdf(false);
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const [savingSettlementId, setSavingSettlementId] = useState<number | null>(null);
@@ -500,6 +524,18 @@ export const ExitOffboardingPanel: React.FC<ExitOffboardingPanelProps> = ({ toke
                           <Ban className="w-3 h-3" /> Cancel
                         </button>
                       )}
+                      {canPdf &&
+                        (['clearance', 'settlement'] as const).map((w) => (
+                          <button
+                            key={w}
+                            type="button"
+                            disabled={pdfBusy === `${r.id}:${w}`}
+                            onClick={() => downloadPdf(r.id, w)}
+                            className="flex items-center gap-1 text-[11px] font-semibold px-3 py-1.5 rounded-lg text-slate-700 border border-slate-200 hover:bg-slate-50 transition-colors disabled:opacity-50"
+                          >
+                            <FileDown className="w-3 h-3" /> {w === 'clearance' ? 'Clearance Certificate (PDF)' : 'Settlement Sheet (PDF)'}
+                          </button>
+                        ))}
                     </div>
 
                     <div>
