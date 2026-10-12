@@ -41,7 +41,7 @@ interface ExitOffboardingRouteDeps {
   authenticateToken: any;
   requireAdmin: any;
   requireModule: (moduleKey: "exit_offboarding") => any;
-  requireModuleLayer: (moduleKey: "exit_offboarding", layer: "exit_dues") => any;
+  requireModuleLayer: (moduleKey: "exit_offboarding", layer: "exit_dues" | "exit_pdf") => any;
   hasModuleLayer: (user: any, moduleKey: "exit_offboarding", layer: string) => Promise<boolean>;
   queryDB: (sql: string, params?: any[]) => Promise<any>;
   getAdminModules: (userId: number) => Promise<string[]>;
@@ -271,6 +271,7 @@ export async function collectExitDues(queryDB: (sql: string, params?: any[]) => 
 
 export function registerExitOffboardingRoutes(app: Express, deps: ExitOffboardingRouteDeps) {
   const { authenticateToken, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer, queryDB, getAdminModules, createAlert } = deps;
+  const pdfGate = [authenticateToken, requireAdmin, requireModule("exit_offboarding"), requireModuleLayer("exit_offboarding", "exit_pdf")];
   const duesGate = [authenticateToken, requireAdmin, requireModule("exit_offboarding"), requireModuleLayer("exit_offboarding", "exit_dues")];
   const settlementOf = async (exitId: number) => {
     const rows: any[] = await queryDB("SELECT * FROM final_settlements");
@@ -642,7 +643,78 @@ export function registerExitOffboardingRoutes(app: Express, deps: ExitOffboardin
   // Whether this account sees the dues card (the page asks once).
   app.get("/api/exit-dues/access", authenticateToken, requireAdmin, requireModule("exit_offboarding"), async (req: any, res) => {
     try {
-      res.json({ exit_dues: await hasModuleLayer(req.user, "exit_offboarding", "exit_dues") });
+      res.json({
+        exit_dues: await hasModuleLayer(req.user, "exit_offboarding", "exit_dues"),
+        exit_pdf: await hasModuleLayer(req.user, "exit_offboarding", "exit_pdf")
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+
+  // ---------- Clearance Certificate / Settlement Sheet PDFs (layer "exit_pdf") ----------
+
+  // Everything the two PDFs print, in one read: the person, the exit, who
+  // cleared each department and when, and the settlement with its added dues.
+  app.get("/api/exit-requests/:id/documents", ...pdfGate, async (req: any, res) => {
+    try {
+      const exitId = Number(req.params.id);
+      const exitRows: any = await queryDB("SELECT * FROM exit_requests WHERE id = ?", [exitId]);
+      if (exitRows.length === 0) return res.status(404).json({ error: "Exit request not found." });
+      const ex = exitRows[0];
+      const [users, emps, items, settlements]: [any, any, any, any] = await Promise.all([
+        queryDB("SELECT id, name FROM users"),
+        queryDB("SELECT * FROM all_employees"),
+        queryDB("SELECT * FROM exit_clearance_items WHERE exit_id = ?", [exitId]),
+        queryDB("SELECT * FROM final_settlements WHERE exit_id = ?", [exitId])
+      ]);
+      const nameOf = (id: any) => (id != null ? (users.find((u: any) => Number(u.id) === Number(id)) as any)?.name || null : null);
+      const emp = emps.find((e: any) => Number(e.user_id) === Number(ex.user_id));
+      const s = settlements[0];
+      res.json({
+        employee: {
+          name: emp?.name || nameOf(ex.user_id),
+          employee_code: emp?.employee_id || null,
+          designation: emp?.designation || null,
+          department: emp?.department || null,
+          joining_date: emp?.joining_date || null
+        },
+        exit: {
+          id: exitId,
+          exit_type: ex.exit_type,
+          reason: ex.reason,
+          notice_date: ex.notice_date,
+          last_working_day: ex.last_working_day,
+          status: ex.status
+        },
+        clearance: items
+          .sort((a: any, b: any) => Number(a.id) - Number(b.id))
+          .map((it: any) => ({
+            department: it.department,
+            item_label: it.item_label,
+            is_cleared: !!Number(it.is_cleared),
+            cleared_by: nameOf(it.cleared_by),
+            cleared_at: it.cleared_at,
+            remarks: it.remarks
+          })),
+        settlement: s
+          ? {
+              unused_leave_days: Number(s.unused_leave_days),
+              unused_leave_encashment: Number(s.unused_leave_encashment),
+              gratuity_amount: Number(s.gratuity_amount),
+              outstanding_dues: Number(s.outstanding_dues),
+              other_additions: Number(s.other_additions),
+              other_deductions: Number(s.other_deductions),
+              net_payable: Number(s.net_payable),
+              notes: s.notes,
+              status: s.status,
+              paid_at: s.paid_at,
+              prepared_by: nameOf(s.prepared_by),
+              added_dues: parseAddedDues(s.dues_json)
+            }
+          : null
+      });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
