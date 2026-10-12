@@ -141,15 +141,15 @@ export const IMPORT_KINDS: Kind[] = [
     key: "movement_claims",
     title: "Movement Claim History",
     description:
-      "Past Movement Claims (check in / check out for official movement). The \"Multiple Check In/Out Details Report\" sheet can be uploaded as it is — each Check In is paired with the same person's next Check Out.",
+      "Past Movement Claims (check in / check out for official movement). The \"Multiple Check In/Out Details Report\" sheet can be uploaded as it is — each Check In is paired with the same person's next Check Out. A row with only a Check In, only a Check Out, or neither is still imported (the remarks say which was missing) — only a row with no date, or whose person has no login, is refused.",
     module: "claims",
     fields: [
       EMP,
       { key: "date", label: "Date", type: "date", required: true, example: "2026-08-12" },
-      { key: "check_in", label: "Check In", type: "time", required: true, aliases: ["in time", "start time"], example: "10:15" },
+      { key: "check_in", label: "Check In", type: "time", aliases: ["in time", "start time"], example: "10:15" },
       { key: "check_out", label: "Check Out", type: "time", aliases: ["out time", "end time"], example: "13:40" },
       { key: "check_out_date", label: "Check Out Date", type: "date", aliases: ["out date"], note: "Only when the Check Out was on a later day" },
-      { key: "purpose", label: "Purpose", type: "text", required: true, aliases: ["visited company"], example: "Site visit - Mirpur" },
+      { key: "purpose", label: "Purpose", type: "text", aliases: ["visited company"], example: "Site visit - Mirpur", note: "Empty = \"Movement\"" },
       { key: "distance_km", label: "Distance (km)", type: "number", aliases: ["distance", "km"], example: 12.5 },
       { key: "remarks", label: "Remarks", type: "text", aliases: ["check in remarks"] },
       { key: "check_in_place", label: "Check In Address", type: "text", aliases: ["check in place"] },
@@ -648,12 +648,16 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
         const { emp, userId } = loginOf(v, ctx);
         const date = dateOf(v, "date", "Date") as string;
         const tout = timeOf(v, "check_out", "Check Out");
-        const tin = timeOf(v, "check_in", "Check In") || fail(tout ? "Only a Check Out in the file — there's no Check In before it." : "Check In is empty.");
+        const tin = timeOf(v, "check_in", "Check In");
+        // A row is never dropped for a missing time: with only a Check Out,
+        // the visit is placed at that time; with neither, at the start of the
+        // day. The remarks say which time the file didn't have.
+        const missing = !tin && !tout ? "No Check In / Check Out time in the file" : !tin ? "Only a Check Out in the file (no Check In)" : "";
         const outDate = (dateOf(v, "check_out_date", "Check Out Date", false) as string | null) || date;
-        if (tout && `${outDate} ${tout}` < `${date} ${tin}`) fail("Check Out is before Check In.");
+        if (tin && tout && `${outDate} ${tout}` < `${date} ${tin}`) fail("Check Out is before Check In.");
         const dist = str(v.distance_km) ? parseNumber(v.distance_km) : null;
         if (dist !== null && (!Number.isFinite(dist) || dist < 0)) fail(`Distance "${str(v.distance_km)}" isn't a number.`);
-        const inAt = `${date} ${tin}`;
+        const inAt = tin ? `${date} ${tin}` : tout ? `${outDate} ${tout}` : `${date} 00:00:00`;
         const who = `${emp.name} (${str(v.employee_id)})`;
         if (prep.existing.some((c: any) => Number(c.user_id) === userId && String(c.check_in_at).slice(0, 16) === inAt.slice(0, 16)))
           return { status: "skip", message: `Already has a claim checked in at ${inAt.slice(0, 16)}.`, employee: who };
@@ -668,10 +672,10 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
              VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               userId,
-              str(v.purpose).slice(0, 255),
+              str(v.purpose).slice(0, 255) || "Movement",
               "completed",
               inAt,
-              note(str(v.remarks), str(v.check_in_place)) || "Imported from Excel",
+              [note(str(v.remarks), str(v.check_in_place)) || "Imported from Excel", missing].filter(Boolean).join("\n"),
               tout ? `${outDate} ${tout}` : null,
               tout ? note(str(v.check_out_remarks), str(v.check_out_place)) : null,
               dist
@@ -681,7 +685,7 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
         prep.existing.push({ user_id: userId, check_in_at: inAt });
         return {
           status: "create",
-          message: tout ? `${tin.slice(0, 5)} – ${tout.slice(0, 5)}${outDate !== date ? ` (${outDate})` : ""}` : `Checked in ${tin.slice(0, 5)} — no Check Out in the file`,
+          message: tin && tout ? `${tin.slice(0, 5)} – ${tout.slice(0, 5)}${outDate !== date ? ` (${outDate})` : ""}` : tin ? `Checked in ${tin.slice(0, 5)} — no Check Out in the file` : `${missing}${tout ? ` — Check Out ${tout.slice(0, 5)}` : ""}`,
           employee: who
         };
       }
