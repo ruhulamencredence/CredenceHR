@@ -682,7 +682,8 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
             ]
           );
         }
-        prep.existing.push({ user_id: userId, check_in_at: inAt });
+        // Not added to prep.existing: "Already has a claim" only looks at claims saved before this
+        // upload, so two different lines of one file at the same minute are both kept.
         return {
           status: "create",
           message: tin && tout ? `${tin.slice(0, 5)} – ${tout.slice(0, 5)}${outDate !== date ? ` (${outDate})` : ""}` : tin ? `Checked in ${tin.slice(0, 5)} — no Check Out in the file` : `${missing}${tout ? ` — Check Out ${tout.slice(0, 5)}` : ""}`,
