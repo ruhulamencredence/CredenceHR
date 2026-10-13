@@ -179,7 +179,6 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [suggestions, setSuggestions] = useState<string[]>([]);
-  const [engine, setEngine] = useState<'local' | 'gemini' | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -199,7 +198,6 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
       .then((d) => {
         if (cancelled || !d) return;
         setSuggestions(d.suggestions || []);
-        setEngine(d.engine || 'local');
       })
       .catch(() => {});
     setTimeout(() => inputRef.current?.focus(), 150);
@@ -304,9 +302,6 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
               </span>
               <div className="min-w-0 flex-1">
                 <h3 className="text-base font-bold text-slate-900 leading-tight">Credence Assistant</h3>
-                <p className="text-[11px] text-slate-500 truncate">
-                  {engine === 'gemini' ? 'AI (Gemini) · ' : ''}আপনার ছুটি, হাজিরা, claim আর app-এর সাহায্য
-                </p>
               </div>
               {msgs.length > 0 && (
                 <button
