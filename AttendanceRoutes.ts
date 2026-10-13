@@ -656,7 +656,44 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
   // Attendance tab — every User, every Project, filterable by project/user/date.
   app.get("/api/attendance", authenticateToken, requireAdmin, requireModule("attendance"), async (req: any, res) => {
     try {
-      const rows = await queryDB("SELECT * FROM attendance");
+      // ?page=&limit= : one page, filtered in SQL — { rows, total, page, limit }. (The unpaged
+      // call below stops at the newest 1,000 records, so it can't show anything older.)
+      const paged = req.query.limit !== undefined;
+      let rows: any[];
+      let pagedTotal = 0;
+      let pageNo = 1;
+      let pageLimit = 50;
+      if (paged) {
+        pageLimit = Math.min(200, Math.max(1, Math.floor(Number(req.query.limit)) || 50));
+        pageNo = Math.max(1, Math.floor(Number(req.query.page)) || 1);
+        const where: string[] = [];
+        const params: any[] = [];
+        if (req.query.project_id) {
+          where.push("a.project_id = ?");
+          params.push(Number(req.query.project_id));
+        }
+        if (req.query.user_id) {
+          where.push("a.user_id = ?");
+          params.push(Number(req.query.user_id));
+        }
+        if (/^\d{4}-\d{2}-\d{2}$/.test(String(req.query.from || ""))) {
+          where.push("a.attendance_date >= ?");
+          params.push(String(req.query.from));
+        }
+        if (/^\d{4}-\d{2}-\d{2}$/.test(String(req.query.to || ""))) {
+          where.push("a.attendance_date <= ?");
+          params.push(String(req.query.to));
+        }
+        const w = where.length ? `WHERE ${where.join(" AND ")}` : "";
+        const [totalRows, pageRows]: any[] = await Promise.all([
+          queryDB(`SELECT COUNT(*) AS n FROM attendance a ${w}`, params),
+          queryDB(`SELECT a.* FROM attendance a ${w} ORDER BY a.attendance_date DESC, a.id DESC LIMIT ? OFFSET ?`, [...params, pageLimit, (pageNo - 1) * pageLimit])
+        ]);
+        pagedTotal = Number(totalRows[0]?.n || 0);
+        rows = pageRows;
+      } else {
+        rows = await queryDB("SELECT * FROM attendance");
+      }
       const projects = await queryDB("SELECT * FROM projects");
       const users = await queryDB("SELECT id, name, email, role, created_at FROM users");
       const projectMap = new Map<number, any>(projects.map((p: any) => [p.id, p]));
@@ -677,25 +714,24 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
 
       filtered.sort((a: any, b: any) => (a.attendance_date < b.attendance_date ? 1 : a.attendance_date > b.attendance_date ? -1 : b.id - a.id));
 
-      const withApprovals = await attachApprovalStatuses("attendance", filtered.slice(0, 1000));
+      const withApprovals = await attachApprovalStatuses("attendance", paged ? filtered : filtered.slice(0, 1000));
       // Head Office vs Project Side of the check-in site — the type of the
       // Branch linked to that Project (branches.project_id), if any.
       const branchTypeByProject = new Map<number, string>(
         (await queryDB("SELECT * FROM branches")).filter((b: any) => b.project_id).map((b: any) => [Number(b.project_id), b.branch_type])
       );
-      res.json(
-        withApprovals.map((r: any) => {
-          const proj = projectMap.get(r.project_id);
-          const u = userMap.get(r.user_id);
-          return {
-            ...r,
-            project_name: proj?.project_name || null,
-            project_office_type: branchTypeByProject.get(Number(r.project_id)) || null,
-            location_radius: proj?.location_radius ?? null,
-            user_name: u?.name || null
-          };
-        })
-      );
+      const out = withApprovals.map((r: any) => {
+        const proj = projectMap.get(r.project_id);
+        const u = userMap.get(r.user_id);
+        return {
+          ...r,
+          project_name: proj?.project_name || null,
+          project_office_type: branchTypeByProject.get(Number(r.project_id)) || null,
+          location_radius: proj?.location_radius ?? null,
+          user_name: u?.name || null
+        };
+      });
+      res.json(paged ? { rows: out, total: pagedTotal, page: pageNo, limit: pageLimit } : out);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

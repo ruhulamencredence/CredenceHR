@@ -145,6 +145,39 @@ export function registerMovementClaimRoutes(app: Express, deps: RegisterMovement
   // TA/DA-style reimbursement review.
   app.get("/api/claims", authenticateToken, requireAdmin, requireModule("claims"), async (req: any, res) => {
     try {
+      // ?page=&limit= : one page, filtered in SQL — { rows, total, page, limit }. (The unpaged
+      // call below stops at the newest 1,000 claims, so it can't show anything older.)
+      if (req.query.limit !== undefined) {
+        const limit = Math.min(200, Math.max(1, Math.floor(Number(req.query.limit)) || 50));
+        const page = Math.max(1, Math.floor(Number(req.query.page)) || 1);
+        const where: string[] = [];
+        const params: any[] = [];
+        if (req.query.user_id) {
+          where.push("c.user_id = ?");
+          params.push(Number(req.query.user_id));
+        }
+        if (req.query.status) {
+          where.push("c.status = ?");
+          params.push(String(req.query.status));
+        }
+        if (/^\d{4}-\d{2}-\d{2}$/.test(String(req.query.from || ""))) {
+          where.push("DATE(c.check_in_at) >= ?");
+          params.push(String(req.query.from));
+        }
+        if (/^\d{4}-\d{2}-\d{2}$/.test(String(req.query.to || ""))) {
+          where.push("DATE(c.check_in_at) <= ?");
+          params.push(String(req.query.to));
+        }
+        const w = where.length ? `WHERE ${where.join(" AND ")}` : "";
+        const [totalRows, pageRows]: any[] = await Promise.all([
+          queryDB(`SELECT COUNT(*) AS n FROM claims c ${w}`, params),
+          queryDB(
+            `SELECT c.*, u.name AS user_name FROM claims c LEFT JOIN users u ON u.id = c.user_id ${w} ORDER BY c.id DESC LIMIT ? OFFSET ?`,
+            [...params, limit, (page - 1) * limit]
+          )
+        ]);
+        return res.json({ rows: pageRows, total: Number(totalRows[0]?.n || 0), page, limit });
+      }
       const rows = await queryDB(
         "SELECT c.*, u.name AS user_name FROM claims c LEFT JOIN users u ON u.id = c.user_id ORDER BY c.id DESC"
       );

@@ -57,6 +57,7 @@ import { useStableCallback } from '../lib/useStableCallback';
 import { reverseGeocode } from '../lib/reverseGeocode';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
 import { confirmDialog } from '../lib/confirmDialog';
+import { PagerBar } from './PagerBar';
 import { ADMIN_TAB_KEYS, adminUrlEnabled, adminTabToPath, adminPathToTab } from '../lib/adminUrl';
 
 // Module Access modal (Admin Panel -> Users -> per-Admin/User "Module
@@ -1217,6 +1218,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       );
     });
   }, [users, userSearchText, userRoleFilter, userAccessFilter]);
+  // Only one page of the (filtered) accounts is drawn at a time.
+  const [userPage, setUserPage] = useState(1);
+  const [userPageSize, setUserPageSize] = useState(50);
+  useEffect(() => {
+    setUserPage(1);
+  }, [userSearchText, userRoleFilter, userAccessFilter]);
+  const pagedUsers = useMemo(
+    () => filteredUsers.slice((userPage - 1) * userPageSize, userPage * userPageSize),
+    [filteredUsers, userPage, userPageSize]
+  );
   const loadAccessTemplates = async () => {
     try {
       const res = await fetch(apiUrl('/api/access-templates'), { headers: { Authorization: `Bearer ${token}` } });
@@ -1402,28 +1413,45 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [attendanceUserFilter, setAttendanceUserFilter] = useState('');
   const [attendanceFromFilter, setAttendanceFromFilter] = useState('');
   const [attendanceToFilter, setAttendanceToFilter] = useState('');
+  // One page of the server's list at a time — every record is reachable, not only the newest 1,000.
+  const [attendancePage, setAttendancePage] = useState(1);
+  const [attendancePageSize, setAttendancePageSize] = useState(50);
+  const [attendanceTotal, setAttendanceTotal] = useState(0);
+  const attendanceReq = useRef(0);
 
   const fetchAttendance = async () => {
+    const req = ++attendanceReq.current;
     setLoadingAttendance(true);
     try {
-      const params = new URLSearchParams();
+      const params = new URLSearchParams({ page: String(attendancePage), limit: String(attendancePageSize) });
       if (attendanceProjectFilter) params.set('project_id', attendanceProjectFilter);
       if (attendanceUserFilter) params.set('user_id', attendanceUserFilter);
       if (attendanceFromFilter) params.set('from', attendanceFromFilter);
       if (attendanceToFilter) params.set('to', attendanceToFilter);
       const res = await fetch(apiUrl(`/api/attendance?${params.toString()}`), { headers: { Authorization: `Bearer ${token}` } });
-      if (res.ok) setAttendanceRecords(await res.json());
+      if (res.ok) {
+        const data = await res.json();
+        if (req !== attendanceReq.current) return; // a newer request is on its way
+        setAttendanceRecords(Array.isArray(data) ? data : data.rows || []);
+        setAttendanceTotal(Array.isArray(data) ? data.length : Number(data.total) || 0);
+      }
     } catch (err) {
       console.error('Failed to load attendance', err);
     } finally {
-      setLoadingAttendance(false);
+      if (req === attendanceReq.current) setLoadingAttendance(false);
     }
   };
 
   useEffect(() => {
     if (activeTab === 'attendance') fetchAttendance();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab]);
+  }, [activeTab, attendancePage, attendancePageSize]);
+
+  // Applying a filter always starts again from page 1.
+  const applyAttendanceFilters = () => {
+    if (attendancePage !== 1) setAttendancePage(1);
+    else fetchAttendance();
+  };
 
   // Monthly Attendance Report (separate Admin tab from the raw 'attendance'
   // log above, its own 'attendance_reports' module — can be granted to an
@@ -1474,6 +1502,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [reportDate, setReportDate] = useState(todayDateOnlyString());
   const [loadingDailyReport, setLoadingDailyReport] = useState(false);
   const [dailyReport, setDailyReport] = useState<any>(null);
+  // Month Wise grid: one page of employees at a time (the Excel / PDF downloads still cover everyone).
+  const [monthGridPage, setMonthGridPage] = useState(1);
+  const [monthGridPageSize, setMonthGridPageSize] = useState(50);
+  useEffect(() => {
+    setMonthGridPage(1);
+  }, [monthlyReport]);
 
   const fetchMonthlyReport = async () => {
     setLoadingMonthlyReport(true);
@@ -2005,8 +2039,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     'devices', 'active_users', 'companies'
   ]);
   const ALL_SHARED: SharedKey[] = ['projects', 'branches', 'mprNumbers', 'entries', 'users', 'budgets', 'permissions', 'departments'];
+  // The accounts list (the biggest one after PEPM entries) is for the tabs that pick or list
+  // accounts; every other tab leaves it unloaded until one of these is opened.
+  const USERS_LIST_TABS = new Set<string>([
+    'users', 'departments', 'attendance', 'attendance_reports', 'vehicle_management', 'claims', 'conveyance', 'disbursement', 'approvals'
+  ]);
   const sharedFor = (tab: string): SharedKey[] =>
-    SELF_CONTAINED_TABS.has(tab) ? [] : ALL_SHARED.filter((k) => k !== 'entries' || tab === 'reports');
+    SELF_CONTAINED_TABS.has(tab)
+      ? []
+      : ALL_SHARED.filter((k) => (k !== 'entries' || tab === 'reports') && (k !== 'users' || USERS_LIST_TABS.has(tab)));
 
   useEffect(() => {
     loadedShared.current = new Set();
@@ -4153,7 +4194,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
               </div>
               <button
                 type="button"
-                onClick={fetchAttendance}
+                onClick={applyAttendanceFilters}
                 className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium whitespace-nowrap transition-colors"
               >
                 <Filter className="w-3.5 h-3.5" /> Apply
@@ -4269,6 +4310,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   ))}
                 </tbody>
               </table>
+              <PagerBar
+                page={attendancePage}
+                pageSize={attendancePageSize}
+                total={attendanceTotal}
+                onPage={setAttendancePage}
+                onPageSize={(n) => { setAttendancePageSize(n); setAttendancePage(1); }}
+              />
             </div>
           )}
         </div>
@@ -4478,7 +4526,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-sm">
-                    {monthlyReport.users.map((u: any) => (
+                    {monthlyReport.users.slice((monthGridPage - 1) * monthGridPageSize, monthGridPage * monthGridPageSize).map((u: any) => (
                       <tr key={u.user_id} className="hover:bg-slate-50/80 transition-colors">
                         <td className="px-4 py-3 whitespace-nowrap font-semibold text-slate-900 text-xs sticky left-0 bg-white">{u.user_name}</td>
                         {u.days.map((d: any) => {
@@ -4544,6 +4592,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                     ))}
                   </tbody>
                 </table>
+                <PagerBar page={monthGridPage} pageSize={monthGridPageSize} total={monthlyReport.users.length} onPage={setMonthGridPage} onPageSize={(n) => { setMonthGridPageSize(n); setMonthGridPage(1); }} />
                 <div className="flex flex-wrap items-center gap-4 px-4 py-3 text-[10px] text-slate-500 border-t border-slate-100">
                   <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-emerald-500" /> Present — GPS (Remote Attendance)</span>
                   <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-sky-500" /> Present — ZKT (Office Attendance)</span>
@@ -6621,7 +6670,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-sm">
-                  {filteredUsers.map((u) => (
+                  {pagedUsers.map((u) => (
                     <tr
                       key={u.id}
                       onClick={() => setManagingUserId(u.id)}
@@ -6686,7 +6735,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
 
               {/* Phone: one card per user instead of a wide table. */}
               <div className="md:hidden divide-y divide-slate-100">
-                {filteredUsers.map((u) => (
+                {pagedUsers.map((u) => (
                   <div
                     key={u.id}
                     role="button"
@@ -6724,6 +6773,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   </div>
                 ))}
               </div>
+              <PagerBar page={userPage} pageSize={userPageSize} total={filteredUsers.length} onPage={setUserPage} onPageSize={(n) => { setUserPageSize(n); setUserPage(1); }} />
             </>
           )}
           </div>

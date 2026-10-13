@@ -13,6 +13,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Check, Plus, Search, Smartphone, Trash2, X } from 'lucide-react';
 import { useHrApi, Notice, btnGhost, btnPrimary } from './HrOpsShared';
 import { confirmDialog } from '../lib/confirmDialog';
+import { PagerBar } from './PagerBar';
 
 interface Phone {
   id: number;
@@ -82,6 +83,9 @@ export const DeviceAccess: React.FC<{ token: string }> = ({ token }) => {
   const [accounts, setAccounts] = useState<Account[] | null>(null);
   const [maxLimit, setMaxLimit] = useState(5);
   const [q, setQ] = useState('');
+  // Only one page of the accounts is drawn at a time.
+  const [pg, setPg] = useState(1);
+  const [pgSize, setPgSize] = useState(50);
   const [msg, setMsg] = useState<Msg>(null);
   const load = useCallback(() => {
     api
@@ -176,7 +180,10 @@ export const DeviceAccess: React.FC<{ token: string }> = ({ token }) => {
         <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
         <input
           value={q}
-          onChange={(e) => setQ(e.target.value)}
+          onChange={(e) => {
+            setQ(e.target.value);
+            setPg(1);
+          }}
           placeholder="Search account"
           className="w-full pl-7 pr-3 py-1.5 text-xs bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600"
         />
@@ -192,7 +199,7 @@ export const DeviceAccess: React.FC<{ token: string }> = ({ token }) => {
             </tr>
           </thead>
           <tbody>
-            {shown.map((a) => (
+            {shown.slice((pg - 1) * pgSize, pg * pgSize).map((a) => (
               <tr key={a.id} className="border-t border-slate-100 align-top">
                 <td className="px-3 py-2.5">
                   <div className="font-semibold text-slate-800">{a.name}</div>
@@ -245,6 +252,7 @@ export const DeviceAccess: React.FC<{ token: string }> = ({ token }) => {
             ))}
           </tbody>
         </table>
+        <PagerBar page={pg} pageSize={pgSize} total={shown.length} onPage={setPg} onPageSize={(n) => { setPgSize(n); setPg(1); }} />
       </div>
     </div>
   );
