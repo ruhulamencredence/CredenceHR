@@ -501,11 +501,13 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
   // Shared validation for POST/PUT below — throws with a message safe to
   // send straight back to the client.
   function validatePaymentAccountBody(body: any) {
-    const accountType = body?.account_type === "mfs" ? "mfs" : "bank";
-    const accountLabel = typeof body?.account_label === "string" ? body.account_label.trim().slice(0, 100) : "";
+    const accountType: "bank" | "mfs" | "cash" = body?.account_type === "mfs" ? "mfs" : body?.account_type === "cash" ? "cash" : "bank";
+    let accountLabel = typeof body?.account_label === "string" ? body.account_label.trim().slice(0, 100) : "";
+    // Cash has no account behind it — the label defaults, the number stays empty.
+    if (accountType === "cash" && !accountLabel) accountLabel = "Cash";
     if (!accountLabel) throw new Error(accountType === "mfs" ? "Give this MFS account a label (e.g. bKash 1)." : "Give this Bank account a label (e.g. Bank 1).");
-    const accountNumber = typeof body?.account_number === "string" ? body.account_number.trim().slice(0, 100) : "";
-    if (!accountNumber) throw new Error(accountType === "mfs" ? "Mobile/Wallet number is required." : "Account number is required.");
+    const accountNumber = accountType === "cash" ? "" : typeof body?.account_number === "string" ? body.account_number.trim().slice(0, 100) : "";
+    if (accountType !== "cash" && !accountNumber) throw new Error(accountType === "mfs" ? "Mobile/Wallet number is required." : "Account number is required.");
     const percentage = Number(body?.percentage);
     if (!Number.isFinite(percentage) || percentage <= 0 || percentage > 100) throw new Error("Percentage must be greater than 0 and at most 100.");
     return {

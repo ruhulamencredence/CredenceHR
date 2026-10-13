@@ -15,7 +15,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import * as XLSX from 'xlsx';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { FileSpreadsheet, Landmark, Printer, Smartphone } from 'lucide-react';
+import { Banknote, FileSpreadsheet, Landmark, Printer, Smartphone } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
 import { finalizePdfPageNumbers } from '../lib/pdfLetterhead';
@@ -29,7 +29,7 @@ interface SheetRow {
   designation: string | null;
   net_salary: number;
   status: string;
-  account_type: '' | 'Bank' | 'MFS';
+  account_type: '' | 'Bank' | 'MFS' | 'Cash';
   bank: string;
   branch: string;
   account_number: string;
@@ -38,7 +38,7 @@ interface SheetRow {
 
 interface Group {
   key: string;
-  kind: 'Bank' | 'MFS' | 'None';
+  kind: 'Bank' | 'MFS' | 'Cash' | 'None';
   name: string;
   title: string;
   rows: SheetRow[];
@@ -46,17 +46,17 @@ interface Group {
 }
 
 const tk = (n: number) => `৳${(Number(n) || 0).toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const KIND_ORDER = { Bank: 0, MFS: 1, None: 2 } as const;
+const KIND_ORDER = { Bank: 0, MFS: 1, Cash: 2, None: 3 } as const;
 
 function buildGroups(rows: SheetRow[]): Group[] {
   const map = new Map<string, Group>();
   for (const r of rows) {
     if (r.status === 'held') continue; // held salaries are not paid this run
-    const kind = r.account_type === 'MFS' ? 'MFS' : r.account_type === 'Bank' ? 'Bank' : 'None';
-    const name = kind === 'None' ? 'No Bank / MFS set up' : r.bank || (kind === 'MFS' ? 'MFS' : 'Bank');
+    const kind = r.account_type === 'MFS' ? 'MFS' : r.account_type === 'Bank' ? 'Bank' : r.account_type === 'Cash' ? 'Cash' : 'None';
+    const name = kind === 'None' ? 'No Bank / MFS / Cash set up' : kind === 'Cash' ? 'Cash' : r.bank || (kind === 'MFS' ? 'MFS' : 'Bank');
     const key = `${kind}|${name}`;
     if (!map.has(key)) {
-      map.set(key, { key, kind, name, title: kind === 'None' ? name : `${kind === 'MFS' ? 'MFS' : 'Bank'} — ${name}`, rows: [], total: 0 });
+      map.set(key, { key, kind, name, title: kind === 'None' ? name : kind === 'Cash' ? 'Cash payment' : `${kind === 'MFS' ? 'MFS' : 'Bank'} — ${name}`, rows: [], total: 0 });
     }
     const g = map.get(key)!;
     g.rows.push(r);
@@ -150,8 +150,8 @@ export const PayrollPaymentVouchers: React.FC<{ token: string; month: string; pa
         ]);
         autoTable(doc, {
           ...standardTable(y0 + 2),
-          head: [['SL', 'ID', 'Name', 'Department', ...(g.kind === 'Bank' ? ['Branch'] : []), g.kind === 'MFS' ? 'Wallet No' : 'Account No', 'Amount']],
-          body: g.rows.map((r, k) => [String(k + 1), r.employee_code || '', r.employee_name, r.department || '', ...(g.kind === 'Bank' ? [r.branch || ''] : []), r.account_number || '-', pdfMoney(r.amount)]),
+          head: [['SL', 'ID', 'Name', 'Department', ...(g.kind === 'Bank' ? ['Branch'] : []), g.kind === 'MFS' ? 'Wallet No' : g.kind === 'Cash' ? 'Signature' : 'Account No', 'Amount']],
+          body: g.rows.map((r, k) => [String(k + 1), r.employee_code || '', r.employee_name, r.department || '', ...(g.kind === 'Bank' ? [r.branch || ''] : []), g.kind === 'Cash' ? '' : r.account_number || '-', pdfMoney(r.amount)]),
           foot: [[{ content: `Total (${g.rows.length})`, colSpan: g.kind === 'Bank' ? 6 : 5, styles: left }, pdfMoney(g.total)]],
           columnStyles: { 0: { cellWidth: 9, halign: 'center' }, [g.kind === 'Bank' ? 6 : 5]: { cellWidth: 26, halign: 'right' } }
         });
@@ -184,7 +184,7 @@ export const PayrollPaymentVouchers: React.FC<{ token: string; month: string; pa
     <div className="bg-white rounded-2xl border border-slate-200 p-4">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <div className="text-xs font-bold text-slate-700">Payment vouchers — Bank &amp; MFS wise</div>
+          <div className="text-xs font-bold text-slate-700">Payment vouchers — Bank, MFS &amp; Cash wise</div>
           <p className="text-[11px] text-slate-500 mt-0.5 max-w-xl">
             This software does not send the money. Take each voucher to that bank or MFS, pay from its own app, then press <b>Pay (Accounts)</b> here to confirm
             {paid ? ' (this month is already confirmed paid).' : '.'} Salaries on hold are left out.
@@ -214,8 +214,8 @@ export const PayrollPaymentVouchers: React.FC<{ token: string; month: string; pa
             {groups.map((g) => (
               <div key={g.key} className="rounded-xl border border-slate-200 p-3">
                 <div className="flex items-start gap-2">
-                  <span className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${g.kind === 'MFS' ? 'bg-pink-50 text-pink-600' : g.kind === 'Bank' ? 'bg-blue-50 text-blue-600' : 'bg-slate-100 text-slate-500'}`}>
-                    {g.kind === 'MFS' ? <Smartphone className="w-4 h-4" /> : <Landmark className="w-4 h-4" />}
+                  <span className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${g.kind === 'MFS' ? 'bg-pink-50 text-pink-600' : g.kind === 'Cash' ? 'bg-emerald-50 text-emerald-600' : g.kind === 'Bank' ? 'bg-blue-50 text-blue-600' : 'bg-slate-100 text-slate-500'}`}>
+                    {g.kind === 'MFS' ? <Smartphone className="w-4 h-4" /> : g.kind === 'Cash' ? <Banknote className="w-4 h-4" /> : <Landmark className="w-4 h-4" />}
                   </span>
                   <div className="min-w-0 flex-1">
                     <div className="text-xs font-semibold text-slate-800 truncate" title={g.title}>
@@ -224,6 +224,7 @@ export const PayrollPaymentVouchers: React.FC<{ token: string; month: string; pa
                     <div className="text-[11px] text-slate-500">
                       {g.rows.length} employee{g.rows.length === 1 ? '' : 's'} · <b className="text-slate-800">{tk(g.total)}</b>
                     </div>
+                    {g.kind === 'Cash' && <div className="text-[10px] text-emerald-700 mt-0.5">Paid in cash — the voucher has a signature column for each employee.</div>}
                     {g.kind === 'None' && <div className="text-[10px] text-amber-700 mt-0.5">No account set in Employees → Payment; paid by the single method chosen in Run Payroll.</div>}
                   </div>
                 </div>

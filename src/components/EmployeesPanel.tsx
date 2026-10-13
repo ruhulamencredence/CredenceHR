@@ -204,7 +204,7 @@ const emptySupervisorForm: SupervisorFormState = { supervisor_id: '', effective_
 // /api/employees/:id/payment-accounts. bank_name/branch_name apply to
 // account_type 'bank'; provider applies to 'mfs' (bKash/Nagad/Rocket/…).
 interface PaymentAccountFormState {
-  account_type: 'bank' | 'mfs';
+  account_type: 'bank' | 'mfs' | 'cash';
   account_label: string;
   bank_name: string;
   branch_name: string;
@@ -696,7 +696,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
     }
   };
 
-  // --- Payment tab (Bank/MFS payroll disbursement split) ---
+  // --- Payment tab (Bank/MFS/Cash payroll disbursement split) ---
 
   const fetchPaymentAccounts = useCallback(async (employeeId: number) => {
     setLoadingPaymentAccounts(true);
@@ -741,9 +741,11 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
     if (!editingId) return;
     setPaymentAccountError(null);
     if (!paymentAccountForm.account_label.trim()) {
-      return setPaymentAccountError(paymentAccountForm.account_type === 'mfs' ? 'Give this MFS account a label (e.g. bKash 1).' : 'Give this Bank account a label (e.g. Bank 1).');
+      if (paymentAccountForm.account_type !== 'cash') {
+        return setPaymentAccountError(paymentAccountForm.account_type === 'mfs' ? 'Give this MFS account a label (e.g. bKash 1).' : 'Give this Bank account a label (e.g. Bank 1).');
+      }
     }
-    if (!paymentAccountForm.account_number.trim()) {
+    if (paymentAccountForm.account_type !== 'cash' && !paymentAccountForm.account_number.trim()) {
       return setPaymentAccountError(paymentAccountForm.account_type === 'mfs' ? 'Mobile/Wallet number is required.' : 'Account number is required.');
     }
     const pct = Number(paymentAccountForm.percentage);
@@ -760,7 +762,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
         headers: { 'Content-Type': 'application/json', ...authHeaders },
         body: JSON.stringify({
           account_type: paymentAccountForm.account_type,
-          account_label: paymentAccountForm.account_label.trim(),
+          account_label: paymentAccountForm.account_label.trim() || (paymentAccountForm.account_type === 'cash' ? 'Cash' : ''),
           bank_name: paymentAccountForm.bank_name.trim() || null,
           branch_name: paymentAccountForm.branch_name.trim() || null,
           provider: paymentAccountForm.provider.trim() || null,
@@ -1978,29 +1980,29 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                 <div className="space-y-4">
                   <div className="rounded-xl border border-slate-200 p-3.5 space-y-3">
                     <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
-                      <Landmark className="w-3.5 h-3.5 text-slate-400" /> {editingPaymentAccountRowId ? 'Edit Account' : 'Add Bank / MFS Account'}
+                      <Landmark className="w-3.5 h-3.5 text-slate-400" /> {editingPaymentAccountRowId ? 'Edit Account' : 'Add Bank / MFS / Cash'}
                     </p>
                     <div className="flex items-center gap-4">
-                      {(['bank', 'mfs'] as const).map((t) => (
+                      {(['bank', 'mfs', 'cash'] as const).map((t) => (
                         <label key={t} className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer">
                           <input
                             type="radio"
                             checked={paymentAccountForm.account_type === t}
-                            onChange={() => setPaymentAccountForm((f) => ({ ...f, account_type: t, provider: t === 'mfs' ? f.provider : '', bank_name: t === 'bank' ? f.bank_name : '' }))}
+                            onChange={() => setPaymentAccountForm((f) => ({ ...f, account_type: t, provider: t === 'mfs' ? f.provider : '', bank_name: t === 'bank' ? f.bank_name : '', account_number: t === 'cash' ? '' : f.account_number }))}
                             className="w-3.5 h-3.5 text-blue-600 focus:ring-blue-600 cursor-pointer"
                           />
-                          {t === 'bank' ? 'Bank' : 'MFS (bKash/Nagad/Rocket)'}
+                          {t === 'bank' ? 'Bank' : t === 'mfs' ? 'MFS (bKash/Nagad/Rocket)' : 'Cash'}
                         </label>
                       ))}
                     </div>
                     <div className="grid sm:grid-cols-2 gap-3">
                       <div>
-                        <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">Label *</label>
+                        <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">Label{paymentAccountForm.account_type === 'cash' ? '' : ' *'}</label>
                         <input
                           type="text"
                           value={paymentAccountForm.account_label}
                           onChange={(e) => setPaymentAccountForm((f) => ({ ...f, account_label: e.target.value }))}
-                          placeholder={paymentAccountForm.account_type === 'mfs' ? 'e.g. bKash 1' : 'e.g. Bank 1'}
+                          placeholder={paymentAccountForm.account_type === 'mfs' ? 'e.g. bKash 1' : paymentAccountForm.account_type === 'cash' ? 'Cash (optional)' : 'e.g. Bank 1'}
                           className="block w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
                         />
                       </div>
@@ -2041,6 +2043,8 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                           />
                         </div>
                       </div>
+                    ) : paymentAccountForm.account_type === 'cash' ? (
+                      <p className="text-[11px] text-emerald-700 bg-emerald-50 rounded-lg px-3 py-2">Paid in cash — no account number needed. The payment voucher gets a signature column for this part of the salary.</p>
                     ) : (
                       <div>
                         <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">Provider</label>
@@ -2056,6 +2060,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                         </select>
                       </div>
                     )}
+                    {paymentAccountForm.account_type !== 'cash' && (
                     <div>
                       <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">
                         {paymentAccountForm.account_type === 'mfs' ? 'Mobile / Wallet Number *' : 'Account Number *'}
@@ -2068,6 +2073,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                         className="block w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
                       />
                     </div>
+                    )}
                     {paymentAccountError && <p className="text-xs text-rose-600">{paymentAccountError}</p>}
                     <p className="text-[11px] text-slate-500">
                       Active accounts so far total <span className="font-semibold">{activePaymentAccountsTotal}%</span>
@@ -2099,7 +2105,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                       </div>
                     ) : paymentAccounts.length === 0 ? (
                       <p className="text-xs text-slate-400 text-center py-8">
-                        No Bank/MFS account set up yet — Payroll will use the Run Payroll wizard's single Payment Method for this employee.
+                        No Bank/MFS/Cash account set up yet — Payroll will use the Run Payroll wizard's single Payment Method for this employee.
                       </p>
                     ) : (
                       <table className="w-full text-xs">
@@ -2118,11 +2124,11 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                               <td className="px-3 py-2.5 font-semibold text-slate-900">
                                 {a.account_label}
                                 <span className="ml-1.5 inline-flex items-center text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500">
-                                  {a.account_type === 'mfs' ? (a.provider || 'MFS') : 'Bank'}
+                                  {a.account_type === 'mfs' ? (a.provider || 'MFS') : a.account_type === 'cash' ? 'Cash' : 'Bank'}
                                 </span>
                               </td>
                               <td className="px-3 py-2.5 text-slate-500">
-                                {a.account_type === 'bank' ? [a.bank_name, a.branch_name].filter(Boolean).join(' — ') || '—' : a.provider || '—'}
+                                {a.account_type === 'bank' ? [a.bank_name, a.branch_name].filter(Boolean).join(' — ') || '—' : a.account_type === 'cash' ? 'Cash in hand' : a.provider || '—'}
                                 <span className="ml-1.5 font-mono text-slate-400">{a.account_number}</span>
                               </td>
                               <td className="px-3 py-2.5 text-right font-semibold text-slate-700">{a.percentage}%</td>
