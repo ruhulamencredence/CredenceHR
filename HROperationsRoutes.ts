@@ -150,6 +150,8 @@ const DEFAULT_ONBOARDING_TASKS: { task_key: string; label: string; category: str
   { task_key: "login_account", label: "App login account created", category: "System & Access", due_days: 0 },
   { task_key: "device_pin", label: "Attendance device PIN set", category: "System & Access", due_days: 0 },
   { task_key: "id_card", label: "ID card issued", category: "System & Access", due_days: 7 },
+  { task_key: "business_card", label: "Business card issued", category: "System & Access", due_days: 7 },
+  { task_key: "sim", label: "Office SIM issued", category: "System & Access", due_days: 3 },
   { task_key: "supervisor", label: "Supervisor assigned", category: "Work Setup", due_days: 0 },
   { task_key: "asset_handover", label: "Office assets handed over", category: "Work Setup", due_days: 3 },
   { task_key: "orientation", label: "Orientation / induction done", category: "Work Setup", due_days: 7 },
@@ -559,6 +561,28 @@ export async function ensureHROperationsSchema(dbPool: any): Promise<void> {
           [t.task_key, t.label, t.category, t.due_days, ++i]
         );
       }
+    }
+    // Checklists made before Business card / Office SIM were defaults get them once per
+    // company (a marker in hr_ops_settings keeps a later removal by HR from being undone).
+    try {
+      const [cos]: any = await dbPool.query("SELECT DISTINCT company_id FROM hr_onboarding_tasks");
+      for (const co of cos || []) {
+        const cid = Number(co.company_id);
+        const [mark]: any = await dbPool.query("SELECT id FROM hr_ops_settings WHERE company_id = ? AND setting_key = 'onboarding_defaults_v2'", [cid]);
+        if (mark.length) continue;
+        const [have]: any = await dbPool.query("SELECT task_key, sort_order FROM hr_onboarding_tasks WHERE company_id = ?", [cid]);
+        let order = Math.max(0, ...have.map((h: any) => Number(h.sort_order) || 0));
+        for (const t of DEFAULT_ONBOARDING_TASKS.filter((d) => d.task_key === "business_card" || d.task_key === "sim")) {
+          if (have.some((h: any) => h.task_key === t.task_key)) continue;
+          await dbPool.query(
+            "INSERT INTO hr_onboarding_tasks (company_id, task_key, label, category, due_days, sort_order, is_active) VALUES (?, ?, ?, ?, ?, ?, 1)",
+            [cid, t.task_key, t.label, t.category, t.due_days, ++order]
+          );
+        }
+        await dbPool.query("INSERT INTO hr_ops_settings (company_id, setting_key, setting_value) VALUES (?, 'onboarding_defaults_v2', '1')", [cid]);
+      }
+    } catch {
+      // company_id not there yet on a brand-new database — the plain seed above already has them.
     }
   } catch (err: any) {
     console.warn("⚠️ Could not seed HR Operations defaults: " + err.message);
@@ -2299,14 +2323,16 @@ export function registerHROperationsRoutes(app: Express, deps: HROperationsRoute
 
   // Ticks items whose fact already exists elsewhere in the app.
   async function autoDetect(employeeId: number, items: any[]) {
-    const [emps, supervisors, letters, accounts, services, assignments] = await Promise.all([
+    const [emps, supervisors, letters, accounts, services, assignments, sims] = await Promise.all([
       queryDB("SELECT * FROM all_employees"),
       queryDB("SELECT * FROM employee_supervisors").catch(() => []),
       queryDB("SELECT * FROM hr_letters"),
       queryDB("SELECT * FROM employee_payment_accounts").catch(() => []),
       queryDB("SELECT * FROM hr_employee_service"),
-      queryDB("SELECT * FROM asset_assignments").catch(() => [])
+      queryDB("SELECT * FROM asset_assignments").catch(() => []),
+      queryDB("SELECT employee_id, phone_number, operator, status FROM mobile_sims WHERE employee_id = ?", [employeeId]).catch(() => [])
     ]);
+    const sim = (sims || []).find((x: any) => Number(x.employee_id) === employeeId && String(x.status || "active") === "active");
     const e = emps.find((x: any) => Number(x.id) === employeeId);
     if (!e) return;
     const svc = services.find((s: any) => Number(s.employee_id) === employeeId);
@@ -2320,6 +2346,7 @@ export function registerHROperationsRoutes(app: Express, deps: HROperationsRoute
       device_pin: e.zk_device_pin ? `PIN ${e.zk_device_pin}` : null,
       supervisor: supervisors.some((s: any) => Number(s.employee_id) === employeeId && Number(s.is_direct) === 1) ? "Direct supervisor set" : null,
       probation_set: svc?.probation_end_date ? `Until ${toDate(svc.probation_end_date)}` : null,
+      sim: sim ? `${sim.operator || "SIM"} ${sim.phone_number}` : null,
       asset_handover: e.user_id && assignments.some((a: any) => Number(a.user_id ?? a.assigned_to) === Number(e.user_id)) ? "Asset assigned" : null
     };
     for (const it of items) {
@@ -2335,7 +2362,10 @@ export function registerHROperationsRoutes(app: Express, deps: HROperationsRoute
 
   app.get("/api/hr-ops/onboarding", ...gate, async (_req: any, res: any) => {
     try {
-      const [emps, items] = await Promise.all([queryDB("SELECT * FROM all_employees"), queryDB("SELECT id, employee_id, status, due_date FROM hr_onboarding_items")]);
+      const [emps, items] = await Promise.all([
+        queryDB("SELECT * FROM all_employees"),
+        queryDB("SELECT id, employee_id, task_key, label, status, due_date FROM hr_onboarding_items")
+      ]);
       const today = todayInDhaka();
       const since = addDays(today, -120);
       const out = emps
@@ -2353,7 +2383,11 @@ export function registerHROperationsRoutes(app: Express, deps: HROperationsRoute
             started: mine.length > 0,
             total: mine.length,
             done,
-            overdue: mine.filter((i: any) => i.status === "pending" && i.due_date && toDate(i.due_date)! < today).length
+            overdue: mine.filter((i: any) => i.status === "pending" && i.due_date && toDate(i.due_date)! < today).length,
+            // What is still open, item by item — for the summary and "who still needs X".
+            pending: mine
+              .filter((i: any) => i.status === "pending")
+              .map((i: any) => ({ task_key: i.task_key, label: i.label, overdue: !!(i.due_date && toDate(i.due_date)! < today) }))
           };
         })
         .sort((a: any, b: any) => (b.joining_date || "").localeCompare(a.joining_date || ""));
