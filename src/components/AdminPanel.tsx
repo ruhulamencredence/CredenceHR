@@ -703,6 +703,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [serviceBookAccessEnabled, setServiceBookAccessEnabled] = useState(false);
   const [loanRequestAccessEnabled, setLoanRequestAccessEnabled] = useState(false);
   const [aiAssistantEnabled, setAiAssistantEnabled] = useState(true);
+  const [assistantSupportEnabled, setAssistantSupportEnabled] = useState(false);
   const [groupDashboardEnabled, setGroupDashboardEnabled] = useState(false);
   const [savingModules, setSavingModules] = useState(false);
 
@@ -731,6 +732,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     setServiceBookAccessEnabled(!!u.can_view_service_book);
     setLoanRequestAccessEnabled(!!u.can_view_loan_request);
     setAiAssistantEnabled(u.can_use_ai_assistant !== false);
+    setAssistantSupportEnabled(!!u.can_handle_assistant_support);
     setGroupDashboardEnabled(!!u.can_view_group_dashboard);
     // Permission layers — one Set per module in PERMISSION_LAYER_MODULES.
     // Explicit saved rows win; a module this account already has granted
@@ -1165,6 +1167,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         });
         const aiData = await aiRes.json();
         if (!aiRes.ok) throw new Error(aiData.error || 'Failed to update AI Assistant access');
+      }
+
+      if (assistantSupportEnabled !== !!managingModulesFor.can_handle_assistant_support) {
+        const asRes = await fetch(apiUrl(`/api/users/${managingModulesFor.id}/assistant-support-access`), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ can_handle_assistant_support: assistantSupportEnabled })
+        });
+        const asData = await asRes.json();
+        if (!asRes.ok) throw new Error(asData.error || 'Failed to update Assistant live support access');
       }
 
       if (callsAccessEnabled !== !!managingModulesFor.can_use_calls) {
@@ -7958,6 +7970,30 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   <span
                     className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
                       aiAssistantEnabled ? 'translate-x-[18px]' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </label>
+              <label className="flex items-center justify-between gap-3 p-3.5 mb-3 bg-violet-50 border border-violet-200 rounded-xl cursor-pointer">
+                <span>
+                  <span className="text-sm font-semibold text-slate-900 block">Assistant live support</span>
+                  <span className="text-[11px] text-slate-500">
+                    Answers people who ask the Assistant for a human (live chat inside the Assistant), and can receive
+                    chats transferred by a Superadmin or another agent. Off by default.
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setAssistantSupportEnabled((v) => !v)}
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${
+                    assistantSupportEnabled ? 'bg-emerald-500' : 'bg-slate-300'
+                  }`}
+                  title={assistantSupportEnabled ? 'On — click to turn off' : 'Off — click to turn on'}
+                  aria-label="Assistant live support"
+                >
+                  <span
+                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                      assistantSupportEnabled ? 'translate-x-[18px]' : 'translate-x-1'
                     }`}
                   />
                 </button>

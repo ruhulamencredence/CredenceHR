@@ -11,10 +11,11 @@
 // Shown to every account unless HR switched it off for them in Module Access
 // (users.can_use_ai_assistant); the API checks the same switch.
 
-import React, { useEffect, useRef, useState } from 'react';
-import { ArrowRight, CalendarCheck, CheckCircle2, Loader2, RotateCcw, Send, Sparkles, X } from 'lucide-react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { ArrowRight, CalendarCheck, CheckCircle2, Headphones, Loader2, RotateCcw, Send, Sparkles, X } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import type { User } from '../types';
+import { LiveChat, SupportInbox, supportApi, useSupportSocket, type SupportMessage, type SupportSession } from './AssistantSupport';
 
 interface Action { label: string; nav: string }
 // A leave application the Assistant filled in (AiAssistantRoutes.ts LeaveDraft).
@@ -181,6 +182,89 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  // Live support (AssistantSupport.tsx): 'bot' = the Assistant, 'live' = my
+  // chat with a human, 'inbox' = agents' queue.
+  const [view, setView] = useState<'bot' | 'live' | 'inbox'>('bot');
+  const [live, setLive] = useState<{ session: SupportSession; messages: SupportMessage[] } | null>(null);
+  const [isAgent, setIsAgent] = useState(false);
+  const [waiting, setWaiting] = useState(0);
+  const [unread, setUnread] = useState(0);
+  const [focusId, setFocusId] = useState<number | null>(null);
+  const [supportError, setSupportError] = useState('');
+  const openRef = useRef(open);
+  openRef.current = open;
+  const liveRef = useRef(live);
+  liveRef.current = live;
+
+  const refreshSupport = useCallback(async () => {
+    if (!token || !allowed) return;
+    try {
+      const a = await supportApi<{ is_agent: boolean; waiting: number }>(token, '/access');
+      setIsAgent(a.is_agent);
+      setWaiting(a.waiting);
+      const mine = await supportApi<{ session: SupportSession | null; messages: SupportMessage[] }>(token, '/mine');
+      setLive((cur) => (mine.session ? { session: mine.session, messages: mine.messages } : cur && cur.session.status === 'closed' ? cur : null));
+    } catch {
+      // live support unavailable — the Assistant itself still works
+    }
+  }, [token, allowed]);
+
+  useEffect(() => {
+    void refreshSupport();
+  }, [refreshSupport]);
+
+  useSupportSocket((e) => {
+    const cur = liveRef.current;
+    const sid = e.session?.id ?? e.session_id;
+    if (cur && sid === cur.session.id) {
+      setLive((l) => {
+        if (!l) return l;
+        const messages = e.message && !l.messages.some((m) => m.id === e.message!.id) ? [...l.messages, e.message] : l.messages;
+        return { session: e.session || l.session, messages };
+      });
+      if (e.message && e.message.sender_id !== user?.id && (!openRef.current || view !== 'live')) setUnread((n) => n + 1);
+    }
+    if (e.queue_changed) {
+      supportApi<{ is_agent: boolean; waiting: number }>(token, '/access').then((a) => setWaiting(a.waiting)).catch(() => {});
+    }
+  });
+
+  // An "assistant_support" alert: agents open the chat in the inbox, the
+  // person who asked opens their live chat.
+  useEffect(() => {
+    const onOpen = (e: Event) => {
+      const id = Number((e as CustomEvent).detail) || null;
+      setOpen(true);
+      if (isAgent && id && (!liveRef.current || liveRef.current.session.id !== id)) {
+        setFocusId(id);
+        setView('inbox');
+      } else {
+        void refreshSupport();
+        setView('live');
+      }
+    };
+    window.addEventListener('credence:open-assistant-support', onOpen);
+    return () => window.removeEventListener('credence:open-assistant-support', onOpen);
+  }, [isAgent, refreshSupport]);
+
+  useEffect(() => {
+    if (open && view === 'live') setUnread(0);
+  }, [open, view, live?.messages.length]);
+
+  const startSupport = async () => {
+    setSupportError('');
+    try {
+      const lastUser = [...msgs].reverse().find((m) => m.role === 'user')?.text || '';
+      const d = await supportApi<{ session: SupportSession; messages: SupportMessage[] }>(token, '/request', {
+        topic: lastUser.slice(0, 200),
+        context: msgs.slice(-6).map((m) => ({ role: m.role, text: m.text }))
+      });
+      setLive({ session: d.session, messages: d.messages });
+      setView('live');
+    } catch (e: any) {
+      setSupportError(e.message || 'Support-এর সাথে যোগাযোগ করা গেল না।');
+    }
+  };
 
   useEffect(() => {
     try {
@@ -260,6 +344,10 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
   };
 
   const go = (nav: string) => {
+    if (nav === 'support:request') {
+      void startSupport();
+      return;
+    }
     setOpen(false);
     onNavigate(nav);
   };
@@ -280,6 +368,11 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
           >
             <Sparkles className="w-5 h-5" />
           </button>
+          {waiting + unread > 0 && (
+            <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 bg-rose-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center border-2 border-white pointer-events-none">
+              {waiting + unread}
+            </span>
+          )}
         </div>
       )}
 
@@ -301,9 +394,9 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
                 <Sparkles className="w-5 h-5" />
               </span>
               <div className="min-w-0 flex-1">
-                <h3 className="text-base font-bold text-slate-900 leading-tight">Credence Assistant</h3>
+                <h3 className="text-base font-bold text-slate-900 leading-tight">{view === 'bot' ? 'Credence Assistant' : view === 'live' ? 'Live support' : 'Support inbox'}</h3>
               </div>
-              {msgs.length > 0 && (
+              {view === 'bot' && msgs.length > 0 && (
                 <button
                   type="button"
                   onClick={() => setMsgs([])}
@@ -325,13 +418,44 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
               </button>
             </div>
 
+            {(isAgent || live) && (
+              <div className="flex gap-1.5 px-4 pb-2">
+                <button type="button" onClick={() => setView('bot')} className={`rounded-full px-3 py-1 text-xs ${view === 'bot' ? 'liquid-glass-button font-semibold' : 'liquid-glass-chip text-slate-700'}`}>
+                  Assistant
+                </button>
+                {live && (
+                  <button type="button" onClick={() => setView('live')} className={`rounded-full px-3 py-1 text-xs inline-flex items-center gap-1 ${view === 'live' ? 'liquid-glass-button font-semibold' : 'liquid-glass-chip text-slate-700'}`}>
+                    <Headphones className="w-3.5 h-3.5" /> আমার support chat{unread > 0 && view !== 'live' ? ` (${unread})` : ''}
+                  </button>
+                )}
+                {isAgent && (
+                  <button type="button" onClick={() => setView('inbox')} className={`rounded-full px-3 py-1 text-xs ${view === 'inbox' ? 'liquid-glass-button font-semibold' : 'liquid-glass-chip text-slate-700'}`}>
+                    Support inbox{waiting > 0 ? ` (${waiting})` : ''}
+                  </button>
+                )}
+              </div>
+            )}
+
+            {view === 'live' && live && user ? (
+              <LiveChat
+                token={token}
+                meId={user.id}
+                session={live.session}
+                messages={live.messages}
+                onChange={(session, messages) => setLive({ session, messages })}
+                onBack={() => { setLive(null); setView('bot'); }}
+              />
+            ) : view === 'inbox' && isAgent && user ? (
+              <SupportInbox token={token} meId={user.id} focusId={focusId} onFocusHandled={() => setFocusId(null)} onQueueCount={setWaiting} />
+            ) : (
+            <>
             <div ref={listRef} className="flex-1 overflow-y-auto overscroll-contain px-4 pb-3 space-y-3">
               {msgs.length === 0 && (
                 <div className="liquid-glass-inset rounded-[24px] px-4 py-4">
                   <p className="text-sm text-slate-800">
                     আসসালামু আলাইকুম{firstName ? `, ${firstName}` : ''}! আমি আপনার নিজের তথ্য দেখে উত্তর দিতে পারি, আর app-এ কোন কাজ কোথায় তা দেখিয়ে দিতে পারি।
                   </p>
-                  <p className="text-[11px] text-slate-500 mt-1.5">আমি শুধু দেখি আর পথ দেখাই — কিছু জমা, অনুমোদন বা বদল করি না।</p>
+                  <p className="text-[11px] text-slate-500 mt-1.5">আমি শুধু দেখি আর পথ দেখাই (ছুটির আবেদন আপনি নিজে জমা দেন)। মানুষের সাহায্য লাগলে বলুন "মানুষের সাথে কথা বলতে চাই"।</p>
                   {suggestions.length > 0 && (
                     <div className="flex flex-wrap gap-1.5 mt-3">
                       {suggestions.map((s) => (
@@ -382,6 +506,7 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
                 )
               )}
 
+              {supportError && <p className="text-[11px] text-rose-600 px-1">{supportError}</p>}
               {busy && (
                 <div className="flex justify-start">
                   <div className="liquid-glass-inset rounded-[20px] rounded-bl-md px-3.5 py-2.5 text-sm text-slate-500 inline-flex items-center gap-2">
@@ -424,6 +549,8 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
                 </button>
               </div>
             </form>
+            </>
+            )}
           </div>
         </div>
       )}

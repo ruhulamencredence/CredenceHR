@@ -194,6 +194,8 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
         ? canOpenGrievanceAdmin && isHrSideCaseAlert(alert.title)
           ? () => openGrievanceAdmin(alert.type === 'disciplinary' ? 'disciplinary' : 'grievances')
           : onOpenMyCases
+        : alert.type === 'assistant_support'
+        ? () => window.dispatchEvent(new CustomEvent('credence:open-assistant-support', { detail: alert.related_id }))
         : alert.type === 'hr_reminder'
         ? () => {
             // HR reminders (probation / contract / document / retirement /

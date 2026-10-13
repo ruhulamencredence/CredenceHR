@@ -204,7 +204,7 @@ function canNav(c: Ctx, nav: string): boolean {
   if (kind === "claims") return target === "movementClaims" ? f.can_view_movement_claims : f.can_view_conveyance_claims || c.modules.includes("conveyance");
   if (kind === "admin") return target === "dashboard" ? c.role === "admin" || c.modules.includes("admin_dashboard") : c.modules.includes(target);
   if (kind === "hrops") return c.modules.includes("hr_operations");
-  return true;
+  return true; // home, profile, support:request
 }
 const allowedActions = (c: Ctx, actions: AssistantAction[]) => actions.filter((a) => canNav(c, a.nav));
 
@@ -686,6 +686,16 @@ const TOOLS: Tool[] = [
     }
   },
   {
+    name: "request_human_support",
+    description: "When the user wants to talk to a real person (HR / admin / support), or you can't help them: offer a button that connects them to a live support agent. Doesn't connect by itself.",
+    run: async () => ({
+      ok: true,
+      text: "একজন মানুষের সাথে কথা বলতে নিচের বোতাম চাপুন। Superadmin বা support-এর কেউ যোগ দিলে এখানেই সরাসরি কথা বলতে পারবেন।",
+      data: { offered: true, note: "A button 'মানুষের সাথে কথা বলুন' is shown; the user presses it to join the live queue." },
+      actions: [{ label: "মানুষের সাথে কথা বলুন", nav: "support:request" }]
+    })
+  },
+  {
     name: "active_notices",
     description: "Notices currently posted for this account (company announcements).",
     run: async (c) => {
@@ -838,6 +848,11 @@ function suggestionsFor(c: Ctx): string[] {
   return s.slice(0, 7);
 }
 
+// "I want a human" — checked before everything else ("kotha" would otherwise
+// read as "kothay", a how-to question).
+const HUMAN_WORDS = ["human", "manush", "মানুষ", "agent", "এজেন্ট", "live chat", "লাইভ চ্যাট", "real person", "admin er sathe", "admin-এর সাথে", "অ্যাডমিনের সাথে",
+  "superadmin er sathe", "সুপারঅ্যাডমিন", "support", "সাপোর্ট", "কারো সাথে কথা", "karo sathe kotha", "kotha bolte chai", "কথা বলতে চাই", "talk to someone", "hr er sathe kotha", "এইচআর-এর সাথে কথা", "hr-এর সাথে কথা"];
+
 const LEAVE_WORDS = ["leave", "ছুটি", "chuti", "chhuti", "ছুটির"];
 const APPLY_WORDS = ["kore dao", "kore den", "করে দাও", "করে দিন", "দিয়ে দাও", "diye dao", "apply", "অ্যাপ্লাই", "এপ্লাই", "lagbe", "লাগবে", "chai", "চাই", "nibo", "নেব", "নিব", "nite chai", "dao", "দাও"];
 const HOLIDAY_WORDS = ["ছুটির দিন", "holiday", "সরকারি ছুটি", "chutir din"];
@@ -845,6 +860,11 @@ const HOLIDAY_WORDS = ["ছুটির দিন", "holiday", "সরকার�
 async function localAnswer(c: Ctx, message: string): Promise<Answer> {
   const t = norm(message);
   const asksHow = hasAny(t, HOW);
+
+  if (hasAny(t, HUMAN_WORDS)) {
+    const r = await TOOLS.find((x) => x.name === "request_human_support")!.run(c, {});
+    return { reply: r.text, actions: r.actions || [] };
+  }
 
   // "20 oct family problem niye leave application kore dao" -> a draft card
   if (hasAny(t, LEAVE_WORDS) && !hasAny(t, HOLIDAY_WORDS) && !asksHow) {
@@ -896,8 +916,8 @@ async function localAnswer(c: Ctx, message: string): Promise<Answer> {
     return { reply: `আসসালামু আলাইকুম, ${c.name.split(" ")[0]}! আমি Credence Assistant। আপনার ছুটি, হাজিরা, claim, loan বা app-এর কোন কাজ কোথায় — জিজ্ঞেস করুন।`, actions: [] };
   }
   return {
-    reply: "দুঃখিত, প্রশ্নটা বুঝতে পারিনি। এভাবে জিজ্ঞেস করে দেখুন:\n" + suggestionsFor(c).map((s) => `• ${s}`).join("\n"),
-    actions: []
+    reply: "দুঃখিত, প্রশ্নটা বুঝতে পারিনি। এভাবে জিজ্ঞেস করে দেখুন:\n" + suggestionsFor(c).map((s) => `• ${s}`).join("\n") + "\n\nঅথবা একজন মানুষের সাথে সরাসরি কথা বলুন।",
+    actions: [{ label: "মানুষের সাথে কথা বলুন", nav: "support:request" }]
   };
 }
 
@@ -960,6 +980,7 @@ async function geminiAnswer(c: Ctx, history: { role: string; text: string }[], m
     `- If a tool returns error "no_access", say politely that their account doesn't have permission and they can ask HR / Superadmin.\n` +
     `- You can only read and guide, with ONE exception: when they ask to apply for leave, call prepare_leave_application. It only fills a form card in the chat; the employee reviews it and presses the card's "জমা দিন" button. Never say the leave was applied or submitted — say the draft is ready below to check and submit with "জমা দিন". Ask for nothing extra first: missing fields can be filled in the card.\n` +
     `- You cannot approve, edit, cancel or delete anything — tell them which page to open (the app shows a button for it).\n` +
+    `- If they want a real person, or you can't help, call request_human_support (it shows a button; never claim someone is connected).\n` +
     `- For any "how do I… / where is…" question ALWAYS call app_help first and give only the steps it returns — never describe menus or buttons from your own knowledge. If it returns no_access, say that page isn't turned on for their account and HR / Superadmin can enable it.\n` +
     `- Write Bangla only in Bangla script (no Arabic, Hindi or other scripts mixed in); English words like page names may stay in English.\n` +
     `- Don't answer questions unrelated to work / this app beyond a brief polite line.\n` +
