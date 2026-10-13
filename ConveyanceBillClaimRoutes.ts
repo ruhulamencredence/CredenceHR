@@ -206,6 +206,20 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
 
   app.get("/api/conveyance-bills", authenticateToken, requireAdmin, requireAnyModule(["conveyance", "disbursement"]), async (req, res) => {
     try {
+      // ?slim=1 (with ?since=YYYY-MM-DD): disbursed bills only, as id/date/disbursed/total —
+      // all the Admin Dashboard adds up.
+      if (String(req.query.slim || "") === "1") {
+        const since = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.since || "")) ? String(req.query.since) : null;
+        const slim = await queryDB(
+          `SELECT b.id, b.user_id, b.bill_date, b.is_disbursed,
+              (SELECT COALESCE(SUM(i.amount), 0) FROM conveyance_bill_items i WHERE i.bill_id = b.id) AS total_amount
+           FROM conveyance_bills b
+           WHERE b.is_disbursed = 1 ${since ? "AND b.bill_date >= ?" : ""}
+           ORDER BY b.id DESC`,
+          since ? [since] : []
+        );
+        return res.json(slim.map((r: any) => ({ ...r, is_disbursed: true, total_amount: Number(r.total_amount) })));
+      }
       const rows = await queryDB(
         `SELECT b.*, u.name AS user_name, du.name AS disbursed_by_name,
             (SELECT COUNT(*) FROM conveyance_bill_items i WHERE i.bill_id = b.id) AS item_count,
@@ -233,6 +247,134 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
           total_amount: Number(r.total_amount)
         }))
       );
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // The Conveyance Bill Claim table: Bills and the Claims not yet in a Bill, one row each,
+  // newest date first — ONE PAGE at a time (?page=&limit=&user_id=&from=&to=). Each Bill
+  // comes with its items' particulars, so the screen needs no request per Bill.
+  // Claims are included only for an account with the "conveyance" module and inside its
+  // Department scope, like GET /api/user-claims; Bills follow GET /api/conveyance-bills.
+  // Registered before /api/conveyance-bills/:id so "combined" is not taken for an id.
+  app.get("/api/conveyance-bills/combined/list", authenticateToken, requireAdmin, requireAnyModule(["conveyance", "disbursement"]), async (req: any, res) => {
+    try {
+      const limit = Math.min(200, Math.max(1, Math.floor(Number(req.query.limit)) || 50));
+      const page = Math.max(1, Math.floor(Number(req.query.page)) || 1);
+      const userId = req.query.user_id ? Number(req.query.user_id) : null;
+      const isDate = (v: any) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ""));
+      const from = isDate(req.query.from) ? String(req.query.from) : null;
+      const to = isDate(req.query.to) ? String(req.query.to) : null;
+
+      const billWhere: string[] = [];
+      const billParams: any[] = [];
+      const claimWhere: string[] = ["NOT EXISTS (SELECT 1 FROM conveyance_bill_items ci WHERE ci.user_claim_id = uc.id)"];
+      const claimParams: any[] = [];
+      if (userId) {
+        billWhere.push("b.user_id = ?");
+        billParams.push(userId);
+        claimWhere.push("uc.user_id = ?");
+        claimParams.push(userId);
+      }
+      if (from) {
+        billWhere.push("b.bill_date >= ?");
+        billParams.push(from);
+        claimWhere.push("uc.claim_date >= ?");
+        claimParams.push(from);
+      }
+      if (to) {
+        billWhere.push("b.bill_date <= ?");
+        billParams.push(to);
+        claimWhere.push("uc.claim_date <= ?");
+        claimParams.push(to);
+      }
+
+      const modules = req.user.role === "superadmin" ? ["conveyance"] : await getAdminModules(req.user.id);
+      let includeClaims = modules.includes("conveyance");
+      if (includeClaims && req.user.role !== "superadmin") {
+        const scope = await getConveyanceClaimDeptScope(req.user.id);
+        if (scope) {
+          if (scope.length === 0) includeClaims = false;
+          else {
+            claimWhere.push(`uc.user_id IN (SELECT user_id FROM all_employees WHERE user_id IS NOT NULL AND department IN (${scope.map(() => "?").join(",")}))`);
+            claimParams.push(...scope);
+          }
+        }
+      }
+
+      const billSql = `SELECT 'bill' AS kind, b.id AS id, b.bill_date AS d FROM conveyance_bills b ${billWhere.length ? "WHERE " + billWhere.join(" AND ") : ""}`;
+      const claimSql = `SELECT 'claim' AS kind, uc.id AS id, uc.claim_date AS d FROM user_claims uc WHERE ${claimWhere.join(" AND ")}`;
+      const unionSql = includeClaims ? `${billSql} UNION ALL ${claimSql}` : billSql;
+      const unionParams = includeClaims ? [...billParams, ...claimParams] : billParams;
+
+      const [totalRows, pageRows]: any[] = await Promise.all([
+        queryDB(`SELECT COUNT(*) AS n FROM (${unionSql}) x`, unionParams),
+        queryDB(`SELECT kind, id, d FROM (${unionSql}) x ORDER BY d DESC, id DESC LIMIT ? OFFSET ?`, [...unionParams, limit, (page - 1) * limit])
+      ]);
+      const billIds = pageRows.filter((r: any) => r.kind === "bill").map((r: any) => Number(r.id));
+      const claimIds = pageRows.filter((r: any) => r.kind === "claim").map((r: any) => Number(r.id));
+
+      const bills: any[] = billIds.length
+        ? await queryDB(
+            `SELECT b.*, u.name AS user_name, du.name AS disbursed_by_name,
+                (SELECT COUNT(*) FROM conveyance_bill_items i WHERE i.bill_id = b.id) AS item_count,
+                (SELECT COALESCE(SUM(i.amount), 0) FROM conveyance_bill_items i WHERE i.bill_id = b.id) AS total_amount
+             FROM conveyance_bills b
+             LEFT JOIN users u ON u.id = b.user_id
+             LEFT JOIN users du ON du.id = b.disbursed_by
+             WHERE b.id IN (${billIds.map(() => "?").join(",")})`,
+            billIds
+          )
+        : [];
+      const itemRows: any[] = billIds.length
+        ? await queryDB(`SELECT id, bill_id, particulars FROM conveyance_bill_items WHERE bill_id IN (${billIds.map(() => "?").join(",")}) ORDER BY entry_date ASC, id ASC`, billIds)
+        : [];
+      const itemsByBill = new Map<number, any[]>();
+      for (const it of itemRows) itemsByBill.set(Number(it.bill_id), [...(itemsByBill.get(Number(it.bill_id)) || []), it]);
+      const billById = new Map<number, any>(
+        bills.map((b: any) => [
+          Number(b.id),
+          { ...b, is_disbursed: !!Number(b.is_disbursed), item_count: Number(b.item_count), total_amount: Number(b.total_amount), items: itemsByBill.get(Number(b.id)) || [] }
+        ])
+      );
+
+      let claimById = new Map<number, any>();
+      if (claimIds.length) {
+        const [claimRows, employees]: any[] = await Promise.all([
+          queryDB(
+            `SELECT uc.id, uc.user_id, u.name AS user_name, uc.claim_date, uc.from_date, uc.to_date, uc.category, uc.amount,
+                    uc.description, uc.file_name, uc.file_mimetype, (uc.file_data IS NOT NULL) AS has_file,
+                    uc.status, uc.admin_remarks, uc.reviewed_by, r.name AS reviewed_by_name, uc.reviewed_at,
+                    uc.created_at, uc.updated_at, i.id AS bill_item_id, i.bill_id, uc.filed_by, fb.name AS filed_by_name,
+                    uc.version, uc.edit_state, uc.return_reason, uc.reclaim_allowed, uc.first_submitted_at
+               FROM user_claims uc
+               LEFT JOIN users u ON u.id = uc.user_id
+               LEFT JOIN users r ON r.id = uc.reviewed_by
+               LEFT JOIN users fb ON fb.id = uc.filed_by
+               LEFT JOIN conveyance_bill_items i ON i.user_claim_id = uc.id
+              WHERE uc.id IN (${claimIds.map(() => "?").join(",")})`,
+            claimIds
+          ),
+          queryDB("SELECT user_id, department FROM all_employees WHERE user_id IS NOT NULL")
+        ]);
+        const dept = new Map<number, string>();
+        for (const e of employees) if (e.user_id != null && e.department) dept.set(Number(e.user_id), e.department);
+        const withRefs = await attachUserClaimRefs(
+          claimRows.map((r: any) => ({ ...r, amount: Number(r.amount), has_file: !!r.has_file, department: dept.get(Number(r.user_id)) || null }))
+        );
+        const withApproval = await attachUserClaimApproval(withRefs);
+        const full = await attachEditState(await attachClaimItems(queryDB, withApproval));
+        claimById = new Map<number, any>(full.map((c: any) => [Number(c.id), c]));
+      }
+
+      res.json({
+        total: Number(totalRows[0]?.n || 0),
+        page,
+        limit,
+        bills: pageRows.filter((r: any) => r.kind === "bill").map((r: any) => billById.get(Number(r.id))).filter(Boolean),
+        claims: pageRows.filter((r: any) => r.kind === "claim").map((r: any) => claimById.get(Number(r.id))).filter(Boolean)
+      });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -1195,6 +1337,29 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
       // ?since=YYYY-MM-DD: only claims dated on/after that day (the Admin
       // Dashboard's last three months).
       const since = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.since || "")) ? String(req.query.since) : null;
+      // ?slim=1: just id, user, date, amount, status — no joins, attachments or approval
+      // lookups (the Admin Dashboard only adds amounts up). Same Department scope as below.
+      if (String(req.query.slim || "") === "1") {
+        const [slimRows, slimEmployees] = await Promise.all([
+          queryDB(
+            `SELECT id, user_id, claim_date, amount, status FROM user_claims ${since ? "WHERE claim_date >= ?" : ""} ORDER BY id DESC`,
+            since ? [since] : []
+          ),
+          queryDB("SELECT user_id, department FROM all_employees WHERE user_id IS NOT NULL")
+        ]);
+        const slimDept = new Map<number, string>();
+        for (const e of slimEmployees) if (e.user_id != null && e.department) slimDept.set(Number(e.user_id), e.department);
+        const slimScope = req.user.role === "superadmin" ? null : await getConveyanceClaimDeptScope(req.user.id);
+        return res.json(
+          slimRows
+            .filter((r: any) => {
+              if (!slimScope) return true;
+              const dept = slimDept.get(Number(r.user_id)) || null;
+              return !!dept && slimScope.includes(dept);
+            })
+            .map((r: any) => ({ ...r, amount: Number(r.amount) }))
+        );
+      }
       const [rows, employees] = await Promise.all([
         queryDB(
           `SELECT uc.id, uc.user_id, u.name AS user_name, uc.claim_date, uc.from_date, uc.to_date, uc.category, uc.amount,
