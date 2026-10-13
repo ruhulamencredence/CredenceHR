@@ -37,6 +37,7 @@ import { LeaveManage } from './components/LeaveManage';
 import { ApproveApplications } from './components/ApproveApplications';
 import { Timesheet } from './components/Timesheet';
 import { PayrollModule } from './components/PayrollModule';
+import { openedOnAdminUrl } from './lib/adminUrl';
 import { EmployeeDirectory } from './components/EmployeeDirectory';
 import { MyResignation } from './components/MyResignation';
 import { AssetManagement } from './components/AssetManagement';
@@ -112,6 +113,8 @@ export default function App() {
   const selfServiceViewStorageKey = user ? `mpr_self_service_view_${user.id}` : null;
   const [selfServiceView, setSelfServiceView] = useState<'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | null>(() => {
     try {
+      // A link straight to an Admin Panel page (/admin/departments) opens that page.
+      if (openedOnAdminUrl()) return null;
       const saved = selfServiceViewStorageKey ? localStorage.getItem(selfServiceViewStorageKey) : null;
       const restorable = ['leaveManagement', 'timesheet', 'approveApplications', 'employeeDirectory', 'resignation', 'assetManagement', 'vehicleManagement', 'myCases', 'myLetters', 'teamAttendance', 'myTasks', 'myMobileSim', 'myLoans'];
       if (saved === 'leaveApplication' || (saved && restorable.includes(saved))) return saved as any;
@@ -143,6 +146,7 @@ export default function App() {
   const showProfilePageStorageKey = user ? `mpr_show_profile_page_${user.id}` : null;
   const [showProfilePage, setShowProfilePage] = useState(() => {
     try {
+      if (openedOnAdminUrl()) return false;
       return showProfilePageStorageKey ? localStorage.getItem(showProfilePageStorageKey) === '1' : false;
     } catch {
       return false;
@@ -587,6 +591,9 @@ export default function App() {
   // session, instead of resetting to the User Panel dashboard every time.
   const [viewMode, setViewMode] = useState<'admin' | 'user'>(() => {
     try {
+      // Opened on /admin/<page>: straight into the Admin Panel (AdminPanel still
+      // checks the account may open that page).
+      if (user && openedOnAdminUrl() && (user.role === 'admin' || user.role === 'superadmin' || (user.module_permissions || []).length > 0)) return 'admin';
       const saved = user ? localStorage.getItem(`mpr_view_mode_${user.id}`) : null;
       if (saved === 'admin' || saved === 'user') return saved;
     } catch {

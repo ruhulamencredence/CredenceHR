@@ -57,6 +57,7 @@ import { useStableCallback } from '../lib/useStableCallback';
 import { reverseGeocode } from '../lib/reverseGeocode';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
 import { confirmDialog } from '../lib/confirmDialog';
+import { ADMIN_TAB_KEYS, adminUrlEnabled, adminTabToPath, adminPathToTab } from '../lib/adminUrl';
 
 // Module Access modal (Admin Panel -> Users -> per-Admin/User "Module
 // Access") groups the same Admin Panel tabs into the same labeled clusters
@@ -478,6 +479,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // PUT /api/users/:id/module-permissions).
   const canGrantModuleAccess = isSuperAdmin || !!user.can_grant_module_access;
 
+  // Whether this account may open that tab. 'bill_claim_policy' isn't its own
+  // module_permissions entry — it rides along with 'conveyance'.
+  // 'permanent_delete_log' isn't either — Superadmin-only, never granted via
+  // module_permissions (see GET /api/entries/permanent-delete-log).
+  const isTabVisible = (tab: string) =>
+    tab === 'dashboard' ? canSeeDashboard :
+    tab === 'reports_insights' ? canSeeReportsInsights :
+    tab === 'data_import' ? canSeeDataImport :
+    tab === 'bill_claim_policy' ? isSuperAdmin || visibleModules.includes('conveyance') :
+    tab === 'permanent_delete_log' || tab === 'companies' || tab === 'devices' || tab === 'active_users' ? isSuperAdmin :
+    isSuperAdmin || visibleModules.includes(tab as AdminModuleKey);
+
   const [activeTab, setActiveTab] = useState<'dashboard' | 'reports_insights' | 'data_import' | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'bill_claim_policy' | 'disbursement' | 'holidays' | 'asset_management' | 'vehicle_management' | 'permanent_delete_log' | 'companies' | 'devices' | 'active_users' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'hr_operations' | 'task_management' | 'mobile_bill'>(
     () => {
       // Restores whichever tab this Admin was last looking at — see the
@@ -485,19 +498,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       // able to land back on the same page, the active tab is mirrored to
       // localStorage (survives a reload) instead of living only in memory.
       try {
+        // An address like /admin/departments wins over the remembered tab.
+        const fromUrl = adminUrlEnabled() ? adminPathToTab(window.location.pathname) : null;
+        if (fromUrl && ADMIN_TAB_KEYS.has(fromUrl) && isTabVisible(fromUrl)) return fromUrl as any;
         const saved = localStorage.getItem(`mpr_admin_tab_${user.id}`);
-        // 'bill_claim_policy' isn't its own module_permissions entry — it rides
-        // along with 'conveyance' (see the tab-visibility effect below).
-        // 'permanent_delete_log' isn't either — Superadmin-only, never
-        // granted via module_permissions (see GET /api/entries/permanent-delete-log).
-        const savedVisible =
-          saved === 'dashboard' ? canSeeDashboard :
-          saved === 'reports_insights' ? canSeeReportsInsights :
-          saved === 'data_import' ? canSeeDataImport :
-          saved === 'bill_claim_policy' ? isSuperAdmin || visibleModules.includes('conveyance') :
-          saved === 'permanent_delete_log' || saved === 'companies' || saved === 'devices' || saved === 'active_users' ? isSuperAdmin :
-          isSuperAdmin || visibleModules.includes(saved as AdminModuleKey);
-        if (saved && savedVisible) return saved as any;
+        if (saved && isTabVisible(saved)) return saved as any;
       } catch {
         // ignore — falls through to the normal default below
       }
@@ -515,6 +520,48 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       // ignore, it just means a reload won't be able to restore this tab.
     }
   }, [activeTab, user.id]);
+
+  // Mirrors the tab in the browser address (/admin/<tab>) so a page can be
+  // copied, bookmarked and stepped back to with the browser's Back button.
+  // The first write replaces the entry (no extra Back step); later ones push.
+  const urlSynced = useRef(false);
+  useEffect(() => {
+    if (!adminUrlEnabled()) return;
+    const target = adminTabToPath(activeTab);
+    if (window.location.pathname === target) {
+      urlSynced.current = true;
+      return;
+    }
+    try {
+      if (urlSynced.current) window.history.pushState(null, '', target + window.location.search);
+      else window.history.replaceState(null, '', target + window.location.search);
+    } catch {
+      // history can be unavailable in some embedded WebViews — the tab still works, just no address.
+    }
+    urlSynced.current = true;
+  }, [activeTab]);
+  // Back / Forward: follow the address, but only to a tab this account may open.
+  useEffect(() => {
+    if (!adminUrlEnabled()) return;
+    const onPop = () => {
+      const tab = adminPathToTab(window.location.pathname);
+      if (tab && ADMIN_TAB_KEYS.has(tab) && isTabVisible(tab)) setActiveTab(tab as any);
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canSeeDashboard, canSeeReportsInsights, canSeeDataImport, isSuperAdmin, visibleModules]);
+  // Leaving the Admin Panel (User Panel, Self Service…) clears its address.
+  useEffect(
+    () => () => {
+      try {
+        if (adminUrlEnabled() && adminPathToTab(window.location.pathname)) window.history.replaceState(null, '', '/');
+      } catch {
+        // ignore
+      }
+    },
+    []
+  );
 
   // Reports the live activeTab up to App.tsx (see onActiveTabChange above) so
   // GlobalSidebar can highlight whichever item actually matches this tab.
