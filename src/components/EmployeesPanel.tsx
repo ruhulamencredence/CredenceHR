@@ -313,6 +313,13 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
+  // The server pages and searches the directory; `employees` is just the page on screen.
+  const [total, setTotal] = useState(0);
+  const [counts, setCounts] = useState({ all: 0, active: 0, inactive: 0 });
+  // Who's who for the Supervisor / Transfer pickers (light: id, code, name…).
+  const [pickerEmployees, setPickerEmployees] = useState<Employee[]>([]);
+  const empReq = useRef(0);
+  const listQuery = useRef({ page: 1, pageSize: 50, q: '', status: 'all' });
   // Directory (the employee table) vs. all-employees Change History.
   const [view, setView] = useState<'directory' | 'history'>('directory');
 
@@ -433,30 +440,56 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
     }));
   };
 
-  const fetchAll = useCallback(async () => {
+  // One page of the directory, as the search / status / page currently say.
+  const fetchEmployees = useCallback(async () => {
+    const req = ++empReq.current;
+    const { page: p, pageSize: size, q, status } = listQuery.current;
     setLoading(true);
     try {
-      const [empRes, projRes, deptRes, branchRes] = await Promise.all([
-        fetch(apiUrl('/api/employees'), { headers: authHeaders }),
-        fetch(apiUrl('/api/projects'), { headers: authHeaders }),
-        fetch(apiUrl('/api/departments'), { headers: authHeaders }),
-        fetch(apiUrl('/api/branches'), { headers: authHeaders })
-      ]);
-      if (empRes.ok) setEmployees(await empRes.json());
-      if (projRes.ok) setProjects(await projRes.json());
-      if (deptRes.ok) setDepartments(await deptRes.json());
-      if (branchRes.ok) setBranches(await branchRes.json());
+      const params = new URLSearchParams({ page: String(p), limit: String(size), q, status });
+      const res = await fetch(apiUrl(`/api/employees?${params.toString()}`), { headers: authHeaders });
+      if (req !== empReq.current) return; // a newer request is on its way
+      if (res.ok) {
+        const data = await res.json();
+        setEmployees(Array.isArray(data) ? data : data.rows || []);
+        setTotal(Array.isArray(data) ? data.length : Number(data.total) || 0);
+        if (data.counts) setCounts(data.counts);
+      }
     } catch {
       setMessage({ type: 'error', text: "Couldn't reach the server. Please try again." });
     } finally {
-      setLoading(false);
+      if (req === empReq.current) setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
+  // Projects, Departments, Branches and the picker list.
+  const fetchMeta = useCallback(async () => {
+    try {
+      const [projRes, deptRes, branchRes, pickRes] = await Promise.all([
+        fetch(apiUrl('/api/projects'), { headers: authHeaders }),
+        fetch(apiUrl('/api/departments'), { headers: authHeaders }),
+        fetch(apiUrl('/api/branches'), { headers: authHeaders }),
+        fetch(apiUrl('/api/employees?slim=1'), { headers: authHeaders })
+      ]);
+      if (projRes.ok) setProjects(await projRes.json());
+      if (deptRes.ok) setDepartments(await deptRes.json());
+      if (branchRes.ok) setBranches(await branchRes.json());
+      if (pickRes.ok) setPickerEmployees(await pickRes.json());
+    } catch {
+      setMessage({ type: 'error', text: "Couldn't reach the server. Please try again." });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
+  // After a change: refresh the page on screen and the lists around it.
+  const fetchAll = useCallback(async () => {
+    await Promise.all([fetchEmployees(), fetchMeta()]);
+  }, [fetchEmployees, fetchMeta]);
+
   useEffect(() => {
-    fetchAll();
-  }, [fetchAll]);
+    fetchMeta();
+  }, [fetchMeta]);
 
   useEffect(() => {
     if (!message) return;
@@ -1136,33 +1169,21 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
     return d?.supervisor_name ? `Supervisor: ${d.supervisor_name}` : '';
   };
 
-  const deferredSearch = React.useDeferredValue(search);
-  const filtered = useMemo(() => {
-    const q = deferredSearch.trim().toLowerCase();
-    return employees.filter((e) => {
-      if (statusFilter === 'active' && !e.is_active) return false;
-      if (statusFilter === 'inactive' && e.is_active) return false;
-      if (!q) return true;
-      return (
-        (e.name || '').toLowerCase().includes(q) ||
-        (e.employee_id || '').toLowerCase().includes(q) ||
-        (e.designation || '').toLowerCase().includes(q) ||
-        (e.department || '').toLowerCase().includes(q) ||
-        (e.email || '').toLowerCase().includes(q) ||
-        (e.phone || '').toLowerCase().includes(q)
-      );
-    });
-  }, [employees, deferredSearch, statusFilter]);
-
-  // Back to the first page whenever the search or filter changes.
-  useEffect(() => setPage(1), [deferredSearch, statusFilter, pageSize]);
-  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
+  // The search waits for a pause in typing; any change of search / status / size goes back to page 1.
+  const [appliedSearch, setAppliedSearch] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => setAppliedSearch(search.trim()), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+  useEffect(() => setPage(1), [appliedSearch, statusFilter, pageSize]);
+  useEffect(() => {
+    listQuery.current = { page, pageSize, q: appliedSearch, status: statusFilter };
+    fetchEmployees();
+  }, [page, pageSize, appliedSearch, statusFilter, fetchEmployees]);
+  const filtered = employees;
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
   const currentPage = Math.min(page, pageCount);
-  const pageRows = useMemo(
-    () => filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize),
-    [filtered, currentPage, pageSize]
-  );
-  const activeCount = useMemo(() => employees.filter((e) => e.is_active).length, [employees]);
+  const pageRows = employees;
 
   return (
     <div className="space-y-5">
@@ -1229,9 +1250,9 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
             onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
             className="py-2.5 px-3 bg-white border border-slate-200 rounded-xl text-slate-700 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
           >
-            <option value="all">All ({employees.length})</option>
-            <option value="active">Active ({activeCount})</option>
-            <option value="inactive">Inactive ({employees.length - activeCount})</option>
+            <option value="all">All ({counts.all})</option>
+            <option value="active">Active ({counts.active})</option>
+            <option value="inactive">Inactive ({counts.inactive})</option>
           </select>
         </div>
       )}
@@ -1244,7 +1265,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
         <div className="bg-white border border-dashed border-slate-300 rounded-2xl p-10 text-center">
           <Contact className="w-8 h-8 text-slate-300 mx-auto mb-2" />
           <p className="text-sm text-slate-500">
-            {employees.length === 0 ? 'No employees yet. Add the first one to get started.' : 'No employees match your search.'}
+            {counts.all === 0 ? 'No employees yet. Add the first one to get started.' : 'No employees match your search.'}
           </p>
         </div>
       ) : (
@@ -1371,7 +1392,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
           <div className="flex flex-col sm:flex-row items-center justify-between gap-2 px-4 py-3 border-t border-slate-200 bg-slate-50/60 text-xs text-slate-600">
             <div className="flex items-center gap-2">
               <span>
-                Showing {(currentPage - 1) * pageSize + 1}–{Math.min(currentPage * pageSize, filtered.length)} of {filtered.length}
+                Showing {(currentPage - 1) * pageSize + 1}–{Math.min(currentPage * pageSize, total)} of {total}
               </span>
               <select
                 value={pageSize}
@@ -1891,7 +1912,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                       <div>
                         <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-600 mb-1">Employee (Supervisor) *</label>
                         <EmployeeSearchSelect
-                          employees={employees}
+                          employees={pickerEmployees}
                           value={supervisorForm.supervisor_id}
                           onChange={(v) => setSupervisorForm((f) => ({ ...f, supervisor_id: v }))}
                           excludeId={editingId ?? undefined}
@@ -2227,7 +2248,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
               <div>
                 <label className={fieldLabelClass}>New Supervisor</label>
                 <EmployeeSearchSelect
-                  employees={employees}
+                  employees={pickerEmployees}
                   value={transferForm.to_supervisor_id}
                   onChange={(v) => setTransferForm((f) => ({ ...f, to_supervisor_id: v }))}
                   excludeId={transferringFor.id}

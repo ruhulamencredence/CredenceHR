@@ -47,8 +47,39 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
       // confirmation, separation…) whose Effective Date has arrived.
       await applyDueHrActions(queryDB, todayInDhaka());
       const rows = await queryDB("SELECT * FROM all_employees");
-      const sorted = [...rows].sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""));
-      res.json(
+      const allSorted = [...rows].sort((a: any, b: any) => (a.name || "").localeCompare(b.name || ""));
+      // ?slim=1 : who's who only (pickers) — id, code, name, designation, department, active.
+      if (String(req.query.slim || "") === "1") {
+        return res.json(
+          allSorted.map((e: any) => ({
+            id: e.id,
+            employee_id: e.employee_id || null,
+            name: e.name,
+            designation: e.designation || null,
+            department: e.department || null,
+            is_active: !!Number(e.is_active)
+          }))
+        );
+      }
+      // ?page=&limit=&q=&status=all|active|inactive : one page of the directory,
+      // searched on the server — { rows, total, counts: { all, active, inactive } }.
+      const paged = req.query.limit !== undefined;
+      const pageLimit = Math.min(200, Math.max(1, Math.floor(Number(req.query.limit)) || 50));
+      const pageNo = Math.max(1, Math.floor(Number(req.query.page)) || 1);
+      const status = String(req.query.status || "all");
+      const q = String(req.query.q || "").trim().toLowerCase();
+      const activeCount = allSorted.filter((e: any) => !!Number(e.is_active)).length;
+      const matched = paged
+        ? allSorted.filter((e: any) => {
+            const active = !!Number(e.is_active);
+            if (status === "active" && !active) return false;
+            if (status === "inactive" && active) return false;
+            if (!q) return true;
+            return [e.name, e.employee_id, e.designation, e.department, e.email, e.phone].some((v) => String(v || "").toLowerCase().includes(q));
+          })
+        : allSorted;
+      const sorted = paged ? matched.slice((pageNo - 1) * pageLimit, pageNo * pageLimit) : allSorted;
+      const shaped =
         sorted.map((e: any) => {
           const out: Record<string, any> = {
             id: e.id,
@@ -79,7 +110,11 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
               : e[field] ?? null;
           }
           return out;
-        })
+        });
+      res.json(
+        paged
+          ? { rows: shaped, total: matched.length, page: pageNo, limit: pageLimit, counts: { all: allSorted.length, active: activeCount, inactive: allSorted.length - activeCount } }
+          : shaped
       );
     } catch (err: any) {
       res.status(500).json({ error: err.message });

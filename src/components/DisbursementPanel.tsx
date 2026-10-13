@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { Banknote, Filter, Printer, CheckSquare, Square, RotateCcw, X, ReceiptText } from 'lucide-react';
@@ -9,6 +9,7 @@ import { finalizePdfPageNumbers } from '../lib/pdfLetterhead';
 import { drawStandardHeader, loadPdfCompany, pdfMoney, standardTable } from '../lib/pdfStandard';
 import { savePdfCrossPlatform } from '../lib/saveFile';
 import { Spinner } from './Spinner';
+import { PagerBar } from './PagerBar';
 import { confirmDialog } from '../lib/confirmDialog';
 
 // ---- Voucher sections ----
@@ -107,16 +108,26 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
   const [userFilter, setUserFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'disbursed'>('pending');
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  // One page of bills at a time; User and Status filter on the server.
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
+  const [total, setTotal] = useState(0);
+  const listReq = useRef(0);
 
   const fetchBills = async () => {
+    const req = ++listReq.current;
     setLoading(true);
     setLoadError('');
     try {
-      const params = new URLSearchParams();
+      const params = new URLSearchParams({ page: String(page), limit: String(pageSize) });
       if (userFilter) params.set('user_id', userFilter);
+      if (statusFilter !== 'all') params.set('status', statusFilter);
       const res = await fetch(apiUrl(`/api/conveyance-bills?${params.toString()}`), { headers: authHeaders });
+      if (req !== listReq.current) return; // a newer request is on its way
       if (res.ok) {
-        setBills(await res.json());
+        const data = await res.json();
+        setBills(Array.isArray(data) ? data : data.rows || []);
+        setTotal(Array.isArray(data) ? data.length : Number(data.total) || 0);
       } else {
         setLoadError('Failed to load conveyance bills.');
       }
@@ -124,14 +135,22 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
       console.error('Failed to load conveyance bills', err);
       setLoadError('Failed to load conveyance bills.');
     } finally {
-      setLoading(false);
+      if (req === listReq.current) setLoading(false);
     }
   };
 
   useEffect(() => {
     fetchBills();
+    // Selection is per page — what's ticked is always on screen.
+    setSelected(new Set());
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [page, pageSize, statusFilter]);
+
+  // Applying the User filter always starts again from page 1.
+  const applyFilters = () => {
+    if (page !== 1) setPage(1);
+    else fetchBills();
+  };
 
   const visibleBills = useMemo(
     () =>
@@ -410,7 +429,10 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
                     <button
                       key={s}
                       type="button"
-                      onClick={() => setStatusFilter(s)}
+                      onClick={() => {
+                        setStatusFilter(s);
+                        setPage(1);
+                      }}
                       className={`flex-1 px-2.5 py-1.5 rounded-md text-[11px] font-semibold capitalize transition-colors ${
                         statusFilter === s ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-500 hover:text-slate-800'
                       }`}
@@ -422,7 +444,7 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
               </div>
               <button
                 type="button"
-                onClick={fetchBills}
+                onClick={applyFilters}
                 className="col-span-1 flex items-center justify-center gap-1.5 text-xs px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-medium whitespace-nowrap transition-colors"
               >
                 <Filter className="w-3.5 h-3.5" /> Apply
@@ -607,6 +629,7 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
                 </tbody>
               </table>
             </div>
+            <PagerBar page={page} pageSize={pageSize} total={total} onPage={setPage} onPageSize={(n) => { setPageSize(n); setPage(1); }} />
           </>
         )}
       </div>

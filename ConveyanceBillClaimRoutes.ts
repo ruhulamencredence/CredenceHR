@@ -220,6 +220,49 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
         );
         return res.json(slim.map((r: any) => ({ ...r, is_disbursed: true, total_amount: Number(r.total_amount) })));
       }
+      // ?page=&limit= : one page, filtered in SQL (user_id, status=pending|disbursed, from, to)
+      // — { rows, total, page, limit }. The Disbursement tab reads it this way.
+      if (req.query.limit !== undefined) {
+        const limit = Math.min(200, Math.max(1, Math.floor(Number(req.query.limit)) || 50));
+        const page = Math.max(1, Math.floor(Number(req.query.page)) || 1);
+        const where: string[] = [];
+        const params: any[] = [];
+        if (req.query.user_id) {
+          where.push("b.user_id = ?");
+          params.push(Number(req.query.user_id));
+        }
+        if (req.query.status === "pending") where.push("COALESCE(b.is_disbursed, 0) = 0");
+        if (req.query.status === "disbursed") where.push("b.is_disbursed = 1");
+        if (/^\d{4}-\d{2}-\d{2}$/.test(String(req.query.from || ""))) {
+          where.push("b.bill_date >= ?");
+          params.push(String(req.query.from));
+        }
+        if (/^\d{4}-\d{2}-\d{2}$/.test(String(req.query.to || ""))) {
+          where.push("b.bill_date <= ?");
+          params.push(String(req.query.to));
+        }
+        const w = where.length ? `WHERE ${where.join(" AND ")}` : "";
+        const [totalRows, pageRows]: any[] = await Promise.all([
+          queryDB(`SELECT COUNT(*) AS n FROM conveyance_bills b ${w}`, params),
+          queryDB(
+            `SELECT b.*, u.name AS user_name, du.name AS disbursed_by_name,
+                (SELECT COUNT(*) FROM conveyance_bill_items i WHERE i.bill_id = b.id) AS item_count,
+                (SELECT COALESCE(SUM(i.amount), 0) FROM conveyance_bill_items i WHERE i.bill_id = b.id) AS total_amount
+             FROM conveyance_bills b
+             LEFT JOIN users u ON u.id = b.user_id
+             LEFT JOIN users du ON du.id = b.disbursed_by
+             ${w}
+             ORDER BY b.id DESC LIMIT ? OFFSET ?`,
+            [...params, limit, (page - 1) * limit]
+          )
+        ]);
+        return res.json({
+          total: Number(totalRows[0]?.n || 0),
+          page,
+          limit,
+          rows: pageRows.map((r: any) => ({ ...r, is_disbursed: !!Number(r.is_disbursed), item_count: Number(r.item_count), total_amount: Number(r.total_amount) }))
+        });
+      }
       const rows = await queryDB(
         `SELECT b.*, u.name AS user_name, du.name AS disbursed_by_name,
             (SELECT COUNT(*) FROM conveyance_bill_items i WHERE i.bill_id = b.id) AS item_count,
