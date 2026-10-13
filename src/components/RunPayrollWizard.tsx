@@ -46,6 +46,8 @@ interface WizardRow {
   extreme_late_count: number;
   extreme_late_deduction_days: number;
   overtime_hours: number;
+  // Entered per hour; overtime_amount is the total (hours x rate) that is paid.
+  overtime_rate: number;
   overtime_amount: number;
   bonus_amount: number;
   other_deduction: number;
@@ -176,6 +178,7 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
       setRows(
         (data.employees || []).map((e: any) => ({
           ...e,
+          overtime_rate: 0,
           overtime_amount: 0,
           // Pre-filled from any bonus staged earlier via Bonus & Incentive
           // -> "Stage" (POST /api/payroll/pending-bonuses) for an employee
@@ -312,12 +315,20 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
     { gross: 0, deductions: 0, net: 0, count: 0 }
   );
 
+  const otTotal = (hours: number, rate: number) => Math.round((Number(hours) || 0) * (Number(rate) || 0) * 100) / 100;
+
   const numInput = (row: WizardRow, key: keyof WizardRow, width = 'w-16') => (
     <input
       type="number"
       value={row[key] as number}
       disabled={!row.included}
-      onChange={(e) => updateRow(row.employee_id, { [key]: Number(e.target.value) } as any)}
+      onChange={(e) => {
+        const v = Number(e.target.value);
+        // OT hours / rate keep the total (hours x rate) in step.
+        if (key === 'overtime_hours') updateRow(row.employee_id, { overtime_hours: v, overtime_amount: otTotal(v, row.overtime_rate) });
+        else if (key === 'overtime_rate') updateRow(row.employee_id, { overtime_rate: v, overtime_amount: otTotal(row.overtime_hours, v) });
+        else updateRow(row.employee_id, { [key]: v } as any);
+      }}
       className={`${width} px-1.5 py-1 text-xs border border-slate-200 rounded-md text-right focus:outline-none focus:ring-2 focus:ring-blue-400 disabled:bg-slate-50 disabled:text-slate-300`}
     />
   );
@@ -504,7 +515,8 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
                     <tr>
                       <th className="px-3 py-2 text-left">Employee</th>
                       <th className="px-3 py-2 text-right">OT Hours</th>
-                      <th className="px-3 py-2 text-right">OT Amount</th>
+                      <th className="px-3 py-2 text-right">OT Amount (per hour)</th>
+                      <th className="px-3 py-2 text-right">Total OT Amount</th>
                       <th className="px-3 py-2 text-right">Bonus / Incentive</th>
                       <th className="px-3 py-2 text-right">Fine / Other Ded.</th>
                       <th className="px-3 py-2 text-left">Remarks</th>
@@ -515,7 +527,10 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
                       <tr key={r.employee_id}>
                         <td className="px-3 py-2 whitespace-nowrap font-medium text-slate-800">{r.employee_name}</td>
                         <td className="px-3 py-2 text-right">{numInput(r, 'overtime_hours')}</td>
-                        <td className="px-3 py-2 text-right">{numInput(r, 'overtime_amount', 'w-20')}</td>
+                        <td className="px-3 py-2 text-right">{numInput(r, 'overtime_rate', 'w-20')}</td>
+                        <td className="px-3 py-2 text-right whitespace-nowrap font-semibold text-slate-800" title={`${r.overtime_hours || 0} h × ${r.overtime_rate || 0}`}>
+                          {r.included && r.overtime_amount > 0 ? money(r.overtime_amount) : '—'}
+                        </td>
                         <td className="px-3 py-2 text-right">
                           {numInput(r, 'bonus_amount', 'w-20')}
                           {!!r.pending_bonus_amount && (
@@ -536,7 +551,7 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
                     ))}
                     {includedRows.length === 0 && (
                       <tr>
-                        <td colSpan={6} className="px-3 py-8 text-center text-slate-400">
+                        <td colSpan={7} className="px-3 py-8 text-center text-slate-400">
                           No employees included — go back to Step 2.
                         </td>
                       </tr>
