@@ -992,6 +992,23 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
       });
 
       result.sort((a: any, b: any) => a.user_name.localeCompare(b.user_name));
+      // ?slim=dashboard : the Admin Dashboard only needs every day's present / holiday flag
+      // and today's + yesterday's full cell (check-in / out times), so the other days are
+      // cut down to those two flags — about a tenth of the full month grid.
+      if (String(req.query.slim || "") === "dashboard") {
+        const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Dhaka" });
+        const [ty, tm, td] = todayStr.split("-").map(Number);
+        const keep = new Set<number>(ty === year && tm === month ? [td, td - 1] : []);
+        return res.json({
+          year,
+          month,
+          days_in_month: daysInMonth,
+          users: result.map((u: any) => ({
+            ...u,
+            days: (u.days || []).map((d: any, i: number) => (keep.has(i + 1) ? d : { present: !!d?.present, day_type: d?.day_type || null }))
+          }))
+        });
+      }
       res.json({ year, month, days_in_month: daysInMonth, users: result });
     } catch (err: any) {
       res.status(500).json({ error: err.message });

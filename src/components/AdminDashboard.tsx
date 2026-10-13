@@ -307,7 +307,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
         safeGet<any[]>('/api/notices/active', authHeaders),
         safeGet<any[]>('/api/employee-directory', groupHeaders),
         safeGet<{ year: number; month: number; days_in_month: number; users: any[] }>(
-          `/api/attendance/report/monthly?year=${now0.getFullYear()}&month=${now0.getMonth() + 1}`,
+          `/api/attendance/report/monthly?year=${now0.getFullYear()}&month=${now0.getMonth() + 1}&slim=dashboard`,
           groupHeaders
         ),
         safeGet<any[]>('/api/holidays', authHeaders),
