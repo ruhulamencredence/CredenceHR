@@ -37,7 +37,8 @@ import { LeaveManage } from './components/LeaveManage';
 import { ApproveApplications } from './components/ApproveApplications';
 import { Timesheet } from './components/Timesheet';
 import { PayrollModule } from './components/PayrollModule';
-import { openedOnAdminUrl } from './lib/adminUrl';
+import { openedOnAdminUrl, adminUrlEnabled, adminPathToTab } from './lib/adminUrl';
+import { selfPathToView, selfViewToPath, canOpenSelfView } from './lib/selfUrl';
 import { EmployeeDirectory } from './components/EmployeeDirectory';
 import { MyResignation } from './components/MyResignation';
 import { AssetManagement } from './components/AssetManagement';
@@ -116,10 +117,16 @@ export default function App() {
       // A link straight to an Admin Panel page (/admin/departments) opens that page.
       if (openedOnAdminUrl()) return null;
       const saved = selfServiceViewStorageKey ? localStorage.getItem(selfServiceViewStorageKey) : null;
+      // A link straight to a Self Service page (/self/my-tasks) opens that page,
+      // when this account may see it.
+      const fromUrl = adminUrlEnabled() ? selfPathToView(window.location.pathname) : null;
+      if (fromUrl && canOpenSelfView(fromUrl, user)) return fromUrl;
+      // An unknown or not-allowed /self/... address opens no Self Service page.
+      if (adminUrlEnabled() && /^\/self\//i.test(window.location.pathname)) return null;
       const restorable = ['leaveManagement', 'timesheet', 'approveApplications', 'employeeDirectory', 'resignation', 'assetManagement', 'vehicleManagement', 'myCases', 'myLetters', 'teamAttendance', 'myTasks', 'myMobileSim', 'myLoans'];
       if (saved === 'leaveApplication' || (saved && restorable.includes(saved))) return saved as any;
-      // Payroll is a module of its own: only brought back for an account that still has it.
-      if (saved === 'payroll' && user && (user.role === 'superadmin' || (user.module_permissions || []).includes('payroll'))) return 'payroll';
+      // Payroll and the other gated pages come back only for an account that still has them.
+      if (saved === 'payroll' && canOpenSelfView('payroll', user)) return 'payroll';
     } catch {
       // ignore — falls through to the "no Self Service page open" default below
     }
@@ -135,6 +142,43 @@ export default function App() {
       // ignore, it just means a reload won't be able to restore this page.
     }
   }, [selfServiceView, selfServiceViewStorageKey]);
+  // Mirrors the open Self Service page in the browser address (/self/my-tasks):
+  // copy / bookmark / Back / Forward. The first write replaces the entry.
+  const selfUrlSynced = useRef(false);
+  useEffect(() => {
+    if (!user || !adminUrlEnabled()) return;
+    try {
+      if (selfServiceView) {
+        const target = selfViewToPath(selfServiceView as any);
+        if (window.location.pathname !== target) {
+          if (selfUrlSynced.current) window.history.pushState(null, '', target);
+          else window.history.replaceState(null, '', target);
+        }
+      } else if (/^\/self\//i.test(window.location.pathname)) {
+        window.history.replaceState(null, '', '/');
+      }
+    } catch {
+      // history can be unavailable in some embedded WebViews — the page still works, just no address.
+    }
+    selfUrlSynced.current = true;
+  }, [selfServiceView, user]);
+  useEffect(() => {
+    if (!user || !adminUrlEnabled()) return;
+    const onPop = () => {
+      const view = selfPathToView(window.location.pathname);
+      if (view && canOpenSelfView(view, user)) {
+        setShowProfilePage(false);
+        setSelfServiceView(view);
+      } else {
+        setSelfServiceView(null);
+        // Back onto an Admin Panel address from a Self Service page.
+        if (adminPathToTab(window.location.pathname) && (user.role === 'admin' || user.role === 'superadmin' || (user.module_permissions || []).length > 0)) setViewMode('admin');
+      }
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
   // ProfilePage.tsx — opened from the avatar in Navbar (desktop header) or
   // GlobalSidebar (mobile drawer's own profile header). Takes over the main
   // area the same way Self Service does, and only ever clears itself via its
@@ -146,7 +190,7 @@ export default function App() {
   const showProfilePageStorageKey = user ? `mpr_show_profile_page_${user.id}` : null;
   const [showProfilePage, setShowProfilePage] = useState(() => {
     try {
-      if (openedOnAdminUrl()) return false;
+      if (openedOnAdminUrl() || selfPathToView(window.location.pathname)) return false;
       return showProfilePageStorageKey ? localStorage.getItem(showProfilePageStorageKey) === '1' : false;
     } catch {
       return false;
@@ -635,6 +679,16 @@ export default function App() {
   // always sees Admin Panel" case, since Superadmin now starts on the User
   // Panel dashboard like everyone else and switches in the same way.
   const isAdminView = hasAdminPanel && viewMode === 'admin';
+  // An /admin/... address with no Admin Panel showing (no access, or the User
+  // Panel is open) has nothing to point at — back to /.
+  useEffect(() => {
+    if (!user || isAdminView || !adminUrlEnabled()) return;
+    try {
+      if (adminPathToTab(window.location.pathname)) window.history.replaceState(null, '', '/');
+    } catch {
+      // ignore
+    }
+  }, [user, isAdminView]);
 
   // Refresh the logged-in user's own record (role, and the Admin-toggleable
   // can_edit_delivery_date / can_job_edit feature permissions) once per app open.
