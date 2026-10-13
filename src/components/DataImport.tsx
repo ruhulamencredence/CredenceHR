@@ -339,6 +339,11 @@ export const DataImport: React.FC<{ token: string; onlyKind?: string }> = ({ tok
   const [error, setError] = useState('');
   const [filter, setFilter] = useState<'all' | RowResult['status']>('all');
   const fileRef = useRef<HTMLInputElement>(null);
+  // Several sheets picked together: checked / imported one after another.
+  type BatchItem = { file: File; state: 'wait' | 'run' | 'ok' | 'fail'; message: string; total: number; create: number; update: number; skip: number; error: number };
+  const [batch, setBatch] = useState<BatchItem[]>([]);
+  const [batchRun, setBatchRun] = useState<'' | 'check' | 'import'>('');
+  const [batchStop, setBatchStop] = useState(false);
 
   useEffect(() => {
     api
@@ -366,6 +371,8 @@ export const DataImport: React.FC<{ token: string; onlyKind?: string }> = ({ tok
     setDone(null);
     setError('');
     setFilter('all');
+    setBatch([]);
+    setBatchRun('');
     if (fileRef.current) fileRef.current.value = '';
   };
 
@@ -398,12 +405,9 @@ export const DataImport: React.FC<{ token: string; onlyKind?: string }> = ({ tok
     XLSX.writeFile(wb, `Import_Template_${kind.title.replace(/[^A-Za-z0-9]+/g, '_')}.xlsx`);
   };
 
-  const readFile = async (file: File) => {
-    if (!kind) return;
-    reset();
-    setBusy('read');
-    setFileName(file.name);
-    try {
+  // Reads one sheet into import rows + the column mapping (throws a readable error).
+  const parseFile = async (file: File, kind: Kind): Promise<{ rows: Record<string, string>[]; matched: { header: string; field: Field }[]; ignored: string[] }> => {
+    {
       // A CSV is read as written (raw), so a phone number keeps its leading 0.
       const wb = XLSX.read(await file.arrayBuffer(), { type: 'array', raw: /\.csv$/i.test(file.name) });
       // The first sheet that has a header row (skips an Instructions sheet put first).
@@ -415,7 +419,7 @@ export const DataImport: React.FC<{ token: string; onlyKind?: string }> = ({ tok
         if (!blockRows.length) throw new Error('No leave rows found in this Leave Summary Report.');
         if (blockRows.length > maxRows) throw new Error(`${blockRows.length} rows — at most ${maxRows} per upload. Split the sheet.`);
         const from = (key: string, header: string) => ({ header, field: kind.fields.find((f) => f.key === key)! });
-        setMatched(
+        return { rows: blockRows, matched: (
           [
             from('employee_id', 'Employee Id'),
             from('leave_type', 'Leave Type'),
@@ -425,17 +429,14 @@ export const DataImport: React.FC<{ token: string; onlyKind?: string }> = ({ tok
             from('purpose', 'Remarks'),
             from('status', 'Approved (Leave Summary Report)')
           ].filter((m) => m.field)
-        );
-        setIgnored(['Leave Year', 'Is Paid Leave', 'Total Leave Availed']);
-        setRows(blockRows);
-        return;
+        ), ignored: ['Leave Year', 'Is Paid Leave', 'Total Leave Availed'] };
       }
       const visitRows = kind.key === 'movement_claims' ? checkInOutSheetRows(grid) : null;
       if (visitRows) {
         if (!visitRows.length) throw new Error('No Check In / Check Out lines found in this report.');
         if (visitRows.length > maxRows) throw new Error(`${visitRows.length} rows — at most ${maxRows} per upload. Split the sheet.`);
         const from = (key: string, header: string) => ({ header, field: kind.fields.find((f) => f.key === key)! });
-        setMatched(
+        return { rows: visitRows, matched: (
           [
             from('employee_id', 'Employee Code'),
             from('date', 'Check In/Out Time (date)'),
@@ -448,17 +449,14 @@ export const DataImport: React.FC<{ token: string; onlyKind?: string }> = ({ tok
             from('check_out_remarks', 'Remarks (Check Out)'),
             from('check_out_place', 'Address (Check Out)')
           ].filter((m) => m.field)
-        );
-        setIgnored(['SL', 'Employee Name']);
-        setRows(visitRows);
-        return;
+        ), ignored: ['SL', 'Employee Name'] };
       }
       const claimRows = kind.key === 'bill_claims' ? claimReportSheetRows(grid) : null;
       if (claimRows) {
         if (!claimRows.length) throw new Error('No claims found in this Claim Report.');
         if (claimRows.length > maxRows) throw new Error(`${claimRows.length} rows — at most ${maxRows} per upload. Split the sheet.`);
         const from = (key: string, header: string) => ({ header, field: kind.fields.find((f) => f.key === key)! });
-        setMatched(
+        return { rows: claimRows, matched: (
           [
             from('employee_id', 'Employee [code]'),
             from('claim_no', 'Claim No.'),
@@ -471,10 +469,7 @@ export const DataImport: React.FC<{ token: string; onlyKind?: string }> = ({ tok
             from('approved_amount', 'Approved Amount'),
             from('disbursed_amount', 'Sanctioned / Disbursed Amount')
           ].filter((m) => m.field)
-        );
-        setIgnored(['Serial', 'Designation', 'Department', 'Adv. Date', 'Adv. Amount', 'Remaining Amount', 'Total Disbursed Amount']);
-        setRows(claimRows);
-        return;
+        ), ignored: ['Serial', 'Designation', 'Department', 'Adv. Date', 'Adv. Amount', 'Remaining Amount', 'Total Disbursed Amount'] };
       }
       const headers = (grid[0] || []).map((h) => String(h || '').trim());
       const fieldFor = (h: string) =>
@@ -501,15 +496,73 @@ export const DataImport: React.FC<{ token: string; onlyKind?: string }> = ({ tok
       }
       if (!out.length) throw new Error('No filled rows under the header row.');
       if (out.length > maxRows) throw new Error(`${out.length} rows — at most ${maxRows} per upload. Split the sheet.`);
-      setMatched(map.map(({ header, field }) => ({ header, field })));
-      setIgnored(extra);
-      setRows(out);
+      return { rows: out, matched: map.map(({ header, field }) => ({ header, field })), ignored: extra };
+    }
+  };
+
+  const readFile = async (file: File) => {
+    if (!kind) return;
+    reset();
+    setBusy('read');
+    setFileName(file.name);
+    try {
+      const p = await parseFile(file, kind);
+      setMatched(p.matched);
+      setIgnored(p.ignored);
+      setRows(p.rows);
     } catch (e: any) {
       setError(e.message || "Couldn't read that file.");
     } finally {
       setBusy('');
     }
   };
+
+  const pickFiles = (list: FileList | File[] | null | undefined) => {
+    const files = Array.from(list || []);
+    if (!files.length) return;
+    if (files.length === 1) return readFile(files[0]);
+    reset();
+    const nat = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true });
+    setBatch(
+      files
+        .sort((a, b) => nat(a.name, b.name))
+        .map((file) => ({ file, state: 'wait' as const, message: '', total: 0, create: 0, update: 0, skip: 0, error: 0 }))
+    );
+  };
+
+  // Runs every picked sheet in order. A sheet that can't be read is marked and
+  // the next one carries on; a failed request stops the run (safe to start again —
+  // rows already in the system are skipped).
+  const runBatch = async (dry: boolean) => {
+    if (!kind || !batch.length) return;
+    setBatchRun(dry ? 'check' : 'import');
+    setBatchStop(false);
+    setError('');
+    const set = (i: number, patch: Partial<BatchItem>) => setBatch((b) => b.map((x, k) => (k === i ? { ...x, ...patch } : x)));
+    for (let i = 0; i < batch.length; i++) {
+      set(i, { state: 'run', message: '' });
+      try {
+        const p = await parseFile(batch[i].file, kind);
+        const missing = kind.fields.filter((f) => f.required && !p.matched.some((m) => m.field.key === f.key));
+        if (missing.length) throw new Error(`Missing column: ${missing.map((f) => f.label).join(', ')}`);
+        const d: RunResponse = await api.post(`/api/data-import/${kind.key}`, { rows: p.rows, dry_run: dry });
+        const firstError = d.results.find((r) => r.status === 'error');
+        set(i, { state: 'ok', ...d.summary, message: firstError ? `Row ${firstError.row}: ${firstError.message}` : '' });
+      } catch (e: any) {
+        set(i, { state: 'fail', message: e.message || 'Failed' });
+        if (!/at most|empty|No filled|Missing column|No .* found/.test(e.message || '')) {
+          setError(`Stopped at ${batch[i].file.name}: ${e.message}. Run again — rows already imported are skipped.`);
+          break;
+        }
+      }
+      if (stopRef.current) break;
+    }
+    setBatchRun('');
+  };
+  const stopRef = useRef(false);
+  useEffect(() => {
+    stopRef.current = batchStop;
+  }, [batchStop]);
 
   const run = async (dry: boolean) => {
     if (!kind) return;
@@ -627,27 +680,26 @@ export const DataImport: React.FC<{ token: string; onlyKind?: string }> = ({ tok
             onDragOver={(e) => e.preventDefault()}
             onDrop={(e) => {
               e.preventDefault();
-              const f = e.dataTransfer.files?.[0];
-              if (f) readFile(f);
+              pickFiles(e.dataTransfer.files);
             }}
           >
             <input
               ref={fileRef}
               type="file"
               accept=".xlsx,.xls,.csv"
+              multiple
               className="hidden"
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) readFile(f);
-              }}
+              onChange={(e) => pickFiles(e.target.files)}
             />
             {busy === 'read' ? (
               <Spinner />
             ) : (
               <>
                 <Upload className="w-6 h-6 text-blue-600 mx-auto" />
-                <div className="text-sm font-semibold text-slate-700 mt-1.5">{fileName || 'Choose or drop the filled sheet'}</div>
-                <div className="text-[11px] text-slate-500">Excel (.xlsx, .xls) or CSV · up to {maxRows} rows</div>
+                <div className="text-sm font-semibold text-slate-700 mt-1.5">
+                  {batch.length ? `${batch.length} files selected` : fileName || 'Choose or drop the filled sheet(s)'}
+                </div>
+                <div className="text-[11px] text-slate-500">Excel (.xlsx, .xls) or CSV · up to {maxRows} rows per file · pick several files to import them one after another</div>
               </>
             )}
           </label>
@@ -655,6 +707,59 @@ export const DataImport: React.FC<{ token: string; onlyKind?: string }> = ({ tok
           {error && (
             <div className="text-xs rounded-lg px-3 py-2 bg-rose-50 text-rose-700 border border-rose-200 flex items-start gap-2">
               <AlertTriangle className="w-4 h-4 shrink-0" /> <span>{error}</span>
+            </div>
+          )}
+
+          {batch.length > 0 && (
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="text-xs text-slate-600">
+                  <span className="font-semibold text-slate-800">{batch.length}</span> files ·{' '}
+                  {batch.filter((b) => b.state === 'ok').length} done · {batch.reduce((n, b) => n + b.create + b.update, 0).toLocaleString()} rows to write/written ·{' '}
+                  {batch.reduce((n, b) => n + b.skip, 0).toLocaleString()} skipped · {batch.reduce((n, b) => n + b.error, 0).toLocaleString()} errors
+                </div>
+                <div className="flex gap-2">
+                  {batchRun ? (
+                    <button type="button" onClick={() => setBatchStop(true)} className="text-xs font-semibold px-3 py-2 rounded-lg border border-slate-200 text-slate-700 bg-white hover:bg-slate-50">
+                      {batchStop ? 'Stopping after this file…' : 'Stop after this file'}
+                    </button>
+                  ) : (
+                    <>
+                      <button type="button" onClick={reset} className="text-xs font-semibold px-3 py-2 rounded-lg border border-slate-200 text-slate-700 bg-white hover:bg-slate-50">
+                        Clear
+                      </button>
+                      <button type="button" onClick={() => runBatch(true)} className="text-xs font-semibold px-3 py-2 rounded-lg border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100">
+                        Check all files
+                      </button>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (await confirmDialog(`Import all ${batch.length} files now, one after another? Rows already in the system are skipped.`)) runBatch(false);
+                        }}
+                        className="text-xs font-semibold px-3 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700"
+                      >
+                        Import all files
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+              <div className="max-h-80 overflow-auto rounded-xl border border-slate-200 divide-y divide-slate-100">
+                {batch.map((b) => (
+                  <div key={b.file.name} className="px-3 py-2 text-xs flex flex-wrap items-center gap-x-3 gap-y-0.5">
+                    <span className="font-medium text-slate-800 truncate max-w-[22rem]">{b.file.name}</span>
+                    <span className={b.state === 'ok' ? 'text-emerald-600' : b.state === 'fail' ? 'text-rose-600' : b.state === 'run' ? 'text-blue-600' : 'text-slate-400'}>
+                      {b.state === 'wait' ? 'Waiting' : b.state === 'run' ? 'Working…' : b.state === 'fail' ? 'Failed' : 'Done'}
+                    </span>
+                    {b.state === 'ok' && (
+                      <span className="text-slate-500">
+                        {b.create} new · {b.update} updated · {b.skip} skipped · {b.error} errors
+                      </span>
+                    )}
+                    {b.message && <span className="text-rose-600 basis-full">{b.message}</span>}
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
