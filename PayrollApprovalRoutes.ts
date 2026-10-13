@@ -517,8 +517,8 @@ export function registerPayrollApprovalRoutes(app: Express, deps: PayrollApprova
         for (const s of mine) {
           rows.push({
             ...base,
-            account_type: s.account_type === "mfs" ? "MFS" : "Bank",
-            bank: s.account_type === "mfs" ? s.provider || s.account_label : s.bank_name || s.account_label,
+            account_type: s.account_type === "mfs" ? "MFS" : s.account_type === "cash" ? "Cash" : "Bank",
+            bank: s.account_type === "mfs" ? s.provider || s.account_label : s.account_type === "cash" ? "Cash" : s.bank_name || s.account_label,
             branch: s.branch_name || "",
             account_number: s.account_number,
             amount: money(s.amount)

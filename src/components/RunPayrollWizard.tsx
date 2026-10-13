@@ -63,7 +63,7 @@ interface WizardRow {
 // PayrollRoutes.ts. Empty/absent for an employee with no split configured,
 // who's paid via this wizard's single Payment Method dropdown instead.
 interface PaymentSplitLine {
-  account_type: 'bank' | 'mfs';
+  account_type: 'bank' | 'mfs' | 'cash';
   account_label: string;
   bank_name: string | null;
   branch_name: string | null;
@@ -587,7 +587,7 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
                                     {p.payment_split.map((s, i) => (
                                       <span
                                         key={i}
-                                        title={`${s.account_type === 'mfs' ? s.provider || 'MFS' : [s.bank_name, s.branch_name].filter(Boolean).join(' — ')} · ${s.account_number} · ${money(s.amount)}`}
+                                        title={`${s.account_type === 'mfs' ? s.provider || 'MFS' : s.account_type === 'cash' ? 'Cash' : [s.bank_name, s.branch_name].filter(Boolean).join(' — ')}${s.account_type === 'cash' ? '' : ` · ${s.account_number}`} · ${money(s.amount)}`}
                                         className="inline-flex items-center text-[10px] font-normal px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-700"
                                       >
                                         {s.account_label} {s.percentage}%

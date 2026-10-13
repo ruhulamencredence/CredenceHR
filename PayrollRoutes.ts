@@ -157,7 +157,7 @@ export async function ensurePayrollSchema(dbPool: any): Promise<void> {
       CREATE TABLE IF NOT EXISTS payroll_payment_splits (
         id INT AUTO_INCREMENT PRIMARY KEY,
         payroll_id INT NOT NULL,
-        account_type ENUM('bank', 'mfs') NOT NULL DEFAULT 'bank',
+        account_type ENUM('bank', 'mfs', 'cash') NOT NULL DEFAULT 'bank',
         account_label VARCHAR(100) NOT NULL,
         bank_name VARCHAR(150) NULL,
         branch_name VARCHAR(150) NULL,
@@ -169,6 +169,8 @@ export async function ensurePayrollSchema(dbPool: any): Promise<void> {
         FOREIGN KEY (payroll_id) REFERENCES payrolls(id) ON DELETE CASCADE
       )
     `);
+    // Cash as a third kind next to Bank / MFS (tables made before it existed).
+    await dbPool.query(`ALTER TABLE payroll_payment_splits MODIFY COLUMN account_type ENUM('bank', 'mfs', 'cash') NOT NULL DEFAULT 'bank'`);
     // ---- Salary Structure Setup: Components & Pay Grades ------------------
     // salary_components — the reusable catalogue of Earning/Deduction line
     // items shown on the "Salary Templates / Components Setup" page (Basic,

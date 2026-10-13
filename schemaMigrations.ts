@@ -1269,7 +1269,7 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
       CREATE TABLE IF NOT EXISTS employee_payment_accounts (
         id INT AUTO_INCREMENT PRIMARY KEY,
         employee_id INT NOT NULL,
-        account_type ENUM('bank', 'mfs') NOT NULL DEFAULT 'bank',
+        account_type ENUM('bank', 'mfs', 'cash') NOT NULL DEFAULT 'bank',
         account_label VARCHAR(100) NOT NULL,
         bank_name VARCHAR(150) NULL,
         branch_name VARCHAR(150) NULL,
@@ -1283,6 +1283,8 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
         FOREIGN KEY (employee_id) REFERENCES all_employees(id) ON DELETE CASCADE
       )
     `);
+    // Cash as a third kind next to Bank / MFS (tables made before it existed).
+    await dbPool.query(`ALTER TABLE employee_payment_accounts MODIFY COLUMN account_type ENUM('bank', 'mfs', 'cash') NOT NULL DEFAULT 'bank'`);
   } catch (err: any) {
     console.warn("⚠️ Could not ensure employee_payment_accounts table exists: " + err.message);
   }

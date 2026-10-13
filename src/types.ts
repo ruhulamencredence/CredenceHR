@@ -366,7 +366,7 @@ export interface EmployeeSupervisor {
 export interface EmployeePaymentAccount {
   id: number;
   employee_id: number;
-  account_type: 'bank' | 'mfs';
+  account_type: 'bank' | 'mfs' | 'cash';
   account_label: string;
   bank_name: string | null;
   branch_name: string | null;
