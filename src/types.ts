@@ -702,6 +702,8 @@ export interface User {
   can_view_loan_request?: boolean;
   // AI Assistant floating helper — ON unless HR switched it off (Module Access).
   can_use_ai_assistant?: boolean;
+  // Answers Assistant live-support chats (AssistantSupportRoutes.ts). OFF by default.
+  can_handle_assistant_support?: boolean;
   can_view_leave_application?: boolean;
   can_view_my_leave?: boolean;
 }
@@ -1665,7 +1667,9 @@ export type AlertType =
   // Payroll -> Approval (PayrollApprovalRoutes.ts): a salary month waiting on
   // Audit / Accounts, returned, or paid -> Payroll -> Approval.
   | 'payroll_approval'
-  | 'hr_reminder';
+  | 'hr_reminder'
+  // Assistant live support: a new request (agents) or a chat transferred to me.
+  | 'assistant_support';
 
 export interface Alert {
   id: number;

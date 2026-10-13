@@ -38,6 +38,7 @@ import { registerNoticeRoutes } from "./NoticeRoutes";
 import { registerEmployeeRoutes } from "./EmployeeRoutes";
 import { registerEmployeeTransferRoutes, ensureEmployeeTransferSchema, applyDueEmployeeTransfers, recordEmployeeEditHistory } from "./EmployeeTransferRoutes";
 import { registerAiAssistantRoutes } from "./AiAssistantRoutes";
+import { registerAssistantSupportRoutes } from "./AssistantSupportRoutes";
 import { registerAdminDashboardRoutes } from "./AdminDashboardRoutes";
 import { registerDeviceRoutes, ensureDeviceSchema, checkAppDevice, deviceStillAllowed } from "./DeviceRoutes";
 import { ensureAccountBlockSchema, accountState, registerAccountBlockRoutes } from "./AccountBlock";
@@ -2790,6 +2791,8 @@ async function startServer() {
   }
 
   registerChatRoutes(app, io, { authenticateToken, queryDB });
+  // Assistant live support — a human answers inside the Assistant (AssistantSupportRoutes.ts).
+  registerAssistantSupportRoutes(app, { authenticateToken, queryDB, io });
   setupChatSocket(io, { queryDB, jwtSecret: JWT_SECRET });
   // Chat audio/video calls — WebRTC signaling on the same socket (CallRoutes.ts).
   registerCallRoutes(app, { authenticateToken, queryDB });
