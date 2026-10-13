@@ -1,9 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Route, Filter, LogIn, LogOut, Trash2 } from 'lucide-react';
 import { ClaimRecord, User } from '../types';
 import { apiUrl } from '../lib/api';
 import { formatDate } from '../lib/formatDate';
 import { Spinner } from './Spinner';
+import { PagerBar } from './PagerBar';
 import { confirmDialog } from '../lib/confirmDialog';
 
 interface ClaimsPanelProps {
@@ -22,35 +23,55 @@ export const ClaimsPanel: React.FC<ClaimsPanelProps> = ({ token, users }) => {
   const [toFilter, setToFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  // One page of the server's list at a time — every claim is reachable, not only the newest 1,000.
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
+  const [total, setTotal] = useState(0);
+  const listReq = useRef(0);
 
   const fetchClaims = async () => {
+    const req = ++listReq.current;
     setLoading(true);
     try {
-      const params = new URLSearchParams();
+      const params = new URLSearchParams({ page: String(page), limit: String(pageSize) });
       if (userFilter) params.set('user_id', userFilter);
       if (fromFilter) params.set('from', fromFilter);
       if (toFilter) params.set('to', toFilter);
       if (statusFilter) params.set('status', statusFilter);
       const res = await fetch(apiUrl(`/api/claims?${params.toString()}`), { headers: { Authorization: `Bearer ${token}` } });
-      if (res.ok) setClaims(await res.json());
+      if (res.ok) {
+        const data = await res.json();
+        if (req !== listReq.current) return; // a newer request is on its way
+        setClaims(Array.isArray(data) ? data : data.rows || []);
+        setTotal(Array.isArray(data) ? data.length : Number(data.total) || 0);
+      }
     } catch (err) {
       console.error('Failed to load claims', err);
     } finally {
-      setLoading(false);
+      if (req === listReq.current) setLoading(false);
     }
   };
 
   useEffect(() => {
     fetchClaims();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [page, pageSize]);
+
+  // Applying a filter always starts again from page 1.
+  const applyFilters = () => {
+    if (page !== 1) setPage(1);
+    else fetchClaims();
+  };
 
   const handleDelete = async (id: number) => {
     if (!(await confirmDialog('Delete this claim? This cannot be undone.'))) return;
     setDeletingId(id);
     try {
       const res = await fetch(apiUrl(`/api/claims/${id}`), { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
-      if (res.ok) setClaims((prev) => prev.filter((c) => c.id !== id));
+      if (res.ok) {
+        setClaims((prev) => prev.filter((c) => c.id !== id));
+        setTotal((n) => Math.max(0, n - 1));
+      }
     } catch (err) {
       console.error('Failed to delete claim', err);
     } finally {
@@ -120,7 +141,7 @@ export const ClaimsPanel: React.FC<ClaimsPanelProps> = ({ token, users }) => {
           </div>
           <button
             type="button"
-            onClick={fetchClaims}
+            onClick={applyFilters}
             className="col-span-1 flex items-center justify-center gap-1.5 text-xs px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium whitespace-nowrap transition-colors"
           >
             <Filter className="w-3.5 h-3.5" /> Apply
@@ -303,6 +324,7 @@ export const ClaimsPanel: React.FC<ClaimsPanelProps> = ({ token, users }) => {
               </tbody>
             </table>
           </div>
+          <PagerBar page={page} pageSize={pageSize} total={total} onPage={setPage} onPageSize={(n) => { setPageSize(n); setPage(1); }} />
         </>
       )}
     </div>
