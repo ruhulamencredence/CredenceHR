@@ -339,7 +339,13 @@ const ApprovalDialog: React.FC<{
           ) : (
             <div className="mt-4">
               <label className="block text-[11px] font-semibold text-slate-500 mb-1">{kind === 'return' ? 'What needs correcting? *' : 'Note (optional)'}</label>
-              <textarea rows={3} value={note} onChange={(e) => setNote(e.target.value)} className={`${input} resize-none`} />
+              <textarea
+                rows={3}
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                placeholder={kind === 'return' ? 'Mention what needs to be corrected' : ''}
+                className={`${input} resize-none`}
+              />
             </div>
           )}
           <div className="mt-4 flex justify-end gap-2">

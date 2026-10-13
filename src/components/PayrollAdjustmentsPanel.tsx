@@ -679,6 +679,9 @@ const AdjustmentForm: React.FC<{
   const [kind, setKind] = useState<'arrear' | 'recovery'>('recovery');
   const [forMonth, setForMonth] = useState(prevMonth(thisMonth()));
   const [total, setTotal] = useState('');
+  // Overtime: hours x rate per hour gives the difference by itself.
+  const [otHours, setOtHours] = useState('');
+  const [otRate, setOtRate] = useState('');
   const [start, setStart] = useState(thisMonth());
   const [installments, setInstallments] = useState('1');
   const [reason, setReason] = useState('');
@@ -698,7 +701,10 @@ const AdjustmentForm: React.FC<{
     (e) => !search.trim() || [e.name, e.employee_code, e.department].some((v) => String(v || '').toLowerCase().includes(search.trim().toLowerCase()))
   );
   const n = Math.max(1, Math.min(24, Math.round(Number(installments) || 1)));
-  const per = Number(total) > 0 ? Math.ceil((Number(total) / n) * 100) / 100 : 0;
+  const otTotal = Number(otHours) > 0 && Number(otRate) > 0 ? Math.round(Number(otHours) * Number(otRate) * 100) / 100 : 0;
+  const totalAmount = otTotal > 0 ? otTotal : Number(total);
+  const otNote = otTotal > 0 ? `OT ${Number(otHours)} h × ${money(Number(otRate))} = ${money(otTotal)}` : '';
+  const per = totalAmount > 0 ? Math.ceil((totalAmount / n) * 100) / 100 : 0;
 
   return (
     <Modal
@@ -714,7 +720,7 @@ const AdjustmentForm: React.FC<{
             className={btnPrimary}
             disabled={!employeeId}
             onClick={() =>
-              onSave({ employee_id: Number(employeeId), kind, for_month: forMonth, total_amount: Number(total), start_month: start, installments: n, reason })
+              onSave({ employee_id: Number(employeeId), kind, for_month: forMonth, total_amount: totalAmount, start_month: start, installments: n, reason: [otNote, reason.trim()].filter(Boolean).join(' — ') })
             }
           >
             Save adjustment
@@ -763,8 +769,36 @@ const AdjustmentForm: React.FC<{
         </div>
         <div>
           <label className={labelCls}>Difference (৳)</label>
-          <input className={inputCls} type="number" min={0} value={total} onChange={(e) => setTotal(e.target.value)} />
+          <input
+            className={`${inputCls} ${otTotal > 0 ? 'bg-slate-50 text-slate-500' : ''}`}
+            type="number"
+            min={0}
+            value={otTotal > 0 ? String(otTotal) : total}
+            disabled={otTotal > 0}
+            onChange={(e) => setTotal(e.target.value)}
+          />
         </div>
+      </div>
+      <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-3 space-y-2">
+        <div className="text-[11px] font-semibold text-slate-500">Overtime (optional) — hours and rate give the total</div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className={labelCls}>OT hours</label>
+            <input className={inputCls} type="number" min={0} step="0.25" value={otHours} onChange={(e) => setOtHours(e.target.value)} placeholder="e.g. 8" />
+          </div>
+          <div>
+            <label className={labelCls}>Amount per hour (৳)</label>
+            <input className={inputCls} type="number" min={0} step="0.01" value={otRate} onChange={(e) => setOtRate(e.target.value)} placeholder="e.g. 150" />
+          </div>
+        </div>
+        {otTotal > 0 && (
+          <p className="text-xs text-slate-700">
+            Total amount: <span className="font-bold text-slate-900">{money(otTotal)}</span>{' '}
+            <span className="text-slate-500">
+              ({Number(otHours)} h × {money(Number(otRate))})
+            </span>
+          </p>
+        )}
       </div>
       {employeeId && ref !== undefined && (
         <div className="text-[11px] rounded-lg bg-slate-50 border border-slate-200 px-3 py-2 text-slate-600">
