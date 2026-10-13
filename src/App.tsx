@@ -113,9 +113,10 @@ export default function App() {
   const [selfServiceView, setSelfServiceView] = useState<'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | null>(() => {
     try {
       const saved = selfServiceViewStorageKey ? localStorage.getItem(selfServiceViewStorageKey) : null;
-      if (saved === 'leaveApplication' || saved === 'leaveManagement' || saved === 'timesheet' || saved === 'approveApplications' || saved === 'employeeDirectory' || saved === 'resignation') {
-        return saved;
-      }
+      const restorable = ['leaveManagement', 'timesheet', 'approveApplications', 'employeeDirectory', 'resignation', 'assetManagement', 'vehicleManagement', 'myCases', 'myLetters', 'teamAttendance', 'myTasks', 'myMobileSim', 'myLoans'];
+      if (saved === 'leaveApplication' || (saved && restorable.includes(saved))) return saved as any;
+      // Payroll is a module of its own: only brought back for an account that still has it.
+      if (saved === 'payroll' && user && (user.role === 'superadmin' || (user.module_permissions || []).includes('payroll'))) return 'payroll';
     } catch {
       // ignore — falls through to the "no Self Service page open" default below
     }
