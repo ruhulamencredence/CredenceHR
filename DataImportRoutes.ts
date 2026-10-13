@@ -80,7 +80,7 @@ export const IMPORT_KINDS: Kind[] = [
     key: "employees",
     title: "Employee Details",
     description:
-      "Adds new employees and updates existing ones, matched on Employee ID. Empty cells leave what's already saved. Fill Login ID and Password to create the employee's login in the same upload.",
+      "Adds new employees and updates existing ones, matched on Employee ID. Empty cells leave what's already saved. Fill Login ID and Password to create the employee's login in the same upload. Payment Type / Bank Name / Account Number add the salary Bank, MFS or Cash account (Employees -> Payment).",
     module: "employees",
     fields: [
       EMP,
@@ -117,7 +117,27 @@ export const IMPORT_KINDS: Kind[] = [
         example: "rahim",
         note: "Email or username they sign in with. With a Password, creates their login (role User) with the default Access Template; skipped if they already have one"
       },
-      { key: "login_password", label: "Password", type: "text", aliases: ["pass", "login password"], example: "Rahim@2026", note: "At least 6 characters" }
+      { key: "login_password", label: "Password", type: "text", aliases: ["pass", "login password"], example: "Rahim@2026", note: "At least 6 characters" },
+      {
+        key: "payment_type",
+        label: "Payment Type",
+        type: "text",
+        aliases: ["salary payment type", "payment method", "pay by"],
+        example: "Bank",
+        note: "Bank / MFS / Cash — how salary is paid (Employees -> Payment). Empty with an Account Number: Bank (MFS if a Provider is given)"
+      },
+      { key: "payment_bank_name", label: "Bank Name", type: "text", aliases: ["payment bank", "salary bank"], example: "Dutch-Bangla Bank" },
+      { key: "payment_branch_name", label: "Bank Branch", type: "text", aliases: ["bank branch name", "payment branch"], example: "Gulshan Branch" },
+      { key: "payment_provider", label: "MFS Provider", type: "text", aliases: ["mfs", "wallet provider"], example: "bKash" },
+      {
+        key: "payment_account_number",
+        label: "Account Number",
+        type: "text",
+        aliases: ["bank account", "bank account number", "account no", "account", "wallet number", "mfs number"],
+        example: "1234567890123",
+        note: "Bank account number, or the MFS wallet number. Not needed for Cash"
+      },
+      { key: "payment_percentage", label: "Payment %", type: "number", aliases: ["payment percent", "share %", "percentage"], example: 100, note: "Share of net salary paid here (default 100). An account the employee already has is skipped" }
     ]
   },
   {
@@ -431,13 +451,18 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
           canGrant = Number(me[0]?.can_grant_module_access || 0) === 1;
         }
         const defaultTemplate = canGrant ? await ensureDefaultAccessTemplate(queryDB).catch(() => null) : null;
+        // Salary payment accounts already on file (Employees -> Payment), by employee.
+        const accountRows: any[] = (await queryDB("SELECT employee_id, account_type, account_number, percentage, is_active FROM employee_payment_accounts").catch(() => [])) || [];
+        const accounts = new Map<number, any[]>();
+        for (const a of accountRows) accounts.set(Number(a.employee_id), [...(accounts.get(Number(a.employee_id)) || []), a]);
         return {
           defaultTemplate,
           takenLogins,
           dept: new Map(departments.map((d) => [norm(String(d.name)), d])),
           branch: new Map(branches.map((b) => [norm(String(b.branch_name)), b])),
           pinOwner: new Map(pins.map((p) => [String(p.zk_device_pin), p])),
-          seenCodes: new Set<string>()
+          seenCodes: new Set<string>(),
+          accounts
         };
       },
       row: async (v, ctx, prep) => {
@@ -510,6 +535,54 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
             );
           }
         }
+        // Salary payment account (Bank / MFS / Cash) from the Payment Type..Payment % columns.
+        let pay: { type: "bank" | "mfs" | "cash"; label: string; bank: string | null; branch: string | null; provider: string | null; number: string; pct: number } | null = null;
+        if (["payment_type", "payment_bank_name", "payment_branch_name", "payment_provider", "payment_account_number", "payment_percentage"].some((k) => str(v[k]))) {
+          const t = norm(str(v.payment_type));
+          const provider = str(v.payment_provider).slice(0, 50);
+          let type: "bank" | "mfs" | "cash" | null = null;
+          if (!t) type = provider ? "mfs" : "bank";
+          else if (["bank", "banktransfer", "banking"].includes(t)) type = "bank";
+          else if (["mfs", "mobile", "mobilebanking", "bkash", "nagad", "rocket", "upay", "surecash", "wallet"].includes(t)) type = "mfs";
+          else if (["cash", "cashpayment"].includes(t)) type = "cash";
+          if (!type) fail(`Payment Type "${str(v.payment_type)}" — write Bank, MFS or Cash.`);
+          const number = type === "cash" ? "" : str(v.payment_account_number).slice(0, 100);
+          if (type !== "cash" && !number) fail(type === "mfs" ? "MFS needs the wallet number in Account Number." : "Bank needs the Account Number.");
+          const pctRaw = str(v.payment_percentage) ? parseNumber(v.payment_percentage) : 100;
+          if (pctRaw === null || !Number.isFinite(pctRaw) || pctRaw <= 0 || pctRaw > 100) fail(`Payment % "${str(v.payment_percentage)}" must be more than 0 and at most 100.`);
+          const pct = Math.round(Number(pctRaw) * 100) / 100;
+          const bank = type === "bank" ? str(v.payment_bank_name).slice(0, 150) || null : null;
+          const mine: any[] = existing ? prep.accounts.get(Number(existing.id)) || [] : [];
+          const same = mine.find((a: any) => a.account_type === type && String(a.account_number || "") === number);
+          if (same) {
+            notes.push(`${type === "cash" ? "Cash" : type === "mfs" ? "MFS" : "Bank"} account already there — not added again`);
+          } else {
+            const used = mine.filter((a: any) => Number(a.is_active) !== 0).reduce((n: number, a: any) => n + Number(a.percentage || 0), 0);
+            if (used + pct > 100.001) fail(`Payment accounts would total ${(used + pct).toFixed(2)}% — can't exceed 100%.`);
+            pay = {
+              type,
+              label: (type === "bank" ? bank : type === "mfs" ? provider : "Cash") || (type === "bank" ? "Bank" : type === "mfs" ? "MFS" : "Cash"),
+              bank,
+              branch: type === "bank" ? str(v.payment_branch_name).slice(0, 150) || null : null,
+              provider: type === "mfs" ? provider || null : null,
+              number,
+              pct
+            };
+            notes.push(`${type === "cash" ? "Cash" : type === "mfs" ? "MFS" : "Bank"} payment${number ? " " + number : ""} ${pct}%`);
+          }
+        }
+        const addPayment = async (employeeId: number) => {
+          if (!pay) return;
+          const have: any[] = prep.accounts.get(employeeId) || [];
+          if (!ctx.dryRun) {
+            await queryDB(
+              `INSERT INTO employee_payment_accounts (employee_id, account_type, account_label, bank_name, branch_name, provider, account_number, percentage, is_active, sort_order)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
+              [employeeId, pay.type, pay.label, pay.bank, pay.branch, pay.provider, pay.number, pay.pct, have.length]
+            );
+          }
+          prep.accounts.set(employeeId, [...have, { account_type: pay.type, account_number: pay.number, percentage: pay.pct, is_active: 1 }]);
+        };
         const createLogin = async (employeeId: number) => {
           if (!login || ctx.dryRun) return;
           const hash = await bcrypt.hash(login.password, 10);
@@ -527,7 +600,7 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
 
         if (existing) {
           const changed = Object.keys(set).filter((k) => str(existing[k]) !== str(set[k]));
-          if (changed.length === 0 && !login) return { status: "skip", message: ["Already up to date", ...notes].join(". "), employee: `${set.name} (${code})` };
+          if (changed.length === 0 && !login && !pay) return { status: "skip", message: ["Already up to date", ...notes].join(". "), employee: `${set.name} (${code})` };
           if (!ctx.dryRun && changed.length > 0) {
             await recordEmployeeEditHistory(queryDB, {
               employeeId: Number(existing.id),
@@ -540,7 +613,8 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
             await queryDB(`UPDATE all_employees SET ${changed.map((k) => `${k} = ?`).join(", ")} WHERE id = ?`, [...changed.map((k) => set[k]), Number(existing.id)]);
           }
           await createLogin(Number(existing.id));
-          const what = [changed.length ? `Changes: ${changed.join(", ")}` : null, login ? "New login" : null].filter(Boolean) as string[];
+          await addPayment(Number(existing.id));
+          const what = [changed.length ? `Changes: ${changed.join(", ")}` : null, login ? "New login" : null, pay ? "Payment account added" : null].filter(Boolean) as string[];
           return { status: "update", message: [...what, ...notes].join(". "), employee: `${set.name} (${code})` };
         }
         if (!ctx.dryRun) {
@@ -550,6 +624,7 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
           const r = await queryDB(`INSERT INTO all_employees (${cols.join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`, vals);
           ctx.byCode.set(codeKey, { id: r.insertId, employee_id: code, ...set });
           await createLogin(Number(r.insertId));
+          await addPayment(Number(r.insertId));
         }
         return { status: "create", message: [login ? "New employee with login" : "New employee", ...notes].join(". "), employee: `${set.name} (${code})` };
       }
