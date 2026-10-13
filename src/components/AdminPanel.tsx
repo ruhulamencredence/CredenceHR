@@ -702,6 +702,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [mobileBillAccessEnabled, setMobileBillAccessEnabled] = useState(false);
   const [serviceBookAccessEnabled, setServiceBookAccessEnabled] = useState(false);
   const [loanRequestAccessEnabled, setLoanRequestAccessEnabled] = useState(false);
+  const [aiAssistantEnabled, setAiAssistantEnabled] = useState(true);
   const [groupDashboardEnabled, setGroupDashboardEnabled] = useState(false);
   const [savingModules, setSavingModules] = useState(false);
 
@@ -729,6 +730,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     setMobileBillAccessEnabled(!!u.can_view_mobile_bill);
     setServiceBookAccessEnabled(!!u.can_view_service_book);
     setLoanRequestAccessEnabled(!!u.can_view_loan_request);
+    setAiAssistantEnabled(u.can_use_ai_assistant !== false);
     setGroupDashboardEnabled(!!u.can_view_group_dashboard);
     // Permission layers — one Set per module in PERMISSION_LAYER_MODULES.
     // Explicit saved rows win; a module this account already has granted
@@ -1153,6 +1155,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         });
         const lrData = await lrRes.json();
         if (!lrRes.ok) throw new Error(lrData.error || 'Failed to update Loan / Advance Request access');
+      }
+
+      if (aiAssistantEnabled !== (managingModulesFor.can_use_ai_assistant !== false)) {
+        const aiRes = await fetch(apiUrl(`/api/users/${managingModulesFor.id}/ai-assistant-access`), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ can_use_ai_assistant: aiAssistantEnabled })
+        });
+        const aiData = await aiRes.json();
+        if (!aiRes.ok) throw new Error(aiData.error || 'Failed to update AI Assistant access');
       }
 
       if (callsAccessEnabled !== !!managingModulesFor.can_use_calls) {
@@ -7922,6 +7934,30 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   <span
                     className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
                       loanRequestAccessEnabled ? 'translate-x-[18px]' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </label>
+              <label className="flex items-center justify-between gap-3 p-3.5 mb-3 bg-violet-50 border border-violet-200 rounded-xl cursor-pointer">
+                <span>
+                  <span className="text-sm font-semibold text-slate-900 block">AI Assistant</span>
+                  <span className="text-[11px] text-slate-500">
+                    The floating Assistant: answers questions about their own leave, attendance, claims and loans, how to
+                    use the app, and — only for modules they already have — HR figures. On by default.
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setAiAssistantEnabled((v) => !v)}
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${
+                    aiAssistantEnabled ? 'bg-emerald-500' : 'bg-slate-300'
+                  }`}
+                  title={aiAssistantEnabled ? 'On — click to turn off' : 'Off — click to turn on'}
+                  aria-label="AI Assistant"
+                >
+                  <span
+                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                      aiAssistantEnabled ? 'translate-x-[18px]' : 'translate-x-1'
                     }`}
                   />
                 </button>

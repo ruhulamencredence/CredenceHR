@@ -32,6 +32,7 @@ import { UserDashboardSkeleton } from './components/UserDashboardSkeleton';
 import { Spinner } from './components/Spinner';
 import { ApkModal } from './components/ApkModal';
 import { FloatingChatButton } from './components/FloatingChatButton';
+import { AiAssistant } from './components/AiAssistant';
 import { CallLayer } from './components/CallLayer';
 import { LeaveManage } from './components/LeaveManage';
 import { ApproveApplications } from './components/ApproveApplications';
@@ -1526,6 +1527,34 @@ export default function App() {
           Hidden while the native in-app Chat page or this button's own popup
           is already open. */}
       <FloatingChatButton token={token || ''} onOpenChat={openChatPopup} hidden={showChat || showChatPopup} />
+
+      {/* Credence Assistant (AiAssistant.tsx) — every account unless switched
+          off in Module Access; its buttons open the page an answer is about. */}
+      <AiAssistant
+        token={token || ''}
+        user={user}
+        hidden={showChat || showChatPopup}
+        onNavigate={(nav) => {
+          const [kind, target] = nav.split(':');
+          if (nav === 'home') return sidebarNavProps.onGoToDashboard();
+          if (nav === 'profile') return sidebarNavProps.onOpenProfile();
+          if (kind === 'self') return sidebarNavProps.onGoToSelfServiceTab(target as Parameters<typeof sidebarNavProps.onGoToSelfServiceTab>[0]);
+          if (kind === 'claims') return sidebarNavProps.onGoToUserClaims(target as 'movementClaims' | 'conveyanceBill');
+          if (kind === 'admin') {
+            if (target === 'claims' || target === 'conveyance') return sidebarNavProps.onGoToAdminClaims(target);
+            return sidebarNavProps.onGoToAdminModule(target as Parameters<typeof sidebarNavProps.onGoToAdminModule>[0]);
+          }
+          if (kind === 'hrops') {
+            try {
+              sessionStorage.setItem('hr_ops_tab', target);
+            } catch {
+              // storage unavailable — the panel opens on its default tab
+            }
+            sidebarNavProps.onGoToAdminModule('hr_operations');
+            setTimeout(() => window.dispatchEvent(new CustomEvent('credence:hr-ops-tab', { detail: target })), 0);
+          }
+        }}
+      />
 
       {/* Chat audio/video calls — rings on any page; only for accounts with
           Calls access (Module Access -> "Also allow Audio / Video Calls"). */}
