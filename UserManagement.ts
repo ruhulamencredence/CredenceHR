@@ -396,6 +396,20 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
       // so pickers can leave out people who have left.
       const empRows: any[] = (await queryDB("SELECT user_id, is_active FROM all_employees WHERE user_id IS NOT NULL").catch(() => [])) || [];
       const inactiveUsers = new Set(empRows.filter((e: any) => Number(e.is_active) === 0).map((e: any) => Number(e.user_id)));
+      // ?slim=1 : who's who only, for pickers and filters (no access switches).
+      if (String(req.query.slim || "") === "1") {
+        return res.json(
+          visibleUsers.map((u: any) => ({
+            id: u.id,
+            name: u.name,
+            email: u.email,
+            username: u.username,
+            role: u.role,
+            is_blocked: u.is_blocked,
+            employee_active: !inactiveUsers.has(Number(u.id))
+          }))
+        );
+      }
       res.json(visibleUsers.map((u: any) => ({
         ...u,
         employee_active: !inactiveUsers.has(Number(u.id)),

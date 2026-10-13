@@ -1188,6 +1188,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [savingDepartment, setSavingDepartment] = useState(false);
   const [mprNumbers, setMprNumbers] = useState<MprNumber[]>([]);
   const [entries, setEntries] = useState<Entry[]>([]);
+  // Who's who (id, name, role…) for the pickers and filters of every tab but Users.
+  const [people, setPeople] = useState<User[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   // User Management table search + role filter — narrows the (often long)
   // users list by name/Login ID and/or role without touching the underlying
@@ -1554,7 +1556,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       filters.push(['Project', proj?.project_name || reportProjectFilter]);
     }
     if (reportEmployeeFilter) {
-      const emp = users.find((u) => String(u.id) === reportEmployeeFilter);
+      const emp = people.find((u) => String(u.id) === reportEmployeeFilter);
       filters.push(['Employee', emp?.name || reportEmployeeFilter]);
     }
     if (reportDepartmentFilter) filters.push(['Department', reportDepartmentFilter]);
@@ -1996,7 +1998,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // fetches its own data (Dashboard, HR Operations, Mobile Bill…) loads none
   // of them, and the PEPM entries (the biggest list) only load for Reports.
   // Each list loads once; fetchAllData() refreshes the ones already loaded.
-  type SharedKey = 'projects' | 'branches' | 'mprNumbers' | 'entries' | 'users' | 'budgets' | 'permissions' | 'departments';
+  type SharedKey = 'projects' | 'branches' | 'mprNumbers' | 'entries' | 'users' | 'people' | 'budgets' | 'permissions' | 'departments';
   const loadedShared = useRef<Set<SharedKey>>(new Set());
   const SHARED_URL: Record<SharedKey, string> = {
     projects: '/api/projects',
@@ -2004,6 +2006,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     mprNumbers: '/api/mpr-numbers',
     entries: '/api/entries?scope=all',
     users: '/api/users',
+    people: '/api/users?slim=1',
     budgets: '/api/budgets',
     permissions: '/api/permissions',
     departments: '/api/departments'
@@ -2014,6 +2017,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     mprNumbers: setMprNumbers,
     entries: setEntries,
     users: setUsers,
+    people: setPeople,
     budgets: setBudgets,
     permissions: setPermissions,
     departments: setDepartments
@@ -2038,16 +2042,19 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     'recruitment', 'grievance_disciplinary', 'document_vault', 'hr_operations', 'task_management', 'mobile_bill',
     'devices', 'active_users', 'companies'
   ]);
-  const ALL_SHARED: SharedKey[] = ['projects', 'branches', 'mprNumbers', 'entries', 'users', 'budgets', 'permissions', 'departments'];
-  // The accounts list (the biggest one after PEPM entries) is for the tabs that pick or list
-  // accounts; every other tab leaves it unloaded until one of these is opened.
-  const USERS_LIST_TABS = new Set<string>([
-    'users', 'departments', 'attendance', 'attendance_reports', 'vehicle_management', 'claims', 'conveyance', 'disbursement', 'approvals'
+  const ALL_SHARED: SharedKey[] = ['projects', 'branches', 'mprNumbers', 'entries', 'users', 'people', 'budgets', 'permissions', 'departments'];
+  // The full accounts list (every access switch — the biggest list after PEPM entries) is
+  // only for the Users tab. Tabs that just pick or filter by an account get the light
+  // `people` list (id, name, role…); every other tab loads neither.
+  const PEOPLE_TABS = new Set<string>([
+    'departments', 'attendance', 'attendance_reports', 'vehicle_management', 'claims', 'conveyance', 'disbursement', 'approvals'
   ]);
   const sharedFor = (tab: string): SharedKey[] =>
     SELF_CONTAINED_TABS.has(tab)
       ? []
-      : ALL_SHARED.filter((k) => (k !== 'entries' || tab === 'reports') && (k !== 'users' || USERS_LIST_TABS.has(tab)));
+      : ALL_SHARED.filter(
+          (k) => (k !== 'entries' || tab === 'reports') && (k !== 'users' || tab === 'users') && (k !== 'people' || PEOPLE_TABS.has(tab))
+        );
 
   useEffect(() => {
     loadedShared.current = new Set();
@@ -4169,7 +4176,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   className="text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none"
                 >
                   <option value="">All Users</option>
-                  {users.filter((u) => u.role === 'user').map((u) => (
+                  {people.filter((u) => u.role === 'user').map((u) => (
                     <option key={u.id} value={u.id}>{u.name}</option>
                   ))}
                 </select>
@@ -4382,7 +4389,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   className="text-xs px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none max-w-[160px]"
                 >
                   <option value="">All Employees</option>
-                  {users
+                  {people
                     .filter((u) => u.role === 'user' || u.role === 'admin')
                     .slice()
                     .sort((a, b) => a.name.localeCompare(b.name))
@@ -4951,7 +4958,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           AdminModuleKey like every other tab here. */}
       {activeTab === 'vehicle_management' && (
         <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6">
-          <VehicleManagementAdmin users={users} />
+          <VehicleManagementAdmin users={people} />
         </div>
       )}
 
@@ -6826,7 +6833,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                     className="block w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
                   >
                     <option value="">— None —</option>
-                    {activePeople(users, deptForm.supervisor_user_id).map((u) => (
+                    {activePeople(people, deptForm.supervisor_user_id).map((u) => (
                       <option key={u.id} value={u.id}>{u.name} ({u.role})</option>
                     ))}
                   </select>
@@ -6973,7 +6980,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       {/* TAB: MOVEMENT CLAIMS — review point A -> point B travel check-in/outs
           Users have recorded for office work (TA/DA-style reimbursement). */}
       {activeTab === 'claims' && (
-        <ClaimsPanel token={token} users={users} />
+        <ClaimsPanel token={token} users={people} />
       )}
 
       {/* TAB: CONVEYANCE BILL CLAIM — Superadmin + explicitly-granted Admins only.
@@ -6981,7 +6988,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           completed Movement Claims (computing Amount at a Rate/KM) or add items by
           hand, then export a printable PDF bill. */}
       {activeTab === 'conveyance' && (
-        <ConveyanceBillPanel token={token} users={users} currentUserId={user.id} />
+        <ConveyanceBillPanel token={token} users={people} currentUserId={user.id} />
       )}
 
       {/* TAB: BILL CLAIM POLICY — same "conveyance" grant as the Bill Claim tab;
@@ -6994,7 +7001,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           as its own module (separate from 'conveyance' above) so an Admin can be
           allowed to BUILD bills without also being able to authorize payouts. */}
       {activeTab === 'disbursement' && (
-        <DisbursementPanel token={token} users={users} />
+        <DisbursementPanel token={token} users={people} />
       )}
 
       {/* TAB: APPROVALS — the OLD single global chain (Queue) sits alongside the
@@ -7024,9 +7031,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
             </button>
           </div>
           {approvalsSection === 'queue' ? (
-            <ApprovalManager token={token} user={user} users={users} />
+            <ApprovalManager token={token} user={user} users={people} />
           ) : (
-            <ApprovalTemplateManager token={token} user={user} users={users} />
+            <ApprovalTemplateManager token={token} user={user} users={people} />
           )}
         </div>
       )}
