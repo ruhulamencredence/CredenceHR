@@ -55,7 +55,25 @@ interface ToolResult {
   text: string; // ready-made Bangla answer (local engine)
   data?: any; // compact facts (Gemini engine)
   actions?: AssistantAction[];
+  draft?: LeaveDraft;
 }
+
+// A leave application the Assistant filled in but did NOT submit: the chat
+// shows it as an editable card, and only the person's own "জমা দিন" posts it
+// to POST /api/leave-applications (with all of that route's own checks).
+export interface LeaveDraft {
+  kind: "leave_application";
+  leave_type: string;
+  start_date: string;
+  end_date: string;
+  is_half_day: boolean;
+  purpose: string;
+  today: string;
+  types: { value: string; label: string; balance: number | null; reliever_required: boolean }[];
+  relievers: { id: number; name: string }[];
+}
+
+interface Answer { reply: string; actions: AssistantAction[]; draft?: LeaveDraft }
 
 const SELF_FLAGS = [
   "can_view_movement_claims", "can_view_conveyance_claims", "can_view_timesheet", "can_view_leave_application",
@@ -224,6 +242,115 @@ interface Tool {
   params?: Record<string, { type: string; description: string }>;
   available?: (c: Ctx) => boolean;
   run: (c: Ctx, args: any) => Promise<ToolResult>;
+}
+
+// ---------------------------------------------------------------------------
+// Reading a leave request out of free text ("20 oct family problem niye leave
+// dao", "কাল থেকে ৩ দিন অসুস্থতার ছুটি"). Only fills the draft card — the
+// person checks every field before submitting.
+// ---------------------------------------------------------------------------
+const MONTH_WORDS: [RegExp, number][] = [
+  [/^(jan|january|জানু|জানুয়ারি|januari)/, 1], [/^(feb|february|ফেব্রু|ফেব্রুয়ারি|februari)/, 2], [/^(mar|march|মার্চ)/, 3],
+  [/^(apr|april|এপ্রিল)/, 4], [/^(may|মে)$/, 5], [/^(jun|june|জুন)/, 6], [/^(jul|july|জুলাই)/, 7], [/^(aug|august|আগস্ট|আগষ্ট)/, 8],
+  [/^(sep|sept|september|সেপ্টে|সেপ্টেম্বর)/, 9], [/^(oct|october|অক্টো|অক্টোবর|oktobor)/, 10], [/^(nov|november|নভে|নভেম্বর)/, 11], [/^(dec|december|ডিসে|ডিসেম্বর)/, 12]
+];
+const toAsciiDigits = (s: string) => s.replace(/[০-৯]/g, (d) => String(BN_DIGITS.indexOf(d)));
+const iso = (y: number, m: number, d: number) => `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+const addDays = (isoDate: string, n: number) => new Date(Date.parse(isoDate + "T00:00:00Z") + n * 86400000).toISOString().slice(0, 10);
+const validDate = (y: number, m: number, d: number) => m >= 1 && m <= 12 && d >= 1 && d <= new Date(Date.UTC(y, m, 0)).getUTCDate();
+
+function monthOf(word: string): number | null {
+  for (const [re, m] of MONTH_WORDS) if (re.test(word)) return m;
+  return null;
+}
+
+export function parseLeaveRequest(text: string, today: string) {
+  const t = ` ${toAsciiDigits(String(text || "").toLowerCase()).replace(/[,।]/g, " ").replace(/\s+/g, " ")} `;
+  const [ty, tm] = today.split("-").map(Number);
+  const yearFor = (m: number, explicit?: number) => explicit || (m < tm - 2 ? ty + 1 : ty);
+  let start: string | null = null;
+  let end: string | null = null;
+
+  // 2026-10-20 (… 2026-10-22)
+  const isoHits = [...t.matchAll(/(\d{4})-(\d{1,2})-(\d{1,2})/g)].map((m) => iso(+m[1], +m[2], +m[3]));
+  if (isoHits.length) { start = isoHits[0]; end = isoHits[1] || null; }
+
+  // 20/10(/2026)
+  if (!start) {
+    const hits = [...t.matchAll(/(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?/g)].filter((m) => validDate(ty, +m[2], +m[1]));
+    if (hits.length) {
+      const mk = (m: RegExpMatchArray) => { const y = m[3] ? (m[3].length === 2 ? 2000 + +m[3] : +m[3]) : yearFor(+m[2]); return iso(y, +m[2], +m[1]); };
+      start = mk(hits[0]); end = hits[1] ? mk(hits[1]) : null;
+    }
+  }
+
+  // 20 oct / 20-22 oct / 20 theke 22 october / oct 20
+  if (!start) {
+    const words = t.trim().split(" ");
+    for (let i = 0; i < words.length && !start; i++) {
+      const m = monthOf(words[i].replace(/(er|এর|-এর|e|তে)$/, ""));
+      if (!m) continue;
+      const before = words.slice(Math.max(0, i - 4), i).join(" ");
+      const range = /(\d{1,2})\s*(?:-|–|to|theke|থেকে|hote|হতে)\s*(\d{1,2})(?:\s*(?:tarikh|তারিখ|ta|টা))?\s*$/.exec(before);
+      const single = /(\d{1,2})(?:\s*(?:tarikh|তারিখ|ta|টা|th|st|nd|rd))?\s*$/.exec(before);
+      const after = /^(\d{1,2})\b/.exec(words[i + 1] || "");
+      const yearWord = /^(20\d{2})$/.exec(words[i + 1] || "") || /^(20\d{2})$/.exec(words[i + 2] || "");
+      const y = yearFor(m, yearWord ? +yearWord[1] : undefined);
+      if (range && validDate(y, m, +range[1]) && validDate(y, m, +range[2])) { start = iso(y, m, +range[1]); end = iso(y, m, +range[2]); }
+      else if (single && validDate(y, m, +single[1])) start = iso(y, m, +single[1]);
+      else if (after && validDate(y, m, +after[1])) start = iso(y, m, +after[1]);
+    }
+    // "… 20 oct to 22 oct": a second month mention gives the end date
+    // ("oct 20 to oct 22" works the same way)
+    if (start && !end) {
+      const dm = [...t.matchAll(/(\d{1,2})\s+([a-z\u0980-\u09ff]+)/g)].map((x) => ({ at: x.index || 0, d: +x[1], m: monthOf(x[2]) }));
+      const md = [...t.matchAll(/([a-z\u0980-\u09ff]+)\s+(\d{1,2})\b/g)].map((x) => ({ at: x.index || 0, d: +x[2], m: monthOf(x[1]) }));
+      const all = [...dm, ...md].filter((x) => x.m).sort((a, b) => a.at - b.at)
+        .filter((x, i, arr) => i === 0 || Math.abs(x.at - arr[i - 1].at) > 4);
+      if (all.length > 1) { const x = all[1]; const y = yearFor(x.m!); if (validDate(y, x.m!, x.d)) end = iso(y, x.m!, x.d); }
+    }
+  }
+
+  // aj / kal / porshu
+  if (!start) {
+    if (/\s(porshu|porshudin|পরশু)\s/.test(t)) start = addDays(today, 2);
+    else if (/\s(kal|kalke|agamikal|agami kal|আগামীকাল|কাল|কালকে|tomorrow)\s/.test(t)) start = addDays(today, 1);
+    else if (/\s(aj|ajke|আজ|আজকে|today)\s/.test(t)) start = today;
+  }
+
+  // "3 din" / "৩ দিন" / "3 days"
+  const n = /(\d{1,2})\s*(?:din|দিন|days?|দিনের)/.exec(t);
+  if (start && !end && n && +n[1] > 1 && +n[1] <= 60) end = addDays(start, +n[1] - 1);
+  if (start && (!end || end < start)) end = start;
+
+  const leave_type = /sick|অসুস্থ|asustho|osustho|জ্বর|jor\b|doctor|ডাক্তার|হাসপাতাল|hospital/.test(t) ? "sick"
+    : /without pay|বিনা বেতন|lwp/.test(t) ? "without_pay"
+    : /earn|অর্জিত/.test(t) ? "custom_earn_leave" : "";
+  const is_half_day = /half ?day|হাফ|অর্ধ|অর্ধেক/.test(t);
+
+  // Purpose: the dates and request words taken out, then "<reason> niye /
+  // er jonno / karone …" or "… for / because <reason>".
+  const MONTH_RX = "(?:jan\\w*|feb\\w*|mar\\w*|apr\\w*|may|jun\\w*|jul\\w*|aug\\w*|sep\\w*|oct\\w*|nov\\w*|dec\\w*|জানুয়ারি|ফেব্রুয়ারি|মার্চ|এপ্রিল|জুন|জুলাই|আগস্ট|সেপ্টেম্বর|অক্টোবর|নভেম্বর|ডিসেম্বর)";
+  const base = toAsciiDigits(String(text || ""))
+    .replace(/\d{4}-\d{1,2}-\d{1,2}/g, " ")
+    .replace(/\d{1,2}\/\d{1,2}(?:\/\d{2,4})?/g, " ")
+    .replace(new RegExp(`\\d{1,2}\\s*(?:-|–|to|theke|থেকে|hote|হতে)\\s*\\d{1,2}\\s*${MONTH_RX}`, "gi"), " ")
+    .replace(new RegExp(`\\d{1,2}\\s*${MONTH_RX}`, "gi"), " ")
+    .replace(new RegExp(`${MONTH_RX}\\s*\\d{1,2}`, "gi"), " ")
+    .replace(/\d{1,2}\s*(?:din|দিন|days?|দিনের)/gi, " ")
+    .replace(/[,।]/g, " ")
+    .replace(/\s+/g, " ");
+  const pre = /^(.{3,90}?)\s*(?:niye|নিয়ে|er jonno|এর জন্য|jonno|জন্য|karone|কারণে)(?:\s|$)/i.exec(base);
+  const post = /(?:\bfor|because of|because|karon|কারণ)\s+(.{3,90}?)\s*$/i.exec(base);
+  const FILLER = new Set(["leave", "application", "appliation", "aplication", "chuti", "chhuti", "ছুটি", "ছুটির", "dao", "দাও", "kore", "করে", "apply", "koro", "করো", "lagbe", "লাগবে",
+    "chai", "চাই", "nibo", "নেব", "নিব", "half", "day", "হাফ", "kal", "কাল", "কালকে", "kalke", "আগামীকাল", "agamikal", "porshu", "পরশু", "aj", "আজ", "ajke", "theke", "থেকে", "to",
+    "on", "from", "ekti", "ekta", "একটি", "একটা", "amar", "আমার", "er", "এর", "sick", "casual", "please", "plz", "ta", "টা", "tarikh", "তারিখ", "i", "need", "want", "take", "a",
+    "an", "the", "for", "my", "den", "দিন", "diye", "দিয়ে", "sir"]);
+  const words = ((pre && pre[1]) || (post && post[1]) || "").split(" ").filter((w) => w && !FILLER.has(w.toLowerCase()));
+  let purpose = words.join(" ").trim();
+  if (purpose) purpose = purpose.charAt(0).toUpperCase() + purpose.slice(1);
+
+  return { start_date: start, end_date: end, leave_type, is_half_day, purpose };
 }
 
 const TOOLS: Tool[] = [
@@ -398,6 +525,59 @@ const TOOLS: Tool[] = [
       return { ok: true, text: lines, data: { results: hits.map((e: any) => ({ name: e.name, id: e.employee_id, designation: e.designation, department: e.department, mobile: e.mobile || e.phone, email: e.email, supervisor: e.supervisor_name })) }, actions: [{ label: "Employee Directory খুলুন", nav: "self:employeeDirectory" }] };
     }
   },
+  {
+    name: "prepare_leave_application",
+    description:
+      "Fill in (do NOT submit) a leave application for the asking employee. The app shows it as an editable card and the employee submits it themselves. " +
+      "Use when they ask to apply for / take leave. Resolve relative dates against today. leave_type: casual | sick | without_pay | a custom key, or omit to let them pick.",
+    params: {
+      start_date: { type: "string", description: "First day of leave, YYYY-MM-DD" },
+      end_date: { type: "string", description: "Last day of leave, YYYY-MM-DD (same as start for one day)" },
+      leave_type: { type: "string", description: "casual, sick, without_pay or a custom leave key; omit if not stated" },
+      purpose: { type: "string", description: "Reason in the employee's words, short" },
+      is_half_day: { type: "boolean", description: "true for a half day" }
+    },
+    available: (c) => isSuper(c) || c.flags.can_view_leave_application,
+    run: async (c, args) => {
+      const [cats, pols, rels, bal] = await Promise.all([
+        callApi(c.req, "/api/leave-categories"),
+        callApi(c.req, "/api/leave-policies"),
+        callApi(c.req, "/api/leave-applications/relievers"),
+        callApi(c.req, "/api/leave-balances/mine")
+      ]);
+      if (!rels.ok && rels.status === 403) return NO_ACCESS;
+      const policy = new Map<string, boolean>((Array.isArray(pols.body) ? pols.body : []).map((p: any) => [String(p.category_key), !!p.reliever_required]));
+      const b = Array.isArray(bal.body) ? bal.body[0] : null;
+      const types = [
+        { value: "casual", label: "Casual Leave", balance: b ? Number(b.casual_leave) : null },
+        { value: "sick", label: "Sick Leave", balance: b ? Number(b.sick_leave) : null },
+        { value: "without_pay", label: "Leave Without Pay", balance: null },
+        ...(Array.isArray(cats.body) ? cats.body : []).map((x: any) => ({
+          value: String(x.key), label: String(x.label),
+          balance: b ? Number((b.custom_leaves || []).find((y: any) => y.key === x.key)?.balance ?? 0) : null
+        }))
+      ].map((x) => ({ ...x, reliever_required: policy.has(x.value) ? policy.get(x.value)! : true }));
+      const isDate = (v: any) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ""));
+      const start = isDate(args?.start_date) ? String(args.start_date) : "";
+      const end = isDate(args?.end_date) && String(args.end_date) >= start ? String(args.end_date) : start;
+      const leaveType = types.some((x) => x.value === args?.leave_type) ? String(args.leave_type) : "casual";
+      const draft: LeaveDraft = {
+        kind: "leave_application",
+        leave_type: leaveType,
+        start_date: start,
+        end_date: end,
+        is_half_day: !!args?.is_half_day,
+        purpose: String(args?.purpose || "").slice(0, 300),
+        today: c.today,
+        types,
+        relievers: (Array.isArray(rels.body) ? rels.body : []).filter((r: any) => Number(r.id) !== c.userId).map((r: any) => ({ id: Number(r.id), name: String(r.name) }))
+      };
+      const missing = [!start && "তারিখ", !draft.purpose && "কারণ"].filter(Boolean);
+      const text = `ছুটির আবেদনের খসড়া তৈরি করেছি${start ? ` — ${bnDate(start)}${end !== start ? ` থেকে ${bnDate(end)}` : ""}` : ""}। ` +
+        (missing.length ? `${missing.join(" আর ")} দিয়ে দিন, ` : "") + "নিচে সব দেখে **জমা দিন** চাপুন। আপনি না চাপলে কিছু জমা হবে না।";
+      return { ok: true, text, draft, data: { drafted: true, submitted: false, leave_type: leaveType, start_date: start, end_date: end, purpose: draft.purpose, note: "Shown to the user as a form; they must review it and press Submit themselves." } };
+    }
+  },
   // ---- HR / Admin ----
   {
     name: "admin_pending_work",
@@ -538,9 +718,26 @@ function suggestionsFor(c: Ctx): string[] {
   return s.slice(0, 6);
 }
 
-async function localAnswer(c: Ctx, message: string): Promise<{ reply: string; actions: AssistantAction[] }> {
+const LEAVE_WORDS = ["leave", "ছুটি", "chuti", "chhuti", "ছুটির"];
+const APPLY_WORDS = ["kore dao", "kore den", "করে দাও", "করে দিন", "দিয়ে দাও", "diye dao", "apply", "অ্যাপ্লাই", "এপ্লাই", "lagbe", "লাগবে", "chai", "চাই", "nibo", "নেব", "নিব", "nite chai", "dao", "দাও"];
+const HOLIDAY_WORDS = ["ছুটির দিন", "holiday", "সরকারি ছুটি", "chutir din"];
+
+async function localAnswer(c: Ctx, message: string): Promise<Answer> {
   const t = norm(message);
   const asksHow = hasAny(t, HOW);
+
+  // "20 oct family problem niye leave application kore dao" -> a draft card
+  if (hasAny(t, LEAVE_WORDS) && !hasAny(t, HOLIDAY_WORDS) && !asksHow) {
+    const parsed = parseLeaveRequest(message, c.today);
+    const asksStatus = hasAny(t, ["balance", "ব্যালেন্স", "baki", "বাকি", "koto", "কত", "status", "অবস্থা", "ki holo", "কী হল", "কি হলো", "কী হলো", "jante", "জানতে"]);
+    const wantsApply = !asksStatus && (hasAny(t, APPLY_WORDS) || !!parsed.start_date);
+    if (wantsApply) {
+      const tool = TOOLS.find((x) => x.name === "prepare_leave_application")!;
+      if (!toolAvailable(tool, c)) return { reply: "ছুটির আবেদন আপনার account-এ চালু নেই। দরকার হলে HR / Superadmin-কে বলুন — তাঁরা Module Access থেকে চালু করে দিতে পারবেন।", actions: [] };
+      const r = await tool.run(c, { ...parsed, leave_type: parsed.leave_type || undefined });
+      return { reply: r.text, actions: [], draft: r.draft };
+    }
+  }
 
   // "find X" / "X-এর নম্বর"
   const find = /(?:find|search|khujo|khuje dao|খুঁজ\S*)\s+(.{2,40})/.exec(t)?.[1] ||
@@ -624,7 +821,7 @@ async function generateWithFallback(ai: GoogleGenAI, req: { contents: Content[];
   throw lastErr || new Error("no Gemini model available");
 }
 
-async function geminiAnswer(c: Ctx, history: { role: string; text: string }[], message: string): Promise<{ reply: string; actions: AssistantAction[] }> {
+async function geminiAnswer(c: Ctx, history: { role: string; text: string }[], message: string): Promise<Answer> {
   const ai = geminiClient();
   if (!ai) throw new Error("no key");
   const tools = TOOLS.filter((t) => toolAvailable(t, c));
@@ -640,7 +837,8 @@ async function geminiAnswer(c: Ctx, history: { role: string; text: string }[], m
     `- Reply in the user's language; default to Bangla. Banglish questions get Bangla answers. Be short and friendly; use bullet lines for lists.\n` +
     `- For any fact about the user, colleagues, attendance, leave, claims, loans, tasks, holidays or HR figures, call a tool. Never guess or invent numbers, names or dates.\n` +
     `- If a tool returns error "no_access", say politely that their account doesn't have permission and they can ask HR / Superadmin.\n` +
-    `- You can only read and guide. You cannot apply, approve, edit or delete anything — tell them which page to open (the app shows a button for it).\n` +
+    `- You can only read and guide, with ONE exception: when they ask to apply for leave, call prepare_leave_application. It only fills a form card in the chat; the employee reviews it and presses the card's "জমা দিন" button. Never say the leave was applied or submitted — say the draft is ready below to check and submit with "জমা দিন". Ask for nothing extra first: missing fields can be filled in the card.\n` +
+    `- You cannot approve, edit, cancel or delete anything — tell them which page to open (the app shows a button for it).\n` +
     `- For any "how do I… / where is…" question ALWAYS call app_help first and give only the steps it returns — never describe menus or buttons from your own knowledge. If it returns no_access, say that page isn't turned on for their account and HR / Superadmin can enable it.\n` +
     `- Write Bangla only in Bangla script (no Arabic, Hindi or other scripts mixed in); English words like page names may stay in English.\n` +
     `- Don't answer questions unrelated to work / this app beyond a brief polite line.`;
@@ -649,6 +847,7 @@ async function geminiAnswer(c: Ctx, history: { role: string; text: string }[], m
     { role: "user", parts: [{ text: message }] }
   ];
   const actions: AssistantAction[] = [];
+  let draft: LeaveDraft | undefined;
   for (let round = 0; round < 4; round++) {
     const resp = await generateWithFallback(ai, {
       contents,
@@ -658,14 +857,15 @@ async function geminiAnswer(c: Ctx, history: { role: string; text: string }[], m
     if (!calls.length) {
       const text = (resp.text || "").trim();
       if (!text) throw new Error("empty reply");
-      return { reply: text, actions };
+      return { reply: text, actions, draft };
     }
     contents.push(resp.candidates?.[0]?.content || { role: "model", parts: calls.map((fc) => ({ functionCall: fc })) });
     const parts = [];
     for (const fc of calls) {
       const tool = tools.find((t) => t.name === fc.name);
-      const out = tool ? await tool.run(c, fc.args || {}) : { ok: false, text: "", data: { error: "unknown_tool" } };
+      const out: ToolResult = tool ? await tool.run(c, fc.args || {}) : { ok: false, text: "", data: { error: "unknown_tool" } };
       for (const a of out.actions || []) actions.push(a);
+      if (out.draft) draft = out.draft;
       parts.push({ functionResponse: { name: String(fc.name), response: { ok: out.ok, ...(out.data ?? {}), summary: out.text } } });
     }
     contents.push({ role: "user", parts });
@@ -716,7 +916,7 @@ export function registerAiAssistantRoutes(app: Express, deps: AiAssistantDeps) {
     if (limited(c.userId)) return res.status(429).json({ error: "একটু বেশি প্রশ্ন হয়ে গেছে — কয়েক মিনিট পর আবার চেষ্টা করুন।" });
     const history = Array.isArray(req.body?.history) ? req.body.history.filter((m: any) => m && typeof m.text === "string") : [];
     let engine: "gemini" | "local" = "local";
-    let out: { reply: string; actions: AssistantAction[] };
+    let out: Answer;
     try {
       if (geminiClient()) {
         out = await Promise.race([
@@ -733,6 +933,6 @@ export function registerAiAssistantRoutes(app: Express, deps: AiAssistantDeps) {
     }
     const seen = new Set<string>();
     const actions = allowedActions(c, out.actions).filter((a) => (seen.has(a.nav) ? false : (seen.add(a.nav), true))).slice(0, 3);
-    res.json({ reply: out.reply, actions, engine });
+    res.json({ reply: out.reply, actions, engine, draft: out.draft || null });
   });
 }
