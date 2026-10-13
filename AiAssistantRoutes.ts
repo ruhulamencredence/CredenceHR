@@ -468,6 +468,8 @@ const TOOLS: Tool[] = [
     params: { topic: { type: "string", description: "What the user wants to do, in their words." } },
     run: async (c, args) => {
       const hits = matchHelp(c, String(args?.topic || ""), 3);
+      const blocked = hits.length ? [] : matchHelp(c, String(args?.topic || ""), 1, true);
+      if (blocked.length) return { ok: false, text: `"${blocked[0].title}" আপনার account-এ চালু নেই। দরকার হলে HR / Superadmin-কে বলুন।`, data: { error: "no_access", page: blocked[0].title } };
       if (!hits.length) return { ok: true, text: "এ বিষয়ে আমার কাছে নির্দিষ্ট নির্দেশনা নেই।", data: { topics: HELP.filter((h) => !h.can || h.can(c)).map((h) => h.title) } };
       return { ok: true, text: hits.map((h) => `**${h.title}:** ${h.steps}`).join("\n\n"), data: { steps: hits.map((h) => ({ title: h.title, steps: h.steps })) }, actions: hits.flatMap(helpAction) };
     }
@@ -584,7 +586,13 @@ async function localAnswer(c: Ctx, message: string): Promise<{ reply: string; ac
 // ---------------------------------------------------------------------------
 // Gemini engine (optional)
 // ---------------------------------------------------------------------------
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+// GEMINI_MODEL may list several models, comma-separated: each call tries them
+// in order and moves on when one is busy (503), gone (404), rate-limited
+// (429) or too slow. The one that last worked is tried first next time.
+const GEMINI_MODELS = (process.env.GEMINI_MODEL || "gemini-flash-lite-latest,gemini-flash-latest,gemini-3.8-flash")
+  .split(",").map((m) => m.trim()).filter(Boolean);
+const GEMINI_CALL_TIMEOUT_MS = 20000;
+let preferredModel = 0;
 let gemini: GoogleGenAI | null = null;
 const geminiClient = () => {
   const key = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
@@ -592,6 +600,29 @@ const geminiClient = () => {
   if (!gemini) gemini = new GoogleGenAI({ apiKey: key });
   return gemini;
 };
+
+async function generateWithFallback(ai: GoogleGenAI, req: { contents: Content[]; config: Record<string, any> }) {
+  let lastErr: any = null;
+  for (let i = 0; i < GEMINI_MODELS.length; i++) {
+    const idx = (preferredModel + i) % GEMINI_MODELS.length;
+    try {
+      const resp = await ai.models.generateContent({
+        model: GEMINI_MODELS[idx],
+        contents: req.contents,
+        config: { ...req.config, httpOptions: { timeout: GEMINI_CALL_TIMEOUT_MS } }
+      });
+      preferredModel = idx;
+      return resp;
+    } catch (err: any) {
+      lastErr = err;
+      const msg = String(err?.message || err);
+      // A bad key or a malformed request won't get better on another model.
+      if (/API_KEY|PERMISSION_DENIED|INVALID_ARGUMENT|\b40[013]\b/.test(msg) && !/\b(404|429|503)\b/.test(msg)) throw err;
+      console.warn(`AI Assistant: ${GEMINI_MODELS[idx]} unavailable (${msg.slice(0, 120)}), trying the next model`);
+    }
+  }
+  throw lastErr || new Error("no Gemini model available");
+}
 
 async function geminiAnswer(c: Ctx, history: { role: string; text: string }[], message: string): Promise<{ reply: string; actions: AssistantAction[] }> {
   const ai = geminiClient();
@@ -610,7 +641,8 @@ async function geminiAnswer(c: Ctx, history: { role: string; text: string }[], m
     `- For any fact about the user, colleagues, attendance, leave, claims, loans, tasks, holidays or HR figures, call a tool. Never guess or invent numbers, names or dates.\n` +
     `- If a tool returns error "no_access", say politely that their account doesn't have permission and they can ask HR / Superadmin.\n` +
     `- You can only read and guide. You cannot apply, approve, edit or delete anything — tell them which page to open (the app shows a button for it).\n` +
-    `- For "how do I…" questions call app_help.\n` +
+    `- For any "how do I… / where is…" question ALWAYS call app_help first and give only the steps it returns — never describe menus or buttons from your own knowledge. If it returns no_access, say that page isn't turned on for their account and HR / Superadmin can enable it.\n` +
+    `- Write Bangla only in Bangla script (no Arabic, Hindi or other scripts mixed in); English words like page names may stay in English.\n` +
     `- Don't answer questions unrelated to work / this app beyond a brief polite line.`;
   const contents: Content[] = [
     ...history.slice(-10).map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: String(m.text || "").slice(0, 2000) }] })),
@@ -618,10 +650,9 @@ async function geminiAnswer(c: Ctx, history: { role: string; text: string }[], m
   ];
   const actions: AssistantAction[] = [];
   for (let round = 0; round < 4; round++) {
-    const resp = await ai.models.generateContent({
-      model: GEMINI_MODEL,
+    const resp = await generateWithFallback(ai, {
       contents,
-      config: { systemInstruction: system, tools: [{ functionDeclarations: declarations }], temperature: 0.3 }
+      config: { systemInstruction: system, tools: [{ functionDeclarations: declarations }], temperature: 0.2 }
     });
     const calls = resp.functionCalls || [];
     if (!calls.length) {
@@ -690,7 +721,7 @@ export function registerAiAssistantRoutes(app: Express, deps: AiAssistantDeps) {
       if (geminiClient()) {
         out = await Promise.race([
           geminiAnswer(c, history, message),
-          new Promise<never>((_, rej) => setTimeout(() => rej(new Error("timeout")), 30000))
+          new Promise<never>((_, rej) => setTimeout(() => rej(new Error("timeout")), 45000))
         ]);
         engine = "gemini";
       } else {
