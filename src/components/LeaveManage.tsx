@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { ArrowLeft, ListChecks, Search, Save, Layers, Building2, ChevronDown, ChevronUp, CheckCircle2, AlertTriangle, Plus, X, ShieldCheck, CalendarClock, GitBranch, Trash2, PlayCircle, Power } from 'lucide-react';
 import { User, LeaveBalance, LeaveCategoryPolicy, LeaveYearSettings, LeaveBalanceWorkflow } from '../types';
@@ -30,6 +30,14 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
+  // The list is paged by the server (and searched there), so only one page of
+  // accounts is ever loaded and drawn.
+  const [appliedSearch, setAppliedSearch] = useState('');
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
+  const [total, setTotal] = useState(0);
+  const [departments, setDepartments] = useState<string[]>([]);
+  const balancesReq = useRef(0);
   // Row currently being edited (by user_id) plus its in-progress field values —
   // only ever relevant when canManageAll is true.
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -488,37 +496,71 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
     });
   };
 
-  const departmentOptions = Array.from(
-    new Set(balances.map((b) => b.department).filter((d): d is string => !!d))
-  ).sort((a, b) => a.localeCompare(b));
+  const departmentOptions = departments.length
+    ? departments
+    : Array.from(new Set(balances.map((b) => b.department).filter((d): d is string => !!d))).sort((a, b) => a.localeCompare(b));
 
   const fetchBalances = async () => {
+    const req = ++balancesReq.current;
     setLoading(true);
     setError('');
     try {
-      const res = await fetch(apiUrl('/api/leave-balances'), {
+      const qs = canManageAll ? `?page=${page}&limit=${pageSize}&q=${encodeURIComponent(appliedSearch)}` : '';
+      const res = await fetch(apiUrl(`/api/leave-balances${qs}`), {
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to load Leave balances');
-      setBalances(Array.isArray(data) ? data : []);
+      if (req !== balancesReq.current) return; // a newer request is on its way
+      if (Array.isArray(data)) {
+        setBalances(data);
+        setTotal(data.length);
+      } else {
+        setBalances(Array.isArray(data.rows) ? data.rows : []);
+        setTotal(Number(data.total) || 0);
+        if (Array.isArray(data.departments)) setDepartments(data.departments);
+      }
     } catch (err: any) {
-      setError(err.message || 'Failed to load Leave balances');
+      if (req === balancesReq.current) setError(err.message || 'Failed to load Leave balances');
     } finally {
-      setLoading(false);
+      if (req === balancesReq.current) setLoading(false);
     }
   };
 
+  // The name search waits for a pause in typing, then goes back to page 1.
+  useEffect(() => {
+    if (search === appliedSearch) return;
+    const t = setTimeout(() => {
+      setAppliedSearch(search);
+      setPage(1);
+    }, 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search]);
+
   useEffect(() => {
     fetchBalances();
-    if (canManageAll) {
-      fetchCategories();
-      fetchPolicies();
-      fetchYearSettings();
-      fetchWorkflows();
-    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, pageSize, appliedSearch]);
+
+  // Leave categories are columns of the list, so they come with it; the other
+  // panels start collapsed and load their data only when opened.
+  useEffect(() => {
+    if (canManageAll) fetchCategories();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  useEffect(() => {
+    if (canManageAll && showPoliciesPanel) fetchPolicies();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showPoliciesPanel]);
+  useEffect(() => {
+    if (canManageAll && showYearSettingsPanel) fetchYearSettings();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showYearSettingsPanel]);
+  useEffect(() => {
+    if (canManageAll && showWorkflowsPanel) fetchWorkflows();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showWorkflowsPanel]);
 
   const startEdit = (b: LeaveBalance) => {
     setEditingId(b.user_id);
@@ -568,9 +610,9 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
     }
   };
 
-  const filtered = balances.filter((b) =>
-    (b.user_name || '').toLowerCase().includes(search.toLowerCase())
-  );
+  // Search is done by the server (see fetchBalances), so the page is shown as it came.
+  const filtered = balances;
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
 
   const selectBulkAll = () => {
     setBulkApplyToAll(true);
@@ -1701,6 +1743,49 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
             <p className="p-10 text-center text-xs text-slate-400">
               You don't have access to manage Leave balances.
             </p>
+          )}
+          {canManageAll && !loading && total > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-2 px-6 py-3 border-t border-slate-200 text-xs text-slate-600">
+              <span>
+                {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} of {total} account{total === 1 ? '' : 's'}
+              </span>
+              <div className="flex items-center gap-2">
+                <select
+                  value={pageSize}
+                  onChange={(e) => {
+                    setPageSize(Number(e.target.value));
+                    setPage(1);
+                  }}
+                  className="border border-slate-200 rounded-lg px-2 py-1 bg-white"
+                  aria-label="Rows per page"
+                >
+                  {[25, 50, 100, 200].map((n) => (
+                    <option key={n} value={n}>
+                      {n} / page
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  disabled={page <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  className="px-3 py-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40"
+                >
+                  Prev
+                </button>
+                <span>
+                  Page {page} / {pageCount}
+                </span>
+                <button
+                  type="button"
+                  disabled={page >= pageCount}
+                  onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
+                  className="px-3 py-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
           )}
         </div>
       </div>

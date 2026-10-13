@@ -452,6 +452,66 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
     try {
       const canManageAll = await hasLeaveManageAccess(req.user.id, req.user.role);
 
+      if (canManageAll && req.query.limit !== undefined) {
+        // Paged for the Leave Manage screen: ?page=&limit=&q= (name search). Only the
+        // rows on the requested page get their balances read (and their default
+        // balances ensured), so the screen no longer waits on every account at once.
+        const limit = Math.min(200, Math.max(1, Math.floor(Number(req.query.limit)) || 50));
+        const page = Math.max(1, Math.floor(Number(req.query.page)) || 1);
+        const q = String(req.query.q || "").trim().toLowerCase();
+        const [allUsers, empRows]: any[] = await Promise.all([
+          queryDB("SELECT id, name, role FROM users WHERE role IN ('admin', 'user')"),
+          queryDB("SELECT user_id, department FROM all_employees WHERE user_id IS NOT NULL")
+        ]);
+        const departmentByUserId = new Map<number, string>();
+        for (const e of empRows) if (e.department) departmentByUserId.set(Number(e.user_id), e.department);
+        const departments = Array.from(new Set<string>(departmentByUserId.values())).sort((a, b) => a.localeCompare(b));
+        const matched = q ? allUsers.filter((u: any) => String(u.name || "").toLowerCase().includes(q)) : allUsers;
+        const pageUsers = matched.slice((page - 1) * limit, page * limit);
+        const ids: number[] = pageUsers.map((u: any) => Number(u.id));
+        await ensureDefaultLeaveBalances(ids);
+        const marks = ids.map(() => "?").join(",");
+        const [balances, categories, categoryBalances]: any[] = ids.length
+          ? await Promise.all([
+              queryDB(`SELECT * FROM leave_balances WHERE user_id IN (${marks})`, ids),
+              queryDB("SELECT id, category_key, label FROM leave_categories"),
+              queryDB(`SELECT * FROM leave_category_balances WHERE user_id IN (${marks})`, ids)
+            ])
+          : [[], [], []];
+        const byUser = new Map<number, any>();
+        for (const b of balances) byUser.set(Number(b.user_id), b);
+        const categoryById = new Map<number, any>();
+        for (const c of categories) categoryById.set(Number(c.id), c);
+        const customLeavesByUser = new Map<number, { key: string; label: string; balance: number }[]>();
+        for (const cb of categoryBalances) {
+          const cat = categoryById.get(Number(cb.category_id));
+          if (!cat) continue;
+          const uid = Number(cb.user_id);
+          if (!customLeavesByUser.has(uid)) customLeavesByUser.set(uid, []);
+          customLeavesByUser.get(uid)!.push({ key: cat.category_key, label: cat.label, balance: Number(cb.balance) });
+        }
+        return res.json({
+          total: matched.length,
+          page,
+          limit,
+          departments,
+          rows: pageUsers.map((u: any) => {
+            const b = byUser.get(Number(u.id));
+            return {
+              user_id: u.id,
+              user_name: u.name,
+              user_role: u.role,
+              department: departmentByUserId.get(Number(u.id)) || null,
+              casual_leave: b ? Number(b.casual_leave) : 0,
+              sick_leave: b ? Number(b.sick_leave) : 0,
+              leave_without_pay: b ? Number(b.leave_without_pay) : 0,
+              updated_at: b ? b.updated_at : null,
+              custom_leaves: customLeavesByUser.get(Number(u.id)) || []
+            };
+          })
+        });
+      }
+
       if (canManageAll) {
         const users: any = await queryDB("SELECT id, name, role FROM users WHERE role IN ('admin', 'user')");
         await ensureDefaultLeaveBalances(users.map((u: any) => Number(u.id)));
