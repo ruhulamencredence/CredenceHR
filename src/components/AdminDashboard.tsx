@@ -448,6 +448,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
     const headcount = attendanceReport.users.length;
     if (!headcount) return null;
     const upToDay = new Date().getDate();
+    // The server already adds each day up (slim=dashboard sends only today's / yesterday's cells).
+    const counted = (attendanceReport as any).day_counts as { day: number; present: number; absent: number }[] | undefined;
+    if (counted) return { headcount, byDay: counted.filter((c) => c.day <= Math.min(upToDay, attendanceReport.days_in_month)) };
     const byDay: { day: number; present: number; absent: number }[] = [];
     for (let day = 1; day <= Math.min(upToDay, attendanceReport.days_in_month); day++) {
       let present = 0;

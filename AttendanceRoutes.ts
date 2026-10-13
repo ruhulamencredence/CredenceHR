@@ -992,21 +992,30 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
       });
 
       result.sort((a: any, b: any) => a.user_name.localeCompare(b.user_name));
-      // ?slim=dashboard : the Admin Dashboard only needs every day's present / holiday flag
-      // and today's + yesterday's full cell (check-in / out times), so the other days are
-      // cut down to those two flags — about a tenth of the full month grid.
+      // ?slim=dashboard : the Admin Dashboard only needs each day's Present / Absent totals
+      // (worked out here, as day_counts) and today's + yesterday's full cell per person
+      // (check-in / out times); every other day's cell is sent as null.
       if (String(req.query.slim || "") === "dashboard") {
         const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Dhaka" });
         const [ty, tm, td] = todayStr.split("-").map(Number);
         const keep = new Set<number>(ty === year && tm === month ? [td, td - 1] : []);
+        const dayCounts = Array.from({ length: daysInMonth }, (_, i) => {
+          let present = 0;
+          let absent = 0;
+          for (const u of result) {
+            const d = u.days?.[i];
+            if (!d) continue;
+            if (d.present) present++;
+            else if (!d.day_type) absent++;
+          }
+          return { day: i + 1, present, absent };
+        });
         return res.json({
           year,
           month,
           days_in_month: daysInMonth,
-          users: result.map((u: any) => ({
-            ...u,
-            days: (u.days || []).map((d: any, i: number) => (keep.has(i + 1) ? d : { present: !!d?.present, day_type: d?.day_type || null }))
-          }))
+          day_counts: dayCounts,
+          users: result.map((u: any) => ({ ...u, days: (u.days || []).map((d: any, i: number) => (keep.has(i + 1) ? d : null)) }))
         });
       }
       res.json({ year, month, days_in_month: daysInMonth, users: result });
