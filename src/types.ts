@@ -700,6 +700,8 @@ export interface User {
   can_view_service_book?: boolean;
   // Self Service -> My Loan / Advance (LoanRequestRoutes.ts).
   can_view_loan_request?: boolean;
+  // AI Assistant floating helper — ON unless HR switched it off (Module Access).
+  can_use_ai_assistant?: boolean;
   can_view_leave_application?: boolean;
   can_view_my_leave?: boolean;
 }

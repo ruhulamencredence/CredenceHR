@@ -662,6 +662,13 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
     if (err.code !== 'ER_DUP_FIELDNAME') console.warn("⚠️ Could not add users.can_use_calls column: " + err.message);
   }
   try {
+    // AI Assistant (AiAssistantRoutes.ts) — ON for everyone; HR can switch it
+    // off per account in Module Access.
+    await dbPool.query(`ALTER TABLE users ADD COLUMN can_use_ai_assistant TINYINT(1) NOT NULL DEFAULT 1`);
+  } catch (err: any) {
+    if (err.code !== 'ER_DUP_FIELDNAME') console.warn("⚠️ Could not add users.can_use_ai_assistant column: " + err.message);
+  }
+  try {
     // Self Service -> My Tasks (TaskRoutes.ts) — OFF until turned on per
     // account in Module Access.
     await dbPool.query(`ALTER TABLE users ADD COLUMN can_view_tasks TINYINT(1) NOT NULL DEFAULT 0`);

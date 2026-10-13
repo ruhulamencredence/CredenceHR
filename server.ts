@@ -37,6 +37,7 @@ import { registerEmployeeTrackingRoutes } from "./EmployeeTrackingRoutes";
 import { registerNoticeRoutes } from "./NoticeRoutes";
 import { registerEmployeeRoutes } from "./EmployeeRoutes";
 import { registerEmployeeTransferRoutes, ensureEmployeeTransferSchema, applyDueEmployeeTransfers, recordEmployeeEditHistory } from "./EmployeeTransferRoutes";
+import { registerAiAssistantRoutes } from "./AiAssistantRoutes";
 import { registerAdminDashboardRoutes } from "./AdminDashboardRoutes";
 import { registerDeviceRoutes, ensureDeviceSchema, checkAppDevice, deviceStillAllowed } from "./DeviceRoutes";
 import { ensureAccountBlockSchema, accountState, registerAccountBlockRoutes } from "./AccountBlock";
@@ -2609,6 +2610,8 @@ async function startServer() {
   // directory-safe columns.
   // Admin Dashboard figures with no screen of their own (AdminDashboardRoutes.ts).
   registerAdminDashboardRoutes(app, { authenticateToken, queryDB, getAdminModules, todayInDhaka });
+  // AI Assistant — floating chat helper for every account (AiAssistantRoutes.ts).
+  registerAiAssistantRoutes(app, { authenticateToken, queryDB, getAdminModules, todayInDhaka });
   registerDeviceRoutes(app, { authenticateToken, requireSuperAdmin, queryDB });
   registerActiveUsersRoutes(app, { authenticateToken, requireSuperAdmin, queryDB });
   registerSessionSecurityRoutes(app, { authenticateToken, requireSuperAdmin, queryDB });

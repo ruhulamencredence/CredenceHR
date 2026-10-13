@@ -209,6 +209,7 @@ export function registerAuthRoutes(app: Express, deps: RegisterAuthRoutesDeps) {
           can_view_mobile_bill: user.role === "superadmin" ? true : !!Number(user.can_view_mobile_bill),
           can_view_service_book: user.role === "superadmin" ? true : !!Number(user.can_view_service_book),
           can_view_loan_request: user.role === "superadmin" ? true : !!Number(user.can_view_loan_request),
+          can_use_ai_assistant: user.role === "superadmin" ? true : Number(user.can_use_ai_assistant ?? 1) !== 0,
           can_view_leave_application: user.role === "superadmin" ? true : !!Number(user.can_view_leave_application),
           can_view_my_leave: user.role === "superadmin" ? true : !!Number(user.can_view_my_leave),
           // Superadmin-granted, only ever meaningful for role='admin': can this
@@ -232,7 +233,7 @@ export function registerAuthRoutes(app: Express, deps: RegisterAuthRoutesDeps) {
   app.get("/api/auth/me", authenticateToken, async (req: any, res) => {
     try {
       const users = await queryDB(
-        "SELECT id, name, email, role, created_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, can_use_calls, can_view_tasks, can_view_mobile_bill, can_view_service_book, can_view_loan_request, can_grant_module_access, attendance_project_id, is_onboarding, must_change_password, onboarding_expires_at FROM users WHERE id = ?",
+        "SELECT id, name, email, role, created_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, can_use_calls, can_view_tasks, can_view_mobile_bill, can_view_service_book, can_view_loan_request, can_use_ai_assistant, can_grant_module_access, attendance_project_id, is_onboarding, must_change_password, onboarding_expires_at FROM users WHERE id = ?",
         [req.user.id]
       );
       if (users.length === 0) return res.status(404).json({ error: "User not found" });
@@ -262,6 +263,7 @@ export function registerAuthRoutes(app: Express, deps: RegisterAuthRoutesDeps) {
         can_view_mobile_bill: u.role === "superadmin" ? true : !!Number(u.can_view_mobile_bill),
         can_view_service_book: u.role === "superadmin" ? true : !!Number(u.can_view_service_book),
         can_view_loan_request: u.role === "superadmin" ? true : !!Number(u.can_view_loan_request),
+        can_use_ai_assistant: u.role === "superadmin" ? true : Number(u.can_use_ai_assistant ?? 1) !== 0,
         can_view_leave_application: u.role === "superadmin" ? true : !!Number(u.can_view_leave_application),
         can_view_my_leave: u.role === "superadmin" ? true : !!Number(u.can_view_my_leave),
         can_grant_module_access: u.role === "admin" ? !!Number(u.can_grant_module_access) : false,
