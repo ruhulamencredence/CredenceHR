@@ -298,12 +298,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
         // report is the one already gated by the grantable 'leave_applications'
         // module, so an account granted Admin Dashboard + Monthly Leave
         // Application sees real figures here too, not just a Superadmin.
-        safeGet<any[]>(`/api/leave-applications/report?since=${leaveSince}`, groupHeaders),
+        safeGet<any[]>(`/api/leave-applications/report?since=${leaveSince}&slim=1`, groupHeaders),
         safeGet<any[]>('/api/leave-balances', authHeaders),
         safeGet<any[]>('/api/payroll/advance-requests?status=pending', authHeaders),
         safeGet<any[]>('/api/assets/requisitions?status=pending', authHeaders),
-        safeGet<any[]>(`/api/user-claims?since=${claimsSince}`, authHeaders),
-        safeGet<any[]>('/api/conveyance-bills', authHeaders),
+        safeGet<any[]>(`/api/user-claims?since=${claimsSince}&slim=1`, authHeaders),
+        safeGet<any[]>(`/api/conveyance-bills?since=${claimsSince}&slim=1`, authHeaders),
         safeGet<any[]>('/api/notices/active', authHeaders),
         safeGet<any[]>('/api/employee-directory', groupHeaders),
         safeGet<{ year: number; month: number; days_in_month: number; users: any[] }>(

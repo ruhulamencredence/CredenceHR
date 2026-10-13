@@ -1320,8 +1320,40 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
         return !!dept && deptScope.includes(dept);
       });
 
+      // ?slim=1: only what the Admin Dashboard draws (who, which days, status, whether it
+      // cleared its first Approval Layer) — no approver look-ups or the other columns.
+      if (String(req.query.slim || "") === "1") {
+        return res.json(
+          visible.map((a: any) => {
+            const ar = approvalByLeaveId.get(Number(a.id));
+            const step = ar ? Number(ar.current_step) : null;
+            return {
+              id: a.id,
+              user_id: a.user_id,
+              user_name: userMap.get(Number(a.user_id))?.name || "(account removed)",
+              leave_type: a.leave_type,
+              leave_type_label: leaveTypeLabelFor(a.leave_type),
+              start_date: a.start_date,
+              end_date: a.end_date,
+              day_count: Number(a.day_count),
+              status: a.status,
+              supervisor_layer_approved: a.status === "approved" || (!!ar && ar.status === "pending" && step != null && step > 1)
+            };
+          })
+        );
+      }
+
+      // ?page=&limit=&q= : one page of the list (q = name search) — only that page is
+      // enriched (approver look-ups), and the answer is { rows, total, page, limit }.
+      const paged = req.query.limit !== undefined;
+      const pageLimit = Math.min(200, Math.max(1, Math.floor(Number(req.query.limit)) || 50));
+      const pageNo = Math.max(1, Math.floor(Number(req.query.page)) || 1);
+      const nameQ = String(req.query.q || "").trim().toLowerCase();
+      const matched = paged && nameQ ? visible.filter((a: any) => String(userMap.get(Number(a.user_id))?.name || "(account removed)").toLowerCase().includes(nameQ)) : visible;
+      const source = paged ? matched.slice((pageNo - 1) * pageLimit, pageNo * pageLimit) : visible;
+
       const enriched = await Promise.all(
-        visible.map(async (a: any) => {
+        source.map(async (a: any) => {
           const ar = approvalByLeaveId.get(Number(a.id));
           let approverName = userMap.get(Number(a.approver_id))?.name || null;
           let currentStep: number | null = null;
@@ -1371,7 +1403,7 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
           };
         })
       );
-      res.json(enriched);
+      res.json(paged ? { rows: enriched, total: matched.length, page: pageNo, limit: pageLimit } : enriched);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

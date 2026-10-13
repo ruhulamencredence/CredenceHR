@@ -1459,6 +1459,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [leaveApplicationsReportSearch, setLeaveApplicationsReportSearch] = useState('');
   const [leaveApplicationsReportDeptFilter, setLeaveApplicationsReportDeptFilter] = useState('');
   const [leaveApplicationsReportDepartments, setLeaveApplicationsReportDepartments] = useState<string[]>([]);
+  // Paged by the server: one page of applications at a time, name search done there too.
+  const [leaveReportPage, setLeaveReportPage] = useState(1);
+  const [leaveReportPageSize, setLeaveReportPageSize] = useState(50);
+  const [leaveReportTotal, setLeaveReportTotal] = useState(0);
+  const [leaveReportQuery, setLeaveReportQuery] = useState('');
+  const leaveReportReq = useRef(0);
 
   const [reportYear, setReportYear] = useState(now.getFullYear());
   const [reportMonth, setReportMonth] = useState(now.getMonth() + 1);
@@ -1671,20 +1677,26 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // filter changes (the filter is applied server-side, same as Attendance
   // Report's ?department= above) and whenever this tab is opened.
   const fetchLeaveApplicationsReport = async () => {
+    const req = ++leaveReportReq.current;
     setLeaveApplicationsReportLoading(true);
     setLeaveApplicationsReportError('');
     try {
-      const qs = leaveApplicationsReportDeptFilter ? `?department=${encodeURIComponent(leaveApplicationsReportDeptFilter)}` : '';
+      const qs =
+        `?page=${leaveReportPage}&limit=${leaveReportPageSize}&q=${encodeURIComponent(leaveReportQuery)}` +
+        (leaveApplicationsReportDeptFilter ? `&department=${encodeURIComponent(leaveApplicationsReportDeptFilter)}` : '');
       const res = await fetch(apiUrl(`/api/leave-applications/report${qs}`), {
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to load Leave Applications');
-      setLeaveApplicationsReport(Array.isArray(data) ? data : []);
+      if (req !== leaveReportReq.current) return; // a newer request is on its way
+      const rows = Array.isArray(data) ? data : Array.isArray(data.rows) ? data.rows : [];
+      setLeaveApplicationsReport(rows);
+      setLeaveReportTotal(Array.isArray(data) ? rows.length : Number(data.total) || 0);
     } catch (err: any) {
-      setLeaveApplicationsReportError(err.message || 'Failed to load Leave Applications');
+      if (req === leaveReportReq.current) setLeaveApplicationsReportError(err.message || 'Failed to load Leave Applications');
     } finally {
-      setLeaveApplicationsReportLoading(false);
+      if (req === leaveReportReq.current) setLeaveApplicationsReportLoading(false);
     }
   };
 
@@ -1702,7 +1714,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     fetchLeaveApplicationsReport();
     if (leaveApplicationsReportDepartments.length === 0) fetchLeaveApplicationsReportDepartments();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, leaveApplicationsReportDeptFilter]);
+  }, [activeTab, leaveApplicationsReportDeptFilter, leaveReportPage, leaveReportPageSize, leaveReportQuery]);
+  // The name search waits for a pause in typing, then goes back to page 1.
+  useEffect(() => {
+    if (leaveApplicationsReportSearch === leaveReportQuery) return;
+    const t = setTimeout(() => {
+      setLeaveReportQuery(leaveApplicationsReportSearch);
+      setLeaveReportPage(1);
+    }, 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leaveApplicationsReportSearch]);
 
   // Groups the flat edit-log rows by calendar day (in the local timezone), newest day
   // first, so the tab reads as "which MPR rows were edited on which day" instead of one
@@ -4683,7 +4705,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
               </div>
               <select
                 value={leaveApplicationsReportDeptFilter}
-                onChange={(e) => setLeaveApplicationsReportDeptFilter(e.target.value)}
+                onChange={(e) => {
+                  setLeaveApplicationsReportDeptFilter(e.target.value);
+                  setLeaveReportPage(1);
+                }}
                 className="px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <option value="">All Departments</option>
@@ -4718,7 +4743,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {leaveApplicationsReport
-                      .filter((a) => (a.user_name || '').toLowerCase().includes(leaveApplicationsReportSearch.trim().toLowerCase()))
                       .map((a) => (
                         <tr key={a.id} className="hover:bg-slate-50">
                           <td className="px-4 py-3 font-medium text-slate-900">{a.user_name || '(account removed)'}</td>
@@ -4755,7 +4779,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   ConveyanceClaimCard.tsx's own mobile treatment). */}
               <div className="md:hidden divide-y divide-slate-100">
                 {leaveApplicationsReport
-                  .filter((a) => (a.user_name || '').toLowerCase().includes(leaveApplicationsReportSearch.trim().toLowerCase()))
                   .map((a) => (
                     <div key={a.id} className="p-4 flex flex-col gap-2">
                       <div className="flex items-start justify-between gap-2">
@@ -4789,6 +4812,40 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   <p className="px-4 py-10 text-center text-slate-400 text-sm">No Leave Applications found.</p>
                 )}
               </div>
+              {leaveReportTotal > 0 && (
+                <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-t border-slate-200 text-xs text-slate-600">
+                  <span>
+                    {(leaveReportPage - 1) * leaveReportPageSize + 1}–{Math.min(leaveReportPage * leaveReportPageSize, leaveReportTotal)} of {leaveReportTotal}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={leaveReportPageSize}
+                      onChange={(e) => {
+                        setLeaveReportPageSize(Number(e.target.value));
+                        setLeaveReportPage(1);
+                      }}
+                      className="border border-slate-200 rounded-lg px-2 py-1 bg-white"
+                      aria-label="Rows per page"
+                    >
+                      {[25, 50, 100, 200].map((n) => (
+                        <option key={n} value={n}>{n} / page</option>
+                      ))}
+                    </select>
+                    <button type="button" disabled={leaveReportPage <= 1} onClick={() => setLeaveReportPage((p) => Math.max(1, p - 1))} className="px-3 py-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40">
+                      Prev
+                    </button>
+                    <span>Page {leaveReportPage} / {Math.max(1, Math.ceil(leaveReportTotal / leaveReportPageSize))}</span>
+                    <button
+                      type="button"
+                      disabled={leaveReportPage >= Math.ceil(leaveReportTotal / leaveReportPageSize)}
+                      onClick={() => setLeaveReportPage((p) => p + 1)}
+                      className="px-3 py-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              )}
             </>
           )}
         </div>

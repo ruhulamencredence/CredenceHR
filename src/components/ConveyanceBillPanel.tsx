@@ -1,5 +1,5 @@
 import { activePeople } from '../lib/activePeople';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { Wallet, Plus, Trash2, X, Route, Filter, FileDown, Pencil, Check, Paperclip, MapPin, Clock, Save } from 'lucide-react';
@@ -63,78 +63,48 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
   const [fromFilter, setFromFilter] = useState('');
   const [toFilter, setToFilter] = useState('');
   const [deletingBillId, setDeletingBillId] = useState<number | null>(null);
+  // The table is one page of the server's combined list (Bills + Claims not yet in a Bill).
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
+  const [total, setTotal] = useState(0);
+  const listReq = useRef(0);
 
-  // Bill rows in the unified table show which items/claims were added inside
-  // them — the list endpoint only returns item_count, so pull each bill's own
-  // items in parallel (same endpoint the detail modal already uses) and cache
-  // them by bill id.
-  const loadBillItems = async (billsList: ConveyanceBill[]) => {
-    try {
-      const results = await Promise.all(
-        billsList.map(async (b) => {
-          const res = await fetch(apiUrl(`/api/conveyance-bills/${b.id}`), { headers: authHeaders });
-          if (!res.ok) return [b.id, []] as const;
-          const detail: ConveyanceBill = await res.json();
-          return [b.id, detail.items || []] as const;
-        })
-      );
-      setBillItems(Object.fromEntries(results));
-    } catch (err) {
-      console.error('Failed to load bill items', err);
-    }
-  };
-
-  const fetchBills = async () => {
+  // One request for the whole page: Bills (with the particulars of their items) and
+  // Claims, newest first. From/To filter both on the server.
+  const fetchAll = async () => {
+    const req = ++listReq.current;
     setLoading(true);
     try {
-      const params = new URLSearchParams();
+      const params = new URLSearchParams({ page: String(page), limit: String(pageSize) });
       if (userFilter) params.set('user_id', userFilter);
       if (fromFilter) params.set('from', fromFilter);
       if (toFilter) params.set('to', toFilter);
-      const res = await fetch(apiUrl(`/api/conveyance-bills?${params.toString()}`), { headers: authHeaders });
+      const res = await fetch(apiUrl(`/api/conveyance-bills/combined/list?${params.toString()}`), { headers: authHeaders });
       if (res.ok) {
-        const data: ConveyanceBill[] = await res.json();
-        setBills(data);
-        loadBillItems(data);
+        const data: { total: number; bills: ConveyanceBill[]; claims: UserClaim[] } = await res.json();
+        if (req !== listReq.current) return; // a newer request is on its way
+        setBills(data.bills);
+        setUserClaims(data.claims);
+        setBillItems(Object.fromEntries(data.bills.map((b) => [b.id, (b.items || []) as ConveyanceBillItem[]])));
+        setTotal(Number(data.total) || 0);
       }
     } catch (err) {
       console.error('Failed to load conveyance bills', err);
     } finally {
-      setLoading(false);
+      if (req === listReq.current) setLoading(false);
     }
-  };
-
-  // User Claims and Bills are shown together in ONE table (one row each) —
-  // fetch both. The backend doesn't support a date-range filter on
-  // /api/user-claims, so From/To are applied client-side on claim_date.
-  const fetchUserClaims = async () => {
-    try {
-      const params = new URLSearchParams();
-      if (userFilter) params.set('user_id', userFilter);
-      const res = await fetch(apiUrl(`/api/user-claims?${params.toString()}`), { headers: authHeaders });
-      if (res.ok) {
-        const data: UserClaim[] = await res.json();
-        const filtered = data.filter((c) => {
-          const d = String(c.claim_date).slice(0, 10);
-          if (fromFilter && d < fromFilter) return false;
-          if (toFilter && d > toFilter) return false;
-          return true;
-        });
-        setUserClaims(filtered);
-      }
-    } catch (err) {
-      console.error('Failed to load user claims', err);
-    }
-  };
-
-  const fetchAll = async () => {
-    await Promise.all([fetchBills(), fetchUserClaims()]);
   };
 
   useEffect(() => {
     fetchAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [page, pageSize]);
+
+  // Applying a filter always starts again from page 1.
+  const applyFilters = () => {
+    if (page !== 1) setPage(1);
+    else fetchAll();
+  };
 
   const hasFilters = userFilter || fromFilter || toFilter;
 
@@ -541,7 +511,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
             </div>
             <button
               type="button"
-              onClick={fetchAll}
+              onClick={applyFilters}
               className="col-span-1 flex items-center justify-center gap-1.5 text-xs px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium whitespace-nowrap transition-colors"
             >
               <Filter className="w-3.5 h-3.5" /> Apply
@@ -679,6 +649,40 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
                 </tbody>
               </table>
             </div>
+            {total > 0 && (
+              <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-t border-slate-200 text-xs text-slate-600">
+                <span>
+                  {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} of {total}
+                </span>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={pageSize}
+                    onChange={(e) => {
+                      setPageSize(Number(e.target.value));
+                      setPage(1);
+                    }}
+                    className="border border-slate-200 rounded-lg px-2 py-1 bg-white"
+                    aria-label="Rows per page"
+                  >
+                    {[25, 50, 100, 200].map((n) => (
+                      <option key={n} value={n}>{n} / page</option>
+                    ))}
+                  </select>
+                  <button type="button" disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))} className="px-3 py-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40">
+                    Prev
+                  </button>
+                  <span>Page {page} / {Math.max(1, Math.ceil(total / pageSize))}</span>
+                  <button
+                    type="button"
+                    disabled={page >= Math.ceil(total / pageSize)}
+                    onClick={() => setPage((p) => p + 1)}
+                    className="px-3 py-1 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 disabled:opacity-40"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
           </>
         )}
       </div>
@@ -735,7 +739,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
           onClose={() => setBehalfFor(null)}
           onSubmitted={() => {
             setBehalfFor(null);
-            void fetchBills();
+            void fetchAll();
           }}
         />
       )}
