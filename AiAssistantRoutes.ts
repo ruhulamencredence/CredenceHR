@@ -102,6 +102,8 @@ const st = (s: any) => STATUS_BN[String(s || "").toLowerCase()] || String(s || "
 
 const isSuper = (c: Ctx) => c.role === "superadmin";
 const hasMod = (c: Ctx, k: string) => isSuper(c) || c.modules.includes(k);
+// Same people who see the Admin (HR) Dashboard — AdminDashboardRoutes.ts gate.
+const canDash = (c: Ctx) => isSuper(c) || c.role === "admin" || c.modules.includes("admin_dashboard");
 
 // ---------------------------------------------------------------------------
 // App help — where things are. `can` keeps a page out of the answer when the
@@ -175,6 +177,8 @@ const HELP: HelpEntry[] = [
     steps: "Admin Panel → **Notices** → New Notice।", nav: "admin:notices", can: (c) => hasMod(c, "notices") },
   { id: "approval_chain", title: "Approval Chain", keys: ["approval chain", "chain", "approver set", "কে approve করবে"],
     steps: "Admin Panel → **Approval Chain**। কোন আবেদন কোন ধাপে কে approve করবে, তা এখানে ঠিক করা হয়।", nav: "admin:approvals", can: (c) => hasMod(c, "approvals") },
+  { id: "dashboard", title: "HR Dashboard", keys: ["dashboard", "ড্যাশবোর্ড", "admin dashboard"],
+    steps: "Admin Panel → **Admin Dashboard**। আজকের হাজিরা, অপেক্ষমাণ কাজ, জন্মদিন, probation/contract শেষ হওয়া, document-এর মেয়াদ আর সামনের personnel action এক জায়গায়।", nav: "admin:dashboard", can: canDash },
   { id: "reports", title: "Reports", keys: ["report", "রিপোর্ট"],
     steps: "Admin Panel → **Reports & Insights**। তৈরি রিপোর্ট বা নিজের মতো রিপোর্ট বানিয়ে Excel/PDF।", nav: "admin:reports_insights", can: (c) => isSuper(c) || c.modules.includes("reports_insights") }
 ];
@@ -582,7 +586,7 @@ const TOOLS: Tool[] = [
   {
     name: "admin_pending_work",
     description: "HR/Admin: counts of items waiting in the organisation (leave applications, claims, bills to disburse, asset/vehicle requisitions, personnel actions…).",
-    available: (c) => isSuper(c) || c.role === "admin" || c.modules.includes("admin_dashboard"),
+    available: canDash,
     run: async (c) => {
       const r = await callApi(c.req, "/api/admin-dashboard/extras");
       if (!r.ok) return fail(r.status);
@@ -590,6 +594,111 @@ const TOOLS: Tool[] = [
       if (!tasks.length) return { ok: true, text: "এই মুহূর্তে কিছুই অপেক্ষায় নেই। 👍", data: { pending: [] } };
       const actions = tasks.filter((t) => t.tab).slice(0, 3).map((t) => ({ label: `${t.label} খুলুন`, nav: t.tab === "hr_operations" ? "hrops:dashboard" : `admin:${t.tab}` }));
       return { ok: true, text: "যা অপেক্ষায় আছে:\n" + tasks.map((t) => `• ${t.label}: **${bn(t.count)}**`).join("\n"), data: { pending: tasks.map((t) => ({ item: t.label, count: t.count })) }, actions };
+    }
+  },
+  {
+    name: "hr_dashboard",
+    description:
+      "HR/Admin Dashboard details. section: summary (default) | birthdays (next 7 days) | probation (ending within 30 days) | contract (ending) | " +
+      "documents_expiry (employee documents expiring) | alerts (all three) | personnel_actions (promotions/transfers etc. taking effect) | " +
+      "document_requests (letter requests / information submitted, waiting for HR) | attendance_approvals (attendance approvals and corrections waiting).",
+    params: { section: { type: "string", description: "One of the sections listed; omit for summary." } },
+    available: canDash,
+    run: async (c, args) => {
+      const r = await callApi(c.req, "/api/admin-dashboard/extras");
+      if (!r.ok) return fail(r.status);
+      const x = r.body || {};
+      const section = String(args?.section || "summary");
+      const when = (d: number) => (d === 0 ? "আজ" : d > 0 ? `${bn(d)} দিন পরে` : `${bn(-d)} দিন আগে পেরিয়েছে`);
+      const who = (p: any) => `${p.name}${p.employee_code ? ` (${p.employee_code})` : ""}${p.designation ? `, ${p.designation}` : ""}`;
+      const list = (rows: any[], line: (p: any) => string, empty: string, max = 10) =>
+        rows.length ? rows.slice(0, max).map((p) => `• ${line(p)}`).join("\n") + (rows.length > max ? `\n…আরও ${bn(rows.length - max)} জন` : "") : empty;
+      const alerts: any[] = x.alerts || [];
+      const byKind = (k: string) => alerts.filter((a) => a.kind === k);
+      const dashAction: AssistantAction[] = [{ label: "Admin Dashboard খুলুন", nav: "admin:dashboard" }];
+      let text = "";
+      let data: any = {};
+      switch (section) {
+        case "birthdays":
+          text = `সামনের ৭ দিনের জন্মদিন:\n` + list(x.birthdays || [], (b) => `${who(b)} — ${bnDate(b.date)} (${when(b.days_away)})${b.turning ? `, ${bn(b.turning)} বছর` : ""}`, "সামনের ৭ দিনে কারো জন্মদিন নেই।");
+          data = { birthdays: (x.birthdays || []).map((b: any) => ({ name: b.name, date: b.date, days_away: b.days_away, turning: b.turning })) };
+          break;
+        case "probation":
+        case "contract":
+        case "documents_expiry":
+        case "alerts": {
+          const rows = section === "alerts" ? alerts : byKind(section === "documents_expiry" ? "document" : section);
+          const title = section === "probation" ? "Probation শেষ হচ্ছে" : section === "contract" ? "Contract শেষ হচ্ছে" : section === "documents_expiry" ? "Document-এর মেয়াদ শেষ হচ্ছে" : "Probation / Contract / Document সতর্কতা";
+          text = `${title} (৩০ দিনের মধ্যে):\n` + list(rows, (a) => `${who(a)} — ${a.label}: ${bnDate(a.date)} (${when(a.days)})`, "এই সময়ের মধ্যে কিছু নেই।");
+          data = { items: rows.map((a: any) => ({ kind: a.kind, label: a.label, name: a.name, date: a.date, days: a.days })) };
+          break;
+        }
+        case "personnel_actions":
+          text = "সামনে কার্যকর হবে এমন Personnel Action:\n" + list(x.status_effective || [], (a) => `${who(a)} — ${a.action}: ${bnDate(a.date)} (${st(a.status)})`, "সামনে কোনো Personnel Action নেই।");
+          data = { actions: (x.status_effective || []).map((a: any) => ({ name: a.name, action: a.action, date: a.date, status: a.status })) };
+          break;
+        case "document_requests":
+          text = "HR-এর কাছে অপেক্ষমাণ চিঠি / তথ্য:\n" + list(x.documents || [], (d) => `${who(d)} — ${d.kind}: ${d.detail}${d.date ? ` (${bnDate(d.date)})` : ""}`, "কোনো অনুরোধ অপেক্ষায় নেই।");
+          data = { requests: (x.documents || []).map((d: any) => ({ name: d.name, kind: d.kind, detail: d.detail, date: d.date })) };
+          break;
+        case "attendance_approvals":
+          text = `হাজিরা অনুমোদনের অপেক্ষায়: **${bn((x.attendance_approvals || []).length)}**\n` + list(x.attendance_approvals || [], (a) => `${who(a)}${a.date ? ` — ${bnDate(a.date)}` : ""}`, "", 6) +
+            `\nহাজিরা সংশোধনের অনুরোধ: **${bn((x.attendance_corrections || []).length)}**\n` + list(x.attendance_corrections || [], (a) => `${who(a)}${a.date ? ` — ${bnDate(a.date)}` : ""}`, "", 6);
+          data = { attendance_approvals: (x.attendance_approvals || []).length, corrections: (x.attendance_corrections || []).length };
+          break;
+        default: {
+          const tasks: any[] = (x.tasks || []).filter((t: any) => Number(t.count) > 0);
+          text = `**HR Dashboard — ${bnDate(x.today)}**\n` +
+            (tasks.length ? "অপেক্ষমাণ: " + tasks.map((t) => `${t.label} ${bn(t.count)}`).join(", ") + "\n" : "অপেক্ষমাণ কিছু নেই।\n") +
+            `• জন্মদিন (৭ দিনে): ${bn((x.birthdays || []).length)} জন\n` +
+            `• Probation শেষ হচ্ছে: ${bn(byKind("probation").length)} · Contract শেষ: ${bn(byKind("contract").length)} · Document-এর মেয়াদ: ${bn(byKind("document").length)}\n` +
+            `• সামনের Personnel Action: ${bn((x.status_effective || []).length)}\n` +
+            `• HR-এর কাছে চিঠি/তথ্যের অনুরোধ: ${bn((x.documents || []).length)}\n` +
+            `• হাজিরা অনুমোদন / সংশোধন: ${bn((x.attendance_approvals || []).length)} / ${bn((x.attendance_corrections || []).length)}\n` +
+            "বিস্তারিত চাইলে জিজ্ঞেস করুন — যেমন \"কার probation শেষ হচ্ছে?\"";
+          data = {
+            today: x.today, pending: tasks.map((t) => ({ item: t.label, count: t.count })), birthdays: (x.birthdays || []).length,
+            probation_ending: byKind("probation").length, contract_ending: byKind("contract").length, documents_expiring: byKind("document").length,
+            personnel_actions_upcoming: (x.status_effective || []).length, document_requests: (x.documents || []).length,
+            attendance_approvals: (x.attendance_approvals || []).length, attendance_corrections: (x.attendance_corrections || []).length
+          };
+        }
+      }
+      return { ok: true, text, data, actions: dashAction };
+    }
+  },
+  {
+    name: "on_leave",
+    description: "HR: who is on approved leave on a date (default today), and whose leave on that date is still pending. Optional date YYYY-MM-DD.",
+    params: { date: { type: "string", description: "YYYY-MM-DD; omit for today." } },
+    available: (c) => hasMod(c, "leave_applications"),
+    run: async (c, args) => {
+      const date = /^\d{4}-\d{2}-\d{2}$/.test(String(args?.date || "")) ? String(args.date) : c.today;
+      const r = await callApi(c.req, `/api/leave-applications/report?since=${addDays(date, -90)}&slim=1`);
+      if (!r.ok) return fail(r.status);
+      const rows: any[] = (Array.isArray(r.body) ? r.body : r.body?.rows || []).filter((l: any) => String(l.start_date).slice(0, 10) <= date && String(l.end_date).slice(0, 10) >= date);
+      const approved = rows.filter((l) => l.status === "approved");
+      const pending = rows.filter((l) => l.status === "pending");
+      const line = (l: any) => `${l.user_name} — ${l.leave_type_label || l.leave_type} (${bnDate(l.start_date)}${l.end_date !== l.start_date ? ` – ${bnDate(l.end_date)}` : ""})`;
+      const text = `${bnDate(date)}-এ ছুটিতে: **${bn(approved.length)} জন**` + (approved.length ? "\n" + approved.slice(0, 15).map((l) => `• ${line(l)}`).join("\n") : "") +
+        (pending.length ? `\nঅনুমোদনের অপেক্ষায় (${bn(pending.length)}):\n` + pending.slice(0, 10).map((l) => `• ${line(l)}`).join("\n") : "");
+      return { ok: true, text, data: { date, on_leave: approved.map((l) => ({ name: l.user_name, type: l.leave_type_label || l.leave_type, from: l.start_date, to: l.end_date })), pending: pending.map((l) => ({ name: l.user_name, from: l.start_date, to: l.end_date })) }, actions: [{ label: "Leave Applications খুলুন", nav: "admin:leave_applications" }] };
+    }
+  },
+  {
+    name: "active_notices",
+    description: "Notices currently posted for this account (company announcements).",
+    run: async (c) => {
+      const r = await callApi(c.req, "/api/notices/active");
+      if (!r.ok) return fail(r.status);
+      const rows: any[] = Array.isArray(r.body) ? r.body : [];
+      const plain = (h: any) => String(h || "").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
+      if (!rows.length) return { ok: true, text: "এখন আপনার জন্য কোনো নতুন নোটিশ নেই।", data: { notices: [] } };
+      return {
+        ok: true,
+        text: "চালু নোটিশ:\n" + rows.slice(0, 5).map((n) => `• **${n.title}**${plain(n.content_html) ? ` — ${plain(n.content_html).slice(0, 160)}` : ""}`).join("\n"),
+        data: { notices: rows.slice(0, 10).map((n) => ({ title: n.title, text: plain(n.content_html).slice(0, 500), posted: n.created_at })) }
+      };
     }
   },
   {
@@ -703,6 +812,17 @@ const INTENTS: Intent[] = [
       }
       return {};
     } },
+  { tool: "hr_dashboard", keys: ["dashboard", "ড্যাশবোর্ড", "সারসংক্ষেপ", "summary", "overview", "ওভারভিউ"], args: () => ({ section: "summary" }) },
+  { tool: "hr_dashboard", keys: ["birthday", "জন্মদিন", "jonmodin", "jonmo din"], args: () => ({ section: "birthdays" }) },
+  { tool: "hr_dashboard", keys: ["probation", "প্রবেশন", "প্রবেশনারি", "confirmation", "কনফার্মেশন"], args: () => ({ section: "probation" }) },
+  { tool: "hr_dashboard", keys: ["contract", "চুক্তি", "কন্ট্রাক্ট"], args: () => ({ section: "contract" }) },
+  { tool: "hr_dashboard", keys: ["expire", "expiry", "মেয়াদ শেষ", "মেয়াদোত্তীর্ণ", "ডকুমেন্টের মেয়াদ", "document er meyad", "meyad sesh"], args: () => ({ section: "documents_expiry" }) },
+  { tool: "hr_dashboard", keys: ["promotion", "পদোন্নতি", "transfer", "বদলি", "personnel action", "কার্যকর হবে", "status effective", "effective"], args: () => ({ section: "personnel_actions" }) },
+  { tool: "hr_dashboard", keys: ["document request", "letter request", "certificate request", "চিঠির অনুরোধ", "তথ্য জমা", "info request"], args: () => ({ section: "document_requests" }) },
+  { tool: "hr_dashboard", keys: ["attendance approval", "attendance correction", "হাজিরা সংশোধন", "হাজিরা অনুমোদন", "correction"], args: () => ({ section: "attendance_approvals" }) },
+  { tool: "on_leave", keys: ["ke ke chutite", "কে কে ছুটিতে", "ছুটিতে আছে", "ছুটিতে কে", "কারা ছুটিতে", "on leave", "chutite ache", "chutite ke", "leave e ache", "leave a ache"],
+    args: (t, c) => (hasAny(t, ["kal", "কাল", "tomorrow", "আগামীকাল"]) ? { date: addDays(c.today, 1) } : {}) },
+  { tool: "active_notices", keys: ["notice", "নোটিশ", "ঘোষণা", "announcement"] },
   { tool: "onboarding_overview", keys: ["onboarding", "অনবোর্ডিং", "joiner", "নতুন যোগদান", "id card", "আইডি কার্ড", "business card", "বিজনেস কার্ড"] },
   { tool: "headcount", keys: ["headcount", "হেডকাউন্ট", "মোট কর্মী", "কতজন কর্মী", "koto jon employee", "kotojon employee", "total employee", "how many employee", "কর্মী সংখ্যা"] }
 ];
@@ -712,10 +832,10 @@ const THANKS = ["thanks", "thank you", "ধন্যবাদ", "dhonnobad", "th
 
 function suggestionsFor(c: Ctx): string[] {
   const s = ["আমার ছুটি কত বাকি?", "এই মাসে কয়দিন দেরি করেছি?", ...(canNav(c, "self:leaveApplication") ? ["ছুটির আবেদন কীভাবে করব?"] : ["Password কীভাবে বদলাব?"]), "সামনের ছুটির দিন কবে?"];
-  if (isSuper(c) || c.role === "admin" || c.modules.includes("admin_dashboard")) s.unshift("কী কী অপেক্ষায় আছে?");
+  if (canDash(c)) s.unshift("HR Dashboard-এর সারসংক্ষেপ দাও", "কী কী অপেক্ষায় আছে?");
   if (hasMod(c, "attendance_reports")) s.unshift("আজ কে কে অনুপস্থিত?");
   if (hasMod(c, "hr_operations")) s.push("Onboarding-এ কার কী বাকি?");
-  return s.slice(0, 6);
+  return s.slice(0, 7);
 }
 
 const LEAVE_WORDS = ["leave", "ছুটি", "chuti", "chhuti", "ছুটির"];
@@ -729,7 +849,8 @@ async function localAnswer(c: Ctx, message: string): Promise<Answer> {
   // "20 oct family problem niye leave application kore dao" -> a draft card
   if (hasAny(t, LEAVE_WORDS) && !hasAny(t, HOLIDAY_WORDS) && !asksHow) {
     const parsed = parseLeaveRequest(message, c.today);
-    const asksStatus = hasAny(t, ["balance", "ব্যালেন্স", "baki", "বাকি", "koto", "কত", "status", "অবস্থা", "ki holo", "কী হল", "কি হলো", "কী হলো", "jante", "জানতে"]);
+    const asksStatus = hasAny(t, ["balance", "ব্যালেন্স", "baki", "বাকি", "koto", "কত", "status", "অবস্থা", "ki holo", "কী হল", "কি হলো", "কী হলো", "jante", "জানতে",
+      "ছুটিতে", "chutite", "on leave", "leave e ache", "ke ke", "কে কে", "kara", "কারা", "report", "রিপোর্ট"]);
     const wantsApply = !asksStatus && (hasAny(t, APPLY_WORDS) || !!parsed.start_date);
     if (wantsApply) {
       const tool = TOOLS.find((x) => x.name === "prepare_leave_application")!;
@@ -841,7 +962,9 @@ async function geminiAnswer(c: Ctx, history: { role: string; text: string }[], m
     `- You cannot approve, edit, cancel or delete anything — tell them which page to open (the app shows a button for it).\n` +
     `- For any "how do I… / where is…" question ALWAYS call app_help first and give only the steps it returns — never describe menus or buttons from your own knowledge. If it returns no_access, say that page isn't turned on for their account and HR / Superadmin can enable it.\n` +
     `- Write Bangla only in Bangla script (no Arabic, Hindi or other scripts mixed in); English words like page names may stay in English.\n` +
-    `- Don't answer questions unrelated to work / this app beyond a brief polite line.`;
+    `- Don't answer questions unrelated to work / this app beyond a brief polite line.\n` +
+    `- This account can open ONLY these pages: ${HELP.filter((h) => !h.can || h.can(c)).map((h) => h.title).join(", ")}${c.modules.length ? `; Admin Panel modules: ${c.modules.join(", ")}` : isSuper(c) ? "; every Admin Panel module (Superadmin)" : ""}. ` +
+    `Never explain, describe or give figures from any other page, menu or module — say briefly that it isn't turned on for *your account* (the user's) and HR / Superadmin can enable it in Module Access. Don't list the pages they can open unless they ask what they can use.`;
   const contents: Content[] = [
     ...history.slice(-10).map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: String(m.text || "").slice(0, 2000) }] })),
     { role: "user", parts: [{ text: message }] }
