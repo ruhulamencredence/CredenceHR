@@ -116,6 +116,13 @@ export function BottomNav({ active, onChange, canViewMovementClaim = true, canVi
   useEffect(() => {
     if (!showMore) setMoreOpen(false);
   }, [showMore]);
+  // While the More button is on screen, the Credence Assistant is reached
+  // from inside it, so its floating button steps aside (index.css).
+  useEffect(() => {
+    if (!showMore) return;
+    document.body.setAttribute('data-more-menu', '');
+    return () => document.body.removeAttribute('data-more-menu');
+  }, [showMore]);
   useEffect(() => {
     if (!moreOpen) return;
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setMoreOpen(false);

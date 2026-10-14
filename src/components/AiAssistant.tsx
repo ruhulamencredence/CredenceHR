@@ -247,6 +247,13 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
     return () => window.removeEventListener('credence:open-assistant-support', onOpen);
   }, [isAgent, refreshSupport]);
 
+  // The phone More menu's "Credence Assistant" tile (UserPanel.tsx).
+  useEffect(() => {
+    const onOpen = () => setOpen(true);
+    window.addEventListener('credence:open-assistant', onOpen);
+    return () => window.removeEventListener('credence:open-assistant', onOpen);
+  }, []);
+
   useEffect(() => {
     if (open && view === 'live') setUnread(0);
   }, [open, view, live?.messages.length]);
@@ -358,7 +365,7 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
     <>
       {/* .liquid-glass-button sets position: relative, so the wrapper is what's fixed. */}
       {!open && !hidden && (
-        <div className="fixed z-50 right-4 md:right-7 bottom-[calc(88px+env(safe-area-inset-bottom,0px))] md:bottom-[100px]">
+        <div className="assistant-fab fixed z-50 right-4 md:right-7 bottom-[calc(88px+env(safe-area-inset-bottom,0px))] md:bottom-[100px]">
           <button
             type="button"
             onClick={() => setOpen(true)}
@@ -377,16 +384,16 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
       )}
 
       {open && (
-        <div
-          className="fixed inset-0 z-[80] liquid-glass-backdrop flex items-end sm:items-center md:items-end justify-center md:justify-end p-2 sm:p-4 md:p-6"
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setOpen(false);
-          }}
-        >
+        <>
+        {/* Phones / small tablets: dim + blur behind the sheet, tap it to
+            close. On a computer the page stays sharp and usable next to the
+            Assistant — no backdrop at all. */}
+        <div className="md:hidden fixed inset-0 z-[80] liquid-glass-backdrop" onClick={() => setOpen(false)} aria-hidden="true" />
+        <div className="fixed inset-0 z-[81] pointer-events-none flex items-end sm:items-center md:items-end justify-center md:justify-end p-2 sm:p-4 md:p-6">
           <div
             role="dialog"
             aria-label="Credence Assistant"
-            className="liquid-glass liquid-glass-in rounded-[32px] w-full max-w-md flex flex-col overflow-hidden"
+            className="pointer-events-auto liquid-glass liquid-glass-in rounded-[32px] w-full max-w-md flex flex-col overflow-hidden shadow-2xl"
             style={{ height: 'min(640px, 88vh)' }}
           >
             <div className="flex items-center gap-3 px-5 pt-5 pb-3">
@@ -553,6 +560,7 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
             )}
           </div>
         </div>
+        </>
       )}
     </>
   );
