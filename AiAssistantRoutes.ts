@@ -395,6 +395,32 @@ export function parseLeaveRequest(text: string, today: string) {
   return { start_date: start, end_date: end, leave_type, is_half_day, purpose };
 }
 
+// Where a pending leave application waits: its Reliever first, then the
+// Approval Chain layer (label from the template step) and who approves it.
+function leaveStage(l: any): { key: string; bn: string; en: string } {
+  if (l.reliever_status === "pending" && l.reliever_id && !l.current_step) {
+    const who = String(l.reliever_name || l.approver_name || "").replace(/ \(Reliever\)$/, "");
+    return { key: "reliever", bn: `Reliever-এর কাছে${who ? ` (${who})` : ""}`, en: `Reliever${who ? ` (${who})` : ""}` };
+  }
+  const layer = l.current_step_label || (l.current_step ? `Step ${l.current_step}` : "Approver");
+  const of = l.current_step && l.total_steps ? ` ${l.current_step}/${l.total_steps}` : "";
+  const who = l.approver_name ? ` — ${l.approver_name}` : "";
+  return { key: `${layer}|${of}|${who}`, bn: `${layer} ধাপে${of ? ` (${bn(of.trim())})` : ""}${who}`, en: `${layer}${of}${who}` };
+}
+function groupByStage(rows: any[]) {
+  const m = new Map<string, { bn: string; en: string; items: any[] }>();
+  for (const l of rows) {
+    const s = leaveStage(l);
+    if (!m.has(s.key)) m.set(s.key, { bn: s.bn, en: s.en, items: [] });
+    m.get(s.key)!.items.push(l);
+  }
+  return [...m.values()].sort((a, b) => b.items.length - a.items.length);
+}
+const monthEndOf = (isoDate: string) => {
+  const [y, m] = isoDate.split("-").map(Number);
+  return iso(y, m, new Date(Date.UTC(y, m, 0)).getUTCDate());
+};
+
 const TOOLS: Tool[] = [
   {
     name: "my_leave_balance",
@@ -748,6 +774,77 @@ const TOOLS: Tool[] = [
     }
   },
   {
+    name: "upcoming_leaves",
+    description:
+      "HR: leave applications (approved and pending) for coming days — who applied, which dates, how many — and for the pending ones which approval layer they wait at. " +
+      "from / to YYYY-MM-DD; default from tomorrow to the end of this month.",
+    params: { from: { type: "string", description: "YYYY-MM-DD; default tomorrow." }, to: { type: "string", description: "YYYY-MM-DD; default the last day of this month." } },
+    available: (c) => hasMod(c, "leave_applications"),
+    run: async (c, args) => {
+      const tomorrow = addDays(c.today, 1);
+      const from = /^\d{4}-\d{2}-\d{2}$/.test(String(args?.from || "")) ? String(args.from) : tomorrow;
+      let to = /^\d{4}-\d{2}-\d{2}$/.test(String(args?.to || "")) ? String(args.to) : monthEndOf(from);
+      if (!args?.to && to < addDays(from, 6)) to = addDays(from, 6); // last days of a month: show the coming week
+      if (to < from) to = from;
+      const r = await callApi(c.req, `/api/leave-applications/report?since=${from}`);
+      if (!r.ok) return fail(r.status);
+      const rows: any[] = (Array.isArray(r.body) ? r.body : r.body?.rows || [])
+        .filter((l: any) => ["approved", "pending"].includes(l.status) && ymd(l.start_date)! <= to && ymd(l.end_date)! >= from)
+        .sort((a: any, b: any) => String(a.start_date).localeCompare(String(b.start_date)));
+      const pending = rows.filter((l) => l.status === "pending");
+      const people = new Set(rows.map((l) => l.user_id)).size;
+      const range = `${bnDate(from)} – ${bnDate(to)}`;
+      if (!rows.length) return { ok: true, text: `${range}: কোনো ছুটির আবেদন নেই।`, data: { from, to, applications: [] }, actions: [{ label: "Leave Applications খুলুন", nav: "admin:leave_applications" }] };
+      const dates = (l: any) => `${bnDate(l.start_date)}${ymd(l.end_date) !== ymd(l.start_date) ? ` – ${bnDate(l.end_date)}` : ""}`;
+      const line = (l: any) => `• **${l.user_name}**${l.department ? ` (${l.department})` : ""} — ${l.leave_type_label || l.leave_type}, ${dates(l)} (${bn(l.day_count)} দিন): ` +
+        (l.status === "approved" ? "অনুমোদিত" : `অপেক্ষমাণ — ${leaveStage(l).bn}`);
+      const groups = groupByStage(pending);
+      const text = `${range}: ছুটির আবেদন **${bn(rows.length)}টি** (${bn(people)} জন) — অনুমোদিত ${bn(rows.length - pending.length)}, অপেক্ষমাণ ${bn(pending.length)}\n` +
+        rows.slice(0, 15).map(line).join("\n") + (rows.length > 15 ? `\n…আরও ${bn(rows.length - 15)}টি` : "") +
+        (groups.length ? "\n\nঅপেক্ষমাণগুলো যেখানে আটকে আছে:\n" + groups.map((g) => `• ${g.bn}: **${bn(g.items.length)}টি** (${g.items.slice(0, 4).map((l: any) => l.user_name).join(", ")}${g.items.length > 4 ? "…" : ""})`).join("\n") : "");
+      return {
+        ok: true,
+        text,
+        data: {
+          from, to, total: rows.length, people, approved: rows.length - pending.length, pending: pending.length,
+          applications: rows.slice(0, 60).map((l) => ({ name: l.user_name, department: l.department, type: l.leave_type_label || l.leave_type, from: ymd(l.start_date), to: ymd(l.end_date), days: l.day_count, status: l.status, waiting_at: l.status === "pending" ? leaveStage(l).en : null })),
+          pending_by_layer: groups.map((g) => ({ layer: g.en, count: g.items.length }))
+        },
+        actions: [{ label: "Leave Applications খুলুন", nav: "admin:leave_applications" }],
+        report: report("Leave Applications", `Leave-${from}-to-${to}`, ["Name", "Department", "Leave Type", "From", "To", "Days", "Status", "Waiting At"],
+          rows.map((l) => [l.user_name, l.department || "", l.leave_type_label || l.leave_type, enDate(l.start_date), enDate(l.end_date), Number(l.day_count) || 0, l.status === "approved" ? "Approved" : "Pending", l.status === "pending" ? leaveStage(l).en : ""]),
+          [["Period", `${enDate(from)} - ${enDate(to)}`], ["Applications", String(rows.length)], ["Employees", String(people)], ["Approved", String(rows.length - pending.length)], ["Pending", String(pending.length)]])
+      };
+    }
+  },
+  {
+    name: "leave_pending_layers",
+    description: "HR: every pending leave application grouped by the approval layer it is stuck at (Reliever, Supervisor, HR… with the approver's name) and how many days it has been waiting.",
+    available: (c) => hasMod(c, "leave_applications"),
+    run: async (c) => {
+      const r = await callApi(c.req, `/api/leave-applications/report?since=${c.today}`);
+      if (!r.ok) return fail(r.status);
+      const pending: any[] = (Array.isArray(r.body) ? r.body : r.body?.rows || []).filter((l: any) => l.status === "pending")
+        .sort((a: any, b: any) => String(a.created_at).localeCompare(String(b.created_at)));
+      if (!pending.length) return { ok: true, text: "এখন কোনো ছুটির আবেদন অনুমোদনের অপেক্ষায় নেই। 👍", data: { pending: 0 }, actions: [{ label: "Leave Applications খুলুন", nav: "admin:leave_applications" }] };
+      const waited = (l: any) => Math.max(0, Math.round((Date.parse(c.today) - Date.parse(String(l.created_at || l.apply_date || c.today).slice(0, 10))) / 86400000));
+      const groups = groupByStage(pending);
+      const text = `অনুমোদনের অপেক্ষায় মোট **${bn(pending.length)}টি** ছুটির আবেদন:\n` +
+        groups.map((g) => `**${g.bn}** — ${bn(g.items.length)}টি\n` + g.items.slice(0, 6).map((l: any) =>
+          `  • ${l.user_name} — ${bnDate(l.start_date)}${ymd(l.end_date) !== ymd(l.start_date) ? ` – ${bnDate(l.end_date)}` : ""} (${bn(l.day_count)} দিন), ${bn(waited(l))} দিন ধরে অপেক্ষায়`).join("\n") +
+          (g.items.length > 6 ? `\n  …আরও ${bn(g.items.length - 6)}টি` : "")).join("\n");
+      return {
+        ok: true,
+        text,
+        data: { pending: pending.length, by_layer: groups.map((g) => ({ layer: g.en, count: g.items.length, applications: g.items.slice(0, 20).map((l: any) => ({ name: l.user_name, from: ymd(l.start_date), to: ymd(l.end_date), days: l.day_count, waiting_days: waited(l) })) })) },
+        actions: [{ label: "Leave Applications খুলুন", nav: "admin:leave_applications" }],
+        report: report("Pending Leave Applications by Approval Layer", `Pending-Leave-${c.today}`, ["Waiting At", "Name", "Department", "Leave Type", "From", "To", "Days", "Waiting (days)"],
+          groups.flatMap((g) => g.items.map((l: any) => [g.en, l.user_name, l.department || "", l.leave_type_label || l.leave_type, enDate(l.start_date), enDate(l.end_date), Number(l.day_count) || 0, waited(l)])),
+          [["As of", enDate(c.today)], ["Pending", String(pending.length)]])
+      };
+    }
+  },
+  {
     name: "request_human_support",
     description: "When the user wants to talk to a real person (HR / admin / support), or you can't help them: offer a button that connects them to a live support agent. Doesn't connect by itself.",
     run: async () => ({
@@ -997,6 +1094,15 @@ const INTENTS: Intent[] = [
       }
       return {};
     } },
+  { tool: "upcoming_leaves", keys: ["ke ke leave application", "kara leave application", "leave application koreche", "leave application korche", "leave apply koreche", "ছুটির আবেদন করেছে", "ছুটির আবেদন করেছেন", "কে কে ছুটির আবেদন", "কারা ছুটির আবেদন",
+      "koyta leave application", "কয়টা ছুটির আবেদন", "কতগুলো ছুটির আবেদন", "koyta leave", "কয়টা ছুটি", "upcoming leave", "samner leave", "সামনের ছুটির আবেদন", "next days leave", "next few days leave", "kal theke", "কাল থেকে", "ei month e leave", "এই মাসে ছুটি", "ei mase leave"],
+    args: (t, c) => {
+      const d = [...t.matchAll(/(\d{4}-\d{2}-\d{2})/g)].map((m) => m[1]);
+      if (d.length) return { from: d[0], to: d[1] || undefined };
+      if (hasAny(t, ["next week", "ei saptah", "এই সপ্তাহ", "সামনের সপ্তাহ", "7 din", "৭ দিন"])) return { from: addDays(c.today, 1), to: addDays(c.today, 7) };
+      return {};
+    } },
+  { tool: "leave_pending_layers", keys: ["kon layer", "কোন লেয়ার", "কোন layer", "layer e atke", "লেয়ারে আটকে", "atke ache", "আটকে আছে", "atke ase", "kon step", "kon dhape", "কোন ধাপে", "কার কাছে আটকে", "kar kache atke", "kar kache pending", "stuck", "pending leave", "অপেক্ষমাণ ছুটি", "leave pending", "ছুটি পেন্ডিং"] },
   { tool: "late_on_date", keys: ["ke ke late", "kara late", "ke late", "কে কে দেরি", "কারা দেরি", "কে দেরি", "কে কে লেট", "কারা লেট", "late koreche", "late korse", "late eseche", "late ashche", "দেরিতে এসেছে", "দেরি করেছে", "লেট করেছে", "late list", "লেট লিস্ট", "দেরির তালিকা", "who came late", "who is late", "late today", "ajke late", "ajk late", "আজ দেরি", "আজকে দেরি", "আজ লেট"],
     args: (t, c) => {
       const d = /(\d{4}-\d{2}-\d{2})/.exec(t)?.[1];
@@ -1062,7 +1168,8 @@ async function localAnswer(c: Ctx, message: string): Promise<Answer> {
   if (hasAny(t, LEAVE_WORDS) && !hasAny(t, HOLIDAY_WORDS) && !asksHow) {
     const parsed = parseLeaveRequest(message, c.today);
     const asksStatus = hasAny(t, ["balance", "ব্যালেন্স", "baki", "বাকি", "koto", "কত", "status", "অবস্থা", "ki holo", "কী হল", "কি হলো", "কী হলো", "jante", "জানতে",
-      "ছুটিতে", "chutite", "on leave", "leave e ache", "ke ke", "কে কে", "kara", "কারা", "report", "রিপোর্ট"]);
+      "ছুটিতে", "chutite", "on leave", "leave e ache", "ke ke", "কে কে", "kara", "কারা", "report", "রিপোর্ট",
+      "koyta", "কয়টা", "কতগুলো", "koreche", "korche", "করেছে", "করেছেন", "layer", "লেয়ার", "atke", "আটকে", "pending", "পেন্ডিং", "kon", "কোন"]);
     const wantsApply = !asksStatus && (hasAny(t, APPLY_WORDS) || !!parsed.start_date);
     if (wantsApply) {
       const tool = TOOLS.find((x) => x.name === "prepare_leave_application")!;
