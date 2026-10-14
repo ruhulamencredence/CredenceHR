@@ -27,6 +27,9 @@ interface Candidate {
   source: string | null;
   status: string;
   notes: string | null;
+  // The scheduled interview, if any (candidate_interviews).
+  interview_id?: number | null;
+  interview_at?: string | null;
 }
 
 // A candidate's New Joiner Onboarding (HR Operations), from
@@ -240,10 +243,26 @@ export const RecruitmentPanel: React.FC<RecruitmentPanelProps> = ({ token }) => 
       if (!res.ok) throw new Error(data.error || 'Failed to update candidate');
       setCandidatesByPosting((prev) => ({
         ...prev,
-        [postingId]: (prev[postingId] || []).map((c) => (c.id === candidateId ? data : c))
+        [postingId]: (prev[postingId] || []).map((c) => (c.id === candidateId ? { ...c, ...data } : c))
       }));
     } catch (err: any) {
       setError(err.message || 'Failed to update candidate');
+    }
+  };
+
+  // Interview date & time for a candidate whose status is "interview
+  // scheduled" — the Admin Dashboard counts today's and this week's.
+  const setInterviewAt = async (postingId: number, c: Candidate, value: string) => {
+    const scheduled_at = value ? `${value.replace('T', ' ')}:00` : null;
+    try {
+      const res = c.interview_id
+        ? await fetch(apiUrl(`/api/candidate-interviews/${c.interview_id}`), { method: 'PUT', headers: authHeaders, body: JSON.stringify({ scheduled_at }) })
+        : await fetch(apiUrl('/api/candidate-interviews'), { method: 'POST', headers: authHeaders, body: JSON.stringify({ candidate_id: c.id, scheduled_at }) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Failed to save the interview time');
+      await fetchCandidates(postingId);
+    } catch (err: any) {
+      setError(err.message || 'Failed to save the interview time');
     }
   };
 
@@ -376,6 +395,22 @@ export const RecruitmentPanel: React.FC<RecruitmentPanelProps> = ({ token }) => 
                             <p className="text-[11px] text-slate-400">
                               {c.email || '—'} · {c.phone || '—'} · {c.source || '—'}
                             </p>
+                            {c.status === 'interview_scheduled' && (
+                              <label className="mt-1 flex items-center gap-1.5 text-[11px] text-indigo-700">
+                                Interview:
+                                <input
+                                  type="datetime-local"
+                                  defaultValue={c.interview_at ? String(c.interview_at).replace(' ', 'T').slice(0, 16) : ''}
+                                  key={c.interview_at || 'none'}
+                                  onBlur={(e) => {
+                                    const cur = c.interview_at ? String(c.interview_at).replace(' ', 'T').slice(0, 16) : '';
+                                    if (e.target.value !== cur) setInterviewAt(p.id, c, e.target.value);
+                                  }}
+                                  className="px-1.5 py-0.5 text-[11px] border border-indigo-200 rounded-md"
+                                  aria-label={`Interview date and time for ${c.name}`}
+                                />
+                              </label>
+                            )}
                             {c.status === 'hired' && canSeeOnboarding && (() => {
                               const o = onbByCandidate[c.id];
                               const reopen = !o || o.status === 'cancelled' || o.status === 'expired';

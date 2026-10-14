@@ -2626,7 +2626,7 @@ async function startServer() {
   // that file's own comment for why the SELECT stays limited to
   // directory-safe columns.
   // Admin Dashboard figures with no screen of their own (AdminDashboardRoutes.ts).
-  registerAdminDashboardRoutes(app, { authenticateToken, queryDB, getAdminModules, todayInDhaka });
+  registerAdminDashboardRoutes(app, { authenticateToken, queryDB, getAdminModules, todayInDhaka, getCurrentStepApprovers });
   // AI Assistant — floating chat helper for every account (AiAssistantRoutes.ts).
   registerAiAssistantRoutes(app, { authenticateToken, queryDB, getAdminModules, todayInDhaka });
   registerDeviceRoutes(app, { authenticateToken, requireSuperAdmin, queryDB });

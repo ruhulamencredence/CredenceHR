@@ -26,7 +26,23 @@ interface AdminDashboardRouteDeps {
   queryDB: (sql: string, params?: any[]) => Promise<any>;
   getAdminModules: (userId: number) => Promise<string[]>;
   todayInDhaka: () => string;
+  // Who approves a pending approval request's current step (server.ts).
+  getCurrentStepApprovers: (request: any) => Promise<{ user_id: number; user_name: string | null }[]>;
 }
+
+// What a pending approval request is, the module that lists it (an account
+// sees only the kinds whose module it has) and the Admin Panel tab to open.
+const STUCK_SOURCES: Record<string, { label: string; module: string; tab: string }> = {
+  leave_application: { label: "Leave application", module: "leave_applications", tab: "leave_applications" },
+  user_claim: { label: "Conveyance bill", module: "conveyance", tab: "conveyance" },
+  claim: { label: "Movement claim", module: "claims", tab: "claims" },
+  attendance: { label: "Attendance", module: "attendance", tab: "approvals" },
+  attendance_correction: { label: "Attendance correction", module: "attendance", tab: "approvals" },
+  asset_requisition: { label: "Asset requisition", module: "asset_management", tab: "asset_management" },
+  vehicle_requisition: { label: "Vehicle requisition", module: "vehicle_management", tab: "vehicle_management" },
+  mobile_limit_request: { label: "Mobile limit request", module: "mobile_bill", tab: "mobile_bill" },
+  advance_request: { label: "Loan / salary advance", module: "payroll", tab: "payroll" }
+};
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const dateOnly = (v: any): string | null => {
@@ -37,7 +53,7 @@ const dateOnly = (v: any): string | null => {
 const daysBetween = (from: string, to: string) => Math.round((Date.parse(to + "T00:00:00Z") - Date.parse(from + "T00:00:00Z")) / DAY_MS);
 
 export function registerAdminDashboardRoutes(app: Express, deps: AdminDashboardRouteDeps) {
-  const { authenticateToken, queryDB, getAdminModules, todayInDhaka } = deps;
+  const { authenticateToken, queryDB, getAdminModules, todayInDhaka, getCurrentStepApprovers } = deps;
   const rows = (sql: string, params: any[] = []) => queryDB(sql, params).then((r: any) => (Array.isArray(r) ? r : [])).catch(() => [] as any[]);
 
   // Same people who see the dashboard (AdminPanel's canSeeDashboard).
@@ -187,6 +203,99 @@ export function registerAdminDashboardRoutes(app: Express, deps: AdminDashboardR
         tasks,
         alerts
       });
+    } catch (err: any) {
+      res.status(500).json({ error: err?.message || String(err) });
+    }
+  });
+
+  // Applications that have sat at the same approval layer for `days` days or
+  // more (default 3): which layer, who has to act, since when. Reliever
+  // requests of leave applications count too. Only the kinds whose module
+  // this account has (a Superadmin sees all).
+  app.get("/api/admin-dashboard/stuck", authenticateToken, gate, async (req: any, res) => {
+    try {
+      const days = Math.min(60, Math.max(1, Math.floor(Number(req.query.days)) || 3));
+      const isSuper = req.user.role === "superadmin";
+      const mods = isSuper ? [] : await getAdminModules(req.user.id).catch(() => [] as string[]);
+      const allowed = (type: string) => !!STUCK_SOURCES[type] && (isSuper || mods.includes(STUCK_SOURCES[type].module));
+      const today = todayInDhaka();
+      const [requests, steps, leaves, relievers, users] = await Promise.all([
+        rows(
+          `SELECT ar.*, DATE(COALESCE(ar.updated_at, ar.created_at)) AS since
+           FROM approval_requests ar
+           WHERE ar.status = 'pending' AND COALESCE(ar.updated_at, ar.created_at) <= DATE_SUB(NOW(), INTERVAL ? DAY)
+           ORDER BY COALESCE(ar.updated_at, ar.created_at) ASC LIMIT 400`,
+          [days]
+        ),
+        rows("SELECT template_id, step_order, approver_type, label FROM approval_template_steps"),
+        rows("SELECT id, start_date, end_date, day_count FROM leave_applications WHERE status = 'pending'"),
+        allowed("leave_application")
+          ? rows(
+              `SELECT la.id, la.user_id, la.reliever_id, la.start_date, la.end_date, la.day_count, DATE(la.created_at) AS since
+               FROM leave_applications la
+               WHERE la.status = 'pending' AND la.reliever_status = 'pending' AND la.reliever_id IS NOT NULL
+                 AND la.created_at <= DATE_SUB(NOW(), INTERVAL ? DAY)
+                 AND NOT EXISTS (SELECT 1 FROM approval_requests ar WHERE ar.source_type = 'leave_application' AND ar.source_id = la.id)`,
+              [days]
+            )
+          : Promise.resolve([] as any[]),
+        rows("SELECT id, name FROM users")
+      ]);
+      const nameOf = new Map<number, string>(users.map((u: any) => [Number(u.id), String(u.name || "")]));
+      const stepLabel = new Map<string, string>(steps.map((st: any) => [`${st.template_id}:${st.step_order}`, String(st.label || st.approver_type || "").trim()]));
+      const leaveById = new Map<number, any>(leaves.map((l: any) => [Number(l.id), l]));
+      const leaveDates = (l: any) => (l ? `${dateOnly(l.start_date)}${dateOnly(l.end_date) !== dateOnly(l.start_date) ? ` to ${dateOnly(l.end_date)}` : ""} (${Number(l.day_count)} day${Number(l.day_count) === 1 ? "" : "s"})` : null);
+
+      const items: any[] = [];
+      for (const ar of requests.filter((r: any) => allowed(r.source_type)).slice(0, 200)) {
+        const src = STUCK_SOURCES[ar.source_type];
+        const step = Number(ar.current_step);
+        const supervisorStep = !!ar.supervisor_step_user_id;
+        const layer = supervisorStep && step === 1
+          ? "Supervisor"
+          : (ar.template_id && stepLabel.get(`${ar.template_id}:${step - (supervisorStep ? 1 : 0)}`)) || `Step ${step}`;
+        const approvers = await getCurrentStepApprovers(ar).catch(() => []);
+        const since = dateOnly(ar.since) || today;
+        items.push({
+          kind: ar.source_type,
+          label: src.label,
+          tab: src.tab,
+          id: Number(ar.source_id),
+          requester: nameOf.get(Number(ar.requested_by)) || "—",
+          detail: ar.source_type === "leave_application" ? leaveDates(leaveById.get(Number(ar.source_id))) : null,
+          layer,
+          step,
+          total_steps: Number(ar.total_steps) || null,
+          approvers: approvers.map((a) => a.user_name || `User #${a.user_id}`),
+          since,
+          days_waiting: Math.max(0, daysBetween(since, today))
+        });
+      }
+      for (const l of relievers) {
+        const since = dateOnly(l.since) || today;
+        items.push({
+          kind: "leave_reliever",
+          label: "Leave application",
+          tab: "leave_applications",
+          id: Number(l.id),
+          requester: nameOf.get(Number(l.user_id)) || "—",
+          detail: leaveDates(l),
+          layer: "Reliever",
+          step: null,
+          total_steps: null,
+          approvers: [nameOf.get(Number(l.reliever_id)) || "—"],
+          since,
+          days_waiting: Math.max(0, daysBetween(since, today))
+        });
+      }
+      items.sort((a, b) => b.days_waiting - a.days_waiting);
+      const byKind = new Map<string, { label: string; tab: string; count: number }>();
+      for (const it of items) {
+        const k = byKind.get(it.label) || { label: it.label, tab: it.tab, count: 0 };
+        k.count++;
+        byKind.set(it.label, k);
+      }
+      res.json({ days, total: items.length, by_kind: [...byKind.values()].sort((a, b) => b.count - a.count), items });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || String(err) });
     }
