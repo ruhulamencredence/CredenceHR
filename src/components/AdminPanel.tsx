@@ -706,6 +706,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [targetsAccessEnabled, setTargetsAccessEnabled] = useState(false);
   const [aiAssistantEnabled, setAiAssistantEnabled] = useState(true);
   const [assistantSupportEnabled, setAssistantSupportEnabled] = useState(false);
+  const [assistantReportsEnabled, setAssistantReportsEnabled] = useState(false);
   const [groupDashboardEnabled, setGroupDashboardEnabled] = useState(false);
   const [savingModules, setSavingModules] = useState(false);
 
@@ -736,6 +737,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     setTargetsAccessEnabled(!!u.can_view_targets);
     setAiAssistantEnabled(u.can_use_ai_assistant !== false);
     setAssistantSupportEnabled(!!u.can_handle_assistant_support);
+    setAssistantReportsEnabled(!!u.can_export_assistant_reports);
     setGroupDashboardEnabled(!!u.can_view_group_dashboard);
     // Permission layers — one Set per module in PERMISSION_LAYER_MODULES.
     // Explicit saved rows win; a module this account already has granted
@@ -1180,6 +1182,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         });
         const aiData = await aiRes.json();
         if (!aiRes.ok) throw new Error(aiData.error || 'Failed to update AI Assistant access');
+      }
+
+      if (assistantReportsEnabled !== !!managingModulesFor.can_export_assistant_reports) {
+        const arRes = await fetch(apiUrl(`/api/users/${managingModulesFor.id}/assistant-report-access`), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ can_export_assistant_reports: assistantReportsEnabled })
+        });
+        const arData = await arRes.json();
+        if (!arRes.ok) throw new Error(arData.error || 'Failed to update Assistant report download access');
       }
 
       if (assistantSupportEnabled !== !!managingModulesFor.can_handle_assistant_support) {
@@ -8008,6 +8020,30 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   <span
                     className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
                       aiAssistantEnabled ? 'translate-x-[18px]' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </label>
+              <label className="flex items-center justify-between gap-3 p-3.5 mb-3 bg-violet-50 border border-violet-200 rounded-xl cursor-pointer">
+                <span>
+                  <span className="text-sm font-semibold text-slate-900 block">Assistant — report PDF / Excel download</span>
+                  <span className="text-[11px] text-slate-500">
+                    PDF and Excel buttons under the Assistant's list answers (who has completed 10 years, who is absent
+                    today…), with the full list. Only for figures they can already see. Off by default.
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setAssistantReportsEnabled((v) => !v)}
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${
+                    assistantReportsEnabled ? 'bg-emerald-500' : 'bg-slate-300'
+                  }`}
+                  title={assistantReportsEnabled ? 'On — click to turn off' : 'Off — click to turn on'}
+                  aria-label="Assistant report download"
+                >
+                  <span
+                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                      assistantReportsEnabled ? 'translate-x-[18px]' : 'translate-x-1'
                     }`}
                   />
                 </button>

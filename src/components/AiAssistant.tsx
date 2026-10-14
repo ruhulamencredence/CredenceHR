@@ -12,9 +12,10 @@
 // (users.can_use_ai_assistant); the API checks the same switch.
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowRight, CalendarCheck, CheckCircle2, Headphones, Loader2, RotateCcw, Send, Sparkles, X } from 'lucide-react';
+import { ArrowRight, CalendarCheck, CheckCircle2, FileSpreadsheet, FileText, Headphones, Loader2, RotateCcw, Send, Sparkles, X } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import type { User } from '../types';
+import { downloadAssistantExcel, downloadAssistantPdf, type AssistantReport } from '../lib/assistantReportExport';
 import { LiveChat, SupportInbox, supportApi, useSupportSocket, type SupportMessage, type SupportSession } from './AssistantSupport';
 
 interface Action { label: string; nav: string }
@@ -31,7 +32,41 @@ interface LeaveDraft {
   types: { value: string; label: string; balance: number | null; reliever_required: boolean }[];
   relievers: { id: number; name: string }[];
 }
-interface Msg { role: 'user' | 'assistant'; text: string; actions?: Action[]; draft?: LeaveDraft; draftDone?: 'submitted' | 'cancelled' }
+interface Msg { role: 'user' | 'assistant'; text: string; actions?: Action[]; draft?: LeaveDraft; draftDone?: 'submitted' | 'cancelled'; report?: AssistantReport }
+
+// PDF / Excel of the full list behind an answer. The server only sends a
+// report to accounts with "Assistant — report PDF / Excel download" ticked.
+const ReportButtons: React.FC<{ token: string; report: AssistantReport; preparedBy: string }> = ({ token, report, preparedBy }) => {
+  const [busy, setBusy] = useState<'pdf' | 'xlsx' | null>(null);
+  const [err, setErr] = useState('');
+  const run = async (kind: 'pdf' | 'xlsx') => {
+    setBusy(kind);
+    setErr('');
+    try {
+      if (kind === 'pdf') await downloadAssistantPdf(token, report, preparedBy);
+      else await downloadAssistantExcel(report, preparedBy);
+    } catch {
+      setErr('ফাইল বানানো যায়নি, আবার চেষ্টা করুন।');
+    } finally {
+      setBusy(null);
+    }
+  };
+  const btn = 'liquid-glass-chip rounded-full px-3 py-1.5 text-xs font-semibold inline-flex items-center gap-1.5 disabled:opacity-50';
+  return (
+    <div className="mt-2.5">
+      <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1">পুরো তালিকা ({report.rows.length})</p>
+      <div className="flex flex-wrap gap-1.5">
+        <button type="button" disabled={!!busy} onClick={() => run('pdf')} className={`${btn} text-rose-700`} aria-label="Download PDF">
+          {busy === 'pdf' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />} PDF
+        </button>
+        <button type="button" disabled={!!busy} onClick={() => run('xlsx')} className={`${btn} text-emerald-700`} aria-label="Download Excel">
+          {busy === 'xlsx' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileSpreadsheet className="w-3.5 h-3.5" />} Excel
+        </button>
+      </div>
+      {err && <p className="text-[11px] text-rose-600 mt-1">{err}</p>}
+    </div>
+  );
+};
 
 const dayCountOf = (from: string, to: string, half: boolean) => {
   if (!from || !to || to < from) return 0;
@@ -330,7 +365,7 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
       });
       const d = await r.json().catch(() => null);
       const reply = r.ok && d?.reply ? d.reply : d?.error || 'দুঃখিত, এখন উত্তর দিতে পারছি না। একটু পরে আবার চেষ্টা করুন।';
-      setMsgs((m) => [...m, { role: 'assistant', text: reply, actions: r.ok ? d?.actions || [] : [], draft: r.ok && d?.draft ? d.draft : undefined }]);
+      setMsgs((m) => [...m, { role: 'assistant', text: reply, actions: r.ok ? d?.actions || [] : [], draft: r.ok && d?.draft ? d.draft : undefined, report: r.ok && d?.report ? d.report : undefined }]);
     } catch {
       setMsgs((m) => [...m, { role: 'assistant', text: 'সংযোগে সমস্যা হয়েছে। ইন্টারনেট দেখে আবার চেষ্টা করুন।' }]);
     } finally {
@@ -493,6 +528,7 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
                       {m.draft && m.draftDone === 'submitted' && (
                         <p className="mt-2 inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700"><CheckCircle2 className="w-3.5 h-3.5" /> জমা দেওয়া হয়েছে</p>
                       )}
+                      {m.report && <ReportButtons token={token} report={m.report} preparedBy={user?.name || ''} />}
                       {m.actions && m.actions.length > 0 && (
                         <div className="flex flex-wrap gap-1.5 mt-2.5">
                           {m.actions.map((a) => (

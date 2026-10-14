@@ -718,6 +718,7 @@ export interface User {
   can_use_ai_assistant?: boolean;
   // Answers Assistant live-support chats (AssistantSupportRoutes.ts). OFF by default.
   can_handle_assistant_support?: boolean;
+  can_export_assistant_reports?: boolean;
   can_view_leave_application?: boolean;
   can_view_my_leave?: boolean;
 }
