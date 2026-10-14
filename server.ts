@@ -235,7 +235,7 @@ const PERMISSION_LAYER_KEYS = ["read", "edit_add", "entry_upload", "delete_trash
 const USERS_LAYER_KEYS = [...PERMISSION_LAYER_KEYS, "block_account"] as const;
 // Which modules currently enforce PERMISSION_LAYER_KEYS — mirrors
 // PERMISSION_LAYER_MODULES in src/types.ts. Rolled out module by module.
-const PERMISSION_LAYER_MODULES = ["departments", "projects", "approvals", "users", "reports", "tracking", "payroll", "mobile_bill", "office_attendance", "conveyance", "hr_operations", "exit_offboarding", "target_reports"] as const;
+const PERMISSION_LAYER_MODULES = ["departments", "projects", "approvals", "users", "reports", "tracking", "payroll", "mobile_bill", "office_attendance", "conveyance", "hr_operations", "exit_offboarding", "target_reports", "attendance_reports"] as const;
 // Employee Tracking's layers: "read" = the live map, history and status
 // cards; "stay_report" = the Stay Report (TrackingStayReport.ts). Both are
 // reading, so an account with Employee Tracking and no saved layers has both.
@@ -288,6 +288,10 @@ const EXIT_LAYER_KEYS = ["read", "exit_dues", "exit_pdf", "exit_clearance_setup"
 // its Excel / PDF; "target_cancel" = cancel or close anyone's target. Both
 // explicit-only — the no-saved-layers default is "read" alone.
 const TARGET_LAYER_KEYS = ["read", "target_export", "target_cancel"] as const;
+// Attendance Reports: "read" = the reports as they always were; "late_list"
+// = who came late on a day, by name (the Assistant's "aj ke ke late").
+// Explicit-only — the no-saved-layers default is "read" alone.
+const ATTENDANCE_REPORT_LAYER_KEYS = ["read", "late_list"] as const;
 // PEPM Reports uses four of them: Read Only, Edit, Delete/Trash, Permanent Delete
 // — plus its own "Budget Submission Status" (the second report on that page),
 // which, like Permanent Delete, is never part of the no-saved-rows default:
@@ -322,6 +326,7 @@ const MODULE_LAYER_KEY_SETS: Record<string, readonly string[]> = {
   hr_operations: HR_OPS_LAYER_KEYS,
   exit_offboarding: EXIT_LAYER_KEYS,
   target_reports: TARGET_LAYER_KEYS,
+  attendance_reports: ATTENDANCE_REPORT_LAYER_KEYS,
   leave_manage: LEAVE_MANAGE_LAYER_KEYS,
 };
 
@@ -2155,7 +2160,7 @@ async function startServer() {
   // on for a module is never a silent regression; a Superadmin only actually
   // restricts anything once they explicitly save a narrower set in the
   // Module Access modal.
-  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "block_account" | "limit_history" | "link_pins" | "on_behalf" | "onboarding_create" | "onboarding_review" | "onboarding_approve" | "exit_dues" | "exit_pdf" | "reminders_receive" | "salary_bulk_upload" | "target_export" | "target_cancel" | "exit_clearance_setup") =>
+  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "block_account" | "limit_history" | "link_pins" | "on_behalf" | "onboarding_create" | "onboarding_review" | "onboarding_approve" | "exit_dues" | "exit_pdf" | "reminders_receive" | "salary_bulk_upload" | "target_export" | "target_cancel" | "exit_clearance_setup" | "late_list") =>
     async (req: any, res: any, next: any) => {
       if (!req.user) return res.status(401).json({ error: "Access token required" });
       if (req.user.onb) return res.status(403).json({ error: "Admin access required" });
@@ -2172,7 +2177,7 @@ async function startServer() {
           ? grantedLayers
           : moduleKey === "tracking"
             ? [...TRACKING_DEFAULT_LAYERS]
-            : moduleKey === "payroll" || moduleKey === "office_attendance" || moduleKey === "conveyance" || moduleKey === "hr_operations" || moduleKey === "exit_offboarding" || moduleKey === "target_reports"
+            : moduleKey === "payroll" || moduleKey === "office_attendance" || moduleKey === "conveyance" || moduleKey === "hr_operations" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "attendance_reports"
               ? ["read"]
               : moduleKey === "mobile_bill"
                 ? [...MOBILE_BILL_LAYER_KEYS]
@@ -2200,7 +2205,7 @@ async function startServer() {
     const defaults: readonly string[] =
       moduleKey === "tracking"
         ? TRACKING_DEFAULT_LAYERS
-        : moduleKey === "payroll" || moduleKey === "office_attendance" || moduleKey === "conveyance" || moduleKey === "hr_operations" || moduleKey === "exit_offboarding" || moduleKey === "target_reports"
+        : moduleKey === "payroll" || moduleKey === "office_attendance" || moduleKey === "conveyance" || moduleKey === "hr_operations" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "attendance_reports"
           ? ["read"]
           : moduleKey === "mobile_bill"
             ? MOBILE_BILL_LAYER_KEYS
@@ -2486,7 +2491,8 @@ async function startServer() {
     requireModuleLayer,
     hasModuleLayer,
     getAdminModules,
-    queryDB
+    queryDB,
+    getAttendanceReportDeptScope
   });
 
   // Asset Management (Employee Profile -> My Assets / New Requisition /
