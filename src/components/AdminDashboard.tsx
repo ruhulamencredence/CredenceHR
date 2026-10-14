@@ -27,6 +27,7 @@
 // (onNavigate); one listing people opens a list.
 
 import { UserAvatar } from './UserAvatar';
+import { AdminDashboardWatch } from './AdminDashboardWatch';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   CalendarClock, CalendarDays, Wallet, Banknote, Package, HandCoins,
@@ -884,6 +885,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
               </div>
             </div>
           )}
+
+          {/* Waiting on someone: stuck approvals, joiners, exits, loans / mobile, recruitment */}
+          <AdminDashboardWatch token={token} onNavigate={onNavigate} />
 
           {/* Quick View + Claim Amount chart */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
