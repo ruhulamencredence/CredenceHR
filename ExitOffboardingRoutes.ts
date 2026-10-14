@@ -30,6 +30,10 @@ import type { Express } from "express";
 import type { AlertType } from "./Alerts";
 import { setAccountBlocked } from "./AccountBlock";
 
+// The clearance departments a new install starts with. The list itself is
+// per company and editable (Exit / Offboarding -> Clearance Departments,
+// layer "exit_clearance_setup"): exit_clearance_approvers holds one row per
+// department with what it clears, its approver and its place in the list.
 const CLEARANCE_DEPARTMENTS: { department: string; item_label: string }[] = [
   { department: "IT", item_label: "Laptop / equipment & system access return" },
   { department: "Finance", item_label: "Loan / advance / expense clearance" },
@@ -41,7 +45,7 @@ interface ExitOffboardingRouteDeps {
   authenticateToken: any;
   requireAdmin: any;
   requireModule: (moduleKey: "exit_offboarding") => any;
-  requireModuleLayer: (moduleKey: "exit_offboarding", layer: "exit_dues" | "exit_pdf") => any;
+  requireModuleLayer: (moduleKey: "exit_offboarding", layer: "exit_dues" | "exit_pdf" | "exit_clearance_setup") => any;
   hasModuleLayer: (user: any, moduleKey: "exit_offboarding", layer: string) => Promise<boolean>;
   queryDB: (sql: string, params?: any[]) => Promise<any>;
   getAdminModules: (userId: number) => Promise<string[]>;
@@ -135,6 +139,24 @@ export async function ensureExitOffboardingSchema(dbPool: any): Promise<void> {
     }
   } catch (err: any) {
     console.warn("⚠️ Could not ensure exit_clearance_approvers table exists: " + err.message);
+  }
+  // Editable clearance departments: what each one clears and its order.
+  for (const sql of [
+    "ALTER TABLE exit_clearance_approvers ADD COLUMN item_label VARCHAR(255) NULL",
+    "ALTER TABLE exit_clearance_approvers ADD COLUMN sort_order INT NOT NULL DEFAULT 0"
+  ]) {
+    try {
+      await dbPool.query(sql);
+    } catch (err: any) {
+      if (err.code !== "ER_DUP_FIELDNAME") console.warn("⚠️ Could not extend exit_clearance_approvers: " + err.message);
+    }
+  }
+  try {
+    for (const [i, d] of CLEARANCE_DEPARTMENTS.entries()) {
+      await dbPool.query("UPDATE exit_clearance_approvers SET item_label = ?, sort_order = ? WHERE department = ? AND item_label IS NULL", [d.item_label, i + 1, d.department]);
+    }
+  } catch (err: any) {
+    console.warn("⚠️ Could not fill clearance department labels: " + err.message);
   }
   try {
     await dbPool.query(`
@@ -282,6 +304,22 @@ export function registerExitOffboardingRoutes(app: Express, deps: ExitOffboardin
     (await collectExitDues(queryDB, Number(exitRow.user_id), await settlementOf(Number(exitRow.id)))).filter((d) => d.blocking);
   const duesError = (blocking: ExitDue[]) =>
     `Still open in other modules: ${blocking.map((d) => d.label + (d.kind === "loan" ? " (balance not added to the settlement)" : "")).join("; ")}. Clear them first.`;
+
+  // This company's clearance departments, in order (the built-in four when
+  // none are set up — e.g. the in-memory fallback).
+  async function clearanceDepartments(): Promise<{ id: number | null; department: string; item_label: string; approver_user_id: number | null; sort_order: number }[]> {
+    const rows: any[] = (await queryDB("SELECT * FROM exit_clearance_approvers").catch(() => [])) || [];
+    if (!rows.length) return CLEARANCE_DEPARTMENTS.map((d, i) => ({ id: null, ...d, approver_user_id: null, sort_order: i + 1 }));
+    return rows
+      .map((r: any) => ({
+        id: Number(r.id),
+        department: String(r.department),
+        item_label: r.item_label || CLEARANCE_DEPARTMENTS.find((d) => d.department === r.department)?.item_label || `${r.department} clearance`,
+        approver_user_id: r.approver_user_id != null ? Number(r.approver_user_id) : null,
+        sort_order: Number(r.sort_order) || 0
+      }))
+      .sort((a, b) => a.sort_order - b.sort_order || a.id - b.id);
+  }
 
   async function canManageExits(userId: number, role: string): Promise<boolean> {
     if (role === "superadmin") return true;
@@ -537,14 +575,10 @@ export function registerExitOffboardingRoutes(app: Express, deps: ExitOffboardin
       // department with no one assigned yet (approver_user_id stays NULL)
       // just never shows up in anyone's Approve Application queue; Admin can
       // still tick it by hand in ExitOffboardingPanel.
-      const approverRows: any = await queryDB("SELECT * FROM exit_clearance_approvers");
-      const approverByDept = new Map<string, number | null>(
-        approverRows.map((r: any) => [r.department, r.approver_user_id != null ? Number(r.approver_user_id) : null])
-      );
-      for (const item of CLEARANCE_DEPARTMENTS) {
+      for (const item of await clearanceDepartments()) {
         await queryDB(
           "INSERT INTO exit_clearance_items (exit_id, department, item_label, approver_user_id) VALUES (?, ?, ?, ?)",
-          [exitId, item.department, item.item_label, approverByDept.get(item.department) ?? null]
+          [exitId, item.department, item.item_label, item.approver_user_id]
         );
       }
       const rows: any = await queryDB("SELECT * FROM exit_requests WHERE id = ?", [exitId]);
@@ -623,19 +657,20 @@ export function registerExitOffboardingRoutes(app: Express, deps: ExitOffboardin
     }
   });
 
-  // GET: the 4 department -> approver assignments (Admin Panel -> Exit/
+  // GET: the clearance departments, in order, with what each clears and its
+  // approver (Admin Panel -> Exit/
   // Offboarding -> Clearance Approvers settings) — module-gated, same as
   // every other management-side route here.
   app.get("/api/exit-clearance-approvers", authenticateToken, requireAdmin, requireModule("exit_offboarding"), async (req: any, res) => {
     try {
-      const [rows, users]: [any, any] = await Promise.all([
-        queryDB("SELECT * FROM exit_clearance_approvers ORDER BY id ASC"),
-        queryDB("SELECT id, name FROM users")
-      ]);
+      const [rows, users]: [any, any] = await Promise.all([clearanceDepartments(), queryDB("SELECT id, name FROM users")]);
       const userById = new Map(users.map((u: any) => [Number(u.id), u]));
       res.json(
         rows.map((r: any) => ({
+          id: r.id,
           department: r.department,
+          item_label: r.item_label,
+          sort_order: r.sort_order,
           approver_user_id: r.approver_user_id != null ? Number(r.approver_user_id) : null,
           approver_name: r.approver_user_id != null ? (userById.get(Number(r.approver_user_id)) as any)?.name || null : null
         }))
@@ -664,6 +699,96 @@ export function registerExitOffboardingRoutes(app: Express, deps: ExitOffboardin
       await queryDB("UPDATE exit_clearance_approvers SET approver_user_id = ? WHERE id = ?", [approverUserId, Number(existing.id)]);
       const users: any = approverUserId != null ? await queryDB("SELECT id, name FROM users WHERE id = ?", [approverUserId]) : [];
       res.json({ department, approver_user_id: approverUserId, approver_name: users[0]?.name || null });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ---------- Clearance Departments (layer "exit_clearance_setup") ----------
+  // Add / rename / reorder / remove the departments every NEW exit is cleared
+  // by. Exits already raised keep the clearance items they were given (a
+  // newly added department can be added to the open ones on request).
+  const setupGate = [authenticateToken, requireAdmin, requireModule("exit_offboarding"), requireModuleLayer("exit_offboarding", "exit_clearance_setup")];
+  const cleanDept = (body: any) => ({
+    department: typeof body?.department === "string" ? body.department.trim().replace(/\s+/g, " ").slice(0, 100) : "",
+    item_label: typeof body?.item_label === "string" ? body.item_label.trim().slice(0, 255) : ""
+  });
+  const sameName = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+  app.post("/api/exit-clearance-departments", ...setupGate, async (req: any, res) => {
+    try {
+      const { department, item_label } = cleanDept(req.body);
+      if (!department) return res.status(400).json({ error: "Write the department name." });
+      if (!item_label) return res.status(400).json({ error: "Write what this department clears." });
+      const list = await clearanceDepartments();
+      if (list.some((d) => sameName(d.department, department))) return res.status(409).json({ error: `"${department}" is already in the list.` });
+      const approver = req.body?.approver_user_id ? Number(req.body.approver_user_id) : null;
+      const order = list.reduce((m, d) => Math.max(m, d.sort_order), 0) + 1;
+      const r: any = await queryDB("INSERT INTO exit_clearance_approvers (department, approver_user_id, item_label, sort_order) VALUES (?, ?, ?, ?)", [
+        department,
+        approver,
+        item_label,
+        order
+      ]);
+      // Also onto the exits still open, when asked.
+      let addedTo = 0;
+      if (req.body?.apply_to_open) {
+        const [exits, items]: [any, any] = await Promise.all([queryDB("SELECT * FROM exit_requests"), queryDB("SELECT exit_id, department FROM exit_clearance_items")]);
+        for (const e of exits.filter((x: any) => x.status === "pending" || x.status === "clearance")) {
+          if (items.some((i: any) => Number(i.exit_id) === Number(e.id) && sameName(String(i.department), department))) continue;
+          await queryDB("INSERT INTO exit_clearance_items (exit_id, department, item_label, approver_user_id) VALUES (?, ?, ?, ?)", [Number(e.id), department, item_label, approver]);
+          addedTo += 1;
+          if (e.status === "clearance" && approver) {
+            await notify([approver], "exit_clearance", `${department} Clearance Awaiting Your Approval`, `${item_label} — review it in Approve Application.`, Number(e.id));
+          }
+        }
+      }
+      res.status(201).json({ id: Number(r.insertId), department, item_label, sort_order: order, added_to_open: addedTo });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Rename a department / change what it clears. Exits already raised keep
+  // the old wording.
+  app.put("/api/exit-clearance-departments/:id", ...setupGate, async (req: any, res) => {
+    try {
+      const id = Number(req.params.id);
+      const list = await clearanceDepartments();
+      const row = list.find((d) => d.id === id);
+      if (!row) return res.status(404).json({ error: "Clearance department not found." });
+      const next = cleanDept({ department: req.body?.department ?? row.department, item_label: req.body?.item_label ?? row.item_label });
+      if (!next.department || !next.item_label) return res.status(400).json({ error: "Name and what it clears can't be empty." });
+      if (list.some((d) => d.id !== id && sameName(d.department, next.department))) return res.status(409).json({ error: `"${next.department}" is already in the list.` });
+      await queryDB("UPDATE exit_clearance_approvers SET department = ?, item_label = ? WHERE id = ?", [next.department, next.item_label, id]);
+      res.json({ id, ...next });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // New order: ids top to bottom.
+  app.put("/api/exit-clearance-departments-order", ...setupGate, async (req: any, res) => {
+    try {
+      const ids: number[] = (Array.isArray(req.body?.ids) ? req.body.ids : []).map(Number);
+      const list = await clearanceDepartments();
+      if (ids.length !== list.length || !list.every((d) => d.id !== null && ids.includes(d.id))) return res.status(400).json({ error: "Send every department once." });
+      for (const [i, id] of ids.entries()) await queryDB("UPDATE exit_clearance_approvers SET sort_order = ? WHERE id = ?", [i + 1, id]);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Remove a department from NEW exits (exits already raised keep its item).
+  app.delete("/api/exit-clearance-departments/:id", ...setupGate, async (req: any, res) => {
+    try {
+      const id = Number(req.params.id);
+      const list = await clearanceDepartments();
+      if (!list.some((d) => d.id === id)) return res.status(404).json({ error: "Clearance department not found." });
+      if (list.length <= 1) return res.status(409).json({ error: "Keep at least one clearance department." });
+      await queryDB("DELETE FROM exit_clearance_approvers WHERE id = ?", [id]);
+      res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -741,7 +866,8 @@ export function registerExitOffboardingRoutes(app: Express, deps: ExitOffboardin
     try {
       res.json({
         exit_dues: await hasModuleLayer(req.user, "exit_offboarding", "exit_dues"),
-        exit_pdf: await hasModuleLayer(req.user, "exit_offboarding", "exit_pdf")
+        exit_pdf: await hasModuleLayer(req.user, "exit_offboarding", "exit_pdf"),
+        exit_clearance_setup: await hasModuleLayer(req.user, "exit_offboarding", "exit_clearance_setup")
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message });

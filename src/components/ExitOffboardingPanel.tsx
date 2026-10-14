@@ -5,6 +5,7 @@ import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
 import { ExitDuesCard, DuesBlockedModal, type ExitDue } from './ExitDuesCard';
 import { ExitPendingList } from './ExitPendingList';
+import { ClearanceDepartments } from './ClearanceDepartments';
 import { saveClearanceCertificatePdf, saveSettlementSheetPdf, type ExitDocuments } from '../lib/exitDocuments';
 
 interface ExitOffboardingPanelProps {
@@ -116,6 +117,7 @@ export const ExitOffboardingPanel: React.FC<ExitOffboardingPanelProps> = ({ toke
       .then((a) => {
         setCanSeeDues(!!a?.exit_dues);
         setCanPdf(!!a?.exit_pdf);
+        setCanSetupClearance(!!a?.exit_clearance_setup);
       })
       .catch(() => {
         setCanSeeDues(false);
@@ -125,16 +127,11 @@ export const ExitOffboardingPanel: React.FC<ExitOffboardingPanelProps> = ({ toke
   }, []);
   const [savingSettlementId, setSavingSettlementId] = useState<number | null>(null);
 
-  // Clearance Approvers — which login account routes each of the 4 fixed
-  // clearance departments to their own Approve Application queue (see
-  // ExitOffboardingRoutes.ts's exit_clearance_approvers table comment for
-  // why this is its own mapping instead of reusing the Departments
-  // module's Supervisor). Only affects clearance items on exit requests
-  // created AFTER a change here — already-created ones keep whoever was
-  // assigned when they were created.
-  const [clearanceApprovers, setClearanceApprovers] = useState<{ department: string; approver_user_id: number | null; approver_name: string | null }[]>([]);
+  // Clearance Departments (ClearanceDepartments.tsx): the departments new
+  // exits are cleared by and their approvers; changing the list itself needs
+  // the exit_clearance_setup layer.
   const [showApprovers, setShowApprovers] = useState(false);
-  const [savingApproverDept, setSavingApproverDept] = useState<string | null>(null);
+  const [canSetupClearance, setCanSetupClearance] = useState(false);
 
   const authHeaders = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
 
@@ -142,41 +139,19 @@ export const ExitOffboardingPanel: React.FC<ExitOffboardingPanelProps> = ({ toke
     setLoading(true);
     setError('');
     try {
-      const [reqRes, usersRes, approversRes] = await Promise.all([
+      const [reqRes, usersRes] = await Promise.all([
         fetch(apiUrl('/api/exit-requests'), { headers: authHeaders }),
-        fetch(apiUrl('/api/users'), { headers: authHeaders }),
-        fetch(apiUrl('/api/exit-clearance-approvers'), { headers: authHeaders })
+        fetch(apiUrl('/api/users'), { headers: authHeaders })
       ]);
       const reqData = await reqRes.json();
       if (!reqRes.ok) throw new Error(reqData.error || 'Failed to load exit requests');
       setRequests(Array.isArray(reqData) ? reqData : []);
       const usersData = await usersRes.json();
       if (usersRes.ok) setUsers(Array.isArray(usersData) ? usersData.filter((u: any) => u.role !== 'superadmin') : []);
-      const approversData = await approversRes.json();
-      if (approversRes.ok) setClearanceApprovers(Array.isArray(approversData) ? approversData : []);
     } catch (err: any) {
       setError(err.message || 'Failed to load exit requests');
     } finally {
       setLoading(false);
-    }
-  };
-
-  const setClearanceApprover = async (department: string, approverUserId: number | null) => {
-    setSavingApproverDept(department);
-    setError('');
-    try {
-      const res = await fetch(apiUrl(`/api/exit-clearance-approvers/${encodeURIComponent(department)}`), {
-        method: 'PUT',
-        headers: authHeaders,
-        body: JSON.stringify({ approver_user_id: approverUserId })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to update clearance approver');
-      setClearanceApprovers((prev) => prev.map((a) => (a.department === department ? data : a)));
-    } catch (err: any) {
-      setError(err.message || 'Failed to update clearance approver');
-    } finally {
-      setSavingApproverDept(null);
     }
   };
 
@@ -354,7 +329,7 @@ export const ExitOffboardingPanel: React.FC<ExitOffboardingPanelProps> = ({ toke
             onClick={() => setShowApprovers((v) => !v)}
             className="flex items-center gap-1.5 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition-colors"
           >
-            <ShieldCheck className="w-3.5 h-3.5" /> Clearance Approvers
+            <ShieldCheck className="w-3.5 h-3.5" /> Clearance Departments
           </button>
           <button
             type="button"
@@ -366,36 +341,7 @@ export const ExitOffboardingPanel: React.FC<ExitOffboardingPanelProps> = ({ toke
         </div>
       </div>
 
-      {showApprovers && (
-        <div className="px-6 py-5 border-b border-slate-200 bg-slate-50/60">
-          <p className="text-xs font-bold text-slate-700 mb-1">Clearance Approvers</p>
-          <p className="text-[11px] text-slate-500 mb-3 max-w-xl">
-            Whoever's picked here gets that department's clearance item in their own Approve Application queue for
-            every NEW resignation from now on — they can tick it themselves instead of you doing it by hand below.
-            Already-open resignations keep whoever was assigned when they were raised.
-          </p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            {clearanceApprovers.map((a) => (
-              <div key={a.department}>
-                <label className="block text-[10px] font-semibold text-slate-500 mb-1">{a.department}</label>
-                <select
-                  value={a.approver_user_id ?? ''}
-                  disabled={savingApproverDept === a.department}
-                  onChange={(e) => setClearanceApprover(a.department, e.target.value ? Number(e.target.value) : null)}
-                  className="w-full px-3 py-2 text-xs border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
-                >
-                  <option value="">Unassigned</option>
-                  {activePeople(users, a.approver_user_id).map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      {showApprovers && <ClearanceDepartments token={token} users={users} canSetup={canSetupClearance} />}
 
       {showNew && (
         <div className="px-6 py-5 border-b border-slate-200 bg-slate-50/60">
@@ -574,7 +520,7 @@ export const ExitOffboardingPanel: React.FC<ExitOffboardingPanelProps> = ({ toke
                               <span className="text-slate-500">{item.item_label}</span>
                               <br />
                               <span className="text-slate-400">
-                                {item.approver_name ? `Assigned to ${item.approver_name}` : 'Unassigned — see Clearance Approvers above'}
+                                {item.approver_name ? `Assigned to ${item.approver_name}` : 'Unassigned — see Clearance Departments above'}
                               </span>
                             </span>
                           </label>
