@@ -175,6 +175,26 @@ const HELP: HelpEntry[] = [
     steps: "মেনু → Requests & Claims → **My Loan / Advance** → New Request। টাকা, কিস্তি আর কারণ দিয়ে জমা দিন।", nav: "self:myLoans", can: (c) => isSuper(c) || c.flags.can_view_loan_request },
   { id: "targets", title: "My Targets", keys: ["target", "টার্গেট", "লক্ষ্য", "lokkho", "monthly target", "yearly target"],
     steps: "মেনু → Work & Approvals → **My Targets**। মাসিক / বার্ষিক target আর তার task দেখা যায়; প্রতিটা task-এ **Update** চেপে % অগ্রগতি, status আর details দিন। Share হওয়া target edit / delete করা যায় না। Supervisor হলে **Team** ট্যাব থেকে team-কে target দিন আর approve করুন।", nav: "self:myTargets", can: (c) => isSuper(c) || c.flags.can_view_targets },
+  { id: "target_give", title: "Team / Department-কে target দেওয়া (Supervisor)",
+    keys: ["target dibo", "target dite", "target deya", "target set", "set target", "give target", "give a target", "target kivabe", "team target", "team ke target", "department task", "department target set", "department er task",
+      "ডিপার্টমেন্ট টাস্ক", "ডিপার্টমেন্টের কাজ", "টার্গেট দেব", "টার্গেট দিতে", "টার্গেট সেট", "লক্ষ্য দেওয়া", "লক্ষ্য দিতে", "supervisor target", "কর্মীকে target", "task set", "টাস্ক সেট", "whole team",
+      "টার্গেট কীভাবে দ", "টার্গেট কিভাবে দ", "টার্গেট কেমনে দ", "target kivabe d", "target kemne d", "target ki kore d", "how to give target", "how to set target"],
+    steps:
+      "১. মেনু → Work & Approvals → **My Targets** খুলুন → উপরে **Team** ট্যাব (শুধু supervisor-রা দেখেন)।\n" +
+      "২. **\"Give a target\"** চাপুন → কাকে দেবেন বাছুন — এক-একজনকে টিক দিন, বা **\"Whole team\"** চাপলে department-এর সবাই একসাথে।\n" +
+      "৩. **Monthly / Yearly** আর কোন মাস/বছর, **Deadline** আর target-এর নাম দিন।\n" +
+      "৪. **Task** যোগ করুন — প্রতিটার নাম, বিবরণ, শেষ তারিখ আর গুরুত্ব (weight); মোট % এই গুরুত্ব ধরে হিসাব হয়।\n" +
+      "৫. **Save draft** (শুধু আপনি দেখবেন, পরে বদলানো যায়) অথবা **Share** — Share করলে কর্মী notification পান। Share-এর পর edit / delete করা যায় না, শুধু task-এর অগ্রগতি, status আর details আপডেট হয়।\n" +
+      "কর্মী আর supervisor দুজনেই অগ্রগতি দিতে পারেন; কর্মী নিজে target Share করলে Team ট্যাবে আপনার **Approve / Reject**-এর জন্য আসে। ভুল হলে কারণ লিখে **Cancel** করে **\"Copy as new\"** দিয়ে আবার দিন। Deadline-এর ৩ দিন আগে, শেষ দিনে আর পেরোলে রিমাইন্ডার যায়।\n" +
+      "Team ট্যাব না দেখালে: Admin Panel → Departments-এ আপনাকে সেই department-এর **Supervisor** বানাতে হবে (বা কর্মীর Supervisor হিসেবে আপনাকে দিতে হবে)।",
+    nav: "self:myTargets", can: (c) => isSuper(c) || c.flags.can_view_targets },
+  { id: "target_setup", title: "Target চালু করা — Supervisor ও access (HR / Admin)",
+    keys: ["department supervisor", "supervisor set", "supervisor kivabe", "supervisor ke", "supervisor বানা", "সুপারভাইজার সেট", "সুপারভাইজার কে", "target access", "my targets access", "target chalu", "টার্গেট চালু", "target on", "allow my targets"],
+    steps:
+      "১. **Supervisor ঠিক করুন:** Admin Panel → **Departments** → department খুলে **Supervisor** বেছে Save। (কোনো কর্মীর ব্যক্তিগত supervisor: Employees → কর্মী → Supervisor।)\n" +
+      "২. **My Targets চালু করুন:** Admin Panel → Users → account → **Module Access** → **\"Also allow My Targets\"** — supervisor আর যাঁরা target পাবেন সেই কর্মী দুজনের জন্যই।\n" +
+      "৩. পুরো কোম্পানির হিসাব: Module Access-এ **Target Reports** দিন; Excel/PDF আর অন্যের target Cancel করার জন্য আলাদা টিক (\"Targets — Excel / PDF\", \"Targets — Cancel / Close\")।",
+    nav: "admin:departments", can: (c) => isSuper(c) || c.modules.includes("departments") || c.modules.includes("users") },
   { id: "target_reports", title: "Target Reports", keys: ["target report", "টার্গেট রিপোর্ট", "target status", "department target"],
     steps: "মেনু → HR Operations → Reports → **Target Reports**। বছর, মাস, department, employee আর status দিয়ে filter করুন; By department / By employee / Targets দেখুন।", nav: "admin:target_reports", can: (c) => isSuper(c) || c.modules.includes("target_reports") },
   { id: "sim", title: "Mobile SIM / বিল", keys: ["sim", "সিম", "mobile bill", "মোবাইল বিল", "phone bill", "limit"],
@@ -1066,7 +1086,7 @@ function matchHelp(c: Ctx, text: string, limit: number, blocked = false): HelpEn
     .map((x) => x.h);
 }
 
-const HOW = ["kivabe", "kibhabe", "kivabe", "kemne", "kothay", "kotha", "কিভাবে", "কীভাবে", "কেমনে", "কোথায়", "how ", "where ", "how do", "how to", "নিয়ম", "niyom", "process", "প্রক্রিয়া", "দিতে চাই", "করতে চাই", "korte chai", "dite chai"];
+const HOW = ["ki kore", "কী করে", "কি করে", "kivabe", "kibhabe", "kivabe", "kemne", "kothay", "kotha", "কিভাবে", "কীভাবে", "কেমনে", "কোথায়", "how ", "where ", "how do", "how to", "নিয়ম", "niyom", "process", "প্রক্রিয়া", "দিতে চাই", "করতে চাই", "korte chai", "dite chai"];
 
 interface Intent { tool: string; keys: string[]; args?: (t: string, c: Ctx) => any }
 
