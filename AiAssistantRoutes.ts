@@ -7,7 +7,8 @@
 //      month's attendance / late days, claims, loans, tasks, holidays;
 //   2. how to use the app — where a page is, with a button that opens it;
 //   3. HR/Admin figures — today's attendance, pending work, onboarding,
-//      headcount, finding a colleague.
+//      headcount, length of service (who has completed N years), finding a
+//      colleague.
 //
 // Every figure is fetched by calling the app's OWN API on this server with the
 // asker's own token (see callApi), so the assistant can never show something
@@ -87,6 +88,11 @@ const bnDate = (iso: any) => {
   const s = String(iso || "").slice(0, 10);
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
   return m ? `${bn(Number(m[3]))} ${BN_MONTHS[Number(m[2]) - 1]} ${bn(m[1])}` : s;
+};
+// "2016-10-14" from a stored date, or null when it isn't one.
+const ymd = (v: any) => {
+  const s = String(v || "").slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) && s !== "0000-00-00" ? s : null;
 };
 const bnMonth = (ym: string) => {
   const m = /^(\d{4})-(\d{2})$/.exec(ym);
@@ -767,6 +773,74 @@ const TOOLS: Tool[] = [
     }
   },
   {
+    name: "service_length",
+    description:
+      "HR: active employees by length of service, from their joining date. years = the number of years (default 10). " +
+      "mode: at_least (default — completed at least that many years) | exact (completed exactly that many whole years) | " +
+      "this_year (complete that many years during the current calendar year — work anniversaries). Optional department name filter.",
+    params: {
+      years: { type: "number", description: "Number of years of service, e.g. 5 or 10. Default 10." },
+      mode: { type: "string", description: "at_least | exact | this_year. Default at_least." },
+      department: { type: "string", description: "Optional department name to filter by." }
+    },
+    available: (c) => hasMod(c, "employees"),
+    run: async (c, args) => {
+      const years = Math.min(60, Math.max(1, Math.floor(Number(args?.years)) || 10));
+      const mode = ["exact", "this_year"].includes(String(args?.mode)) ? String(args.mode) : "at_least";
+      const dept = String(args?.department || "").trim().toLowerCase();
+      const r = await callApi(c.req, "/api/employees");
+      if (!r.ok) return fail(r.status);
+      const [ty, tm, td] = c.today.split("-").map(Number);
+      // Whole years (and the months after them) from the joining date to today.
+      const served = (j: string) => {
+        const [y, m, d] = j.split("-").map(Number);
+        let months = (ty - y) * 12 + (tm - m) - (td < d ? 1 : 0);
+        if (months < 0) months = 0;
+        return { y: Math.floor(months / 12), m: months % 12 };
+      };
+      const all: any[] = (Array.isArray(r.body) ? r.body : []).filter((e: any) => e.is_active);
+      const scoped = dept ? all.filter((e) => String(e.department || "").toLowerCase().includes(dept)) : all;
+      const dated = scoped
+        .map((e) => ({ e, j: ymd(e.joining_date) }))
+        .filter((x): x is { e: any; j: string } => !!x.j && x.j <= c.today)
+        .map((x) => ({ ...x, s: served(x.j), anniversary: `${Number(x.j.slice(0, 4)) + years}${x.j.slice(4)}` }));
+      const hits = (mode === "this_year"
+        ? dated.filter((x) => x.anniversary.slice(0, 4) === String(ty))
+        : mode === "exact"
+          ? dated.filter((x) => x.s.y === years)
+          : dated.filter((x) => x.s.y >= years)
+      ).sort((a, b) => (a.j < b.j ? -1 : a.j > b.j ? 1 : 0));
+      const missing = scoped.length - dated.length;
+      const len = (s: { y: number; m: number }) => `${bn(s.y)} বছর${s.m ? ` ${bn(s.m)} মাস` : ""}`;
+      const who = (e: any) => `**${e.name}**${e.employee_id ? ` (${e.employee_id})` : ""}${e.designation ? `, ${e.designation}` : ""}${e.department ? ` — ${e.department}` : ""}`;
+      const title = mode === "this_year"
+        ? `${bn(ty)} সালে ${bn(years)} বছর পূর্ণ হচ্ছে`
+        : mode === "exact" ? `ঠিক ${bn(years)} বছর পূর্ণ হয়েছে` : `${bn(years)} বছর বা তার বেশি সময় ধরে আছেন`;
+      const line = (x: any) => mode === "this_year"
+        ? `• ${who(x.e)} — যোগদান ${bnDate(x.j)}, ${bnDate(x.anniversary)}-এ ${bn(years)} বছর${x.anniversary <= c.today ? " (পূর্ণ হয়ে গেছে)" : ""}`
+        : `• ${who(x.e)} — যোগদান ${bnDate(x.j)}, ${len(x.s)}`;
+      const max = 25;
+      // The few who are close to the mark, so "nobody yet" still says something.
+      const soon = mode === "at_least"
+        ? dated.filter((x) => x.s.y === years - 1).sort((a, b) => (a.j < b.j ? -1 : 1)).slice(0, 5)
+        : [];
+      const text = `${title}${dept ? ` (${args.department})` : ""}: **${bn(hits.length)} জন**` +
+        (hits.length ? "\n" + hits.slice(0, max).map(line).join("\n") + (hits.length > max ? `\n…আরও ${bn(hits.length - max)} জন` : "") : "") +
+        (!hits.length && soon.length ? `\nশিগগিরই ${bn(years)} বছর হবে:\n` + soon.map((x) => `• ${who(x.e)} — ${bnDate(x.anniversary)}`).join("\n") : "") +
+        (missing > 0 ? `\n(${bn(missing)} জন active কর্মীর Joining Date দেওয়া নেই, তাই তাঁরা হিসাবে আসেননি।)` : "");
+      return {
+        ok: true,
+        text,
+        data: {
+          years, mode, today: c.today, count: hits.length, without_joining_date: missing,
+          employees: hits.slice(0, 60).map((x) => ({ name: x.e.name, employee_id: x.e.employee_id, designation: x.e.designation, department: x.e.department, joining_date: x.j, years: x.s.y, months: x.s.m, anniversary: x.anniversary })),
+          close_to_mark: soon.map((x) => ({ name: x.e.name, anniversary: x.anniversary }))
+        },
+        actions: [{ label: "Employees খুলুন", nav: "admin:employees" }]
+      };
+    }
+  },
+  {
     name: "app_help",
     description: "How to do something in the CredenceHR app (apply leave, claim a bill, request an asset, change password, add employee, run payroll…). Returns the steps and the page to open.",
     params: { topic: { type: "string", description: "What the user wants to do, in their words." } },
@@ -839,6 +913,16 @@ const INTENTS: Intent[] = [
     args: (t, c) => (hasAny(t, ["kal", "কাল", "tomorrow", "আগামীকাল"]) ? { date: addDays(c.today, 1) } : {}) },
   { tool: "active_notices", keys: ["notice", "নোটিশ", "ঘোষণা", "announcement"] },
   { tool: "onboarding_overview", keys: ["onboarding", "অনবোর্ডিং", "joiner", "নতুন যোগদান", "id card", "আইডি কার্ড", "business card", "বিজনেস কার্ড"] },
+  { tool: "service_length", keys: ["bochor hoiche", "bochor hoyeche", "bochor hoise", "bochor holo", "bochor purno", "বছর হয়েছে", "বছর হলো", "বছর হল", "বছর পূর্ণ", "বছর ধরে", "bochor dhore",
+      "years of service", "year of service", "service length", "length of service", "years in company", "service year", "চাকরির মেয়াদ", "chakrir meyad", "চাকরির বয়স",
+      "work anniversary", "job anniversary", "service anniversary", "বর্ষপূর্তি"],
+    args: (t) => {
+      const a = toAsciiDigits(t);
+      const n = /(\d{1,2})\s*(?:\+\s*)?(?:bochor|বছর|years?|yrs?)/.exec(a)?.[1];
+      const mode = hasAny(a, ["anniversary", "বর্ষপূর্তি", "ei bochor", "এই বছর", "this year", "e bochor", "এ বছর"]) ? "this_year"
+        : hasAny(a, ["thik", "ঠিক", "exactly"]) ? "exact" : "at_least";
+      return { years: n ? Number(n) : 10, mode };
+    } },
   { tool: "headcount", keys: ["headcount", "হেডকাউন্ট", "মোট কর্মী", "কতজন কর্মী", "koto jon employee", "kotojon employee", "total employee", "how many employee", "কর্মী সংখ্যা"] }
 ];
 
