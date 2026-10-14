@@ -204,7 +204,9 @@ export async function ensureExitOffboardingSchema(dbPool: any): Promise<void> {
 //   amount   — money the Employee owes (loans / advances) or is owed (claims).
 export interface ExitDue {
   key: string;
-  kind: "asset" | "sim" | "loan" | "loan_request" | "claim" | "bill" | "vehicle";
+  // "status" / "clearance" are not dues: they come from this exit itself
+  // (settleBlockers) — clearance not started, a department not cleared yet.
+  kind: "asset" | "sim" | "loan" | "loan_request" | "claim" | "bill" | "vehicle" | "status" | "clearance";
   label: string;
   detail: string | null;
   amount: number | null;
@@ -302,8 +304,39 @@ export function registerExitOffboardingRoutes(app: Express, deps: ExitOffboardin
   // The dues that stop a settlement being paid / an exit being settled.
   const blockingDues = async (exitRow: any) =>
     (await collectExitDues(queryDB, Number(exitRow.user_id), await settlementOf(Number(exitRow.id)))).filter((d) => d.blocking);
+  // Everything that must be done before the Full & Final can be paid / the
+  // exit settled: clearance started, every clearance department cleared, and
+  // no blocking dues in other modules.
+  const settleBlockers = async (exitRow: any): Promise<ExitDue[]> => {
+    const out: ExitDue[] = [];
+    if (exitRow.status !== "clearance" && exitRow.status !== "settled") {
+      out.push({
+        key: "status",
+        kind: "status",
+        label: exitRow.status === "cancelled" ? "This exit is cancelled" : "Clearance hasn't been started",
+        detail: exitRow.status === "cancelled" ? "A cancelled exit can't be settled." : "Accept the exit with “Start Clearance” first.",
+        amount: null,
+        blocking: true,
+        added: false
+      });
+    }
+    const [items, users]: [any, any] = await Promise.all([queryDB("SELECT * FROM exit_clearance_items"), queryDB("SELECT id, name FROM users")]);
+    for (const it of (items || []).filter((x: any) => Number(x.exit_id) === Number(exitRow.id) && !Number(x.is_cleared))) {
+      const who = it.approver_user_id != null ? (users || []).find((u: any) => Number(u.id) === Number(it.approver_user_id))?.name : null;
+      out.push({
+        key: `clearance:${it.id}`,
+        kind: "clearance",
+        label: `${it.department} clearance not done`,
+        detail: `${it.item_label}${who ? ` — waiting on ${who}` : " — no approver assigned"}`,
+        amount: null,
+        blocking: true,
+        added: false
+      });
+    }
+    return [...out, ...(await blockingDues(exitRow))];
+  };
   const duesError = (blocking: ExitDue[]) =>
-    `Still open in other modules: ${blocking.map((d) => d.label + (d.kind === "loan" ? " (balance not added to the settlement)" : "")).join("; ")}. Clear them first.`;
+    `Can't settle yet — still open: ${blocking.map((d) => d.label + (d.kind === "loan" ? " (balance not added to the settlement)" : "")).join("; ")}. Clear them first.`;
 
   // This company's clearance departments, in order (the built-in four when
   // none are set up — e.g. the in-memory fallback).
@@ -610,7 +643,11 @@ export function registerExitOffboardingRoutes(app: Express, deps: ExitOffboardin
       const before: any = await queryDB("SELECT * FROM exit_requests WHERE id = ?", [id]);
       if (before.length === 0) return res.status(404).json({ error: "Exit request not found." });
       if (status === "settled" && before[0].status !== "settled") {
-        const blocking = await blockingDues(before[0]);
+        const blocking = await settleBlockers(before[0]);
+        // Settled follows the paid Full & Final (marking it Paid settles the exit).
+        const paid = (await settlementOf(id))?.status === "paid";
+        if (!paid)
+          blocking.push({ key: "settlement", kind: "status", label: "Full & Final not paid", detail: "Mark the settlement Paid — that settles the exit.", amount: null, blocking: true, added: false });
         if (blocking.length) return res.status(409).json({ error: duesError(blocking), blocking });
       }
       await queryDB("UPDATE exit_requests SET status = ? WHERE id = ?", [status, id]);
@@ -644,6 +681,13 @@ export function registerExitOffboardingRoutes(app: Express, deps: ExitOffboardin
       const id = Number(req.params.id);
       const isCleared = !!req.body?.is_cleared;
       const remarks = typeof req.body?.remarks === "string" ? req.body.remarks.trim().slice(0, 500) : null;
+      // A settled exit's clearance is final.
+      const item: any = (await queryDB("SELECT exit_id FROM exit_clearance_items WHERE id = ?", [id]))[0];
+      if (!item) return res.status(404).json({ error: "Clearance item not found." });
+      const exitRow: any = (await queryDB("SELECT status FROM exit_requests WHERE id = ?", [Number(item.exit_id)]))[0];
+      if (exitRow && (exitRow.status === "settled" || exitRow.status === "cancelled")) {
+        return res.status(409).json({ error: `This exit is ${exitRow.status} — its clearance can't be changed.` });
+      }
       await queryDB(
         "UPDATE exit_clearance_items SET is_cleared = ?, cleared_by = ?, cleared_at = ?, remarks = ? WHERE id = ?",
         [isCleared ? 1 : 0, isCleared ? req.user.id : null, isCleared ? new Date() : null, remarks, id]
@@ -651,7 +695,16 @@ export function registerExitOffboardingRoutes(app: Express, deps: ExitOffboardin
       const rows: any = await queryDB("SELECT * FROM exit_clearance_items WHERE id = ?", [id]);
       if (rows.length === 0) return res.status(404).json({ error: "Clearance item not found." });
       const r = rows[0];
-      res.json({ id: Number(r.id), department: r.department, item_label: r.item_label, is_cleared: !!Number(r.is_cleared), remarks: r.remarks });
+      const who: any = r.approver_user_id != null ? (await queryDB("SELECT name FROM users WHERE id = ?", [Number(r.approver_user_id)]))[0] : null;
+      res.json({
+        id: Number(r.id),
+        department: r.department,
+        item_label: r.item_label,
+        is_cleared: !!Number(r.is_cleared),
+        remarks: r.remarks,
+        approver_user_id: r.approver_user_id != null ? Number(r.approver_user_id) : null,
+        approver_name: who?.name || null
+      });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -1046,7 +1099,7 @@ export function registerExitOffboardingRoutes(app: Express, deps: ExitOffboardin
       if (!settlement) return res.status(404).json({ error: "Settlement not found — open it first to create the draft." });
       if (status === "paid" && settlement.status !== "paid") {
         const exitRows: any = await queryDB("SELECT * FROM exit_requests WHERE id = ?", [exitId]);
-        const blocking = exitRows[0] ? await blockingDues(exitRows[0]) : [];
+        const blocking = exitRows[0] ? await settleBlockers(exitRows[0]) : [];
         if (blocking.length) return res.status(409).json({ error: duesError(blocking), blocking });
       }
 

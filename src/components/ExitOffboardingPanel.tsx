@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { LogOut, Plus, X, CheckCircle2, AlertTriangle, ChevronDown, ChevronUp, Save, Ban, ShieldCheck, FileDown } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
+import { confirmDialog } from '../lib/confirmDialog';
 import { ExitDuesCard, DuesBlockedModal, type ExitDue } from './ExitDuesCard';
 import { ExitPendingList } from './ExitPendingList';
 import { ClearanceDepartments } from './ClearanceDepartments';
@@ -264,6 +265,15 @@ export const ExitOffboardingPanel: React.FC<ExitOffboardingPanelProps> = ({ toke
   const saveSettlement = async (exitId: number, markStatus?: 'approved' | 'paid') => {
     const draft = settlementDrafts[exitId];
     if (!draft) return;
+    if (
+      markStatus === 'paid' &&
+      !(await confirmDialog('Mark the Full & Final paid and settle this exit? The settlement is then final and the login is blocked.', {
+        title: 'Mark Paid & Settle',
+        confirmLabel: 'Mark Paid & Settle',
+        tone: 'default'
+      }))
+    )
+      return;
     setSavingSettlementId(exitId);
     setError('');
     try {
@@ -295,6 +305,16 @@ export const ExitOffboardingPanel: React.FC<ExitOffboardingPanelProps> = ({ toke
     } finally {
       setSavingSettlementId(null);
     }
+  };
+
+  // Why Paid & Settle can't be pressed yet (the server checks the same, plus
+  // the assets / SIMs / loans still open in other modules).
+  const settleHold = (r: ExitRequest): string | null => {
+    if (r.status === 'cancelled') return 'This exit is cancelled.';
+    if (r.status === 'pending') return 'Start Clearance first — the exit hasn’t been accepted yet.';
+    const open = r.clearance_items.filter((c) => !c.is_cleared);
+    if (open.length) return `Clearance not done: ${open.map((c) => c.department).join(', ')}.`;
+    return null;
   };
 
   const netPayablePreview = (exitId: number) => {
@@ -579,6 +599,11 @@ export const ExitOffboardingPanel: React.FC<ExitOffboardingPanelProps> = ({ toke
                             />
                           </div>
                           <div className="flex items-center justify-between flex-wrap gap-2 pt-1">
+                            {settleHold(r) && (
+                              <p className="w-full text-[11px] text-amber-700 flex items-center gap-1">
+                                <AlertTriangle className="w-3 h-3 shrink-0" /> {settleHold(r)}
+                              </p>
+                            )}
                             <p className="text-sm font-bold text-slate-800">
                               Net Payable: <span className="text-emerald-700">{netPayablePreview(r.id).toFixed(2)}</span>
                             </p>
@@ -595,7 +620,8 @@ export const ExitOffboardingPanel: React.FC<ExitOffboardingPanelProps> = ({ toke
                               <button
                                 type="button"
                                 onClick={() => saveSettlement(r.id, 'paid')}
-                                disabled={savingSettlementId === r.id}
+                                disabled={savingSettlementId === r.id || !!settleHold(r)}
+                                title={settleHold(r) || undefined}
                                 className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50 transition-colors"
                               >
                                 <CheckCircle2 className="w-3 h-3" /> Mark Paid &amp; Settle
