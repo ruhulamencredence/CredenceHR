@@ -402,3 +402,12 @@ body::before {
 @media (prefers-reduced-motion: reduce) {
   .hero-spot-source, .hero-spot-beam, .hero-spot-pool { animation: none; }
 }
+
+/* Credence Assistant's floating button (AiAssistant.tsx): on phones, while the
+   bottom bar's More button is showing (BottomNav.tsx sets data-more-menu), the
+   Assistant opens from the More menu instead, so the button steps aside. */
+@media (max-width: 767px) {
+  body[data-more-menu] .assistant-fab {
+    display: none;
+  }
+}

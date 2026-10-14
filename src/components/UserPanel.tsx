@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Capacitor } from '@capacitor/core';
 import { Project, MprNumber, Entry, Budget, BudgetItem, User, MprUsage, ClaimsNavRequest, JobsNavRequest, DashboardNavRequest, LeaveNavRequest } from '../types';
-import { CalendarClock, CheckSquare, ExternalLink, Gavel, LogOut, MessageSquare, ShieldCheck, Smartphone, HandCoins, Target } from 'lucide-react';
+import { CalendarClock, CheckSquare, ExternalLink, Gavel, LogOut, MessageSquare, ShieldCheck, Smartphone, HandCoins, Target, Sparkles } from 'lucide-react';
 import type { MoreItem } from './BottomNav';
 
 // Mobile Dashboard: at most this many quick access tiles; the rest go to the
@@ -1159,6 +1159,11 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // as GlobalSidebar's Self Service list.
   const openSelfService = (target: SelfServiceTarget) => onOpenSelfService?.(target);
   const mobileMoreItems: MoreItem[] = [
+    // Credence Assistant (AiAssistant.tsx) lives here on phones instead of a
+    // floating button; same access rule as the Assistant itself.
+    ...(!user.is_onboarding && (user.role === 'superadmin' || user.can_use_ai_assistant !== false)
+      ? [{ key: 'assistant', label: 'Credence Assistant', icon: Sparkles, iconBg: 'from-violet-400 to-fuchsia-500 shadow-[0_6px_16px_-2px_rgba(147,51,234,0.4)]', onClick: () => window.dispatchEvent(new CustomEvent('credence:open-assistant')) }]
+      : []),
     { key: 'noticeBoard', label: 'Notice Board', icon: Bell, iconBg: 'from-yellow-300 to-amber-400 shadow-[0_6px_16px_-2px_rgba(217,119,6,0.35)]', onClick: () => goToMobileSection('noticeBoard') },
     ...(onOpenSelfService
       ? ([
