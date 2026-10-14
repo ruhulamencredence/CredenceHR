@@ -18,7 +18,9 @@ import { confirmDialog } from '../lib/confirmDialog';
 
 export interface ExitDue {
   key: string;
-  kind: 'asset' | 'sim' | 'loan' | 'loan_request' | 'claim' | 'bill' | 'vehicle';
+  // 'status' / 'clearance' only come with a refused Paid / Settle (the exit
+  // itself: clearance not started, a department not cleared).
+  kind: 'asset' | 'sim' | 'loan' | 'loan_request' | 'claim' | 'bill' | 'vehicle' | 'status' | 'clearance';
   label: string;
   detail: string | null;
   amount: number | null;
@@ -207,7 +209,7 @@ export const DuesBlockedModal: React.FC<{ message: string; items: ExitDue[]; onC
           </button>
         </div>
         <div className="px-5 pb-4 overflow-y-auto flex-1">
-          <p className="text-sm text-slate-600">{items.length ? 'Clear these first — return the asset, turn off or move the SIM, or add the balance to the settlement:' : message}</p>
+          <p className="text-sm text-slate-600">{items.length ? `${items.length} thing${items.length === 1 ? '' : 's'} still open — finish ${items.length === 1 ? 'it' : 'them'} first:` : message}</p>
           {items.length > 0 && (
             <ul className="liquid-glass-inset rounded-2xl mt-3 px-4 py-3 space-y-2 text-xs">
               {items.map((d) => (
