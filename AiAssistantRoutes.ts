@@ -49,6 +49,7 @@ interface Ctx {
   modules: string[];
   flags: Record<string, boolean>;
   today: string;
+  canExport: boolean; // users.can_export_assistant_reports (Superadmin always)
 }
 
 interface ToolResult {
@@ -57,6 +58,7 @@ interface ToolResult {
   data?: any; // compact facts (Gemini engine)
   actions?: AssistantAction[];
   draft?: LeaveDraft;
+  report?: AssistantReport;
 }
 
 // A leave application the Assistant filled in but did NOT submit: the chat
@@ -74,7 +76,18 @@ export interface LeaveDraft {
   relievers: { id: number; name: string }[];
 }
 
-interface Answer { reply: string; actions: AssistantAction[]; draft?: LeaveDraft }
+// The full table behind a list answer, for the PDF / Excel buttons under it
+// (users.can_export_assistant_reports). Plain English so the PDF's built-in
+// font can print it; the chat text itself stays Bangla.
+export interface AssistantReport {
+  title: string;
+  file: string; // file name without extension
+  details?: [string, string][];
+  columns: string[];
+  rows: (string | number | null)[][];
+}
+
+interface Answer { reply: string; actions: AssistantAction[]; draft?: LeaveDraft; report?: AssistantReport }
 
 const SELF_FLAGS = [
   "can_view_movement_claims", "can_view_conveyance_claims", "can_view_timesheet", "can_view_leave_application",
@@ -94,6 +107,20 @@ const ymd = (v: any) => {
   const s = String(v || "").slice(0, 10);
   return /^\d{4}-\d{2}-\d{2}$/.test(s) && s !== "0000-00-00" ? s : null;
 };
+const EN_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const enDate = (v: any) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(v || ""));
+  return m ? `${m[3]} ${EN_MONTHS[Number(m[2]) - 1]} ${m[1]}` : String(v || "");
+};
+const enTime = (v: any) => /(\d{2}:\d{2})/.exec(String(v || ""))?.[1] || "";
+// A numbered table (SL first).
+const report = (title: string, file: string, columns: string[], rows: (string | number | null)[][], details?: [string, string][]): AssistantReport => ({
+  title,
+  file: file.replace(/[^A-Za-z0-9_-]+/g, "-"),
+  columns: ["SL", ...columns],
+  rows: rows.map((r, i) => [i + 1, ...r]),
+  details
+});
 const bnMonth = (ym: string) => {
   const m = /^(\d{4})-(\d{2})$/.exec(ym);
   return m ? `${BN_MONTHS[Number(m[2]) - 1]} ${bn(m[1])}` : ym;
@@ -401,7 +428,10 @@ const TOOLS: Tool[] = [
         ok: true,
         text: `${pending ? `আপনার ${bn(pending)}টি আবেদন অনুমোদনের অপেক্ষায়।\n` : ""}সাম্প্রতিক আবেদন:\n${lines}`,
         data: { pending, recent: recent.map((x) => ({ type: x.leave_type_label || x.leave_type, from: x.start_date, to: x.end_date, days: x.day_count, status: x.status, current_step: x.current_step, total_steps: x.total_steps })) },
-        actions: [{ label: "Leave Application খুলুন", nav: "self:leaveApplication" }]
+        actions: [{ label: "Leave Application খুলুন", nav: "self:leaveApplication" }],
+        report: report("My Leave Applications", "My-Leave-Applications", ["Leave Type", "From", "To", "Days", "Status"],
+          [...rows].sort((a, b) => String(b.start_date).localeCompare(String(a.start_date))).map((x) => [x.leave_type_label || x.leave_type, enDate(x.start_date), enDate(x.end_date || x.start_date), Number(x.day_count) || 0, String(x.status || "")]),
+          [["Employee", c.name]])
       };
     }
   },
@@ -441,7 +471,9 @@ const TOOLS: Tool[] = [
       return {
         ok: true,
         text: `${bnDate(from)} – ${bnDate(to)}: **${bn(days.length)} দিন দেরি**${extreme ? ` (এর মধ্যে ${bn(extreme)} দিন অনেক দেরি)` : ""}\n${lines}${days.length > 12 ? `\n…আরও ${bn(days.length - 12)} দিন` : ""}`,
-        data: { from, to, late_days: days.map(([d, k]) => ({ date: d, kind: k === "extreme" ? "extreme_late" : "late" })) }
+        data: { from, to, late_days: days.map(([d, k]) => ({ date: d, kind: k === "extreme" ? "extreme_late" : "late" })) },
+        report: report("My Late Days", `My-Late-Days-${from}-to-${to}`, ["Date", "Late"], days.map(([d, k]) => [enDate(d), k === "extreme" ? "Extreme late" : "Late"]),
+          [["Employee", c.name], ["Period", `${enDate(from)} - ${enDate(to)}`], ["Late days", String(days.length)]])
       };
     }
   },
@@ -604,7 +636,8 @@ const TOOLS: Tool[] = [
       const tasks: any[] = (r.body?.tasks || []).filter((t: any) => Number(t.count) > 0);
       if (!tasks.length) return { ok: true, text: "এই মুহূর্তে কিছুই অপেক্ষায় নেই। 👍", data: { pending: [] } };
       const actions = tasks.filter((t) => t.tab).slice(0, 3).map((t) => ({ label: `${t.label} খুলুন`, nav: t.tab === "hr_operations" ? "hrops:dashboard" : `admin:${t.tab}` }));
-      return { ok: true, text: "যা অপেক্ষায় আছে:\n" + tasks.map((t) => `• ${t.label}: **${bn(t.count)}**`).join("\n"), data: { pending: tasks.map((t) => ({ item: t.label, count: t.count })) }, actions };
+      return { ok: true, text: "যা অপেক্ষায় আছে:\n" + tasks.map((t) => `• ${t.label}: **${bn(t.count)}**`).join("\n"), data: { pending: tasks.map((t) => ({ item: t.label, count: t.count })) }, actions,
+        report: report("Pending Work", `Pending-Work-${c.today}`, ["Item", "Waiting"], tasks.map((t) => [String(t.label), Number(t.count) || 0]), [["As of", enDate(c.today)]]) };
     }
   },
   {
@@ -629,10 +662,14 @@ const TOOLS: Tool[] = [
       const dashAction: AssistantAction[] = [{ label: "Admin Dashboard খুলুন", nav: "admin:dashboard" }];
       let text = "";
       let data: any = {};
+      let rep: AssistantReport | undefined;
+      const asOf: [string, string][] = [["As of", enDate(x.today || c.today)]];
       switch (section) {
         case "birthdays":
           text = `সামনের ৭ দিনের জন্মদিন:\n` + list(x.birthdays || [], (b) => `${who(b)} — ${bnDate(b.date)} (${when(b.days_away)})${b.turning ? `, ${bn(b.turning)} বছর` : ""}`, "সামনের ৭ দিনে কারো জন্মদিন নেই।");
           data = { birthdays: (x.birthdays || []).map((b: any) => ({ name: b.name, date: b.date, days_away: b.days_away, turning: b.turning })) };
+          rep = report("Birthdays - Next 7 Days", `Birthdays-${c.today}`, ["Name", "Employee ID", "Designation", "Birthday", "In (days)", "Turning"],
+            (x.birthdays || []).map((b: any) => [b.name, b.employee_code || "", b.designation || "", enDate(b.date), Number(b.days_away) || 0, b.turning || ""]), asOf);
           break;
         case "probation":
         case "contract":
@@ -642,20 +679,31 @@ const TOOLS: Tool[] = [
           const title = section === "probation" ? "Probation শেষ হচ্ছে" : section === "contract" ? "Contract শেষ হচ্ছে" : section === "documents_expiry" ? "Document-এর মেয়াদ শেষ হচ্ছে" : "Probation / Contract / Document সতর্কতা";
           text = `${title} (৩০ দিনের মধ্যে):\n` + list(rows, (a) => `${who(a)} — ${a.label}: ${bnDate(a.date)} (${when(a.days)})`, "এই সময়ের মধ্যে কিছু নেই।");
           data = { items: rows.map((a: any) => ({ kind: a.kind, label: a.label, name: a.name, date: a.date, days: a.days })) };
+          const enTitle = section === "probation" ? "Probation Ending" : section === "contract" ? "Contract Ending" : section === "documents_expiry" ? "Documents Expiring" : "Probation / Contract / Document Alerts";
+          rep = report(`${enTitle} - Within 30 Days`, `${enTitle.replace(/ \/ /g, "-")}-${c.today}`, ["Name", "Employee ID", "Designation", "Item", "Date", "Days left"],
+            rows.map((a: any) => [a.name, a.employee_code || "", a.designation || "", a.label, enDate(a.date), Number(a.days)]), asOf);
           break;
         }
         case "personnel_actions":
           text = "সামনে কার্যকর হবে এমন Personnel Action:\n" + list(x.status_effective || [], (a) => `${who(a)} — ${a.action}: ${bnDate(a.date)} (${st(a.status)})`, "সামনে কোনো Personnel Action নেই।");
           data = { actions: (x.status_effective || []).map((a: any) => ({ name: a.name, action: a.action, date: a.date, status: a.status })) };
+          rep = report("Upcoming Personnel Actions", `Personnel-Actions-${c.today}`, ["Name", "Employee ID", "Action", "Effective Date", "Status"],
+            (x.status_effective || []).map((a: any) => [a.name, a.employee_code || "", a.action, enDate(a.date), String(a.status || "")]), asOf);
           break;
         case "document_requests":
           text = "HR-এর কাছে অপেক্ষমাণ চিঠি / তথ্য:\n" + list(x.documents || [], (d) => `${who(d)} — ${d.kind}: ${d.detail}${d.date ? ` (${bnDate(d.date)})` : ""}`, "কোনো অনুরোধ অপেক্ষায় নেই।");
           data = { requests: (x.documents || []).map((d: any) => ({ name: d.name, kind: d.kind, detail: d.detail, date: d.date })) };
+          rep = report("Letter / Information Requests Waiting for HR", `Document-Requests-${c.today}`, ["Name", "Employee ID", "Request", "Detail", "Date"],
+            (x.documents || []).map((d: any) => [d.name, d.employee_code || "", d.kind, d.detail || "", enDate(d.date)]), asOf);
           break;
         case "attendance_approvals":
           text = `হাজিরা অনুমোদনের অপেক্ষায়: **${bn((x.attendance_approvals || []).length)}**\n` + list(x.attendance_approvals || [], (a) => `${who(a)}${a.date ? ` — ${bnDate(a.date)}` : ""}`, "", 6) +
             `\nহাজিরা সংশোধনের অনুরোধ: **${bn((x.attendance_corrections || []).length)}**\n` + list(x.attendance_corrections || [], (a) => `${who(a)}${a.date ? ` — ${bnDate(a.date)}` : ""}`, "", 6);
           data = { attendance_approvals: (x.attendance_approvals || []).length, corrections: (x.attendance_corrections || []).length };
+          rep = report("Attendance Approvals & Corrections Waiting", `Attendance-Approvals-${c.today}`, ["Type", "Name", "Employee ID", "Date"], [
+            ...(x.attendance_approvals || []).map((a: any) => ["Approval", a.name, a.employee_code || "", enDate(a.date)]),
+            ...(x.attendance_corrections || []).map((a: any) => ["Correction", a.name, a.employee_code || "", enDate(a.date)])
+          ], asOf);
           break;
         default: {
           const tasks: any[] = (x.tasks || []).filter((t: any) => Number(t.count) > 0);
@@ -675,7 +723,7 @@ const TOOLS: Tool[] = [
           };
         }
       }
-      return { ok: true, text, data, actions: dashAction };
+      return { ok: true, text, data, actions: dashAction, report: rep };
     }
   },
   {
@@ -693,7 +741,10 @@ const TOOLS: Tool[] = [
       const line = (l: any) => `${l.user_name} — ${l.leave_type_label || l.leave_type} (${bnDate(l.start_date)}${l.end_date !== l.start_date ? ` – ${bnDate(l.end_date)}` : ""})`;
       const text = `${bnDate(date)}-এ ছুটিতে: **${bn(approved.length)} জন**` + (approved.length ? "\n" + approved.slice(0, 15).map((l) => `• ${line(l)}`).join("\n") : "") +
         (pending.length ? `\nঅনুমোদনের অপেক্ষায় (${bn(pending.length)}):\n` + pending.slice(0, 10).map((l) => `• ${line(l)}`).join("\n") : "");
-      return { ok: true, text, data: { date, on_leave: approved.map((l) => ({ name: l.user_name, type: l.leave_type_label || l.leave_type, from: l.start_date, to: l.end_date })), pending: pending.map((l) => ({ name: l.user_name, from: l.start_date, to: l.end_date })) }, actions: [{ label: "Leave Applications খুলুন", nav: "admin:leave_applications" }] };
+      return { ok: true, text, data: { date, on_leave: approved.map((l) => ({ name: l.user_name, type: l.leave_type_label || l.leave_type, from: l.start_date, to: l.end_date })), pending: pending.map((l) => ({ name: l.user_name, from: l.start_date, to: l.end_date })) }, actions: [{ label: "Leave Applications খুলুন", nav: "admin:leave_applications" }],
+        report: report("On Leave", `On-Leave-${date}`, ["Name", "Leave Type", "From", "To", "Status"],
+          [...approved, ...pending].map((l) => [l.user_name, l.leave_type_label || l.leave_type, enDate(l.start_date), enDate(l.end_date), l.status === "approved" ? "Approved" : "Pending approval"]),
+          [["Date", enDate(date)], ["On leave", String(approved.length)], ["Pending", String(pending.length)]]) };
     }
   },
   {
@@ -735,7 +786,12 @@ const TOOLS: Tool[] = [
       const present: any[] = b.present || [], absent: any[] = b.absent || [], off: any[] = b.on_holiday || [];
       const names = (a: any[]) => a.slice(0, 8).map((x) => x.user_name).join(", ") + (a.length > 8 ? ` …আরও ${bn(a.length - 8)} জন` : "");
       const text = `${bnDate(date)}${b.holiday_title ? ` (${b.holiday_title})` : ""}:\n• উপস্থিত: **${bn(present.length)} জন**\n• অনুপস্থিত: **${bn(absent.length)} জন**${absent.length ? ` — ${names(absent)}` : ""}${off.length ? `\n• ছুটিতে: ${bn(off.length)} জন` : ""}\n• মোট: ${bn(b.total_users ?? present.length + absent.length + off.length)} জন`;
-      return { ok: true, text, data: { date, present: present.length, absent: absent.length, on_holiday: off.length, absent_names: absent.slice(0, 30).map((x) => x.user_name), holiday: b.holiday_title || null }, actions: [{ label: "Monthly Attendance Report খুলুন", nav: "admin:attendance_reports" }] };
+      return { ok: true, text, data: { date, present: present.length, absent: absent.length, on_holiday: off.length, absent_names: absent.slice(0, 30).map((x) => x.user_name), holiday: b.holiday_title || null }, actions: [{ label: "Monthly Attendance Report খুলুন", nav: "admin:attendance_reports" }],
+        report: report("Daily Attendance", `Attendance-${date}`, ["Name", "Department", "Status", "Check In", "Check Out"], [
+          ...absent.map((x) => [x.user_name, x.department || "", "Absent", "", ""]),
+          ...present.map((x) => [x.user_name, x.department || "", "Present", enTime(x.check_in_at), enTime(x.check_out_at)]),
+          ...off.map((x) => [x.user_name, x.department || "", "Holiday / weekend", "", ""])
+        ], [["Date", enDate(date) + (b.holiday_title ? ` (${b.holiday_title})` : "")], ["Present", String(present.length)], ["Absent", String(absent.length)], ["On holiday", String(off.length)]]) };
     }
   },
   {
@@ -755,7 +811,10 @@ const TOOLS: Tool[] = [
       const top = [...byTask.entries()].sort((a, b) => b[1].length - a[1].length).slice(0, 6);
       const text = `Onboarding-এ মোট **${bn(list.length)} জন**: সম্পূর্ণ ${bn(complete.length)}, চলছে ${bn(inProg.length)}, শুরু হয়নি ${bn(notStarted.length)}${overdue.length ? `, সময় পেরোনো কাজ আছে ${bn(overdue.length)} জনের` : ""}।` +
         (top.length ? "\nযা সবচেয়ে বেশি বাকি:\n" + top.map(([label, who]) => `• ${label}: ${bn(who.length)} জন (${who.slice(0, 3).join(", ")}${who.length > 3 ? "…" : ""})`).join("\n") : "");
-      return { ok: true, text, data: { total: list.length, complete: complete.length, in_progress: inProg.length, not_started: notStarted.length, with_overdue: overdue.length, people: list.slice(0, 40).map((j) => ({ name: j.name, done: j.done, total: j.total, overdue: j.overdue, pending: (j.pending || []).map((p: any) => p.label) })) }, actions: [{ label: "Onboarding খুলুন", nav: "hrops:onboarding" }] };
+      return { ok: true, text, data: { total: list.length, complete: complete.length, in_progress: inProg.length, not_started: notStarted.length, with_overdue: overdue.length, people: list.slice(0, 40).map((j) => ({ name: j.name, done: j.done, total: j.total, overdue: j.overdue, pending: (j.pending || []).map((p: any) => p.label) })) }, actions: [{ label: "Onboarding খুলুন", nav: "hrops:onboarding" }],
+        report: report("Onboarding Status", `Onboarding-${c.today}`, ["Name", "Done", "Total", "Overdue", "Pending items"],
+          list.map((j) => [j.name, Number(j.done) || 0, Number(j.total) || 0, Number(j.overdue) || 0, (j.pending || []).map((p: any) => p.label).join(", ")]),
+          [["As of", enDate(c.today)], ["Complete", String(complete.length)], ["In progress", String(inProg.length)], ["Not started", String(notStarted.length)]]) };
     }
   },
   {
@@ -769,7 +828,9 @@ const TOOLS: Tool[] = [
       const deps: any[] = (b.headcount_by_department || []).slice(0, 8);
       const text = `মোট কর্মী: **${bn(b.headcount_total ?? 0)} জন**\n` + deps.map((d) => `• ${d.department}: ${bn(d.count)}`).join("\n") +
         `\nখোলা পদ: ${bn(b.open_positions ?? 0)} · Exit চলছে: ${bn(b.pending_exits ?? 0)} · খোলা অভিযোগ: ${bn(b.open_grievances ?? 0)}`;
-      return { ok: true, text, data: { total: b.headcount_total, by_department: deps, open_positions: b.open_positions, pending_exits: b.pending_exits, open_grievances: b.open_grievances }, actions: [{ label: "HR Analytics খুলুন", nav: "admin:hr_analytics" }] };
+      return { ok: true, text, data: { total: b.headcount_total, by_department: deps, open_positions: b.open_positions, pending_exits: b.pending_exits, open_grievances: b.open_grievances }, actions: [{ label: "HR Analytics খুলুন", nav: "admin:hr_analytics" }],
+        report: report("Headcount by Department", `Headcount-${c.today}`, ["Department", "Headcount"], (b.headcount_by_department || []).map((d: any) => [d.department, Number(d.count) || 0]),
+          [["As of", enDate(c.today)], ["Total", String(b.headcount_total ?? 0)], ["Open positions", String(b.open_positions ?? 0)], ["Exits in progress", String(b.pending_exits ?? 0)]]) };
     }
   },
   {
@@ -836,7 +897,15 @@ const TOOLS: Tool[] = [
           employees: hits.slice(0, 60).map((x) => ({ name: x.e.name, employee_id: x.e.employee_id, designation: x.e.designation, department: x.e.department, joining_date: x.j, years: x.s.y, months: x.s.m, anniversary: x.anniversary })),
           close_to_mark: soon.map((x) => ({ name: x.e.name, anniversary: x.anniversary }))
         },
-        actions: [{ label: "Employees খুলুন", nav: "admin:employees" }]
+        actions: [{ label: "Employees খুলুন", nav: "admin:employees" }],
+        report: report(
+          mode === "this_year" ? `${years}-Year Service Anniversaries in ${ty}` : mode === "exact" ? `Employees with Exactly ${years} Years of Service` : `Employees with ${years}+ Years of Service`,
+          `Service-${years}-years-${mode}-${c.today}`,
+          ["Name", "Employee ID", "Designation", "Department", "Joining Date", "Service", ...(mode === "this_year" ? [`${years} Years On`] : [])],
+          hits.map((x) => [x.e.name, x.e.employee_id || "", x.e.designation || "", x.e.department || "", enDate(x.j), `${x.s.y} yr${x.s.m ? ` ${x.s.m} mo` : ""}`, ...(mode === "this_year" ? [enDate(x.anniversary)] : [])]),
+          [["As of", enDate(c.today)], ...(dept ? [["Department", String(args.department)] as [string, string]] : []), ["Employees", String(hits.length)],
+            ...(missing > 0 ? [["Not counted (no joining date)", String(missing)] as [string, string]] : [])]
+        )
       };
     }
   },
@@ -992,7 +1061,7 @@ async function localAnswer(c: Ctx, message: string): Promise<Answer> {
     const tool = TOOLS.find((x) => x.name === intent.tool)!;
     if (!toolAvailable(tool, c)) return { reply: NO_ACCESS.text, actions: [] };
     const r = await tool.run(c, intent.args ? intent.args(t, c) : {});
-    return { reply: r.text, actions: allowedActions(c, r.actions || []) };
+    return { reply: r.text, actions: allowedActions(c, r.actions || []), report: r.report };
   }
   if (help.length) {
     return { reply: help.map((h) => `**${h.title}:** ${h.steps}`).join("\n\n"), actions: help.flatMap(helpAction) };
@@ -1081,6 +1150,7 @@ async function geminiAnswer(c: Ctx, history: { role: string; text: string }[], m
   ];
   const actions: AssistantAction[] = [];
   let draft: LeaveDraft | undefined;
+  let rep: AssistantReport | undefined;
   for (let round = 0; round < 4; round++) {
     const resp = await generateWithFallback(ai, {
       contents,
@@ -1090,7 +1160,7 @@ async function geminiAnswer(c: Ctx, history: { role: string; text: string }[], m
     if (!calls.length) {
       const text = (resp.text || "").trim();
       if (!text) throw new Error("empty reply");
-      return { reply: text, actions, draft };
+      return { reply: text, actions, draft, report: rep };
     }
     contents.push(resp.candidates?.[0]?.content || { role: "model", parts: calls.map((fc) => ({ functionCall: fc })) });
     const parts = [];
@@ -1099,6 +1169,7 @@ async function geminiAnswer(c: Ctx, history: { role: string; text: string }[], m
       const out: ToolResult = tool ? await tool.run(c, fc.args || {}) : { ok: false, text: "", data: { error: "unknown_tool" } };
       for (const a of out.actions || []) actions.push(a);
       if (out.draft) draft = out.draft;
+      if (out.report) rep = out.report;
       parts.push({ functionResponse: { name: String(fc.name), response: { ok: out.ok, ...(out.data ?? {}), summary: out.text } } });
     }
     contents.push({ role: "user", parts });
@@ -1116,14 +1187,15 @@ export function registerAiAssistantRoutes(app: Express, deps: AiAssistantDeps) {
   const loadCtx = async (req: any): Promise<Ctx | null> => {
     const u = req.user;
     if (!u || u.onb) return null;
-    const rows: any[] = (await queryDB(`SELECT name, role, can_use_ai_assistant, ${SELF_FLAGS.join(", ")} FROM users WHERE id = ?`, [u.id]).catch(() => [])) || [];
+    const rows: any[] = (await queryDB(`SELECT name, role, can_use_ai_assistant, can_export_assistant_reports, ${SELF_FLAGS.join(", ")} FROM users WHERE id = ?`, [u.id]).catch(() => [])) || [];
     const row = rows[0];
     if (!row) return null;
     if (row.role !== "superadmin" && !Number(row.can_use_ai_assistant ?? 1)) return null;
     const flags: Record<string, boolean> = {};
     for (const f of SELF_FLAGS) flags[f] = !!Number(row[f] || 0);
     const modules = row.role === "superadmin" ? [] : await getAdminModules(u.id).catch(() => []);
-    return { req, userId: u.id, name: String(row.name || ""), role: String(row.role || ""), modules, flags, today: todayInDhaka() };
+    return { req, userId: u.id, name: String(row.name || ""), role: String(row.role || ""), modules, flags, today: todayInDhaka(),
+      canExport: row.role === "superadmin" || !!Number(row.can_export_assistant_reports || 0) };
   };
 
   const recent = new Map<number, number[]>();
@@ -1166,6 +1238,9 @@ export function registerAiAssistantRoutes(app: Express, deps: AiAssistantDeps) {
     }
     const seen = new Set<string>();
     const actions = allowedActions(c, out.actions).filter((a) => (seen.has(a.nav) ? false : (seen.add(a.nav), true))).slice(0, 3);
-    res.json({ reply: out.reply, actions, engine, draft: out.draft || null });
+    // The full table goes only to accounts allowed to download it, and only
+    // when there's something in it.
+    const rep = c.canExport && out.report && out.report.rows.length ? { ...out.report, rows: out.report.rows.slice(0, 5000) } : null;
+    res.json({ reply: out.reply, actions, engine, draft: out.draft || null, report: rep });
   });
 }
