@@ -1352,6 +1352,12 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
       const matched = paged && nameQ ? visible.filter((a: any) => String(userMap.get(Number(a.user_id))?.name || "(account removed)").toLowerCase().includes(nameQ)) : visible;
       const source = paged ? matched.slice((pageNo - 1) * pageLimit, pageNo * pageLimit) : visible;
 
+      // The name of the Approval Layer a pending application waits at
+      // ("Supervisor", "HR"…) — Approval Chain -> the template step's label.
+      const stepRows: any[] = await queryDB("SELECT template_id, step_order, approver_type, label FROM approval_template_steps").catch(() => []);
+      const stepLabel = new Map<string, string>(
+        stepRows.map((st: any) => [`${st.template_id}:${st.step_order}`, String(st.label || st.approver_type || "").trim()])
+      );
       const enriched = await Promise.all(
         source.map(async (a: any) => {
           const ar = approvalByLeaveId.get(Number(a.id));
@@ -1396,6 +1402,14 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
             decided_by_name: a.decided_by ? (userMap.get(Number(a.decided_by))?.name || null) : null,
             current_step: currentStep,
             total_steps: totalSteps,
+            // An auto-supervisor step (supervisor_step_user_id) is step 1 and
+            // shifts the template's steps by one — same as getCurrentStepApprovers.
+            current_step_label:
+              ar && ar.status === "pending"
+                ? ar.supervisor_step_user_id && Number(ar.current_step) === 1
+                  ? "Supervisor"
+                  : stepLabel.get(`${ar.template_id}:${Number(ar.current_step) - (ar.supervisor_step_user_id ? 1 : 0)}`) || null
+                : null,
             supervisor_layer_approved: supervisorLayerApproved,
             reliever_name: a.reliever_id ? (userMap.get(Number(a.reliever_id))?.name || null) : null,
             reliever_status: a.reliever_status || null,
