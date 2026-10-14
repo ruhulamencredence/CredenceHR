@@ -49,6 +49,7 @@ export const ADMIN_TAB_PATH: Record<string, string[]> = {
   hr_operations: [...HRM, 'HR Operations'],
   task_management: [...HRM, 'Task Management'],
   mobile_bill: [...HRM, 'Mobile Bill'],
+  target_reports: [...HRM, 'Target Reports'],
 
   users: ['Admin Panel', 'MIS', 'Users'],
   projects: ['Admin Panel', 'MIS', 'Projects'],

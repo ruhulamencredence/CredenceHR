@@ -56,6 +56,7 @@ import { registerPerformanceRoutes, ensurePerformanceSchema } from "./Performanc
 import { registerRecruitmentRoutes, ensureRecruitmentSchema } from "./RecruitmentRoutes";
 import { registerGrievanceRoutes, ensureGrievanceSchema } from "./GrievanceRoutes";
 import { registerTaskRoutes, ensureTaskSchema } from "./TaskRoutes";
+import { registerTargetRoutes } from "./TargetRoutes";
 import { registerTrackingStayReportRoutes, wallMinutes } from "./TrackingStayReport";
 import { registerMobileBillRoutes, ensureMobileBillSchema, finalizeMobileLimitRequest, rejectMobileLimitRequest } from "./MobileBillRoutes";
 import { registerLoanRequestRoutes, ensureLoanRequestSchema, finalizeAdvanceRequest, rejectAdvanceRequest, recommendAdvanceRequest } from "./LoanRequestRoutes";
@@ -222,7 +223,7 @@ const USER_CLAIM_CATEGORIES = ["Transport", "Fuel", "Toll", "Parking", "Others"]
 // running day-to-day without also giving them the full Admin Panel ->
 // Vehicle Management tab (fleet CRUD, the Approval Workflow's own queue,
 // etc.). See the two routes' own comments for what the bypass does.
-const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports", "users", "attendance", "attendance_reports", "leave_applications", "recycle", "editlog", "notices", "claims", "approvals", "conveyance", "disbursement", "employees", "departments", "tracking", "office_attendance", "holidays", "payroll", "asset_management", "vehicle_management", "vehicle_maintainer", "exit_offboarding", "performance_management", "recruitment", "grievance_disciplinary", "hr_analytics", "document_vault", "hr_operations", "admin_dashboard", "task_management", "mobile_bill"] as const;
+const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports", "users", "attendance", "attendance_reports", "leave_applications", "recycle", "editlog", "notices", "claims", "approvals", "conveyance", "disbursement", "employees", "departments", "tracking", "office_attendance", "holidays", "payroll", "asset_management", "vehicle_management", "vehicle_maintainer", "exit_offboarding", "performance_management", "recruitment", "grievance_disciplinary", "hr_analytics", "document_vault", "hr_operations", "admin_dashboard", "task_management", "mobile_bill", "target_reports"] as const;
 
 // Granular per-module action layers — mirrors PermissionLayerKey/
 // PERMISSION_LAYERS in src/types.ts (single source of truth is duplicated
@@ -234,7 +235,7 @@ const PERMISSION_LAYER_KEYS = ["read", "edit_add", "entry_upload", "delete_trash
 const USERS_LAYER_KEYS = [...PERMISSION_LAYER_KEYS, "block_account"] as const;
 // Which modules currently enforce PERMISSION_LAYER_KEYS — mirrors
 // PERMISSION_LAYER_MODULES in src/types.ts. Rolled out module by module.
-const PERMISSION_LAYER_MODULES = ["departments", "projects", "approvals", "users", "reports", "tracking", "payroll", "mobile_bill", "office_attendance", "conveyance", "hr_operations", "exit_offboarding"] as const;
+const PERMISSION_LAYER_MODULES = ["departments", "projects", "approvals", "users", "reports", "tracking", "payroll", "mobile_bill", "office_attendance", "conveyance", "hr_operations", "exit_offboarding", "target_reports"] as const;
 // Employee Tracking's layers: "read" = the live map, history and status
 // cards; "stay_report" = the Stay Report (TrackingStayReport.ts). Both are
 // reading, so an account with Employee Tracking and no saved layers has both.
@@ -281,6 +282,10 @@ const HR_OPS_LAYER_KEYS = ["read", "onboarding_create", "onboarding_review", "on
 // loans / advances, claims, rides) and adding them to the Full & Final
 // Settlement. Explicit-only — the no-saved-layers default is "read" alone.
 const EXIT_LAYER_KEYS = ["read", "exit_dues", "exit_pdf"] as const;
+// Target Reports (TargetRoutes.ts): "read" = the report; "target_export" =
+// its Excel / PDF; "target_cancel" = cancel or close anyone's target. Both
+// explicit-only — the no-saved-layers default is "read" alone.
+const TARGET_LAYER_KEYS = ["read", "target_export", "target_cancel"] as const;
 // PEPM Reports uses four of them: Read Only, Edit, Delete/Trash, Permanent Delete
 // — plus its own "Budget Submission Status" (the second report on that page),
 // which, like Permanent Delete, is never part of the no-saved-rows default:
@@ -314,6 +319,7 @@ const MODULE_LAYER_KEY_SETS: Record<string, readonly string[]> = {
   conveyance: CONVEYANCE_LAYER_KEYS,
   hr_operations: HR_OPS_LAYER_KEYS,
   exit_offboarding: EXIT_LAYER_KEYS,
+  target_reports: TARGET_LAYER_KEYS,
   leave_manage: LEAVE_MANAGE_LAYER_KEYS,
 };
 
@@ -2147,7 +2153,7 @@ async function startServer() {
   // on for a module is never a silent regression; a Superadmin only actually
   // restricts anything once they explicitly save a narrower set in the
   // Module Access modal.
-  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "block_account" | "limit_history" | "link_pins" | "on_behalf" | "onboarding_create" | "onboarding_review" | "onboarding_approve" | "exit_dues" | "exit_pdf" | "reminders_receive" | "salary_bulk_upload") =>
+  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "block_account" | "limit_history" | "link_pins" | "on_behalf" | "onboarding_create" | "onboarding_review" | "onboarding_approve" | "exit_dues" | "exit_pdf" | "reminders_receive" | "salary_bulk_upload" | "target_export" | "target_cancel") =>
     async (req: any, res: any, next: any) => {
       if (!req.user) return res.status(401).json({ error: "Access token required" });
       if (req.user.onb) return res.status(403).json({ error: "Admin access required" });
@@ -2164,7 +2170,7 @@ async function startServer() {
           ? grantedLayers
           : moduleKey === "tracking"
             ? [...TRACKING_DEFAULT_LAYERS]
-            : moduleKey === "payroll" || moduleKey === "office_attendance" || moduleKey === "conveyance" || moduleKey === "hr_operations" || moduleKey === "exit_offboarding"
+            : moduleKey === "payroll" || moduleKey === "office_attendance" || moduleKey === "conveyance" || moduleKey === "hr_operations" || moduleKey === "exit_offboarding" || moduleKey === "target_reports"
               ? ["read"]
               : moduleKey === "mobile_bill"
                 ? [...MOBILE_BILL_LAYER_KEYS]
@@ -2192,7 +2198,7 @@ async function startServer() {
     const defaults: readonly string[] =
       moduleKey === "tracking"
         ? TRACKING_DEFAULT_LAYERS
-        : moduleKey === "payroll" || moduleKey === "office_attendance" || moduleKey === "conveyance" || moduleKey === "hr_operations" || moduleKey === "exit_offboarding"
+        : moduleKey === "payroll" || moduleKey === "office_attendance" || moduleKey === "conveyance" || moduleKey === "hr_operations" || moduleKey === "exit_offboarding" || moduleKey === "target_reports"
           ? ["read"]
           : moduleKey === "mobile_bill"
             ? MOBILE_BILL_LAYER_KEYS
@@ -2553,6 +2559,8 @@ async function startServer() {
   registerRecruitmentRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB });
   registerGrievanceRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB, getAdminModules, createAlert });
   registerTaskRoutes(app, { authenticateToken, queryDB, getAdminModules, createAlert });
+  // Targets: Self Service -> My Targets and Admin Panel -> Target Reports.
+  registerTargetRoutes(app, { authenticateToken, queryDB, hasModuleLayer, createAlert });
   // Mobile Bill (company SIMs, limits, bills, reports) — limit raise requests
   // ride the Dynamic Approval Engine (request_type 'mobile').
   // Employee Tracking -> Stay Report (time at each place, day by day).

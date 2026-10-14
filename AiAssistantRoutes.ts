@@ -77,7 +77,7 @@ interface Answer { reply: string; actions: AssistantAction[]; draft?: LeaveDraft
 
 const SELF_FLAGS = [
   "can_view_movement_claims", "can_view_conveyance_claims", "can_view_timesheet", "can_view_leave_application",
-  "can_view_my_leave", "can_view_tasks", "can_view_mobile_bill", "can_view_loan_request", "can_manage_leave"
+  "can_view_my_leave", "can_view_tasks", "can_view_mobile_bill", "can_view_loan_request", "can_view_targets", "can_manage_leave"
 ] as const;
 
 const BN_DIGITS = "০১২৩৪৫৬৭৮৯";
@@ -140,6 +140,10 @@ const HELP: HelpEntry[] = [
     steps: "মেনু → Requests & Claims → **My Letters & Service Record**। আপনাকে দেওয়া চিঠি দেখা যায়, আর \"Request a letter\" দিয়ে Salary / Experience certificate চাওয়া যায়।", nav: "self:myLetters" },
   { id: "loan", title: "Loan / Advance", keys: ["loan", "লোন", "ঋণ", "advance", "অ্যাডভান্স", "অগ্রিম"],
     steps: "মেনু → Requests & Claims → **My Loan / Advance** → New Request। টাকা, কিস্তি আর কারণ দিয়ে জমা দিন।", nav: "self:myLoans", can: (c) => isSuper(c) || c.flags.can_view_loan_request },
+  { id: "targets", title: "My Targets", keys: ["target", "টার্গেট", "লক্ষ্য", "lokkho", "monthly target", "yearly target"],
+    steps: "মেনু → Work & Approvals → **My Targets**। মাসিক / বার্ষিক target আর তার task দেখা যায়; প্রতিটা task-এ **Update** চেপে % অগ্রগতি, status আর details দিন। Share হওয়া target edit / delete করা যায় না। Supervisor হলে **Team** ট্যাব থেকে team-কে target দিন আর approve করুন।", nav: "self:myTargets", can: (c) => isSuper(c) || c.flags.can_view_targets },
+  { id: "target_reports", title: "Target Reports", keys: ["target report", "টার্গেট রিপোর্ট", "target status", "department target"],
+    steps: "মেনু → HR Operations → Reports → **Target Reports**। বছর, মাস, department, employee আর status দিয়ে filter করুন; By department / By employee / Targets দেখুন।", nav: "admin:target_reports", can: (c) => isSuper(c) || c.modules.includes("target_reports") },
   { id: "sim", title: "Mobile SIM / বিল", keys: ["sim", "সিম", "mobile bill", "মোবাইল বিল", "phone bill", "limit"],
     steps: "মেনু → Requests & Claims → **My Mobile SIM**। আপনার SIM, মাসিক limit আর বিল দেখা যায়; limit বাড়াতে request দিন।", nav: "self:myMobileSim", can: (c) => isSuper(c) || c.flags.can_view_mobile_bill || c.modules.includes("mobile_bill") },
   { id: "tasks", title: "My Tasks", keys: ["task", "টাস্ক"],
@@ -197,6 +201,7 @@ function canNav(c: Ctx, nav: string): boolean {
       case "myTasks": return f.can_view_tasks || c.modules.includes("task_management");
       case "myMobileSim": return f.can_view_mobile_bill || c.modules.includes("mobile_bill");
       case "myLoans": return f.can_view_loan_request;
+      case "myTargets": return f.can_view_targets;
       case "payroll": return c.modules.includes("payroll");
       default: return true;
     }

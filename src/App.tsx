@@ -47,6 +47,7 @@ import { MyCases } from './components/MyCases';
 import { MyTasks } from './components/MyTasks';
 import { MyMobileSim } from './components/MyMobileSim';
 import { MyLoans } from './components/MyLoans';
+import { MyTargets } from './components/MyTargets';
 import { MyLetters } from './components/MyLetters';
 import { TeamAttendance } from './components/TeamAttendance';
 import { VehicleManagement } from './components/VehicleManagement';
@@ -113,7 +114,7 @@ export default function App() {
   // this account was actually looking at, instead of resetting to the
   // Admin/User Panel default every time.
   const selfServiceViewStorageKey = user ? `mpr_self_service_view_${user.id}` : null;
-  const [selfServiceView, setSelfServiceView] = useState<'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | null>(() => {
+  const [selfServiceView, setSelfServiceView] = useState<'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | null>(() => {
     try {
       // A link straight to an Admin Panel page (/admin/departments) opens that page.
       if (openedOnAdminUrl()) return null;
@@ -124,7 +125,7 @@ export default function App() {
       if (fromUrl && canOpenSelfView(fromUrl, user)) return fromUrl;
       // An unknown or not-allowed /self/... address opens no Self Service page.
       if (adminUrlEnabled() && /^\/self\//i.test(window.location.pathname)) return null;
-      const restorable = ['leaveManagement', 'timesheet', 'approveApplications', 'employeeDirectory', 'resignation', 'assetManagement', 'vehicleManagement', 'myCases', 'myLetters', 'teamAttendance', 'myTasks', 'myMobileSim', 'myLoans'];
+      const restorable = ['leaveManagement', 'timesheet', 'approveApplications', 'employeeDirectory', 'resignation', 'assetManagement', 'vehicleManagement', 'myCases', 'myLetters', 'teamAttendance', 'myTasks', 'myMobileSim', 'myLoans', 'myTargets'];
       if (saved === 'leaveApplication' || (saved && restorable.includes(saved))) return saved as any;
       // Payroll and the other gated pages come back only for an account that still has them.
       if (saved === 'payroll' && canOpenSelfView('payroll', user)) return 'payroll';
@@ -863,6 +864,25 @@ export default function App() {
     window.addEventListener('credence:open-task', onOpen);
     return () => window.removeEventListener('credence:open-task', onOpen);
   }, [user]);
+  // A target alert (TargetRoutes.ts) opens My Targets with that target open
+  // (the page reads it from sessionStorage); someone with only Target Reports
+  // gets the report.
+  useEffect(() => {
+    const onOpen = () => {
+      if (!user) return;
+      setShowProfilePage(false);
+      setShowChat(false);
+      setShowAlertsPage(false);
+      if (user.role === 'superadmin' || !!user.can_view_targets) {
+        setSelfServiceView('myTargets');
+      } else if ((user.module_permissions || []).includes('target_reports')) {
+        setSelfServiceView(null);
+        window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'target_reports' }));
+      }
+    };
+    window.addEventListener('credence:open-target', onOpen);
+    return () => window.removeEventListener('credence:open-target', onOpen);
+  }, [user]);
   // A Mobile Bill alert (MobileBillRoutes.ts): a new limit request with no
   // approval chain opens HR's Mobile Bill; anything else opens My Mobile SIM.
   useEffect(() => {
@@ -1082,7 +1102,7 @@ export default function App() {
       setViewMode('admin');
       setAdminNavRequest({ target, ts: Date.now() });
     },
-    onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans') => {
+    onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets') => {
       setShowProfilePage(false);
           setShowChat(false);
           setShowAlertsPage(false);
@@ -1427,6 +1447,8 @@ export default function App() {
           <MyMobileSim token={token} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'myLoans' ? (
           <MyLoans token={token} onBack={() => setSelfServiceView(null)} />
+        ) : selfServiceView === 'myTargets' ? (
+          <MyTargets token={token} user={user} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'myLetters' ? (
           <MyLetters token={token} onBack={() => setSelfServiceView(null)} canServiceBook={!!user && (user.role === 'superadmin' || !!user.can_view_service_book)} />
         ) : selfServiceView === 'teamAttendance' ? (

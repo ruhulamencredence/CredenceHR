@@ -31,6 +31,7 @@ import { ensurePerformanceSchema } from "./PerformanceRoutes";
 import { ensureRecruitmentSchema } from "./RecruitmentRoutes";
 import { ensureSiteAttendanceSchema } from "./SiteAttendanceRoutes";
 import { ensureTaskSchema } from "./TaskRoutes";
+import { ensureTargetSchema } from "./TargetRoutes";
 import { ensureVehicleManagementSchema } from "./VehicleManagementRoutes";
 import { ensureWebPushSchema } from "./WebPushService";
 import { ensureHolidayCalendarSchema } from "./holidayRoutes";
@@ -125,6 +126,7 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
   await ensureRecruitmentSchema(dbPool);
   await ensureGrievanceSchema(dbPool);
   await ensureTaskSchema(dbPool);
+  await ensureTargetSchema(dbPool);
   await ensureMobileBillSchema(dbPool);
   await ensureDocumentVaultSchema(dbPool);
   // HR Operations (personnel actions, letters, onboarding, service book) —
@@ -682,6 +684,13 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
     await dbPool.query(`ALTER TABLE users ADD COLUMN can_view_tasks TINYINT(1) NOT NULL DEFAULT 0`);
   } catch (err: any) {
     if (err.code !== 'ER_DUP_FIELDNAME') console.warn("⚠️ Could not add users.can_view_tasks column: " + err.message);
+  }
+  try {
+    // Self Service -> My Targets (TargetRoutes.ts) — OFF until turned on per
+    // account in Module Access.
+    await dbPool.query(`ALTER TABLE users ADD COLUMN can_view_targets TINYINT(1) NOT NULL DEFAULT 0`);
+  } catch (err: any) {
+    if (err.code !== 'ER_DUP_FIELDNAME') console.warn("⚠️ Could not add users.can_view_targets column: " + err.message);
   }
   try {
     // Self Service -> My Loan / Advance (LoanRequestRoutes.ts) — OFF until
