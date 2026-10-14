@@ -455,7 +455,7 @@ const TOOLS: Tool[] = [
   },
   {
     name: "my_late_days",
-    description: "The exact dates the asking employee came late between two dates (YYYY-MM-DD). Defaults to the current month.",
+    description: "The asking employee's OWN late dates between two dates (YYYY-MM-DD), default the current month. Not for questions about other employees — use late_on_date for that.",
     params: { from: { type: "string", description: "Start date YYYY-MM-DD" }, to: { type: "string", description: "End date YYYY-MM-DD" } },
     run: async (c, args) => {
       const from = /^\d{4}-\d{2}-\d{2}$/.test(String(args?.from || "")) ? String(args.from) : c.today.slice(0, 8) + "01";
@@ -795,6 +795,33 @@ const TOOLS: Tool[] = [
     }
   },
   {
+    name: "late_on_date",
+    description: "HR: which employees came late (Delay / Extreme Delay) on a date, default today, with their first check-in time. Optional date YYYY-MM-DD.",
+    params: { date: { type: "string", description: "YYYY-MM-DD; omit for today." } },
+    available: (c) => hasMod(c, "attendance_reports"),
+    run: async (c, args) => {
+      const date = /^\d{4}-\d{2}-\d{2}$/.test(String(args?.date || "")) ? String(args.date) : c.today;
+      const r = await callApi(c.req, `/api/attendance/report/late?date=${date}`);
+      if (!r.ok) return fail(r.status);
+      const late: any[] = r.body?.late || [];
+      const extreme = late.filter((x) => x.kind === "extreme");
+      const line = (x: any) => `• **${x.name}**${x.employee_code ? ` (${x.employee_code})` : ""}${x.department ? ` — ${x.department}` : ""}${enTime(x.first_in) ? `, এসেছেন ${bn(enTime(x.first_in))}` : ""}${x.kind === "extreme" ? " · অনেক দেরি" : ""}`;
+      const text = late.length
+        ? `${bnDate(date)}-এ দেরিতে এসেছেন **${bn(late.length)} জন**${extreme.length ? ` (এর মধ্যে অনেক দেরি ${bn(extreme.length)} জন)` : ""}${r.body?.shift_start ? ` — অফিস শুরু ${bn(enTime(r.body.shift_start))}` : ""}:\n` +
+          late.slice(0, 20).map(line).join("\n") + (late.length > 20 ? `\n…আরও ${bn(late.length - 20)} জন` : "")
+        : `${bnDate(date)}-এ কেউ দেরিতে আসেননি। 👍`;
+      return {
+        ok: true,
+        text,
+        data: { date, shift_start: r.body?.shift_start || null, late: late.slice(0, 60).map((x) => ({ name: x.name, employee_id: x.employee_code, department: x.department, first_in: enTime(x.first_in) || null, kind: x.kind === "extreme" ? "extreme_late" : "late" })) },
+        actions: [{ label: "Monthly Attendance Report খুলুন", nav: "admin:attendance_reports" }],
+        report: report("Late Arrivals", `Late-${date}`, ["Name", "Employee ID", "Designation", "Department", "First In", "Late"],
+          late.map((x) => [x.name, x.employee_code || "", x.designation || "", x.department || "", enTime(x.first_in), x.kind === "extreme" ? "Extreme late" : "Late"]),
+          [["Date", enDate(date)], ...(r.body?.shift_start ? [["Shift starts", enTime(r.body.shift_start)] as [string, string]] : []), ["Late", String(late.length)], ["Extreme late", String(extreme.length)]])
+      };
+    }
+  },
+  {
     name: "onboarding_overview",
     description: "HR: employees in onboarding — how many complete / in progress / not started / overdue, and which checklist items are pending for whom.",
     available: (c) => hasMod(c, "hr_operations"),
@@ -970,6 +997,13 @@ const INTENTS: Intent[] = [
       }
       return {};
     } },
+  { tool: "late_on_date", keys: ["ke ke late", "kara late", "ke late", "কে কে দেরি", "কারা দেরি", "কে দেরি", "কে কে লেট", "কারা লেট", "late koreche", "late korse", "late eseche", "late ashche", "দেরিতে এসেছে", "দেরি করেছে", "লেট করেছে", "late list", "লেট লিস্ট", "দেরির তালিকা", "who came late", "who is late", "late today", "ajke late", "ajk late", "আজ দেরি", "আজকে দেরি", "আজ লেট"],
+    args: (t, c) => {
+      const d = /(\d{4}-\d{2}-\d{2})/.exec(t)?.[1];
+      if (d) return { date: d };
+      if (hasAny(t, ["gotokal", "গতকাল", "yesterday"])) return { date: addDays(c.today, -1) };
+      return {};
+    } },
   { tool: "hr_dashboard", keys: ["dashboard", "ড্যাশবোর্ড", "সারসংক্ষেপ", "summary", "overview", "ওভারভিউ"], args: () => ({ section: "summary" }) },
   { tool: "hr_dashboard", keys: ["birthday", "জন্মদিন", "jonmodin", "jonmo din"], args: () => ({ section: "birthdays" }) },
   { tool: "hr_dashboard", keys: ["probation", "প্রবেশন", "প্রবেশনারি", "confirmation", "কনফার্মেশন"], args: () => ({ section: "probation" }) },
@@ -1057,7 +1091,10 @@ async function localAnswer(c: Ctx, message: string): Promise<Answer> {
   const blockedHelp = help.length ? [] : matchHelp(c, message, 1, true);
 
   if (scored.length && !(asksHow && (help.length || blockedHelp.length))) {
-    const intent = scored[0].i;
+    // "amar / ami … late" is about the asker's own days, not everyone's.
+    const intent = scored[0].i.tool === "late_on_date" && hasAny(t, [" amar ", " ami ", "আমার", "আমি", " my ", " i "])
+      ? INTENTS.find((i) => i.tool === "my_late_days")!
+      : scored[0].i;
     const tool = TOOLS.find((x) => x.name === intent.tool)!;
     if (!toolAvailable(tool, c)) return { reply: NO_ACCESS.text, actions: [] };
     const r = await tool.run(c, intent.args ? intent.args(t, c) : {});

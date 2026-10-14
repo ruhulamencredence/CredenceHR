@@ -58,7 +58,9 @@ interface PayrollRouteDeps {
   // Payroll's permission layers (server.ts PAYROLL_LAYER_KEYS) — used for
   // the salary month setting, which needs "salary_month" ticked.
   requireModuleLayer: (moduleKey: "payroll", layer: "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log") => any;
-  hasModuleLayer: (user: any, moduleKey: "payroll", layer: "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log") => Promise<boolean>;
+  hasModuleLayer: (user: any, moduleKey: "payroll" | "attendance_reports", layer: "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "late_list") => Promise<boolean>;
+  // Attendance Reports' Department-wise scope (null = every Department).
+  getAttendanceReportDeptScope: (userId: number) => Promise<string[] | null>;
   // The account's granted Admin Panel modules — the Dashboard calendar lets
   // an 'attendance_reports' holder open their own Department's calendars.
   getAdminModules: (userId: number) => Promise<string[]>;
@@ -538,7 +540,7 @@ export const LATE_LEAVE_ARREAR_PREFIX = "Leave approved after salary";
 const todayInDhakaStr = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Dhaka" });
 
 export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
-  const { authenticateToken, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer, getAdminModules, queryDB } = deps;
+  const { authenticateToken, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer, getAdminModules, queryDB, getAttendanceReportDeptScope } = deps;
 
   // Builds one employee's payroll disbursement split for a given Net Salary,
   // from that employee's active employee_payment_accounts rows (Admin Panel
@@ -2245,6 +2247,66 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       res.json({ linked: true, days });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Failed to load your late days." });
+    }
+  });
+
+  // Attendance Reports -> who came late on one day (Delay / Extreme Delay),
+  // by the same late policy, holiday calendars, office punches and waivers
+  // payroll uses. Needs the "Late list" layer of Attendance Reports
+  // (explicit-only) and keeps to that account's Departments. Read by the
+  // Credence Assistant ("aj ke ke late").
+  app.get("/api/attendance/report/late", authenticateToken, requireAdmin, async (req: any, res) => {
+    try {
+      if (!(await hasModuleLayer(req.user, "attendance_reports", "late_list"))) {
+        return res.status(403).json({ error: "You don't have access to the late list. Ask your Superadmin to grant it." });
+      }
+      const date = String(req.query.date || "");
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: "A valid date (YYYY-MM-DD) is required." });
+      const deptScope = req.user.role === "superadmin" ? null : await getAttendanceReportDeptScope(req.user.id);
+      const employees = (
+        await queryDB(
+          `SELECT id, name, employee_id AS employee_code, designation, department, user_id, zk_device_pin, company_id
+           FROM all_employees WHERE is_active = 1 ORDER BY name ASC`
+        )
+      ).filter((e: any) => Number(e.company_id ?? 1) === activeCompanyId() && (!deptScope || deptScope.includes(e.department)));
+      if (!employees.length) return res.json({ date, late: [], total: 0 });
+      const holidayMapsByGroup = await getHolidayMapsByGroup(queryDB, date, date);
+      const branchTypeByUserId = await getEmployeeBranchTypeMap(queryDB);
+      const policy = await getLatePolicyForMonth(await salaryMonthOf(date));
+      const { lateDatesByEmployee, extremeLateDatesByEmployee } = await computeLateDatesByEmployee(
+        employees, date, date, holidayMapsByGroup, branchTypeByUserId, policy
+      );
+      const late = employees
+        .map((e: any) => ({
+          e,
+          kind: (extremeLateDatesByEmployee.get(Number(e.id)) || []).includes(date) ? "extreme" : (lateDatesByEmployee.get(Number(e.id)) || []).includes(date) ? "delay" : null
+        }))
+        .filter((x: any) => x.kind);
+      // First arrival for each of them (app check-in or device punch).
+      const userIds = late.map((x: any) => x.e.user_id).filter(Boolean);
+      const pins = late.map((x: any) => x.e.zk_device_pin).filter(Boolean);
+      const firstIn = new Map<number, string>();
+      const keep = (id: number, t: any) => { const v = String(t || ""); if (v && (!firstIn.has(id) || v < firstIn.get(id)!)) firstIn.set(id, v); };
+      if (userIds.length) {
+        for (const r of await queryDB(`SELECT user_id, MIN(check_in_at) AS t FROM attendance WHERE attendance_date = ? AND check_in_at IS NOT NULL AND user_id IN (${userIds.map(() => "?").join(",")}) GROUP BY user_id`, [date, ...userIds]))
+          keep(Number(r.user_id), r.t);
+      }
+      if (pins.length) {
+        const byPin = new Map<string, number>(late.filter((x: any) => x.e.zk_device_pin && x.e.user_id).map((x: any) => [String(x.e.zk_device_pin), Number(x.e.user_id)]));
+        for (const r of await queryDB(`SELECT device_user_pin, MIN(punch_time) AS t FROM zk_attendance_logs WHERE DATE(punch_time) = ? AND device_user_pin IN (${pins.map(() => "?").join(",")}) GROUP BY device_user_pin`, [date, ...pins]).catch(() => []))
+          if (byPin.has(String(r.device_user_pin))) keep(byPin.get(String(r.device_user_pin))!, r.t);
+      }
+      res.json({
+        date,
+        total: employees.length,
+        shift_start: policy.shift_start_time || null,
+        late: late.map((x: any) => ({
+          employee_id: x.e.id, name: x.e.name, employee_code: x.e.employee_code || null, designation: x.e.designation || null,
+          department: x.e.department || null, kind: x.kind, first_in: x.e.user_id ? firstIn.get(Number(x.e.user_id)) || null : null
+        }))
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to load the late list." });
     }
   });
 
