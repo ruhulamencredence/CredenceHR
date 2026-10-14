@@ -38,6 +38,7 @@ import { DataImport } from './DataImport';
 import { DocumentVaultPanel } from './DocumentVaultPanel';
 import { HROperationsPanel } from './HROperationsPanel';
 import { TaskManagement } from './TaskManagement';
+import { TargetReports } from './TargetReports';
 import { MobileBillAdmin } from './MobileBillAdmin';
 import { AdminDashboard } from './AdminDashboard';
 import { UserAccessDrawer, UserAccessChips, userInitials, ROLE_BADGE, ROLE_LABEL } from './UserAccessDrawer';
@@ -70,7 +71,7 @@ import { ADMIN_TAB_KEYS, adminUrlEnabled, adminTabToPath, adminPathToTab } from 
 // listed under one of these falls into "Other" automatically.
 const MODULE_ACCESS_GROUPS: { label: string; keys: AdminModuleKey[] }[] = [
   { label: 'PEPM Manage', keys: ['reports', 'mprs', 'imports', 'recycle', 'editlog'] },
-  { label: 'HR', keys: ['approvals', 'notices', 'holidays', 'leave_applications', 'departments', 'task_management', 'mobile_bill'] },
+  { label: 'HR', keys: ['approvals', 'notices', 'holidays', 'leave_applications', 'departments', 'task_management', 'mobile_bill', 'target_reports'] },
   { label: 'HR - Attendance', keys: ['attendance', 'attendance_reports', 'office_attendance'] },
   { label: 'HR - Claims/Bill/Disbursement', keys: ['claims', 'conveyance', 'disbursement'] },
   { label: 'HR - Employee', keys: ['employees', 'tracking', 'asset_management', 'vehicle_management', 'vehicle_maintainer'] },
@@ -82,7 +83,7 @@ const MODULE_ACCESS_GROUPS: { label: string; keys: AdminModuleKey[] }[] = [
     keys: ADMIN_MODULES.map((m) => m.key).filter(
       (key) => ![
         'reports', 'mprs', 'imports', 'recycle', 'editlog',
-        'approvals', 'notices', 'holidays', 'leave_applications', 'departments', 'task_management', 'mobile_bill',
+        'approvals', 'notices', 'holidays', 'leave_applications', 'departments', 'task_management', 'mobile_bill', 'target_reports',
         'attendance', 'attendance_reports', 'office_attendance',
         'claims', 'conveyance', 'disbursement',
         'employees', 'tracking', 'asset_management', 'vehicle_management', 'vehicle_maintainer',
@@ -492,7 +493,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     tab === 'permanent_delete_log' || tab === 'companies' || tab === 'devices' || tab === 'active_users' ? isSuperAdmin :
     isSuperAdmin || visibleModules.includes(tab as AdminModuleKey);
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'reports_insights' | 'data_import' | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'bill_claim_policy' | 'disbursement' | 'holidays' | 'asset_management' | 'vehicle_management' | 'permanent_delete_log' | 'companies' | 'devices' | 'active_users' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'hr_operations' | 'task_management' | 'mobile_bill'>(
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'reports_insights' | 'data_import' | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'bill_claim_policy' | 'disbursement' | 'holidays' | 'asset_management' | 'vehicle_management' | 'permanent_delete_log' | 'companies' | 'devices' | 'active_users' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'hr_operations' | 'task_management' | 'mobile_bill' | 'target_reports'>(
     () => {
       // Restores whichever tab this Admin was last looking at — see the
       // "pull down to reload" note in App.tsx: since a reload now has to be
@@ -702,6 +703,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [mobileBillAccessEnabled, setMobileBillAccessEnabled] = useState(false);
   const [serviceBookAccessEnabled, setServiceBookAccessEnabled] = useState(false);
   const [loanRequestAccessEnabled, setLoanRequestAccessEnabled] = useState(false);
+  const [targetsAccessEnabled, setTargetsAccessEnabled] = useState(false);
   const [aiAssistantEnabled, setAiAssistantEnabled] = useState(true);
   const [assistantSupportEnabled, setAssistantSupportEnabled] = useState(false);
   const [groupDashboardEnabled, setGroupDashboardEnabled] = useState(false);
@@ -731,6 +733,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     setMobileBillAccessEnabled(!!u.can_view_mobile_bill);
     setServiceBookAccessEnabled(!!u.can_view_service_book);
     setLoanRequestAccessEnabled(!!u.can_view_loan_request);
+    setTargetsAccessEnabled(!!u.can_view_targets);
     setAiAssistantEnabled(u.can_use_ai_assistant !== false);
     setAssistantSupportEnabled(!!u.can_handle_assistant_support);
     setGroupDashboardEnabled(!!u.can_view_group_dashboard);
@@ -1157,6 +1160,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         });
         const lrData = await lrRes.json();
         if (!lrRes.ok) throw new Error(lrData.error || 'Failed to update Loan / Advance Request access');
+      }
+
+      if (targetsAccessEnabled !== !!managingModulesFor.can_view_targets) {
+        const tgRes = await fetch(apiUrl(`/api/users/${managingModulesFor.id}/targets-access`), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ can_view_targets: targetsAccessEnabled })
+        });
+        const tgData = await tgRes.json();
+        if (!tgRes.ok) throw new Error(tgData.error || 'Failed to update My Targets access');
       }
 
       if (aiAssistantEnabled !== (managingModulesFor.can_use_ai_assistant !== false)) {
@@ -2063,7 +2076,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // Tabs that read none of the shared lists.
   const SELF_CONTAINED_TABS = new Set<string>([
     'dashboard', 'reports_insights', 'data_import', 'hr_analytics', 'exit_offboarding', 'performance_management',
-    'recruitment', 'grievance_disciplinary', 'document_vault', 'hr_operations', 'task_management', 'mobile_bill',
+    'recruitment', 'grievance_disciplinary', 'document_vault', 'hr_operations', 'task_management', 'mobile_bill', 'target_reports',
     'devices', 'active_users', 'companies'
   ]);
   const ALL_SHARED: SharedKey[] = ['projects', 'branches', 'mprNumbers', 'entries', 'users', 'people', 'budgets', 'permissions', 'departments'];
@@ -5001,6 +5014,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       {activeTab === 'document_vault' && <DocumentVaultPanel token={token} />}
       {activeTab === 'hr_operations' && <HROperationsPanel token={token} canGrievance={canSee('grievance_disciplinary')} />}
       {activeTab === 'task_management' && <TaskManagement token={token} user={user} />}
+      {activeTab === 'target_reports' && <TargetReports token={token} user={user} />}
       {activeTab === 'mobile_bill' && <MobileBillAdmin token={token} />}
 
       {/* TAB: PERMANENT DELETE LOG — Superadmin-only (see GET
@@ -7946,6 +7960,30 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   <span
                     className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
                       loanRequestAccessEnabled ? 'translate-x-[18px]' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </label>
+              <label className="flex items-center justify-between gap-3 p-3.5 mb-3 bg-violet-50 border border-violet-200 rounded-xl cursor-pointer">
+                <span>
+                  <span className="text-sm font-semibold text-slate-900 block">Also allow My Targets</span>
+                  <span className="text-[11px] text-slate-500">
+                    Self Service → My Targets: monthly / yearly targets with tasks, progress and deadline. A supervisor
+                    also gets the Team tab to give targets to their people. Off by default.
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setTargetsAccessEnabled((v) => !v)}
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${
+                    targetsAccessEnabled ? 'bg-emerald-500' : 'bg-slate-300'
+                  }`}
+                  title={targetsAccessEnabled ? 'On — click to turn off' : 'Off — click to turn on'}
+                  aria-label="Also allow My Targets"
+                >
+                  <span
+                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                      targetsAccessEnabled ? 'translate-x-[18px]' : 'translate-x-1'
                     }`}
                   />
                 </button>

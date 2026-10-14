@@ -208,6 +208,16 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
             }
             window.dispatchEvent(new CustomEvent('credence:open-task', { detail: { title: alert.title } }));
           }
+        : alert.type === 'target'
+        ? // My Targets, with this target open (App.tsx, MyTargets.tsx).
+          () => {
+            try {
+              if (alert.related_id) sessionStorage.setItem('open_target_id', String(alert.related_id));
+            } catch {
+              // storage unavailable — the page opens without the target
+            }
+            window.dispatchEvent(new CustomEvent('credence:open-target'));
+          }
         : alert.type === 'payroll_approval' && alert.title !== 'Salary Paid'
         ? // Audit / Accounts / HR: Payroll -> Approval (App.tsx).
           () => window.dispatchEvent(new CustomEvent('credence:open-payroll-approval'))

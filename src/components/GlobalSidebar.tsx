@@ -49,7 +49,7 @@ interface GlobalSidebarProps {
   onGoToUserClaims: (target: 'movementClaims' | 'conveyanceBill') => void;
   // Everyday employee self-service items — not Admin-gated, shown to every
   // account regardless of role/module access.
-  onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans') => void;
+  onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets') => void;
   // Admin Panel's own Movement Claims / Conveyance Bill Claim review tabs —
   // separate feature from onGoToUserClaims above, gated by module_permissions
   // like every other Admin Panel module.
@@ -360,6 +360,11 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   if (isSuperAdmin || !!user.can_view_loan_request) {
     selfServiceItems.push({ key: 'myLoans', label: 'My Loan / Advance', icon: HandCoins, onClick: () => onGoToSelfServiceTab('myLoans') });
   }
+  // My Targets (MyTargets.tsx) — monthly / yearly targets and their tasks;
+  // a supervisor's Team tab too. users.can_view_targets.
+  if (isSuperAdmin || !!user.can_view_targets) {
+    selfServiceItems.push({ key: 'myTargets', label: 'My Targets', icon: Target, onClick: () => onGoToSelfServiceTab('myTargets') });
+  }
   if (siteSupervisor.teams > 0) {
     selfServiceItems.push({ key: 'teamAttendance', label: 'Team Attendance', icon: ClipboardCheck, onClick: () => onGoToSelfServiceTab('teamAttendance') });
   }
@@ -474,6 +479,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     { key: 'holidays', label: 'Holidays', icon: Calendar, onClick: () => onGoToAdminModule('holidays') },
     { key: 'task_management', label: 'Task Management', icon: ClipboardList, onClick: () => onGoToAdminModule('task_management') },
     { key: 'mobile_bill', label: 'Mobile Bill', icon: Smartphone, onClick: () => onGoToAdminModule('mobile_bill') },
+    { key: 'target_reports', label: 'Target Reports', icon: Target, onClick: () => onGoToAdminModule('target_reports') },
     ...departmentsItem,
   ].filter((i) => canSeeModule(i.key as AdminModuleKey));
 
@@ -629,7 +635,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   const isItem = (e: Entry): e is NavItem => !('heading' in e);
   const makeGroups = (list: MenuGroup[]) => list.filter((g) => g.entries.some(isItem));
   const selfGroups = makeGroups([
-    { key: 'g_work', label: 'Work & Approvals', icon: ListChecks, entries: pick('myTasks', 'approveApplications', 'teamAttendance') },
+    { key: 'g_work', label: 'Work & Approvals', icon: ListChecks, entries: pick('myTasks', 'myTargets', 'approveApplications', 'teamAttendance') },
     { key: 'g_pepm_op', label: 'PEPM Operation', icon: Briefcase, entries: pick('entry', 'jobs', 'entryDetails', 'jobEdit') },
     { key: 'g_leave_att', label: 'Leave & Attendance', icon: CalendarClock, entries: pick('leaveApplication', 'timesheet') },
     { key: 'g_requests', label: 'Requests & Claims', icon: Wallet, entries: pick('userMovementClaims', 'userConveyanceClaims', 'vehicleManagement', 'assetManagement', 'myMobileSim', 'myLoans', 'myLetters') },
@@ -658,7 +664,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
       entries: pick(
         { heading: 'Daily' }, 'task_management', 'notices', 'approvals',
         { heading: 'Employee records' }, 'hr_operations_actions', 'hr_operations_grievance', 'hr_operations_letters', 'hr_operations_service_book', 'hr_operations_onboarding', 'hr_operations_increments',
-        { heading: 'Reports' }, 'hr_operations_reports', 'hr_operations',
+        { heading: 'Reports' }, 'hr_operations_reports', 'hr_operations', 'target_reports',
         { heading: 'Facilities' }, 'asset_management', 'vehicle_management', 'mobile_bill',
         { heading: 'Settings' }, 'hr_operations_settings'
       )
