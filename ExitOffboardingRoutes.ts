@@ -414,6 +414,102 @@ export function registerExitOffboardingRoutes(app: Express, deps: ExitOffboardin
     }
   });
 
+  // Offboarding pending list (Exit / Offboarding -> Pending): every exit not
+  // finished yet — still pending / in clearance, or settled with the Full &
+  // Final not paid — with what each one is still waiting on: open clearance
+  // items (and who they sit with), the settlement, the days to / past the
+  // last working day, and — only with the "exit_dues" layer — the assets,
+  // SIMs and loans still open in other modules. Plus the counts and the open
+  // clearance items by department.
+  app.get("/api/exit-requests/pending", authenticateToken, requireAdmin, requireModule("exit_offboarding"), async (req: any, res) => {
+    try {
+      const withDues = await hasModuleLayer(req.user, "exit_offboarding", "exit_dues");
+      const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Dhaka" }).format(new Date());
+      const dayDiff = (to: string) => Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86400000);
+      const ymd = (v: any) => {
+        if (!v) return null;
+        if (v instanceof Date) return isNaN(v.getTime()) ? null : `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, "0")}-${String(v.getDate()).padStart(2, "0")}`;
+        const s = String(v).slice(0, 10);
+        return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+      };
+      const [rows, emps]: [any, any] = await Promise.all([
+        queryDB("SELECT * FROM exit_requests"),
+        queryDB("SELECT user_id, employee_id, department, designation FROM all_employees WHERE user_id IS NOT NULL")
+      ]);
+      const empOf = new Map<number, any>((emps || []).map((e: any) => [Number(e.user_id), e]));
+      const list: any[] = [];
+      for (const row of rows || []) {
+        if (row.status === "cancelled") continue;
+        const x = await serializeExit(row);
+        const paid = x.settlement?.status === "paid";
+        if (x.status === "settled" && paid) continue;
+        const lwd = ymd(x.last_working_day);
+        const days = lwd ? dayDiff(lwd) : null;
+        const openItems = x.clearance_items.filter((c: any) => !c.is_cleared);
+        const dues = withDues ? await collectExitDues(queryDB, x.user_id, await settlementOf(x.id)).catch(() => [] as ExitDue[]) : [];
+        const blocking = dues.filter((d) => d.blocking);
+        const emp = empOf.get(x.user_id);
+        // Short "still waiting on" labels, in the order HR works them.
+        const pending: { key: string; label: string; tone: "red" | "amber" | "slate" }[] = [];
+        if (x.status === "pending") pending.push({ key: "review", label: "Not accepted yet — start clearance", tone: "amber" });
+        for (const c of openItems) pending.push({ key: `clearance:${c.id}`, label: `${c.department} clearance${c.approver_name ? ` (${c.approver_name})` : " (unassigned)"}`, tone: days !== null && days < 0 ? "red" : "amber" });
+        for (const d of blocking) pending.push({ key: d.key, label: d.kind === "loan" ? `${d.label} — ৳${(d.amount || 0).toLocaleString("en-US")} not in settlement` : `${d.kind === "sim" ? "SIM" : "Asset"}: ${d.label}`, tone: "red" });
+        if (!x.settlement) pending.push({ key: "settlement", label: "Settlement not prepared", tone: "slate" });
+        else if (!paid) pending.push({ key: "settlement", label: `Settlement ${x.settlement.status} — not paid`, tone: "slate" });
+        list.push({
+          id: x.id,
+          user_id: x.user_id,
+          name: x.user_name,
+          employee_code: emp?.employee_id || null,
+          department: emp?.department || null,
+          designation: emp?.designation || null,
+          exit_type: x.exit_type,
+          status: x.status,
+          notice_date: ymd(x.notice_date),
+          last_working_day: lwd,
+          days_left: days,
+          clearance_total: x.clearance_items.length,
+          clearance_done: x.clearance_items.length - openItems.length,
+          open_clearance: openItems.map((c: any) => ({ id: c.id, department: c.department, item_label: c.item_label, approver_name: c.approver_name })),
+          settlement_status: x.settlement?.status || null,
+          net_payable: x.settlement ? x.settlement.net_payable : null,
+          blocking_dues: blocking.map((d) => ({ key: d.key, kind: d.kind, label: d.label, amount: d.amount })),
+          other_dues: dues.filter((d) => !d.blocking && !d.added).length,
+          pending
+        });
+      }
+      // Soonest last working day first; no date last.
+      list.sort((a, b) => (a.days_left ?? 1e9) - (b.days_left ?? 1e9) || a.id - b.id);
+      const byDept = new Map<string, { department: string; open: number; approvers: Set<string>; exits: { id: number; name: string }[] }>();
+      for (const e of list) {
+        for (const c of e.open_clearance) {
+          const d = byDept.get(c.department) || { department: c.department, open: 0, approvers: new Set<string>(), exits: [] };
+          d.open += 1;
+          d.approvers.add(c.approver_name || "Unassigned");
+          d.exits.push({ id: e.id, name: e.name });
+          byDept.set(c.department, d);
+        }
+      }
+      res.json({
+        today,
+        with_dues: withDues,
+        summary: {
+          open: list.length,
+          not_accepted: list.filter((e) => e.status === "pending").length,
+          leaving_7_days: list.filter((e) => e.days_left !== null && e.days_left >= 0 && e.days_left <= 7).length,
+          past_last_day: list.filter((e) => e.days_left !== null && e.days_left < 0 && e.status !== "settled").length,
+          clearance_open: list.reduce((t, e) => t + e.open_clearance.length, 0),
+          settlement_unpaid: list.filter((e) => e.settlement_status !== "paid").length,
+          blocking_dues: withDues ? list.reduce((t, e) => t + e.blocking_dues.length, 0) : null
+        },
+        by_department: [...byDept.values()].map((d) => ({ department: d.department, open: d.open, approvers: [...d.approvers], exits: d.exits })).sort((a, b) => b.open - a.open),
+        exits: list
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // POST: any authenticated account may submit their OWN resignation
   // (user_id forced to req.user.id, exit_type forced to 'resignation');
   // initiating a termination for someone ELSE, or backdating a different

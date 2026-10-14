@@ -4,6 +4,7 @@ import { LogOut, Plus, X, CheckCircle2, AlertTriangle, ChevronDown, ChevronUp, S
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
 import { ExitDuesCard, DuesBlockedModal, type ExitDue } from './ExitDuesCard';
+import { ExitPendingList } from './ExitPendingList';
 import { saveClearanceCertificatePdf, saveSettlementSheetPdf, type ExitDocuments } from '../lib/exitDocuments';
 
 interface ExitOffboardingPanelProps {
@@ -101,6 +102,13 @@ export const ExitOffboardingPanel: React.FC<ExitOffboardingPanelProps> = ({ toke
     }
   };
   const [duesRefresh, setDuesRefresh] = useState(0);
+  // Reloads the Pending list after anything here changes.
+  const [pendingRefresh, setPendingRefresh] = useState(0);
+  const openFromPending = (exitId: number) => {
+    setExpandedId(exitId);
+    openSettlement(exitId);
+    setTimeout(() => document.getElementById(`exit-request-${exitId}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+  };
   const [duesBlocked, setDuesBlocked] = useState<{ message: string; items: ExitDue[] } | null>(null);
   useEffect(() => {
     fetch(apiUrl('/api/exit-dues/access'), { headers: authHeaders })
@@ -199,6 +207,7 @@ export const ExitOffboardingPanel: React.FC<ExitOffboardingPanelProps> = ({ toke
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to create exit request');
       setRequests((prev) => [data, ...prev]);
+      setPendingRefresh((n) => n + 1);
       setShowNew(false);
       setNewUserId('');
       setNewReason('');
@@ -226,6 +235,7 @@ export const ExitOffboardingPanel: React.FC<ExitOffboardingPanelProps> = ({ toke
       }
       if (!res.ok) throw new Error(data.error || 'Failed to update status');
       setRequests((prev) => prev.map((r) => (r.id === id ? data : r)));
+      setPendingRefresh((n) => n + 1);
     } catch (err: any) {
       setError(err.message || 'Failed to update status');
     }
@@ -246,6 +256,7 @@ export const ExitOffboardingPanel: React.FC<ExitOffboardingPanelProps> = ({ toke
           r.id === exitId ? { ...r, clearance_items: r.clearance_items.map((ci) => (ci.id === item.id ? data : ci)) } : r
         )
       );
+      setPendingRefresh((n) => n + 1);
     } catch (err: any) {
       setError(err.message || 'Failed to update clearance item');
     }
@@ -303,6 +314,7 @@ export const ExitOffboardingPanel: React.FC<ExitOffboardingPanelProps> = ({ toke
       }
       if (!res.ok) throw new Error(data.error || 'Failed to save settlement');
       setRequests((prev) => prev.map((r) => (r.id === exitId ? { ...r, settlement: data, status: markStatus === 'paid' ? 'settled' : r.status } : r)));
+      setPendingRefresh((n) => n + 1);
     } catch (err: any) {
       setError(err.message || 'Failed to save settlement');
     } finally {
@@ -458,6 +470,8 @@ export const ExitOffboardingPanel: React.FC<ExitOffboardingPanelProps> = ({ toke
         </div>
       )}
 
+      <ExitPendingList token={token} refreshKey={pendingRefresh} onOpen={openFromPending} />
+
       {error && (
         <div className="mx-6 mt-4 px-4 py-2.5 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl flex items-center gap-2">
           <AlertTriangle className="w-3.5 h-3.5 shrink-0" /> {error}
@@ -475,7 +489,7 @@ export const ExitOffboardingPanel: React.FC<ExitOffboardingPanelProps> = ({ toke
             const expanded = expandedId === r.id;
             const draft = settlementDrafts[r.id];
             return (
-              <div key={r.id} className="rounded-xl border border-slate-200 overflow-hidden">
+              <div key={r.id} id={`exit-request-${r.id}`} className="rounded-xl border border-slate-200 overflow-hidden scroll-mt-4">
                 <button
                   type="button"
                   onClick={() => {
@@ -574,7 +588,10 @@ export const ExitOffboardingPanel: React.FC<ExitOffboardingPanelProps> = ({ toke
                         exitId={r.id}
                         settlementPaid={r.settlement?.status === 'paid'}
                         refreshKey={duesRefresh}
-                        onAdded={() => openSettlement(r.id, true)}
+                        onAdded={() => {
+                          openSettlement(r.id, true);
+                          setPendingRefresh((n) => n + 1);
+                        }}
                       />
                     )}
 
