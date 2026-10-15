@@ -699,6 +699,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [leaveApplicationAccessEnabled, setLeaveApplicationAccessEnabled] = useState(false);
   // Chat audio/video calls (CallLayer.tsx) — off by default.
   const [callsAccessEnabled, setCallsAccessEnabled] = useState(false);
+  // Credence Mail (MailRoutes.ts) — off by default.
+  const [mailAccessEnabled, setMailAccessEnabled] = useState(false);
   const [tasksAccessEnabled, setTasksAccessEnabled] = useState(false);
   const [mobileBillAccessEnabled, setMobileBillAccessEnabled] = useState(false);
   const [serviceBookAccessEnabled, setServiceBookAccessEnabled] = useState(false);
@@ -730,6 +732,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     setTimesheetAccessEnabled(!!u.can_view_timesheet);
     setLeaveApplicationAccessEnabled(!!u.can_view_leave_application || !!u.can_view_my_leave);
     setCallsAccessEnabled(!!u.can_use_calls);
+    setMailAccessEnabled(!!u.can_use_mail);
     setTasksAccessEnabled(!!u.can_view_tasks);
     setMobileBillAccessEnabled(!!u.can_view_mobile_bill);
     setServiceBookAccessEnabled(!!u.can_view_service_book);
@@ -1212,6 +1215,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         });
         const caData = await caRes.json();
         if (!caRes.ok) throw new Error(caData.error || 'Failed to update Calls access');
+      }
+
+      if (mailAccessEnabled !== !!managingModulesFor.can_use_mail) {
+        const maRes = await fetch(apiUrl(`/api/users/${managingModulesFor.id}/mail-access`), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ can_use_mail: mailAccessEnabled })
+        });
+        const maData = await maRes.json();
+        if (!maRes.ok) throw new Error(maData.error || 'Failed to update Mail access');
       }
 
       setManagingModulesFor(null);
@@ -7901,6 +7914,29 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   <span
                     className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
                       callsAccessEnabled ? 'translate-x-[18px]' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </label>
+              <label className="flex items-center justify-between gap-3 p-3.5 mb-3 bg-indigo-50 border border-indigo-200 rounded-xl cursor-pointer">
+                <span>
+                  <span className="text-sm font-semibold text-slate-900 block">Also allow Credence Mail</span>
+                  <span className="text-[11px] text-slate-500">
+                    Lets this {managingModulesFor.role === 'user' ? 'User' : 'Admin'} connect their own company mailbox
+                    (IMAP/SMTP) and read and send mail inside CredenceHR. Off by default.
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setMailAccessEnabled((v) => !v)}
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${
+                    mailAccessEnabled ? 'bg-emerald-500' : 'bg-slate-300'
+                  }`}
+                  title={mailAccessEnabled ? 'On — click to turn off' : 'Off — click to turn on'}
+                >
+                  <span
+                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                      mailAccessEnabled ? 'translate-x-[18px]' : 'translate-x-1'
                     }`}
                   />
                 </button>

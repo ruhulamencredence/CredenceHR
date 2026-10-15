@@ -48,6 +48,7 @@ import { registerActiveUsersRoutes, ensureActiveUsersSchema, touchSession } from
 import { registerSessionSecurityRoutes, checkSession, sessionEndMessage } from "./SessionSecurity";
 import { registerDataImportRoutes } from "./DataImportRoutes";
 import { registerCallRoutes, setupCallSocket } from "./CallRoutes";
+import { ensureMailSchema, registerMailRoutes } from "./MailRoutes";
 import { registerWebPushRoutes, ensureWebPushSchema } from "./WebPushService";
 import { sendPushToUserIds } from "./PushNotificationService";
 import { registerEmployeeDirectoryRoutes } from "./EmployeeDirectoryRoutes";
@@ -214,6 +215,8 @@ async function initDB() {
     isMySQLConnected = true;
     connection.release();
     await ensureSchemaMigrations(dbPool, { EMPLOYEE_EXT_FIELD_DDL, getApprovalChain, queryDB });
+    // Credence Mail tables (MailRoutes.ts).
+    await ensureMailSchema(dbPool);
     await ensureZkSchema(dbPool);
     // ZKTeco polling + daily pulls: one process only (jobRunner.ts).
     if (runsBackgroundJobs()) startZkSyncSchedule(dbPool);
@@ -2879,6 +2882,8 @@ async function startServer() {
   // Chat audio/video calls — WebRTC signaling on the same socket (CallRoutes.ts).
   registerCallRoutes(app, { authenticateToken, queryDB });
   setupCallSocket(io, { queryDB });
+  // Credence Mail — users' own mailboxes over IMAP/SMTP (MailRoutes.ts).
+  registerMailRoutes(app, io, { authenticateToken, queryDB, isMySQL: () => !!(isMySQLConnected && dbPool) });
 
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({
