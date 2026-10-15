@@ -957,6 +957,23 @@ export function registerAssetManagementRoutes(app: Express, deps: AssetManagemen
       }
       const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
       const rows = await queryDB(`SELECT * FROM assets ${where} ORDER BY created_at DESC`, params);
+      // ?with_holder=1: who holds each assigned asset now (its open
+      // assignment) — the Credence Assistant's "who has LAP-0042".
+      if (String(req.query.with_holder || "") === "1") {
+        const open: any[] = await queryDB(
+          `SELECT aa.asset_id, aa.employee_user_id, aa.assigned_date, aa.acknowledged_at, u.name AS holder_name
+           FROM asset_assignments aa LEFT JOIN users u ON u.id = aa.employee_user_id
+           WHERE aa.returned_date IS NULL ORDER BY aa.id DESC`
+        );
+        const byAsset = new Map<number, any>();
+        for (const a of open) if (!byAsset.has(Number(a.asset_id))) byAsset.set(Number(a.asset_id), a);
+        return res.json(
+          rows.map((r: any) => {
+            const h = byAsset.get(Number(r.id));
+            return { ...r, holder_user_id: h?.employee_user_id ?? null, holder_name: h?.holder_name ?? null, assigned_date: h?.assigned_date ?? null, acknowledged: h ? !!h.acknowledged_at : null };
+          })
+        );
+      }
       res.json(rows);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
