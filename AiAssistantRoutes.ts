@@ -1487,6 +1487,59 @@ const TOOLS: Tool[] = [
     }
   },
   {
+    name: "daily_hr_report",
+    description:
+      "Today's HR report in one answer (\"ajker HR report\", daily report): headcount, attendance (present / absent), who came late, who is on leave, " +
+      "pending and stuck approvals, exits, onboarding, interviews and the dashboard's coming dates. Each part only when this account may see it. " +
+      "Optional date YYYY-MM-DD for the attendance / late / leave parts (default today).",
+    params: { date: { type: "string", description: "YYYY-MM-DD; default today." } },
+    available: (c) => DAILY_PARTS.some((p) => toolAvailable(TOOLS.find((t) => t.name === p.tool)!, c)),
+    run: async (c, args) => {
+      const date = /^\d{4}-\d{2}-\d{2}$/.test(String(args?.date || "")) ? String(args.date) : c.today;
+      // Every part is the same tool the person could ask on its own, so the
+      // same module checks (and the APIs' own 403s) decide what is in it.
+      const parts = await Promise.all(
+        DAILY_PARTS.map(async (p) => {
+          const tool = TOOLS.find((t) => t.name === p.tool)!;
+          if (!toolAvailable(tool, c)) return null;
+          try {
+            const r = await tool.run(c, p.args(date));
+            return r.ok ? { p, r } : null;
+          } catch {
+            return null;
+          }
+        })
+      );
+      const got = parts.filter((x): x is { p: (typeof DAILY_PARTS)[number]; r: ToolResult } => !!x && !!x.r.text && !(x.p.skipEmpty && x.p.skipEmpty(x.r)));
+      if (!got.length) return NO_ACCESS;
+      const body = got.map(({ p, r }) => {
+        // Lines whose every figure is 0 ("জন্মদিন (৭ দিনে): ০ জন") say nothing.
+        const allZero = (l: string) => { const n = toAsciiDigits(l).replace(/\(\d+ দিনে\)/g, "").match(/\d+/g); return !!n && n.every((x) => x === "0"); };
+        const lines = r.text.split("\n").filter((l) => l.trim() && !/^বিস্তারিত চাইলে|^\*\*HR Dashboard/.test(l) && !(p.dropPending && /^অপেক্ষমাণ:/.test(l)) && !(p.dropZeros && allZero(l)));
+        if (!lines.length) return `**${p.title}**\nনতুন কিছু নেই।`;
+        return `**${p.title}**\n` + lines.slice(0, 9).join("\n") + (lines.length > 9 ? "\n…" : "");
+      });
+      const rows: (string | number | null)[][] = [];
+      for (const { p, r } of got) {
+        if (!r.report) continue;
+        for (const row of r.report.rows) {
+          const [, first, ...rest] = row;
+          rows.push([p.title, first === null || first === undefined ? "" : String(first), rest.filter((v) => v !== null && v !== undefined && v !== "").join(" · ")]);
+        }
+      }
+      const seen = new Set<string>();
+      const actions = got.flatMap(({ r }) => r.actions || []).filter((a) => (seen.has(a.nav) ? false : (seen.add(a.nav), true))).slice(0, 4);
+      return {
+        ok: true,
+        text: `📋 **HR রিপোর্ট — ${bnDate(date)}**\n\n` + body.join("\n\n") +
+          (DAILY_PARTS.some((p) => !toolAvailable(TOOLS.find((t) => t.name === p.tool)!, c)) ? "\n\n_আপনার account-এ যে অংশগুলো দেখার অনুমতি আছে, শুধু সেগুলো দেখানো হয়েছে।_" : ""),
+        data: { date, parts: got.map(({ p, r }) => ({ part: p.title, facts: r.data })) },
+        actions,
+        report: rows.length ? report(`Daily HR Report — ${enDate(date)}`, `HR-Report-${date}`, ["Section", "Name / Item", "Detail"], rows, [["Date", enDate(date)], ["Sections", got.map(({ p }) => p.title).join(", ")]]) : undefined
+      };
+    }
+  },
+  {
     name: "on_leave",
     description: "HR: who is on approved leave on a date (default today), and whose leave on that date is still pending. Optional date YYYY-MM-DD.",
     params: { date: { type: "string", description: "YYYY-MM-DD; omit for today." } },
@@ -1783,6 +1836,22 @@ const TOOLS: Tool[] = [
 
 const toolAvailable = (t: Tool, c: Ctx) => !t.available || t.available(c);
 
+// The parts of the daily HR report (daily_hr_report), in order. Parts that
+// only matter when something is there are left out when empty.
+const DAILY_PARTS: { tool: string; title: string; args: (date: string) => any; skipEmpty?: (r: ToolResult) => boolean; dropPending?: boolean; dropZeros?: boolean }[] = [
+  { tool: "headcount", title: "লোকবল", args: () => ({}) },
+  { tool: "attendance_on_date", title: "হাজিরা", args: (date) => ({ date }) },
+  { tool: "late_on_date", title: "দেরিতে এসেছেন", args: (date) => ({ date }) },
+  { tool: "on_leave", title: "ছুটিতে", args: (date) => ({ date }) },
+  { tool: "admin_pending_work", title: "অপেক্ষমাণ অনুমোদন", args: () => ({}) },
+  { tool: "stuck_applications", title: "৩+ দিন আটকে আছে", args: () => ({ days: 3 }), skipEmpty: (r) => !r.data?.total },
+  { tool: "exits_overview", title: "Exit / Offboarding", args: () => ({}), skipEmpty: (r) => !r.data?.exits?.length },
+  { tool: "onboarding_overview", title: "Onboarding", args: () => ({}) },
+  { tool: "recruitment_overview", title: "Recruitment", args: () => ({}), dropZeros: true,
+    skipEmpty: (r) => !r.data?.open_posts?.length && !r.data?.interviews_this_week?.length && !r.data?.offers_waiting?.length },
+  { tool: "hr_dashboard", title: "সামনে যা আছে", args: () => ({ section: "summary" }), dropPending: true, dropZeros: true }
+];
+
 // ---------------------------------------------------------------------------
 // Local engine
 // ---------------------------------------------------------------------------
@@ -1907,6 +1976,8 @@ const INTENTS: Intent[] = [
   { tool: "document_vault_overview", keys: ["document vault", "ডকুমেন্ট ভল্ট", "document expire", "kar document", "কার document", "কার ডকুমেন্ট", "sign baki", "সই বাকি", "signature baki", "unsigned document", "passport expire", "পাসপোর্টের মেয়াদ", "er document", "এর document", "-এর ডকুমেন্ট"],
     args: (t) => { const n = /(\d{1,3})\s*(?:din|দিন|days?)/.exec(toAsciiDigits(t))?.[1]; return { name: subjectBefore(t), days: n ? Number(n) : undefined }; } },
   { tool: "vehicle_overview", keys: ["vehicle", "ভেহিকেল", "gari koyta", "কয়টা গাড়ি", "gari khali", "খালি গাড়ি", "kon gari", "কোন গাড়ি", "ride request", "ajker ride", "আজকের ride", "fleet", "driver koi", "গাড়ি কোথায়", "gari kothay", "sobar ride", "ride pending"] },
+  { tool: "daily_hr_report", keys: ["hr report", "hr রিপোর্ট", "এইচআর রিপোর্ট", "hr-এর রিপোর্ট", "daily report", "daily hr", "dainik report", "দৈনিক রিপোর্ট", "ajker report", "আজকের রিপোর্ট", "ajker hr", "আজকের hr", "আজকের এইচআর", "today's report", "todays report", "today report", "today's hr", "din er report", "দিনের রিপোর্ট", "ajker summary", "আজকের সারসংক্ষেপ", "ajker update", "আজকের আপডেট"],
+    args: (t, c) => { const d = /(\d{4}-\d{2}-\d{2})/.exec(t)?.[1]; return d ? { date: d } : hasAny(t, ["gotokal", "গতকাল", "yesterday", "kalker", "কালকের"]) ? { date: addDays(c.today, -1) } : {}; } },
   { tool: "headcount", keys: ["headcount", "হেডকাউন্ট", "মোট কর্মী", "কতজন কর্মী", "koto jon employee", "kotojon employee", "total employee", "how many employee", "কর্মী সংখ্যা"] }
 ];
 
