@@ -34,6 +34,7 @@ import type { Express } from "express";
 import type { AlertType } from "./Alerts";
 import { loadSettings, toDate, num } from "./HROperationsRoutes";
 import { requiredDocuments, missingDocuments, rowsFor } from "./HrOps360Routes";
+import { runsBackgroundJobs } from "./jobRunner";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 
@@ -511,6 +512,8 @@ export function registerInfoRequestRoutes(app: Express, deps: InfoRequestRouteDe
       console.warn("⚠️ Info request reminders: " + err.message);
     }
   };
-  setTimeout(remind, 90 * 1000);
-  setInterval(remind, 60 * 60 * 1000);
+  if (runsBackgroundJobs()) {
+    setTimeout(remind, 90 * 1000);
+    setInterval(remind, 60 * 60 * 1000);
+  }
 }

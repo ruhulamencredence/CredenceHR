@@ -22,6 +22,7 @@
 
 import type { Express } from "express";
 import { companyStore, activeGroupId, DEFAULT_COMPANY_ID, DEFAULT_GROUP_ID } from "./companyContext";
+import { runsBackgroundJobs } from "./jobRunner";
 
 interface LeaveRouteDeps {
   authenticateToken: any;
@@ -1750,8 +1751,11 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
 
   // Kick off the year-end auto-rollover check once at startup, then every 6
   // hours — see checkAndRunLeaveYearRollover's own doc comment above.
-  checkAndRunLeaveYearRollover();
-  setInterval(checkAndRunLeaveYearRollover, 6 * 60 * 60 * 1000);
+  // One process only under PM2 cluster mode (jobRunner.ts).
+  if (runsBackgroundJobs()) {
+    checkAndRunLeaveYearRollover();
+    setInterval(checkAndRunLeaveYearRollover, 6 * 60 * 60 * 1000);
+  }
 
   return { ensureDefaultLeaveBalances };
 }

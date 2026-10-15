@@ -77,6 +77,7 @@ import { registerErp360SsoRoutes } from "./Erp360SsoRoutes";
 import { Server as SocketIOServer } from "socket.io";
 import { ensureChatSchema, registerChatRoutes, setupChatSocket } from "./ChatRoutes";
 import { memoryDb, queryMemoryDb, EMPLOYEE_BOOL_FIELDS } from "./memoryDbFallback";
+import { runsBackgroundJobs } from "./jobRunner";
 
 dotenv.config();
 
@@ -214,7 +215,8 @@ async function initDB() {
     connection.release();
     await ensureSchemaMigrations(dbPool, { EMPLOYEE_EXT_FIELD_DDL, getApprovalChain, queryDB });
     await ensureZkSchema(dbPool);
-    startZkSyncSchedule(dbPool);
+    // ZKTeco polling + daily pulls: one process only (jobRunner.ts).
+    if (runsBackgroundJobs()) startZkSyncSchedule(dbPool);
   } catch (err: any) {
     console.warn("⚠️ MySQL Connection failed (" + err.message + "). Falling back to in-memory storage for preview/testing. (To use MySQL, ensure XAMPP MySQL is running and .env is configured).");
     isMySQLConnected = false;
@@ -2790,12 +2792,9 @@ async function startServer() {
   // deployment), Socket.IO keeps using its default in-memory adapter
   // exactly as before, so this is a no-op until REDIS_URL is actually
   // configured on a multi-instance deployment.
-  // Known follow-up once this is enabled: ChatRoutes.ts's setupChatSocket
-  // still tracks "is this user online" in a local, per-process Map
-  // (onlineSockets) — accurate within one instance, but a user connected
-  // to instance A and instance B independently won't be seen as online by
-  // both. Fine for now; move that to Redis too when multi-instance
-  // presence accuracy actually matters.
+  // With it on, presence (ChatRoutes.ts) and calls (CallRoutes.ts) work
+  // across workers too, and background jobs run in one worker only
+  // (jobRunner.ts).
   if (process.env.REDIS_URL) {
     try {
       const { createAdapter } = await import("@socket.io/redis-adapter");

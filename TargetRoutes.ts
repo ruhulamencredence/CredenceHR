@@ -41,6 +41,7 @@
 
 import type { Express } from "express";
 import type { AlertType } from "./Alerts";
+import { runsBackgroundJobs } from "./jobRunner";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 
@@ -949,6 +950,8 @@ export function registerTargetRoutes(app: Express, deps: TargetRouteDeps) {
     // Updates by a supervisor were told to the Employee at once.
     await queryDB("UPDATE target_task_updates u JOIN target_tasks k ON k.id = u.task_id JOIN targets t ON t.id = k.target_id SET u.digested = 1 WHERE u.digested = 0 AND u.user_id <> t.user_id").catch(() => undefined);
   }
-  setTimeout(remind, 100 * 1000);
-  setInterval(remind, 30 * 60 * 1000);
+  if (runsBackgroundJobs()) {
+    setTimeout(remind, 100 * 1000);
+    setInterval(remind, 30 * 60 * 1000);
+  }
 }

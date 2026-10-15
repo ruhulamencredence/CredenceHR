@@ -42,7 +42,14 @@ export function connectChatSocket(token: string): Socket {
     // rest of the session.
     reconnection: true,
     reconnectionDelay: 2000,
-    reconnectionDelayMax: 15000
+    reconnectionDelayMax: 15000,
+    // WebSocket straight away: one connection that stays on one server
+    // process. The default (start with HTTP long-polling, then upgrade)
+    // sends several separate requests, which under PM2 cluster mode land
+    // on different workers and break the connection. Long-polling remains
+    // the fallback for a network that blocks WebSockets.
+    transports: ['websocket', 'polling'],
+    tryAllTransports: true
   });
   // Notices (NoticePopup): a new one shows at once; after a reconnect, one
   // published while the app was asleep/offline does too.

@@ -48,6 +48,7 @@ import {
 } from "./HrOps360Routes";
 import { companyStore } from "./companyContext";
 import { contextForCompany } from "./CompanyRoutes";
+import { runsBackgroundJobs } from "./jobRunner";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 
@@ -958,8 +959,10 @@ export function registerHrReportsRoutes(app: Express, deps: HrReportsRouteDeps) 
       running = false;
     }
   };
-  setTimeout(tick, 60 * 1000);
-  setInterval(tick, 10 * 60 * 1000);
+  if (runsBackgroundJobs()) {
+    setTimeout(tick, 60 * 1000);
+    setInterval(tick, 10 * 60 * 1000);
+  }
 
   // ---- catalog + run ----
   app.get("/api/hr-ops/reports/catalog", ...gate, async (req: any, res: any) => {

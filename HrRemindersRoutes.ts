@@ -32,6 +32,7 @@ import type { Express } from "express";
 import { companyStore, activeCompanyId } from "./companyContext";
 import { contextForCompany } from "./CompanyRoutes";
 import { loadSettings, computeIncrementsDue, addDays } from "./HROperationsRoutes";
+import { runsBackgroundJobs } from "./jobRunner";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 
@@ -365,7 +366,7 @@ export function registerHrReminderRoutes(app: Express, deps: HrReminderDeps) {
     }
   });
 
-  if (deps.schedule) {
+  if (deps.schedule && runsBackgroundJobs()) {
     const tick = () => runAllReminders(queryDB, createAlert, todayInDhaka()).catch((err) => console.warn("⚠️ HR reminders: " + err.message));
     setTimeout(tick, 2 * 60 * 1000);
     setInterval(tick, 60 * 60 * 1000);

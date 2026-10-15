@@ -157,6 +157,87 @@ export function setupCallSocket(io: SocketIOServer, deps: { queryDB: QueryDB }) 
     void by;
   };
 
+  // One call event, for a call this process holds. Returns the reply for
+  // call:accept (null = no such call here).
+  const handle = (type: string, callId: string, me: number, socketId: string, data: any): any => {
+    const c = calls.get(callId);
+    if (type === "disconnect") {
+      for (const x of Array.from(calls.values())) if (x.callerSocket === socketId || x.calleeSocket === socketId) finish(x, "disconnected", me);
+      return null;
+    }
+    if (!c) return null;
+    if (type === "accept") {
+      if (c.calleeId !== me || c.state !== "ringing") return { ok: false, error: "This call has ended." };
+      if (c.ringTimer) clearTimeout(c.ringTimer);
+      c.ringTimer = null;
+      c.state = "active";
+      c.calleeSocket = socketId;
+      c.acceptedAt = Date.now();
+      io.to(c.callerSocket).emit("call:accepted", { callId: c.id });
+      // The callee's other devices stop ringing.
+      io.to(`user:${me}`).except(socketId).emit("call:taken", { callId: c.id });
+      return { ok: true };
+    }
+    if (type === "decline") {
+      if (c.calleeId === me && c.state === "ringing") finish(c, "declined", me);
+      return { ok: true };
+    }
+    if (type === "signal") {
+      if (c.state !== "active") return { ok: true };
+      const to = socketId === c.callerSocket ? c.calleeSocket : socketId === c.calleeSocket ? c.callerSocket : null;
+      if (to) io.to(to).emit("call:signal", { callId: c.id, data });
+      return { ok: true };
+    }
+    if (type === "end") {
+      if (socketId !== c.callerSocket && socketId !== c.calleeSocket && !(c.state === "ringing" && c.calleeId === me)) return { ok: true };
+      finish(c, c.state === "ringing" && socketId === c.callerSocket ? "cancelled" : "ended", me);
+      return { ok: true };
+    }
+    return null;
+  };
+
+  // Several workers share events only through the Redis adapter
+  // (server.ts, REDIS_URL); with the default in-memory adapter there is no
+  // other process to ask.
+  const clustered = () => io.of("/").adapter.constructor.name !== "Adapter";
+
+  // Ask every other worker; resolves with their answers (none on error/timeout).
+  const askOthers = (ev: string, payload: any): Promise<any[]> =>
+    new Promise((resolve) => {
+      try {
+        (io as any).serverSideEmit(ev, payload, (err: any, answers: any[]) => resolve(err ? [] : answers || []));
+      } catch {
+        resolve([]);
+      }
+    });
+
+  const handleOrRelay = async (type: string, callId: string, me: number, socketId: string, data: any): Promise<any> => {
+    if (calls.has(callId) || !clustered()) return handle(type, callId, me, socketId, data);
+    try {
+      const answers = await askOthers("call:relay", { type, callId, me, socketId, data });
+      return answers.find((a) => a) || null;
+    } catch {
+      return null;
+    }
+  };
+  (io as any).on("call:relay", (p: any, done?: (r: any) => void) => {
+    const r = p && (p.type === "disconnect" || calls.has(String(p.callId))) ? handle(String(p.type), String(p.callId), Number(p.me), String(p.socketId), p.data) : null;
+    if (typeof done === "function") done(r);
+  });
+
+  // Whether another worker has this account in a call.
+  const busyElsewhere = async (userId: number): Promise<boolean> => {
+    if (!clustered()) return false;
+    try {
+      return (await askOthers("call:busy", userId)).some(Boolean);
+    } catch {
+      return false;
+    }
+  };
+  (io as any).on("call:busy", (userId: any, done?: (r: boolean) => void) => {
+    if (typeof done === "function") done(busy.has(Number(userId)));
+  });
+
   io.on("connection", (socket: Socket) => {
     const me = Number((socket.data as any)?.user?.id);
     if (!me) return;
@@ -178,8 +259,8 @@ export function setupCallSocket(io: SocketIOServer, deps: { queryDB: QueryDB }) 
         if (!peerId) return reply({ ok: false, error: "Nobody else is in this chat." });
         const peer = await callAccess(queryDB, peerId);
         if (!peer.ok) return reply({ ok: false, error: `${peer.name} can't receive calls yet — Calls aren't turned on for them.` });
-        if (busy.has(me)) return reply({ ok: false, error: "You're already in a call." });
-        if (busy.has(peerId)) return reply({ ok: false, error: `${peer.name} is on another call.` });
+        if (busy.has(me) || (await busyElsewhere(me))) return reply({ ok: false, error: "You're already in a call." });
+        if (busy.has(peerId) || (await busyElsewhere(peerId))) return reply({ ok: false, error: `${peer.name} is on another call.` });
         const peerSockets = await io.in(`user:${peerId}`).fetchSockets();
         if (peerSockets.length === 0) {
           void logCall({ roomId, callerId: me, kind }, `📞 Missed ${label(kind)}`);
@@ -210,44 +291,22 @@ export function setupCallSocket(io: SocketIOServer, deps: { queryDB: QueryDB }) 
       }
     });
 
-    socket.on("call:accept", (data: { callId: string }, ack?: (r: any) => void) => {
-      const c = calls.get(String(data?.callId));
-      if (!c || c.calleeId !== me || c.state !== "ringing") return ack && ack({ ok: false, error: "This call has ended." });
-      if (c.ringTimer) clearTimeout(c.ringTimer);
-      c.ringTimer = null;
-      c.state = "active";
-      c.calleeSocket = socket.id;
-      c.acceptedAt = Date.now();
-      io.to(c.callerSocket).emit("call:accepted", { callId: c.id });
-      // The callee's other devices stop ringing.
-      socket.to(`user:${me}`).emit("call:taken", { callId: c.id });
-      ack && ack({ ok: true });
+    // accept / decline / signal / end / disconnect: handled where the call
+    // lives (the caller's process). Under PM2 cluster mode the other side
+    // may be connected to another worker — then it is passed on to the
+    // worker that has the call (relay below), which answers the same way.
+    socket.on("call:accept", async (data: { callId: string }, ack?: (r: any) => void) => {
+      const r = await handleOrRelay("accept", String(data?.callId), me, socket.id, null);
+      ack && ack(r || { ok: false, error: "This call has ended." });
     });
-
-    socket.on("call:decline", (data: { callId: string }) => {
-      const c = calls.get(String(data?.callId));
-      if (!c || c.calleeId !== me || c.state !== "ringing") return;
-      finish(c, "declined", me);
-    });
-
-    socket.on("call:signal", (data: { callId: string; data: any }) => {
-      const c = calls.get(String(data?.callId));
-      if (!c || c.state !== "active") return;
-      const to = socket.id === c.callerSocket ? c.calleeSocket : socket.id === c.calleeSocket ? c.callerSocket : null;
-      if (to) io.to(to).emit("call:signal", { callId: c.id, data: data.data });
-    });
-
-    socket.on("call:end", (data: { callId: string }) => {
-      const c = calls.get(String(data?.callId));
-      if (!c) return;
-      if (socket.id !== c.callerSocket && socket.id !== c.calleeSocket && !(c.state === "ringing" && c.calleeId === me)) return;
-      finish(c, c.state === "ringing" && socket.id === c.callerSocket ? "cancelled" : "ended", me);
-    });
-
+    socket.on("call:decline", (data: { callId: string }) => void handleOrRelay("decline", String(data?.callId), me, socket.id, null));
+    socket.on("call:signal", (data: { callId: string; data: any }) => void handleOrRelay("signal", String(data?.callId), me, socket.id, data?.data));
+    socket.on("call:end", (data: { callId: string }) => void handleOrRelay("end", String(data?.callId), me, socket.id, null));
     socket.on("disconnect", () => {
       for (const c of Array.from(calls.values())) {
         if (c.callerSocket === socket.id || c.calleeSocket === socket.id) finish(c, "disconnected", me);
       }
+      if (clustered()) (io as any).serverSideEmit("call:relay", { type: "disconnect", callId: "", me, socketId: socket.id, data: null });
     });
   });
 }
