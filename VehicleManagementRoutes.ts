@@ -44,6 +44,7 @@
 
 import type { Express } from "express";
 import type { AlertType } from "./Alerts";
+import { runsBackgroundJobs } from "./jobRunner";
 
 interface VehicleManagementRouteDeps {
   authenticateToken: any;
@@ -456,8 +457,12 @@ export function registerVehicleManagementRoutes(app: Express, deps: VehicleManag
     }
     return rideCheckRunning;
   }
-  setInterval(() => void expireOverdueRides(), 60 * 1000);
-  setTimeout(() => void expireOverdueRides(), 15 * 1000);
+  // (Each request also runs it before reading rides, so the other PM2
+  // workers stay correct without their own timer.)
+  if (runsBackgroundJobs()) {
+    setInterval(() => void expireOverdueRides(), 60 * 1000);
+    setTimeout(() => void expireOverdueRides(), 15 * 1000);
+  }
 
   const EXPIRED_MSG = "This ride request has expired — its start time (plus the grace time) has passed.";
 

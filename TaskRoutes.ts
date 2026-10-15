@@ -29,6 +29,7 @@
 
 import type { Express } from "express";
 import type { AlertType } from "./Alerts";
+import { runsBackgroundJobs } from "./jobRunner";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 
@@ -827,6 +828,8 @@ export function registerTaskRoutes(app: Express, deps: TaskRouteDeps) {
       console.warn("⚠️ Task reminders: " + err.message);
     }
   }
-  setTimeout(remind, 90 * 1000);
-  setInterval(remind, 30 * 60 * 1000);
+  if (runsBackgroundJobs()) {
+    setTimeout(remind, 90 * 1000);
+    setInterval(remind, 30 * 60 * 1000);
+  }
 }

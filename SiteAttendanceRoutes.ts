@@ -37,6 +37,7 @@
 import type { Express } from "express";
 import type { AlertType } from "./Alerts";
 import { getHolidayMapsByGroup, getEmployeeBranchTypeByEmployeeId, type HolidayAppliesTo } from "./holidayRoutes";
+import { runsBackgroundJobs } from "./jobRunner";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 
@@ -978,6 +979,8 @@ export function registerSiteAttendanceRoutes(app: Express, deps: SiteAttendanceR
       console.warn("⚠️ Site attendance reminders: " + err.message);
     }
   };
-  setTimeout(remind, 2 * 60 * 1000);
-  setInterval(remind, 30 * 60 * 1000);
+  if (runsBackgroundJobs()) {
+    setTimeout(remind, 2 * 60 * 1000);
+    setInterval(remind, 30 * 60 * 1000);
+  }
 }

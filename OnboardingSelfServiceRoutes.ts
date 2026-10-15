@@ -36,6 +36,7 @@ import { setAccountBlocked } from "./AccountBlock";
 import { applyAccessTemplate, ensureDefaultAccessTemplate } from "./AccessTemplateDefaults";
 import { requiredDocuments, missingDocuments } from "./HrOps360Routes";
 import { createAlert } from "./Alerts";
+import { runsBackgroundJobs } from "./jobRunner";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 type Tx = (fn: (q: QueryDB) => Promise<void>) => Promise<void>;
@@ -1069,6 +1070,8 @@ export function registerOnboardingRoutes(app: Express, deps: OnboardingDeps) {
       if (Number(r?.affectedRows)) await closeLogin(Number(a.user_id), "Onboarding expired", null).catch(() => {});
     }
   };
-  setTimeout(() => expireOverdue(queryDB).catch(() => {}), 30_000).unref?.();
-  setInterval(() => expireOverdue(queryDB).catch(() => {}), 60 * 60 * 1000).unref?.();
+  if (runsBackgroundJobs()) {
+    setTimeout(() => expireOverdue(queryDB).catch(() => {}), 30_000).unref?.();
+    setInterval(() => expireOverdue(queryDB).catch(() => {}), 60 * 60 * 1000).unref?.();
+  }
 }
