@@ -230,6 +230,28 @@ const HELP: HelpEntry[] = [
     steps: "Admin Panel → HR Operations → **Letters** → New Letter। Employee আর template বেছে দেখে Issue করুন।", nav: "hrops:letters", can: (c) => hasMod(c, "hr_operations") },
   { id: "leave_admin", title: "Leave Applications (HR)", keys: ["leave report", "সবার ছুটি", "leave applications", "leave approve"],
     steps: "Admin Panel → Leave → **Leave Applications**। সবার আবেদন, অবস্থা আর রিপোর্ট।", nav: "admin:leave_applications", can: (c) => hasMod(c, "leave_applications") },
+  { id: "leave_manage", title: "ছুটির ব্যালেন্স সেট / বদলানো (Leave Manage)",
+    keys: ["leave manage", "লিভ ম্যানেজ", "leave balance set", "set leave balance", "balance set", "set balance", "ব্যালেন্স সেট", "ছুটির ব্যালেন্স সেট", "balance edit", "edit balance", "ব্যালেন্স বদল", "balance change",
+      "balance bosabo", "balance bosano", "ব্যালেন্স বসা", "bulk balance", "set balance in bulk", "leave category", "ছুটির ধরন যোগ", "add category", "earn leave", "আর্ন লিভ", "leave policy", "ছুটির নিয়ম", "leave type add"],
+    steps:
+      "মেনু → Self Service → HRM → Leave Manage → **Leave Manage**। এখানে সব কর্মীর ছুটির ব্যালেন্স দেখা যায়।\n" +
+      "• **একজনের ব্যালেন্স বদলাতে:** তালিকায় কর্মীর সারিতে Edit করে Casual / Sick / Leave without Pay আর অন্য ধরনের দিন বসিয়ে Save।\n" +
+      "• **অনেকজনের একসাথে:** **\"Set Balance in Bulk\"** → সবাই, বা নির্দিষ্ট Department বাছুন → প্রতিটা ছুটির ধরনের দিন দিন → Apply।\n" +
+      "• **নতুন ছুটির ধরন (যেমন Earn Leave):** Set Balance in Bulk-এর ভেতরে **\"Add Category\"**; তারপর তার **Leave Policy** (কতদিন, কারা পাবে) ঠিক করুন।\n" +
+      "• প্রতি বছর আপনা থেকে নতুন ব্যালেন্স বসাতে চাইলে নিচের \"Leave Year ও Balance Workflow\" দেখুন।",
+    nav: "self:leaveManagement", can: (c) => isSuper(c) || c.flags.can_manage_leave },
+  { id: "leave_year", title: "Leave Year ও Balance Workflow (বছর শেষে ব্যালেন্স)",
+    keys: ["year settings", "leave year", "লিভ ইয়ার", "ছুটির বছর", "balance workflow", "designation wise leave", "পদবি অনুযায়ী ছুটি", "notun bochor", "notun bochorer", "new year leave", "নতুন বছর", "automatic balance", "auto balance", "balance automatic", "আপনা থেকে ব্যালেন্স", "yearly balance", "barshik chuti", "leave workflow", "নতুন বছরের ব্যালেন্স", "year end leave", "বছর শেষে ছুটি", "leave reset", "ছুটি রিসেট"],
+    steps:
+      "Self Service → HRM → Leave Manage → **Leave Manage** পাতার নিচের অংশে:\n" +
+      "• **Year Settings:** HR-এর ছুটির বছর কবে শেষ আর কবে শুরু (যেমন ১ জানুয়ারি – ৩১ ডিসেম্বর) ঠিক করুন; নতুন বছর শুরু হলে workflow আপনা থেকে চলে।\n" +
+      "• **Leave Balance Workflows:** \"General\" সবার জন্য, আর দরকার হলে পদবি (Designation) অনুযায়ী আলাদা workflow (যেমন Manager, GM) — প্রতিটা ছুটির ধরনে বছরে কত দিন। পদবির workflow সেই পদবির কর্মীদের জন্য General-এর বদলে খাটে। **\"Apply Now\"** দিয়ে সাথে সাথে ব্যালেন্স বসানো যায়।",
+    nav: "self:leaveManagement", can: (c) => isSuper(c) || c.flags.can_manage_leave },
+  { id: "leave_manage_access", title: "কাউকে Leave Manage-এর অনুমতি দেওয়া",
+    keys: ["leave manage access", "leave manage permission", "balance edit access", "ব্যালেন্স এডিটের অনুমতি", "leave balance access", "allow editing leave"],
+    steps:
+      "Admin Panel → Users → account → **Module Access** → **\"Also allow editing Leave balances\"** চালু করুন। তার নিচে কোন কোন কাজ করতে পারবেন টিক দিন: Edit Balance, Set Balance in Bulk, Add Category, Leave Policy, Year Settings, Balance Workflows।",
+    nav: "admin:users", can: (c) => isSuper(c) || c.modules.includes("users") },
   { id: "notice", title: "Notice দেওয়া", keys: ["notice", "নোটিশ", "announcement", "ঘোষণা"],
     steps: "Admin Panel → **Notices** → New Notice।", nav: "admin:notices", can: (c) => hasMod(c, "notices") },
   { id: "approval_chain", title: "Approval Chain", keys: ["approval chain", "chain", "approver set", "কে approve করবে"],
@@ -1061,7 +1083,7 @@ const TOOLS: Tool[] = [
       const hits = matchHelp(c, String(args?.topic || ""), 3);
       const blocked = hits.length ? [] : matchHelp(c, String(args?.topic || ""), 1, true);
       if (blocked.length) return { ok: false, text: `"${blocked[0].title}" আপনার account-এ চালু নেই। দরকার হলে HR / Superadmin-কে বলুন।`, data: { error: "no_access", page: blocked[0].title } };
-      if (!hits.length) return { ok: true, text: "এ বিষয়ে আমার কাছে নির্দিষ্ট নির্দেশনা নেই।", data: { topics: HELP.filter((h) => !h.can || h.can(c)).map((h) => h.title) } };
+      if (!hits.length) return { ok: true, text: "এ বিষয়ে আমার কাছে নির্দিষ্ট নির্দেশনা নেই।", data: { error: "no_guide", topics: HELP.filter((h) => !h.can || h.can(c)).map((h) => h.title) } };
       return { ok: true, text: hits.map((h) => `**${h.title}:** ${h.steps}`).join("\n\n"), data: { steps: hits.map((h) => ({ title: h.title, steps: h.steps })) }, actions: hits.flatMap(helpAction) };
     }
   }
@@ -1217,7 +1239,11 @@ async function localAnswer(c: Ctx, message: string): Promise<Answer> {
   const help = matchHelp(c, message, 2);
   const blockedHelp = help.length ? [] : matchHelp(c, message, 1, true);
 
-  if (scored.length && !(asksHow && (help.length || blockedHelp.length))) {
+  // A how-to entry that matches more of the question than the best data
+  // question ("leave balance set korbo" is about setting, not reading, it).
+  const helpScore = Math.max(0, ...HELP.map((h) => h.keys.reduce((sc, k) => sc + (t.includes(k) ? k.length : 0), 0)));
+  const helpWins = (help.length || blockedHelp.length) && helpScore > (scored[0]?.score || 0);
+  if (scored.length && !(asksHow && (help.length || blockedHelp.length)) && !helpWins) {
     // "amar / ami … late" is about the asker's own days, not everyone's.
     const intent = scored[0].i.tool === "late_on_date" && hasAny(t, [" amar ", " ami ", "আমার", "আমি", " my ", " i "])
       ? INTENTS.find((i) => i.tool === "my_late_days")!
@@ -1303,7 +1329,8 @@ async function geminiAnswer(c: Ctx, history: { role: string; text: string }[], m
     `- You can only read and guide, with ONE exception: when they ask to apply for leave, call prepare_leave_application. It only fills a form card in the chat; the employee reviews it and presses the card's "জমা দিন" button. Never say the leave was applied or submitted — say the draft is ready below to check and submit with "জমা দিন". Ask for nothing extra first: missing fields can be filled in the card.\n` +
     `- You cannot approve, edit, cancel or delete anything — tell them which page to open (the app shows a button for it).\n` +
     `- If they want a real person, or you can't help, call request_human_support (it shows a button; never claim someone is connected).\n` +
-    `- For any "how do I… / where is…" question ALWAYS call app_help first and give only the steps it returns — never describe menus or buttons from your own knowledge. If it returns no_access, say that page isn't turned on for their account and HR / Superadmin can enable it.\n` +
+    `- For any "how do I… / where is…" question ALWAYS call app_help first and give only the steps it returns — never describe menus or buttons from your own knowledge. If it returns no_access, say that page isn't turned on for their account and HR / Superadmin can enable it. If it returns no_guide, say you don't have the exact steps for that and offer request_human_support — never claim the page is turned off or that they lack access unless a tool returned no_access.\n` +
+    (isSuper(c) ? `- This user is a Superadmin: every page and module is open to them. Never tell them something isn't enabled for their account.\n` : "") +
     `- Write Bangla only in Bangla script (no Arabic, Hindi or other scripts mixed in); English words like page names may stay in English.\n` +
     `- Don't answer questions unrelated to work / this app beyond a brief polite line.\n` +
     `- This account can open ONLY these pages: ${HELP.filter((h) => !h.can || h.can(c)).map((h) => h.title).join(", ")}${c.modules.length ? `; Admin Panel modules: ${c.modules.join(", ")}` : isSuper(c) ? "; every Admin Panel module (Superadmin)" : ""}. ` +
