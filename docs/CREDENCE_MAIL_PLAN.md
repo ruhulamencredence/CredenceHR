@@ -102,27 +102,33 @@
 
 প্রতিটা ধাপের শেষে tsc (৫৭টা error, আগের মতো) আর `vite build` চলবে। তারপর একটা নকল IMAP / SMTP server দিয়ে API আর Playwright পরীক্ষা, DB আগের অবস্থায় ফেরানো, commit আর `claude/nice-fermi-0tale9`-এ push। শেষে বাংলায় রিপোর্ট।
 
-### ধাপ ১: Server
-- [ ] `MailRoutes.ts`: schema আর migration, `can_use_mail` switch (users column, Module Access route, UserManagement), অনুমতির middleware
-- [ ] Mailbox যুক্ত করা, পরীক্ষা করা, সরানো (IMAP যাচাই, encrypt করে রাখা, provider preset)
-- [ ] Sync: Inbox / Sent / অন্য folder (UID ধরে কেবল নতুনগুলো), mail parse, attachment-এর তথ্য
-- [ ] তালিকা (folder, label, category, খোঁজা, পাতা), একটা mail, flag / label বদলানো, batch, মুছে ফেলা (IMAP-এও)
-- [ ] পাঠানো (SMTP, attachment, signature), draft, schedule (jobRunner)
-- [ ] Socket.IO দিয়ে নতুন mail-এর খবর, online user-দের জন্য IDLE, একসাথে সংযোগের সীমা
-- [ ] নিরাপত্তা: প্রতিটা query user দিয়ে ছাঁকা, ডিফল্ট key নেই, rate limit
+### ধাপ ১: Server (শেষ, পরীক্ষিত)
+- [x] `MailRoutes.ts`: schema আর migration, `can_use_mail` switch (users column, Module Access route, UserManagement), অনুমতির middleware
+- [x] Mailbox যুক্ত করা, পরীক্ষা করা, সরানো (IMAP যাচাই, encrypt করে রাখা, provider preset)
+- [x] Sync: Inbox / Sent / অন্য folder (UID ধরে কেবল নতুনগুলো), mail parse, attachment-এর তথ্য
+- [x] তালিকা (folder, label, category, খোঁজা, পাতা), একটা mail, flag / label বদলানো, batch, মুছে ফেলা (IMAP-এও)
+- [x] পাঠানো (SMTP, attachment, signature), draft, schedule (jobRunner)
+- [x] Socket.IO দিয়ে নতুন mail-এর খবর, online user-দের জন্য IDLE, একসাথে সংযোগের সীমা
+- [x] নিরাপত্তা: প্রতিটা query user দিয়ে ছাঁকা, ডিফল্ট key নেই, হাতে sync-এ ১০ সেকেন্ডের সীমা
 
-### ধাপ ২: মূল screen
-- [ ] menu-তে জায়গা আর অনুমতি, mailbox যুক্ত করার পাতা
-- [ ] folder-এর তালিকা, mail-এর তালিকা, mail পড়া (DOMPurify), Compose / Reply / Forward, attachment
-- [ ] মোবাইল layout, skeleton, liquid-glass popup
+### ধাপ ২: মূল screen (শেষ, পরীক্ষিত)
+- [x] menu-তে জায়গা আর অনুমতি, mailbox যুক্ত করার পাতা
+- [x] folder-এর তালিকা, mail-এর তালিকা, mail পড়া (DOMPurify), Compose / Reply / Forward, attachment
+- [x] মোবাইল layout, skeleton, liquid-glass popup
 
 ### ধাপ ৩: বাকি ফিচার
 - [ ] Settings: signature আর logo, vacation responder, blocked senders, layout, ভাষা, timezone
 - [ ] Template, Filter / Rules, Contacts, Task, Calendar event
 - [ ] Analytics, Notification panel
-- [ ] CredenceHR Employee Directory থেকে address বেছে নেওয়া
+- [x] CredenceHR Employee Directory থেকে address বেছে নেওয়া (Compose-এ suggestion, ধাপ ২-এর সাথে)
 
 ---
+
+### পরীক্ষার ফলাফল
+- **ধাপ ১:** এই পরিবেশে চালানো একটা Dovecot mail server (IMAP, cPanel-এর মতো `INBOX.Sent` / `INBOX.Trash` / `INBOX.Junk`) আর তার সাথে যুক্ত একটা SMTP server দিয়ে পুরো `/api/mail` API — ৭৩টা পরীক্ষা পাস।
+  - এতে পাওয়া bug ঠিক করা হয়েছে: reply আলাদা conversation-এ চলে যেত; rule-এর "পড়া হয়েছে" / star পরের sync-এ উল্টে যেত; watcher চালু হওয়ার আগে আসা mail live দেখাত না।
+- **ধাপ ২:** Chromium-এ (desktop 1440px আর phone 390px) ৩৯টা পরীক্ষা পাস — mailbox যুক্ত করা, পড়া, HTML mail-এর script / form / iframe বাদ পড়া, ছবি বন্ধ থাকা, attachment, Reply all, Draft, Send later, একসাথে মুছে ফেলা, live নতুন mail, আর switch বন্ধ থাকলে menu-তে না দেখানো।
+- Attachment একসাথে সর্বোচ্চ ১৫ MB (server-এর ২৫ MB JSON সীমার মধ্যে থাকার জন্য)।
 
 ## ৫. আপনাদের যা করতে হবে
 

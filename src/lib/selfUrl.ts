@@ -5,7 +5,7 @@ import type { User } from '../types';
 
 export type SelfView =
   | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation'
-  | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets';
+  | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | 'credenceMail';
 
 const SLUGS: Record<SelfView, string> = {
   leaveManagement: 'leave-management',
@@ -22,7 +22,8 @@ const SLUGS: Record<SelfView, string> = {
   myTasks: 'my-tasks',
   myMobileSim: 'my-mobile-sim',
   myLoans: 'my-loans',
-  myTargets: 'my-targets'
+  myTargets: 'my-targets',
+  credenceMail: 'mail'
 };
 
 export const SELF_URL_PREFIX = '/self/';
@@ -51,6 +52,7 @@ export const canOpenSelfView = (view: SelfView, user: User | null): boolean => {
     case 'myMobileSim': return sa || !!user.can_view_mobile_bill || mods.includes('mobile_bill');
     case 'myLoans': return sa || !!user.can_view_loan_request;
     case 'myTargets': return sa || !!user.can_view_targets;
+    case 'credenceMail': return sa || !!user.can_use_mail;
     default: return true;
   }
 };

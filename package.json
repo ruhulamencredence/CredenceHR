@@ -40,6 +40,7 @@
     "capacitor-voice-recorder": "7.0.6",
     "compression": "^1.8.1",
     "cors": "^2.8.6",
+    "dompurify": "^3.4.17",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
     "firebase-admin": "^13.0.2",

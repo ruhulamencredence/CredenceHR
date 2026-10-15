@@ -1355,7 +1355,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
       if (!b64) continue;
       const data = Buffer.from(b64, "base64");
       total += data.length;
-      if (total > 18 * 1024 * 1024) throw bad("Attachments can be at most 18 MB in total.");
+      if (total > 15 * 1024 * 1024) throw bad("Attachments can be at most 15 MB in total.");
       out.push({ name: str(f.name, 255) || "attachment", type: str(f.type, 150) || "application/octet-stream", data });
     }
     return out;
@@ -1831,7 +1831,10 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
       // imapflow keeps the connection in IDLE by itself while nothing else runs.
     } catch {
       stopIdle(id);
+      return;
     }
+    // Mail that came in before the watcher started raises no "exists" — catch up once.
+    syncAndNotify(a, ["inbox"]).catch(() => undefined);
   }
   async function onlineUserIds(): Promise<Set<number>> {
     try {
