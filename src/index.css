@@ -6,6 +6,13 @@
    than a CSS module since a matching copy of this same animation is also
    defined inline in index.html for the very first paint, before this
    stylesheet has loaded at all. */
+/* Loading placeholders (HrOpsSkeleton.tsx): wait a moment, then fade in,
+   so a fast load never flashes one. */
+@keyframes skeleton-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
 @keyframes mpr-spin {
   to { transform: rotate(360deg); }
 }

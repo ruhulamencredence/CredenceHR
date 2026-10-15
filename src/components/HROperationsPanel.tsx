@@ -15,7 +15,7 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { Briefcase, LayoutDashboard, ClipboardList, BookOpen, FileText, ClipboardCheck, TrendingUp, Settings, FileSpreadsheet, Gavel } from 'lucide-react';
-import { Spinner } from './Spinner';
+import { HrOpsBodySkeleton } from './HrOpsSkeleton';
 import { useHrApi, Notice, type HrOpsEmployee, type HrOpsMeta } from './HrOpsShared';
 import { HrOpsDashboard } from './HrOpsDashboard';
 import { HrOpsActions } from './HrOpsActions';
@@ -131,11 +131,7 @@ export const HROperationsPanel: React.FC<{ token: string; canGrievance?: boolean
       <div className="p-6">
         {error && <Notice msg={{ type: 'error', text: error }} />}
         {!meta ? (
-          !error && (
-            <div className="flex items-center justify-center gap-2 py-16 text-sm text-slate-500">
-              <Spinner size={16} /> Loading…
-            </div>
-          )
+          !error && <HrOpsBodySkeleton tab={tab} employeeChosen={!!bookEmployee} />
         ) : tab === 'dashboard' ? (
           <HrOpsDashboard token={token} onOpenEmployee={openEmployee} meta={meta} employees={employees} onChanged={changed} />
         ) : tab === 'actions' ? (
