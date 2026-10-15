@@ -701,6 +701,7 @@ export interface User {
   can_view_timesheet?: boolean;
   // Chat audio/video calls (CallLayer.tsx) — Self Service switch, off by default.
   can_use_calls?: boolean;
+  can_use_mail?: boolean;
   // Admin Panel -> Users -> Block: this login can't sign in (AccountBlock.ts).
   is_blocked?: boolean | number;
   // The linked Employee record is active (false once Resigned / Terminated / blocked).
