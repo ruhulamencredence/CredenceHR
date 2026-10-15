@@ -143,9 +143,11 @@ export const MailReader: React.FC<{
   thread: MailMessage[] | null;
   folder: string;
   error: string;
+  // Someone else's mailbox opened from Mail Administration: no actions.
+  readOnly?: boolean;
   onBack?: () => void;
   onAction: (action: ReaderAction, m: MailMessage) => void;
-}> = ({ token, thread, folder, error, onBack, onAction }) => {
+}> = ({ token, thread, folder, error, readOnly, onBack, onAction }) => {
   const [openIds, setOpenIds] = useState<Set<string>>(new Set());
   const [more, setMore] = useState(false);
   const last = thread && thread.length ? thread[thread.length - 1] : null;
@@ -163,6 +165,7 @@ export const MailReader: React.FC<{
   const inSpam = last.labels.includes('Spam');
   const inTrash = last.labels.includes('Trash');
   const scheduled = last.labels.includes('Scheduled');
+  const actions = !readOnly;
   const btn = 'p-2 rounded-full text-slate-600 hover:bg-black/5 hover:text-slate-900';
 
   return (
@@ -174,7 +177,7 @@ export const MailReader: React.FC<{
           </button>
         )}
         <div className="flex-1" />
-        {!scheduled && (
+        {actions && !scheduled && (
           <>
             {inSpam ? (
               <button type="button" className={btn} onClick={() => onAction('notSpam', last)} title="Not spam"><Inbox className="w-4 h-4" /></button>
@@ -194,10 +197,10 @@ export const MailReader: React.FC<{
             </button>
           </>
         )}
-        <button type="button" className={`${btn} hover:text-rose-600`} onClick={() => onAction('trash', last)} title={inTrash || scheduled ? 'Delete for good' : 'Delete'}>
+        {actions && <button type="button" className={`${btn} hover:text-rose-600`} onClick={() => onAction('trash', last)} title={inTrash || scheduled ? 'Delete for good' : 'Delete'}>
           <Trash2 className="w-4 h-4" />
-        </button>
-        {!scheduled && (
+        </button>}
+        {actions && !scheduled && (
           <div className="relative">
             <button type="button" className={btn} onClick={() => setMore((v) => !v)} aria-label="More" aria-expanded={more} title="More">
               <MoreVertical className="w-4 h-4" />
@@ -243,7 +246,7 @@ export const MailReader: React.FC<{
             ))}
           </div>
         )}
-        {scheduled && (
+        {scheduled && actions && (
           <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-sky-50 text-sky-800 text-xs px-3 py-2.5">
             <span className="flex items-center gap-1.5"><Clock className="w-3.5 h-3.5" /> Will be sent {fullMailDate(last.scheduledSendTime)}.</span>
             <button type="button" onClick={() => onAction('unschedule', last)} className="font-semibold underline underline-offset-2">Cancel sending</button>
@@ -268,7 +271,7 @@ export const MailReader: React.FC<{
             />
           ))}
         </div>
-        {!scheduled && !inTrash && (
+        {actions && !scheduled && !inTrash && (
           <div className="mt-4 flex flex-wrap gap-2 pb-24 md:pb-6">
             <button type="button" onClick={() => onAction('reply', last)} className="inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
               <Reply className="w-4 h-4" /> Reply

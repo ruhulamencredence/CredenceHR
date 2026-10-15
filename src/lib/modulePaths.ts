@@ -54,6 +54,7 @@ export const ADMIN_TAB_PATH: Record<string, string[]> = {
   users: ['Admin Panel', 'MIS', 'Users'],
   projects: ['Admin Panel', 'MIS', 'Projects'],
   branches: ['Admin Panel', 'MIS', 'Branches'],
+  mail_admin: ['Admin Panel', 'MIS', 'Mail Administration'],
 
   permanent_delete_log: ['Admin Panel', 'Permanent Delete Log'],
   companies: ['Admin Panel', 'Companies'],

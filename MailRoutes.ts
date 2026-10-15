@@ -41,6 +41,9 @@ interface MailDeps {
   authenticateToken: any;
   queryDB: QueryDB;
   isMySQL: () => boolean;
+  // Admin Panel -> Mail Administration (module "mail_admin", server.ts).
+  requireModuleLayer: (moduleKey: any, layer: any) => any;
+  hasModuleLayer: (user: any, moduleKey: any, layer: string) => Promise<boolean>;
 }
 
 // ---------------------------------------------------------------------------
@@ -239,6 +242,22 @@ export async function ensureMailSchema(dbPool: any): Promise<void> {
       ) DEFAULT CHARSET=utf8mb4`
     ],
     [
+      // Admin Panel -> Mail Administration: every mailbox opened and every
+      // password shown, by whom and when.
+      "mail_admin_log",
+      `CREATE TABLE IF NOT EXISTS mail_admin_log (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        actor_user_id INT NOT NULL,
+        target_user_id INT NOT NULL,
+        account_id INT NULL,
+        action VARCHAR(20) NOT NULL,
+        ip VARCHAR(64) NULL,
+        created_at DATETIME NOT NULL,
+        KEY idx_mail_admin_log_target (target_user_id, created_at),
+        KEY idx_mail_admin_log_actor (actor_user_id, created_at)
+      ) DEFAULT CHARSET=utf8mb4`
+    ],
+    [
       "mail_vacation_log",
       `CREATE TABLE IF NOT EXISTS mail_vacation_log (
         account_id INT NOT NULL,
@@ -395,7 +414,7 @@ const INITIAL_SYNC = Math.max(20, Number(process.env.MAIL_INITIAL_SYNC) || 200);
 const BATCH_MAX = 300;
 
 export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailDeps) {
-  const { authenticateToken, queryDB, isMySQL } = deps;
+  const { authenticateToken, queryDB, isMySQL, requireModuleLayer, hasModuleLayer } = deps;
 
   // -------------------------------------------------------------------------
   // Access
@@ -414,13 +433,44 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     accessCache.set(id, { ok, at: Date.now() });
     return ok;
   }
+  // Mail Administration: an account with the "mail_open" layer can open
+  // someone else's mailbox, read only, by sending X-Mail-View-As: <user id>.
+  // The Superadmin's own mailbox only the Superadmin can open.
+  const lastOpenLog = new Map<string, number>();
+  async function viewAsTarget(req: any): Promise<number | null> {
+    const raw = req.headers["x-mail-view-as"];
+    if (raw === undefined || raw === "") return null;
+    const target = Number(raw);
+    if (!Number.isInteger(target) || target <= 0) throw bad("Unknown mailbox owner.", 400);
+    if (target === Number(req.user.id)) return null;
+    if (!(await hasModuleLayer(req.user, "mail_admin", "mail_open"))) throw bad("You don't have permission to open other people's mailboxes.", 403);
+    const rows: any[] = (await queryDB("SELECT id, role FROM users WHERE id = ?", [target])) || [];
+    if (!rows[0]) throw bad("Unknown mailbox owner.", 404);
+    if (rows[0].role === "superadmin" && req.user.role !== "superadmin") throw bad("Only the Superadmin can open this mailbox.", 403);
+    // Only reading: nothing in the mailbox may change (a manual sync just
+    // fetches new mail).
+    const path = String(req.path || "");
+    if (req.method !== "GET" && !(req.method === "POST" && path === "/api/mail/sync")) throw bad("An opened mailbox is read only.", 403);
+    // One log line per person per mailbox every 30 minutes, not per click.
+    const key = `${req.user.id}:${target}`;
+    if (Date.now() - (lastOpenLog.get(key) || 0) > 30 * 60_000) {
+      lastOpenLog.set(key, Date.now());
+      await queryDB("INSERT INTO mail_admin_log (actor_user_id, target_user_id, action, ip, created_at) VALUES (?, ?, 'open', ?, UTC_TIMESTAMP())", [Number(req.user.id), target, String(req.ip || "").slice(0, 64)]);
+    }
+    return target;
+  }
   const requireMail = async (req: any, res: any, next: any) => {
     try {
       if (!isMySQL()) return res.status(503).json({ error: "Credence Mail needs the MySQL database." });
+      const target = await viewAsTarget(req);
+      if (target) {
+        req.mailViewAs = target;
+        return next();
+      }
       if (!(await hasMail(req.user))) return res.status(403).json({ error: "Credence Mail isn't turned on for your account." });
       next();
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      res.status(Number(err?.status) || 500).json({ error: err.message });
     }
   };
   const gate = [authenticateToken, requireMail];
@@ -436,7 +486,8 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
       fail(res, err);
     }
   };
-  const uid = (req: any) => Number(req.user.id);
+  // Whose mailbox this request works on: one's own, or the one an admin opened.
+  const uid = (req: any) => Number(req.mailViewAs || req.user.id);
 
   async function accountOf(userId: number, accountId: any): Promise<any> {
     const rows: any[] = await queryDB("SELECT * FROM mail_accounts WHERE id = ? AND user_id = ?", [Number(accountId), userId]);
@@ -970,6 +1021,104 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
         serverReady: !!mailKey(),
         accounts: enabled ? (await accountsOf(uid(req))).map(publicAccount) : []
       });
+    })
+  );
+
+  // ---- Admin Panel -> Mail Administration ------------------------------------
+  // Everyone's connected mailboxes in this company (queryDB scopes "users" to
+  // the active company). Opening one uses X-Mail-View-As (requireMail above).
+  async function adminMailboxes(): Promise<any[]> {
+    return (
+      (await queryDB(
+        `SELECT a.id, a.user_id, a.email, a.display_name, a.provider, a.imap_host, a.smtp_host, a.last_sync_at, a.last_error, a.created_at,
+                u.name AS user_name, u.email AS user_login, u.username AS user_username, u.role AS user_role
+         FROM mail_accounts a JOIN users u ON u.id = a.user_id
+         ORDER BY u.name ASC, a.email ASC`
+      )) || []
+    );
+  }
+  const noStore = (res: any) => res.setHeader("Cache-Control", "no-store");
+  app.get(
+    "/api/mail/admin/accounts",
+    authenticateToken,
+    requireModuleLayer("mail_admin", "read"),
+    handler(async (req, res) => {
+      if (!isMySQL()) throw bad("Credence Mail needs the MySQL database.", 503);
+      const [canOpen, canPassword] = await Promise.all([hasModuleLayer(req.user, "mail_admin", "mail_open"), hasModuleLayer(req.user, "mail_admin", "mail_password")]);
+      const isSuper = req.user.role === "superadmin";
+      noStore(res);
+      res.json({
+        canOpen,
+        canPassword,
+        serverReady: !!mailKey(),
+        items: (await adminMailboxes()).map((r) => ({
+          id: Number(r.id),
+          userId: Number(r.user_id),
+          userName: r.user_name || r.user_login || r.user_username || `#${r.user_id}`,
+          userLogin: r.user_login || r.user_username || "",
+          emailAddress: r.email,
+          name: r.display_name || r.email,
+          provider: r.provider,
+          imapHost: r.imap_host,
+          smtpHost: r.smtp_host,
+          lastSyncAt: fromDb(r.last_sync_at),
+          lastError: r.last_error || null,
+          connectedAt: fromDb(r.created_at),
+          // The Superadmin's own mailbox is only for the Superadmin.
+          locked: r.user_role === "superadmin" && !isSuper
+        }))
+      });
+    })
+  );
+  app.post(
+    "/api/mail/admin/accounts/:id/password",
+    authenticateToken,
+    requireModuleLayer("mail_admin", "mail_password"),
+    handler(async (req, res) => {
+      if (!isMySQL()) throw bad("Credence Mail needs the MySQL database.", 503);
+      const id = Number(req.params.id);
+      const row = (await adminMailboxes()).find((r) => Number(r.id) === id);
+      if (!row) throw bad("Mailbox not found.", 404);
+      if (row.user_role === "superadmin" && req.user.role !== "superadmin") throw bad("Only the Superadmin can see this mailbox's password.", 403);
+      const full: any = ((await queryDB("SELECT password_enc FROM mail_accounts WHERE id = ?", [id])) || [])[0];
+      if (!full) throw bad("Mailbox not found.", 404);
+      const password = decryptSecret(full.password_enc);
+      await queryDB("INSERT INTO mail_admin_log (actor_user_id, target_user_id, account_id, action, ip, created_at) VALUES (?, ?, ?, 'password', ?, UTC_TIMESTAMP())", [
+        Number(req.user.id),
+        Number(row.user_id),
+        id,
+        String(req.ip || "").slice(0, 64)
+      ]);
+      noStore(res);
+      res.json({ password });
+    })
+  );
+  app.get(
+    "/api/mail/admin/log",
+    authenticateToken,
+    requireModuleLayer("mail_admin", "read"),
+    handler(async (req, res) => {
+      if (!isMySQL()) throw bad("Credence Mail needs the MySQL database.", 503);
+      const rows: any[] =
+        (await queryDB(
+          `SELECT l.id, l.action, l.account_id, l.created_at, l.actor_user_id, l.target_user_id, a.name AS actor_name, t.name AS target_name, m.email AS mailbox
+           FROM mail_admin_log l
+           JOIN users t ON t.id = l.target_user_id
+           LEFT JOIN users a ON a.id = l.actor_user_id
+           LEFT JOIN mail_accounts m ON m.id = l.account_id
+           ORDER BY l.id DESC LIMIT 300`
+        )) || [];
+      noStore(res);
+      res.json(
+        rows.map((r) => ({
+          id: Number(r.id),
+          action: r.action,
+          at: fromDb(r.created_at),
+          actor: r.actor_name || `#${r.actor_user_id}`,
+          target: r.target_name || `#${r.target_user_id}`,
+          mailbox: r.mailbox || null
+        }))
+      );
     })
   );
 

@@ -179,10 +179,18 @@ export class MailApiError extends Error {
   }
 }
 
+// Admin Panel -> Mail Administration: while someone else's mailbox is open
+// (read only), every call carries whose it is (MailRoutes.ts requireMail).
+let viewAsUserId: number | null = null;
+export function setMailViewAs(userId: number | null) {
+  viewAsUserId = userId;
+}
+const viewAsHeader = (): Record<string, string> => (viewAsUserId ? { 'X-Mail-View-As': String(viewAsUserId) } : {});
+
 export async function mailFetch<T = any>(token: string, path: string, init: { method?: string; body?: any } = {}): Promise<T> {
   const res = await fetch(apiUrl(`/api/mail${path}`), {
     method: init.method || 'GET',
-    headers: { Authorization: `Bearer ${token}`, ...(init.body !== undefined ? { 'Content-Type': 'application/json' } : {}) },
+    headers: { Authorization: `Bearer ${token}`, ...viewAsHeader(), ...(init.body !== undefined ? { 'Content-Type': 'application/json' } : {}) },
     body: init.body !== undefined ? JSON.stringify(init.body) : undefined
   });
   const data = await res.json().catch(() => null);
@@ -192,7 +200,7 @@ export async function mailFetch<T = any>(token: string, path: string, init: { me
 
 // Attachments are fetched with the token (they're not public links).
 export async function fetchAttachment(token: string, messageId: string, idx: number): Promise<Blob> {
-  const res = await fetch(apiUrl(`/api/mail/messages/${messageId}/attachments/${idx}`), { headers: { Authorization: `Bearer ${token}` } });
+  const res = await fetch(apiUrl(`/api/mail/messages/${messageId}/attachments/${idx}`), { headers: { Authorization: `Bearer ${token}`, ...viewAsHeader() } });
   if (!res.ok) {
     const data = await res.json().catch(() => null);
     throw new MailApiError(data?.error || 'Could not open the attachment.', res.status);
