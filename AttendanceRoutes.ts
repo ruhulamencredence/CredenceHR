@@ -807,11 +807,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
       const todayStr = todayInDhaka();
       const monthEnd = `${prefix}-${String(daysInMonth).padStart(2, "0")}`;
 
-      // Only this month's rows (idx_attendance_date) — reading the whole
-      // table every time made the report, and the Admin Dashboard that loads
-      // it, slower every day.
-      const [rows, projects, users] = await Promise.all([
-        queryDB("SELECT * FROM attendance WHERE attendance_date BETWEEN ? AND ?", [monthStart, monthEnd]),
+      const [projects, users] = await Promise.all([
         queryDB("SELECT * FROM projects"),
         queryDB("SELECT id, name, email, role, created_at FROM users")
       ]);
@@ -830,7 +826,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
         if (e.user_id != null && e.department) departmentByUserId.set(Number(e.user_id), e.department);
       }
 
-      const relevantUsers = users.filter(
+      const filteredUsers = users.filter(
         (u: any) =>
           (u.role === "user" || u.role === "admin") &&
           (!user_id || u.id === user_id) &&
@@ -844,6 +840,30 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
           // filter on this", not "you must pick one".
           (!deptScope || deptScope.includes(departmentByUserId.get(u.id) || ""))
       );
+      // ?limit=&page= : one page of employees (by name), for the on-screen
+      // grid — at ~1,500 staff the whole month was ~12 MB and every
+      // person's 31 days were worked out on each open. Without limit (the
+      // PDF export, the Admin Dashboard, the Assistant) it is everyone, as
+      // before.
+      filteredUsers.sort((a: any, b: any) => String(a.name).localeCompare(String(b.name)));
+      const limit = req.query.limit !== undefined ? Math.min(200, Math.max(1, Math.floor(Number(req.query.limit)) || 50)) : 0;
+      const total = filteredUsers.length;
+      const page = limit ? Math.min(Math.max(1, Math.floor(Number(req.query.page)) || 1), Math.max(1, Math.ceil(total / limit))) : 1;
+      const relevantUsers = limit ? filteredUsers.slice((page - 1) * limit, page * limit) : filteredUsers;
+      const pageUserIds = new Set<number>(relevantUsers.map((u: any) => Number(u.id)));
+
+      // Only this month's rows (idx_attendance_date) — reading the whole
+      // table every time made the report, and the Admin Dashboard that loads
+      // it, slower every day. A page reads only its own people's rows.
+      const pageIds = [...pageUserIds];
+      const rows: any[] = limit
+        ? pageIds.length
+          ? ((await queryDB(
+              `SELECT * FROM attendance WHERE attendance_date BETWEEN ? AND ? AND user_id IN (${pageIds.map(() => "?").join(",")})`,
+              [monthStart, monthEnd, ...pageIds]
+            )) || []).filter((r: any) => pageUserIds.has(Number(r.user_id)))
+          : []
+        : await queryDB("SELECT * FROM attendance WHERE attendance_date BETWEEN ? AND ?", [monthStart, monthEnd]);
 
       // Global Calendar (Admin Panel -> Holidays) — any date the Superadmin (or
       // whoever's been granted the "holidays" module) has marked Weekend or
@@ -878,7 +898,9 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
         const employees = await queryDB(
           "SELECT user_id, zk_device_pin FROM all_employees WHERE user_id IS NOT NULL AND zk_device_pin IS NOT NULL"
         );
-        const pinByUserId = new Map<number, string>(employees.map((e: any) => [e.user_id, e.zk_device_pin]));
+        const pinByUserId = new Map<number, string>(
+          employees.filter((e: any) => pageUserIds.has(Number(e.user_id))).map((e: any) => [e.user_id, e.zk_device_pin])
+        );
         if (pinByUserId.size > 0) {
           const officeLogs = await queryDB(
             // Same single-punch guard — a day with exactly one punch (e.g.
@@ -1018,7 +1040,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
           users: result.map((u: any) => ({ ...u, days: (u.days || []).map((d: any, i: number) => (keep.has(i + 1) ? d : null)) }))
         });
       }
-      res.json({ year, month, days_in_month: daysInMonth, users: result });
+      res.json({ year, month, days_in_month: daysInMonth, users: result, ...(limit ? { total, page, limit } : {}) });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -1044,7 +1066,9 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
         return res.status(403).json({ error: "You don't have access to this Department's Attendance Report." });
       }
 
-      const rows = await queryDB("SELECT * FROM attendance");
+      // Just this day's rows (idx_attendance_date), not the whole history;
+      // still filtered by date below.
+      const rows = await queryDB("SELECT * FROM attendance WHERE attendance_date = ?", [date]);
       const projects = await queryDB("SELECT * FROM projects");
       const users = await queryDB("SELECT id, name, email, role, created_at FROM users");
       const projectMap = new Map<number, any>(projects.map((p: any) => [p.id, p]));
