@@ -1553,28 +1553,41 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [reportDate, setReportDate] = useState(todayDateOnlyString());
   const [loadingDailyReport, setLoadingDailyReport] = useState(false);
   const [dailyReport, setDailyReport] = useState<any>(null);
-  // Month Wise grid: one page of employees at a time (the Excel / PDF downloads still cover everyone).
+  // Month Wise grid: one page of employees at a time, fetched from the
+  // server page by page (the whole month for ~1,500 staff was ~12 MB). The
+  // PDF download fetches everyone when it is clicked.
   const [monthGridPage, setMonthGridPage] = useState(1);
   const [monthGridPageSize, setMonthGridPageSize] = useState(50);
-  useEffect(() => {
-    setMonthGridPage(1);
-  }, [monthlyReport]);
+  const [exportingMonthlyReport, setExportingMonthlyReport] = useState(false);
+  const monthlyReportReq = useRef(0);
+  const monthlyReportParams = () => {
+    const params = new URLSearchParams();
+    params.set('year', String(reportYear));
+    params.set('month', String(reportMonth));
+    if (reportProjectFilter) params.set('project_id', reportProjectFilter);
+    if (reportEmployeeFilter) params.set('user_id', reportEmployeeFilter);
+    if (reportDepartmentFilter) params.set('department', reportDepartmentFilter);
+    return params;
+  };
+  const monthlyReportTotal = (r: any) => (r ? Number(r.total ?? r.users?.length ?? 0) : 0);
 
-  const fetchMonthlyReport = async () => {
+  const fetchMonthlyReport = async (page = 1, pageSize = monthGridPageSize) => {
+    const reqId = ++monthlyReportReq.current;
     setLoadingMonthlyReport(true);
     try {
-      const params = new URLSearchParams();
-      params.set('year', String(reportYear));
-      params.set('month', String(reportMonth));
-      if (reportProjectFilter) params.set('project_id', reportProjectFilter);
-      if (reportEmployeeFilter) params.set('user_id', reportEmployeeFilter);
-      if (reportDepartmentFilter) params.set('department', reportDepartmentFilter);
+      const params = monthlyReportParams();
+      params.set('limit', String(pageSize));
+      params.set('page', String(page));
       const res = await fetch(apiUrl(`/api/attendance/report/monthly?${params.toString()}`), { headers: { Authorization: `Bearer ${token}` } });
-      if (res.ok) setMonthlyReport(await res.json());
+      if (res.ok && reqId === monthlyReportReq.current) {
+        const data = await res.json();
+        setMonthlyReport(data);
+        setMonthGridPage(Number(data.page) || page);
+      }
     } catch (err) {
       console.error('Failed to load monthly attendance report', err);
     } finally {
-      setLoadingMonthlyReport(false);
+      if (reqId === monthlyReportReq.current) setLoadingMonthlyReport(false);
     }
   };
 
@@ -1619,61 +1632,73 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // fit legibly across that many columns on paper, so the PDF always uses
   // symbols regardless of which mode the on-screen toggle is set to.
   const handleExportMonthlyReportPdf = async () => {
-    if (!monthlyReport || monthlyReport.users.length === 0) return;
-    const logoImg = await loadImageElement(credenceLogo);
-    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    if (!monthlyReport || monthlyReportTotal(monthlyReport) === 0 || exportingMonthlyReport) return;
+    setExportingMonthlyReport(true);
+    try {
+      // The grid holds one page; the PDF covers everyone, so fetch them all now.
+      const fullRes = await fetch(apiUrl(`/api/attendance/report/monthly?${monthlyReportParams().toString()}`), { headers: { Authorization: `Bearer ${token}` } });
+      if (!fullRes.ok) return;
+      const monthlyReport = await fullRes.json();
+      if (!monthlyReport.users?.length) return;
+      const logoImg = await loadImageElement(credenceLogo);
+      const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
 
-    const monthLabel = new Date(monthlyReport.year, monthlyReport.month - 1, 1).toLocaleString('en-US', { month: 'long' });
-    const letterheadOptions = {
-      reportTitle: `Monthly Attendance Report — ${monthLabel} ${monthlyReport.year}`,
-      filters: activeReportFilters()
-    };
-    const contentStartY = drawPdfLetterhead(doc, logoImg, letterheadOptions);
+      const monthLabel = new Date(monthlyReport.year, monthlyReport.month - 1, 1).toLocaleString('en-US', { month: 'long' });
+      const letterheadOptions = {
+        reportTitle: `Monthly Attendance Report — ${monthLabel} ${monthlyReport.year}`,
+        filters: activeReportFilters()
+      };
+      const contentStartY = drawPdfLetterhead(doc, logoImg, letterheadOptions);
 
-    const dayHeaders = Array.from({ length: monthlyReport.days_in_month }, (_, i) => String(i + 1));
+      const dayHeaders = Array.from({ length: monthlyReport.days_in_month }, (_, i) => String(i + 1));
 
-    autoTable(doc, {
-      startY: contentStartY,
-      margin: { top: contentStartY, left: 6, right: 6 },
-      head: [['Employee', ...dayHeaders, 'P', 'H', 'A']],
-      body: monthlyReport.users.map((u: any) => {
-        const daySymbols = u.days.map((d: any) => {
-          const isHoliday = !!d.day_type;
-          return d.present ? 'P' : isHoliday ? (d.day_type === 'weekend' ? 'W' : 'H') : d.future || d.before_joining ? '' : '-';
-        });
-        return [u.user_name, ...daySymbols, String(u.present_days), String(u.holiday_days ?? 0), String(u.absent_days)];
-      }),
-      styles: { fontSize: 5.5, cellPadding: 0.8, halign: 'center', overflow: 'visible' },
-      columnStyles: { 0: { cellWidth: 26, halign: 'left', fontStyle: 'bold' } },
-      headStyles: { fillColor: [37, 99, 235], textColor: 255, fontSize: 5.5 },
-      alternateRowStyles: { fillColor: [248, 250, 252] },
-      // Same color convention as the on-screen grid: green Present, amber
-      // Holiday, sky Weekend, slate Absent.
-      didParseCell: (data: any) => {
-        if (data.section === 'body' && data.column.index > 0 && data.column.index <= monthlyReport.days_in_month) {
-          const val = data.cell.raw;
-          if (val === 'P') data.cell.styles.textColor = [5, 150, 105];
-          else if (val === 'H') data.cell.styles.textColor = [217, 119, 6];
-          else if (val === 'W') data.cell.styles.textColor = [2, 132, 199];
-          else if (val === '-') data.cell.styles.textColor = [148, 163, 184];
-        }
-      },
-      didDrawPage: () => drawPdfLetterhead(doc, logoImg, letterheadOptions)
-    });
+      autoTable(doc, {
+        startY: contentStartY,
+        margin: { top: contentStartY, left: 6, right: 6 },
+        head: [['Employee', ...dayHeaders, 'P', 'H', 'A']],
+        body: monthlyReport.users.map((u: any) => {
+          const daySymbols = u.days.map((d: any) => {
+            const isHoliday = !!d.day_type;
+            return d.present ? 'P' : isHoliday ? (d.day_type === 'weekend' ? 'W' : 'H') : d.future || d.before_joining ? '' : '-';
+          });
+          return [u.user_name, ...daySymbols, String(u.present_days), String(u.holiday_days ?? 0), String(u.absent_days)];
+        }),
+        styles: { fontSize: 5.5, cellPadding: 0.8, halign: 'center', overflow: 'visible' },
+        columnStyles: { 0: { cellWidth: 26, halign: 'left', fontStyle: 'bold' } },
+        headStyles: { fillColor: [37, 99, 235], textColor: 255, fontSize: 5.5 },
+        alternateRowStyles: { fillColor: [248, 250, 252] },
+        // Same color convention as the on-screen grid: green Present, amber
+        // Holiday, sky Weekend, slate Absent.
+        didParseCell: (data: any) => {
+          if (data.section === 'body' && data.column.index > 0 && data.column.index <= monthlyReport.days_in_month) {
+            const val = data.cell.raw;
+            if (val === 'P') data.cell.styles.textColor = [5, 150, 105];
+            else if (val === 'H') data.cell.styles.textColor = [217, 119, 6];
+            else if (val === 'W') data.cell.styles.textColor = [2, 132, 199];
+            else if (val === '-') data.cell.styles.textColor = [148, 163, 184];
+          }
+        },
+        didDrawPage: () => drawPdfLetterhead(doc, logoImg, letterheadOptions)
+      });
 
-    const finalY = (doc as any).lastAutoTable.finalY;
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9);
-    doc.setTextColor(15, 23, 42);
-    doc.text(`Total Employees: ${monthlyReport.users.length}`, 6, finalY + 8);
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(7.5);
-    doc.setTextColor(100, 116, 139);
-    doc.text('P = Present   H = Holiday   W = Weekend   - = Absent', 6, finalY + 13);
+      const finalY = (doc as any).lastAutoTable.finalY;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor(15, 23, 42);
+      doc.text(`Total Employees: ${monthlyReport.users.length}`, 6, finalY + 8);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7.5);
+      doc.setTextColor(100, 116, 139);
+      doc.text('P = Present   H = Holiday   W = Weekend   - = Absent', 6, finalY + 13);
 
-    finalizePdfPageNumbers(doc);
-    const filename = `Monthly_Attendance_Report_${monthlyReport.year}_${String(monthlyReport.month).padStart(2, '0')}.pdf`;
-    await savePdfCrossPlatform(doc, filename);
+      finalizePdfPageNumbers(doc);
+      const filename = `Monthly_Attendance_Report_${monthlyReport.year}_${String(monthlyReport.month).padStart(2, '0')}.pdf`;
+      await savePdfCrossPlatform(doc, filename);
+    } catch (err) {
+      console.error('Failed to export the monthly attendance report', err);
+    } finally {
+      setExportingMonthlyReport(false);
+    }
   };
 
   // Export PDF — Date Wise. Portrait, one row per Employee across all three
@@ -4489,7 +4514,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   </div>
                   <button
                     type="button"
-                    onClick={fetchMonthlyReport}
+                    onClick={() => fetchMonthlyReport(1)}
                     className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium whitespace-nowrap transition-colors"
                   >
                     <Filter className="w-3.5 h-3.5" /> Apply
@@ -4519,11 +4544,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   <button
                     type="button"
                     onClick={handleExportMonthlyReportPdf}
-                    disabled={!monthlyReport || monthlyReport.users.length === 0}
+                    disabled={monthlyReportTotal(monthlyReport) === 0 || exportingMonthlyReport}
                     title="Download this report as a PDF"
                     className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-medium whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed transition-colors ml-1"
                   >
-                    <FileDown className="w-3.5 h-3.5" /> Export PDF
+                    <FileDown className="w-3.5 h-3.5" /> {exportingMonthlyReport ? 'Preparing…' : 'Export PDF'}
                   </button>
                 </>
               ) : (
@@ -4560,15 +4585,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           </div>
 
           {attendanceReportView === 'month' ? (
-            loadingMonthlyReport ? (
+            loadingMonthlyReport && !monthlyReport ? (
               <p className="text-xs text-slate-400 text-center py-12">Loading report...</p>
-            ) : !monthlyReport || monthlyReport.users.length === 0 ? (
+            ) : monthlyReportTotal(monthlyReport) === 0 ? (
               <div className="text-center text-xs text-slate-400 py-12 flex flex-col items-center gap-2">
                 <Calendar className="w-6 h-6 text-slate-300" />
                 No users to report on yet.
               </div>
             ) : (
-              <div className="overflow-x-auto">
+              <div className={`overflow-x-auto transition-opacity ${loadingMonthlyReport ? 'opacity-50 pointer-events-none' : ''}`}>
                 <table className="min-w-full divide-y divide-slate-200">
                   <thead className="bg-slate-50 text-slate-500 text-[11px] uppercase tracking-wider">
                     <tr>
@@ -4582,7 +4607,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-sm">
-                    {monthlyReport.users.slice((monthGridPage - 1) * monthGridPageSize, monthGridPage * monthGridPageSize).map((u: any) => (
+                    {monthlyReport.users.map((u: any) => (
                       <tr key={u.user_id} className="hover:bg-slate-50/80 transition-colors">
                         <td className="px-4 py-3 whitespace-nowrap font-semibold text-slate-900 text-xs sticky left-0 bg-white">{u.user_name}</td>
                         {u.days.map((d: any) => {
@@ -4648,7 +4673,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                     ))}
                   </tbody>
                 </table>
-                <PagerBar page={monthGridPage} pageSize={monthGridPageSize} total={monthlyReport.users.length} onPage={setMonthGridPage} onPageSize={(n) => { setMonthGridPageSize(n); setMonthGridPage(1); }} />
+                <PagerBar page={monthGridPage} pageSize={monthGridPageSize} total={monthlyReportTotal(monthlyReport)} onPage={(p) => fetchMonthlyReport(p)} onPageSize={(n) => { setMonthGridPageSize(n); fetchMonthlyReport(1, n); }} />
                 <div className="flex flex-wrap items-center gap-4 px-4 py-3 text-[10px] text-slate-500 border-t border-slate-100">
                   <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-emerald-500" /> Present — GPS (Remote Attendance)</span>
                   <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full bg-sky-500" /> Present — ZKT (Office Attendance)</span>
