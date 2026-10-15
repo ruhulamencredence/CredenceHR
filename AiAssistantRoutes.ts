@@ -1522,9 +1522,16 @@ const TOOLS: Tool[] = [
       const rows: (string | number | null)[][] = [];
       for (const { p, r } of got) {
         if (!r.report) continue;
+        // The PDF font has no Bangla, so the report is in English: the
+        // part's English name, and each value with its column's name.
+        const cols = r.report.columns;
         for (const row of r.report.rows) {
           const [, first, ...rest] = row;
-          rows.push([p.title, first === null || first === undefined ? "" : String(first), rest.filter((v) => v !== null && v !== undefined && v !== "").join(" · ")]);
+          const detail = rest
+            .map((v, i) => (v === null || v === undefined || v === "" ? "" : rest.length === 1 ? String(v) : `${cols[i + 2]}: ${v}`))
+            .filter(Boolean)
+            .join(" · ");
+          rows.push([p.en, first === null || first === undefined ? "" : String(first), detail]);
         }
       }
       const seen = new Set<string>();
@@ -1535,7 +1542,7 @@ const TOOLS: Tool[] = [
           (DAILY_PARTS.some((p) => !toolAvailable(TOOLS.find((t) => t.name === p.tool)!, c)) ? "\n\n_আপনার account-এ যে অংশগুলো দেখার অনুমতি আছে, শুধু সেগুলো দেখানো হয়েছে।_" : ""),
         data: { date, parts: got.map(({ p, r }) => ({ part: p.title, facts: r.data })) },
         actions,
-        report: rows.length ? report(`Daily HR Report — ${enDate(date)}`, `HR-Report-${date}`, ["Section", "Name / Item", "Detail"], rows, [["Date", enDate(date)], ["Sections", got.map(({ p }) => p.title).join(", ")]]) : undefined
+        report: rows.length ? report(`Daily HR Report — ${enDate(date)}`, `HR-Report-${date}`, ["Section", "Name / Item", "Detail"], rows, [["Date", enDate(date)], ["Sections", got.map(({ p }) => p.en).join(", ")]]) : undefined
       };
     }
   },
@@ -1838,18 +1845,18 @@ const toolAvailable = (t: Tool, c: Ctx) => !t.available || t.available(c);
 
 // The parts of the daily HR report (daily_hr_report), in order. Parts that
 // only matter when something is there are left out when empty.
-const DAILY_PARTS: { tool: string; title: string; args: (date: string) => any; skipEmpty?: (r: ToolResult) => boolean; dropPending?: boolean; dropZeros?: boolean }[] = [
-  { tool: "headcount", title: "লোকবল", args: () => ({}) },
-  { tool: "attendance_on_date", title: "হাজিরা", args: (date) => ({ date }) },
-  { tool: "late_on_date", title: "দেরিতে এসেছেন", args: (date) => ({ date }) },
-  { tool: "on_leave", title: "ছুটিতে", args: (date) => ({ date }) },
-  { tool: "admin_pending_work", title: "অপেক্ষমাণ অনুমোদন", args: () => ({}) },
-  { tool: "stuck_applications", title: "৩+ দিন আটকে আছে", args: () => ({ days: 3 }), skipEmpty: (r) => !r.data?.total },
-  { tool: "exits_overview", title: "Exit / Offboarding", args: () => ({}), skipEmpty: (r) => !r.data?.exits?.length },
-  { tool: "onboarding_overview", title: "Onboarding", args: () => ({}) },
-  { tool: "recruitment_overview", title: "Recruitment", args: () => ({}), dropZeros: true,
+const DAILY_PARTS: { tool: string; title: string; en: string; args: (date: string) => any; skipEmpty?: (r: ToolResult) => boolean; dropPending?: boolean; dropZeros?: boolean }[] = [
+  { tool: "headcount", title: "লোকবল", en: "Headcount", args: () => ({}) },
+  { tool: "attendance_on_date", title: "হাজিরা", en: "Attendance", args: (date) => ({ date }) },
+  { tool: "late_on_date", title: "দেরিতে এসেছেন", en: "Late", args: (date) => ({ date }) },
+  { tool: "on_leave", title: "ছুটিতে", en: "On Leave", args: (date) => ({ date }) },
+  { tool: "admin_pending_work", title: "অপেক্ষমাণ অনুমোদন", en: "Pending Approvals", args: () => ({}) },
+  { tool: "stuck_applications", title: "৩+ দিন আটকে আছে", en: "Stuck 3+ Days", args: () => ({ days: 3 }), skipEmpty: (r) => !r.data?.total },
+  { tool: "exits_overview", title: "Exit / Offboarding", en: "Exit / Offboarding", args: () => ({}), skipEmpty: (r) => !r.data?.exits?.length },
+  { tool: "onboarding_overview", title: "Onboarding", en: "Onboarding", args: () => ({}) },
+  { tool: "recruitment_overview", title: "Recruitment", en: "Recruitment", args: () => ({}), dropZeros: true,
     skipEmpty: (r) => !r.data?.open_posts?.length && !r.data?.interviews_this_week?.length && !r.data?.offers_waiting?.length },
-  { tool: "hr_dashboard", title: "সামনে যা আছে", args: () => ({ section: "summary" }), dropPending: true, dropZeros: true }
+  { tool: "hr_dashboard", title: "সামনে যা আছে", en: "Coming Up", args: () => ({ section: "summary" }), dropPending: true, dropZeros: true }
 ];
 
 // ---------------------------------------------------------------------------
