@@ -2796,20 +2796,78 @@ async function startServer() {
   // across workers too, and background jobs run in one worker only
   // (jobRunner.ts).
   if (process.env.REDIS_URL) {
+    // Redis must answer within a few seconds at startup; if it doesn't (not
+    // installed / not running / wrong REDIS_URL) the app starts WITHOUT it,
+    // with one clear warning, instead of retrying for ever — which used to
+    // keep the server from starting at all and fill the log with
+    // ECONNREFUSED. Once connected, a Redis restart is retried with a
+    // back-off, and its errors are logged at most once a minute.
+    let adapterReady = false;
+    const lastLogged: Record<string, number> = {};
+    const logRedisError = (which: string, err: any) => {
+      if (!adapterReady) return; // startup failure is reported once below
+      const now = Date.now();
+      if (now - (lastLogged[which] || 0) < 60_000) return;
+      lastLogged[which] = now;
+      console.error(`Socket.IO Redis ${which} client error (retrying): ${err?.code || err?.message || err}`);
+    };
+    let pubClient: any = null;
+    let subClient: any = null;
+    // While Redis is down (restart, network blip) the adapter's own pending
+    // publishes fail with nobody awaiting them; Node would end the whole
+    // server on that unhandled rejection. Only those Redis connection
+    // errors are caught here — anything else still ends the process as
+    // before (PM2 restarts it).
+    let redisDown = false;
+    const REDIS_CONN_ERR = /EPIPE|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EHOSTUNREACH|ClientClosed|SocketClosed|Connection ?Timeout|The client is closed|Socket closed/i;
+    process.on("unhandledRejection", (reason: any) => {
+      const text = `${reason?.name || ""} ${reason?.code || ""} ${reason?.message || reason}`;
+      if (adapterReady && REDIS_CONN_ERR.test(text)) {
+        logRedisError("connection", reason);
+        return;
+      }
+      throw reason;
+    });
     try {
       const { createAdapter } = await import("@socket.io/redis-adapter");
       const { createClient } = await import("redis");
-      const pubClient = createClient({ url: process.env.REDIS_URL });
-      const subClient = pubClient.duplicate();
-      pubClient.on("error", (err) => console.error("Socket.IO Redis pub client error:", err));
-      subClient.on("error", (err) => console.error("Socket.IO Redis sub client error:", err));
-      await Promise.all([pubClient.connect(), subClient.connect()]);
+      pubClient = createClient({
+        url: process.env.REDIS_URL,
+        socket: {
+          connectTimeout: 5000,
+          // false = give up (only before the first successful connect).
+          reconnectStrategy: (retries: number) => (adapterReady ? Math.min(500 * (retries + 1), 10_000) : false)
+        }
+      });
+      subClient = pubClient.duplicate();
+      for (const [c, which] of [[pubClient, "pub"], [subClient, "sub"]] as const) {
+        c.on("error", (err: any) => {
+          redisDown = true;
+          logRedisError(which, err);
+        });
+        c.on("ready", () => {
+          if (redisDown && adapterReady) console.log(` Socket.IO Redis ${which} client reconnected.`);
+          redisDown = false;
+        });
+      }
+      await Promise.race([
+        Promise.all([pubClient.connect(), subClient.connect()]),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("no answer within 6 seconds")), 6000))
+      ]);
       io.adapter(createAdapter(pubClient, subClient));
+      adapterReady = true;
       console.log(" Socket.IO Redis adapter connected — ready for multi-instance deployment.");
-    } catch (err) {
-      console.error(
-        "Failed to attach Socket.IO Redis adapter (falling back to the default in-memory adapter — chat will only broadcast within this one process):",
-        err
+    } catch (err: any) {
+      for (const c of [pubClient, subClient]) {
+        try {
+          await c?.disconnect();
+        } catch {
+          // already closed
+        }
+      }
+      console.warn(
+        `⚠️ Redis not reachable at ${process.env.REDIS_URL} (${err?.code || err?.message || err}) — running WITHOUT it. ` +
+          "Fine for a single process; with several PM2 workers chat, notifications, presence and calls between workers will not work until Redis is running and the app is restarted."
       );
     }
   }
