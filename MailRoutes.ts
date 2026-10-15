@@ -104,6 +104,7 @@ export async function ensureMailSchema(dbPool: any): Promise<void> {
         uid BIGINT NULL,
         message_id VARCHAR(500) NULL,
         in_reply_to VARCHAR(500) NULL,
+        refs TEXT NULL,
         thread_id VARCHAR(64) NOT NULL,
         from_name VARCHAR(255) NULL,
         from_email VARCHAR(255) NULL,
@@ -248,6 +249,8 @@ export async function ensureMailSchema(dbPool: any): Promise<void> {
     ]
   ];
   for (const [label, sql] of tables) await run(label, sql);
+  // References chain, so a reply to a reply stays in the same conversation.
+  await run("mail_messages.refs", "ALTER TABLE mail_messages ADD COLUMN refs TEXT NULL AFTER in_reply_to", ["ER_DUP_FIELDNAME"]);
 }
 
 // ---------------------------------------------------------------------------
@@ -585,8 +588,10 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     const host = String(a?.host || "").trim();
     return mb && host ? `${mb}@${host}` : String(a?.address || "").trim();
   };
-  const threadOf = (messageId: string | null, inReplyTo: string | null, references: string[] | string | undefined) => {
-    const refs = Array.isArray(references) ? references : references ? String(references).split(/\s+/) : [];
+  const refList = (references: string[] | string | null | undefined): string[] =>
+    (Array.isArray(references) ? references : references ? String(references).split(/\s+/) : []).map((x) => String(x).trim()).filter(Boolean);
+  const threadOf = (messageId: string | null, inReplyTo: string | null, references: string[] | string | null | undefined) => {
+    const refs = refList(references);
     const root = refs[0] || inReplyTo || messageId || crypto.randomUUID();
     return `t${crypto.createHash("sha1").update(root).digest("hex").slice(0, 24)}`;
   };
@@ -610,6 +615,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     const date = env.date || parsed.date || msg.internalDate || new Date();
     const messageId = String(env.messageId || parsed.messageId || "").slice(0, 500) || null;
     const inReplyTo = String(env.inReplyTo || parsed.inReplyTo || "").slice(0, 500) || null;
+    const refs = refList(parsed.references).join(" ").slice(0, 4000) || null;
 
     // Inline images (cid:) shown from the message itself when small.
     let html: string = parsed.html || parsed.textAsHtml || `<pre>${escapeHtml(parsed.text || "")}</pre>`;
@@ -664,9 +670,9 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
 
     const result: any = await queryDB(
       `INSERT IGNORE INTO mail_messages
-        (user_id, account_id, folder_role, uid, message_id, in_reply_to, thread_id, from_name, from_email, to_json, cc_json, subject, body, snippet,
+        (user_id, account_id, folder_role, uid, message_id, in_reply_to, refs, thread_id, from_name, from_email, to_json, cc_json, subject, body, snippet,
          mail_date, is_read, is_starred, labels_json, category, attachments_json, has_attachments)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         Number(a.user_id),
         Number(a.id),
@@ -674,6 +680,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
         Number(msg.uid),
         messageId,
         inReplyTo,
+        refs,
         threadOf(messageId, inReplyTo, parsed.references),
         fromName,
         fromEmail,
@@ -692,7 +699,10 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
       ]
     );
     if (!Number(result?.affectedRows)) return null;
-    const row = { id: Number(result.insertId), fromEmail, fromName, subject, labels: lab, date };
+    // A rule's read / star goes to the mail server too — otherwise the next
+    // sync would take the server's flags back.
+    const addFlags = [...(isRead && !flags.has("\\Seen") ? ["\\Seen"] : []), ...(isStarred && !flags.has("\\Flagged") ? ["\\Flagged"] : [])];
+    const row = { id: Number(result.insertId), fromEmail, fromName, subject, labels: lab, date, addFlags };
     if (role === "inbox" && fresh && lab.includes("Inbox")) await maybeVacationReply(a, fromEmail, subject, date).catch(() => undefined);
     return row;
   }
@@ -781,6 +791,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
                   }
                 }
                 const row = await storeFetched(a, role, m, !firstTime);
+                if (row?.addFlags.length) await c.messageFlagsAdd(String(m.uid), row.addFlags, { uid: true }).catch(() => undefined);
                 if (row) {
                   (out as any)[role]++;
                   if (role === "inbox" && !firstTime && row.labels.includes("Inbox")) out.fresh.push(row);
@@ -1374,8 +1385,9 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
   }
 
   // Builds the message once: the same bytes go to SMTP and into Sent.
-  async function compose(a: any, m: { to: string[]; cc: string[]; bcc: string[]; subject: string; html: string; inReplyTo?: string | null; references?: string | null; files: { name: string; mime: string; data: Buffer }[] }) {
-    const messageId = `<${crypto.randomUUID()}@${String(a.email).split("@")[1] || "credence.mail"}>`;
+  const newMessageId = (a: any) => `<${crypto.randomUUID()}@${String(a.email).split("@")[1] || "credence.mail"}>`;
+  async function compose(a: any, m: { messageId?: string | null; to: string[]; cc: string[]; bcc: string[]; subject: string; html: string; inReplyTo?: string | null; references?: string | null; files: { name: string; mime: string; data: Buffer }[] }) {
+    const messageId = m.messageId || newMessageId(a);
     const raw = await new MailComposer({
       from: { name: a.display_name || a.email, address: a.email },
       to: m.to.join(", ") || undefined,
@@ -1398,7 +1410,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     const cc = parseJson<string[]>(row.cc_json, []);
     const bcc = parseJson<string[]>(row.bcc_json, []);
     const files = await storedFiles(Number(row.id));
-    const { raw, messageId } = await compose(a, { to, cc, bcc, subject: row.subject || "", html: row.body || "", inReplyTo: row.in_reply_to, files });
+    const { raw, messageId } = await compose(a, { messageId: row.message_id, to, cc, bcc, subject: row.subject || "", html: row.body || "", inReplyTo: row.in_reply_to, references: row.refs, files });
     await sendRaw(a, { from: a.email, to: [...to, ...cc, ...bcc] }, raw);
     // A copy in the server's Sent folder (other mail apps see it too).
     let sentUid: number | null = null;
@@ -1431,18 +1443,30 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     const text = html.replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
     const scheduledAt = labels.includes("Scheduled") && b.scheduledAt ? toDb(b.scheduledAt) : null;
     const inReplyTo = str(b.inReplyTo, 500) || null;
-    const thread = str(b.threadId, 64) || threadOf(null, inReplyTo, undefined);
+    // The Message-ID is fixed when the mail is first saved, so the thread
+    // (rooted at the first mail's Message-ID) is the same one the
+    // recipients' replies will point back to.
+    let messageId: string | null = null;
+    if (existingId) messageId = (((await queryDB("SELECT message_id FROM mail_messages WHERE id = ? AND user_id = ?", [existingId, userId])) || [])[0] || {}).message_id || null;
+    if (!messageId) messageId = newMessageId(a);
+    // A reply carries the whole chain of the mail it answers.
+    let refs: string | null = null;
+    if (inReplyTo) {
+      const orig: any = ((await queryDB("SELECT refs FROM mail_messages WHERE user_id = ? AND message_id = ? LIMIT 1", [userId, inReplyTo])) || [])[0];
+      refs = [...refList(orig?.refs), inReplyTo].filter((x, i, all) => all.indexOf(x) === i).join(" ").slice(0, 4000);
+    }
+    const thread = threadOf(messageId, inReplyTo, refs);
     let id = existingId;
     if (id) {
       await queryDB(
-        `UPDATE mail_messages SET account_id = ?, to_json = ?, cc_json = ?, bcc_json = ?, subject = ?, body = ?, snippet = ?, labels_json = ?, scheduled_at = ?, in_reply_to = ?, thread_id = ?, mail_date = UTC_TIMESTAMP(), from_email = ?, from_name = ? WHERE id = ? AND user_id = ?`,
-        [Number(a.id), JSON.stringify(to), JSON.stringify(cc), JSON.stringify(bcc), subject, html, text.slice(0, 200), JSON.stringify(labels), scheduledAt, inReplyTo, thread, a.email, a.display_name || a.email, id, userId]
+        `UPDATE mail_messages SET account_id = ?, to_json = ?, cc_json = ?, bcc_json = ?, subject = ?, body = ?, snippet = ?, labels_json = ?, scheduled_at = ?, in_reply_to = ?, refs = ?, message_id = ?, thread_id = ?, mail_date = UTC_TIMESTAMP(), from_email = ?, from_name = ? WHERE id = ? AND user_id = ?`,
+        [Number(a.id), JSON.stringify(to), JSON.stringify(cc), JSON.stringify(bcc), subject, html, text.slice(0, 200), JSON.stringify(labels), scheduledAt, inReplyTo, refs, messageId, thread, a.email, a.display_name || a.email, id, userId]
       );
     } else {
       const r: any = await queryDB(
-        `INSERT INTO mail_messages (user_id, account_id, folder_role, uid, thread_id, in_reply_to, from_name, from_email, to_json, cc_json, bcc_json, subject, body, snippet, mail_date, is_read, labels_json, category, attachments_json, scheduled_at)
-         VALUES (?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), 1, ?, 'primary', '[]', ?)`,
-        [userId, Number(a.id), thread, inReplyTo, a.display_name || a.email, a.email, JSON.stringify(to), JSON.stringify(cc), JSON.stringify(bcc), subject, html, text.slice(0, 200), JSON.stringify(labels), scheduledAt]
+        `INSERT INTO mail_messages (user_id, account_id, folder_role, uid, message_id, thread_id, in_reply_to, refs, from_name, from_email, to_json, cc_json, bcc_json, subject, body, snippet, mail_date, is_read, labels_json, category, attachments_json, scheduled_at)
+         VALUES (?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(), 1, ?, 'primary', '[]', ?)`,
+        [userId, Number(a.id), messageId, thread, inReplyTo, refs, a.display_name || a.email, a.email, JSON.stringify(to), JSON.stringify(cc), JSON.stringify(bcc), subject, html, text.slice(0, 200), JSON.stringify(labels), scheduledAt]
       );
       id = Number(r.insertId);
     }
@@ -1458,7 +1482,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
   }
 
   // Send now, or later (scheduledAt) — { accountId, to, cc, bcc, subject,
-  // body, attachments: [{ name, type, dataUrl }], inReplyTo, threadId,
+  // body, attachments: [{ name, type, dataUrl }], inReplyTo,
   // draftId, keepAttachments }
   app.post(
     "/api/mail/send",
