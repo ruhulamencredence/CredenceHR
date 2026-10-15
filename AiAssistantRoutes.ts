@@ -91,7 +91,7 @@ interface Answer { reply: string; actions: AssistantAction[]; draft?: LeaveDraft
 
 const SELF_FLAGS = [
   "can_view_movement_claims", "can_view_conveyance_claims", "can_view_timesheet", "can_view_leave_application",
-  "can_view_my_leave", "can_view_tasks", "can_view_mobile_bill", "can_view_loan_request", "can_view_targets", "can_manage_leave"
+  "can_view_my_leave", "can_view_tasks", "can_view_mobile_bill", "can_view_loan_request", "can_view_targets", "can_manage_leave", "can_view_service_book"
 ] as const;
 
 const BN_DIGITS = "০১২৩৪৫৬৭৮৯";
@@ -437,6 +437,15 @@ export function parseLeaveRequest(text: string, today: string) {
   return { start_date: start, end_date: end, leave_type, is_half_day, purpose };
 }
 
+// "pending_with" on a requisition: a name, a list of names or { name }.
+const pendingWith = (x: any): string | null => {
+  const p = x?.pending_with;
+  if (!p) return null;
+  if (typeof p === "string") return p;
+  if (Array.isArray(p)) return p.map((v) => (typeof v === "string" ? v : v?.name || v?.user_name)).filter(Boolean).join(" / ") || null;
+  return p.name || p.user_name || null;
+};
+
 // Where a pending leave application waits: its Reliever first, then the
 // Approval Chain layer (label from the template step) and who approves it.
 function leaveStage(l: any): { key: string; bn: string; en: string } {
@@ -691,6 +700,202 @@ const TOOLS: Tool[] = [
       const text = `ছুটির আবেদনের খসড়া তৈরি করেছি${start ? ` — ${bnDate(start)}${end !== start ? ` থেকে ${bnDate(end)}` : ""}` : ""}। ` +
         (missing.length ? `${missing.join(" আর ")} দিয়ে দিন, ` : "") + "নিচে সব দেখে **জমা দিন** চাপুন। আপনি না চাপলে কিছু জমা হবে না।";
       return { ok: true, text, draft, data: { drafted: true, submitted: false, leave_type: leaveType, start_date: start, end_date: end, purpose: draft.purpose, note: "Shown to the user as a form; they must review it and press Submit themselves." } };
+    }
+  },
+  // ---- The asker's own things (each reads the asker's own API) ----
+  {
+    name: "my_pending_approvals",
+    description: "Applications waiting for the asking user's own approval (as supervisor / approver / reliever / clearance approver): how many, whose, what, since when.",
+    run: async (c) => {
+      const r = await callApi(c.req, "/api/my-approvals");
+      if (!r.ok) return fail(r.status);
+      const rows: any[] = Array.isArray(r.body) ? r.body : [];
+      if (!rows.length) return { ok: true, text: "এই মুহূর্তে আপনার অনুমোদনের অপেক্ষায় কিছু নেই। 👍", data: { pending: 0 }, actions: [{ label: "Approve Application খুলুন", nav: "self:approveApplications" }] };
+      const KIND: Record<string, string> = {
+        leave_application: "ছুটির আবেদন", leave_reliever: "ছুটি (Reliever হিসেবে)", leave_direct: "ছুটির আবেদন", claim: "Movement claim", user_claim: "Conveyance bill",
+        attendance: "হাজিরা", attendance_correction: "হাজিরা সংশোধন", asset_requisition: "Asset requisition", vehicle_requisition: "গাড়ির requisition",
+        mobile_limit_request: "Mobile limit", advance_request: "Loan / advance", exit_clearance: "Exit clearance", hr_action: "Personnel action"
+      };
+      const kinds = new Map<string, number>();
+      for (const x of rows) kinds.set(KIND[x.source_type] || x.source_type, (kinds.get(KIND[x.source_type] || x.source_type) || 0) + 1);
+      const age = (x: any) => Math.max(0, Math.round((Date.parse(c.today) - Date.parse(String(x.created_at || c.today).slice(0, 10))) / 86400000));
+      const sorted = [...rows].sort((a, b) => age(b) - age(a));
+      const text = `আপনার অনুমোদনের অপেক্ষায় **${bn(rows.length)}টি**: ` + [...kinds.entries()].map(([k, n]) => `${k} ${bn(n)}`).join(", ") + "\n" +
+        sorted.slice(0, 8).map((x) => `• ${KIND[x.source_type] || x.source_type} — **${x.requested_by_name || "—"}**${x.source_label ? `: ${x.source_label}` : ""}${x.source_amount ? ` (${money(x.source_amount)})` : ""} · ${bn(age(x))} দিন ধরে`).join("\n") +
+        (rows.length > 8 ? `\n…আরও ${bn(rows.length - 8)}টি` : "");
+      return {
+        ok: true, text,
+        data: { pending: rows.length, by_kind: Object.fromEntries(kinds), items: sorted.slice(0, 30).map((x) => ({ kind: KIND[x.source_type] || x.source_type, from: x.requested_by_name, what: x.source_label, amount: x.source_amount, step: `${x.current_step}/${x.total_steps}`, waiting_days: age(x) })) },
+        actions: [{ label: "Approve Application খুলুন", nav: "self:approveApplications" }],
+        report: report("Waiting for My Approval", `My-Approvals-${c.today}`, ["Type", "From", "Detail", "Amount", "Step", "Waiting (days)"],
+          sorted.map((x) => [KIND[x.source_type] ? x.source_type.replace(/_/g, " ") : x.source_type, x.requested_by_name || "", x.source_label || "", x.source_amount ?? "", `${x.current_step}/${x.total_steps}`, age(x)]), [["As of", enDate(c.today)], ["Approver", c.name]])
+      };
+    }
+  },
+  {
+    name: "my_profile",
+    description: "The asking employee's own job details: employee ID, designation, department, branch, supervisor — and, when their Service Book is turned on, joining date, length of service, job base, probation / confirmation dates.",
+    run: async (c) => {
+      const dir = await callApi(c.req, "/api/employee-directory");
+      const me = (Array.isArray(dir.body) ? dir.body : []).find((e: any) => Number(e.user_id) === c.userId);
+      const full = isSuper(c) || c.flags.can_view_service_book;
+      const sb = full ? await callApi(c.req, "/api/hr-ops/my/service-book") : null;
+      const e = sb?.ok ? sb.body?.employee : null;
+      if (!me && !e) return { ok: true, text: "আপনার login এখনো কোনো Employee record-এর সাথে যুক্ত নয়, তাই তথ্য দেখানো যাচ্ছে না। HR-কে জানান।", data: { linked: false } };
+      const months = Number(e?.service_length_months);
+      const lines = [
+        `• Employee ID: **${e?.employee_code || me?.employee_id || "—"}**`,
+        `• পদবি: **${e?.designation || me?.designation || "—"}**${(e?.department || me?.department) ? ` · Department: ${e?.department || me?.department}` : ""}`,
+        (e?.branch || me?.branch) ? `• Branch: ${e?.branch || me?.branch}` : "",
+        `• Supervisor: **${e?.supervisor || me?.supervisor_name || "দেওয়া নেই"}**`,
+        e?.joining_date ? `• যোগদান: ${bnDate(e.joining_date)}${Number.isFinite(months) ? ` — ${bn(Math.floor(months / 12))} বছর ${bn(months % 12)} মাস` : ""}` : "",
+        e?.job_base ? `• চাকরির ধরন: ${e.job_base}` : "",
+        e?.probation_end_date && !e?.confirmation_date ? `• Probation শেষ: ${bnDate(e.probation_end_date)}` : "",
+        e?.confirmation_date ? `• Confirmation: ${bnDate(e.confirmation_date)}` : ""
+      ].filter(Boolean);
+      const note = !full ? "\n(যোগদানের তারিখ ও চাকরির ইতিহাস My Service Book-এ থাকে — সেটা আপনার account-এ চালু নেই।)" : "";
+      return {
+        ok: true,
+        text: `**${c.name}**\n` + lines.join("\n") + note,
+        data: { employee_id: e?.employee_code || me?.employee_id, designation: e?.designation || me?.designation, department: e?.department || me?.department, branch: e?.branch || me?.branch,
+          supervisor: e?.supervisor || me?.supervisor_name || null, ...(full ? { joining_date: e?.joining_date || null, service_months: Number.isFinite(months) ? months : null, job_base: e?.job_base || null, probation_end_date: e?.probation_end_date || null, confirmation_date: e?.confirmation_date || null } : { service_book: "not_enabled" }) },
+        actions: full ? [{ label: "My Service Book খুলুন", nav: "self:myLetters" }] : []
+      };
+    }
+  },
+  {
+    name: "my_assets",
+    description: "Assets the asking employee holds (and which still need their acknowledgement or are asked back), and their own asset requisitions with status.",
+    run: async (c) => {
+      const [held, reqs] = await Promise.all([callApi(c.req, "/api/assets/my"), callApi(c.req, "/api/assets/requisitions/my")]);
+      if (!held.ok && !reqs.ok) return fail(held.status);
+      const items: any[] = Array.isArray(held.body) ? held.body : [];
+      const rq: any[] = (Array.isArray(reqs.body) ? reqs.body : []).filter((x: any) => !["fulfilled", "rejected", "cancelled", "closed"].includes(String(x.status)));
+      const ack = items.filter((a) => !a.acknowledged_at);
+      const back = items.filter((a) => a.return_requested_at);
+      const text = (items.length
+        ? `আপনার কাছে **${bn(items.length)}টি** asset:\n` + items.slice(0, 10).map((a) => `• ${a.name}${a.asset_tag ? ` (${a.asset_tag})` : ""}${Number(a.quantity) > 1 ? ` × ${bn(a.quantity)}` : ""} — ${bnDate(a.assigned_date)} থেকে${!a.acknowledged_at ? " · ⚠️ হাতে পাওয়ার স্বীকৃতি (Acknowledge) বাকি" : ""}${a.return_requested_at ? " · ফেরত চাওয়া হয়েছে" : ""}`).join("\n")
+        : "আপনার নামে কোনো asset নেই।") +
+        (rq.length ? `\nচলমান requisition ${bn(rq.length)}টি:\n` + rq.slice(0, 5).map((x: any) => `• ${x.asset_category || "Asset"} — ${st(String(x.status).replace("manager_approved", "approved"))}${pendingWith(x) ? ` (অপেক্ষায়: ${pendingWith(x)})` : ""}`).join("\n") : "");
+      return { ok: true, text, data: { held: items.map((a) => ({ name: a.name, tag: a.asset_tag, since: a.assigned_date, acknowledged: !!a.acknowledged_at, return_requested: !!a.return_requested_at })), awaiting_ack: ack.length, asked_back: back.length, open_requisitions: rq.map((x: any) => ({ category: x.asset_category, status: x.status, waiting_on: pendingWith(x) })) }, actions: [{ label: "My Asset খুলুন", nav: "self:assetManagement" }] };
+    }
+  },
+  {
+    name: "my_rides",
+    description: "The asking employee's own vehicle (ride) requisitions — upcoming / ongoing / pending ones with date, route, status, vehicle and driver.",
+    run: async (c) => {
+      const r = await callApi(c.req, "/api/vehicles/requisitions");
+      if (!r.ok) return fail(r.status);
+      const mine: any[] = (Array.isArray(r.body) ? r.body : []).filter((x: any) => Number(x.employee_user_id) === c.userId);
+      const open = mine.filter((x) => !["completed", "rejected", "cancelled", "expired"].includes(String(x.status)));
+      if (!mine.length) return { ok: true, text: "আপনার কোনো গাড়ির requisition নেই।", data: { rides: [] }, actions: [{ label: "Book a Ride খুলুন", nav: "self:vehicleManagement" }] };
+      const line = (x: any) => `• ${bnDate(x.ride_date || x.created_at)}${x.start_time ? ` ${bn(enTime(" " + x.start_time))}` : ""}${x.pickup_location ? ` — ${x.pickup_location}${x.destination ? ` → ${x.destination}` : ""}` : ""}: **${st(x.status)}**${x.vehicle_no ? ` · গাড়ি ${x.vehicle_no}` : ""}${x.driver_name ? ` · চালক ${x.driver_name}${x.driver_mobile ? ` (${x.driver_mobile})` : ""}` : ""}${pendingWith(x) ? ` · অপেক্ষায়: ${pendingWith(x)}` : ""}`;
+      return {
+        ok: true,
+        text: (open.length ? `চলমান / অপেক্ষমাণ ${bn(open.length)}টি:\n` + open.slice(0, 6).map(line).join("\n") : "এখন কোনো চলমান requisition নেই।") + `\n(মোট ${bn(mine.length)}টি requisition)`,
+        data: { open: open.slice(0, 10).map((x) => ({ date: x.ride_date, time: x.start_time, from: x.pickup_location, to: x.destination, status: x.status, vehicle: x.vehicle_no || null, driver: x.driver_name || null, waiting_on: pendingWith(x) })), total: mine.length },
+        actions: [{ label: "Book a Ride খুলুন", nav: "self:vehicleManagement" }]
+      };
+    }
+  },
+  {
+    name: "my_letters",
+    description: "The asking employee's letters from HR: letter / certificate requests and their status, letters waiting for their acknowledgement, and information or documents HR has asked them to submit.",
+    run: async (c) => {
+      const [l, i] = await Promise.all([callApi(c.req, "/api/hr-ops/my/letters"), callApi(c.req, "/api/hr-ops/my/info-requests")]);
+      if (!l.ok && !i.ok) return fail(l.status);
+      const reqs: any[] = (l.body?.requests || []).filter((x: any) => x.status === "pending" || x.status === "in_progress");
+      const toAck: any[] = (l.body?.letters || []).filter((x: any) => x.requires_ack && !x.acknowledged_at && x.status !== "cancelled");
+      const info: any[] = (i.body?.items || []).filter((x: any) => ["pending", "requested", "rejected", "returned"].includes(String(x.status)) || (!x.submitted_at && x.status !== "approved"));
+      const parts: string[] = [];
+      parts.push(reqs.length ? `চিঠির অনুরোধ অপেক্ষায় ${bn(reqs.length)}টি:\n` + reqs.map((x) => `• ${x.letter_label || x.letter_type} — ${bnDate(x.created_at)} থেকে`).join("\n") : "কোনো চিঠির অনুরোধ অপেক্ষায় নেই।");
+      if (toAck.length) parts.push(`Acknowledge করা বাকি ${bn(toAck.length)}টি চিঠি:\n` + toAck.map((x) => `• ${x.letter_label || x.subject} (${x.ref_no || ""})`).join("\n"));
+      if (info.length) parts.push(`HR আপনার কাছে চেয়েছে ${bn(info.length)}টি:\n` + info.slice(0, 8).map((x) => `• ${x.item_label}${x.due_date ? ` — শেষ তারিখ ${bnDate(x.due_date)}` : ""}${x.overdue ? " ⚠️" : ""}${x.status === "rejected" || x.status === "returned" ? " (ফেরত — আবার দিন)" : ""}`).join("\n"));
+      return {
+        ok: true, text: parts.join("\n\n"),
+        data: { letter_requests: reqs.map((x) => ({ type: x.letter_label || x.letter_type, since: x.created_at, status: x.status })), to_acknowledge: toAck.map((x) => x.letter_label || x.subject), hr_asked_for: info.map((x) => ({ item: x.item_label, due: x.due_date, overdue: !!x.overdue, status: x.status })) },
+        actions: [{ label: "My Letters খুলুন", nav: "self:myLetters" }]
+      };
+    }
+  },
+  {
+    name: "my_targets_progress",
+    description: "The asking employee's own monthly / yearly targets: progress %, tasks done, deadline, overdue ones, and targets waiting for approval.",
+    available: (c) => isSuper(c) || c.flags.can_view_targets,
+    run: async (c) => {
+      const r = await callApi(c.req, "/api/targets/mine");
+      if (!r.ok) return fail(r.status);
+      const list: any[] = (Array.isArray(r.body) ? r.body : []).filter((t: any) => ["active", "pending", "draft"].includes(t.status));
+      if (!list.length) return { ok: true, text: "আপনার কোনো চলমান target নেই।", data: { targets: [] }, actions: [{ label: "My Targets খুলুন", nav: "self:myTargets" }] };
+      const line = (t: any) => `• **${t.title}** (${t.period_type === "yearly" ? "বার্ষিক" : "মাসিক"} ${t.period}) — **${bn(t.progress)}%**, task ${bn(t.completed_count)}/${bn(t.task_count)} শেষ, deadline ${bnDate(t.deadline)}${t.overdue ? " ⚠️ সময় পেরিয়েছে" : ""}${t.status === "pending" ? " · অনুমোদনের অপেক্ষায়" : t.status === "draft" ? " · খসড়া" : ""}`;
+      return {
+        ok: true, text: `আপনার target ${bn(list.length)}টি:\n` + list.slice(0, 8).map(line).join("\n"),
+        data: { targets: list.map((t) => ({ title: t.title, period: t.period, type: t.period_type, progress: t.progress, done: t.completed_count, tasks: t.task_count, deadline: t.deadline, overdue: !!t.overdue, status: t.status })) },
+        actions: [{ label: "My Targets খুলুন", nav: "self:myTargets" }]
+      };
+    }
+  },
+  {
+    name: "my_mobile_sim",
+    description: "The asking employee's own office SIM(s): monthly limit, latest bills against the limit, and their limit-raise requests.",
+    available: (c) => isSuper(c) || c.flags.can_view_mobile_bill || c.modules.includes("mobile_bill"),
+    run: async (c) => {
+      const r = await callApi(c.req, "/api/mobile-bill/my");
+      if (!r.ok) return fail(r.status);
+      const sims: any[] = r.body?.sims || [];
+      const reqs: any[] = (r.body?.requests || []).filter((x: any) => x.status === "pending");
+      if (!sims.length) return { ok: true, text: "আপনার নামে কোনো অফিস SIM নেই।", data: { sims: [] }, actions: [{ label: "My Mobile SIM খুলুন", nav: "self:myMobileSim" }] };
+      const text = sims.map((s) => {
+        const b = (s.bills || [])[0];
+        return `• **${s.phone_number}** (${s.operator || ""}) — limit ${money(s.limit_amount)}` + (b ? `\n  ${bnMonth(String(b.month))}-এর bill ${money(b.amount)}${Number(b.amount) > Number(b.limit_amount) ? ` — ⚠️ ${money(Number(b.amount) - Number(b.limit_amount))} বেশি (কাটা যেতে পারে)` : " — limit-এর মধ্যে"}` : "\n  এখনো কোনো bill আসেনি");
+      }).join("\n") + (reqs.length ? `\nLimit বাড়ানোর অনুরোধ অপেক্ষায়: ${reqs.map((x) => `${money(x.current_limit)} → ${money(x.requested_limit)}`).join(", ")}` : "");
+      return { ok: true, text, data: { sims: sims.map((s) => ({ phone: s.phone_number, limit: s.limit_amount, last_bills: (s.bills || []).slice(0, 3) })), pending_requests: reqs.map((x) => ({ from: x.current_limit, to: x.requested_limit })) }, actions: [{ label: "My Mobile SIM খুলুন", nav: "self:myMobileSim" }] };
+    }
+  },
+  {
+    name: "my_resignation",
+    description: "The asking employee's own resignation / exit: status, last working day, which clearance items are done or still open (and with whom).",
+    run: async (c) => {
+      const r = await callApi(c.req, "/api/exit-requests");
+      if (!r.ok) return fail(r.status);
+      const mine: any[] = (Array.isArray(r.body) ? r.body : []).filter((x: any) => Number(x.user_id) === c.userId);
+      const x = mine.find((e) => e.status !== "cancelled") || mine[0];
+      if (!x) return { ok: true, text: "আপনার কোনো resignation / exit আবেদন নেই।", data: { exit: null }, actions: [{ label: "My Resignation খুলুন", nav: "self:resignation" }] };
+      const items: any[] = x.clearance_items || [];
+      const open = items.filter((i) => !Number(i.is_cleared));
+      const STATUS: Record<string, string> = { pending: "HR-এর গ্রহণের অপেক্ষায়", clearance: "Clearance চলছে", settled: "Settle হয়েছে", cancelled: "বাতিল" };
+      const text = `আপনার exit: **${STATUS[x.status] || st(x.status)}**${x.last_working_day ? ` · শেষ কর্মদিবস ${bnDate(x.last_working_day)}` : ""}` +
+        (items.length ? `\nClearance ${bn(items.length - open.length)}/${bn(items.length)} শেষ` + (open.length ? ":\n" + open.map((i) => `• ${i.department} বাকি${i.approver_name ? ` — ${i.approver_name}` : ""}`).join("\n") : " ✔") : "");
+      return { ok: true, text, data: { status: x.status, last_working_day: x.last_working_day, clearance_done: items.length - open.length, clearance_total: items.length, open: open.map((i) => ({ department: i.department, approver: i.approver_name || null })) }, actions: [{ label: "My Resignation খুলুন", nav: "self:resignation" }] };
+    }
+  },
+  {
+    name: "my_cases",
+    description: "Status of grievances the asking employee raised, and disciplinary cases about them (only their own).",
+    run: async (c) => {
+      const r = await callApi(c.req, "/api/my-cases");
+      if (!r.ok) return fail(r.status);
+      const raised: any[] = r.body?.raised || [];
+      const disc: any[] = r.body?.disciplinary || [];
+      if (!raised.length && !disc.length) return { ok: true, text: "আপনার কোনো অভিযোগ বা disciplinary case নেই।", data: { raised: [], disciplinary: [] }, actions: [{ label: "Grievance খুলুন", nav: "self:myCases" }] };
+      const text = (raised.length ? `আপনার অভিযোগ ${bn(raised.length)}টি:\n` + raised.slice(0, 6).map((g) => `• ${g.category || "অভিযোগ"}${g.description ? `: ${String(g.description).slice(0, 60)}` : ""} — **${st(g.status)}**${g.created_at ? ` (${bnDate(g.created_at)})` : ""}`).join("\n") : "") +
+        (disc.length ? `${raised.length ? "\n" : ""}Disciplinary ${bn(disc.length)}টি:\n` + disc.slice(0, 6).map((d) => `• ${d.action_type || d.type || "Case"} — **${st(d.status)}**`).join("\n") : "");
+      return { ok: true, text, data: { raised: raised.map((g) => ({ category: g.category, about: String(g.description || "").slice(0, 120), status: g.status })), disciplinary: disc.map((d) => ({ type: d.action_type || d.type, status: d.status })) }, actions: [{ label: "Grievance & Disciplinary খুলুন", nav: "self:myCases" }] };
+    }
+  },
+  {
+    name: "my_team_attendance",
+    description: "For a site supervisor: today's attendance of the site teams they mark (present / late / absent / on leave / not yet marked).",
+    run: async (c) => {
+      const r = await callApi(c.req, "/api/site-attendance/my-teams");
+      if (!r.ok) return fail(r.status);
+      const teams: any[] = r.body?.teams || [];
+      if (!teams.length) return { ok: true, text: "আপনি কোনো site টিমের হাজিরা নেন না।", data: { teams: [] } };
+      const text = `${bnDate(r.body?.today || c.today)}-এর টিম হাজিরা:\n` + teams.map((t) => {
+        const k = t.today?.counts || {};
+        return `• **${t.name}**${t.project_name ? ` (${t.project_name})` : ""} — মোট ${bn(k.total ?? 0)}: উপস্থিত ${bn(k.present ?? 0)}, দেরি ${bn(k.late ?? 0)}, অনুপস্থিত ${bn(k.absent ?? 0)}, ছুটি ${bn(k.leave ?? 0)}${k.unmarked ? ` · ⚠️ ${bn(k.unmarked)} জনের হাজিরা এখনো দেওয়া হয়নি` : ""}`;
+      }).join("\n");
+      return { ok: true, text, data: { date: r.body?.today, teams: teams.map((t) => ({ team: t.name, project: t.project_name, ...(t.today?.counts || {}) })) }, actions: [{ label: "Team Attendance খুলুন", nav: "self:teamAttendance" }] };
     }
   },
   // ---- HR / Admin ----
@@ -1136,6 +1341,16 @@ const INTENTS: Intent[] = [
       }
       return {};
     } },
+  { tool: "my_pending_approvals", keys: ["amar kache approval", "amar approval", "আমার কাছে কয়টা", "আমার অনুমোদনের", "আমার কাছে অনুমোদন", "approval koyta", "koyta approval", "কয়টা approval", "pending approval amar", "amar kache pending", "আমার কাছে পেন্ডিং", "approve korte hobe", "approve বাকি", "approve baki", "waiting for my approval", "my approvals", "my pending approvals"] },
+  { tool: "my_profile", keys: ["amar supervisor", "আমার supervisor", "আমার সুপারভাইজার", "amar boss", "my supervisor", "amar joining", "আমার যোগদান", "joining date", "যোগদানের তারিখ", "amar designation", "আমার পদবি", "amar podobi", "amar employee id", "আমার employee id", "আমার আইডি", "amar department", "আমার department", "my profile", "আমার প্রোফাইল", "amar profile", "koto bochor chakri", "কত বছর চাকরি", "amar confirmation", "probation kobe sesh"] },
+  { tool: "my_assets", keys: ["amar asset", "আমার asset", "আমার অ্যাসেট", "amar kache ki asset", "আমার কাছে কী", "my asset", "laptop amar", "acknowledge asset", "asset acknowledge", "asset requisition status", "requisition koi", "asset er obostha"] },
+  { tool: "my_rides", keys: ["amar ride", "আমার ride", "amar gari", "আমার গাড়ি", "gari booking", "গাড়ির বুকিং", "ride status", "my ride", "vehicle requisition status", "gari kobe", "গাড়ি কবে", "driver ke", "ড্রাইভার কে"] },
+  { tool: "my_letters", keys: ["amar letter", "আমার চিঠি", "letter request status", "certificate request", "সার্টিফিকেট", "certificate kobe", "letter kobe", "chithi", "acknowledge letter", "hr ki cheyeche", "HR কী চেয়েছে", "hr amar kache", "info request", "document joma", "কী জমা দিতে হবে", "ki joma dite hobe"] },
+  { tool: "my_targets_progress", keys: ["amar target", "আমার target", "আমার টার্গেট", "target koto", "target progress", "টার্গেট কত", "my target", "target deadline", "target koto percent"] },
+  { tool: "my_mobile_sim", keys: ["amar sim", "আমার সিম", "mobile bill", "মোবাইল বিল", "amar bill limit", "sim limit", "phone bill", "ফোন বিল", "bill limit"] },
+  { tool: "my_resignation", keys: ["amar resignation", "আমার resignation", "resignation status", "রিজাইন", "পদত্যাগ", "clearance koi", "clearance status", "ক্লিয়ারেন্স", "last working day", "শেষ কর্মদিবস", "amar exit"] },
+  { tool: "my_cases", keys: ["amar complaint", "আমার অভিযোগ", "grievance status", "abhijog", "obhijog", "complaint status", "disciplinary", "শোকজ", "show cause"] },
+  { tool: "my_team_attendance", keys: ["team attendance", "টিম হাজিরা", "amar team", "আমার টিম", "site attendance", "muster", "মাস্টার", "team er hajira", "টিমের হাজিরা"] },
   { tool: "upcoming_leaves", keys: ["ke ke leave application", "kara leave application", "leave application koreche", "leave application korche", "leave apply koreche", "ছুটির আবেদন করেছে", "ছুটির আবেদন করেছেন", "কে কে ছুটির আবেদন", "কারা ছুটির আবেদন",
       "koyta leave application", "কয়টা ছুটির আবেদন", "কতগুলো ছুটির আবেদন", "koyta leave", "কয়টা ছুটি", "upcoming leave", "samner leave", "সামনের ছুটির আবেদন", "next days leave", "next few days leave", "kal theke", "কাল থেকে", "ei month e leave", "এই মাসে ছুটি", "ei mase leave"],
     args: (t, c) => {
@@ -1242,7 +1457,9 @@ async function localAnswer(c: Ctx, message: string): Promise<Answer> {
   // A how-to entry that matches more of the question than the best data
   // question ("leave balance set korbo" is about setting, not reading, it).
   const helpScore = Math.max(0, ...HELP.map((h) => h.keys.reduce((sc, k) => sc + (t.includes(k) ? k.length : 0), 0)));
-  const helpWins = (help.length || blockedHelp.length) && helpScore > (scored[0]?.score || 0);
+  // …unless it asks where something stands ("ki holo", "status", "koi").
+  const asksState = hasAny(t, ["ki holo", "ki hoise", "ki hoyeche", "কী হল", "কি হলো", "কী হলো", "কি হল", "obostha", "অবস্থা", "status", " koi ", " কই ", "kothay ache", "কোথায় আছে", "koto ", "কত ", "kobe", "কবে"]);
+  const helpWins = (help.length || blockedHelp.length) && helpScore > (scored[0]?.score || 0) && !asksState;
   if (scored.length && !(asksHow && (help.length || blockedHelp.length)) && !helpWins) {
     // "amar / ami … late" is about the asker's own days, not everyone's.
     const intent = scored[0].i.tool === "late_on_date" && hasAny(t, [" amar ", " ami ", "আমার", "আমি", " my ", " i "])
