@@ -30,7 +30,8 @@ export type SelfServiceFeature =
   | 'can_view_mobile_bill'
   | 'can_view_service_book'
   | 'can_view_loan_request'
-  | 'can_view_targets';
+  | 'can_view_targets'
+  | 'can_use_mail';
 const SELF_SERVICE_ENDPOINT: Record<SelfServiceFeature, string> = {
   can_view_movement_claims: 'movement-claim-access',
   can_view_conveyance_claims: 'conveyance-claim-access',
@@ -40,7 +41,8 @@ const SELF_SERVICE_ENDPOINT: Record<SelfServiceFeature, string> = {
   can_view_mobile_bill: 'mobile-bill-access',
   can_view_service_book: 'service-book-access',
   can_view_loan_request: 'loan-request-access',
-  can_view_targets: 'targets-access'
+  can_view_targets: 'targets-access',
+  can_use_mail: 'mail-access'
 };
 export const isSelfServiceFeature = (f: TemplateFeature): f is SelfServiceFeature => f in SELF_SERVICE_ENDPOINT;
 
@@ -58,7 +60,8 @@ export const TEMPLATE_FEATURES: { key: TemplateFeature; label: string; selfServi
   { key: 'can_view_mobile_bill', label: 'My Mobile SIM', selfService: true },
   { key: 'can_view_service_book', label: 'My Service Book', selfService: true },
   { key: 'can_view_loan_request', label: 'Loan / Advance Request', selfService: true },
-  { key: 'can_view_targets', label: 'My Targets', selfService: true }
+  { key: 'can_view_targets', label: 'My Targets', selfService: true },
+  { key: 'can_use_mail', label: 'Credence Mail', selfService: true }
 ];
 
 export interface AccessTemplate {

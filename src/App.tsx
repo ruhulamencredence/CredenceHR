@@ -25,6 +25,8 @@ const AdminPanel = lazy(() => import('./components/AdminPanel').then(m => ({ def
 // pays for it.
 const ChatPanel = lazy(() => import('./components/ChatPanel').then(m => ({ default: m.ChatPanel })));
 const AlertsPage = lazy(() => import('./components/AlertsPage').then(m => ({ default: m.AlertsPage })));
+// Credence Mail (Self Service, users.can_use_mail) — its own chunk.
+const CredenceMail = lazy(() => import('./components/mail/CredenceMail').then(m => ({ default: m.CredenceMail })));
 
 import { AppLoader } from './components/AppLoader';
 import { HrOpsPageSkeleton } from './components/HrOpsSkeleton';
@@ -115,7 +117,7 @@ export default function App() {
   // this account was actually looking at, instead of resetting to the
   // Admin/User Panel default every time.
   const selfServiceViewStorageKey = user ? `mpr_self_service_view_${user.id}` : null;
-  const [selfServiceView, setSelfServiceView] = useState<'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | null>(() => {
+  const [selfServiceView, setSelfServiceView] = useState<'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | 'credenceMail' | null>(() => {
     try {
       // A link straight to an Admin Panel page (/admin/departments) opens that page.
       if (openedOnAdminUrl()) return null;
@@ -130,6 +132,7 @@ export default function App() {
       if (saved === 'leaveApplication' || (saved && restorable.includes(saved))) return saved as any;
       // Payroll and the other gated pages come back only for an account that still has them.
       if (saved === 'payroll' && canOpenSelfView('payroll', user)) return 'payroll';
+      if (saved === 'credenceMail' && canOpenSelfView('credenceMail', user)) return 'credenceMail';
     } catch {
       // ignore — falls through to the "no Self Service page open" default below
     }
@@ -1103,7 +1106,7 @@ export default function App() {
       setViewMode('admin');
       setAdminNavRequest({ target, ts: Date.now() });
     },
-    onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets') => {
+    onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | 'credenceMail') => {
       setShowProfilePage(false);
           setShowChat(false);
           setShowAlertsPage(false);
@@ -1452,6 +1455,8 @@ export default function App() {
           <MyMobileSim token={token} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'myLoans' ? (
           <MyLoans token={token} onBack={() => setSelfServiceView(null)} />
+        ) : selfServiceView === 'credenceMail' && canOpenSelfView('credenceMail', user) ? (
+          <CredenceMail token={token} user={user} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'myTargets' ? (
           <MyTargets token={token} user={user} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'myLetters' ? (
