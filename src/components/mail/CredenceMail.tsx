@@ -13,7 +13,7 @@ import { Capacitor } from '@capacitor/core';
 import {
   ArrowLeft, Mail, Inbox, Star, Send, FileText, Clock, Archive, ShieldAlert, Trash2, AlertCircle, Pencil, RefreshCw, Search, X, Menu, Paperclip,
   CheckSquare, Square, MailOpen, Plus, Loader2, Server, ChevronDown, Bookmark, LogOut, Check,
-  Bell, Users, ListChecks, Filter, BarChart3, Settings, Tag, CheckCheck
+  Bell, Users, ListChecks, Filter, BarChart3, Settings, Tag, CheckCheck, Eye
 } from 'lucide-react';
 import { ModulePath } from '../ModulePath';
 import { confirmDialog } from '../../lib/confirmDialog';
@@ -23,7 +23,7 @@ import { useKeyboardInset, scrollFocusedFieldIntoView } from '../../lib/useKeybo
 import type { User } from '../../types';
 import {
   MAIL_CATEGORIES, MAIL_FOLDERS, MailAccount, MailContact, MailCounts, MailFilter, MailList, MailMessage, MailSettings, MailStatus, MailTemplate, SYSTEM_LABELS, mailFetch,
-  setMailTimeZone, shortMailDate, fullMailDate
+  setMailTimeZone, setMailViewAs, shortMailDate, fullMailDate
 } from '../../lib/mailApi';
 import { MailReader, ReaderAction, MailAvatar } from './MailReader';
 import { MailCompose, ComposeInit } from './MailCompose';
@@ -267,10 +267,11 @@ const Row: React.FC<{
   checked: boolean;
   checking: boolean;
   compact?: boolean;
+  readOnly?: boolean;
   onOpen: () => void;
   onCheck: () => void;
   onStar: () => void;
-}> = ({ m, folder, selected, checked, checking, compact, onOpen, onCheck, onStar }) => {
+}> = ({ m, folder, selected, checked, checking, compact, readOnly, onOpen, onCheck, onStar }) => {
   const outgoing = folder === 'Sent' || folder === 'Drafts' || folder === 'Scheduled';
   const who = outgoing ? `To: ${m.to.concat(m.cc).join(', ') || '(no one yet)'}` : m.from.name || m.from.email;
   const ownLabels = m.labels.filter((l) => !SYSTEM_LABELS.has(l)).slice(0, 2);
@@ -278,7 +279,7 @@ const Row: React.FC<{
     <>
       {ownLabels.map((l) => <span key={l} className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 shrink-0">{l}</span>)}
       {m.hasAttachments && <Paperclip className="w-3.5 h-3.5 text-slate-400 shrink-0" />}
-      {folder !== 'Drafts' && folder !== 'Scheduled' && (
+      {folder !== 'Drafts' && folder !== 'Scheduled' && !readOnly && (
         <button
           type="button"
           onClick={(e) => {
@@ -305,15 +306,17 @@ const Row: React.FC<{
         type="button"
         onClick={(e) => {
           e.stopPropagation();
-          onCheck();
+          // An opened (read-only) mailbox has nothing to select mails for.
+          if (readOnly) onOpen();
+          else onCheck();
         }}
         className="relative shrink-0"
-        aria-label={checked ? 'Unselect' : 'Select'}
+        aria-label={readOnly ? 'Open' : checked ? 'Unselect' : 'Select'}
       >
-        <span className={checking || checked ? 'hidden' : 'group-hover:hidden'}>
+        <span className={readOnly ? '' : checking || checked ? 'hidden' : 'group-hover:hidden'}>
           <MailAvatar name={outgoing ? m.to[0] || '?' : m.from.name} email={outgoing ? m.to[0] || '' : m.from.email} size={compact ? 'sm' : 'md'} />
         </span>
-        <span className={`${checking || checked ? 'flex' : 'hidden group-hover:flex'} ${compact ? 'w-8 h-8' : 'w-10 h-10'} items-center justify-center rounded-full ${checked ? 'bg-sky-600 text-white' : 'bg-slate-100 text-slate-500'}`}>
+        <span className={`${readOnly ? 'hidden' : checking || checked ? 'flex' : 'hidden group-hover:flex'} ${compact ? 'w-8 h-8' : 'w-10 h-10'} items-center justify-center rounded-full ${checked ? 'bg-sky-600 text-white' : 'bg-slate-100 text-slate-500'}`}>
           {checked ? <Check className="w-5 h-5" /> : <Square className="w-4 h-4" />}
         </span>
       </button>
@@ -350,8 +353,18 @@ const Row: React.FC<{
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
-export const CredenceMail: React.FC<{ token: string; user: User; onBack?: () => void }> = ({ token, user, onBack }) => {
+export const CredenceMail: React.FC<{
+  token: string;
+  user: User;
+  onBack?: () => void;
+  // Admin Panel -> Mail Administration: someone else's mailbox, read only.
+  viewAs?: { userId: number; name: string };
+}> = ({ token, user, onBack, viewAs }) => {
   const isNativeApp = Capacitor.isNativePlatform();
+  const ro = !!viewAs;
+  // Every call from here on carries whose mailbox it is (set before the first fetch).
+  setMailViewAs(viewAs ? viewAs.userId : null);
+  useEffect(() => () => setMailViewAs(null), []);
   const [status, setStatus] = useState<MailStatus | null>(null);
   const [statusError, setStatusError] = useState('');
   const [accountFilter, setAccountFilter] = useState<number | 0>(0);
@@ -429,7 +442,9 @@ export const CredenceMail: React.FC<{ token: string; user: User; onBack?: () => 
   const loadStatus = useCallback(async () => {
     try {
       setStatusError('');
-      setStatus(await mailFetch<MailStatus>(token, '/status'));
+      // An opened mailbox: its owner's mailboxes, no own-access check.
+      if (viewAs) setStatus({ enabled: true, serverReady: true, accounts: await mailFetch<MailAccount[]>(token, '/accounts') });
+      else setStatus(await mailFetch<MailStatus>(token, '/status'));
     } catch (e: any) {
       setStatusError(e.message);
     }
@@ -510,7 +525,8 @@ export const CredenceMail: React.FC<{ token: string; user: User; onBack?: () => 
     void loadCounts();
   };
   useEffect(() => {
-    if (!status?.enabled) return;
+    // Live news goes to the owner's own screen, not to an admin's view.
+    if (!status?.enabled || ro) return;
     const socket = connectChatSocket(token);
     const onChanged = () => refreshRef.current();
     const onNew = (e: any) => {
@@ -535,7 +551,7 @@ export const CredenceMail: React.FC<{ token: string; user: User; onBack?: () => 
       socket.off('mail:send-failed', onFailed);
       clearInterval(t);
     };
-  }, [token, status?.enabled, say, addNote]);
+  }, [token, status?.enabled, say, addNote, ro]);
 
   // Opening one: the whole conversation, marked read.
   useEffect(() => {
@@ -555,7 +571,8 @@ export const CredenceMail: React.FC<{ token: string; user: User; onBack?: () => 
         const shown = folder === 'Trash' || folder === 'Spam' || folder === 'Drafts' || folder === 'Scheduled' || !t.some((x) => x.id === m.id) ? [await mailFetch<MailMessage>(token, `/messages/${m.id}`)] : t;
         if (cancelled) return;
         setThread(shown);
-        const unread = shown.filter((x) => !x.isRead).map((x) => x.id);
+        // Reading someone else's mailbox leaves it as it was.
+        const unread = ro ? [] : shown.filter((x) => !x.isRead).map((x) => x.id);
         if (unread.length) {
           await mailFetch(token, '/messages/batch', { method: 'POST', body: { ids: unread, patch: { isRead: true } } });
           setList((prev) => (prev ? { ...prev, items: prev.items.map((x) => (unread.includes(x.id) ? { ...x, isRead: true } : x)) } : prev));
@@ -761,7 +778,7 @@ export const CredenceMail: React.FC<{ token: string; user: User; onBack?: () => 
   };
 
   const openRow = (m: MailMessage) => {
-    if (m.labels.includes('Drafts')) {
+    if (m.labels.includes('Drafts') && !ro) {
       void openDraft(m).catch((e) => say(e.message, 'error'));
       return;
     }
@@ -837,6 +854,16 @@ export const CredenceMail: React.FC<{ token: string; user: User; onBack?: () => 
     </div>
   );
 
+  const modulePath = ['Self Service', 'Credence Mail'];
+  const roBanner = ro ? (
+    <div className="mb-3 flex items-center gap-2 rounded-2xl bg-amber-50 text-amber-900 text-xs px-3 py-2">
+      <Eye className="w-4 h-4 shrink-0" />
+      <span className="flex-1 min-w-0">You are looking at {viewAs!.name}'s mailbox. Read only — nothing here changes, and the visit is in the Mail Administration log.</span>
+      {onBack && (
+        <button type="button" onClick={onBack} className="shrink-0 font-semibold underline underline-offset-2">Close</button>
+      )}
+    </div>
+  ) : null;
   const header = (
     <div className="flex items-center justify-between gap-3 mb-3 mt-2 flex-wrap">
       <div className="flex items-center gap-2 min-w-0">
@@ -845,11 +872,11 @@ export const CredenceMail: React.FC<{ token: string; user: User; onBack?: () => 
             <ArrowLeft className="w-5 h-5 text-slate-500" />
           </button>
         )}
-        <h1 className="text-base sm:text-lg font-bold flex items-center gap-2 leading-tight">
-          <Mail className="w-5 h-5 text-sky-600 shrink-0" /> Credence Mail
+        <h1 className="text-base sm:text-lg font-bold flex items-center gap-2 leading-tight min-w-0">
+          <Mail className="w-5 h-5 text-sky-600 shrink-0" /> <span className="truncate">{viewAs ? `${viewAs.name}'s mailbox` : 'Credence Mail'}</span>
         </h1>
       </div>
-      {accounts.length > 0 && (
+      {accounts.length > 0 && !ro && (
         <div className="flex items-center gap-1.5">
           {accounts.length > 1 && (
             <select
@@ -879,8 +906,10 @@ export const CredenceMail: React.FC<{ token: string; user: User; onBack?: () => 
   const wrap = (body: React.ReactNode) => (
     <div className="w-full min-h-[calc(100vh-4rem)] text-slate-900">
       <div className="w-full px-3 sm:px-6 lg:px-8 pt-3 pb-28 md:pb-8">
-        {!isNativeApp && <ModulePath path={['Self Service', 'Credence Mail']} />}
+        {/* Inside the Admin Panel, its own path line is already shown. */}
+          {!isNativeApp && !ro && <ModulePath path={modulePath} />}
         {header}
+        {roBanner}
         {body}
       </div>
     </div>
@@ -889,6 +918,7 @@ export const CredenceMail: React.FC<{ token: string; user: User; onBack?: () => 
   if (statusError) return wrap(<div className="rounded-2xl bg-white border border-slate-200 p-8 text-center text-sm text-rose-600">{statusError}</div>);
   if (!status) return wrap(<div className="h-[calc(100vh-11rem)] rounded-3xl overflow-hidden bg-white/50 border border-slate-200/70"><PageSkeleton /></div>);
   if (!status.enabled) return wrap(<div className="rounded-2xl bg-white border border-slate-200 p-8 text-center text-sm text-slate-500">Credence Mail isn't turned on for your account.</div>);
+  if (!accounts.length && ro) return wrap(<div className="rounded-2xl bg-white border border-slate-200 p-8 text-center text-sm text-slate-500">{viewAs!.name} has no mailbox connected now.</div>);
   if (!accounts.length) {
     return wrap(
       <div className="max-w-md mx-auto mt-6">
@@ -1015,7 +1045,7 @@ export const CredenceMail: React.FC<{ token: string; user: User; onBack?: () => 
           <button type="button" onClick={() => void sync()} disabled={syncing} className="p-2 rounded-full hover:bg-black/5 disabled:opacity-50" aria-label="Check for new mail" title="Check for new mail">
             <RefreshCw className={`w-4 h-4 text-slate-600 ${syncing ? 'animate-spin' : ''}`} />
           </button>
-          <div className="md:hidden">{bellFor('list')}</div>
+          {!ro && <div className="md:hidden">{bellFor('list')}</div>}
         </div>
         {checked.size > 0 ? (
           <div className="flex items-center gap-1 flex-wrap">
@@ -1077,6 +1107,7 @@ export const CredenceMail: React.FC<{ token: string; user: User; onBack?: () => 
                   selected={selectedId === m.id}
                   checked={checked.has(m.id)}
                   checking={checked.size > 0}
+                  readOnly={ro}
                   compact={settings?.layout?.density === 'compact'}
                   onOpen={() => (checked.size ? setChecked((p) => { const n = new Set(p); n.has(m.id) ? n.delete(m.id) : n.add(m.id); return n; }) : openRow(m))}
                   onCheck={() => setChecked((p) => { const n = new Set(p); n.has(m.id) ? n.delete(m.id) : n.add(m.id); return n; })}
@@ -1099,7 +1130,7 @@ export const CredenceMail: React.FC<{ token: string; user: User; onBack?: () => 
   );
 
   const reader = selectedId ? (
-    <MailReader token={token} thread={thread} folder={folder} error={threadError} onBack={() => setSelectedId(null)} onAction={(a, m) => void act(a, m)} />
+    <MailReader token={token} thread={thread} folder={folder} error={threadError} readOnly={ro} onBack={() => setSelectedId(null)} onAction={(a, m) => void act(a, m)} />
   ) : (
     <div className="hidden md:flex h-full items-center justify-center text-center p-8">
       <div>
@@ -1113,15 +1144,16 @@ export const CredenceMail: React.FC<{ token: string; user: User; onBack?: () => 
     <div className="w-full text-slate-900">
       <div className="w-full px-0 sm:px-6 lg:px-8 pt-1 sm:pt-3 pb-0 md:pb-6">
         <div className="px-3 sm:px-0">
-          {!isNativeApp && <ModulePath path={['Self Service', 'Credence Mail']} />}
+          {!isNativeApp && !ro && <ModulePath path={modulePath} />}
           <div className="hidden md:block">{header}</div>
+          {roBanner}
         </div>
         <div className="flex h-[calc(100dvh-4.5rem)] md:h-[calc(100vh-10.5rem)] min-h-[28rem] md:rounded-3xl overflow-hidden md:border border-slate-200/70 bg-white/40">
           {/* Folders (desktop) */}
           <aside className="hidden md:flex flex-col w-56 shrink-0 p-3 gap-3 overflow-y-auto">
-            {composeButton}
+            {!ro && composeButton}
             {folderNav}
-            <div className="border-t border-slate-200/70 pt-3">{toolsNav}</div>
+            {!ro && <div className="border-t border-slate-200/70 pt-3">{toolsNav}</div>}
           </aside>
           {/* List */}
           <section className={`${selectedId ? 'hidden md:flex' : 'flex'} flex-col w-full md:w-[22rem] lg:w-[26rem] shrink-0 md:border-x border-slate-200/70 bg-white/80 min-h-0`}>{listPane}</section>
@@ -1133,7 +1165,7 @@ export const CredenceMail: React.FC<{ token: string; user: User; onBack?: () => 
       {/* Phone: write button */}
       {/* (.liquid-glass-button is position: relative, so the wrapper is the fixed one.)
           Above the assistant button in the corner. */}
-      {!selectedId && (
+      {!selectedId && !ro && (
         <div className="md:hidden fixed right-4 z-40" style={{ bottom: 'calc(9.5rem + env(safe-area-inset-bottom))' }}>
           <button
             type="button"
@@ -1165,13 +1197,15 @@ export const CredenceMail: React.FC<{ token: string; user: User; onBack?: () => 
                 </select>
               )}
               <div className="liquid-glass-inset rounded-[24px] p-2">{folderNav}</div>
-              <div className="liquid-glass-inset rounded-[24px] p-2 pt-3">{toolsNav}</div>
-              <button type="button" onClick={() => { setDrawer(false); setMailboxes(true); }} className="text-sm px-3 py-2 rounded-xl text-slate-700 hover:bg-black/5 inline-flex items-center gap-2">
-                <Server className="w-4 h-4" /> Mailboxes
-              </button>
+              {!ro && <div className="liquid-glass-inset rounded-[24px] p-2 pt-3">{toolsNav}</div>}
+              {!ro && (
+                <button type="button" onClick={() => { setDrawer(false); setMailboxes(true); }} className="text-sm px-3 py-2 rounded-xl text-slate-700 hover:bg-black/5 inline-flex items-center gap-2">
+                  <Server className="w-4 h-4" /> Mailboxes
+                </button>
+              )}
               {onBack && (
                 <button type="button" onClick={onBack} className="mt-auto text-sm px-3 py-2 rounded-xl text-slate-700 hover:bg-black/5 inline-flex items-center gap-2">
-                  <ArrowLeft className="w-4 h-4" /> Back to CredenceHR
+                  <ArrowLeft className="w-4 h-4" /> {ro ? 'Close this mailbox' : 'Back to CredenceHR'}
                 </button>
               )}
             </div>

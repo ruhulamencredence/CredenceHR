@@ -575,6 +575,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   const misGroup: NavItem[] = [
     { key: 'users', label: 'Users', icon: Users, onClick: () => onGoToAdminModule('users') },
     ...orgItems,
+    { key: 'mail_admin', label: 'Mail Administration', icon: Mail, onClick: () => onGoToAdminModule('mail_admin') },
   ].filter((i) => canSeeModule(i.key as AdminModuleKey));
 
   // Not part of MIS — Superadmin-only, but not "Users management", so kept
@@ -678,7 +679,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
       key: 'g_settings',
       label: 'Settings & Administration',
       icon: Server,
-      entries: pick('users', 'projects', 'branches', 'companies', 'devices', 'active_users', 'data_import', 'permanent_delete_log')
+      entries: pick('users', 'projects', 'branches', 'mail_admin', 'companies', 'devices', 'active_users', 'data_import', 'permanent_delete_log')
     },
     { key: 'g_pepm', label: 'PEPM Management', icon: BarChart3, entries: pick('reports', 'mprs', 'imports', 'recycle', 'editlog') }
   ]);
