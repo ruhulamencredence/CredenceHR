@@ -519,6 +519,16 @@ const nameBefore = (t: string) => {
   return words.slice(-1)[0] || "";
 };
 
+// "Sales department er target" / "Rahim er task": the department or person
+// asked about, if any.
+const ORG_WORDS = new Set(["department", "dept", "বিভাগ", "বিভাগের", "team", "টিম", "company", "সবার", "sobar", "performance", "review", "appraisal", "rating", "task", "target", "document", "vehicle", "gari", "ride", "bochor", "বছর", "বছরের", "mas", "mash", "month", "year", "week", "saptah"]);
+const subjectBefore = (t: string) => {
+  const d = /([a-z.&]{2,})\s+(?:department|dept)\b/.exec(t) || /([\u0980-\u09ff]{2,})\s+(?:বিভাগ|department)/.exec(t);
+  if (d && !NOT_NAMES.has(d[1]) && !ORG_WORDS.has(d[1])) return d[1];
+  const n = nameBefore(t);
+  return ORG_WORDS.has(n) ? "" : n;
+};
+
 // "pending_with" on a requisition: a name, a list of names or { name }.
 const pendingWith = (x: any): string | null => {
   const p = x?.pending_with;
@@ -1273,6 +1283,210 @@ const TOOLS: Tool[] = [
     }
   },
   {
+    name: "target_progress",
+    description: "Target Reports: target progress of the company by department — average %, fully done, overdue, waiting approval — or of one department / one person. month 'YYYY-MM' (default this month), or year 'YYYY' for the whole year; name = a department or a person.",
+    params: { month: { type: "string", description: "YYYY-MM; default this month." }, year: { type: "string", description: "YYYY for the whole year instead of one month." }, name: { type: "string", description: "Department or person name (optional)." } },
+    available: (c) => hasMod(c, "target_reports"),
+    run: async (c, args) => {
+      const year = /^\d{4}$/.test(String(args?.year || "")) ? String(args.year) : "";
+      const month = year ? "" : /^\d{4}-\d{2}$/.test(String(args?.month || "")) ? String(args.month) : c.today.slice(0, 7);
+      const r = await callApi(c.req, month ? `/api/target-reports?year=${month.slice(0, 4)}&period_type=monthly&month=${month}` : `/api/target-reports?year=${year}`);
+      if (!r.ok) return fail(r.status);
+      const b = r.body || {};
+      const when = month ? bnMonth(month) : `${bn(year)} সাল`;
+      const q = String(args?.name || "").trim().toLowerCase();
+      const line = (x: any, label: string) => `• **${label}** — গড় ${bn(x.avg_progress ?? 0)}%, target ${bn(x.targets)}টি, পুরো শেষ ${bn(x.fully_done)}, সময় পেরিয়েছে ${bn(x.overdue)}, অনুমোদনের অপেক্ষায় ${bn(x.pending)} · task ${bn(x.completed_tasks)}/${bn(x.tasks)} শেষ${x.blocked_tasks ? `, আটকে ${bn(x.blocked_tasks)}` : ""}`;
+      const nav = [{ label: "Target Reports খুলুন", nav: "admin:target_reports" }];
+      if (q.length >= 2) {
+        const depts = (b.by_department || []).filter((d: any) => String(d.department).toLowerCase().includes(q));
+        const emps = depts.length ? [] : (b.by_employee || []).filter((e: any) => String(e.name).toLowerCase().includes(q));
+        if (!depts.length && !emps.length) return { ok: true, text: `${when}-এ "${args.name}" নামে কোনো department বা কর্মীর target পাওয়া যায়নি।`, data: { results: [] }, actions: nav };
+        const list = depts.length ? depts : emps;
+        return {
+          ok: true,
+          text: `${when}-এর target:\n` + list.slice(0, 8).map((x: any) => line(x, depts.length ? x.department : `${x.name}${x.department ? ` (${x.department})` : ""}`)).join("\n"),
+          data: { period: month || year, results: list.slice(0, 20) },
+          actions: nav
+        };
+      }
+      const s = b.summary || {};
+      if (!Number(s.targets)) return { ok: true, text: `${when}-এ কোনো target নেই।`, data: { period: month || year, targets: 0 }, actions: nav };
+      const rows: any[] = b.by_department || [];
+      return {
+        ok: true,
+        text: `${when}-এর target: **${bn(s.targets)}টি** (${bn(s.people)} জন), গড় অগ্রগতি **${bn(s.avg_progress ?? 0)}%** — পুরো শেষ ${bn(s.fully_done)}, সময় পেরিয়েছে ${bn(s.overdue)}, অনুমোদনের অপেক্ষায় ${bn(s.pending)}\n\nDepartment অনুযায়ী:\n` +
+          rows.map((d) => line(d, `${d.department} (${bn(d.people)} জন)`)).join("\n"),
+        data: { period: month || year, summary: s, by_department: rows },
+        actions: nav,
+        report: report(`Target Progress by Department — ${month || year}`, `Target-Progress-${month || year}`, ["Department", "People", "Targets", "Avg Progress %", "Fully Done", "Overdue", "Waiting Approval", "Tasks", "Tasks Done", "Blocked Tasks"],
+          rows.map((d) => [d.department, d.people, d.targets, d.avg_progress ?? 0, d.fully_done, d.overdue, d.pending, d.tasks, d.completed_tasks, d.blocked_tasks]),
+          [["Period", month || year], ["Targets", String(s.targets)], ["Average progress", `${s.avg_progress ?? 0}%`]])
+      };
+    }
+  },
+  {
+    name: "task_overview",
+    description: "Task Management: the company's open tasks — how many open / in progress, overdue (with whom and since), due today and this week, by department or person. name = a department or a person (optional).",
+    params: { name: { type: "string", description: "Department or person name (optional)." } },
+    available: (c) => hasMod(c, "task_management"),
+    run: async (c, args) => {
+      const r = await callApi(c.req, "/api/tasks/all");
+      if (!r.ok) return fail(r.status);
+      const q = String(args?.name || "").trim().toLowerCase();
+      const who = (t: any) => (t.assignees || []).map((a: any) => a.name).join(", ");
+      let open: any[] = (Array.isArray(r.body) ? r.body : []).filter((t: any) => t.status === "open" || t.status === "in_progress");
+      if (q.length >= 2) open = open.filter((t) => String(t.department || "").toLowerCase().includes(q) || (t.assignees || []).some((a: any) => String(a.name).toLowerCase().includes(q)));
+      const nav = [{ label: "Task Management খুলুন", nav: "admin:task_management" }];
+      const scope = q.length >= 2 ? `${String(args.name).trim().replace(/^\w/, (x) => x.toUpperCase())}-এর ` : "";
+      if (!open.length) return { ok: true, text: `${scope}কোনো খোলা task নেই। 👍`, data: { open: 0 }, actions: nav };
+      const due = (t: any) => ymd(t.due_date);
+      const overdue = open.filter((t) => t.overdue).sort((a, b) => String(due(a)).localeCompare(String(due(b))));
+      const today = open.filter((t) => !t.overdue && due(t) === c.today);
+      const week = open.filter((t) => !t.overdue && due(t) && due(t)! > c.today && due(t)! <= addDays(c.today, 7));
+      const line = (t: any) => `• **${t.title}** — ${who(t) || "কাউকে দেওয়া হয়নি"}${t.department ? ` (${t.department})` : ""}${due(t) ? `, শেষ তারিখ ${bnDate(due(t))}` : ""}${t.status === "in_progress" ? " · চলছে" : ""}`;
+      const byDept = new Map<string, { open: number; overdue: number }>();
+      for (const t of open) { const k = t.department || "—"; const v = byDept.get(k) || { open: 0, overdue: 0 }; v.open++; if (t.overdue) v.overdue++; byDept.set(k, v); }
+      const text = `${scope}খোলা task **${bn(open.length)}টি** — চলছে ${bn(open.filter((t) => t.status === "in_progress").length)}, সময় পেরিয়েছে **${bn(overdue.length)}**, আজ শেষ তারিখ ${bn(today.length)}, ৭ দিনের মধ্যে ${bn(week.length)}` +
+        (overdue.length ? "\n\nসময় পেরিয়েছে:\n" + overdue.slice(0, 8).map(line).join("\n") + (overdue.length > 8 ? `\n…আরও ${bn(overdue.length - 8)}টি` : "") : "") +
+        (today.length ? "\n\nআজ শেষ তারিখ:\n" + today.slice(0, 6).map(line).join("\n") : "") +
+        (week.length ? "\n\n৭ দিনের মধ্যে শেষ তারিখ:\n" + week.slice(0, 6).map(line).join("\n") : "") +
+        (q.length < 2 && byDept.size > 1 ? "\n\nDepartment অনুযায়ী: " + [...byDept.entries()].map(([k, v]) => `${k} ${bn(v.open)}${v.overdue ? ` (দেরি ${bn(v.overdue)})` : ""}`).join(", ") : "");
+      return {
+        ok: true, text,
+        data: { open: open.length, overdue: overdue.map((t) => ({ title: t.title, assignees: who(t), department: t.department, due: due(t) })).slice(0, 30), due_today: today.map((t) => t.title), due_this_week: week.map((t) => ({ title: t.title, due: due(t), assignees: who(t) })).slice(0, 30), by_department: Object.fromEntries(byDept) },
+        actions: nav,
+        report: report("Open Tasks", `Open-Tasks-${c.today}`, ["Task", "Assigned to", "Department", "Priority", "Due", "Status", "Given by"],
+          open.map((t) => [t.title, who(t), t.department || "", t.priority || "", enDate(due(t)), t.overdue ? "Overdue" : t.status === "in_progress" ? "In progress" : "Open", t.created_by_name || ""]),
+          [["As of", enDate(c.today)], ...(q.length >= 2 ? [["Filter", String(args.name)] as [string, string]] : []), ["Open", String(open.length)], ["Overdue", String(overdue.length)]])
+      };
+    }
+  },
+  {
+    name: "performance_overview",
+    description: "Performance Management: the active appraisal cycle — reviews pending / submitted / acknowledged, average rating, goals; or one person's goals and review. name = a person (optional).",
+    params: { name: { type: "string", description: "Person name (optional)." } },
+    available: (c) => hasMod(c, "performance_management"),
+    run: async (c, args) => {
+      const cy = await callApi(c.req, "/api/performance-cycles");
+      if (!cy.ok) return fail(cy.status);
+      const cycles: any[] = Array.isArray(cy.body) ? cy.body : [];
+      const nav = [{ label: "Performance খুলুন", nav: "admin:performance_management" }];
+      const cycle = cycles.find((x) => x.status === "active") || [...cycles].filter((x) => x.status !== "draft").sort((a, b) => String(b.period_end).localeCompare(String(a.period_end)))[0];
+      if (!cycle) return { ok: true, text: cycles.length ? "কোনো চালু appraisal cycle নেই (শুধু খসড়া আছে)।" : "এখনো কোনো appraisal cycle তৈরি হয়নি।", data: { cycles: cycles.length }, actions: nav };
+      const [g, rv] = await Promise.all([callApi(c.req, `/api/performance-goals?cycle_id=${cycle.id}`), callApi(c.req, `/api/performance-reviews?cycle_id=${cycle.id}`)]);
+      if (!rv.ok) return fail(rv.status);
+      let goals: any[] = (Array.isArray(g.body) ? g.body : []).filter((x: any) => Number(x.cycle_id) === Number(cycle.id));
+      let reviews: any[] = Array.isArray(rv.body) ? rv.body : [];
+      const q = String(args?.name || "").trim().toLowerCase();
+      if (q.length >= 2) {
+        goals = goals.filter((x) => String(x.user_name || "").toLowerCase().includes(q));
+        reviews = reviews.filter((x) => String(x.user_name || "").toLowerCase().includes(q));
+        if (!goals.length && !reviews.length) return { ok: true, text: `"${cycle.name}" cycle-এ "${args.name}" নামে কারো goal বা review নেই।`, data: { results: [] }, actions: nav };
+      }
+      const rated = reviews.filter((x) => x.overall_rating !== null && x.overall_rating !== undefined);
+      const avg = rated.length ? Math.round((rated.reduce((t, x) => t + Number(x.overall_rating), 0) / rated.length) * 10) / 10 : null;
+      const st = (s: string) => reviews.filter((x) => x.status === s);
+      const head = `**${cycle.name}** (${bnDate(cycle.period_start)} – ${bnDate(cycle.period_end)}${cycle.status === "closed" ? ", বন্ধ" : ""})`;
+      const STATUS: Record<string, string> = { pending: "জমা বাকি", submitted: "জমা হয়েছে, স্বীকৃতি বাকি", acknowledged: "স্বীকৃত" };
+      const text = q.length >= 2
+        ? `${head}:\n` + reviews.slice(0, 5).map((x) => `• **${x.user_name}** — review ${STATUS[x.status] || x.status}${x.overall_rating !== null && x.overall_rating !== undefined ? `, rating ${bn(x.overall_rating)}` : ""}${x.reviewer_name ? ` (reviewer ${x.reviewer_name})` : ""}`).join("\n") +
+          (goals.length ? "\nGoal:\n" + goals.slice(0, 8).map((x) => `• ${x.title}${x.user_name ? ` — ${x.user_name}` : ""} (weight ${bn(x.weight)}${x.self_rating !== null ? `, নিজের rating ${bn(x.self_rating)}` : ""}${x.manager_rating !== null ? `, manager ${bn(x.manager_rating)}` : ""})${x.status === "completed" ? " ✓" : ""}`).join("\n") : "")
+        : `${head}: review **${bn(reviews.length)}টি** — জমা বাকি ${bn(st("pending").length)}, জমা হয়েছে ${bn(st("submitted").length)}, স্বীকৃত ${bn(st("acknowledged").length)}` +
+          (avg !== null ? `, গড় rating **${bn(avg)}**` : "") + `\nGoal ${bn(goals.length)}টি (${bn(new Set(goals.map((x) => x.user_id)).size)} জনের), শেষ ${bn(goals.filter((x) => x.status === "completed").length)}` +
+          (st("pending").length ? `\nজমা বাকি: ${st("pending").slice(0, 10).map((x) => `${x.user_name}${x.reviewer_name ? ` (${x.reviewer_name})` : ""}`).join(", ")}` : "");
+      return {
+        ok: true, text,
+        data: { cycle: { name: cycle.name, from: cycle.period_start, to: cycle.period_end, status: cycle.status }, average_rating: avg, reviews: reviews.slice(0, 40).map((x) => ({ name: x.user_name, reviewer: x.reviewer_name, rating: x.overall_rating, status: x.status })), goals: goals.length },
+        actions: nav,
+        report: report(`Performance Reviews — ${cycle.name}`, `Performance-${String(cycle.name).replace(/[^\w-]+/g, "-")}`, ["Employee", "Reviewer", "Rating", "Status", "Goals", "Goals Done"],
+          reviews.map((x) => { const gs = goals.filter((y) => Number(y.user_id) === Number(x.user_id)); return [x.user_name || "", x.reviewer_name || "", x.overall_rating ?? "", x.status, gs.length, gs.filter((y) => y.status === "completed").length]; }),
+          [["Cycle", `${cycle.name} (${enDate(cycle.period_start)} – ${enDate(cycle.period_end)})`], ...(avg !== null ? [["Average rating", String(avg)] as [string, string]] : [])])
+      };
+    }
+  },
+  {
+    name: "document_vault_overview",
+    description: "Document Vault (managers): employee documents expiring soon (within `days`, default 60) or already expired, documents waiting for a signature, or one person's documents. name = a person (optional).",
+    params: { name: { type: "string", description: "Person name (optional)." }, days: { type: "number", description: "Look-ahead for expiry; default 60." } },
+    available: (c) => hasMod(c, "document_vault"),
+    run: async (c, args) => {
+      // The list returns only the asker's own files to a non-manager; the
+      // people picker is manager-only, so it is the gate here.
+      const gate = await callApi(c.req, "/api/employee-documents/people");
+      if (!gate.ok) return fail(gate.status);
+      const r = await callApi(c.req, "/api/employee-documents");
+      if (!r.ok) return fail(r.status);
+      const all: any[] = Array.isArray(r.body) ? r.body : [];
+      const nav = [{ label: "Document Vault খুলুন", nav: "admin:document_vault" }];
+      const exp = (d: any) => ymd(d.expiry_date);
+      const q = String(args?.name || "").trim().toLowerCase();
+      if (q.length >= 2) {
+        const mine = all.filter((d) => String(d.user_name || "").toLowerCase().includes(q));
+        if (!mine.length) return { ok: true, text: `"${args.name}" নামে কারো document নেই।`, data: { results: [] }, actions: nav };
+        return {
+          ok: true,
+          text: `"${args.name}"-এর document ${bn(mine.length)}টি:\n` + mine.slice(0, 12).map((d) => `• **${d.doc_type}** — ${d.user_name}${exp(d) ? `, মেয়াদ ${bnDate(exp(d))}${exp(d)! < c.today ? " ⚠️ শেষ" : ""}` : ""}${d.requires_signature ? (d.is_signed ? " · সই হয়েছে" : " · সই বাকি") : ""}`).join("\n"),
+          data: { results: mine.slice(0, 30).map((d) => ({ name: d.user_name, type: d.doc_type, file: d.file_name, expiry: exp(d), needs_signature: !!d.requires_signature, signed: !!d.is_signed })) },
+          actions: nav
+        };
+      }
+      const days = Math.min(365, Math.max(1, Math.floor(Number(args?.days)) || 60));
+      const until = addDays(c.today, days);
+      const expired = all.filter((d) => exp(d) && exp(d)! < c.today).sort((a, b) => String(exp(a)).localeCompare(String(exp(b))));
+      const soon = all.filter((d) => exp(d) && exp(d)! >= c.today && exp(d)! <= until).sort((a, b) => String(exp(a)).localeCompare(String(exp(b))));
+      const unsigned = all.filter((d) => d.requires_signature && !d.is_signed);
+      const line = (d: any) => `• **${d.user_name}** — ${d.doc_type}${exp(d) ? `, ${bnDate(exp(d))}` : ""}`;
+      const text = `মোট document ${bn(all.length)}টি — মেয়াদ শেষ **${bn(expired.length)}**, ${bn(days)} দিনের মধ্যে শেষ হবে **${bn(soon.length)}**, সই বাকি ${bn(unsigned.length)}` +
+        (expired.length ? "\n\nমেয়াদ শেষ:\n" + expired.slice(0, 8).map(line).join("\n") : "") +
+        (soon.length ? `\n\n${bn(days)} দিনের মধ্যে:\n` + soon.slice(0, 10).map(line).join("\n") : "") +
+        (unsigned.length ? "\n\nসই বাকি: " + unsigned.slice(0, 8).map((d) => `${d.user_name} (${d.doc_type})`).join(", ") : "");
+      const listed = [...expired, ...soon, ...unsigned.filter((d) => !expired.includes(d) && !soon.includes(d))];
+      return {
+        ok: true, text,
+        data: { total: all.length, expired: expired.map((d) => ({ name: d.user_name, type: d.doc_type, expiry: exp(d) })).slice(0, 30), expiring: soon.map((d) => ({ name: d.user_name, type: d.doc_type, expiry: exp(d) })).slice(0, 30), unsigned: unsigned.map((d) => ({ name: d.user_name, type: d.doc_type })).slice(0, 30) },
+        actions: nav,
+        report: report("Documents — Expiry & Signature", `Documents-${c.today}`, ["Employee", "Document", "File", "Expiry", "State", "Signature"],
+          listed.map((d) => [d.user_name || "", d.doc_type, d.file_name, enDate(exp(d)), exp(d) && exp(d)! < c.today ? "Expired" : exp(d) && exp(d)! <= until ? `Expires within ${days} days` : "", d.requires_signature ? (d.is_signed ? "Signed" : "Waiting") : ""]),
+          [["As of", enDate(c.today)], ["Expired", String(expired.length)], [`Expiring in ${days} days`, String(soon.length)]])
+      };
+    }
+  },
+  {
+    name: "vehicle_overview",
+    description: "Vehicle Management: the fleet by status (free / on a ride / in maintenance), today's rides, rides under way, and ride requests waiting for approval (with whom) or for a vehicle.",
+    available: (c) => hasMod(c, "vehicle_management"),
+    run: async (c) => {
+      const v = await callApi(c.req, "/api/vehicles");
+      if (!v.ok) return fail(v.status);
+      const r = await callApi(c.req, "/api/vehicles/requisitions");
+      if (!r.ok) return fail(r.status);
+      const fleet: any[] = Array.isArray(v.body) ? v.body : [];
+      const rides: any[] = Array.isArray(r.body) ? r.body : [];
+      const nav = [{ label: "Vehicle Management খুলুন", nav: "admin:vehicle_management" }];
+      const st = (s: string) => fleet.filter((x) => x.status === s);
+      const day = (x: any) => ymd(x.ride_date);
+      const ongoing = rides.filter((x) => x.status === "ongoing");
+      const todays = rides.filter((x) => day(x) === c.today && ["approved", "ongoing", "completed"].includes(x.status));
+      const pending = rides.filter((x) => x.status === "pending");
+      const unassigned = rides.filter((x) => x.status === "approved" && !x.assigned_vehicle_id);
+      const ride = (x: any) => `• **${x.employee_name || "—"}** — ${x.pickup_location || "?"} → ${x.destination || "?"}${day(x) !== c.today ? `, ${bnDate(day(x))}` : ""}${x.start_time ? ` ${bn(String(x.start_time).slice(0, 5))}` : ""}${x.vehicle_no ? ` · ${x.vehicle_no}` : ""}${x.driver_name ? ` (${x.driver_name})` : ""}`;
+      const text = `গাড়ি **${bn(fleet.length)}টি** — খালি ${bn(st("available").length)}, ride-এ ${bn(st("on_ride").length)}, মেরামতে ${bn(st("maintenance").length)}` +
+        (st("available").length ? ` (খালি: ${st("available").slice(0, 6).map((x) => x.vehicle_no).join(", ")})` : "") +
+        `\nএখন চলছে ${bn(ongoing.length)}টি ride, আজকের ride ${bn(todays.length)}টি` + (ongoing.length ? ":\n" + ongoing.slice(0, 6).map(ride).join("\n") : "") +
+        `\nঅনুমোদনের অপেক্ষায় ${bn(pending.length)}টি` + (pending.length ? ":\n" + pending.slice(0, 8).map((x) => `${ride(x)} — ${pendingWith(x) ? `অপেক্ষা ${pendingWith(x)}-এর কাছে` : "approver ঠিক হয়নি"}`).join("\n") : "") +
+        (unassigned.length ? `\nঅনুমোদিত কিন্তু গাড়ি দেওয়া বাকি ${bn(unassigned.length)}টি: ${unassigned.slice(0, 6).map((x) => x.employee_name).join(", ")}` : "");
+      const listed = [...ongoing, ...pending, ...unassigned, ...todays.filter((x) => !ongoing.includes(x))];
+      return {
+        ok: true, text,
+        data: { fleet: { total: fleet.length, available: st("available").map((x) => x.vehicle_no), on_ride: st("on_ride").length, maintenance: st("maintenance").length }, ongoing: ongoing.map((x) => ({ who: x.employee_name, from: x.pickup_location, to: x.destination, vehicle: x.vehicle_no, driver: x.driver_name })), today: todays.length, pending: pending.map((x) => ({ who: x.employee_name, date: day(x), to: x.destination, waiting_with: pendingWith(x) })), approved_no_vehicle: unassigned.map((x) => x.employee_name) },
+        actions: nav,
+        report: report("Rides", `Rides-${c.today}`, ["Requested by", "Date", "Time", "From", "To", "Status", "Vehicle", "Driver", "Waiting with"],
+          listed.map((x) => [x.employee_name || "", enDate(day(x)), x.start_time ? String(x.start_time).slice(0, 5) : "", x.pickup_location || "", x.destination || "", x.status, x.vehicle_no || "", x.driver_name || "", pendingWith(x) || ""]),
+          [["As of", enDate(c.today)], ["Vehicles", String(fleet.length)], ["Available", String(st("available").length)]])
+      };
+    }
+  },
+  {
     name: "on_leave",
     description: "HR: who is on approved leave on a date (default today), and whose leave on that date is still pending. Optional date YYYY-MM-DD.",
     params: { date: { type: "string", description: "YYYY-MM-DD; omit for today." } },
@@ -1684,8 +1898,19 @@ const INTENTS: Intent[] = [
         : hasAny(a, ["thik", "ঠিক", "exactly"]) ? "exact" : "at_least";
       return { years: n ? Number(n) : 10, mode };
     } },
+  { tool: "target_progress", keys: ["department target", "department er target", "department wise target", "dept target", "বিভাগের target", "department-এর target", "target report", "টার্গেট রিপোর্ট", "sobar target", "সবার target", "সবার টার্গেট", "company target", "কোম্পানির target", "team target", "kar target koto", "কার target কত", "target achievement"],
+    args: (t, c) => ({ name: subjectBefore(t), ...(hasAny(t, LAST_MONTH) ? { month: monthShift(c.today.slice(0, 7), -1) } : hasAny(t, ["ei bochor", "এই বছর", "this year", "puro bochor", "পুরো বছর", "yearly", "বার্ষিক"]) ? { year: c.today.slice(0, 4) } : {}) }) },
+  { tool: "task_overview", keys: ["overdue task", "task overdue", "task er deadline", "sobar task", "সবার task", "সবার টাস্ক", "company task", "khola task", "খোলা task", "open task", "task koyta", "কয়টা task", "koyta task", "task report", "টাস্ক রিপোর্ট", "department er task", "department-এর task", " er task", "এর task", "-এর task", "এর টাস্ক", "kar task baki", "কার task বাকি", "ke ke task", "task kar kache", "pending task"],
+    args: (t) => ({ name: subjectBefore(t) }) },
+  { tool: "performance_overview", keys: ["performance", "পারফরম্যান্স", "appraisal", "অ্যাপ্রেইজাল", "review cycle", "performance review", "rating koto", "রেটিং", "kpi", "goal setting", "evaluation", "মূল্যায়ন"],
+    args: (t) => ({ name: subjectBefore(t) }) },
+  { tool: "document_vault_overview", keys: ["document vault", "ডকুমেন্ট ভল্ট", "document expire", "kar document", "কার document", "কার ডকুমেন্ট", "sign baki", "সই বাকি", "signature baki", "unsigned document", "passport expire", "পাসপোর্টের মেয়াদ", "er document", "এর document", "-এর ডকুমেন্ট"],
+    args: (t) => { const n = /(\d{1,3})\s*(?:din|দিন|days?)/.exec(toAsciiDigits(t))?.[1]; return { name: subjectBefore(t), days: n ? Number(n) : undefined }; } },
+  { tool: "vehicle_overview", keys: ["vehicle", "ভেহিকেল", "gari koyta", "কয়টা গাড়ি", "gari khali", "খালি গাড়ি", "kon gari", "কোন গাড়ি", "ride request", "ajker ride", "আজকের ride", "fleet", "driver koi", "গাড়ি কোথায়", "gari kothay", "sobar ride", "ride pending"] },
   { tool: "headcount", keys: ["headcount", "হেডকাউন্ট", "মোট কর্মী", "কতজন কর্মী", "koto jon employee", "kotojon employee", "total employee", "how many employee", "কর্মী সংখ্যা"] }
 ];
+
+const OWN_TOOL: Record<string, string> = { late_on_date: "my_late_days", task_overview: "my_tasks", target_progress: "my_targets_progress", vehicle_overview: "my_rides" };
 
 const GREET = ["hi", "hello", "hey", "salam", "assalam", "হাই", "হ্যালো", "সালাম", "আসসালাম", "kemon acho", "কেমন আছ", "good morning", "শুভ সকাল"];
 const THANKS = ["thanks", "thank you", "ধন্যবাদ", "dhonnobad", "thx", "অনেক ধন্যবাদ"];
@@ -1769,9 +1994,11 @@ async function localAnswer(c: Ctx, message: string): Promise<Answer> {
   const asksState = hasAny(t, ["ki holo", "ki hoise", "ki hoyeche", "কী হল", "কি হলো", "কী হলো", "কি হল", "obostha", "অবস্থা", "status", " koi ", " কই ", "kothay ache", "কোথায় আছে", "koto ", "কত ", "kobe", "কবে"]);
   const helpWins = (help.length || blockedHelp.length) && helpScore > (scored[0]?.score || 0) && !asksState;
   if (scored.length && !(asksHow && (help.length || blockedHelp.length)) && !helpWins) {
-    // "amar / ami … late" is about the asker's own days, not everyone's.
-    const intent = scored[0].i.tool === "late_on_date" && hasAny(t, [" amar ", " ami ", "আমার", "আমি", " my ", " i "])
-      ? INTENTS.find((i) => i.tool === "my_late_days")!
+    // "amar / ami … late" is about the asker's own days, not everyone's
+    // (the same for tasks, targets and rides).
+    const own = OWN_TOOL[scored[0].i.tool];
+    const intent = own && hasAny(t, [" amar ", " ami ", "আমার", "আমি", " my ", " i "])
+      ? INTENTS.find((i) => i.tool === own)!
       : scored[0].i;
     const tool = TOOLS.find((x) => x.name === intent.tool)!;
     if (!toolAvailable(tool, c)) return { reply: NO_ACCESS.text, actions: [] };
