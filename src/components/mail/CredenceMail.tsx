@@ -13,7 +13,7 @@ import { Capacitor } from '@capacitor/core';
 import {
   ArrowLeft, Mail, Inbox, Star, Send, FileText, Clock, Archive, ShieldAlert, Trash2, AlertCircle, Pencil, RefreshCw, Search, X, Menu, Paperclip,
   CheckSquare, Square, MailOpen, Plus, Loader2, Server, ChevronDown, Bookmark, LogOut, Check,
-  Bell, Users, ListChecks, Filter, BarChart3, Settings, Tag, CheckCheck, Eye
+  Users, ListChecks, Filter, BarChart3, Settings, Tag, Eye
 } from 'lucide-react';
 import { ModulePath } from '../ModulePath';
 import { confirmDialog } from '../../lib/confirmDialog';
@@ -40,20 +40,32 @@ type Tool =
   | { kind: 'planner'; tab: 'tasks' | 'calendar'; fromMail?: FromMail }
   | { kind: 'analytics' };
 
-// This session's mail notifications (the bell), kept on this device.
-interface MailNote {
-  id: string;
-  kind: 'new' | 'sent' | 'scheduled' | 'failed';
-  title: string;
-  body: string;
-  at: number;
-  read: boolean;
-}
-
 const FOLDER_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   Inbox, Starred: Star, Important: Bookmark, Sent: Send, Drafts: FileText, Scheduled: Clock, Archive, Spam: ShieldAlert, Trash: Trash2
 };
 const PAGE = 50;
+
+// Mail server settings for a new mailbox (same presets as MailRoutes.ts).
+// Anything that isn't a known provider is taken to be on the Credence server.
+const CREDENCE_DOMAIN = 'credencehousinglimited.com';
+interface ServerFields {
+  imapHost: string;
+  imapPort: string;
+  imapSecure: boolean;
+  smtpHost: string;
+  smtpPort: string;
+  smtpSecure: boolean;
+  username: string;
+}
+const srv = (imapHost: string, smtpHost: string, smtpPort = '465', smtpSecure = true): ServerFields => ({ imapHost, imapPort: '993', imapSecure: true, smtpHost, smtpPort, smtpSecure, username: '' });
+function presetFor(email: string): ServerFields {
+  const d = (email.split('@')[1] || '').toLowerCase();
+  if (d === 'gmail.com' || d === 'googlemail.com') return srv('imap.gmail.com', 'smtp.gmail.com');
+  if (/(^|\.)(outlook|hotmail|live)\./.test(d)) return srv('outlook.office365.com', 'smtp.office365.com', '587', false);
+  if (d.startsWith('yahoo.')) return srv('imap.mail.yahoo.com', 'smtp.mail.yahoo.com');
+  if (d.startsWith('zoho.')) return srv('imap.zoho.com', 'smtp.zoho.com');
+  return srv(CREDENCE_DOMAIN, CREDENCE_DOMAIN);
+}
 
 // ---------------------------------------------------------------------------
 // Connect a mailbox (first time, or another one)
@@ -65,36 +77,51 @@ const ConnectMailbox: React.FC<{ token: string; userName: string; onConnected: (
   const [password, setPassword] = useState('');
   const [name, setName] = useState(userName);
   const [advanced, setAdvanced] = useState(false);
-  const [imapHost, setImapHost] = useState('');
-  const [imapPort, setImapPort] = useState('993');
-  const [imapSecure, setImapSecure] = useState(true);
-  const [smtpHost, setSmtpHost] = useState('');
-  const [smtpPort, setSmtpPort] = useState('465');
-  const [smtpSecure, setSmtpSecure] = useState(true);
-  const [username, setUsername] = useState('');
+  // Server settings start as the Credence mail server; another provider's
+  // address fills in its own — until the person changes a field by hand.
+  const [server, setServer] = useState<ServerFields>({ ...presetFor('') });
+  const [edited, setEdited] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const inputCls = 'w-full text-sm px-3 py-2.5 bg-white/80 border border-slate-200 rounded-xl focus:ring-2 focus:ring-sky-200 focus:outline-none';
+  // Just the name part ("rahim") means a Credence address.
+  const fullEmail = (v: string) => {
+    const t = v.trim().toLowerCase();
+    return t && !t.includes('@') ? `${t}@${CREDENCE_DOMAIN}` : t;
+  };
+  const setField = (patch: Partial<ServerFields>) => {
+    setEdited(true);
+    setServer((f) => ({ ...f, ...patch }));
+  };
+  useEffect(() => {
+    if (!edited) setServer({ ...presetFor(fullEmail(email)) });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [email, edited]);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    if (!/^\S+@\S+\.\S+$/.test(email.trim())) return setError('Enter your email address.');
+    const addr = fullEmail(email);
+    if (!/^\S+@\S+\.\S+$/.test(addr)) return setError('Enter your email address.');
     if (!password) return setError('Enter the mailbox password.');
+    if (!server.imapHost.trim() || !server.smtpHost.trim()) {
+      setAdvanced(true);
+      return setError('Fill in the incoming (IMAP) and outgoing (SMTP) servers.');
+    }
     setBusy(true);
     try {
-      const body: any = { email: email.trim(), password, name: name.trim() };
-      if (advanced) {
-        Object.assign(body, {
-          imapHost: imapHost.trim() || undefined,
-          imapPort: Number(imapPort) || undefined,
-          imapSecure,
-          smtpHost: smtpHost.trim() || undefined,
-          smtpPort: Number(smtpPort) || undefined,
-          smtpSecure,
-          username: username.trim() || undefined
-        });
-      }
+      const body: any = {
+        email: addr,
+        password,
+        name: name.trim(),
+        imapHost: server.imapHost.trim(),
+        imapPort: Number(server.imapPort) || 993,
+        imapSecure: server.imapSecure,
+        smtpHost: server.smtpHost.trim(),
+        smtpPort: Number(server.smtpPort) || 465,
+        smtpSecure: server.smtpSecure,
+        username: server.username.trim() || undefined
+      };
       onConnected(await mailFetch<MailAccount>(token, '/accounts', { method: 'POST', body }));
     } catch (err: any) {
       setError(err.message);
@@ -116,7 +143,8 @@ const ConnectMailbox: React.FC<{ token: string; userName: string; onConnected: (
     <form onSubmit={submit} onFocusCapture={scrollFocusedFieldIntoView} className="space-y-3">
       <div>
         <label className="block text-xs font-medium text-slate-600 mb-1">Email address</label>
-        <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" autoComplete="email" placeholder="you@credencehousinglimited.com" className={inputCls} autoFocus />
+        <input value={email} onChange={(e) => setEmail(e.target.value)} type="text" inputMode="email" autoComplete="email" autoCapitalize="none" placeholder="you@credencehousinglimited.com" className={inputCls} autoFocus />
+        {email.trim() && !email.includes('@') && <p className="mt-1 text-[11px] text-slate-500">{fullEmail(email)}</p>}
       </div>
       <div>
         <label className="block text-xs font-medium text-slate-600 mb-1">Mailbox password</label>
@@ -127,25 +155,40 @@ const ConnectMailbox: React.FC<{ token: string; userName: string; onConnected: (
         <label className="block text-xs font-medium text-slate-600 mb-1">Name shown to people you write to</label>
         <input value={name} onChange={(e) => setName(e.target.value)} className={inputCls} />
       </div>
-      <button type="button" onClick={() => setAdvanced((v) => !v)} className="text-xs text-slate-600 hover:text-slate-900 inline-flex items-center gap-1">
-        Server settings <ChevronDown className={`w-3 h-3 transition-transform ${advanced ? 'rotate-180' : ''}`} />
-      </button>
-      {advanced && (
-        <div className="rounded-2xl liquid-glass-inset p-3 space-y-2.5">
-          <p className="text-[11px] text-slate-500">Only needed for a mailbox outside Credence, Gmail, Outlook, Yahoo or Zoho. Empty fields use the address's own domain.</p>
-          <div className="grid grid-cols-[1fr_5rem] gap-2">
-            <input value={imapHost} onChange={(e) => setImapHost(e.target.value)} placeholder="IMAP server (incoming)" className={inputCls} />
-            <input value={imapPort} onChange={(e) => setImapPort(e.target.value)} inputMode="numeric" placeholder="993" className={inputCls} />
+      <div className="rounded-2xl liquid-glass-inset p-3">
+        <button type="button" onClick={() => setAdvanced((v) => !v)} className="w-full flex items-center justify-between gap-2 text-left">
+          <span className="min-w-0">
+            <span className="block text-xs font-medium text-slate-700">Server settings</span>
+            <span className="block text-[11px] text-slate-500 truncate">
+              {server.imapHost || '—'} · IMAP {server.imapPort}{server.imapSecure ? ' SSL' : ''} · SMTP {server.smtpPort}{server.smtpSecure ? ' SSL' : ''}
+            </span>
+          </span>
+          <span className="text-xs text-sky-700 font-semibold inline-flex items-center gap-1 shrink-0">
+            {advanced ? 'Hide' : 'Change'} <ChevronDown className={`w-3 h-3 transition-transform ${advanced ? 'rotate-180' : ''}`} />
+          </span>
+        </button>
+        {advanced && (
+          <div className="mt-3 space-y-2.5">
+            <p className="text-[11px] text-slate-500">Set for the Credence mail server ({CREDENCE_DOMAIN}). Change only for a mailbox somewhere else.</p>
+            <div className="grid grid-cols-[1fr_5rem] gap-2">
+              <input value={server.imapHost} onChange={(e) => setField({ imapHost: e.target.value })} placeholder="IMAP server (incoming)" aria-label="IMAP server (incoming)" className={inputCls} />
+              <input value={server.imapPort} onChange={(e) => setField({ imapPort: e.target.value })} inputMode="numeric" aria-label="IMAP port" className={inputCls} />
+            </div>
+            <label className="flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" checked={server.imapSecure} onChange={(e) => setField({ imapSecure: e.target.checked })} /> IMAP uses SSL/TLS</label>
+            <div className="grid grid-cols-[1fr_5rem] gap-2">
+              <input value={server.smtpHost} onChange={(e) => setField({ smtpHost: e.target.value })} placeholder="SMTP server (outgoing)" aria-label="SMTP server (outgoing)" className={inputCls} />
+              <input value={server.smtpPort} onChange={(e) => setField({ smtpPort: e.target.value })} inputMode="numeric" aria-label="SMTP port" className={inputCls} />
+            </div>
+            <label className="flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" checked={server.smtpSecure} onChange={(e) => setField({ smtpSecure: e.target.checked })} /> SMTP uses SSL/TLS (port 465)</label>
+            <input value={server.username} onChange={(e) => setField({ username: e.target.value })} placeholder="Login name (if not the email address)" className={inputCls} />
+            {edited && (
+              <button type="button" onClick={() => setEdited(false)} className="text-[11px] text-slate-500 hover:text-slate-800 underline underline-offset-2">
+                Back to the usual settings
+              </button>
+            )}
           </div>
-          <label className="flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" checked={imapSecure} onChange={(e) => setImapSecure(e.target.checked)} /> IMAP uses SSL/TLS</label>
-          <div className="grid grid-cols-[1fr_5rem] gap-2">
-            <input value={smtpHost} onChange={(e) => setSmtpHost(e.target.value)} placeholder="SMTP server (outgoing)" className={inputCls} />
-            <input value={smtpPort} onChange={(e) => setSmtpPort(e.target.value)} inputMode="numeric" placeholder="465" className={inputCls} />
-          </div>
-          <label className="flex items-center gap-2 text-xs text-slate-600"><input type="checkbox" checked={smtpSecure} onChange={(e) => setSmtpSecure(e.target.checked)} /> SMTP uses SSL/TLS (port 465)</label>
-          <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Login name (if not the email address)" className={inputCls} />
-        </div>
-      )}
+        )}
+      </div>
       {error && <div className="text-xs px-3 py-2 rounded-xl bg-rose-50 text-rose-700">{error}</div>}
       <div className="flex items-center justify-end gap-2 pt-1">
         {onCancel && (
@@ -389,16 +432,6 @@ export const CredenceMail: React.FC<{
   const [tool, setTool] = useState<Tool | null>(null);
   const [templates, setTemplates] = useState<MailTemplate[]>([]);
   const [ruleLabels, setRuleLabels] = useState<string[]>([]);
-  const notesKey = `credence_mail_notes_${user.id}`;
-  const [notes, setNotes] = useState<MailNote[]>(() => {
-    try {
-      return JSON.parse(localStorage.getItem(notesKey) || '[]');
-    } catch {
-      return [];
-    }
-  });
-  // Which bell's panel is open (the header one on desktop, the list one on a phone).
-  const [notesOpen, setNotesOpen] = useState<'header' | 'list' | null>(null);
   const listReq = useRef(0);
   const accounts = status?.accounts || [];
   const ownEmails = useMemo(() => new Set(accounts.map((a) => a.emailAddress.toLowerCase())), [accounts]);
@@ -409,30 +442,6 @@ export const CredenceMail: React.FC<{
   const say = useCallback((text: string, tone: 'ok' | 'error' = 'ok') => {
     setToast({ text, tone });
   }, []);
-  const addNote = useCallback(
-    (n: Omit<MailNote, 'id' | 'at' | 'read'>) =>
-      setNotes((prev) => {
-        const next = [{ ...n, id: `${Date.now()}${Math.random().toString(36).slice(2, 6)}`, at: Date.now(), read: false }, ...prev].slice(0, 40);
-        try {
-          localStorage.setItem(notesKey, JSON.stringify(next));
-        } catch {
-          // Storage can be unavailable; the bell still works this session.
-        }
-        return next;
-      }),
-    [notesKey]
-  );
-  const markNotesRead = () =>
-    setNotes((prev) => {
-      const next = prev.map((n) => ({ ...n, read: true }));
-      try {
-        localStorage.setItem(notesKey, JSON.stringify(next));
-      } catch {
-        // see addNote
-      }
-      return next;
-    });
-  const unreadNotes = notes.filter((n) => !n.read).length;
   useEffect(() => {
     if (!toast) return;
     const t = setTimeout(() => setToast(null), 4000);
@@ -529,17 +538,10 @@ export const CredenceMail: React.FC<{
     if (!status?.enabled || ro) return;
     const socket = connectChatSocket(token);
     const onChanged = () => refreshRef.current();
-    const onNew = (e: any) => {
-      refreshRef.current();
-      if (!e?.count) return;
-      say(e.count > 1 ? `${e.count} new mails` : `New mail from ${e.from}: ${e.subject}`);
-      addNote({ kind: 'new', title: e.count > 1 ? `${e.count} new mails` : `New mail from ${e.from}`, body: e.subject || '' });
-    };
-    const onFailed = (e: any) => {
-      refreshRef.current();
-      say(e?.error || 'A scheduled mail could not be sent.', 'error');
-      addNote({ kind: 'failed', title: 'Not sent — kept in Drafts', body: `${e?.subject || ''}${e?.error ? ` · ${e.error}` : ''}` });
-    };
+    // New mail and a failed scheduled mail are told through CredenceHR's own
+    // Alerts (MailRoutes.ts createAlert); here the list just refreshes.
+    const onNew = () => refreshRef.current();
+    const onFailed = () => refreshRef.current();
     socket.on('mail:changed', onChanged);
     socket.on('mail:new', onNew);
     socket.on('mail:send-failed', onFailed);
@@ -551,7 +553,27 @@ export const CredenceMail: React.FC<{
       socket.off('mail:send-failed', onFailed);
       clearInterval(t);
     };
-  }, [token, status?.enabled, say, addNote, ro]);
+  }, [token, status?.enabled, ro]);
+
+  // A mail alert (CredenceHR's Alerts bell) opens that mail: on arriving here,
+  // or when already here.
+  useEffect(() => {
+    if (ro) return;
+    const take = () => {
+      try {
+        const id = sessionStorage.getItem('open_mail_id');
+        if (!id) return;
+        sessionStorage.removeItem('open_mail_id');
+        setSelectedId(id);
+      } catch {
+        // storage unavailable — stays on the list
+      }
+    };
+    take();
+    const onOpen = (e: Event) => (e as CustomEvent).detail === 'credenceMail' && setTimeout(take, 0);
+    window.addEventListener('credence:open-self-service', onOpen);
+    return () => window.removeEventListener('credence:open-self-service', onOpen);
+  }, [ro]);
 
   // Opening one: the whole conversation, marked read.
   useEffect(() => {
@@ -585,9 +607,10 @@ export const CredenceMail: React.FC<{
     return () => {
       cancelled = true;
     };
-    // Only when a different mail is opened.
+    // Only when a different mail is opened (or the list first arrives, for a
+    // mail opened from an alert).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedId, token]);
+  }, [selectedId, token, !!list]);
 
   const sync = async () => {
     setSyncing(true);
@@ -786,74 +809,6 @@ export const CredenceMail: React.FC<{
   };
 
   // ---- Screens ----
-  const noteIcon = (k: MailNote['kind']) => (k === 'new' ? <Mail className="w-4 h-4 text-sky-600" /> : k === 'sent' ? <Send className="w-4 h-4 text-emerald-600" /> : k === 'scheduled' ? <Clock className="w-4 h-4 text-amber-600" /> : <AlertCircle className="w-4 h-4 text-rose-600" />);
-  const bellFor = (where: 'header' | 'list') => (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={() => setNotesOpen((v) => (v === where ? null : where))}
-        className="relative w-8 h-8 rounded-xl bg-white/80 border border-slate-200 hover:bg-white text-slate-700 inline-flex items-center justify-center"
-        aria-label={`Mail notifications${unreadNotes ? `, ${unreadNotes} new` : ''}`}
-        title="Notifications"
-      >
-        <Bell className="w-4 h-4" />
-        {unreadNotes > 0 && <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-rose-600 text-white text-[10px] font-bold flex items-center justify-center">{unreadNotes > 9 ? '9+' : unreadNotes}</span>}
-      </button>
-      {notesOpen === where && (
-        <>
-          <div className="fixed inset-0 z-[60]" onClick={() => { setNotesOpen(null); markNotesRead(); }} />
-          <div className="absolute right-0 top-full mt-2 z-[61] w-[min(22rem,calc(100vw-1.5rem))] rounded-3xl bg-white shadow-2xl ring-1 ring-black/5 overflow-hidden">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
-              <span className="text-sm font-semibold text-slate-800">Notifications</span>
-              <span className="flex items-center gap-1">
-                {notes.length > 0 && (
-                  <>
-                    <button type="button" onClick={markNotesRead} className="p-1.5 rounded-full hover:bg-black/5 text-slate-500" title="Mark all as read" aria-label="Mark all as read"><CheckCheck className="w-4 h-4" /></button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setNotes([]);
-                        try { localStorage.removeItem(notesKey); } catch { /* see addNote */ }
-                      }}
-                      className="text-[11px] text-slate-500 hover:text-slate-800 px-2"
-                    >
-                      Clear
-                    </button>
-                  </>
-                )}
-              </span>
-            </div>
-            <div className="max-h-80 overflow-y-auto divide-y divide-slate-100">
-              {!notes.length ? (
-                <p className="px-4 py-8 text-center text-xs text-slate-500">No notifications yet. New mail shows up here as it arrives.</p>
-              ) : (
-                notes.map((n) => (
-                  <button
-                    key={n.id}
-                    type="button"
-                    onClick={() => {
-                      setNotesOpen(null);
-                      markNotesRead();
-                      openFolder(n.kind === 'new' ? 'Inbox' : n.kind === 'failed' ? 'Drafts' : n.kind === 'scheduled' ? 'Scheduled' : 'Sent');
-                    }}
-                    className={`w-full text-left flex items-start gap-3 px-4 py-2.5 hover:bg-slate-50 ${n.read ? '' : 'bg-sky-50/50'}`}
-                  >
-                    <span className="mt-0.5 shrink-0">{noteIcon(n.kind)}</span>
-                    <span className="flex-1 min-w-0">
-                      <span className="block text-xs font-semibold text-slate-800 truncate">{n.title}</span>
-                      {n.body && <span className="block text-[11px] text-slate-500 truncate">{n.body}</span>}
-                      <span className="block text-[10px] text-slate-400">{shortMailDate(new Date(n.at).toISOString())}</span>
-                    </span>
-                  </button>
-                ))
-              )}
-            </div>
-          </div>
-        </>
-      )}
-    </div>
-  );
-
   const modulePath = ['Self Service', 'Credence Mail'];
   const roBanner = ro ? (
     <div className="mb-3 flex items-center gap-2 rounded-2xl bg-amber-50 text-amber-900 text-xs px-3 py-2">
@@ -894,7 +849,6 @@ export const CredenceMail: React.FC<{
           <button type="button" onClick={() => setMailboxes(true)} className="text-xs px-3 py-1.5 rounded-xl bg-white/80 border border-slate-200 hover:bg-white text-slate-700 hidden sm:inline-flex items-center gap-1.5">
             <Server className="w-3.5 h-3.5" /> Mailboxes
           </button>
-          {bellFor('header')}
           <button type="button" onClick={() => settings && setTool({ kind: 'settings' })} disabled={!settings} className="w-8 h-8 rounded-xl bg-white/80 border border-slate-200 hover:bg-white text-slate-700 inline-flex items-center justify-center disabled:opacity-50" aria-label="Mail settings" title="Settings">
             <Settings className="w-4 h-4" />
           </button>
@@ -1045,7 +999,6 @@ export const CredenceMail: React.FC<{
           <button type="button" onClick={() => void sync()} disabled={syncing} className="p-2 rounded-full hover:bg-black/5 disabled:opacity-50" aria-label="Check for new mail" title="Check for new mail">
             <RefreshCw className={`w-4 h-4 text-slate-600 ${syncing ? 'animate-spin' : ''}`} />
           </button>
-          {!ro && <div className="md:hidden">{bellFor('list')}</div>}
         </div>
         {checked.size > 0 ? (
           <div className="flex items-center gap-1 flex-wrap">
@@ -1237,11 +1190,7 @@ export const CredenceMail: React.FC<{
             setCompose(null);
             refreshRef.current();
           }}
-          onDone={(text) => {
-            say(text);
-            if (text === 'Sent.') addNote({ kind: 'sent', title: 'Mail sent', body: '' });
-            else if (text.startsWith('Will be sent')) addNote({ kind: 'scheduled', title: 'Mail scheduled', body: text.replace(/\.$/, '') });
-          }}
+          onDone={(text) => say(text)}
         />
       )}
 

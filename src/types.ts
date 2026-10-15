@@ -1702,7 +1702,9 @@ export type AlertType =
   | 'hr_reminder'
   // Assistant live support: a new request (agents) or a chat transferred to me.
   | 'assistant_support'
-  | 'target';
+  | 'target'
+  // Credence Mail (MailRoutes.ts): new mail, or a scheduled mail not sent.
+  | 'mail';
 
 export interface Alert {
   id: number;
