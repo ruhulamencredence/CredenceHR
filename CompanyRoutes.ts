@@ -32,6 +32,13 @@ import { endAllSessions } from "./SessionSecurity";
 import bcrypt from "bcryptjs";
 import { DEFAULT_COMPANY_ID, DEFAULT_GROUP_ID, activeCompanyId, activeGroupId, companyStore, type CompanyContext } from "./companyContext";
 import { SHARE_KINDS, CONFIG_TABLES, OWN_TABLES, GROUP_TABLES, GROUP_BACKFILL } from "./companyScope";
+
+// Every column but the logo image itself. These lists are read on every
+// request (resolveCompanyContext) and by most company screens; with
+// SELECT * each read also pulled every company's logo out of the
+// database. The logo routes read logo_data by id.
+const COMPANY_ROWS = "SELECT id, group_id, name, short_code, is_mother, address, phone, email, website, logo_mime, is_active, created_at, shared_settings FROM companies";
+const GROUP_ROWS = "SELECT id, name, short_name, logo_mime, created_at, workspace_code, tagline, is_active FROM company_groups";
 import { deleteCompany, deleteWorkspace, type WithTransaction } from "./companyDelete";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
@@ -162,6 +169,14 @@ export async function ensureCompanySchema(dbPool: any): Promise<void> {
   }
   await run("all_employees.company_id", "ALTER TABLE all_employees ADD COLUMN company_id INT NOT NULL DEFAULT 1", ["ER_DUP_FIELDNAME"]);
   await run("all_employees index", "ALTER TABLE all_employees ADD INDEX idx_employee_company (company_id)", ["ER_DUP_KEYNAME"]);
+  // The company filter (companyScope.ts) wraps almost every query in
+  // "user_id IN (SELECT user_id FROM all_employees ...)" and
+  // "users WHERE group_id = ?" — without these two indexes each of those
+  // read the whole table, on every request.
+  await run("all_employees user index", "ALTER TABLE all_employees ADD INDEX idx_employee_user (user_id)", ["ER_DUP_KEYNAME"]);
+  await run("users group index", "ALTER TABLE users ADD INDEX idx_users_group (group_id)", ["ER_DUP_KEYNAME"]);
+  // Who is on approved leave on a day (Dashboard "On leave today", reports).
+  await run("leave_applications status index", "ALTER TABLE leave_applications ADD INDEX idx_leave_applications_status_start (status, start_date)", ["ER_DUP_KEYNAME", "ER_NO_SUCH_TABLE"]);
 
   // Departments, branches and projects belong to a company too; their names
   // only need to be unique within it (a sister company can also have "Accounts").
@@ -300,7 +315,7 @@ export function sharedKindsOf(c: any, isMother: boolean): string[] {
 
 // Context for background jobs acting for one company (e.g. a scheduled report).
 export async function contextForCompany(queryDB: QueryDB, companyId: number): Promise<CompanyContext> {
-  const all: any[] = (await queryDB("SELECT * FROM companies").catch(() => [])) || [];
+  const all: any[] = (await queryDB(COMPANY_ROWS).catch(() => [])) || [];
   const c = all.find((x) => Number(x.id) === Number(companyId)) || all.find((x) => Number(x.id) === DEFAULT_COMPANY_ID);
   const groupId = Number(c?.group_id ?? DEFAULT_GROUP_ID);
   const mother = all.find((x) => Number(x.group_id) === groupId && Number(x.is_mother) === 1) || c;
@@ -319,7 +334,7 @@ export function invalidateCompanyAccess(userId?: number) {
 }
 
 async function companiesOfGroup(queryDB: QueryDB, groupId: number): Promise<any[]> {
-  const rows: any[] = (await queryDB("SELECT * FROM companies").catch(() => [])) || [];
+  const rows: any[] = (await queryDB(COMPANY_ROWS).catch(() => [])) || [];
   return rows.filter((c) => Number(c.group_id) === groupId);
 }
 
@@ -384,8 +399,8 @@ export async function resolveCompanyContext(queryDB: QueryDB, user: { id: number
   const want = Number(Array.isArray(requested) ? requested[0] : requested);
   if (want && !info.allowed.includes(want) && info.platform) {
     const [companies, groups]: any[][] = await Promise.all([
-      queryDB("SELECT * FROM companies").catch(() => []),
-      queryDB("SELECT * FROM company_groups").catch(() => [])
+      queryDB(COMPANY_ROWS).catch(() => []),
+      queryDB(GROUP_ROWS).catch(() => [])
     ]);
     const c = (companies || []).find((x: any) => Number(x.id) === want && Number(x.is_active ?? 1) === 1);
     const g = c && (groups || []).find((x: any) => Number(x.id) === Number(c.group_id) && Number(x.is_active ?? 1) === 1);
@@ -476,7 +491,7 @@ export const normalizeWorkspace = (v: any) => String(v || "").trim().toLowerCase
 export async function findWorkspace(queryDB: QueryDB, code: string): Promise<any | null> {
   const want = normalizeWorkspace(code);
   if (!want) return null;
-  const rows: any[] = (await queryDB("SELECT * FROM company_groups").catch(() => [])) || [];
+  const rows: any[] = (await queryDB(GROUP_ROWS).catch(() => [])) || [];
   return rows.find((g) => normalizeWorkspace(g.workspace_code) === want && Number(g.is_active ?? 1) === 1) || null;
 }
 
@@ -542,7 +557,7 @@ export function registerCompanyRoutes(app: Express, deps: CompanyRouteDeps) {
     shared_settings: sharedKindsOf(c, Number(c.is_mother) === 1)
   });
   const groupOf = async (groupId: number) => {
-    const rows: any[] = (await queryDB("SELECT * FROM company_groups").catch(() => [])) || [];
+    const rows: any[] = (await queryDB(GROUP_ROWS).catch(() => [])) || [];
     const g = rows.find((r) => Number(r.id) === groupId);
     return g
       ? { id: Number(g.id), name: g.name, short_name: g.short_name || null, workspace_code: g.workspace_code || null }
@@ -562,7 +577,7 @@ export function registerCompanyRoutes(app: Express, deps: CompanyRouteDeps) {
       // The system owner also gets every workspace, to open any of them.
       let workspaces: any[] | undefined;
       if (info.platform) {
-        const [groups, all]: any[][] = await Promise.all([queryDB("SELECT * FROM company_groups"), queryDB("SELECT * FROM companies")]);
+        const [groups, all]: any[][] = await Promise.all([queryDB(GROUP_ROWS), queryDB(COMPANY_ROWS)]);
         workspaces = (groups || [])
           .filter((g: any) => Number(g.is_active ?? 1) === 1)
           .map((g: any) => {
@@ -1034,7 +1049,8 @@ export function registerCompanyRoutes(app: Express, deps: CompanyRouteDeps) {
 
   app.get("/api/public/workspaces/:code/logo", async (req: any, res) => {
     try {
-      const g = await findWorkspace(queryDB, req.params.code);
+      const found = await findWorkspace(queryDB, req.params.code);
+      const g = found ? ((await queryDB("SELECT * FROM company_groups WHERE id = ?", [Number(found.id)])) || []).find((r: any) => Number(r.id) === Number(found.id)) : null;
       if (!g || !g.logo_mime) throw bad("No logo.", 404);
       res.setHeader("Content-Type", g.logo_mime);
       res.setHeader("Cache-Control", "public, max-age=3600");
@@ -1068,7 +1084,7 @@ export function registerCompanyRoutes(app: Express, deps: CompanyRouteDeps) {
     const code = normalizeWorkspace(b?.workspace_code);
     if (!WORKSPACE_RE.test(code) || RESERVED_WORKSPACES.has(code))
       throw bad("Workspace: 3–40 small letters, digits or dashes, starting with a letter (e.g. credence). People type this before signing in.");
-    const rows: any[] = (await queryDB("SELECT * FROM company_groups")) || [];
+    const rows: any[] = (await queryDB(GROUP_ROWS)) || [];
     if (rows.some((g) => Number(g.id) !== selfId && normalizeWorkspace(g.workspace_code) === code)) throw bad(`The workspace "${code}" is already taken.`);
     return {
       name,
@@ -1083,8 +1099,8 @@ export function registerCompanyRoutes(app: Express, deps: CompanyRouteDeps) {
   app.get("/api/platform/workspaces", authenticateToken, requirePlatformAdmin, async (_req: any, res) => {
     try {
       const [groups, companies, users] = await Promise.all([
-        queryDB("SELECT * FROM company_groups"),
-        queryDB("SELECT * FROM companies").catch(() => []),
+        queryDB(GROUP_ROWS),
+        queryDB(COMPANY_ROWS).catch(() => []),
         // Every workspace's accounts — the system owner's view spans groups.
         queryDB("/*unscoped*/ SELECT * FROM users").catch(() => [])
       ]);
@@ -1166,7 +1182,7 @@ export function registerCompanyRoutes(app: Express, deps: CompanyRouteDeps) {
   app.put("/api/platform/workspaces/:id", authenticateToken, requirePlatformAdmin, async (req: any, res) => {
     try {
       const id = Number(req.params.id);
-      const rows: any[] = (await queryDB("SELECT * FROM company_groups")) || [];
+      const rows: any[] = (await queryDB(GROUP_ROWS)) || [];
       if (!rows.some((g) => Number(g.id) === id)) throw bad("Workspace not found.", 404);
       const w = await cleanWorkspace(req.body, id);
       if (id === DEFAULT_GROUP_ID && !w.is_active) throw bad("Your own workspace can't be switched off.");
@@ -1190,7 +1206,7 @@ export function registerCompanyRoutes(app: Express, deps: CompanyRouteDeps) {
   app.delete("/api/platform/workspaces/:id", authenticateToken, requirePlatformAdmin, async (req: any, res) => {
     try {
       const id = Number(req.params.id);
-      const g = ((await queryDB("SELECT * FROM company_groups")) || []).find((r: any) => Number(r.id) === id);
+      const g = ((await queryDB(GROUP_ROWS)) || []).find((r: any) => Number(r.id) === id);
       if (!g) throw bad("Workspace not found.", 404);
       if (id === DEFAULT_GROUP_ID) throw bad("Your own workspace can't be deleted.");
       if (id === activeGroupId()) throw bad("You are working inside this workspace. Go back to your workspace first.");
@@ -1220,7 +1236,7 @@ export function registerCompanyRoutes(app: Express, deps: CompanyRouteDeps) {
   app.post("/api/platform/workspaces/:id/superadmins", authenticateToken, requirePlatformAdmin, async (req: any, res) => {
     try {
       const groupId = Number(req.params.id);
-      const groups: any[] = (await queryDB("SELECT * FROM company_groups")) || [];
+      const groups: any[] = (await queryDB(GROUP_ROWS)) || [];
       if (!groups.some((g) => Number(g.id) === groupId)) throw bad("Workspace not found.", 404);
       const name = String(req.body?.name || "").trim().slice(0, 100);
       const email = String(req.body?.email || "").trim().toLowerCase().slice(0, 150);
@@ -1273,8 +1289,8 @@ export function registerCompanyRoutes(app: Express, deps: CompanyRouteDeps) {
       const [rows, users, groups, companies]: any[][] = await Promise.all([
         queryDB("SELECT * FROM platform_visits ORDER BY id DESC LIMIT 50").catch(() => []),
         queryDB("/*unscoped*/ SELECT id, name FROM users").catch(() => []),
-        queryDB("SELECT * FROM company_groups").catch(() => []),
-        queryDB("SELECT * FROM companies").catch(() => [])
+        queryDB(GROUP_ROWS).catch(() => []),
+        queryDB(COMPANY_ROWS).catch(() => [])
       ]);
       const name = (list: any[], id: any) => list.find((x: any) => Number(x.id) === Number(id))?.name || "—";
       res.json(

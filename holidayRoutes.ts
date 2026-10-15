@@ -137,8 +137,12 @@ export async function ensureHolidayCalendarSchema(dbPool: any): Promise<void> {
 // convention this codebase already uses for this shape of lookup (see
 // ExitOffboardingRoutes.ts's own comment on why), and the only form the
 // in-memory fallback DB's generic-table simulator can parse.
+// onlyUserId: a route about one account (its own calendar, its own summary)
+// reads just that Employee row — every Employee of the company on every
+// Dashboard open was the heaviest part of those routes at ~1,500 staff.
 export async function getEmployeeBranchTypeMap(
-  queryDB: (sql: string, params?: any[]) => Promise<any>
+  queryDB: (sql: string, params?: any[]) => Promise<any>,
+  onlyUserId?: number
 ): Promise<Map<number, HolidayAppliesTo>> {
   const map = new Map<number, HolidayAppliesTo>();
   try {
@@ -146,7 +150,7 @@ export async function getEmployeeBranchTypeMap(
     // generic-table simulator only understands `SELECT * FROM <table>`
     // verbatim, not a column-restricted/WHERE-filtered variant.
     const [employees, branches] = await Promise.all([
-      queryDB("SELECT * FROM all_employees"),
+      onlyUserId ? queryDB("SELECT * FROM all_employees WHERE user_id = ?", [onlyUserId]) : queryDB("SELECT * FROM all_employees"),
       queryDB("SELECT * FROM branches")
     ]);
     const branchTypeById = new Map<number, HolidayAppliesTo>(
@@ -291,7 +295,7 @@ export function registerHolidayRoutes(app: Express, deps: HolidayRouteDeps) {
   // just "which one am I").
   app.get("/api/my-holiday-group", authenticateToken, async (req: any, res) => {
     try {
-      const branchTypeMap = await getEmployeeBranchTypeMap(queryDB);
+      const branchTypeMap = await getEmployeeBranchTypeMap(queryDB, Number(req.user.id));
       res.json({ applies_to: branchTypeMap.get(Number(req.user.id)) || "head_office" });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -444,7 +448,7 @@ export function registerHolidayRoutes(app: Express, deps: HolidayRouteDeps) {
 
       // Which calendar applies to the account asking — Head Office and
       // Project site Employees can have a different "is today off" answer.
-      const branchTypeMap = await getEmployeeBranchTypeMap(queryDB);
+      const branchTypeMap = await getEmployeeBranchTypeMap(queryDB, Number(req.user.id));
       const myGroup: HolidayAppliesTo = branchTypeMap.get(Number(req.user.id)) || "head_office";
 
       const allHolidayRows = await fetchAllHolidayRows(queryDB);
@@ -455,13 +459,24 @@ export function registerHolidayRoutes(app: Express, deps: HolidayRouteDeps) {
       const todayRows = myGroupRows.filter((r: any) => r.entry_date === today);
       const nextRows = myGroupRows.filter((r: any) => r.entry_date > today).slice(0, 1);
 
-      const leaveRows = await queryDB(
-        `SELECT l.user_id, l.end_date, u.name
-         FROM leave_applications l
-         JOIN users u ON u.id = l.user_id
-         WHERE l.status = 'approved' AND l.start_date <= ? AND l.end_date >= ?`,
+      // The day's approved leave first, then just those people's names —
+      // joining users here made MySQL walk the company's whole user list
+      // (through the company filter) on every Dashboard open.
+      const leaveOnly: any[] = await queryDB(
+        "SELECT user_id, start_date, end_date, status FROM leave_applications WHERE status = 'approved' AND start_date <= ? AND end_date >= ?",
         [today, today]
+      ).then((rows: any[]) =>
+        // (Checked again here too: the in-memory fallback DB ignores WHERE.)
+        rows.filter((l: any) => l.status === "approved" && String(l.start_date).slice(0, 10) <= today && String(l.end_date).slice(0, 10) >= today)
       );
+      const leaveUserIds = [...new Set(leaveOnly.map((l: any) => Number(l.user_id)))];
+      const names: any[] = leaveUserIds.length
+        ? await queryDB(`SELECT id, name FROM users WHERE id IN (${leaveUserIds.map(() => "?").join(",")})`, leaveUserIds)
+        : [];
+      const nameById = new Map<number, string>(names.map((u: any) => [Number(u.id), u.name]));
+      const leaveRows = leaveOnly
+        .filter((l: any) => nameById.has(Number(l.user_id)))
+        .map((l: any) => ({ user_id: l.user_id, end_date: l.end_date, name: nameById.get(Number(l.user_id)) }));
 
       // One person can hold two approved applications that both cover today
       // (e.g. a range extended by a second request), which would list them

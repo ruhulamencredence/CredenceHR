@@ -470,7 +470,7 @@ export async function buildFacts(queryDB: QueryDB, today: string, stages: Set<St
 
   // ---- documents ----
   if (stages.has("documents")) {
-    const [docs, sigs] = await Promise.all([queryDB("SELECT * FROM employee_documents").catch(() => []), queryDB("SELECT * FROM document_signatures").catch(() => [])]);
+    const [docs, sigs] = await Promise.all([queryDB("SELECT id, user_id, doc_type, file_name, file_mimetype, requires_signature, expiry_date, uploaded_by, uploaded_at FROM employee_documents").catch(() => []), queryDB("SELECT * FROM document_signatures").catch(() => [])]);
     const signed = new Set(sigs.map((s: any) => Number(s.document_id)));
     const byU = groupRows<number>(docs, (r) => Number(r.user_id));
     const required = requiredDocuments(settings);

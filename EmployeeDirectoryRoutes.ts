@@ -33,6 +33,14 @@ interface EmployeeDirectoryRouteDeps {
 export function registerEmployeeDirectoryRoutes(app: Express, deps: EmployeeDirectoryRouteDeps) {
   const { authenticateToken, queryDB } = deps;
 
+  // Every Dashboard open asks for the whole roster, and it is the same for
+  // everyone working in the same company (or the same whole group) — at
+  // ~1,500 staff building it each time was one of the heaviest Dashboard
+  // calls. Kept for a minute per company / group, so a new or edited
+  // Employee shows up here within a minute.
+  const CACHE_MS = 60 * 1000;
+  const cache = new Map<string, { at: number; body: string }>();
+
   // Multi-company: normally the roster of the company being worked in. An
   // account allowed the whole group's directory (users.can_view_group_directory,
   // set in Admin Panel -> Companies -> Who can work where) and the Superadmin
@@ -45,6 +53,12 @@ export function registerEmployeeDirectoryRoutes(app: Express, deps: EmployeeDire
       if (!wholeGroup && ctx) {
         const me: any[] = (await queryDB("SELECT can_view_group_directory FROM users WHERE id = ?", [req.user.id]).catch(() => [])) || [];
         wholeGroup = !!Number(me[0]?.can_view_group_directory || 0);
+      }
+      const key = ctx ? (wholeGroup ? `g${ctx.groupId}` : `c${ctx.companyId}:${ctx.groupId}:${ctx.visiting ? "v" : ""}:${(ctx.shared || []).join(",")}`) : "none";
+      const hit = cache.get(key);
+      if (hit && Date.now() - hit.at < CACHE_MS) {
+        res.type("application/json").send(hit.body);
+        return;
       }
       const load = () => queryDB(
         `SELECT e.id, e.employee_id, e.name, e.designation, e.department, e.department_id,
@@ -70,9 +84,9 @@ export function registerEmployeeDirectoryRoutes(app: Express, deps: EmployeeDire
          ORDER BY e.name ASC`
       );
       const rows: any[] = wholeGroup && ctx ? await companyStore.run({ ...ctx, wholeGroup: true }, load) : await load();
-      const companies: any[] = (await queryDB("SELECT * FROM companies").catch(() => [])) || [];
+      const companies: any[] = (await queryDB("SELECT id, name, short_code FROM companies").catch(() => [])) || [];
       const companyOf = new Map(companies.map((c: any) => [Number(c.id), c]));
-      res.json(
+      const body = JSON.stringify(
         rows.map((r: any) => ({
           id: r.id,
           employee_id: r.employee_id,
@@ -95,6 +109,9 @@ export function registerEmployeeDirectoryRoutes(app: Express, deps: EmployeeDire
           company_code: companyOf.get(Number(r.company_id ?? 1))?.short_code || null
         }))
       );
+      if (cache.size > 200) cache.clear();
+      cache.set(key, { at: Date.now(), body });
+      res.type("application/json").send(body);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

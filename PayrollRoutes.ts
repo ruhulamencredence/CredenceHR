@@ -2082,7 +2082,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       if (empRows.length === 0) return res.json({ linked: false, month_year: monthYear });
       const employee = empRows[0];
 
-      const branchTypeByUserId = await getEmployeeBranchTypeMap(queryDB);
+      const branchTypeByUserId = await getEmployeeBranchTypeMap(queryDB, Number(employee.user_id));
       const myGroup: HolidayAppliesTo = branchTypeByUserId.get(Number(employee.user_id)) || "head_office";
       const holidayMap = await getHolidayMap(queryDB, monthStart, monthEnd, myGroup);
       // Days before this person's Joining Date aren't theirs to attend — they
@@ -2223,7 +2223,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       const empRows = await queryDB("SELECT id, user_id, zk_device_pin FROM all_employees WHERE user_id = ? LIMIT 1", [req.user.id]);
       if (empRows.length === 0) return res.json({ linked: false, days: {} });
       const employee = empRows[0];
-      const branchTypeByUserId = await getEmployeeBranchTypeMap(queryDB);
+      const branchTypeByUserId = await getEmployeeBranchTypeMap(queryDB, Number(employee.user_id));
       const myGroup: HolidayAppliesTo = branchTypeByUserId.get(Number(employee.user_id)) || "head_office";
 
       const days: Record<string, "delay" | "extreme"> = {};
@@ -2318,19 +2318,25 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
   //     Report): everyone in their own Department;
   //   - the Superadmin: every employee.
   async function calendarViewableEmployees(user: any): Promise<any[]> {
-    const rows = (
-      await queryDB(
-        `SELECT id, name, employee_id AS employee_code, department, user_id, zk_device_pin, company_id
-         FROM all_employees WHERE is_active = 1 AND user_id IS NOT NULL ORDER BY name ASC`
-      )
-    ).filter((e: any) => Number(e.company_id ?? 1) === activeCompanyId());
-    if (user.role === "superadmin") return rows;
-    const me = rows.find((e: any) => Number(e.user_id) === Number(user.id));
+    const COLS = "id, name, employee_id AS employee_code, department, user_id, zk_device_pin, company_id";
+    const inCompany = (rows: any[]) => rows.filter((e: any) => Number(e.company_id ?? 1) === activeCompanyId());
+    if (user.role === "superadmin") {
+      return inCompany(await queryDB(`SELECT ${COLS} FROM all_employees WHERE is_active = 1 AND user_id IS NOT NULL ORDER BY name ASC`));
+    }
+    // Everyone else sees themselves (and, with Attendance Reports, their own
+    // department) — read just those rows, not the whole company's, since
+    // this runs on every Dashboard open.
+    // (Filtered again in JS: the in-memory fallback DB ignores WHERE.)
+    const me = inCompany(await queryDB(`SELECT ${COLS} FROM all_employees WHERE is_active = 1 AND user_id = ?`, [Number(user.id)])).find(
+      (e: any) => Number(e.user_id) === Number(user.id) && Number(e.is_active ?? 1) === 1
+    );
     if (!me) return [];
     const canSeeDepartment =
       (user.role === "admin" || user.role === "user") && (await getAdminModules(user.id)).includes("attendance_reports");
     if (!canSeeDepartment || !me.department) return [me];
-    return rows.filter((e: any) => e.department === me.department);
+    return inCompany(
+      await queryDB(`SELECT ${COLS} FROM all_employees WHERE is_active = 1 AND user_id IS NOT NULL AND department = ? ORDER BY name ASC`, [me.department])
+    ).filter((e: any) => e.department === me.department && e.user_id != null);
   }
 
   // The viewer's own Delay / Extreme Delay and the Leave of the people this
@@ -2392,7 +2398,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       // holiday calendars as the payroll. The policy is per salary month, so
       // resolve each one the range touches.
       const self = employees.filter((e: any) => Number(e.user_id) === me);
-      const branchTypeByUserId = await getEmployeeBranchTypeMap(queryDB);
+      const branchTypeByUserId = await getEmployeeBranchTypeMap(queryDB, me);
       let monthYear = await salaryMonthOf(from);
       for (let i = 0; i < 4 && self.length > 0; i++) {
         const period = await getSalaryPeriod(monthYear);
