@@ -50,7 +50,7 @@ import {
   Wallet,
   Building2
 } from 'lucide-react';
-import { Spinner } from './Spinner';
+import { ServiceBookSkeleton } from './HrOpsSkeleton';
 import { apiUrl } from '../lib/api';
 import { NewActionModal } from './HrOpsActions';
 import { LetterComposer } from './HrOpsLetters';
@@ -155,9 +155,17 @@ function useSection<T>(api: ReturnType<typeof useHrApi>, rawPath: string | null,
   return { data, error, loading };
 }
 
+// A tab's own data loading: rows in the shape of the list that will appear.
 const Loading = () => (
-  <div className="flex items-center justify-center gap-2 py-14 text-sm text-slate-500">
-    <Spinner size={16} /> Loading…
+  <div className="py-4" role="status" aria-label="Loading" style={{ animation: 'skeleton-in .25s ease .15s both' }}>
+  <div className="space-y-3 animate-pulse">
+    {[0, 1, 2, 3].map((i) => (
+      <div key={i} className="flex items-center gap-3 rounded-lg border border-slate-100 px-3 py-3">
+        <div className="h-3 w-24 rounded bg-slate-100" />
+        <div className={`h-3 rounded bg-slate-200/80 ${i % 2 ? 'w-1/3' : 'w-1/2'}`} />
+      </div>
+    ))}
+  </div>
   </div>
 );
 const Empty: React.FC<{ children: React.ReactNode }> = ({ children }) => <p className="text-xs text-slate-400 text-center py-8">{children}</p>;
@@ -238,7 +246,11 @@ export const Employee360: React.FC<{
   const employeeId = self ? -1 : employeeIdProp;
   const api = useHrApi(token);
   const [ov, setOv] = useState<P360Overview | null>(null);
-  const [loading, setLoading] = useState(false);
+  // Which employee `ov` belongs to, and whether loading them failed — so a
+  // newly picked employee shows the skeleton, never the last one's book or
+  // a blank page.
+  const [loadedFor, setLoadedFor] = useState<number | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [msg, setMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [tab, setTab] = useState<TabKey>('overview');
   const [reloadKey, setReloadKey] = useState(0);
@@ -262,15 +274,17 @@ export const Employee360: React.FC<{
   const load = useCallback(async () => {
     if (!employeeId) {
       setOv(null);
+      setLoadedFor(null);
       return;
     }
-    setLoading(true);
+    setLoadFailed(false);
     try {
-      setOv(await api.get<P360Overview>(self ? '/api/hr-ops/my/p360' : `/api/hr-ops/p360/${employeeId}`));
+      const data = await api.get<P360Overview>(self ? '/api/hr-ops/my/p360' : `/api/hr-ops/p360/${employeeId}`);
+      setOv(data);
+      setLoadedFor(employeeId);
     } catch (e: any) {
       setMsg({ type: 'error', text: e.message });
-    } finally {
-      setLoading(false);
+      setLoadFailed(true);
     }
   }, [api, employeeId, self]);
   useEffect(() => {
@@ -349,9 +363,16 @@ export const Employee360: React.FC<{
           <BookOpen className="w-9 h-9 mx-auto mb-2 text-slate-300" />
           Pick an employee to see everything about them — service history, experience, documents, attendance, leave, claims, salary and loans.
         </div>
-      ) : loading && !ov ? (
-        <Loading />
-      ) : !ov || !e || !s ? null : (
+      ) : loadFailed && loadedFor !== employeeId ? (
+        <div className="text-center py-14 text-sm text-slate-500">
+          <p className="mb-3">This service book couldn't be loaded.</p>
+          <button type="button" className={btnGhost} onClick={load}>
+            Try again
+          </button>
+        </div>
+      ) : !ov || !e || !s || loadedFor !== employeeId ? (
+        <ServiceBookSkeleton />
+      ) : (
         <>
           {/* Header */}
           <div className="rounded-xl border border-slate-200 bg-gradient-to-r from-blue-50/60 to-white p-4">

@@ -27,6 +27,7 @@ const ChatPanel = lazy(() => import('./components/ChatPanel').then(m => ({ defau
 const AlertsPage = lazy(() => import('./components/AlertsPage').then(m => ({ default: m.AlertsPage })));
 
 import { AppLoader } from './components/AppLoader';
+import { HrOpsPageSkeleton } from './components/HrOpsSkeleton';
 import { ModulePath } from './components/ModulePath';
 import { UserDashboardSkeleton } from './components/UserDashboardSkeleton';
 import { Spinner } from './components/Spinner';
@@ -1331,10 +1332,14 @@ export default function App() {
             UserDashboardSkeleton) so nothing jumps when it arrives. The Admin
             Panel, Chat and Alerts show nothing while their code loads — each
             has its own loading state, and a generic skeleton first just
-            flickers. Every other page keeps the generic loader. */}
+            flickers — except HR Operations, whose page skeleton fades in
+            only after a moment (HrOpsSkeleton.tsx). Every other page keeps
+            the generic loader. */}
         <Suspense
           fallback={
-            showChat || showAlertsPage || (isAdminView && !showProfilePage && !selfServiceView) ? null : !showProfilePage && !selfServiceView ? (
+            isAdminView && !showProfilePage && !selfServiceView && !showChat && !showAlertsPage && (adminNavRequest?.target || (adminUrlEnabled() && adminPathToTab(window.location.pathname)) || adminActiveTab) === 'hr_operations' ? (
+              <HrOpsPageSkeleton />
+            ) : showChat || showAlertsPage || (isAdminView && !showProfilePage && !selfServiceView) ? null : !showProfilePage && !selfServiceView ? (
               <UserDashboardSkeleton showAttendance={!!user?.can_use_attendance} showLeaveSummary={!!user?.can_view_leave_summary} showTracking={user?.role === 'superadmin' || (user?.module_permissions || []).includes('tracking')} />
             ) : (
               <AppLoader />
