@@ -52,94 +52,179 @@ const localDateTime = (d: Date) => {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
 };
 
-// To / Cc / Bcc with suggestions (own contacts, colleagues, people written with).
+// Everyone in the Employee Directory with an email (GET /api/mail/directory),
+// fetched once per visit and shared by every To / Cc / Bcc field.
+export interface DirectoryPerson {
+  name: string;
+  email: string;
+  designation: string;
+  department: string;
+}
+let directoryCache: Promise<DirectoryPerson[]> | null = null;
+const loadDirectory = (token: string) => {
+  if (!directoryCache) {
+    directoryCache = mailFetch<DirectoryPerson[]>(token, '/directory').catch(() => {
+      directoryCache = null;
+      return [];
+    });
+  }
+  return directoryCache;
+};
+
+type Suggestion = { name: string; email: string; sub: string; tag: string };
+const SHOW_MAX = 150;
+
+// To / Cc / Bcc: type any address, or pick from the list — employees (all of
+// them, from the dropdown button or as you type), your contacts and people
+// you've written with. Several addresses, comma between.
 const AddressField: React.FC<{ token: string; label: string; value: string; onChange: (v: string) => void; autoFocus?: boolean; right?: React.ReactNode }> = ({
   token, label, value, onChange, autoFocus, right
 }) => {
-  const [list, setList] = useState<AddressSuggestion[]>([]);
+  const [book, setBook] = useState<AddressSuggestion[]>([]);
+  const [people, setPeople] = useState<DirectoryPerson[] | null>(null);
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   const current = (value.split(/[,;]/).pop() || '').trim();
+  const chosen = useMemo(() => new Set(value.split(/[,;]/).map((x) => (/<([^>]+)>/.exec(x)?.[1] || x).trim().toLowerCase()).filter(Boolean)), [value]);
 
+  useEffect(() => {
+    if (open && !people) void loadDirectory(token).then(setPeople);
+  }, [open, people, token]);
+
+  // Own contacts and people written with, as you type.
   useEffect(() => {
     if (timer.current) clearTimeout(timer.current);
     if (current.length < 2) {
-      setList([]);
+      setBook([]);
       return;
     }
     timer.current = setTimeout(() => {
       mailFetch<AddressSuggestion[]>(token, `/address-book?q=${encodeURIComponent(current)}`)
-        .then((r) => {
-          setList(r.slice(0, 8));
-          setActive(0);
-        })
-        .catch(() => setList([]));
+        .then((r) => setBook(r.filter((x) => x.source !== 'colleague')))
+        .catch(() => setBook([]));
     }, 200);
     return () => {
       if (timer.current) clearTimeout(timer.current);
     };
   }, [current, token]);
 
-  const pick = (s: AddressSuggestion) => {
+  const list = useMemo(() => {
+    const q = current.toLowerCase();
+    const out: Suggestion[] = [];
+    const seen = new Set<string>(chosen);
+    for (const b of book) {
+      if (seen.has(b.email)) continue;
+      seen.add(b.email);
+      out.push({ name: b.name, email: b.email, sub: '', tag: b.source === 'contact' ? 'Contact' : 'Recent' });
+    }
+    for (const p of people || []) {
+      if (seen.has(p.email)) continue;
+      if (q && !`${p.name} ${p.email} ${p.designation} ${p.department}`.toLowerCase().includes(q)) continue;
+      seen.add(p.email);
+      out.push({ name: p.name, email: p.email, sub: [p.designation, p.department].filter(Boolean).join(' · '), tag: 'Employee' });
+    }
+    return out;
+  }, [book, people, current, chosen]);
+  const shown = list.slice(0, SHOW_MAX);
+  useEffect(() => setActive(0), [current]);
+  useEffect(() => {
+    listRef.current?.querySelector<HTMLElement>(`[data-i="${active}"]`)?.scrollIntoView({ block: 'nearest' });
+  }, [active]);
+
+  const pick = (sug: Suggestion) => {
     const parts = value.split(/[,;]/);
-    parts[parts.length - 1] = ` ${s.email}`;
+    parts[parts.length - 1] = ` ${sug.email}`;
     onChange(`${parts.join(',').replace(/^\s*,?\s*/, '')}, `);
-    setOpen(false);
+    // Stays open for the next one.
+    inputRef.current?.focus();
   };
 
   return (
     <div className="relative flex items-center gap-2 border-b border-slate-200/70 px-4">
       <span className="text-xs text-slate-500 w-8 shrink-0">{label}</span>
       <input
+        ref={inputRef}
         value={value}
         autoFocus={autoFocus}
         onChange={(e) => {
           onChange(e.target.value);
           setOpen(true);
         }}
-        onFocus={() => setOpen(true)}
+        // The list opens from the button, or as soon as something is typed.
+        onFocus={() => current && setOpen(true)}
         onBlur={() => setTimeout(() => setOpen(false), 150)}
         onKeyDown={(e) => {
-          if (!open || !list.length) return;
+          if (e.key === 'Escape') return setOpen(false);
+          if (e.key === 'ArrowDown' && !open) {
+            e.preventDefault();
+            return setOpen(true);
+          }
+          if (!open || !shown.length) return;
           if (e.key === 'ArrowDown') {
             e.preventDefault();
-            setActive((a) => (a + 1) % list.length);
+            setActive((a) => (a + 1) % shown.length);
           } else if (e.key === 'ArrowUp') {
             e.preventDefault();
-            setActive((a) => (a - 1 + list.length) % list.length);
-          } else if (e.key === 'Enter' || e.key === 'Tab') {
-            if (list[active]) {
-              e.preventDefault();
-              pick(list[active]);
-            }
+            setActive((a) => (a - 1 + shown.length) % shown.length);
+          } else if ((e.key === 'Enter' || e.key === 'Tab') && current && shown[active]) {
+            e.preventDefault();
+            pick(shown[active]);
           }
         }}
         type="text"
         inputMode="email"
         autoComplete="off"
-        className="flex-1 min-w-0 bg-transparent py-2.5 text-sm focus:outline-none"
+        placeholder={label === 'To' ? 'Type an address or pick from the list' : ''}
+        className="flex-1 min-w-0 bg-transparent py-2.5 text-sm focus:outline-none placeholder:text-slate-400"
       />
+      <button
+        type="button"
+        onMouseDown={(e) => e.preventDefault()}
+        onClick={() => {
+          setOpen((v) => !v);
+          inputRef.current?.focus();
+        }}
+        className="p-1 rounded-lg text-slate-500 hover:bg-black/5 hover:text-slate-800 shrink-0"
+        aria-label={`Choose ${label} from employees`}
+        aria-expanded={open}
+        title="Choose from employees"
+      >
+        <ChevronDown className={`w-4 h-4 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
       {right}
-      {open && list.length > 0 && (
-        <div className="absolute left-12 right-4 top-full mt-1 z-20 rounded-2xl bg-white shadow-xl ring-1 ring-black/5 overflow-hidden">
-          {list.map((s, i) => (
-            <button
-              type="button"
-              key={s.email}
-              onMouseDown={(e) => {
-                e.preventDefault();
-                pick(s);
-              }}
-              className={`w-full text-left px-3 py-2 flex items-center justify-between gap-2 ${i === active ? 'bg-sky-50' : 'hover:bg-slate-50'}`}
-            >
-              <span className="min-w-0">
-                <span className="block text-sm font-medium text-slate-800 truncate">{s.name}</span>
-                <span className="block text-xs text-slate-500 truncate">{s.email}</span>
-              </span>
-              <span className="text-[10px] text-slate-400 shrink-0">{s.source === 'colleague' ? 'Colleague' : s.source === 'contact' ? 'Contact' : 'Recent'}</span>
-            </button>
-          ))}
+      {open && (
+        <div ref={listRef} className="absolute left-12 right-4 top-full mt-1 z-20 rounded-2xl bg-white shadow-xl ring-1 ring-black/5 overflow-y-auto max-h-72" onMouseDown={(e) => e.preventDefault()}>
+          {!people && !book.length ? (
+            <div className="px-3 py-3 text-xs text-slate-500 flex items-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading employees…</div>
+          ) : !shown.length ? (
+            <div className="px-3 py-3 text-xs text-slate-500">{current ? `No one matches “${current}” — the address you type is used as it is.` : 'Everyone is added already.'}</div>
+          ) : (
+            <>
+              {shown.map((sug, i) => (
+                <button
+                  type="button"
+                  key={sug.email}
+                  data-i={i}
+                  onClick={() => pick(sug)}
+                  onMouseEnter={() => setActive(i)}
+                  className={`w-full text-left px-3 py-2 flex items-center justify-between gap-2 ${i === active ? 'bg-sky-50' : ''}`}
+                >
+                  <span className="min-w-0">
+                    <span className="block text-sm font-medium text-slate-800 truncate">{sug.name}</span>
+                    <span className="block text-xs text-slate-500 truncate">
+                      {sug.email}
+                      {sug.sub && <span className="text-slate-400"> · {sug.sub}</span>}
+                    </span>
+                  </span>
+                  <span className="text-[10px] text-slate-400 shrink-0">{sug.tag}</span>
+                </button>
+              ))}
+              {list.length > SHOW_MAX && <div className="px-3 py-2 text-[11px] text-slate-400 border-t border-slate-100">{list.length - SHOW_MAX} more — type a name, department or designation to find them.</div>}
+            </>
+          )}
         </div>
       )}
     </div>

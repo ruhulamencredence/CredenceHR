@@ -34,6 +34,7 @@ import MailComposer from "nodemailer/lib/mail-composer";
 import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
 import { runsBackgroundJobs } from "./jobRunner";
+import { createAlert } from "./Alerts";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 
@@ -895,6 +896,17 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
           count: r.fresh.length,
           from: latest.fromName || latest.fromEmail,
           subject: latest.subject
+        });
+        // CredenceHR's own notifications (the Alerts bell, and a push to the
+        // phone) — Credence Mail has no bell of its own.
+        const n = r.fresh.length;
+        void createAlert(queryDB, {
+          userId: Number(a.user_id),
+          type: "mail",
+          title: n > 1 ? `${n} new mails` : `New mail from ${latest.fromName || latest.fromEmail}`,
+          message: n > 1 ? `Latest: ${latest.subject} — ${latest.fromName || latest.fromEmail}` : String(latest.subject || "(no subject)"),
+          relatedType: "mail_message",
+          relatedId: Number(latest.id)
         });
       }
       if (r.inbox || r.sent || r.junk) io.to(`user:${Number(a.user_id)}`).emit("mail:changed", { accountId: Number(a.id) });
@@ -1913,6 +1925,29 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     })
   );
 
+  // Everyone in the Employee Directory who has an email, for the composer's
+  // To / Cc / Bcc lists (queryDB keeps all_employees to the active company).
+  app.get(
+    "/api/mail/directory",
+    ...gate,
+    handler(async (_req, res) => {
+      const rows: any[] =
+        (await queryDB(
+          "SELECT name, email, designation, department FROM all_employees WHERE is_active = 1 AND email IS NOT NULL AND email <> '' ORDER BY name LIMIT 10000"
+        ).catch(() => [])) || [];
+      const seen = new Set<string>();
+      const out: { name: string; email: string; designation: string; department: string }[] = [];
+      for (const r of rows) {
+        const e = String(r.email || "").trim().toLowerCase();
+        if (!isEmail(e) || seen.has(e)) continue;
+        seen.add(e);
+        out.push({ name: String(r.name || "").trim() || e.split("@")[0], email: e, designation: r.designation || "", department: r.department || "" });
+      }
+      res.setHeader("Cache-Control", "private, max-age=300");
+      res.json(out);
+    })
+  );
+
   // Numbers for the Analytics view (last 14 days).
   app.get(
     "/api/mail/analytics",
@@ -2050,6 +2085,14 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
         const msg = `Scheduled mail not sent: ${e?.response || e?.message || e}`;
         await queryDB("UPDATE mail_messages SET labels_json = ?, send_error = ?, scheduled_at = NULL WHERE id = ?", [JSON.stringify(["Drafts"]), msg.slice(0, 500), Number(row.id)]).catch(() => undefined);
         io.to(`user:${Number(row.user_id)}`).emit("mail:send-failed", { id: String(row.id), subject: row.subject, error: msg });
+        void createAlert(queryDB, {
+          userId: Number(row.user_id),
+          type: "mail",
+          title: "Scheduled mail not sent",
+          message: `${row.subject || "(no subject)"} — kept in Drafts. ${msg}`.slice(0, 900),
+          relatedType: "mail_message",
+          relatedId: Number(row.id)
+        });
       }
     }
   }

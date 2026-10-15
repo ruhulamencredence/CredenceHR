@@ -291,6 +291,16 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
         : alert.type === 'device_request'
         ? // Superadmin: Admin Panel -> Device Access, to approve the new phone.
           () => window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'devices' }))
+        : alert.type === 'mail'
+        ? // Credence Mail, with this mail open (App.tsx, mail/CredenceMail.tsx).
+          () => {
+            try {
+              if (alert.related_id) sessionStorage.setItem('open_mail_id', String(alert.related_id));
+            } catch {
+              // storage unavailable — Credence Mail opens on the Inbox
+            }
+            window.dispatchEvent(new CustomEvent('credence:open-self-service', { detail: 'credenceMail' }));
+          }
         : alert.type === 'site_attendance'
         ? () => window.dispatchEvent(new CustomEvent('credence:open-self-service', { detail: 'teamAttendance' }))
         : alert.type === 'hr_letter'

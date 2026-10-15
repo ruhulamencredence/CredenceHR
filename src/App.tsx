@@ -836,7 +836,8 @@ export default function App() {
   useEffect(() => {
     const onOpen = (e: Event) => {
       const target = (e as CustomEvent).detail;
-      if (target !== 'teamAttendance') return;
+      // Credence Mail only for an account that has it (a mail alert).
+      if (target !== 'teamAttendance' && !(target === 'credenceMail' && canOpenSelfView('credenceMail', user))) return;
       setShowProfilePage(false);
       setShowChat(false);
       setShowAlertsPage(false);
@@ -844,7 +845,7 @@ export default function App() {
     };
     window.addEventListener('credence:open-self-service', onOpen);
     return () => window.removeEventListener('credence:open-self-service', onOpen);
-  }, []);
+  }, [user]);
   // A task alert (TaskRoutes.ts): one about work given to this account opens
   // My Tasks; anything else (a request to HR, a task they gave) opens Task
   // Management for HR. The page then opens the task itself.
