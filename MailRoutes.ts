@@ -1562,14 +1562,27 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
       const b = req.body || {};
       const next = {
         signatures: Array.isArray(b.signatures)
-          ? b.signatures.slice(0, 20).map((s: any) => ({ id: str(s.id, 60) || crypto.randomUUID(), name: str(s.name, 120) || "Signature", content: String(s.content || "").slice(0, 200_000), isDefault: !!s.isDefault }))
+          ? b.signatures.slice(0, 20).map((s: any) => ({
+              id: str(s.id, 60) || crypto.randomUUID(),
+              name: str(s.name, 120) || "Signature",
+              content: String(s.content || "").slice(0, 200_000),
+              isDefault: !!s.isDefault,
+              // The signature maker's fields, so it can be edited again.
+              fields: s.fields && typeof s.fields === "object"
+                ? { fullName: str(s.fields.fullName, 120), title: str(s.fields.title, 120), department: str(s.fields.department, 120), mobile: str(s.fields.mobile, 60), pabx: str(s.fields.pabx, 30) }
+                : undefined,
+              logoUrl: /^(https?:\/\/[^\s"'<>]+)?\/api\/mail\/public\/signature\/\d+\/[0-9a-f]{32}$/.test(String(s.logoUrl || "")) ? String(s.logoUrl) : undefined
+            }))
           : cur.signatures,
         vacationResponder:
           b.vacationResponder && typeof b.vacationResponder === "object"
             ? { enabled: !!b.vacationResponder.enabled, subject: str(b.vacationResponder.subject, 500), message: String(b.vacationResponder.message || "").slice(0, 10_000), startDate: str(b.vacationResponder.startDate, 40) || undefined, endDate: str(b.vacationResponder.endDate, 40) || undefined }
             : cur.vacationResponder,
         blockedSenders: Array.isArray(b.blockedSenders) ? [...new Set(b.blockedSenders.map((x: any) => str(x, 255).toLowerCase()).filter(Boolean))].slice(0, 500) : cur.blockedSenders,
-        layout: b.layout && typeof b.layout === "object" ? b.layout : cur.layout,
+        layout:
+          b.layout && typeof b.layout === "object" && !Array.isArray(b.layout)
+            ? { density: b.layout.density === "compact" ? "compact" : "comfortable", previewPane: str(b.layout.previewPane, 20) || "right", theme: str(b.layout.theme, 20) || "light" }
+            : cur.layout,
         language: str(b.language, 50) || cur.language,
         timezone: str(b.timezone, 80) || cur.timezone
       };

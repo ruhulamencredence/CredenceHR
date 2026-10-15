@@ -9,13 +9,13 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  X, Send, Paperclip, Bold, Italic, Underline, List, ListOrdered, Link2, Quote, RemoveFormatting, Clock, Trash2, Loader2, ChevronDown, FileText
+  X, Send, Paperclip, Bold, Italic, Underline, List, ListOrdered, Link2, Quote, RemoveFormatting, Clock, Trash2, Loader2, ChevronDown, FileText, PenLine
 } from 'lucide-react';
 import { confirmDialog } from '../../lib/confirmDialog';
 import { useBackButtonClose } from '../../lib/useBackButtonClose';
 import { useKeyboardInset } from '../../lib/useKeyboardInset';
 import {
-  AddressSuggestion, MailAccount, MailAttachment, MailSignature, OutgoingFile, fetchAttachment, fileToDataUrl, formatBytes, mailFetch
+  AddressSuggestion, MailAccount, MailAttachment, MailSignature, MailTemplate, OutgoingFile, fetchAttachment, fileToDataUrl, formatBytes, mailFetch
 } from '../../lib/mailApi';
 
 export interface ComposeInit {
@@ -150,10 +150,11 @@ export const MailCompose: React.FC<{
   token: string;
   accounts: MailAccount[];
   signatures: MailSignature[];
+  templates?: MailTemplate[];
   init: ComposeInit;
   onClose: () => void;
   onDone: (message: string) => void;
-}> = ({ token, accounts, signatures, init, onClose, onDone }) => {
+}> = ({ token, accounts, signatures, templates = [], init, onClose, onDone }) => {
   const defaultSig = signatures.find((s) => s.isDefault) || null;
   const [accountId, setAccountId] = useState<number>(init.accountId || accounts.find((a) => a.isDefault)?.id || accounts[0]?.id);
   const [to, setTo] = useState(init.to || '');
@@ -367,6 +368,21 @@ export const MailCompose: React.FC<{
     else document.execCommand('createLink', false, safe);
     markDirty();
   };
+  const insertTemplate = (id: string) => {
+    const t = templates.find((x) => x.id === id);
+    if (!t || !editorRef.current) return;
+    if (t.subject && !subject.trim()) setSubject(t.subject);
+    const ed = editorRef.current;
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount && ed.contains(sel.anchorNode)) {
+      ed.focus();
+      document.execCommand('insertHTML', false, t.body);
+    } else {
+      // At the top, above the signature and any quoted mail.
+      ed.innerHTML = `<div>${t.body}</div>${ed.innerHTML}`;
+    }
+    markDirty();
+  };
   const changeSignature = (id: string) => {
     setSigId(id);
     if (!editorRef.current) return;
@@ -440,9 +456,20 @@ export const MailCompose: React.FC<{
               <button type="button" className={toolBtn} onMouseDown={(e) => e.preventDefault()} onClick={() => cmd('removeFormat')} aria-label="Clear formatting"><RemoveFormatting className="w-4 h-4" /></button>
               <span className="w-px h-5 bg-slate-200 mx-1 shrink-0" />
               <button type="button" className={toolBtn} onClick={() => fileRef.current?.click()} aria-label="Attach files"><Paperclip className="w-4 h-4" /></button>
-              {signatures.length > 0 && (
+              {templates.length > 0 && (
                 <label className="ml-auto flex items-center gap-1 text-xs text-slate-500 shrink-0 pl-2">
                   <FileText className="w-3.5 h-3.5" />
+                  <select value="" onChange={(e) => insertTemplate(e.target.value)} className="bg-transparent focus:outline-none max-w-[8rem]" aria-label="Insert a template">
+                    <option value="">Template</option>
+                    {templates.map((t) => (
+                      <option key={t.id} value={t.id}>{t.title}</option>
+                    ))}
+                  </select>
+                </label>
+              )}
+              {signatures.length > 0 && (
+                <label className={`${templates.length ? '' : 'ml-auto '}flex items-center gap-1 text-xs text-slate-500 shrink-0 pl-2`}>
+                  <PenLine className="w-3.5 h-3.5" />
                   <select value={sigId} onChange={(e) => changeSignature(e.target.value)} className="bg-transparent focus:outline-none max-w-[9rem]">
                     <option value="">No signature</option>
                     {signatures.map((s) => (
