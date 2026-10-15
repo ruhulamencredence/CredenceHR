@@ -381,8 +381,19 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
   // same values and the same "minus leave already taken this year" as
   // Apply Now. An account with any balance row is never touched. Returns the
   // accounts that got their default balance just now.
+  // Accounts the default balance was just tried for. When no active
+  // workflow gives an account a row, "missing" stays true — without this,
+  // every Dashboard open of that account re-ran every workflow (reading
+  // every account and Employee), the heaviest part of the Dashboard at
+  // ~1,500 staff. Tried again after an hour (or on the next restart).
+  const defaultTriedAt = new Map<number, number>();
+  const DEFAULT_RETRY_MS = 60 * 60 * 1000;
+
   async function ensureDefaultLeaveBalances(userIds: number[]): Promise<Set<number>> {
-    const ids = [...new Set(userIds.map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+    const now = Date.now();
+    const ids = [...new Set(userIds.map(Number).filter((n) => Number.isInteger(n) && n > 0))].filter(
+      (id) => now - (defaultTriedAt.get(id) || 0) > DEFAULT_RETRY_MS
+    );
     if (!ids.length) return new Set();
     try {
       const ph = ids.map(() => "?").join(",");
@@ -394,6 +405,8 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
       const has = new Set<number>([...(withFixed || []), ...(withCustom || [])].map((r: any) => Number(r.user_id)));
       const missing = (users || []).map((u: any) => Number(u.id)).filter((id: number) => !has.has(id));
       if (!missing.length) return new Set();
+      if (defaultTriedAt.size > 20000) defaultTriedAt.clear();
+      for (const id of missing) defaultTriedAt.set(id, now);
       const sa: any[] = (await queryDB("SELECT id FROM users WHERE role = 'superadmin' LIMIT 1")) || [];
       await applyAllActiveWorkflows(sa[0] ? Number(sa[0].id) : null, undefined, missing);
       return new Set(missing);

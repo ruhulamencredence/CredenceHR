@@ -186,7 +186,7 @@ export function registerInfoRequestRoutes(app: Express, deps: InfoRequestRouteDe
       const [emps, existing, docs, fam, settings] = await Promise.all([
         queryDB("SELECT * FROM all_employees"),
         queryDB("SELECT * FROM hr_info_requests"),
-        queryDB("SELECT * FROM employee_documents").catch(() => []),
+        queryDB("SELECT id, user_id, doc_type, file_name, file_mimetype, requires_signature, expiry_date, uploaded_by, uploaded_at FROM employee_documents").catch(() => []),
         queryDB("SELECT * FROM hr_emp_family").catch(() => []),
         loadSettings(queryDB)
       ]);

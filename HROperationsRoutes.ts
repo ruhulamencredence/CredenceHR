@@ -1097,20 +1097,26 @@ function describeChange(action: any, employeeName?: string): string {
 // current step lists this account.
 export async function getMyHrActionApprovals(queryDB: QueryDB, userId: number): Promise<any[]> {
   try {
-    const [actions, employees, users] = await Promise.all([
-      queryDB("SELECT * FROM hr_actions"),
-      queryDB("SELECT * FROM all_employees"),
-      queryDB("SELECT * FROM users")
-    ]);
-    const empMap = new Map<number, any>(employees.map((e: any) => [Number(e.id), e]));
-    const userMap = new Map<number, any>(users.map((u: any) => [Number(u.id), u]));
-    return actions
+    // Runs on every Dashboard open: find this account's pending actions
+    // first, then read only the Employees / requesters they name.
+    const actions: any[] = await queryDB("SELECT * FROM hr_actions WHERE status = 'pending'");
+    const mine = actions
       .filter((a: any) => a.status === "pending")
       .filter((a: any) => {
         const chain = parseJson(a.chain_json, []);
         const step = chain.find((s: any) => Number(s.step_order) === Number(a.current_step));
         return !!step && (step.approver_ids || []).map(Number).includes(Number(userId));
-      })
+      });
+    if (!mine.length) return [];
+    const empIds = [...new Set(mine.map((a: any) => Number(a.employee_id)))];
+    const userIds = [...new Set(mine.map((a: any) => Number(a.created_by)))];
+    const [employees, users] = await Promise.all([
+      queryDB(`SELECT * FROM all_employees WHERE id IN (${empIds.map(() => "?").join(",")})`, empIds),
+      queryDB(`SELECT id, name FROM users WHERE id IN (${userIds.map(() => "?").join(",")})`, userIds)
+    ]);
+    const empMap = new Map<number, any>(employees.map((e: any) => [Number(e.id), e]));
+    const userMap = new Map<number, any>(users.map((u: any) => [Number(u.id), u]));
+    return mine
       .map((a: any) => {
         const emp = empMap.get(Number(a.employee_id));
         return {
@@ -1703,7 +1709,7 @@ export function registerHROperationsRoutes(app: Express, deps: HROperationsRoute
       throw bad("A transfer needs a new department, branch or supervisor.");
     }
     if (type === "company_transfer") {
-      const companies: any[] = (await queryDB("SELECT * FROM companies").catch(() => [])) || [];
+      const companies: any[] = (await queryDB("SELECT id, group_id, name, short_code, is_mother, address, phone, email, website, logo_mime, is_active FROM companies").catch(() => [])) || [];
       const empRow = world.employees.find((x: any) => Number(x.id) === empId);
       const current = companies.find((c) => Number(c.id) === Number(empRow?.company_id ?? 1));
       const target = companies.find((c) => Number(c.id) === Number(raw.company_id));

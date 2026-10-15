@@ -187,6 +187,15 @@ async function initDB() {
       // lower this per-worker limit to fit.
       connectionLimit: 30,
       queueLimit: 0,
+      // Every distinct SQL run through execute() stays prepared on its
+      // connection (mysql2's default keeps up to 16,000 per connection), and
+      // MySQL allows only max_prepared_stmt_count (16,382 by default) across
+      // ALL connections. With 4 PM2 workers x 30 connections that limit was
+      // hit under load and queries failed ("Can't create more than
+      // max_prepared_stmt_count statements"). 100 per connection keeps the
+      // most-used statements fast (least-used ones are closed) and leaves
+      // room for 5 workers: 5 x 30 x 100 = 15,000.
+      maxPreparedStatements: 100,
       // Without this, mysql2 hands back DATE/DATETIME columns as JS Date objects built
       // from LOCAL midnight. Those then get flattened to a string either by our own
       // `.toISOString()` calls or implicitly by JSON.stringify (which also calls

@@ -228,6 +228,11 @@ function simulateGenericTable(table: string, store: any[], sql: string, lowerSql
   if (lowerSql.startsWith(`select * from ${table}`)) {
     return [...store];
   }
+  // A plain column list ("SELECT id, name, ... FROM companies" — used where
+  // a big column such as a logo must not be read): every row, like above.
+  if (new RegExp(`^select\\s+[a-z0-9_,\\s]+\\s+from\\s+${table}(\\s|$)`).test(lowerSql) && !lowerSql.includes(" join ")) {
+    return [...store];
+  }
   return undefined;
 }
 

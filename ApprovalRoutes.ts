@@ -285,7 +285,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
   // details + who's up next) for the Admin Panel -> Approvals queue/history.
   app.get("/api/approvals", authenticateToken, requireAdmin, requireModule("approvals"), async (req: any, res) => {
     try {
-      const [requests, chain, templateStepApproverRows, attendanceRows, claimRows, userClaimRows, attendanceCorrectionRows, leaveApplicationRows, assetRequisitionRows, vehicleRequisitionRows, mobileLimitRows, advanceRows, projects, users] = await Promise.all([
+      const [requests, chain, templateStepApproverRows, projects, users] = await Promise.all([
         queryDB("SELECT ar.*, u.name AS requested_by_name FROM approval_requests ar LEFT JOIN users u ON u.id = ar.requested_by ORDER BY ar.id DESC"),
         getApprovalChain(),
         queryDB(
@@ -294,17 +294,34 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
            JOIN approval_template_steps s ON s.id = sa.step_id
            LEFT JOIN users u ON u.id = sa.user_id`
         ),
-        queryDB("SELECT * FROM attendance"),
-        queryDB("SELECT * FROM claims"),
-        queryDB("SELECT * FROM user_claims"),
-        queryDB("SELECT * FROM attendance_corrections"),
-        queryDB("SELECT * FROM leave_applications"),
-        queryDB("SELECT * FROM asset_requisitions"),
-        queryDB("SELECT * FROM vehicle_requisitions"),
-        queryDB("SELECT r.*, s.phone_number FROM mobile_limit_requests r LEFT JOIN mobile_sims s ON s.id = r.sim_id").catch(() => []),
-        queryDB("SELECT * FROM advance_requests").catch(() => []),
         queryDB("SELECT * FROM projects"),
         queryDB("SELECT id, name, email, role, created_at FROM users")
+      ]);
+      // Only the source rows these requests point at, by id — this used to
+      // read every row of every source table (the whole attendance history,
+      // every claim with its attached file), which grows without end.
+      const KNOWN = ["attendance", "user_claim", "attendance_correction", "leave_application", "asset_requisition", "vehicle_requisition", "mobile_limit_request", "advance_request"];
+      const idsOf = (type: string | null) => [
+        ...new Set<number>(requests.filter((r: any) => (type ? r.source_type === type : !KNOWN.includes(r.source_type))).map((r: any) => Number(r.source_id)).filter((n: number) => n > 0))
+      ];
+      const byIds = async (sql: string, ids: number[]): Promise<any[]> => {
+        const out: any[] = [];
+        for (let i = 0; i < ids.length; i += 1000) {
+          const part = ids.slice(i, i + 1000);
+          out.push(...((await queryDB(`${sql} WHERE ${sql.includes(" r LEFT JOIN ") ? "r." : ""}id IN (${part.map(() => "?").join(",")})`, part)) || []));
+        }
+        return out;
+      };
+      const [attendanceRows, claimRows, userClaimRows, attendanceCorrectionRows, leaveApplicationRows, assetRequisitionRows, vehicleRequisitionRows, mobileLimitRows, advanceRows] = await Promise.all([
+        byIds("SELECT * FROM attendance", idsOf("attendance")),
+        byIds("SELECT * FROM claims", idsOf(null)),
+        byIds("SELECT id, description, category, amount, approved_amount FROM user_claims", idsOf("user_claim")),
+        byIds("SELECT * FROM attendance_corrections", idsOf("attendance_correction")),
+        byIds("SELECT * FROM leave_applications", idsOf("leave_application")),
+        byIds("SELECT * FROM asset_requisitions", idsOf("asset_requisition")),
+        byIds("SELECT * FROM vehicle_requisitions", idsOf("vehicle_requisition")),
+        byIds("SELECT r.*, s.phone_number FROM mobile_limit_requests r LEFT JOIN mobile_sims s ON s.id = r.sim_id", idsOf("mobile_limit_request")).catch(() => []),
+        byIds("SELECT * FROM advance_requests", idsOf("advance_request")).catch(() => [])
       ]);
       const attendanceMap = new Map<number, any>(attendanceRows.map((a: any) => [Number(a.id), a]));
       const claimMap = new Map<number, any>(claimRows.map((c: any) => [Number(c.id), c]));

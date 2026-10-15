@@ -108,7 +108,9 @@ export function registerDocumentVaultRoutes(app: Express, deps: DocumentVaultRou
     try {
       const manage = await canManage(req.user.id, req.user.role);
       const [rows, users, signatures]: [any, any, any] = await Promise.all([
-        queryDB("SELECT * FROM employee_documents"),
+        // Every column but file_data (the file itself, read only by GET .../file):
+        // with it, listing ~1,500 documents pulled every PDF into memory.
+        queryDB("SELECT id, user_id, doc_type, file_name, file_mimetype, requires_signature, expiry_date, uploaded_by, uploaded_at FROM employee_documents"),
         queryDB("SELECT id, name FROM users"),
         queryDB("SELECT * FROM document_signatures")
       ]);
