@@ -437,6 +437,15 @@ export function parseLeaveRequest(text: string, today: string) {
   return { start_date: start, end_date: end, leave_type, is_half_day, purpose };
 }
 
+// "Rahim er chuti koto" -> "rahim": the word(s) right before a separate
+// "er" / "-এর" / "এর" ("ajker" and "মাসের" are not names).
+const NOT_NAMES = new Set(["amar", "আমার", "ei", "এই", "e", "এ", "ajker", "maser", "masher", "মাসের", "gotomaser", "গত", "tomar", "তোমার", "apnar", "আপনার", "kar", "কার", "sobar", "সবার", "team", "office", "company"]);
+const nameBefore = (t: string) => {
+  const m = /([a-z.]{2,}(?:\s+[a-z.]{2,})?)\s+er\s/.exec(t) || /([\u0980-\u09ff]{2,}(?:\s+[\u0980-\u09ff]{2,})?)(?:-এর|\s+এর)\s/.exec(t);
+  const words = (m?.[1] || "").split(/\s+/).filter((w) => w && !NOT_NAMES.has(w));
+  return words.slice(-1)[0] || "";
+};
+
 // "pending_with" on a requisition: a name, a list of names or { name }.
 const pendingWith = (x: any): string | null => {
   const p = x?.pending_with;
@@ -999,6 +1008,197 @@ const TOOLS: Tool[] = [
       return { ok: true, text, data, actions: dashAction, report: rep };
     }
   },
+  // ---- HR / Admin: other people (each needs that module's own access) ----
+  {
+    name: "employee_leave_balance",
+    description: "HR (Leave Manage access): another employee's remaining leave balance by type. name = part of their name.",
+    params: { name: { type: "string", description: "Employee name (or part of it)." } },
+    available: (c) => isSuper(c) || c.flags.can_manage_leave,
+    run: async (c, args) => {
+      const q = String(args?.name || "").trim();
+      if (q.length < 2) return { ok: false, text: "কার ছুটির হিসাব চান? নাম লিখুন — যেমন \"Rahim-এর ছুটি কত বাকি\"।" };
+      const r = await callApi(c.req, `/api/leave-balances?limit=10&q=${encodeURIComponent(q)}`);
+      if (!r.ok) return fail(r.status);
+      const rows: any[] = r.body?.rows || [];
+      if (!rows.length) return { ok: true, text: `"${q}" নামে কাউকে পাওয়া যায়নি।`, data: { results: [] } };
+      const kinds = (b: any) => [
+        { label: "Casual", days: Number(b.casual_leave) || 0 },
+        { label: "Sick", days: Number(b.sick_leave) || 0 },
+        ...((b.custom_leaves || []) as any[]).map((x) => ({ label: String(x.label), days: Number(x.balance) || 0 })),
+        { label: "Without pay", days: Number(b.leave_without_pay) || 0 }
+      ];
+      const text = rows.slice(0, 5).map((b) => `**${b.user_name}**${b.department ? ` (${b.department})` : ""}: ` + kinds(b).map((k) => `${k.label} ${bn(k.days)}`).join(", ") + " দিন").join("\n");
+      return { ok: true, text, data: { results: rows.slice(0, 5).map((b) => ({ name: b.user_name, department: b.department, balances: kinds(b) })) }, actions: [{ label: "Leave Manage খুলুন", nav: "self:leaveManagement" }] };
+    }
+  },
+  {
+    name: "employee_attendance",
+    description: "HR (Monthly Attendance Report access): one employee's attendance for a month — present, absent, holiday days, and late days when the Late list is allowed. name = part of their name; month_year 'YYYY-MM' (default this month).",
+    params: { name: { type: "string", description: "Employee name (or part of it)." }, month_year: { type: "string", description: "YYYY-MM; default this month." } },
+    available: (c) => hasMod(c, "attendance_reports"),
+    run: async (c, args) => {
+      const q = String(args?.name || "").trim().toLowerCase();
+      if (q.length < 2) return { ok: false, text: "কার হাজিরা চান? নাম লিখুন — যেমন \"Rahim-এর এ মাসের হাজিরা\"।" };
+      const ym = /^\d{4}-\d{2}$/.test(String(args?.month_year || "")) ? String(args.month_year) : c.today.slice(0, 7);
+      const [y, m] = ym.split("-").map(Number);
+      const r = await callApi(c.req, `/api/attendance/report/monthly?year=${y}&month=${m}`);
+      if (!r.ok) return fail(r.status);
+      const hits: any[] = (r.body?.users || []).filter((u: any) => String(u.user_name || "").toLowerCase().includes(q)).slice(0, 3);
+      if (!hits.length) return { ok: true, text: `${bnMonth(ym)}-এর রিপোর্টে "${args.name}" নামে কাউকে পাওয়া যায়নি (আপনার দেখার department-এর বাইরে হতে পারে)।`, data: { results: [] } };
+      // Late days only through the Late list (its own layer).
+      const lates = new Map<number, { delay: number; extreme: number }>();
+      const end = ym === c.today.slice(0, 7) ? c.today : `${ym}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, "0")}`;
+      let lateAllowed = true;
+      for (let d = `${ym}-01`; d <= end && lateAllowed; d = addDays(d, 1)) {
+        const lr = await callApi(c.req, `/api/attendance/report/late?date=${d}`);
+        if (lr.status === 403) { lateAllowed = false; break; }
+        for (const x of lr.body?.late || []) {
+          const h = hits.find((u) => String(u.user_name) === String(x.name));
+          if (!h) continue;
+          const k = lates.get(h.user_id) || { delay: 0, extreme: 0 };
+          if (x.kind === "extreme") k.extreme++; else k.delay++;
+          lates.set(h.user_id, k);
+        }
+      }
+      const text = `${bnMonth(ym)}-এর হাজিরা:\n` + hits.map((u) => {
+        const l = lates.get(u.user_id);
+        return `• **${u.user_name}**${u.department ? ` (${u.department})` : ""} — উপস্থিত ${bn(u.present_days)} দিন, অনুপস্থিত ${bn(u.absent_days)}, ছুটির দিন ${bn(u.holiday_days)}` +
+          (lateAllowed ? `, দেরি ${bn(l?.delay || 0)}${l?.extreme ? ` (অনেক দেরি ${bn(l.extreme)})` : ""}` : "");
+      }).join("\n");
+      return {
+        ok: true, text,
+        data: { month: ym, results: hits.map((u) => ({ name: u.user_name, department: u.department, present: u.present_days, absent: u.absent_days, holidays: u.holiday_days, ...(lateAllowed ? { late: lates.get(u.user_id)?.delay || 0, extreme_late: lates.get(u.user_id)?.extreme || 0 } : {}) })) },
+        actions: [{ label: "Monthly Attendance Report খুলুন", nav: "admin:attendance_reports" }]
+      };
+    }
+  },
+  {
+    name: "stuck_applications",
+    description: "HR / Admin Dashboard: applications that have sat at the same approval layer for N days or more (default 3) — which layer, who has to act, since when. Only the kinds whose module the account has.",
+    params: { days: { type: "number", description: "Minimum days waiting at one layer; default 3." } },
+    available: canDash,
+    run: async (c, args) => {
+      const days = Math.min(60, Math.max(1, Math.floor(Number(args?.days)) || 3));
+      const r = await callApi(c.req, `/api/admin-dashboard/stuck?days=${days}`);
+      if (!r.ok) return fail(r.status);
+      const items: any[] = r.body?.items || [];
+      if (!items.length) return { ok: true, text: `${bn(days)} দিনের বেশি কোনো আবেদন এক layer-এ আটকে নেই। 👍`, data: { total: 0 } };
+      const text = `${bn(days)}+ দিন ধরে আটকে আছে **${bn(items.length)}টি** — ` + (r.body.by_kind || []).map((k: any) => `${k.label} ${bn(k.count)}`).join(", ") + "\n" +
+        items.slice(0, 10).map((i) => `• ${i.label} — **${i.requester}**${i.detail ? ` (${String(i.detail).replace(/\d{4}-\d{2}-\d{2}/g, (d: string) => bnDate(d))})` : ""}: ${i.layer}${i.step && i.total_steps ? ` ${bn(i.step)}/${bn(i.total_steps)}` : ""} — ${i.approvers.join(" / ") || "approver নেই"}, ${bn(i.days_waiting)} দিন`).join("\n") +
+        (items.length > 10 ? `\n…আরও ${bn(items.length - 10)}টি` : "");
+      return {
+        ok: true, text,
+        data: { days, total: items.length, items: items.slice(0, 40).map((i) => ({ kind: i.label, from: i.requester, layer: i.layer, approvers: i.approvers, days_waiting: i.days_waiting, detail: i.detail })) },
+        actions: [{ label: "Admin Dashboard খুলুন", nav: "admin:dashboard" }],
+        report: report(`Applications Stuck ${days}+ Days`, `Stuck-${days}d-${c.today}`, ["Type", "Requested by", "Detail", "Layer", "Waiting with", "Since", "Days"],
+          items.map((i) => [i.label, i.requester, i.detail || "", `${i.layer}${i.step && i.total_steps ? ` ${i.step}/${i.total_steps}` : ""}`, i.approvers.join(" / "), enDate(i.since), i.days_waiting]), [["As of", enDate(c.today)], ["Total", String(items.length)]])
+      };
+    }
+  },
+  {
+    name: "exits_overview",
+    description: "HR (Exit / Offboarding): exits in progress — who is leaving and when, last working day this week, past last day, clearance items still open and with whom, settlement not paid.",
+    available: (c) => hasMod(c, "exit_offboarding"),
+    run: async (c) => {
+      const r = await callApi(c.req, "/api/exit-requests/pending");
+      if (!r.ok) return fail(r.status);
+      const s = r.body?.summary || {};
+      const list: any[] = r.body?.exits || [];
+      if (!list.length) return { ok: true, text: "এখন কোনো exit চলছে না।", data: { open: 0 }, actions: [{ label: "Exit / Offboarding খুলুন", nav: "admin:exit_offboarding" }] };
+      const when = (d: any) => d === null || d === undefined ? "তারিখ নেই" : d < 0 ? `${bn(-d)} দিন আগে পেরিয়েছে` : d === 0 ? "আজ" : `${bn(d)} দিন পরে`;
+      const text = `চলমান exit **${bn(s.open ?? list.length)}টি** — ৭ দিনের মধ্যে শেষ কর্মদিবস ${bn(s.leaving_7_days ?? 0)}, শেষ দিন পেরিয়েছে ${bn(s.past_last_day ?? 0)}, খোলা clearance ${bn(s.clearance_open ?? 0)}, settlement বাকি ${bn(s.settlement_unpaid ?? 0)}\n` +
+        list.slice(0, 8).map((x) => `• **${x.name}**${x.department ? ` (${x.department})` : ""} — শেষ দিন ${x.last_working_day ? bnDate(x.last_working_day) : "—"} (${when(x.days_left)}) · clearance ${bn(x.clearance_done)}/${bn(x.clearance_total)}` +
+          ((x.open_clearance || []).length ? ` · বাকি: ${(x.open_clearance as any[]).map((o) => `${o.department}${o.approver_name ? ` (${o.approver_name})` : ""}`).join(", ")}` : "")).join("\n");
+      return {
+        ok: true, text,
+        data: { summary: s, exits: list.slice(0, 30).map((x) => ({ name: x.name, department: x.department, last_working_day: x.last_working_day, days_left: x.days_left, status: x.status, clearance: `${x.clearance_done}/${x.clearance_total}`, open_clearance: (x.open_clearance || []).map((o: any) => ({ department: o.department, approver: o.approver_name })), settlement: x.settlement_status })) },
+        actions: [{ label: "Exit / Offboarding খুলুন", nav: "admin:exit_offboarding" }],
+        report: report("Exits in Progress", `Exits-${c.today}`, ["Name", "Department", "Last Working Day", "Days Left", "Clearance", "Open Clearance", "Settlement"],
+          list.map((x) => [x.name, x.department || "", enDate(x.last_working_day), x.days_left ?? "", `${x.clearance_done}/${x.clearance_total}`, (x.open_clearance || []).map((o: any) => o.department).join(", "), x.settlement_status || "not prepared"]), [["As of", enDate(c.today)]])
+      };
+    }
+  },
+  {
+    name: "recruitment_overview",
+    description: "HR (Recruitment): open job posts and vacancies, interviews today / this week (with time), offers awaiting reply, candidates per stage.",
+    available: (c) => hasMod(c, "recruitment"),
+    run: async (c) => {
+      const [p, k] = await Promise.all([callApi(c.req, "/api/job-postings"), callApi(c.req, "/api/job-candidates")]);
+      if (!p.ok) return fail(p.status);
+      const posts: any[] = Array.isArray(p.body) ? p.body : [];
+      const cands: any[] = Array.isArray(k.body) ? k.body : [];
+      const open = posts.filter((x) => x.status === "open");
+      const title = new Map<number, string>(posts.map((x) => [Number(x.id), x.title]));
+      const week = addDays(c.today, 6);
+      const iv = cands.filter((x) => x.status === "interview_scheduled" && x.interview_at && String(x.interview_at).slice(0, 10) >= c.today && String(x.interview_at).slice(0, 10) <= week)
+        .sort((a, b) => String(a.interview_at).localeCompare(String(b.interview_at)));
+      const today = iv.filter((x) => String(x.interview_at).slice(0, 10) === c.today);
+      const offers = cands.filter((x) => x.status === "offered");
+      const stage = (st2: string) => cands.filter((x) => x.status === st2).length;
+      const text = `খোলা পদ **${bn(open.length)}টি** (${bn(open.reduce((t, x) => t + (Number(x.vacancy_count) || 1), 0))} জন লাগবে)` + (open.length ? `: ${open.slice(0, 6).map((x) => x.title).join(", ")}` : "") +
+        `\nআজ interview ${bn(today.length)}টি, এই সপ্তাহে ${bn(iv.length)}টি` + (iv.length ? ":\n" + iv.slice(0, 8).map((x) => `• **${x.name}** — ${title.get(Number(x.posting_id)) || ""}, ${bnDate(x.interview_at)} ${bn(enTime(x.interview_at))}`).join("\n") : "") +
+        `\nOffer-এর উত্তর বাকি ${bn(offers.length)}টি` + (offers.length ? `: ${offers.slice(0, 6).map((x) => `${x.name} (${title.get(Number(x.posting_id)) || ""})`).join(", ")}` : "") +
+        `\nপ্রার্থী — Applied ${bn(stage("applied"))}, Shortlisted ${bn(stage("shortlisted"))}, Interview ${bn(stage("interview_scheduled") + stage("interviewed"))}, Offered ${bn(offers.length)}, Hired ${bn(stage("hired"))}`;
+      return {
+        ok: true, text,
+        data: { open_posts: open.map((x) => ({ title: x.title, vacancies: x.vacancy_count, department: x.department })), interviews_this_week: iv.map((x) => ({ name: x.name, post: title.get(Number(x.posting_id)), at: x.interview_at })), offers_waiting: offers.map((x) => ({ name: x.name, post: title.get(Number(x.posting_id)) })) },
+        actions: [{ label: "Recruitment খুলুন", nav: "admin:recruitment" }]
+      };
+    }
+  },
+  {
+    name: "payroll_status",
+    description: "Payroll: where a month's payroll stands (draft / submitted to Audit / approved / paid), how many salaries, total and unpaid net, whose salary is on hold. month_year 'YYYY-MM' (default this month).",
+    params: { month_year: { type: "string", description: "YYYY-MM; default this month." } },
+    available: (c) => hasMod(c, "payroll"),
+    run: async (c, args) => {
+      const ym = /^\d{4}-\d{2}$/.test(String(args?.month_year || "")) ? String(args.month_year) : c.today.slice(0, 7);
+      const r = await callApi(c.req, `/api/payroll/approval/${ym}`);
+      if (!r.ok) return fail(r.status);
+      const b = r.body || {};
+      const sm = b.summary || {};
+      const STAGE: Record<string, string> = { draft: "তৈরি হচ্ছে (Draft) — Audit-এ পাঠানো হয়নি", submitted: "Audit-এর অনুমোদনের অপেক্ষায়", returned: "Audit ফেরত পাঠিয়েছে — ঠিক করে আবার পাঠাতে হবে", approved: "Audit অনুমোদন করেছে — Accounts-এর পরিশোধের অপেক্ষায়", paid: "পরিশোধ হয়ে গেছে" };
+      const held: any[] = b.held || [];
+      const text = !Number(sm.runs)
+        ? `${bnMonth(ym)}-এর payroll এখনো তৈরি হয়নি।`
+        : `${bnMonth(ym)}-এর payroll: **${STAGE[b.status] || b.status}**\n• বেতন ${bn(sm.runs)} জনের, মোট net ${money(sm.total_net)}\n• পরিশোধ বাকি ${money(sm.payable_net)} (${bn(sm.unpaid ?? 0)} জন), পরিশোধিত ${bn(sm.paid ?? 0)} জন` +
+          (held.length ? `\n• বেতন hold-এ ${bn(held.length)} জন: ${held.slice(0, 8).map((h: any) => h.employee_name || h.name).filter(Boolean).join(", ")}` : sm.held ? `\n• বেতন hold-এ ${bn(sm.held)} জন` : "");
+      return { ok: true, text, data: { month: ym, status: b.status, summary: sm, held: held.slice(0, 30).map((h: any) => h.employee_name || h.name) }, actions: [{ label: "Payroll খুলুন", nav: "admin:payroll" }] };
+    }
+  },
+  {
+    name: "asset_lookup",
+    description: "Asset Management: who holds an asset (by tag / name / serial), what a person holds, or how many of a category are free. query = asset tag, asset name, category or a person's name.",
+    params: { query: { type: "string", description: "Asset tag, name, category or a person's name." } },
+    available: (c) => hasMod(c, "asset_management"),
+    run: async (c, args) => {
+      const q = String(args?.query || "").trim().toLowerCase();
+      const r = await callApi(c.req, "/api/assets?with_holder=1");
+      if (!r.ok) return fail(r.status);
+      const all: any[] = Array.isArray(r.body) ? r.body : [];
+      const free = all.filter((a) => a.status === "available");
+      if (q.length < 2) {
+        const byCat = new Map<string, { total: number; free: number }>();
+        for (const a of all) { const k = a.category || "Other"; const v = byCat.get(k) || { total: 0, free: 0 }; v.total++; if (a.status === "available") v.free++; byCat.set(k, v); }
+        return { ok: true, text: `মোট asset ${bn(all.length)}টি, খালি ${bn(free.length)}টি:\n` + [...byCat.entries()].map(([k, v]) => `• ${k}: ${bn(v.total)}টি, খালি ${bn(v.free)}`).join("\n"), data: { total: all.length, free: free.length, by_category: Object.fromEntries(byCat) }, actions: [{ label: "Asset Management খুলুন", nav: "admin:asset_management" }] };
+      }
+      // Every word must appear somewhere ("dell laptop" = a Dell in Laptops).
+      const words = q.split(/\s+/).filter((w) => w.length > 1 && !["ta", "ti", "টা", "টি", "ekhon", "এখন"].includes(w));
+      const hit = (a: any) => { const hay = [a.asset_tag, a.name, a.serial_number, a.category, a.holder_name].map((v) => String(v || "").toLowerCase()).join(" "); return words.every((w) => hay.includes(w)); };
+      const rows = all.filter(hit);
+      if (!rows.length) return { ok: true, text: `"${args.query}" দিয়ে কোনো asset পাওয়া যায়নি।`, data: { results: [] } };
+      const STATUS: Record<string, string> = { available: "খালি", assigned: "দেওয়া আছে", maintenance: "মেরামতে", disposed: "বাতিল" };
+      const text = rows.slice(0, 12).map((a) => `• **${a.name}**${a.asset_tag ? ` (${a.asset_tag})` : ""}${a.category ? ` · ${a.category}` : ""} — ${a.holder_name ? `**${a.holder_name}**-এর কাছে${a.assigned_date ? ` (${bnDate(a.assigned_date)} থেকে)` : ""}${a.acknowledged === false ? " · স্বীকৃতি বাকি" : ""}` : STATUS[a.status] || a.status}`).join("\n") +
+        (rows.length > 12 ? `\n…আরও ${bn(rows.length - 12)}টি` : "");
+      return {
+        ok: true, text,
+        data: { results: rows.slice(0, 40).map((a) => ({ name: a.name, tag: a.asset_tag, category: a.category, status: a.status, holder: a.holder_name, since: a.assigned_date })) },
+        actions: [{ label: "Asset Management খুলুন", nav: "admin:asset_management" }],
+        report: report("Assets", `Assets-${c.today}`, ["Asset", "Tag", "Category", "Serial", "Status", "Held by", "Since"],
+          rows.map((a) => [a.name, a.asset_tag || "", a.category || "", a.serial_number || "", a.status, a.holder_name || "", enDate(a.assigned_date)]), [["Search", String(args.query)], ["As of", enDate(c.today)]])
+      };
+    }
+  },
   {
     name: "on_leave",
     description: "HR: who is on approved leave on a date (default today), and whose leave on that date is still pending. Optional date YYYY-MM-DD.",
@@ -1317,7 +1517,7 @@ const HOW = ["ki kore", "কী করে", "কি করে", "kivabe", "kibha
 
 interface Intent { tool: string; keys: string[]; args?: (t: string, c: Ctx) => any }
 
-const LAST_MONTH = ["last month", "gotomash", "goto mash", "goto mas", "গত মাস", "আগের মাস", "previous month"];
+const LAST_MONTH = ["last month", "gotomash", "gotomas", "goto mash", "goto mas", "গত মাস", "আগের মাস", "previous month", "ager mas", "ager mash"];
 
 const INTENTS: Intent[] = [
   { tool: "my_leave_balance", keys: ["leave balance", "balance", "ব্যালেন্স", "chuti koto", "chuti baki", "koto chuti", "ছুটি কত", "কত ছুটি", "ছুটি বাকি", "বাকি ছুটি", "leave baki", "leave koto", "leave left", "how many leave", "কয় দিন ছুটি", "koydin chuti"] },
@@ -1341,6 +1541,18 @@ const INTENTS: Intent[] = [
       }
       return {};
     } },
+  { tool: "employee_leave_balance", keys: [" er chuti koto", " er leave balance", "এর ছুটি কত", "-এর ছুটি কত", " er koto chuti", "এর কত ছুটি", " er chuti baki", "এর ছুটি বাকি"],
+    args: (t) => ({ name: nameBefore(t) }) },
+  { tool: "employee_attendance", keys: [" er hajira", "এর হাজিরা", "-এর হাজিরা", " er attendance", "এর attendance", " er present", "koydin absent", "কয়দিন অনুপস্থিত", " er late", "এর দেরি"],
+    args: (t, c) => ({ name: nameBefore(t), month_year: hasAny(t, LAST_MONTH) ? monthShift(c.today.slice(0, 7), -1) : undefined }) },
+  { tool: "stuck_applications", keys: ["atke ache", "আটকে আছে", "stuck", "din dhore pending", "দিন ধরে পেন্ডিং", "din dhore pore", "অনেকদিন পড়ে", "onekdin pending", "3 din", "৩ দিন"],
+    args: (t) => { const n = /(\d{1,2})\s*(?:din|দিন|days?)/.exec(toAsciiDigits(t))?.[1]; return { days: n ? Number(n) : 3 }; } },
+  { tool: "exits_overview", keys: ["ke ke chole jacche", "কে কে চলে যাচ্ছে", "exit list", "exit koyta", "কয়টা exit", "offboarding", "অফবোর্ডিং", "resign koreche", "রিজাইন করেছে", "kar clearance", "কার clearance", "settlement baki", "সেটেলমেন্ট বাকি", "last working day ke"] },
+  { tool: "recruitment_overview", keys: ["recruitment", "রিক্রুটমেন্ট", "interview", "ইন্টারভিউ", "khola pod", "খোলা পদ", "open position", "vacancy", "শূন্য পদ", "offer", "অফার", "candidate", "প্রার্থী", "job posting"] },
+  { tool: "payroll_status", keys: ["payroll", "পে-রোল", "পেরোল", "salary kobe", "বেতন কবে", "beton kobe", "salary hold", "বেতন hold", "salary paid", "বেতন দেওয়া", "audit e ache", "salary sheet"],
+    args: (t, c) => (hasAny(t, LAST_MONTH) ? { month_year: monthShift(c.today.slice(0, 7), -1) } : {}) },
+  { tool: "asset_lookup", keys: ["kar kache", "কার কাছে", "asset koyta", "কয়টা asset", "asset khali", "খালি asset", "laptop koyta", "কয়টা laptop", "asset list", "who has", "কার নামে"],
+    args: (t) => { const m = /(\S{2,30})\s+(?:kar kache|কার কাছে|কার নামে)/.exec(t) || /(?:who has|kar kache|কার কাছে)\s+(?!ache|আছে)(\S{2,30})/.exec(t); return { query: m ? m[1].replace(/[?]/g, "").trim() : "" }; } },
   { tool: "my_pending_approvals", keys: ["amar kache approval", "amar approval", "আমার কাছে কয়টা", "আমার অনুমোদনের", "আমার কাছে অনুমোদন", "approval koyta", "koyta approval", "কয়টা approval", "pending approval amar", "amar kache pending", "আমার কাছে পেন্ডিং", "approve korte hobe", "approve বাকি", "approve baki", "waiting for my approval", "my approvals", "my pending approvals"] },
   { tool: "my_profile", keys: ["amar supervisor", "আমার supervisor", "আমার সুপারভাইজার", "amar boss", "my supervisor", "amar joining", "আমার যোগদান", "joining date", "যোগদানের তারিখ", "amar designation", "আমার পদবি", "amar podobi", "amar employee id", "আমার employee id", "আমার আইডি", "amar department", "আমার department", "my profile", "আমার প্রোফাইল", "amar profile", "koto bochor chakri", "কত বছর চাকরি", "amar confirmation", "probation kobe sesh"] },
   { tool: "my_assets", keys: ["amar asset", "আমার asset", "আমার অ্যাসেট", "amar kache ki asset", "আমার কাছে কী", "my asset", "laptop amar", "acknowledge asset", "asset acknowledge", "asset requisition status", "requisition koi", "asset er obostha"] },
@@ -1442,6 +1654,19 @@ async function localAnswer(c: Ctx, message: string): Promise<Answer> {
   if (find && !asksHow) {
     const r = await TOOLS.find((x) => x.name === "find_colleague")!.run(c, { query: find.replace(/\s+(er|এর|ke|কে)$/, "").trim() });
     return { reply: r.text, actions: r.actions || [] };
+  }
+
+  // "<name> er ... hajira / chuti": about that person, not the asker.
+  const other = !asksHow && !hasAny(t, [" amar ", "আমার", " ami ", "আমি "]) ? nameBefore(t) : "";
+  if (other) {
+    const kind = hasAny(t, ["hajira", "হাজিরা", "attendance", "present", "absent", "অনুপস্থিত", "late", "দেরি", "লেট"]) ? "employee_attendance"
+      : hasAny(t, ["chuti", "ছুটি", "leave", "balance", "ব্যালেন্স"]) ? "employee_leave_balance" : null;
+    if (kind) {
+      const tool = TOOLS.find((x) => x.name === kind)!;
+      if (!toolAvailable(tool, c)) return { reply: NO_ACCESS.text, actions: [] };
+      const r = await tool.run(c, { name: other, month_year: hasAny(t, LAST_MONTH) ? monthShift(c.today.slice(0, 7), -1) : undefined });
+      return { reply: r.text, actions: allowedActions(c, r.actions || []), report: r.report };
+    }
   }
 
   // Data questions win unless the person is asking HOW to do something. The
