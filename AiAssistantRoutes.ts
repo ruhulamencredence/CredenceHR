@@ -152,7 +152,7 @@ interface HelpEntry {
 }
 
 const HELP: HelpEntry[] = [
-  { id: "leave_apply", title: "ছুটির আবেদন", keys: ["leave apply", "apply leave", "chuti nibo", "chuti nite", "leave nibo", "ছুটি নেব", "ছুটি নিতে", "ছুটির আবেদন", "leave application", "ছুটি চাই", "chuti chai"],
+  { id: "leave_apply", title: "ছুটির আবেদন", keys: ["leave apply", "apply leave", "chuti apply", "ছুটি apply", "ছুটির আবেদন কীভাবে", "chutir abedon", "leave application kivabe", "chuti nibo", "chuti nite", "leave nibo", "ছুটি নেব", "ছুটি নিতে", "ছুটির আবেদন", "leave application", "ছুটি চাই", "chuti chai"],
     steps: "মেনু → Leave & Attendance → **Leave Application** → \"New Leave Application\"। ছুটির ধরন, তারিখ আর কারণ দিন, দরকার হলে Reliever বেছে Submit করুন। আবেদন আপনার supervisor / approval chain-এ যাবে।",
     nav: "self:leaveApplication", can: (c) => isSuper(c) || c.flags.can_view_leave_application || c.flags.can_view_my_leave },
   { id: "movement_claim", title: "Movement Claim", keys: ["movement", "মুভমেন্ট", "check in", "check-in", "চেক ইন", "checkin"],
@@ -214,8 +214,8 @@ const HELP: HelpEntry[] = [
   { id: "payslip", title: "বেতন / Payslip", keys: ["payslip", "পে স্লিপ", "salary slip", "বেতন", "salary", "স্যালারি"],
     steps: "বেতনের হিসাব Payroll বিভাগ তৈরি করে। Payslip বা বেতন-সংক্রান্ত প্রশ্নে HR/Accounts-এ যোগাযোগ করুন। Salary certificate লাগলে My Letters থেকে চাইতে পারেন।", nav: "self:myLetters" },
   // HR / Admin pages
-  { id: "add_employee", title: "নতুন Employee যোগ", keys: ["add employee", "new employee", "নতুন কর্মী", "employee add", "employee jog", "কর্মী যোগ"],
-    steps: "Admin Panel → Employee Management → **Employees** → \"Add Employee\"। অনেকজন একসাথে হলে HR Data Import ব্যবহার করুন।", nav: "admin:employees", can: (c) => hasMod(c, "employees") },
+  { id: "add_employee", title: "নতুন Employee যোগ", keys: ["add employee", "new employee", "নতুন কর্মী", "নতুন employee", "notun employee", "employee add", "employee jog", "কর্মী যোগ"],
+    steps: "Admin Panel → Employee Management → **Employees** → \"Add Employee\"। অনেকজন একসাথে হলে HR Data Import ব্যবহার করুন।\nনতুন কাউকে চাকরিতে নিলে পুরো পথ: **Recruitment (ATS)** → New Posting → Add Candidate → Interview → Offered → Hired → **\"Start onboarding\"** → joiner নিজের তথ্য জমা দেন → HR Operations → Onboarding-এ **Approve** করলে Employee record আর Employee ID আপনা থেকে তৈরি হয়, তারপর Appointment Letter।", nav: "admin:employees", can: (c) => hasMod(c, "employees") },
   { id: "import", title: "Data Import", keys: ["import", "ইমপোর্ট", "excel upload", "bulk"],
     steps: "Admin Panel → **HR Data Import**। ধরন বেছে Template নামান, পূরণ করে Upload → Check → Import।", nav: "admin:data_import", can: (c) => isSuper(c) || c.modules.includes("data_import") },
   { id: "payroll", title: "Payroll চালানো", keys: ["payroll", "পেরোল", "run payroll", "বেতন তৈরি"],
@@ -252,6 +252,79 @@ const HELP: HelpEntry[] = [
     steps:
       "Admin Panel → Users → account → **Module Access** → **\"Also allow editing Leave balances\"** চালু করুন। তার নিচে কোন কোন কাজ করতে পারবেন টিক দিন: Edit Balance, Set Balance in Bulk, Add Category, Leave Policy, Year Settings, Balance Workflows।",
     nav: "admin:users", can: (c) => isSuper(c) || c.modules.includes("users") },
+  // ---- Admin pages (each only for accounts that have that module) ----
+  { id: "users_admin", title: "User / Login তৈরি ও Block", keys: ["add user", "new user", "create user", "user add", "user banabo", "login banabo", "login create", "নতুন user", "ইউজার তৈরি", "লগইন তৈরি", "bulk add users", "account block", "user block", "ব্লক", "unblock", "password reset", "পাসওয়ার্ড রিসেট"],
+    steps: "মেনু → Settings & Administration → **Users**।\n• একজন: **\"Add User\"** → নাম, email/username, role (User / Admin), password → Create User। অনেকজন: **\"Bulk Add Users\"**।\n• কোন পাতা খুলবে: user-এর সারিতে **Module Access**।\n• বন্ধ করতে: **Block Account** (কারণ লিখে) — আর login করতে পারবেন না; Unblock দিয়ে খোলা যায়।\n• Employee-র login: Employees-এ কর্মীর সারি থেকেও Create Login করা যায়।",
+    nav: "admin:users", can: (c) => hasMod(c, "users") },
+  { id: "departments_admin", title: "Department যোগ ও Supervisor", keys: ["add department", "new department", "department add", "department banabo", "ডিপার্টমেন্ট যোগ", "নতুন ডিপার্টমেন্ট", "department supervisor set", "department edit"],
+    steps: "মেনু → Employee Management → **Departments** → **\"Add Department\"** → নাম, **Supervisor**, আর দরকার হলে \"supervisor-এর অনুমোদন লাগবে\" টিক → Save। কর্মীকে department-এ বসাতে Employees-এ কর্মী Edit করুন।",
+    nav: "admin:departments", can: (c) => hasMod(c, "departments") },
+  { id: "projects_branches", title: "Project / Branch যোগ", keys: ["add project", "new project", "project add", "প্রজেক্ট যোগ", "add branch", "new branch", "branch add", "ব্রাঞ্চ যোগ", "site add", "project location"],
+    steps: "মেনু → Settings & Administration → **Projects** → **\"New Project\"** (নাম, ঠিকানা, check-in-এর জন্য location/radius)। Branch: Settings & Administration → **Branches** → **\"New Branch\"**।",
+    nav: "admin:projects", can: (c) => hasMod(c, "projects") || hasMod(c, "branches") },
+  { id: "pepm_admin", title: "PEPM — MPR, Report, Import", keys: ["mpr no", "mpr nos", "এমপিআর", "pepm", "পিইপিএম", "budget report", "job recycle", "mpr edit log", "mpr no", "new mpr"],
+    steps: "মেনু → **PEPM Management**:\n• **MPR Nos** → \"New MPR No\" দিয়ে নতুন MPR।\n• **Reports** → Job/Entry/Budget রিপোর্ট ও Budget Submission Status।\n• **Data Import** → Excel থেকে Job/Entry আনা।\n• **Job Recycle** → মুছে ফেলা Job ফেরত আনা; **MPR Edit Log** → কে কী বদলেছে।",
+    nav: "admin:reports", can: (c) => ["reports", "mprs", "imports", "recycle", "editlog"].some((k) => hasMod(c, k)) },
+  { id: "office_attendance_admin", title: "Office Attendance — ZKTeco Device", keys: ["office attendance", "অফিস হাজিরা", "zkteco", "zk device", "device add", "fingerprint", "ফিঙ্গারপ্রিন্ট", "punch machine", "unlinked pin", "device pin"],
+    steps: "মেনু → Attendance & Leave → **Office Attendance** → **\"Manage Devices\"** → **\"Add Device\"** (IP/port)। কোন PIN কোন কর্মীর, মেলাতে **\"Unlinked PINs\"** → কর্মী বেছে link করুন। Punch আপনা থেকে নির্দিষ্ট সময়ে টেনে আনা হয়।",
+    nav: "admin:office_attendance", can: (c) => hasMod(c, "office_attendance") },
+  { id: "site_attendance_admin", title: "Site Attendance — টিম ও Supervisor", keys: ["site attendance", "সাইট হাজিরা", "site team", "muster team", "new team", "team banabo", "site supervisor"],
+    steps: "মেনু → Attendance & Leave → **Site Attendance** → **\"New team\"** → নাম, Project, Supervisor (আর backup), টিমের কর্মী → Save। Supervisor প্রতিদিন My Panel → Team Attendance থেকে হাজিরা দেন; HR এখানে সব টিমের হিসাব আর Excel পান।",
+    nav: "admin:office_attendance", can: (c) => hasMod(c, "office_attendance") },
+  { id: "remote_attendance_admin", title: "Remote Attendance (মাঠের হাজিরা) অনুমোদন", keys: ["remote attendance", "রিমোট হাজিরা", "field attendance", "check in approve", "check-in approve"],
+    steps: "মেনু → Attendance & Leave → **Remote Attendance**। মাঠ থেকে দেওয়া Check In/Out-এর location দেখে অনুমোদন দিন। Monthly Attendance Report-এ মাসের হিসাব।",
+    nav: "admin:attendance", can: (c) => hasMod(c, "attendance") },
+  { id: "tracking_admin", title: "Employee Tracking", keys: ["employee tracking", "ট্র্যাকিং", "kothay ache", "কোথায় আছে", "live location", "লাইভ লোকেশন", "stay report", "live follow"],
+    steps: "মেনু → Employee Management → **Employee Tracking**। **Live** — এখন কে কোথায় (location পাঠাচ্ছেন যাঁরা); **Stay Report** — দিনে কোথায় কতক্ষণ ছিলেন; **Live Follow** — একজনকে চলতি অবস্থায় দেখা (আলাদা অনুমতি লাগে)। কর্মীর ফোনে tracking চালু থাকতে হয়।",
+    nav: "admin:tracking", can: (c) => hasMod(c, "tracking") },
+  { id: "claims_admin", title: "Claim অনুমোদন ও বিল পরিশোধ (HR / Accounts)", keys: ["claim approve", "bill approve", "bill disburse", "disbursement", "ডিসবার্সমেন্ট", "বিল পরিশোধ", "bill pay", "claim policy", "bill claim policy", "conveyance limit"],
+    steps: "মেনু → Payroll & Claims:\n• **Movement Claims** / **Bill Claim** — কর্মীদের claim দেখা, অনুমোদন / ফেরত / বাতিল।\n• **Bill Disbursement** — অনুমোদিত বিল বেছে পরিশোধ (Disburse) আর payment voucher PDF।\n• **Bill Claim Policy** — ধরন অনুযায়ী সীমা আর কতদিন পর্যন্ত claim করা যাবে।",
+    nav: "admin:conveyance", can: (c) => ["claims", "conveyance", "disbursement"].some((k) => hasMod(c, k)) },
+  { id: "asset_admin", title: "Asset Management (HR / Store)", keys: ["asset management", "asset assign", "asset dibo", "asset return", "asset ferot", "অ্যাসেট দেওয়া", "asset inventory", "নতুন asset", "add asset", "asset claim"],
+    steps: "মেনু → HR Operations → Facilities → **Asset Management**:\n• **Approvals** — কর্মীদের asset requisition অনুমোদন ও হাতে দেওয়া (Fulfill)।\n• **Claims** — কর্মী \"এটা আমার কাছে আছে\" দাবি করলে মিলিয়ে নিশ্চিত করা।\n• **Inventory** — asset যোগ, কাকে দেওয়া, ফেরত নেওয়া (Settings থেকে \"Show Inventory tab\" চালু থাকতে হয়)।",
+    nav: "admin:asset_management", can: (c) => hasMod(c, "asset_management") },
+  { id: "vehicle_admin", title: "Vehicle Management (গাড়ি ও চালক)", keys: ["vehicle management", "gari add", "গাড়ি যোগ", "driver assign", "চালক দেওয়া", "ride approve", "emergency ride", "vehicle inventory"],
+    steps: "মেনু → HR Operations → Facilities → **Vehicle Management**:\n• **Requests** — ride অনুমোদন, গাড়ি ও চালক দেওয়া, সময় বাড়ানোর আবেদন (Approve Extension)।\n• **Emergency** — HR সরাসরি ride দিতে পারে।\n• **Inventory** — গাড়ি যোগ (\"Add\")।",
+    nav: "admin:vehicle_management", can: (c) => hasMod(c, "vehicle_management") },
+  { id: "mobile_bill_admin", title: "Mobile Bill — SIM ও বিল (HR)", keys: ["give a sim", "sim dibo", "সিম দেওয়া", "sim add", "import bill", "bill import", "বিল ইমপোর্ট", "mobile limit set", "limit policy", "payment sheet"],
+    steps: "মেনু → HR Operations → Facilities → **Mobile Bill**:\n• **\"Give a SIM\"** — নম্বর, অপারেটর, কর্মী, limit (policy অনুযায়ী বা নিজের মতো)।\n• **\"Add limit\"** — পদবি/ধরন অনুযায়ী limit policy।\n• **\"Import bill\"** — অপারেটরের Excel (\"Download template\" দেখে)। limit-এর বেশি হলে কর্মীর বেতন থেকে কাটা যায়।\n• **\"Payment sheet PDF\"** — মাসের পরিশোধ।",
+    nav: "admin:mobile_bill", can: (c) => hasMod(c, "mobile_bill") },
+  { id: "exit_admin", title: "Exit / Offboarding (HR)", keys: ["exit request", "new exit", "exit add", "offboarding kivabe", "clearance start", "start clearance", "settlement", "সেটেলমেন্ট", "final settlement", "mark paid", "clearance department", "experience certificate", "release letter"],
+    steps: "মেনু → Employee Management → **Exit / Offboarding**:\n১. **\"New Exit Request\"** (কর্মী resignation দিলে নিজেও আসে) → কর্মী, ধরন, notice ও শেষ কর্মদিবস।\n২. **\"Start Clearance\"** → প্রতিটা department-এর clearance তার approver-এর কাছে যায় (কোন department, ঠিক করতে **\"Clearance Departments\"**)।\n৩. Settlement (Gratuity, ছুটির টাকা, কাটা loan) তৈরি → সব clearance আর বকেয়া শেষ হলে **\"Mark Paid & Settle\"**।\n৪. Clearance Certificate / Settlement Sheet PDF, আর HR Operations → Letters থেকে Release / Experience Letter।",
+    nav: "admin:exit_offboarding", can: (c) => hasMod(c, "exit_offboarding") },
+  { id: "recruitment_admin", title: "Recruitment — পদ, প্রার্থী, Interview", keys: ["new posting", "job posting", "চাকরির বিজ্ঞাপন", "add candidate", "প্রার্থী যোগ", "interview schedule", "interview time", "ইন্টারভিউ সময়", "hire", "start onboarding", "recruitment kivabe", "chakrite neya", "chakrite nite", "চাকরিতে নেওয়া", "নিয়োগ", "niyog", "hiring process", "notun lok neya", "নতুন লোক নেওয়া", "posting theke onboarding", "hiring", "new hire", "job post", "recruit", "candidate add", "posting to onboarding"],
+    steps: "মেনু → Employee Management → **Recruitment (ATS)**:\n১. **\"New Posting\"** → পদ, department, পদবি, কতজন।\n২. Posting খুলে **\"Add Candidate\"**।\n৩. Status বদলান: Applied → Shortlisted → Interview scheduled (তখন **Interview-এর তারিখ ও সময়** দিন) → Interviewed → Offered → Hired।\n৪. Hired হলে **\"Start onboarding\"** — joiner-এর login তৈরি হয়, Onboarding-এ যায়।",
+    nav: "admin:recruitment", can: (c) => hasMod(c, "recruitment") },
+  { id: "performance_admin", title: "Performance Management (Appraisal)", keys: ["performance", "পারফরম্যান্স", "appraisal", "অ্যাপ্রাইজাল", "kpi", "new cycle", "review cycle", "goal set"],
+    steps: "মেনু → Employee Management → **Performance Management** → **\"New Cycle\"** (সময়কাল) → কর্মীর **\"Add Goal\"** (KPI) → সময় হলে **\"Start Review\"** → নম্বর ও মন্তব্য দিয়ে **Submit**।",
+    nav: "admin:performance_management", can: (c) => hasMod(c, "performance_management") },
+  { id: "grievance_admin", title: "Grievance ও Disciplinary (HR)", keys: ["grievance handle", "অভিযোগ দেখা", "investigation", "disciplinary action", "শোকজ দেওয়া", "show cause dibo", "show cause", "শোকজ", "warning letter", "issue action"],
+    steps: "মেনু → Employee Management → **Grievance & Disciplinary**:\n• **Grievances** — অভিযোগ খুলে দায়িত্ব দিন → **\"Start Investigating\"** → সমাধান লিখে বন্ধ করুন।\n• **Disciplinary Actions** — **\"Issue Action\"** (সতর্কতা, শোকজ, suspension…) — কর্মী নিজের পাতায় দেখেন ও উত্তর দেন।",
+    nav: "admin:grievance_disciplinary", can: (c) => hasMod(c, "grievance_disciplinary") },
+  { id: "document_vault_admin", title: "Document Vault", keys: ["document vault", "ডকুমেন্ট ভল্ট", "upload document", "document upload", "নথি আপলোড", "nid upload", "document expiry"],
+    steps: "মেনু → Employee Management → **Document Vault** → **\"Upload Document\"** → কর্মী, ধরন (NID, সার্টিফিকেট…), মেয়াদ থাকলে তারিখ। মেয়াদ শেষ হওয়ার আগে Dashboard-এ সতর্কতা আসে।",
+    nav: "admin:document_vault", can: (c) => hasMod(c, "document_vault") },
+  { id: "hr_actions", title: "Promotion / Transfer / Increment / Confirmation (Personnel Action)", keys: ["promotion", "পদোন্নতি", "transfer", "বদলি", "confirmation dibo", "confirm korbo", "personnel action", "new hr action", "salary increase", "designation change", "পদবি বদল", "suspension"],
+    steps: "মেনু → HR Operations → Employee records → **Personnel Actions** → **\"New HR Action\"** → কর্মী, ধরন (Promotion, Transfer, Increment, Confirmation, Probation extension, Separation…), নতুন মান আর কার্যকর তারিখ → Submit। Approval chain শেষ হলে কার্যকর তারিখে আপনা থেকে Employee record বদলায়; চিঠি Letters থেকে Issue করুন।",
+    nav: "hrops:actions", can: (c) => hasMod(c, "hr_operations") },
+  { id: "increments_admin", title: "Increment নিয়ম", keys: ["increment rule", "increment policy", "ইনক্রিমেন্ট", "বার্ষিক ইনক্রিমেন্ট", "increment due", "annual increment"],
+    steps: "মেনু → HR Operations → Employee records → **Increments** → **\"Create Increment Rule\"** (কত % / কত টাকা, কোন মাসে, কারা)। যাঁদের increment-এর সময় হয়েছে তাঁদের তালিকা এখানে; প্রয়োগ হয় Personnel Action হিসেবে।",
+    nav: "hrops:increments", can: (c) => hasMod(c, "hr_operations") },
+  { id: "service_book_admin", title: "Employee 360 / Service Book", keys: ["employee 360", "service book", "সার্ভিস বুক", "dossier", "ডোসিয়ার", "employee profile full", "কর্মীর পুরো তথ্য"],
+    steps: "মেনু → HR Operations → Employee records → **Service Book** → কর্মী বাছুন। এক পাতায় চাকরির ইতিহাস, হাজিরা, ছুটি, claim, loan, asset, document, অভিযোগ। **\"Dossier\"** দিয়ে PDF; এখান থেকে **\"Give Loan / Advance\"**-ও দেওয়া যায় (Payroll অনুমতি লাগে)।",
+    nav: "hrops:service_book", can: (c) => hasMod(c, "hr_operations") },
+  { id: "task_admin", title: "Task দেওয়া (Task Management)", keys: ["give a task", "task dibo", "টাস্ক দেওয়া", "task assign", "task management"],
+    steps: "মেনু → HR Operations → Daily → **Task Management** → **\"Give a task\"** → কাকে, কী কাজ, শেষ তারিখ, গুরুত্ব। অগ্রগতি এখানে দেখা যায়, Excel-ও আছে; কর্মী My Tasks-এ পান।",
+    nav: "admin:task_management", can: (c) => hasMod(c, "task_management") },
+  { id: "payroll_settings", title: "Payroll — বেতনের মাস, Late policy, অনুমোদন, Hold", keys: ["salary month", "বেতনের মাস", "late policy", "লেট পলিসি", "late deduction", "দেরিতে কাটা", "payroll approval", "payroll audit", "salary hold", "বেতন আটকানো", "payslip generate", "generate payslips", "salary atke", "beton atke", "বেতন আটকে", "salary hold kivabe", "hold salary", "salary release"],
+    steps: "মেনু → Payroll & Claims → **Payroll**:\n• **Run Payroll** → মাস বেছে Generate; **Generate Payslips** দিয়ে payslip।\n• বেতনের মাস কবে থেকে কবে (যেমন ২৬–২৫): **Salary Month Setting** (আলাদা অনুমতি)।\n• দেরিতে কাটা: **Late policy** (অফিস শুরু, grace, কয়টা দেরিতে ১ দিন কাটা)।\n• **Approval** ট্যাব: Submit → Audit Approve → Accounts Pay।\n• কারো বেতন আটকাতে: **Salary Hold / Release** (আলাদা অনুমতি)।",
+    nav: "admin:payroll", can: (c) => hasMod(c, "payroll") },
+  { id: "companies_admin", title: "Company (Sister concern) যোগ", keys: ["company add", "new company", "কোম্পানি যোগ", "sister concern", "সিস্টার কনসার্ন", "company switch", "workspace"],
+    steps: "মেনু → Settings & Administration → **Companies** — কোম্পানি যোগ, logo/ঠিকানা, কোন user কোন কোম্পানিতে। উপরের company নাম থেকে কোম্পানি বদলানো যায়।",
+    nav: "admin:companies", can: (c) => isSuper(c) },
+  { id: "assistant_settings", title: "Assistant-এর অনুমতি (চালু/বন্ধ, রিপোর্ট, Live support)", keys: ["assistant off", "assistant bondho", "assistant permission", "assistant report download", "pdf download permission", "live support agent", "assistant support"],
+    steps: "Settings & Administration → Users → account → **Module Access**:\n• **AI Assistant** — চালু/বন্ধ (ডিফল্ট চালু)।\n• **Assistant — report PDF / Excel download** — তালিকার উত্তরে PDF/Excel বোতাম (ডিফল্ট বন্ধ)।\n• **Assistant live support** — যাঁরা মানুষের সাথে কথা চাওয়া ব্যক্তিদের উত্তর দেবেন।",
+    nav: "admin:users", can: (c) => hasMod(c, "users") },
   { id: "notice", title: "Notice দেওয়া", keys: ["notice", "নোটিশ", "announcement", "ঘোষণা"],
     steps: "Admin Panel → **Notices** → New Notice।", nav: "admin:notices", can: (c) => hasMod(c, "notices") },
   { id: "approval_chain", title: "Approval Chain", keys: ["approval chain", "chain", "approver set", "কে approve করবে"],
@@ -1485,7 +1558,7 @@ const TOOLS: Tool[] = [
     description: "How to do something in the CredenceHR app (apply leave, claim a bill, request an asset, change password, add employee, run payroll…). Returns the steps and the page to open.",
     params: { topic: { type: "string", description: "What the user wants to do, in their words." } },
     run: async (c, args) => {
-      const hits = matchHelp(c, String(args?.topic || ""), 3);
+      const hits = matchHelp(c, String(args?.topic || ""), 4);
       const blocked = hits.length ? [] : matchHelp(c, String(args?.topic || ""), 1, true);
       if (blocked.length) return { ok: false, text: `"${blocked[0].title}" আপনার account-এ চালু নেই। দরকার হলে HR / Superadmin-কে বলুন।`, data: { error: "no_access", page: blocked[0].title } };
       if (!hits.length) return { ok: true, text: "এ বিষয়ে আমার কাছে নির্দিষ্ট নির্দেশনা নেই।", data: { error: "no_guide", topics: HELP.filter((h) => !h.can || h.can(c)).map((h) => h.title) } };
@@ -1502,11 +1575,21 @@ const toolAvailable = (t: Tool, c: Ctx) => !t.available || t.available(c);
 const norm = (s: string) => ` ${String(s || "").toLowerCase().replace(/[?!.,।]+/g, " ").replace(/\s+/g, " ").trim()} `;
 const hasAny = (t: string, keys: string[]) => keys.some((k) => t.includes(k));
 
+// How well a how-to entry matches: a key found as written counts in full; a
+// key of several words that are all there with other words between them
+// ("department kivabe add korbo" for "department add") counts a little less.
+const helpKeyScore = (h: HelpEntry, t: string) =>
+  h.keys.reduce((sc, k) => {
+    if (t.includes(k)) return sc + k.length;
+    const parts = k.split(" ").filter((w) => w.length > 1);
+    return parts.length > 1 && parts.every((w) => t.includes(w)) ? sc + Math.round(k.length * 0.6) : sc;
+  }, 0);
+
 // blocked = true finds only the pages this account can NOT open (to say so).
 function matchHelp(c: Ctx, text: string, limit: number, blocked = false): HelpEntry[] {
   const t = norm(text);
   return HELP.filter((h) => (!h.can || h.can(c)) !== blocked)
-    .map((h) => ({ h, score: h.keys.reduce((s, k) => s + (t.includes(k) ? k.length : 0), 0) }))
+    .map((h) => ({ h, score: helpKeyScore(h, t) }))
     .filter((x) => x.score > 0)
     .sort((a, b) => b.score - a.score)
     .slice(0, limit)
@@ -1681,7 +1764,7 @@ async function localAnswer(c: Ctx, message: string): Promise<Answer> {
 
   // A how-to entry that matches more of the question than the best data
   // question ("leave balance set korbo" is about setting, not reading, it).
-  const helpScore = Math.max(0, ...HELP.map((h) => h.keys.reduce((sc, k) => sc + (t.includes(k) ? k.length : 0), 0)));
+  const helpScore = Math.max(0, ...HELP.map((h) => helpKeyScore(h, t)));
   // …unless it asks where something stands ("ki holo", "status", "koi").
   const asksState = hasAny(t, ["ki holo", "ki hoise", "ki hoyeche", "কী হল", "কি হলো", "কী হলো", "কি হল", "obostha", "অবস্থা", "status", " koi ", " কই ", "kothay ache", "কোথায় আছে", "koto ", "কত ", "kobe", "কবে"]);
   const helpWins = (help.length || blockedHelp.length) && helpScore > (scored[0]?.score || 0) && !asksState;
@@ -1771,7 +1854,7 @@ async function geminiAnswer(c: Ctx, history: { role: string; text: string }[], m
     `- You can only read and guide, with ONE exception: when they ask to apply for leave, call prepare_leave_application. It only fills a form card in the chat; the employee reviews it and presses the card's "জমা দিন" button. Never say the leave was applied or submitted — say the draft is ready below to check and submit with "জমা দিন". Ask for nothing extra first: missing fields can be filled in the card.\n` +
     `- You cannot approve, edit, cancel or delete anything — tell them which page to open (the app shows a button for it).\n` +
     `- If they want a real person, or you can't help, call request_human_support (it shows a button; never claim someone is connected).\n` +
-    `- For any "how do I… / where is…" question ALWAYS call app_help first and give only the steps it returns — never describe menus or buttons from your own knowledge. If it returns no_access, say that page isn't turned on for their account and HR / Superadmin can enable it. If it returns no_guide, say you don't have the exact steps for that and offer request_human_support — never claim the page is turned off or that they lack access unless a tool returned no_access.\n` +
+    `- For any "how do I… / where is…" question ALWAYS call app_help first and give only the steps it returns — never describe menus or buttons from your own knowledge. If it returns no_access, say that page isn't turned on for their account and HR / Superadmin can enable it. If it returns no_guide, say you don't have the exact steps for that and offer request_human_support — never claim the page is turned off or that they lack access unless a tool returned no_access. When app_help returns several entries, answer with the one that fits the question best and keep its steps, order and button names as written (you may translate into the user's language) — don't merge entries into a process of your own or add steps that aren't there.\n` +
     (isSuper(c) ? `- This user is a Superadmin: every page and module is open to them. Never tell them something isn't enabled for their account.\n` : "") +
     `- Write Bangla only in Bangla script (no Arabic, Hindi or other scripts mixed in); English words like page names may stay in English.\n` +
     `- Don't answer questions unrelated to work / this app beyond a brief polite line.\n` +
@@ -1784,6 +1867,11 @@ async function geminiAnswer(c: Ctx, history: { role: string; text: string }[], m
   const actions: AssistantAction[] = [];
   let draft: LeaveDraft | undefined;
   let rep: AssistantReport | undefined;
+  // How-to answers are given exactly as written in HELP (menu paths and
+  // button names must not be paraphrased): when app_help is all Gemini
+  // used, its best entries are the reply.
+  let helpOnly = true;
+  let helpSteps: { title: string; steps: string }[] = [];
   for (let round = 0; round < 4; round++) {
     const resp = await generateWithFallback(ai, {
       contents,
@@ -1792,6 +1880,7 @@ async function geminiAnswer(c: Ctx, history: { role: string; text: string }[], m
     const calls = resp.functionCalls || [];
     if (!calls.length) {
       const text = (resp.text || "").trim();
+      if (helpOnly && helpSteps.length) return { reply: helpSteps.slice(0, 3).map((h) => `**${h.title}:** ${h.steps}`).join("\n\n"), actions, draft, report: rep };
       if (!text) throw new Error("empty reply");
       return { reply: text, actions, draft, report: rep };
     }
@@ -1803,6 +1892,10 @@ async function geminiAnswer(c: Ctx, history: { role: string; text: string }[], m
       for (const a of out.actions || []) actions.push(a);
       if (out.draft) draft = out.draft;
       if (out.report) rep = out.report;
+      if (fc.name === "app_help") {
+        for (const h of out.ok && Array.isArray(out.data?.steps) ? out.data.steps : []) if (!helpSteps.some((x) => x.title === h.title)) helpSteps.push(h);
+      }
+      else helpOnly = false;
       parts.push({ functionResponse: { name: String(fc.name), response: { ok: out.ok, ...(out.data ?? {}), summary: out.text } } });
     }
     contents.push({ role: "user", parts });
