@@ -12,7 +12,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Capacitor } from '@capacitor/core';
 import {
   ArrowLeft, Mail, Inbox, Star, Send, FileText, Clock, Archive, ShieldAlert, Trash2, AlertCircle, Pencil, RefreshCw, Search, X, Menu, Paperclip,
-  CheckSquare, Square, MailOpen, Plus, Loader2, Server, ChevronDown, Bookmark, LogOut, Check
+  CheckSquare, Square, MailOpen, Plus, Loader2, Server, ChevronDown, Bookmark, LogOut, Check,
+  Bell, Users, ListChecks, Filter, BarChart3, Settings, Tag, CheckCheck
 } from 'lucide-react';
 import { ModulePath } from '../ModulePath';
 import { confirmDialog } from '../../lib/confirmDialog';
@@ -21,11 +22,33 @@ import { useBackButtonClose } from '../../lib/useBackButtonClose';
 import { useKeyboardInset, scrollFocusedFieldIntoView } from '../../lib/useKeyboardInset';
 import type { User } from '../../types';
 import {
-  MAIL_CATEGORIES, MAIL_FOLDERS, MailAccount, MailCounts, MailList, MailMessage, MailSettings, MailStatus, SYSTEM_LABELS, mailFetch, shortMailDate, fullMailDate
+  MAIL_CATEGORIES, MAIL_FOLDERS, MailAccount, MailContact, MailCounts, MailFilter, MailList, MailMessage, MailSettings, MailStatus, MailTemplate, SYSTEM_LABELS, mailFetch,
+  setMailTimeZone, shortMailDate, fullMailDate
 } from '../../lib/mailApi';
 import { MailReader, ReaderAction, MailAvatar } from './MailReader';
 import { MailCompose, ComposeInit } from './MailCompose';
 import { sanitizeMailHtml } from './MailBody';
+import { MailSettingsPopup } from './MailSettings';
+import { MailRulesPopup, MailTemplatesPopup, MailContactsPopup, MailPlannerPopup, FromMail } from './MailTools';
+import { MailAnalyticsPopup } from './MailAnalytics';
+
+type Tool =
+  | { kind: 'settings'; tab?: string }
+  | { kind: 'rules'; prefill?: Partial<MailFilter> }
+  | { kind: 'templates' }
+  | { kind: 'contacts'; prefill?: Partial<MailContact> }
+  | { kind: 'planner'; tab: 'tasks' | 'calendar'; fromMail?: FromMail }
+  | { kind: 'analytics' };
+
+// This session's mail notifications (the bell), kept on this device.
+interface MailNote {
+  id: string;
+  kind: 'new' | 'sent' | 'scheduled' | 'failed';
+  title: string;
+  body: string;
+  at: number;
+  read: boolean;
+}
 
 const FOLDER_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   Inbox, Starred: Star, Important: Bookmark, Sent: Send, Drafts: FileText, Scheduled: Clock, Archive, Spam: ShieldAlert, Trash: Trash2
@@ -243,20 +266,40 @@ const Row: React.FC<{
   selected: boolean;
   checked: boolean;
   checking: boolean;
+  compact?: boolean;
   onOpen: () => void;
   onCheck: () => void;
   onStar: () => void;
-}> = ({ m, folder, selected, checked, checking, onOpen, onCheck, onStar }) => {
+}> = ({ m, folder, selected, checked, checking, compact, onOpen, onCheck, onStar }) => {
   const outgoing = folder === 'Sent' || folder === 'Drafts' || folder === 'Scheduled';
   const who = outgoing ? `To: ${m.to.concat(m.cc).join(', ') || '(no one yet)'}` : m.from.name || m.from.email;
   const ownLabels = m.labels.filter((l) => !SYSTEM_LABELS.has(l)).slice(0, 2);
+  const trailing = (
+    <>
+      {ownLabels.map((l) => <span key={l} className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 shrink-0">{l}</span>)}
+      {m.hasAttachments && <Paperclip className="w-3.5 h-3.5 text-slate-400 shrink-0" />}
+      {folder !== 'Drafts' && folder !== 'Scheduled' && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onStar();
+          }}
+          className="p-0.5 -m-0.5 shrink-0"
+          aria-label={m.isStarred ? 'Unstar' : 'Star'}
+        >
+          <Star className={`w-4 h-4 ${m.isStarred ? 'fill-amber-400 text-amber-400' : 'text-slate-300 hover:text-slate-500'}`} />
+        </button>
+      )}
+    </>
+  );
   return (
     <div
       role="button"
       tabIndex={0}
       onClick={onOpen}
       onKeyDown={(e) => e.key === 'Enter' && onOpen()}
-      className={`group flex items-start gap-3 px-3 sm:px-4 py-3 cursor-pointer border-l-[3px] ${selected ? 'bg-sky-50/80 border-sky-500' : m.isRead ? 'border-transparent hover:bg-slate-50' : 'border-transparent bg-white hover:bg-slate-50'}`}
+      className={`group flex items-start gap-3 px-3 sm:px-4 ${compact ? 'py-1.5' : 'py-3'} cursor-pointer border-l-[3px] ${selected ? 'bg-sky-50/80 border-sky-500' : m.isRead ? 'border-transparent hover:bg-slate-50' : 'border-transparent bg-white hover:bg-slate-50'}`}
     >
       <button
         type="button"
@@ -268,9 +311,9 @@ const Row: React.FC<{
         aria-label={checked ? 'Unselect' : 'Select'}
       >
         <span className={checking || checked ? 'hidden' : 'group-hover:hidden'}>
-          <MailAvatar name={outgoing ? m.to[0] || '?' : m.from.name} email={outgoing ? m.to[0] || '' : m.from.email} />
+          <MailAvatar name={outgoing ? m.to[0] || '?' : m.from.name} email={outgoing ? m.to[0] || '' : m.from.email} size={compact ? 'sm' : 'md'} />
         </span>
-        <span className={`${checking || checked ? 'flex' : 'hidden group-hover:flex'} w-10 h-10 items-center justify-center rounded-full ${checked ? 'bg-sky-600 text-white' : 'bg-slate-100 text-slate-500'}`}>
+        <span className={`${checking || checked ? 'flex' : 'hidden group-hover:flex'} ${compact ? 'w-8 h-8' : 'w-10 h-10'} items-center justify-center rounded-full ${checked ? 'bg-sky-600 text-white' : 'bg-slate-100 text-slate-500'}`}>
           {checked ? <Check className="w-5 h-5" /> : <Square className="w-4 h-4" />}
         </span>
       </button>
@@ -285,25 +328,20 @@ const Row: React.FC<{
           {m.isDraft && <span className="text-[11px] font-semibold text-rose-600 shrink-0">Draft</span>}
           {m.sendError && <AlertCircle className="w-3.5 h-3.5 text-rose-500 shrink-0" />}
           <span className={`text-[13px] truncate ${m.isRead ? 'text-slate-600' : 'font-semibold text-slate-800'}`}>{m.subject}</span>
-        </div>
-        <div className="flex items-center gap-1.5 min-w-0">
-          <span className="text-xs text-slate-500 truncate flex-1">{m.snippet}</span>
-          {ownLabels.map((l) => <span key={l} className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 shrink-0">{l}</span>)}
-          {m.hasAttachments && <Paperclip className="w-3.5 h-3.5 text-slate-400 shrink-0" />}
-          {folder !== 'Drafts' && folder !== 'Scheduled' && (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onStar();
-              }}
-              className="p-0.5 -m-0.5 shrink-0"
-              aria-label={m.isStarred ? 'Unstar' : 'Star'}
-            >
-              <Star className={`w-4 h-4 ${m.isStarred ? 'fill-amber-400 text-amber-400' : 'text-slate-300 hover:text-slate-500'}`} />
-            </button>
+          {/* Compact: no preview line, so the icons sit here. */}
+          {compact && (
+            <>
+              <span className="flex-1" />
+              {trailing}
+            </>
           )}
         </div>
+        {!compact && (
+          <div className="flex items-center gap-1.5 min-w-0">
+            <span className="text-xs text-slate-500 truncate flex-1">{m.snippet}</span>
+            {trailing}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -335,6 +373,19 @@ export const CredenceMail: React.FC<{ token: string; user: User; onBack?: () => 
   const [mailboxes, setMailboxes] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [toast, setToast] = useState<{ text: string; tone: 'ok' | 'error' } | null>(null);
+  const [tool, setTool] = useState<Tool | null>(null);
+  const [templates, setTemplates] = useState<MailTemplate[]>([]);
+  const [ruleLabels, setRuleLabels] = useState<string[]>([]);
+  const notesKey = `credence_mail_notes_${user.id}`;
+  const [notes, setNotes] = useState<MailNote[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem(notesKey) || '[]');
+    } catch {
+      return [];
+    }
+  });
+  // Which bell's panel is open (the header one on desktop, the list one on a phone).
+  const [notesOpen, setNotesOpen] = useState<'header' | 'list' | null>(null);
   const listReq = useRef(0);
   const accounts = status?.accounts || [];
   const ownEmails = useMemo(() => new Set(accounts.map((a) => a.emailAddress.toLowerCase())), [accounts]);
@@ -345,6 +396,30 @@ export const CredenceMail: React.FC<{ token: string; user: User; onBack?: () => 
   const say = useCallback((text: string, tone: 'ok' | 'error' = 'ok') => {
     setToast({ text, tone });
   }, []);
+  const addNote = useCallback(
+    (n: Omit<MailNote, 'id' | 'at' | 'read'>) =>
+      setNotes((prev) => {
+        const next = [{ ...n, id: `${Date.now()}${Math.random().toString(36).slice(2, 6)}`, at: Date.now(), read: false }, ...prev].slice(0, 40);
+        try {
+          localStorage.setItem(notesKey, JSON.stringify(next));
+        } catch {
+          // Storage can be unavailable; the bell still works this session.
+        }
+        return next;
+      }),
+    [notesKey]
+  );
+  const markNotesRead = () =>
+    setNotes((prev) => {
+      const next = prev.map((n) => ({ ...n, read: true }));
+      try {
+        localStorage.setItem(notesKey, JSON.stringify(next));
+      } catch {
+        // see addNote
+      }
+      return next;
+    });
+  const unreadNotes = notes.filter((n) => !n.read).length;
   useEffect(() => {
     if (!toast) return;
     const t = setTimeout(() => setToast(null), 4000);
@@ -411,10 +486,22 @@ export const CredenceMail: React.FC<{ token: string; user: User; onBack?: () => 
   useEffect(() => {
     void loadCounts();
   }, [loadCounts]);
+  const loadRuleLabels = useCallback(() => {
+    mailFetch<MailFilter[]>(token, '/filters')
+      .then((fs) => setRuleLabels([...new Set(fs.flatMap((f) => f.actions?.applyLabels || []))].filter((l) => !SYSTEM_LABELS.has(l)).sort((a, b) => a.localeCompare(b))))
+      .catch(() => undefined);
+  }, [token]);
   useEffect(() => {
     if (!status?.enabled) return;
-    mailFetch<MailSettings>(token, '/settings').then(setSettings).catch(() => undefined);
-  }, [token, status?.enabled]);
+    mailFetch<MailSettings>(token, '/settings')
+      .then((st) => {
+        setMailTimeZone(st.timezone);
+        setSettings(st);
+      })
+      .catch(() => undefined);
+    mailFetch<MailTemplate[]>(token, '/templates').then(setTemplates).catch(() => undefined);
+    loadRuleLabels();
+  }, [token, status?.enabled, loadRuleLabels]);
 
   // Live: the server's IDLE watcher / scheduled sender tell this account.
   const refreshRef = useRef<() => void>(() => undefined);
@@ -428,11 +515,14 @@ export const CredenceMail: React.FC<{ token: string; user: User; onBack?: () => 
     const onChanged = () => refreshRef.current();
     const onNew = (e: any) => {
       refreshRef.current();
-      if (e?.count) say(e.count > 1 ? `${e.count} new mails` : `New mail from ${e.from}: ${e.subject}`);
+      if (!e?.count) return;
+      say(e.count > 1 ? `${e.count} new mails` : `New mail from ${e.from}: ${e.subject}`);
+      addNote({ kind: 'new', title: e.count > 1 ? `${e.count} new mails` : `New mail from ${e.from}`, body: e.subject || '' });
     };
     const onFailed = (e: any) => {
       refreshRef.current();
       say(e?.error || 'A scheduled mail could not be sent.', 'error');
+      addNote({ kind: 'failed', title: 'Not sent — kept in Drafts', body: `${e?.subject || ''}${e?.error ? ` · ${e.error}` : ''}` });
     };
     socket.on('mail:changed', onChanged);
     socket.on('mail:new', onNew);
@@ -445,7 +535,7 @@ export const CredenceMail: React.FC<{ token: string; user: User; onBack?: () => 
       socket.off('mail:send-failed', onFailed);
       clearInterval(t);
     };
-  }, [token, status?.enabled, say]);
+  }, [token, status?.enabled, say, addNote]);
 
   // Opening one: the whole conversation, marked read.
   useEffect(() => {
@@ -453,13 +543,13 @@ export const CredenceMail: React.FC<{ token: string; user: User; onBack?: () => 
       setThread(null);
       return;
     }
-    const m = list.items.find((x) => x.id === selectedId);
-    if (!m) return;
     let cancelled = false;
     setThread(null);
     setThreadError('');
     (async () => {
       try {
+        // A mail from a task / event link may not be in this list.
+        const m = list.items.find((x) => x.id === selectedId) || (await mailFetch<MailMessage>(token, `/messages/${selectedId}`));
         const t = await mailFetch<MailMessage[]>(token, `/threads/${encodeURIComponent(m.threadId)}`);
         // Trash / Spam / Drafts open just the one mail.
         const shown = folder === 'Trash' || folder === 'Spam' || folder === 'Drafts' || folder === 'Scheduled' || !t.some((x) => x.id === m.id) ? [await mailFetch<MailMessage>(token, `/messages/${m.id}`)] : t;
@@ -576,6 +666,28 @@ export const CredenceMail: React.FC<{ token: string; user: User; onBack?: () => 
         void loadCounts();
         return;
       }
+      if (action === 'task' || action === 'event') {
+        setTool({ kind: 'planner', tab: action === 'task' ? 'tasks' : 'calendar', fromMail: { emailId: m.id, subject: m.subject } });
+        return;
+      }
+      if (action === 'contact') {
+        setTool({ kind: 'contacts', prefill: { name: m.from.name, email: m.from.email } });
+        return;
+      }
+      if (action === 'rule') {
+        setTool({ kind: 'rules', prefill: { name: `Mail from ${m.from.name || m.from.email}`, conditions: { from: m.from.email }, actions: { applyLabels: [] }, isActive: true } });
+        return;
+      }
+      if (action === 'block') {
+        const addr = m.from.email.toLowerCase();
+        if (!addr || !(await confirmDialog(`Block ${addr}? New mail from this address will go to Spam.`, { confirmLabel: 'Block' }))) return;
+        const cur = settings || (await mailFetch<MailSettings>(token, '/settings'));
+        const next = await mailFetch<MailSettings>(token, '/settings', { method: 'PUT', body: { blockedSenders: [...new Set([...(cur.blockedSenders || []), addr])] } });
+        setSettings(next);
+        if (!m.labels.includes('Spam') && (await confirmDialog('Move this mail to Spam too?', { confirmLabel: 'Move to Spam' }))) return void (await act('spam', m));
+        say(`${addr} is blocked.`);
+        return;
+      }
       if (action === 'unschedule') {
         await mailFetch(token, `/messages/${m.id}/unschedule`, { method: 'POST' });
         say('Sending cancelled — it is in Drafts now.');
@@ -657,6 +769,74 @@ export const CredenceMail: React.FC<{ token: string; user: User; onBack?: () => 
   };
 
   // ---- Screens ----
+  const noteIcon = (k: MailNote['kind']) => (k === 'new' ? <Mail className="w-4 h-4 text-sky-600" /> : k === 'sent' ? <Send className="w-4 h-4 text-emerald-600" /> : k === 'scheduled' ? <Clock className="w-4 h-4 text-amber-600" /> : <AlertCircle className="w-4 h-4 text-rose-600" />);
+  const bellFor = (where: 'header' | 'list') => (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setNotesOpen((v) => (v === where ? null : where))}
+        className="relative w-8 h-8 rounded-xl bg-white/80 border border-slate-200 hover:bg-white text-slate-700 inline-flex items-center justify-center"
+        aria-label={`Mail notifications${unreadNotes ? `, ${unreadNotes} new` : ''}`}
+        title="Notifications"
+      >
+        <Bell className="w-4 h-4" />
+        {unreadNotes > 0 && <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-rose-600 text-white text-[10px] font-bold flex items-center justify-center">{unreadNotes > 9 ? '9+' : unreadNotes}</span>}
+      </button>
+      {notesOpen === where && (
+        <>
+          <div className="fixed inset-0 z-[60]" onClick={() => { setNotesOpen(null); markNotesRead(); }} />
+          <div className="absolute right-0 top-full mt-2 z-[61] w-[min(22rem,calc(100vw-1.5rem))] rounded-3xl bg-white shadow-2xl ring-1 ring-black/5 overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
+              <span className="text-sm font-semibold text-slate-800">Notifications</span>
+              <span className="flex items-center gap-1">
+                {notes.length > 0 && (
+                  <>
+                    <button type="button" onClick={markNotesRead} className="p-1.5 rounded-full hover:bg-black/5 text-slate-500" title="Mark all as read" aria-label="Mark all as read"><CheckCheck className="w-4 h-4" /></button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNotes([]);
+                        try { localStorage.removeItem(notesKey); } catch { /* see addNote */ }
+                      }}
+                      className="text-[11px] text-slate-500 hover:text-slate-800 px-2"
+                    >
+                      Clear
+                    </button>
+                  </>
+                )}
+              </span>
+            </div>
+            <div className="max-h-80 overflow-y-auto divide-y divide-slate-100">
+              {!notes.length ? (
+                <p className="px-4 py-8 text-center text-xs text-slate-500">No notifications yet. New mail shows up here as it arrives.</p>
+              ) : (
+                notes.map((n) => (
+                  <button
+                    key={n.id}
+                    type="button"
+                    onClick={() => {
+                      setNotesOpen(null);
+                      markNotesRead();
+                      openFolder(n.kind === 'new' ? 'Inbox' : n.kind === 'failed' ? 'Drafts' : n.kind === 'scheduled' ? 'Scheduled' : 'Sent');
+                    }}
+                    className={`w-full text-left flex items-start gap-3 px-4 py-2.5 hover:bg-slate-50 ${n.read ? '' : 'bg-sky-50/50'}`}
+                  >
+                    <span className="mt-0.5 shrink-0">{noteIcon(n.kind)}</span>
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-xs font-semibold text-slate-800 truncate">{n.title}</span>
+                      {n.body && <span className="block text-[11px] text-slate-500 truncate">{n.body}</span>}
+                      <span className="block text-[10px] text-slate-400">{shortMailDate(new Date(n.at).toISOString())}</span>
+                    </span>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+
   const header = (
     <div className="flex items-center justify-between gap-3 mb-3 mt-2 flex-wrap">
       <div className="flex items-center gap-2 min-w-0">
@@ -686,6 +866,10 @@ export const CredenceMail: React.FC<{ token: string; user: User; onBack?: () => 
           )}
           <button type="button" onClick={() => setMailboxes(true)} className="text-xs px-3 py-1.5 rounded-xl bg-white/80 border border-slate-200 hover:bg-white text-slate-700 hidden sm:inline-flex items-center gap-1.5">
             <Server className="w-3.5 h-3.5" /> Mailboxes
+          </button>
+          {bellFor('header')}
+          <button type="button" onClick={() => settings && setTool({ kind: 'settings' })} disabled={!settings} className="w-8 h-8 rounded-xl bg-white/80 border border-slate-200 hover:bg-white text-slate-700 inline-flex items-center justify-center disabled:opacity-50" aria-label="Mail settings" title="Settings">
+            <Settings className="w-4 h-4" />
           </button>
         </div>
       )}
@@ -744,6 +928,47 @@ export const CredenceMail: React.FC<{ token: string; user: User; onBack?: () => 
           </button>
         );
       })}
+      {ruleLabels.length > 0 && (
+        <>
+          <div className="pt-3 pb-1 px-3 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Labels</div>
+          {ruleLabels.map((l) => (
+            <button
+              key={l}
+              type="button"
+              onClick={() => openFolder(l)}
+              className={`w-full flex items-center gap-3 px-3 py-1.5 rounded-xl text-sm ${folder === l ? 'bg-sky-100/80 text-sky-800 font-semibold' : 'text-slate-700 hover:bg-black/5'}`}
+            >
+              <Tag className="w-4 h-4 shrink-0" />
+              <span className="flex-1 text-left truncate">{l}</span>
+            </button>
+          ))}
+        </>
+      )}
+    </nav>
+  );
+
+  const openTool = (t: Tool) => {
+    setDrawer(false);
+    setTool(t);
+  };
+  const toolsNav = (
+    <nav className="space-y-0.5">
+      <div className="pb-1 px-3 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Tools</div>
+      {(
+        [
+          ['Contacts', Users, () => openTool({ kind: 'contacts' })],
+          ['Tasks & Calendar', ListChecks, () => openTool({ kind: 'planner', tab: 'tasks' })],
+          ['Rules', Filter, () => openTool({ kind: 'rules' })],
+          ['Templates', FileText, () => openTool({ kind: 'templates' })],
+          ['Analytics', BarChart3, () => openTool({ kind: 'analytics' })],
+          ['Settings', Settings, () => settings && openTool({ kind: 'settings' })]
+        ] as [string, React.ComponentType<{ className?: string }>, () => void][]
+      ).map(([label, Icon, onClick]) => (
+        <button key={label} type="button" onClick={onClick} className="w-full flex items-center gap-3 px-3 py-1.5 rounded-xl text-sm text-slate-700 hover:bg-black/5">
+          <Icon className="w-4 h-4 shrink-0" />
+          <span className="flex-1 text-left">{label}</span>
+        </button>
+      ))}
     </nav>
   );
 
@@ -790,6 +1015,7 @@ export const CredenceMail: React.FC<{ token: string; user: User; onBack?: () => 
           <button type="button" onClick={() => void sync()} disabled={syncing} className="p-2 rounded-full hover:bg-black/5 disabled:opacity-50" aria-label="Check for new mail" title="Check for new mail">
             <RefreshCw className={`w-4 h-4 text-slate-600 ${syncing ? 'animate-spin' : ''}`} />
           </button>
+          <div className="md:hidden">{bellFor('list')}</div>
         </div>
         {checked.size > 0 ? (
           <div className="flex items-center gap-1 flex-wrap">
@@ -851,6 +1077,7 @@ export const CredenceMail: React.FC<{ token: string; user: User; onBack?: () => 
                   selected={selectedId === m.id}
                   checked={checked.has(m.id)}
                   checking={checked.size > 0}
+                  compact={settings?.layout?.density === 'compact'}
                   onOpen={() => (checked.size ? setChecked((p) => { const n = new Set(p); n.has(m.id) ? n.delete(m.id) : n.add(m.id); return n; }) : openRow(m))}
                   onCheck={() => setChecked((p) => { const n = new Set(p); n.has(m.id) ? n.delete(m.id) : n.add(m.id); return n; })}
                   onStar={() => void act('star', m)}
@@ -894,6 +1121,7 @@ export const CredenceMail: React.FC<{ token: string; user: User; onBack?: () => 
           <aside className="hidden md:flex flex-col w-56 shrink-0 p-3 gap-3 overflow-y-auto">
             {composeButton}
             {folderNav}
+            <div className="border-t border-slate-200/70 pt-3">{toolsNav}</div>
           </aside>
           {/* List */}
           <section className={`${selectedId ? 'hidden md:flex' : 'flex'} flex-col w-full md:w-[22rem] lg:w-[26rem] shrink-0 md:border-x border-slate-200/70 bg-white/80 min-h-0`}>{listPane}</section>
@@ -937,6 +1165,7 @@ export const CredenceMail: React.FC<{ token: string; user: User; onBack?: () => 
                 </select>
               )}
               <div className="liquid-glass-inset rounded-[24px] p-2">{folderNav}</div>
+              <div className="liquid-glass-inset rounded-[24px] p-2 pt-3">{toolsNav}</div>
               <button type="button" onClick={() => { setDrawer(false); setMailboxes(true); }} className="text-sm px-3 py-2 rounded-xl text-slate-700 hover:bg-black/5 inline-flex items-center gap-2">
                 <Server className="w-4 h-4" /> Mailboxes
               </button>
@@ -968,14 +1197,64 @@ export const CredenceMail: React.FC<{ token: string; user: User; onBack?: () => 
           token={token}
           accounts={accounts}
           signatures={settings?.signatures || []}
+          templates={templates}
           init={compose}
           onClose={() => {
             setCompose(null);
             refreshRef.current();
           }}
-          onDone={(text) => say(text)}
+          onDone={(text) => {
+            say(text);
+            if (text === 'Sent.') addNote({ kind: 'sent', title: 'Mail sent', body: '' });
+            else if (text.startsWith('Will be sent')) addNote({ kind: 'scheduled', title: 'Mail scheduled', body: text.replace(/\.$/, '') });
+          }}
         />
       )}
+
+      {tool?.kind === 'settings' && settings && (
+        <MailSettingsPopup
+          token={token}
+          userName={user.name}
+          settings={settings}
+          startTab={tool.tab}
+          onClose={() => setTool(null)}
+          onSaved={(st) => {
+            setMailTimeZone(st.timezone);
+            setSettings(st);
+            say('Settings saved.');
+            // Dates in the list follow the new time zone.
+            setList((prev) => (prev ? { ...prev } : prev));
+          }}
+        />
+      )}
+      {tool?.kind === 'rules' && (
+        <MailRulesPopup token={token} prefill={tool.prefill} onClose={() => setTool(null)} onChanged={loadRuleLabels} />
+      )}
+      {tool?.kind === 'templates' && <MailTemplatesPopup token={token} onClose={() => setTool(null)} onChanged={setTemplates} />}
+      {tool?.kind === 'contacts' && (
+        <MailContactsPopup
+          token={token}
+          prefill={tool.prefill}
+          onClose={() => setTool(null)}
+          onWrite={(email) => {
+            setTool(null);
+            setCompose({ accountId: accountFilter || undefined, to: email });
+          }}
+        />
+      )}
+      {tool?.kind === 'planner' && (
+        <MailPlannerPopup
+          token={token}
+          startTab={tool.tab}
+          fromMail={tool.fromMail}
+          onClose={() => setTool(null)}
+          onOpenMail={(id) => {
+            setTool(null);
+            setSelectedId(id);
+          }}
+        />
+      )}
+      {tool?.kind === 'analytics' && <MailAnalyticsPopup token={token} onClose={() => setTool(null)} />}
 
       {toast && (
         <div className="fixed left-1/2 -translate-x-1/2 z-[95] px-4 w-full max-w-sm pointer-events-none" style={{ bottom: 'calc(6rem + env(safe-area-inset-bottom))' }}>

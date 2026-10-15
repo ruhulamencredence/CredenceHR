@@ -79,11 +79,75 @@ export interface MailStatus {
   accounts: MailAccount[];
 }
 
+export interface SignatureFields {
+  fullName: string;
+  title: string;
+  department: string;
+  mobile: string;
+  pabx: string;
+}
+
 export interface MailSignature {
   id: string;
   name: string;
   content: string;
   isDefault: boolean;
+  fields?: SignatureFields;
+  logoUrl?: string;
+}
+
+export interface MailTemplate {
+  id: string;
+  title: string;
+  subject: string;
+  body: string;
+}
+
+export interface MailFilter {
+  id: string;
+  name: string;
+  conditions: { from?: string; to?: string; subjectContains?: string; bodyContains?: string; hasAttachment?: boolean };
+  actions: { archive?: boolean; markRead?: boolean; star?: boolean; applyLabels?: string[]; categorize?: string };
+  isActive: boolean;
+}
+
+export interface MailContact {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  company: string;
+  notes: string;
+  avatarColor: string;
+}
+
+export interface MailTask {
+  id: string;
+  title: string;
+  dueDate?: string;
+  completed: boolean;
+  emailId?: string;
+  emailSubject?: string;
+}
+
+export interface MailEvent {
+  id: string;
+  title: string;
+  start: string;
+  end: string;
+  description: string;
+  location: string;
+  emailId?: string;
+}
+
+export interface MailAnalytics {
+  sentCount: number;
+  receivedCount: number;
+  spamCount: number;
+  averageResponseTimeMinutes: number;
+  dailyTrends: { date: string; sent: number; received: number }[];
+  contactEngagement: { name: string; email: string; count: number }[];
+  categoryDistribution: { name: string; value: number }[];
 }
 
 export interface MailSettings {
@@ -146,22 +210,69 @@ export const fileToDataUrl = (file: File) =>
 
 export const formatBytes = (n: number) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} B`);
 
+// Settings -> Time zone: every mail date is shown in it (default Dhaka).
+let mailTimeZone: string | undefined = 'Asia/Dhaka';
+export function setMailTimeZone(tz: string | undefined) {
+  try {
+    new Intl.DateTimeFormat('en-GB', { timeZone: tz }).format(new Date());
+    mailTimeZone = tz;
+  } catch {
+    mailTimeZone = undefined;
+  }
+}
+const dayKey = (d: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: mailTimeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+
 // "10:42" today, "14 Oct" this year, "14/10/25" before.
 export function shortMailDate(iso: string | null): string {
   if (!iso) return '';
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return '';
   const now = new Date();
-  if (d.toDateString() === now.toDateString()) return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-  if (d.getFullYear() === now.getFullYear()) return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
-  return d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: '2-digit' });
+  const tz = { timeZone: mailTimeZone };
+  if (dayKey(d) === dayKey(now)) return d.toLocaleTimeString('en-GB', { ...tz, hour: '2-digit', minute: '2-digit' });
+  if (dayKey(d).slice(0, 4) === dayKey(now).slice(0, 4)) return d.toLocaleDateString('en-GB', { ...tz, day: 'numeric', month: 'short' });
+  return d.toLocaleDateString('en-GB', { ...tz, day: '2-digit', month: '2-digit', year: '2-digit' });
 }
 
 export const fullMailDate = (iso: string | null) => {
   if (!iso) return '';
   const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? '' : d.toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  return Number.isNaN(d.getTime()) ? '' : d.toLocaleString('en-GB', { timeZone: mailTimeZone, weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 };
+
+export const MAIL_TIME_ZONES = ['Asia/Dhaka', 'Asia/Kolkata', 'Asia/Dubai', 'Asia/Riyadh', 'Asia/Singapore', 'Asia/Kuala_Lumpur', 'Asia/Tokyo', 'Europe/London', 'Europe/Berlin', 'America/New_York', 'America/Los_Angeles', 'Australia/Sydney', 'UTC'];
+
+// The Credence signature (same design as the original credence-mail app):
+// company lines fixed, the person's own lines from the signature maker.
+const esc = (v: string) => String(v || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+export function credenceSignatureHtml(f: SignatureFields, logoUrl?: string): string {
+  const contact: string[] = [];
+  if (f.mobile) contact.push(`Mobile: <span style="color:#E05A1A;font-weight:700;">${esc(f.mobile)}</span>`);
+  if (f.pabx) contact.push(`PABX: <span style="color:#E05A1A;font-weight:700;">${esc(f.pabx)}</span>`);
+  const link = (href: string, label: string) =>
+    `<a href="${href}" style="color:#E05A1A;font-weight:700;font-size:10px;text-decoration:none;font-family:Arial,sans-serif;letter-spacing:0.05em;">${label}</a>`;
+  const links = [link('https://credencehousing.com', 'WEBSITE'), link('https://facebook.com/credencehousing', 'FACEBOOK'), link('https://linkedin.com/company/credencehousing', 'LINKEDIN')].join(
+    '<span style="color:#ccc;margin:0 5px;">|</span>'
+  );
+  return `<table cellpadding="0" cellspacing="0" border="0" style="font-family:Arial,sans-serif;width:100%;max-width:520px;margin-top:16px;">
+<tr><td style="padding-bottom:12px;">
+<p style="margin:0;font-size:12px;font-style:italic;color:#555;font-family:Georgia,serif;">With Regards,</p>
+<p style="margin:4px 0 2px;font-size:14px;font-weight:700;color:#1a1a1a;">${esc(f.fullName)}</p>
+<p style="margin:0 0 2px;font-size:11px;color:#0B57D0;">${[f.title, f.department].filter(Boolean).map(esc).join(' | ')}</p>
+${contact.length ? `<p style="margin:0;font-size:11px;color:#333;">${contact.join('&nbsp;&nbsp;|&nbsp;&nbsp;')}</p>` : ''}
+</td></tr>
+<tr><td style="border-top:1px solid #e0e0e0;padding-top:12px;">
+<table cellpadding="0" cellspacing="0" border="0" style="width:100%;"><tr>
+${logoUrl ? `<td style="width:80px;vertical-align:middle;padding-right:14px;"><img src="${esc(logoUrl)}" alt="Logo" style="width:72px;height:auto;display:block;"></td>` : ''}
+<td style="vertical-align:top;">
+<p style="margin:0 0 3px;font-size:13px;font-weight:700;color:#1a1a1a;letter-spacing:0.02em;">CREDENCE HOUSING LIMITED</p>
+<p style="margin:0 0 1px;font-size:10px;color:#555;">Telephone: +8802 41021375, +8802 41021378 | Hotline: 16769</p>
+<p style="margin:0 0 6px;font-size:10px;color:#555;">Corporate Address: House-15, Road-13/A, Dhanmondi, Dhaka-1209, Bangladesh</p>
+<p style="margin:0;">${links}</p>
+</td></tr></table>
+</td></tr>
+</table>`;
+}
 
 // Folder list (left column). `label` is what /api/mail/messages takes.
 export const MAIL_FOLDERS = [

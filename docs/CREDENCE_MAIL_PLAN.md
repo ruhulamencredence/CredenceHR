@@ -116,11 +116,12 @@
 - [x] folder-এর তালিকা, mail-এর তালিকা, mail পড়া (DOMPurify), Compose / Reply / Forward, attachment
 - [x] মোবাইল layout, skeleton, liquid-glass popup
 
-### ধাপ ৩: বাকি ফিচার
-- [ ] Settings: signature আর logo, vacation responder, blocked senders, layout, ভাষা, timezone
-- [ ] Template, Filter / Rules, Contacts, Task, Calendar event
-- [ ] Analytics, Notification panel
-- [x] CredenceHR Employee Directory থেকে address বেছে নেওয়া (Compose-এ suggestion, ধাপ ২-এর সাথে)
+### ধাপ ৩: বাকি ফিচার (শেষ, পরীক্ষিত)
+- [x] Settings: signature আর logo (Credence-এর নকশা, বা নিজের মতো), vacation responder, blocked senders, compact তালিকা, timezone
+- [x] Template, Filter / Rules (rule-এর label folder-তালিকায়), Contacts, Task, Calendar event (mail থেকে সরাসরি task / event / contact / rule / block)
+- [x] Analytics, Notification panel (ঘণ্টা)
+- [x] CredenceHR Employee Directory থেকে address বেছে নেওয়া (Compose-এ suggestion)
+- ভাষা বদলের setting রাখা হয়নি — CredenceHR-এর বাকি সব screen-এর মতো Mail-ও ইংরেজিতে।
 
 ---
 
@@ -128,6 +129,7 @@
 - **ধাপ ১:** এই পরিবেশে চালানো একটা Dovecot mail server (IMAP, cPanel-এর মতো `INBOX.Sent` / `INBOX.Trash` / `INBOX.Junk`) আর তার সাথে যুক্ত একটা SMTP server দিয়ে পুরো `/api/mail` API — ৭৩টা পরীক্ষা পাস।
   - এতে পাওয়া bug ঠিক করা হয়েছে: reply আলাদা conversation-এ চলে যেত; rule-এর "পড়া হয়েছে" / star পরের sync-এ উল্টে যেত; watcher চালু হওয়ার আগে আসা mail live দেখাত না।
 - **ধাপ ২:** Chromium-এ (desktop 1440px আর phone 390px) ৩৯টা পরীক্ষা পাস — mailbox যুক্ত করা, পড়া, HTML mail-এর script / form / iframe বাদ পড়া, ছবি বন্ধ থাকা, attachment, Reply all, Draft, Send later, একসাথে মুছে ফেলা, live নতুন mail, আর switch বন্ধ থাকলে menu-তে না দেখানো।
+- **ধাপ ৩:** Chromium-এ ৪৪টা পরীক্ষা পাস — Settings (compact, timezone, blocked sender, signature আর logo, vacation reply), Template বসানো, Rule আর তার label, live mail-এ rule আর block, notification ঘণ্টা, mail থেকে Task / Event / Contact / Block, Analytics (tooltip, table), phone-এ drawer আর settings। ধাপ ১ আর ২-এর পরীক্ষা আবার চালিয়ে সব পাস।
 - Attachment একসাথে সর্বোচ্চ ১৫ MB (server-এর ২৫ MB JSON সীমার মধ্যে থাকার জন্য)।
 
 ## ৫. আপনাদের যা করতে হবে

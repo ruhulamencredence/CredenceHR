@@ -8,12 +8,15 @@
 
 import React, { useEffect, useState } from 'react';
 import {
-  ArrowLeft, Reply, ReplyAll, Forward, Star, Trash2, MailOpen, Mail, ShieldAlert, Inbox, Archive, Paperclip, Download, Loader2, Clock, ChevronDown, ChevronUp, AlertCircle
+  ArrowLeft, Reply, ReplyAll, Forward, Star, Trash2, MailOpen, Mail, ShieldAlert, Inbox, Archive, Paperclip, Download, Loader2, Clock, ChevronDown, ChevronUp, AlertCircle,
+  MoreVertical, ListChecks, CalendarPlus, UserPlus, Filter, Ban
 } from 'lucide-react';
 import { MailBody } from './MailBody';
 import { MailAttachment, MailMessage, SYSTEM_LABELS, fetchAttachment, formatBytes, fullMailDate, saveBlob, shortMailDate } from '../../lib/mailApi';
 
-export type ReaderAction = 'reply' | 'replyAll' | 'forward' | 'star' | 'unread' | 'trash' | 'spam' | 'notSpam' | 'archive' | 'inbox' | 'unschedule';
+export type ReaderAction =
+  | 'reply' | 'replyAll' | 'forward' | 'star' | 'unread' | 'trash' | 'spam' | 'notSpam' | 'archive' | 'inbox' | 'unschedule'
+  | 'task' | 'event' | 'contact' | 'rule' | 'block';
 
 const initials = (s: string) =>
   (s || '?')
@@ -144,6 +147,7 @@ export const MailReader: React.FC<{
   onAction: (action: ReaderAction, m: MailMessage) => void;
 }> = ({ token, thread, folder, error, onBack, onAction }) => {
   const [openIds, setOpenIds] = useState<Set<string>>(new Set());
+  const [more, setMore] = useState(false);
   const last = thread && thread.length ? thread[thread.length - 1] : null;
   useEffect(() => {
     // The latest mail, and any unread one, start open.
@@ -193,6 +197,41 @@ export const MailReader: React.FC<{
         <button type="button" className={`${btn} hover:text-rose-600`} onClick={() => onAction('trash', last)} title={inTrash || scheduled ? 'Delete for good' : 'Delete'}>
           <Trash2 className="w-4 h-4" />
         </button>
+        {!scheduled && (
+          <div className="relative">
+            <button type="button" className={btn} onClick={() => setMore((v) => !v)} aria-label="More" aria-expanded={more} title="More">
+              <MoreVertical className="w-4 h-4" />
+            </button>
+            {more && (
+              <>
+                <div className="fixed inset-0 z-20" onClick={() => setMore(false)} />
+                <div className="absolute right-0 top-full mt-1 z-30 w-56 rounded-2xl bg-white shadow-xl ring-1 ring-black/5 py-1.5">
+                  {(
+                    [
+                      ['task', 'Add as a task', ListChecks],
+                      ['event', 'Add to calendar', CalendarPlus],
+                      ['contact', `Add ${head.from.name.split(' ')[0] || 'sender'} to contacts`, UserPlus],
+                      ['rule', 'Rule for mail like this', Filter],
+                      ['block', `Block ${last.from.email}`, Ban]
+                    ] as [ReaderAction, string, React.ComponentType<{ className?: string }>][]
+                  ).map(([a, label, Icon]) => (
+                    <button
+                      key={a}
+                      type="button"
+                      onClick={() => {
+                        setMore(false);
+                        onAction(a, a === 'contact' || a === 'block' || a === 'rule' ? last : head);
+                      }}
+                      className={`w-full flex items-center gap-2.5 px-3.5 py-2 text-sm text-left hover:bg-slate-50 ${a === 'block' ? 'text-rose-600' : 'text-slate-700'}`}
+                    >
+                      <Icon className="w-4 h-4 shrink-0" /> <span className="truncate">{label}</span>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto px-3 sm:px-6 py-4">
