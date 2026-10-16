@@ -179,9 +179,14 @@ async function applyTransferEffect(
     );
     const currentSupervisorId = currentSupervisorRows.length > 0 ? currentSupervisorRows[0].supervisor_id : null;
     if (row.to_supervisor_id !== currentSupervisorId) {
+      // The old direct supervisor is removed, not kept as an indirect one —
+      // otherwise they keep seeing / approving this person's targets and
+      // getting their alerts after the move. The transfer row itself keeps
+      // the history (from_supervisor_id). Any existing row for the new
+      // supervisor goes too, so they aren't listed twice.
       await queryDB(
-        "UPDATE employee_supervisors SET is_direct = 0 WHERE employee_id = ? AND is_direct = 1",
-        [row.employee_id]
+        "DELETE FROM employee_supervisors WHERE employee_id = ? AND (is_direct = 1 OR supervisor_id = ?)",
+        [row.employee_id, row.to_supervisor_id]
       );
       await queryDB(
         "INSERT INTO employee_supervisors (employee_id, supervisor_id, effective_date, is_direct) VALUES (?, ?, ?, 1)",

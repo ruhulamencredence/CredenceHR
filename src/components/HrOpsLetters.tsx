@@ -147,7 +147,8 @@ export const LetterComposer: React.FC<{
       const r = init.request
         ? await api.post<any>(`/api/hr-ops/letter-requests/${init.request.id}/decision`, { decision: 'issued', ...payload })
         : await api.post<any>('/api/hr-ops/letters', payload);
-      onIssued(r.ref_no);
+      // A letter to someone who can't log in any more is emailed to them (HROperationsRoutes.ts).
+      onIssued(r.emailed_to ? `${r.ref_no} (emailed to ${r.emailed_to})` : r.email_error ? `${r.ref_no} (${r.email_error})` : r.ref_no);
     } catch (e: any) {
       setErr(e.message);
     } finally {

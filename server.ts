@@ -51,6 +51,7 @@ import { registerCallRoutes, setupCallSocket } from "./CallRoutes";
 import { ensureMailSchema, registerMailRoutes } from "./MailRoutes";
 import { ensureRosterSchema, registerRosterRoutes } from "./RosterRoutes";
 import { ensureESignSchema, registerESignRoutes } from "./ESignRoutes";
+import { ensurePayslipSchema, registerPayslipRoutes } from "./PayslipRoutes";
 import { registerWebPushRoutes, ensureWebPushSchema } from "./WebPushService";
 import { sendPushToUserIds } from "./PushNotificationService";
 import { registerEmployeeDirectoryRoutes } from "./EmployeeDirectoryRoutes";
@@ -223,6 +224,8 @@ async function initDB() {
     await ensureRosterSchema(dbPool);
     // E-Signature on Document Vault documents (ESignRoutes.ts).
     await ensureESignSchema(dbPool);
+    // Self Service -> My Payslip switch (PayslipRoutes.ts).
+    await ensurePayslipSchema(dbPool);
     await ensureZkSchema(dbPool);
     // ZKTeco polling + daily pulls: one process only (jobRunner.ts).
     if (runsBackgroundJobs()) startZkSyncSchedule(dbPool);
@@ -2619,6 +2622,8 @@ async function startServer() {
   registerDocumentVaultRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB, getAdminModules });
   // E-Signature: signers in order, signature images, signed PDF, public /verify (ESignRoutes.ts).
   registerESignRoutes(app, { authenticateToken, requireAdmin, requireModule, hasModuleLayer, getAdminModules, queryDB, createAlert });
+  // Self Service -> My Payslip (PayslipRoutes.ts, users.can_view_payslip).
+  registerPayslipRoutes(app, { authenticateToken, queryDB });
   registerHROperationsRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB, getAdminModules, todayInDhaka, createAlert });
   registerOnboardingRoutes(app, { authenticateToken, requireModule, hasModuleLayer, queryDB, withTransaction: isMySQLConnected && dbPool ? withDbTransaction : undefined });
   // HR reminders (probation / contract / document / retirement / increment
