@@ -222,6 +222,12 @@ describe("Exit dues (live server)", () => {
     assert.equal(ex.code, 201);
     const exitId = ex.body.id;
     try {
+      // Settling also needs the exit in Clearance with every department
+      // cleared — done up front so only the SIM and the loan are left to block.
+      assert.equal((await call("PUT", `/api/exit-requests/${exitId}/status`, admin.token, { status: "clearance" })).code, 200);
+      for (const item of ex.body.clearance_items || []) {
+        assert.equal((await call("PUT", `/api/exit-clearance-items/${item.id}`, admin.token, { is_cleared: true, remarks: "Cleared" })).code, 200);
+      }
       const dues = (await call("GET", `/api/exit-requests/${exitId}/dues`, admin.token)).body.items;
       const loanKey = `loan:${loan.body.id}`;
       assert.ok(dues.some((d: any) => d.kind === "sim" && d.blocking));
