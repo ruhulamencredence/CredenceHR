@@ -475,7 +475,12 @@ export function registerTargetRoutes(app: Express, deps: TargetRouteDeps) {
     if (t.created_by !== Number(user.id)) throw bad("Only the person who made this draft can share it.", 403);
     if (!t.task_count) throw bad("Add at least one task before sharing.");
     const self = t.user_id === Number(user.id);
-    const sups = self ? await supervisorsOf(t.user_id) : [];
+    // Only supervisors who have My Targets on can open and approve it — sent
+    // to anyone else it would sit at "pending" with nobody able to act.
+    const allSups = self ? await supervisorsOf(t.user_id) : [];
+    const sups = allSups.length
+      ? (await rows(`SELECT id FROM users WHERE id IN (${placeholders(allSups.length)}) AND (can_view_targets = 1 OR role = 'superadmin')`, allSups)).map((r) => Number(r.id))
+      : [];
     const status = self && sups.length ? "pending" : "active";
     const claim: any = await queryDB(
       `UPDATE targets SET status = ?, shared_at = NOW()${status === "active" && self ? ", approved_at = NOW()" : ""} WHERE id = ? AND status = 'draft'`,
