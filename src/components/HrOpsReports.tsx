@@ -56,6 +56,7 @@ import {
 import { Spinner } from './Spinner';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
 import { savePdfCrossPlatform } from '../lib/saveFile';
+import { EmailReportButton, emailReport, useCanEmailReports } from '../lib/reportEmail';
 import credenceLogo from '../assets/credence-logo.png';
 import { pdfSafe } from './HrOps360Parts';
 import { FixGapsModal, RequestInfoModal, InfoRequestsReview } from './HrOpsGapTools';
@@ -110,6 +111,9 @@ interface Schedule {
   hour: number;
   recipients: number[];
   only_if_rows: boolean;
+  // Also email the result as an Excel file (needs "Email reports").
+  email?: boolean;
+  extra_emails?: string[];
 }
 interface SavedReport {
   id: number;
@@ -405,7 +409,7 @@ function exportExcel(title: string, r: ReportResult) {
   XLSX.writeFile(wb, `${title.replace(/[^\w]+/g, '_')}.xlsx`);
 }
 
-async function exportPdf(title: string, r: ReportResult, filtersText: string) {
+async function exportPdf(title: string, r: ReportResult, filtersText: string, mode: 'save' | 'email' = 'save') {
   const logo = await loadImageElement(credenceLogo);
   const wide = r.columns.length > 6;
   const doc = new jsPDF({ orientation: wide ? 'landscape' : 'portrait' });
@@ -438,6 +442,10 @@ async function exportPdf(title: string, r: ReportResult, filtersText: string) {
     headStyles: { ...STD_HEAD }
   });
   finalizePdfPageNumbers(doc);
+  if (mode === 'email') {
+    await emailReport(doc, { fileName: `${title.replace(/[^\w]+/g, '_')}.pdf`, title: pdfSafe(title) });
+    return;
+  }
   await savePdfCrossPlatform(doc, `${title.replace(/[^\w]+/g, '_')}.pdf`);
 }
 
@@ -456,6 +464,7 @@ const ResultView: React.FC<{
   // Row selection + "Request from employees" + per-row "Fix" (Report Builder).
   gapTools?: { token: string; canUpload: boolean; onChanged: () => void };
 }> = ({ title, result, filtersText, onOpenEmployee, gapTools }) => {
+  const canEmailReports = useCanEmailReports();
   const [groupKey, setGroupKey] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [fixing, setFixing] = useState<{ employee_id: number; name: string; user_id: number | null } | null>(null);
@@ -519,6 +528,7 @@ const ResultView: React.FC<{
           <button type="button" className={btnGhost} onClick={() => exportPdf(title, { ...result, rows, total: rows.length }, filtersText || '')}>
             <FileDown className="w-3.5 h-3.5" /> PDF
           </button>
+          {canEmailReports && <EmailReportButton className={btnGhost} onClick={() => exportPdf(title, { ...result, rows, total: rows.length }, filtersText || '', 'email')} />}
         </div>
       </div>
       {result.groups && result.group_by && (
@@ -1044,11 +1054,20 @@ const SaveModal: React.FC<{
   const [scheduled, setScheduled] = useState(!!saved?.schedule);
   const [s, setS] = useState<Schedule>(saved?.schedule || { frequency: 'monthly', weekday: 0, day: 1, hour: 9, recipients: [], only_if_rows: true });
   const [msg, setMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const canEmailReports = useCanEmailReports();
+  const [extraText, setExtraText] = useState((saved?.schedule?.extra_emails || []).join(', '));
+  const extra = extraText
+    .split(/[\s,;]+/)
+    .map((x) => x.trim().toLowerCase())
+    .filter(Boolean);
   const save = async () => {
-    if (scheduled && s.recipients.length === 0) return setMsg({ type: 'error', text: 'Pick at least one person to notify.' });
+    const emailing = canEmailReports && !!s.email;
+    if (scheduled && s.recipients.length === 0 && !(emailing && extra.length)) return setMsg({ type: 'error', text: 'Pick at least one person to notify.' });
+    const badExtra = extra.filter((x) => !/^[^\s@<>(),;:"]+@[^\s@<>(),;:"]+\.[^\s@<>(),;:"]+$/.test(x));
+    if (emailing && badExtra.length) return setMsg({ type: 'error', text: `Not an email address: ${badExtra.join(', ')}` });
     setSaving(true);
     try {
-      const body = { name, config, schedule: scheduled ? s : null };
+      const body = { name, config, schedule: scheduled ? { ...s, email: emailing, extra_emails: emailing ? extra : [] } : null };
       if (saved) await api.put(`/api/hr-ops/saved-reports/${saved.id}`, body);
       else await api.post('/api/hr-ops/saved-reports', body);
       onSaved();
@@ -1148,6 +1167,20 @@ const SaveModal: React.FC<{
             <label className="flex items-center gap-2 text-xs text-slate-700">
               <input type="checkbox" checked={s.only_if_rows} onChange={(e) => setS({ ...s, only_if_rows: e.target.checked })} /> Skip when no employee matches
             </label>
+            {canEmailReports && (
+              <div className="rounded-lg bg-violet-50/60 border border-violet-100 p-2.5 space-y-2">
+                <label className="flex items-center gap-2 text-xs font-semibold text-slate-700">
+                  <input type="checkbox" checked={!!s.email} onChange={(e) => setS({ ...s, email: e.target.checked })} /> Also email it (Excel attached)
+                </label>
+                {s.email && (
+                  <div>
+                    <label className={labelCls}>Also to these email addresses (optional)</label>
+                    <input value={extraText} onChange={(e) => setExtraText(e.target.value)} placeholder="e.g. md@company.com, auditor@firm.com" className={inputCls} />
+                    <p className="text-[10px] text-slate-400 mt-1">The people ticked above get it at the email on their account; up to 10 more addresses here.</p>
+                  </div>
+                )}
+              </div>
+            )}
             {(config.month === 'current' || config.year === 'current') && s.frequency === 'monthly' && s.day <= 5 && (
               <p className="text-[11px] text-amber-700">Tip: early in the month, "Last month" usually makes more sense for attendance / leave figures.</p>
             )}
@@ -1428,7 +1461,10 @@ export const HrOpsReports: React.FC<{ token: string; onOpenEmployee: (id: number
                       onClick={async () => {
                         try {
                           const x = await api.post<any>(`/api/hr-ops/saved-reports/${r.id}/send`);
-                          setMsg({ type: 'success', text: `Sent: ${x.count} employee(s), ${x.notified} person(s) notified.` });
+                          setMsg({
+                            type: x.email_error ? 'error' : 'success',
+                            text: `Sent: ${x.count} employee(s), ${x.notified} person(s) notified${x.emailed ? `, emailed to ${x.emailed}` : ''}.${x.email_error ? ` Not emailed: ${x.email_error}` : ''}`
+                          });
                           loadSaved();
                         } catch (e: any) {
                           setMsg({ type: 'error', text: e.message });

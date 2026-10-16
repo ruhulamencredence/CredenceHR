@@ -21,6 +21,7 @@ import { drawStandardHeader, loadPdfCompany, standardTable } from '../lib/pdfSta
 import { savePdfCrossPlatform } from '../lib/saveFile';
 import { fmtDate, periodLabel, ProgressBar, STATUS_LABEL, StatusBadge, Target, TargetDrawer, targetApi, TASK_STATUS_LABEL, TargetStatus, todayYmd } from './TargetParts';
 import { LoadingBlock } from './LoadingBlock';
+import { EmailReportButton, emailReport, useCanEmailReports } from '../lib/reportEmail';
 
 interface Counts {
   targets: number;
@@ -76,6 +77,7 @@ export const TargetReports: React.FC<{ token: string; user: User }> = ({ token }
   const [busy, setBusy] = useState(false);
   const [openId, setOpenId] = useState<number | null>(null);
   const [reload, setReload] = useState(0);
+  const canEmailReports = useCanEmailReports();
 
   // A real month of the chosen year is picked ("Every month" leaves YYYY-00).
   const monthOn = type === 'monthly' && month.startsWith(year) && /-(0[1-9]|1[0-2])$/.test(month);
@@ -159,7 +161,7 @@ export const TargetReports: React.FC<{ token: string; user: User }> = ({ token }
       setBusy(false);
     }
   };
-  const pdf = async () => {
+  const pdf = async (mode: 'save' | 'email' = 'save') => {
     setBusy(true);
     setError('');
     try {
@@ -183,6 +185,10 @@ export const TargetReports: React.FC<{ token: string; user: User }> = ({ token }
         columnStyles: { 0: { halign: 'center', cellWidth: 8 } }
       });
       finalizePdfPageNumbers(doc);
+      if (mode === 'email') {
+        await emailReport(doc, { fileName: `${fileBase}.pdf`, title: 'Target Report' });
+        return;
+      }
       await savePdfCrossPlatform(doc, `${fileBase}.pdf`);
     } catch (e: any) {
       setError(e.message || 'Could not make the PDF.');
@@ -202,9 +208,12 @@ export const TargetReports: React.FC<{ token: string; user: User }> = ({ token }
         </h2>
         {data?.can_export && (
           <div className="flex gap-2">
-            <button type="button" disabled={busy} onClick={pdf} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+            <button type="button" disabled={busy} onClick={() => pdf()} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-50">
               <FileDown className="w-3.5 h-3.5" /> PDF
             </button>
+            {canEmailReports && (
+              <EmailReportButton onClick={() => pdf('email')} disabled={busy} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-50" />
+            )}
             <button type="button" disabled={busy} onClick={excel} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-50">
               <FileSpreadsheet className="w-3.5 h-3.5" /> Excel
             </button>

@@ -48,6 +48,7 @@ import { ModulePath } from './ModulePath';
 import { confirmDialog } from '../lib/confirmDialog';
 
 import { STD_STYLES, STD_HEAD } from '../lib/pdfStandard';
+import { EmailReportButton, emailReport, useCanEmailReports } from '../lib/reportEmail';
 interface UserPanelProps {
   token: string;
   user: User;
@@ -1495,6 +1496,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // see handleExportPdf below).
   const [pdfPreview, setPdfPreview] = useState<{ doc: any; bytes: Uint8Array; filename: string } | null>(null);
   const closePdfPreview = () => setPdfPreview(null);
+  const canEmailReports = useCanEmailReports();
 
   // Android hardware back button: each of these closes just that one
   // modal/drill-down instead of exiting the app (see useBackButtonClose.ts).
@@ -2371,7 +2373,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
   // straight to the native Share sheet instead (which itself offers "Open
   // with [PDF viewer]" as well as "Save to..." — effectively the native
   // equivalent of preview-then-download).
-  const handleExportPdf = async () => {
+  const handleExportPdf = async (mode: 'save' | 'email' = 'save') => {
     const logoImg = await loadImageElement(credenceLogo);
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
 
@@ -2439,6 +2441,10 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
     finalizePdfPageNumbers(doc);
 
     const filename = `Job_Entry_Details_${todayDateOnlyString()}.pdf`;
+    if (mode === 'email') {
+      await emailReport(doc, { fileName: filename, title: letterheadOptions.reportTitle });
+      return;
+    }
     // Always preview first — on every platform, including the Android APK —
     // rather than jumping straight to a save/share action. Nothing is written
     // to disk or shared until the user explicitly taps Download inside the
@@ -4586,13 +4592,20 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
                   </span>
                   <button
                     type="button"
-                    onClick={handleExportPdf}
+                    onClick={() => handleExportPdf()}
                     disabled={filteredEntries.length === 0}
                     title="Download this table as a PDF"
                     className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                   >
                     <FileDown className="w-3.5 h-3.5" /> Export PDF
                   </button>
+                  {canEmailReports && (
+                    <EmailReportButton
+                      onClick={() => handleExportPdf('email')}
+                      disabled={filteredEntries.length === 0}
+                      className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-medium whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    />
+                  )}
                 </div>
               </div>
 

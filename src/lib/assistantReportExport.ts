@@ -11,6 +11,7 @@
 import { isNativePlatform, savePdfCrossPlatform } from './saveFile';
 import { drawStandardHeader, loadPdfCompany, standardTable } from './pdfStandard';
 import { finalizePdfPageNumbers } from './pdfLetterhead';
+import { emailReport } from './reportEmail';
 
 export interface AssistantReport {
   title: string;
@@ -22,7 +23,7 @@ export interface AssistantReport {
 
 const cell = (v: string | number | null) => (v === null || v === undefined ? '' : String(v));
 
-export async function downloadAssistantPdf(token: string, r: AssistantReport, preparedBy: string) {
+export async function downloadAssistantPdf(token: string, r: AssistantReport, preparedBy: string, mode: 'save' | 'email' = 'save') {
   const [{ default: jsPDF }, { default: autoTable }, co] = await Promise.all([import('jspdf'), import('jspdf-autotable'), loadPdfCompany(token)]);
   const doc = new jsPDF({ orientation: r.columns.length > 6 ? 'landscape' : 'portrait', unit: 'mm', format: 'a4' });
   const y = drawStandardHeader(doc, co, r.title, [...(r.details || []), ['Prepared by', preparedBy]]);
@@ -33,6 +34,10 @@ export async function downloadAssistantPdf(token: string, r: AssistantReport, pr
     columnStyles: { 0: { halign: 'center', cellWidth: 9 } }
   });
   finalizePdfPageNumbers(doc);
+  if (mode === 'email') {
+    await emailReport(doc, { fileName: `${r.file}.pdf`, title: r.title });
+    return;
+  }
   await savePdfCrossPlatform(doc, `${r.file}.pdf`);
 }
 

@@ -8,6 +8,7 @@ import { formatDate, todayDateOnlyString } from '../lib/formatDate';
 import { finalizePdfPageNumbers } from '../lib/pdfLetterhead';
 import { drawStandardHeader, loadPdfCompany, pdfMoney, standardTable } from '../lib/pdfStandard';
 import { savePdfCrossPlatform } from '../lib/saveFile';
+import { EmailReportButton, emailReport, useCanEmailReports } from '../lib/reportEmail';
 import { Spinner } from './Spinner';
 import { PagerBar } from './PagerBar';
 import { confirmDialog } from '../lib/confirmDialog';
@@ -100,6 +101,7 @@ const suggestVoucherNo = (billId: number) => {
 // BUILD bills without also being trusted to authorize payouts, and vice versa.
 export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, users }) => {
   const authHeaders = { Authorization: `Bearer ${token}` };
+  const canEmailReports = useCanEmailReports();
   const plainUsers = users.filter((u) => u.role === 'user');
 
   const [bills, setBills] = useState<ConveyanceBill[]>([]);
@@ -191,7 +193,7 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
   // /api/conveyance-bills) only returns item_count/total_amount, not the
   // actual line items, so this always does its own GET .../:id fetch first
   // rather than trusting whatever's already sitting in `bills` state.
-  const buildAndSaveVoucherPdf = async (billId: number) => {
+  const buildAndSaveVoucherPdf = async (billId: number, mode: 'save' | 'email' = 'save') => {
     const res = await fetch(apiUrl(`/api/conveyance-bills/${billId}`), { headers: authHeaders });
     if (!res.ok) throw new Error(`Failed to load Bill CB-${billId} for its voucher.`);
     const bill: ConveyanceBill = await res.json();
@@ -293,14 +295,18 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
 
     finalizePdfPageNumbers(doc);
     const filename = `Payment_Voucher_${bill.voucher_no || bill.id}_${bill.user_name?.replace(/\s+/g, '_') || 'user'}.pdf`;
+    if (mode === 'email') {
+      await emailReport(doc, { fileName: filename, title: 'Conveyance Payment Voucher' });
+      return;
+    }
     await savePdfCrossPlatform(doc, filename);
   };
 
   const [printingId, setPrintingId] = useState<number | null>(null);
-  const handlePrintVoucher = async (billRow: ConveyanceBill) => {
+  const handlePrintVoucher = async (billRow: ConveyanceBill, mode: 'save' | 'email' = 'save') => {
     setPrintingId(billRow.id);
     try {
-      await buildAndSaveVoucherPdf(billRow.id);
+      await buildAndSaveVoucherPdf(billRow.id, mode);
     } catch (err) {
       console.error('Failed to print voucher', err);
       alert('Failed to load bill details for the voucher. Please try again.');
@@ -518,6 +524,13 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
                         >
                           {printingId === b.id ? <Spinner size={14} /> : <Printer className="w-3.5 h-3.5" />} Print Voucher
                         </button>
+                        {canEmailReports && (
+                          <EmailReportButton
+                            onClick={() => handlePrintVoucher(b, 'email')}
+                            disabled={printingId === b.id}
+                            className="flex items-center justify-center gap-1.5 text-xs px-3 py-2 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-700 font-medium transition-colors disabled:opacity-50"
+                          />
+                        )}
                         <button
                           type="button"
                           onClick={() => handleUndoDisburse(b.id)}
@@ -601,6 +614,14 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
                               >
                                 {printingId === b.id ? <Spinner size={14} /> : <Printer className="w-3.5 h-3.5" />}
                               </button>
+                              {canEmailReports && (
+                                <EmailReportButton
+                                  onClick={() => handlePrintVoucher(b, 'email')}
+                                  disabled={printingId === b.id}
+                                  title="Email Payment Voucher as a PDF"
+                                  className="flex items-center gap-1 p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors disabled:opacity-50"
+                                />
+                              )}
                               <button
                                 type="button"
                                 onClick={() => handleUndoDisburse(b.id)}

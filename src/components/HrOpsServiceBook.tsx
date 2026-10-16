@@ -15,6 +15,7 @@ import autoTable from 'jspdf-autotable';
 import { UserPlus, TrendingUp, ArrowLeftRight, BadgeCheck, Banknote, FileText, Gavel, LogOut, Award, Circle } from 'lucide-react';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
 import { savePdfCrossPlatform } from '../lib/saveFile';
+import { emailReport } from '../lib/reportEmail';
 import credenceLogo from '../assets/credence-logo.png';
 import { Badge, fmtDate } from './HrOpsShared';
 
@@ -106,7 +107,7 @@ export const ServiceTimeline: React.FC<{ events: ServiceEvent[] }> = ({ events }
     </ol>
   );
 
-export async function saveServiceBookPdf(data: ServiceBookData) {
+export async function saveServiceBookPdf(data: ServiceBookData, mode: 'save' | 'email' = 'save') {
   if (!data.employee) return;
   const e = data.employee;
   const logo = await loadImageElement(credenceLogo);
@@ -143,5 +144,9 @@ export async function saveServiceBookPdf(data: ServiceBookData) {
     headStyles: { ...STD_HEAD }
   });
   finalizePdfPageNumbers(doc);
+  if (mode === 'email') {
+    await emailReport(doc, { fileName: `Service_Book_${e.name.replace(/\s+/g, '_')}.pdf`, title: 'Employee Service Book' });
+    return;
+  }
   await savePdfCrossPlatform(doc, `Service_Book_${e.name.replace(/\s+/g, '_')}.pdf`);
 }

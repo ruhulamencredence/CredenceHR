@@ -18,6 +18,7 @@ import { LiveFollowModal } from './LiveFollowModal';
 import { formatDate } from '../lib/formatDate';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
 import { savePdfCrossPlatform } from '../lib/saveFile';
+import { EmailReportButton, emailReport, useCanEmailReports } from '../lib/reportEmail';
 import credenceLogo from '../assets/credence-logo.png';
 
 import { STD_STYLES, STD_HEAD } from '../lib/pdfStandard';
@@ -126,6 +127,7 @@ function agoLabel(iso: string): string {
 //  - Path playback: click a user's row (or "View Path") to instead draw their
 //    full ping history for an optional date range as a connected purple trail.
 export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ token, canStayReport = false, canLive = false }) => {
+  const canEmailReports = useCanEmailReports();
   // Live Follow (LiveFollowModal) — who is open, if anyone.
   const [following, setFollowing] = useState<{ id: number; name: string } | null>(null);
   // Stay Report (TrackingStayReport.tsx) — the tracking module's "Stay Report" layer.
@@ -291,7 +293,7 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
   // point first, one row per ping, so an Admin can hand someone "where was
   // this employee between X and Y" as a document instead of a map they'd have
   // to screenshot.
-  const handleExportReport = useCallback(async () => {
+  const handleExportReport = useCallback(async (mode: 'save' | 'email' = 'save') => {
     if (!selectedUser || history.length === 0) return;
     setExportingReport(true);
     try {
@@ -330,6 +332,10 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
 
       finalizePdfPageNumbers(doc);
       const safeName = selectedUser.name.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'Employee';
+      if (mode === 'email') {
+        await emailReport(doc, { fileName: `Tracking-History-${safeName}.pdf`, title: letterheadOptions.reportTitle });
+        return;
+      }
       await savePdfCrossPlatform(doc, `Tracking-History-${safeName}.pdf`);
     } catch (err: any) {
       setError(err.message || 'Failed to export report');
@@ -642,12 +648,19 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 <button
-                  onClick={handleExportReport}
+                  onClick={() => handleExportReport()}
                   disabled={exportingReport}
                   className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
                 >
                   <FileDown className="w-3.5 h-3.5" /> {exportingReport ? 'Preparing…' : 'Download PDF'}
                 </button>
+                {canEmailReports && (
+                  <EmailReportButton
+                    onClick={() => handleExportReport('email')}
+                    disabled={exportingReport}
+                    className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-emerald-600 bg-white text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
+                  />
+                )}
                 <button
                   onClick={() => setShowReport(false)}
                   className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:bg-slate-100 hover:text-slate-600"

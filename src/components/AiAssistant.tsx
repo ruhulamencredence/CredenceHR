@@ -16,6 +16,7 @@ import { ArrowRight, CalendarCheck, CheckCircle2, FileSpreadsheet, FileText, Hea
 import { apiUrl } from '../lib/api';
 import type { User } from '../types';
 import { downloadAssistantExcel, downloadAssistantPdf, type AssistantReport } from '../lib/assistantReportExport';
+import { EmailReportButton, useCanEmailReports } from '../lib/reportEmail';
 import { LiveChat, SupportInbox, supportApi, useSupportSocket, type SupportMessage, type SupportSession } from './AssistantSupport';
 
 interface Action { label: string; nav: string }
@@ -37,13 +38,15 @@ interface Msg { role: 'user' | 'assistant'; text: string; actions?: Action[]; dr
 // PDF / Excel of the full list behind an answer. The server only sends a
 // report to accounts with "Assistant — report PDF / Excel download" ticked.
 const ReportButtons: React.FC<{ token: string; report: AssistantReport; preparedBy: string }> = ({ token, report, preparedBy }) => {
-  const [busy, setBusy] = useState<'pdf' | 'xlsx' | null>(null);
+  const [busy, setBusy] = useState<'pdf' | 'xlsx' | 'email' | null>(null);
   const [err, setErr] = useState('');
-  const run = async (kind: 'pdf' | 'xlsx') => {
+  const canEmailReports = useCanEmailReports();
+  const run = async (kind: 'pdf' | 'xlsx' | 'email') => {
     setBusy(kind);
     setErr('');
     try {
       if (kind === 'pdf') await downloadAssistantPdf(token, report, preparedBy);
+      else if (kind === 'email') await downloadAssistantPdf(token, report, preparedBy, 'email');
       else await downloadAssistantExcel(report, preparedBy);
     } catch {
       setErr('ফাইল বানানো যায়নি, আবার চেষ্টা করুন।');
@@ -59,6 +62,7 @@ const ReportButtons: React.FC<{ token: string; report: AssistantReport; prepared
         <button type="button" disabled={!!busy} onClick={() => run('pdf')} className={`${btn} text-rose-700`} aria-label="Download PDF">
           {busy === 'pdf' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />} PDF
         </button>
+        {canEmailReports && <EmailReportButton onClick={() => run('email')} disabled={!!busy} className={`${btn} text-sky-700`} />}
         <button type="button" disabled={!!busy} onClick={() => run('xlsx')} className={`${btn} text-emerald-700`} aria-label="Download Excel">
           {busy === 'xlsx' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileSpreadsheet className="w-3.5 h-3.5" />} Excel
         </button>

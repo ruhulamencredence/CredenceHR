@@ -13,6 +13,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from './pdfLetterhead';
 import { savePdfCrossPlatform } from './saveFile';
+import { emailReport } from './reportEmail';
 import credenceLogo from '../assets/credence-logo.png';
 
 import { STD_STYLES, STD_HEAD, STD_FOOT } from './pdfStandard';
@@ -78,7 +79,7 @@ function drawSignatures(doc: jsPDF, y: number, labels: string[]) {
   });
 }
 
-export async function saveClearanceCertificatePdf(d: ExitDocuments) {
+export async function saveClearanceCertificatePdf(d: ExitDocuments, mode: 'save' | 'email' = 'save') {
   const logo = await loadImageElement(credenceLogo);
   const doc = new jsPDF();
   let y = drawPdfLetterhead(doc, logo, { reportTitle: 'Clearance Certificate', filtersLabel: 'Employee Details:', filters: personRows(d) });
@@ -111,10 +112,14 @@ export async function saveClearanceCertificatePdf(d: ExitDocuments) {
   doc.text(all ? 'All departments cleared' : 'Clearance incomplete', 14, y + 9);
   drawSignatures(doc, y + 10, ['Prepared by (HR)', 'Authorised Signatory']);
   finalizePdfPageNumbers(doc);
+  if (mode === 'email') {
+    await emailReport(doc, { fileName: `Clearance_Certificate_${fileSafe(d.employee.name)}.pdf`, title: 'Clearance Certificate' });
+    return;
+  }
   await savePdfCrossPlatform(doc, `Clearance_Certificate_${fileSafe(d.employee.name)}.pdf`);
 }
 
-export async function saveSettlementSheetPdf(d: ExitDocuments) {
+export async function saveSettlementSheetPdf(d: ExitDocuments, mode: 'save' | 'email' = 'save') {
   const s = d.settlement;
   if (!s) throw new Error('There is no settlement for this exit yet — open the settlement first.');
   const logo = await loadImageElement(credenceLogo);
@@ -158,5 +163,9 @@ export async function saveSettlementSheetPdf(d: ExitDocuments) {
   }
   drawSignatures(doc, end + 6, ['Prepared by' + (s.prepared_by ? ` (${s.prepared_by})` : ''), 'Employee (received)', 'Approved by']);
   finalizePdfPageNumbers(doc);
+  if (mode === 'email') {
+    await emailReport(doc, { fileName: `Final_Settlement_${fileSafe(d.employee.name)}.pdf`, title: 'Full & Final Settlement' });
+    return;
+  }
   await savePdfCrossPlatform(doc, `Final_Settlement_${fileSafe(d.employee.name)}.pdf`);
 }

@@ -13,12 +13,9 @@
 //   * Individual Payslip View & Print / Download — View opens the PDF in a
 //     new tab (the browser's own viewer gives Print/Save for free);
 //     Download saves it straight to disk via savePdfCrossPlatform.
-//   * Email Payslips — per-employee and "Email All" buttons. NOTE: this
-//     calls POST /api/payroll/:id/email and POST /api/payroll/email-bulk,
-//     which do not exist yet in PayrollRoutes.ts (no SMTP/mailer is wired
-//     up anywhere in this project) — the buttons are ready, but the server
-//     route + mail transport still need to be added before they can
-//     actually send anything.
+//   * Email Payslips — per-employee and "Email All" buttons: each employee
+//     gets an email with their payslip PDF (the same file as the PDF
+//     button) attached, via POST /api/payroll/:id/email.
 
 import React, { useEffect, useMemo, useState } from 'react';
 import jsPDF from 'jspdf';
@@ -125,18 +122,27 @@ export const PayslipManagementPanel: React.FC<PayslipManagementPanelProps> = ({ 
   };
 
   // ---- Email: per-employee and "Email All" --------------------------------
-  // Backend route not implemented yet — see file header note.
+  // The same PDF as the PDF button, built here and attached by the server.
+  const sendPayslipEmail = async (record: PayrollRecord) => {
+    const doc = await buildSinglePayslip(record);
+    const pdf_base64 = String(doc.output('datauristring')).split(',')[1] || '';
+    return fetch(apiUrl(`/api/payroll/${record.id}/email`), {
+      method: 'POST',
+      headers: { ...authHeaders, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pdf_base64 })
+    });
+  };
   const emailPayslip = async (record: PayrollRecord) => {
     setBusyId(record.id);
     setNotice(null);
     try {
-      const res = await fetch(apiUrl(`/api/payroll/${record.id}/email`), { method: 'POST', headers: authHeaders });
+      const res = await sendPayslipEmail(record);
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         setNotice({ type: 'error', text: data.error || `Couldn't email ${record.employee_name}'s payslip — email sending isn't set up on the server yet.` });
         return;
       }
-      setNotice({ type: 'success', text: `Payslip emailed to ${record.employee_name}.` });
+      setNotice({ type: 'success', text: `Payslip emailed to ${record.employee_name} with the PDF attached.` });
     } catch {
       setNotice({ type: 'error', text: `Couldn't email ${record.employee_name}'s payslip — email sending isn't set up on the server yet.` });
     } finally {
@@ -144,23 +150,29 @@ export const PayslipManagementPanel: React.FC<PayslipManagementPanelProps> = ({ 
     }
   };
 
+  // One email per employee, each with their own payslip PDF attached.
   const emailAllPayslips = async () => {
     if (records.length === 0) return;
     setBulkBusy('email');
     setNotice(null);
     try {
-      const res = await fetch(apiUrl('/api/payroll/email-bulk'), {
-        method: 'POST',
-        headers: { ...authHeaders, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ month_year: monthYear })
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setNotice({ type: 'error', text: data.error || "Couldn't email payslips — email sending isn't set up on the server yet." });
-        return;
+      let sent = 0;
+      const failed: string[] = [];
+      for (const [i, record] of records.entries()) {
+        setNotice({ type: 'success', text: `Emailing ${i + 1} of ${records.length}…` });
+        const res = await sendPayslipEmail(record);
+        const data = await res.json().catch(() => ({}));
+        if (res.ok) sent++;
+        else {
+          failed.push(`${record.employee_name}: ${data.error || 'failed'}`);
+          // Email not set up at all: stop instead of failing every one.
+          if (/isn't set up/i.test(String(data.error || ''))) break;
+        }
       }
-      const sent = (data.results || []).filter((r: any) => r.success).length;
-      setNotice({ type: 'success', text: `Emailed ${sent} of ${records.length} payslip${records.length === 1 ? '' : 's'}.` });
+      setNotice({
+        type: failed.length && !sent ? 'error' : 'success',
+        text: `Emailed ${sent} of ${records.length} payslip${records.length === 1 ? '' : 's'} with the PDF attached.${failed.length ? ` Not sent — ${failed.slice(0, 5).join('; ')}${failed.length > 5 ? ` and ${failed.length - 5} more` : ''}.` : ''}`
+      });
     } catch {
       setNotice({ type: 'error', text: "Couldn't email payslips — email sending isn't set up on the server yet." });
     } finally {

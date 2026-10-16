@@ -1609,6 +1609,15 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
   // and that's reported back as a normal { error } response rather than a
   // silent failure.
 
+  function payslipPdfAttachment(b64: any, record: any): { filename: string; content: Buffer; contentType: string } | { error: string } | null {
+    if (!b64) return null;
+    const content = Buffer.from(String(b64).replace(/^data:[^,]*,/, ""), "base64");
+    if (content.subarray(0, 5).toString("latin1") !== "%PDF-") return { error: "The payslip PDF is not a valid PDF." };
+    if (content.length > 5 * 1024 * 1024) return { error: "The payslip PDF is too big." };
+    const name = String(record.employee_name || "Employee").replace(/[^\w]+/g, "_");
+    return { filename: `Payslip_${name}_${record.month_year}.pdf`, content, contentType: "application/pdf" };
+  }
+
   app.post("/api/payroll/:id/email", authenticateToken, requireAdmin, requireModule("payroll"), async (req: any, res) => {
     try {
       const rows = await queryDB(
@@ -1623,9 +1632,13 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       const to = record.employee_email || record.employee_personal_email;
       if (!to) return res.status(400).json({ error: `${record.employee_name} has no email on file in the Employee Directory.` });
 
-      const result = await sendMail({ to, subject: `Payslip — ${record.month_year}`, html: buildPayslipEmailHtml(record) });
+      // The payslip PDF the browser built (lib/payslipPdf.ts — the same file
+      // as Payroll -> Payslips -> PDF), attached when sent.
+      const pdf = payslipPdfAttachment(req.body?.pdf_base64, record);
+      if (pdf && "error" in pdf) return res.status(400).json({ error: pdf.error });
+      const result = await sendMail({ to, subject: `Payslip — ${record.month_year}`, html: buildPayslipEmailHtml(record), attachments: pdf && !("error" in pdf) ? [pdf] : undefined });
       if (!result.success) return res.status(400).json({ error: result.error });
-      res.json({ success: true });
+      res.json({ success: true, to, attached: !!pdf });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Failed to email payslip." });
     }

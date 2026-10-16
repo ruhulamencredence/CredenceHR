@@ -17,6 +17,7 @@ import { Paperclip } from 'lucide-react';
 import { Spinner } from './Spinner';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
 import { savePdfCrossPlatform } from '../lib/saveFile';
+import { EmailReportButton, emailReport, useCanEmailReports } from '../lib/reportEmail';
 import credenceLogo from '../assets/credence-logo.png';
 import { serviceLength, type ServiceEvent } from './HrOpsServiceBook';
 import { apiUrl } from '../lib/api';
@@ -783,7 +784,7 @@ export const pdfSafe = (v: any) =>
     .replace(/→/g, '->')
     .replace(/৳/g, 'Tk ');
 
-export async function saveDossierPdf(d: DossierData, picked: Set<string>) {
+export async function saveDossierPdf(d: DossierData, picked: Set<string>, mode: 'save' | 'email' = 'save') {
   const e = d.overview.employee;
   const logo = await loadImageElement(credenceLogo);
   const doc = new jsPDF();
@@ -822,6 +823,10 @@ export async function saveDossierPdf(d: DossierData, picked: Set<string>) {
     y = (doc as any).lastAutoTable.finalY + 6;
   }
   finalizePdfPageNumbers(doc);
+  if (mode === 'email') {
+    await emailReport(doc, { fileName: `Employee_Dossier_${e.name.replace(/\s+/g, '_')}.pdf`, title: 'Employee Dossier' });
+    return;
+  }
   await savePdfCrossPlatform(doc, `Employee_Dossier_${e.name.replace(/\s+/g, '_')}.pdf`);
 }
 
@@ -839,16 +844,18 @@ export function saveDossierExcel(d: DossierData, picked: Set<string>) {
 
 export const DossierModal: React.FC<{ token: string; overview: P360Overview; onClose: () => void }> = ({ token, overview, onClose }) => {
   const api = useHrApi(token);
+  const canEmailReports = useCanEmailReports();
   const sections = DOSSIER_SECTIONS.filter((s) => !s.payroll || overview.permissions.payroll);
   const [picked, setPicked] = useState<Set<string>>(() => new Set(sections.map((s) => s.key)));
   const [year, setYear] = useState(new Date().getFullYear());
-  const [busy, setBusy] = useState<'' | 'pdf' | 'xlsx'>('');
+  const [busy, setBusy] = useState<'' | 'pdf' | 'xlsx' | 'email'>('');
   const [msg, setMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const run = async (kind: 'pdf' | 'xlsx') => {
+  const run = async (kind: 'pdf' | 'xlsx' | 'email') => {
     setBusy(kind);
     try {
       const data = await loadDossier(api, overview, picked, year);
       if (kind === 'pdf') await saveDossierPdf(data, picked);
+      else if (kind === 'email') await saveDossierPdf(data, picked, 'email');
       else saveDossierExcel(data, picked);
       onClose();
     } catch (e: any) {
@@ -870,6 +877,7 @@ export const DossierModal: React.FC<{ token: string; overview: P360Overview; onC
           <button type="button" className={btnPrimary} disabled={!!busy || picked.size === 0} onClick={() => run('pdf')}>
             {busy === 'pdf' && <Spinner size={14} />} PDF
           </button>
+          {canEmailReports && <EmailReportButton onClick={() => run('email')} disabled={!!busy || picked.size === 0} className={btnGhost} />}
         </>
       }
     >

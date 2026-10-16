@@ -9,6 +9,7 @@ import { ExitPendingList } from './ExitPendingList';
 import { ClearanceDepartments } from './ClearanceDepartments';
 import { saveClearanceCertificatePdf, saveSettlementSheetPdf, type ExitDocuments } from '../lib/exitDocuments';
 import { LoadingBlock } from './LoadingBlock';
+import { EmailReportButton, useCanEmailReports } from '../lib/reportEmail';
 
 interface ExitOffboardingPanelProps {
   token: string;
@@ -90,14 +91,15 @@ export const ExitOffboardingPanel: React.FC<ExitOffboardingPanelProps> = ({ toke
   // Clearance Certificate / Settlement Sheet PDFs (layer "exit_pdf").
   const [canPdf, setCanPdf] = useState(false);
   const [pdfBusy, setPdfBusy] = useState<string | null>(null);
-  const downloadPdf = async (exitId: number, which: 'clearance' | 'settlement') => {
+  const canEmailReports = useCanEmailReports();
+  const downloadPdf = async (exitId: number, which: 'clearance' | 'settlement', mode: 'save' | 'email' = 'save') => {
     setError('');
     setPdfBusy(`${exitId}:${which}`);
     try {
       const res = await fetch(apiUrl(`/api/exit-requests/${exitId}/documents`), { headers: authHeaders });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Could not load the document');
-      await (which === 'clearance' ? saveClearanceCertificatePdf(data as ExitDocuments) : saveSettlementSheetPdf(data as ExitDocuments));
+      await (which === 'clearance' ? saveClearanceCertificatePdf(data as ExitDocuments, mode) : saveSettlementSheetPdf(data as ExitDocuments, mode));
     } catch (err: any) {
       setError(err.message || 'Could not make the PDF');
     } finally {
@@ -504,15 +506,24 @@ export const ExitOffboardingPanel: React.FC<ExitOffboardingPanelProps> = ({ toke
                       )}
                       {canPdf &&
                         (['clearance', 'settlement'] as const).map((w) => (
-                          <button
-                            key={w}
-                            type="button"
-                            disabled={pdfBusy === `${r.id}:${w}`}
-                            onClick={() => downloadPdf(r.id, w)}
-                            className="flex items-center gap-1 text-[11px] font-semibold px-3 py-1.5 rounded-lg text-slate-700 border border-slate-200 hover:bg-slate-50 transition-colors disabled:opacity-50"
-                          >
-                            <FileDown className="w-3 h-3" /> {w === 'clearance' ? 'Clearance Certificate (PDF)' : 'Settlement Sheet (PDF)'}
-                          </button>
+                          <React.Fragment key={w}>
+                            <button
+                              type="button"
+                              disabled={pdfBusy === `${r.id}:${w}`}
+                              onClick={() => downloadPdf(r.id, w)}
+                              className="flex items-center gap-1 text-[11px] font-semibold px-3 py-1.5 rounded-lg text-slate-700 border border-slate-200 hover:bg-slate-50 transition-colors disabled:opacity-50"
+                            >
+                              <FileDown className="w-3 h-3" /> {w === 'clearance' ? 'Clearance Certificate (PDF)' : 'Settlement Sheet (PDF)'}
+                            </button>
+                            {canEmailReports && (
+                              <EmailReportButton
+                                onClick={() => downloadPdf(r.id, w, 'email')}
+                                disabled={pdfBusy === `${r.id}:${w}`}
+                                title={w === 'clearance' ? 'Email the Clearance Certificate as a PDF' : 'Email the Settlement Sheet as a PDF'}
+                                className="flex items-center gap-1 text-[11px] font-semibold px-3 py-1.5 rounded-lg text-slate-700 border border-slate-200 hover:bg-slate-50 transition-colors disabled:opacity-50"
+                              />
+                            )}
+                          </React.Fragment>
                         ))}
                     </div>
 

@@ -22,6 +22,7 @@ import { Spinner } from './Spinner';
 import { finalizePdfPageNumbers } from '../lib/pdfLetterhead';
 import { drawStandardHeader, loadPdfCompany, pdfMoney, standardTable } from '../lib/pdfStandard';
 import { savePdfCrossPlatform } from '../lib/saveFile';
+import { EmailReportButton, emailReport, useCanEmailReports } from '../lib/reportEmail';
 import {
   fmtDate,
   findHeaderRow,
@@ -136,6 +137,7 @@ const BillsTab: React.FC<{ token: string }> = ({ token }) => {
   const [importing, setImporting] = useState(false);
   const [editing, setEditing] = useState<BillRow | null>(null);
   const [busy, setBusy] = useState(false);
+  const canEmailReports = useCanEmailReports();
 
   const load = useCallback(() => {
     setRows(null);
@@ -197,7 +199,7 @@ const BillsTab: React.FC<{ token: string }> = ({ token }) => {
     XLSX.writeFile(wb, `Mobile-Bill-${month}${operator ? `-${operator}` : ''}.xlsx`);
   };
 
-  const pdf = async () => {
+  const pdf = async (mode: 'save' | 'email' = 'save') => {
     setBusy(true);
     try {
       const co = await loadPdfCompany(token);
@@ -230,6 +232,10 @@ const BillsTab: React.FC<{ token: string }> = ({ token }) => {
         columnStyles: { 0: { halign: 'center', cellWidth: 12 }, 8: { halign: 'right' }, 9: { halign: 'right' }, 10: { halign: 'right' }, 11: { halign: 'right' } }
       });
       finalizePdfPageNumbers(doc);
+      if (mode === 'email') {
+        await emailReport(doc, { fileName: `Mobile-Bill-${month}${operator ? `-${operator}` : ''}.pdf`, title: 'Mobile Bill Payment Sheet' });
+        return;
+      }
       await savePdfCrossPlatform(doc, `Mobile-Bill-${month}${operator ? `-${operator}` : ''}.pdf`);
     } catch (e: any) {
       setError(e.message || 'Could not make the PDF.');
@@ -263,9 +269,10 @@ const BillsTab: React.FC<{ token: string }> = ({ token }) => {
         <button type="button" className={btnMain} onClick={() => setImporting(true)}>
           <Upload className="w-3.5 h-3.5" /> Import bill
         </button>
-        <button type="button" className={btnLight} disabled={!billed.length || busy} onClick={pdf}>
+        <button type="button" className={btnLight} disabled={!billed.length || busy} onClick={() => pdf()}>
           <FileDown className="w-3.5 h-3.5" /> Payment sheet PDF
         </button>
+        {canEmailReports && <EmailReportButton onClick={() => pdf('email')} disabled={!billed.length || busy} className={btnLight} />}
         <button type="button" className={btnLight} disabled={!billed.length} onClick={excel}>
           <FileSpreadsheet className="w-3.5 h-3.5" /> Excel
         </button>
