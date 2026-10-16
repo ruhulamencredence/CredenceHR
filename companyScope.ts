@@ -193,6 +193,8 @@ export const LINKED_TABLES = new Map<string, [string, string]>([
   ["conveyance_bill_items", ["bill_id", "conveyance_bills"]],
   ["conveyance_claim_department_access", ["user_id", "users"]],
   ["document_signatures", ["document_id", "employee_documents"]],
+  ["document_signers", ["document_id", "employee_documents"]],
+  ["user_signatures", ["user_id", "users"]],
   ["employee_template_assignments", ["employee_user_id", "users"]],
   ["exit_clearance_items", ["exit_id", "exit_requests"]],
   ["hr_report_runs", ["report_id", "hr_saved_reports"]],

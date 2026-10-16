@@ -21,7 +21,7 @@ const COMPANY = 'Credence Housing Limited';
 const COMPANY_ADDRESS = 'Dhaka, Bangladesh';
 // Where people send privacy questions and data requests.
 export const PRIVACY_CONTACT_EMAIL = 'info@credencehousinglimited.com';
-const UPDATED = '6 October 2026';
+const UPDATED = '16 October 2026';
 
 type Block = string | { list: string[] };
 const SECTIONS: { title: string; body: Block[] }[] = [
@@ -38,6 +38,7 @@ const SECTIONS: { title: string; body: Block[] }[] = [
       { list: [
         'Account and employee details: name, employee ID, email, phone number, department, designation, joining date, salary and payroll details, leave, loans, claims, documents and other HR records your employer keeps in the app.',
         'Attendance: check-in and check-out times, and the location of the phone at that moment.',
+        'Electronic signatures: when you sign a document in the app, the signature you draw or upload, the name you type, the time and the network address (IP) of your device. They are printed on the signed document; anyone with its verification code can see who signed it and when, but never the document itself.',
         'Location in the background (Android app only, and only if your employer turned on Employee Tracking for your account and you agreed): the phone’s location every few minutes during your signed-in session — even when the app is closed or not in use — together with the location accuracy and the battery level. While someone you are allowed to be followed by has you open in Live Follow, or while you are on a Book a Ride trip, it is sent every few seconds.',
         'Location for claims and rides: the places you pick or are at when you file a conveyance claim or book a ride.',
         'Photos, files and documents you upload (profile photo, claim receipts, documents, chat attachments).',

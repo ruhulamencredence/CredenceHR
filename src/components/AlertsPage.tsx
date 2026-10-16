@@ -242,6 +242,9 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
           }
         : alert.type === 'site_attendance'
         ? () => window.dispatchEvent(new CustomEvent('credence:open-self-service', { detail: 'teamAttendance' }))
+        : alert.type === 'document_sign'
+        ? // Documents to Sign, or Document Vault for a signed / declined one (App.tsx).
+          () => window.dispatchEvent(new CustomEvent('credence:open-esign', { detail: { title: alert.title } }))
         : alert.type === 'roster'
         ? // Self Service -> My Duty Roster (App.tsx, MyRoster.tsx).
           () => window.dispatchEvent(new CustomEvent('credence:open-self-service', { detail: 'myRoster' }))

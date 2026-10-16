@@ -5,7 +5,7 @@ import type { User } from '../types';
 
 export type SelfView =
   | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation'
-  | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | 'credenceMail' | 'myRoster';
+  | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | 'credenceMail' | 'myRoster' | 'mySignatures';
 
 const SLUGS: Record<SelfView, string> = {
   leaveManagement: 'leave-management',
@@ -24,7 +24,8 @@ const SLUGS: Record<SelfView, string> = {
   myLoans: 'my-loans',
   myTargets: 'my-targets',
   credenceMail: 'mail',
-  myRoster: 'duty-roster'
+  myRoster: 'duty-roster',
+  mySignatures: 'documents-to-sign'
 };
 
 export const SELF_URL_PREFIX = '/self/';
@@ -55,6 +56,7 @@ export const canOpenSelfView = (view: SelfView, user: User | null): boolean => {
     case 'myTargets': return sa || !!user.can_view_targets;
     case 'credenceMail': return sa || !!user.can_use_mail;
     case 'myRoster': return sa || !!user.can_view_roster;
+    case 'mySignatures': return sa || !!user.can_sign_documents;
     default: return true;
   }
 };

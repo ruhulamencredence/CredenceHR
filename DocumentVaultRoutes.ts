@@ -87,7 +87,9 @@ export function registerDocumentVaultRoutes(app: Express, deps: DocumentVaultRou
     return modules.includes("document_vault");
   }
 
-  function listDocument(d: any, userById: Map<number, any>, signedIds: Set<number>) {
+  // signerRows: E-Signature progress (ESignRoutes.ts, document_signers).
+  function listDocument(d: any, userById: Map<number, any>, signedIds: Set<number>, signerRows: any[] = []) {
+    const mine = signerRows.filter((s: any) => Number(s.document_id) === Number(d.id));
     return {
       id: Number(d.id),
       user_id: Number(d.user_id),
@@ -96,7 +98,10 @@ export function registerDocumentVaultRoutes(app: Express, deps: DocumentVaultRou
       file_name: d.file_name,
       file_mimetype: d.file_mimetype,
       requires_signature: !!Number(d.requires_signature),
-      is_signed: signedIds.has(Number(d.id)),
+      is_signed: signedIds.has(Number(d.id)) || d.sign_status === "completed",
+      sign_status: d.sign_status || "none",
+      signers_total: mine.length,
+      signers_done: mine.filter((s: any) => s.status === "signed").length,
       expiry_date: d.expiry_date,
       uploaded_at: d.uploaded_at
     };
@@ -107,18 +112,19 @@ export function registerDocumentVaultRoutes(app: Express, deps: DocumentVaultRou
   app.get("/api/employee-documents", authenticateToken, async (req: any, res: any) => {
     try {
       const manage = await canManage(req.user.id, req.user.role);
-      const [rows, users, signatures]: [any, any, any] = await Promise.all([
+      const [rows, users, signatures, signerRows]: [any, any, any, any] = await Promise.all([
         // Every column but file_data (the file itself, read only by GET .../file):
         // with it, listing ~1,500 documents pulled every PDF into memory.
-        queryDB("SELECT id, user_id, doc_type, file_name, file_mimetype, requires_signature, expiry_date, uploaded_by, uploaded_at FROM employee_documents"),
+        queryDB("SELECT id, user_id, doc_type, file_name, file_mimetype, requires_signature, expiry_date, uploaded_by, uploaded_at, sign_status FROM employee_documents"),
         queryDB("SELECT id, name FROM users"),
-        queryDB("SELECT * FROM document_signatures")
+        queryDB("SELECT * FROM document_signatures"),
+        queryDB("SELECT document_id, status FROM document_signers").catch(() => [])
       ]);
       const userById = new Map<number, any>(users.map((u: any): [number, any] => [Number(u.id), u]));
       const signedIds = new Set<number>(signatures.map((s: any) => Number(s.document_id)));
       const scoped = manage ? rows : rows.filter((d: any) => Number(d.user_id) === Number(req.user.id));
       const sorted = scoped.sort((a: any, b: any) => Number(b.id) - Number(a.id));
-      res.json(sorted.map((d: any) => listDocument(d, userById, signedIds)));
+      res.json(sorted.map((d: any) => listDocument(d, userById, signedIds, signerRows)));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -190,7 +196,9 @@ export function registerDocumentVaultRoutes(app: Express, deps: DocumentVaultRou
       if (rows.length === 0) return res.status(404).json({ error: "Document not found." });
       const doc = rows[0];
       const isOwner = Number(doc.user_id) === Number(req.user.id);
-      if (!isOwner && !(await canManage(req.user.id, req.user.role))) {
+      // Someone asked to sign it (E-Signature, document_signers) may read it too.
+      const isSigner = !isOwner && ((await queryDB("SELECT id FROM document_signers WHERE document_id = ? AND signer_user_id = ?", [id, req.user.id]).catch(() => [])) || []).length > 0;
+      if (!isOwner && !isSigner && !(await canManage(req.user.id, req.user.role))) {
         return res.status(403).json({ error: "Not authorized." });
       }
       if (!doc.file_data) return res.status(404).json({ error: "No file stored on this document." });

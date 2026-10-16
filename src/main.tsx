@@ -4,6 +4,7 @@ import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import ChatStandalone from './ChatStandalone.tsx';
 import PrivacyPolicy from './components/PrivacyPolicy.tsx';
+import VerifyPage from './components/VerifyPage.tsx';
 import { OnboardingShell, SESSION_CHANGED_EVENT } from './components/OnboardingShell.tsx';
 import type { User } from './types.ts';
 import { applyBackgroundTheme, getSavedBackgroundTheme } from './lib/backgroundTheme.ts';
@@ -28,6 +29,10 @@ const isStandaloneChat = window.location.pathname === '/chat';
 // readable without signing in, so it skips <App /> and its sign-in screen.
 const isPrivacyPolicy = /^\/privacy\/?$/.test(window.location.pathname);
 if (isPrivacyPolicy) document.title = 'Privacy Policy · CredenceHR';
+// /verify and /verify/<code> — the public check of an e-signed document
+// (VerifyPage.tsx, ESignRoutes.ts): opened from a signed PDF's QR code by
+// people who have no account, so it skips <App /> like /privacy.
+const isVerify = /^\/verify(\/[A-Za-z0-9-]+)?\/?$/.test(window.location.pathname);
 
 // A new joiner's temporary login (HR Operations -> Onboarding -> New Joiners)
 // gets only "My Onboarding", never the normal app — so none of the app's
@@ -58,6 +63,6 @@ function Root() {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    {isPrivacyPolicy ? <PrivacyPolicy /> : isStandaloneChat ? <ChatStandalone /> : <Root />}
+    {isPrivacyPolicy ? <PrivacyPolicy /> : isVerify ? <VerifyPage /> : isStandaloneChat ? <ChatStandalone /> : <Root />}
   </StrictMode>,
 );

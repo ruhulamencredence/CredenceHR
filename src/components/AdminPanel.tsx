@@ -710,6 +710,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [mailAccessEnabled, setMailAccessEnabled] = useState(false);
   // My Duty Roster (RosterRoutes.ts) — off by default.
   const [rosterAccessEnabled, setRosterAccessEnabled] = useState(false);
+  // Documents to Sign (ESignRoutes.ts) — off by default.
+  const [signDocsEnabled, setSignDocsEnabled] = useState(false);
   const [tasksAccessEnabled, setTasksAccessEnabled] = useState(false);
   const [mobileBillAccessEnabled, setMobileBillAccessEnabled] = useState(false);
   const [serviceBookAccessEnabled, setServiceBookAccessEnabled] = useState(false);
@@ -743,6 +745,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     setCallsAccessEnabled(!!u.can_use_calls);
     setMailAccessEnabled(!!u.can_use_mail);
     setRosterAccessEnabled(!!u.can_view_roster);
+    setSignDocsEnabled(!!u.can_sign_documents);
     setTasksAccessEnabled(!!u.can_view_tasks);
     setMobileBillAccessEnabled(!!u.can_view_mobile_bill);
     setServiceBookAccessEnabled(!!u.can_view_service_book);
@@ -1276,6 +1279,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         });
         const roData = await roRes.json();
         if (!roRes.ok) throw new Error(roData.error || 'Failed to update My Duty Roster access');
+      }
+
+      if (signDocsEnabled !== !!managingModulesFor.can_sign_documents) {
+        const sdRes = await fetch(apiUrl(`/api/users/${managingModulesFor.id}/sign-documents-access`), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ can_sign_documents: signDocsEnabled })
+        });
+        const sdData = await sdRes.json();
+        if (!sdRes.ok) throw new Error(sdData.error || 'Failed to update Documents to Sign access');
       }
 
       setManagingModulesFor(null);
@@ -8012,6 +8025,28 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   <span
                     className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
                       rosterAccessEnabled ? 'translate-x-[18px]' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </label>
+              <label className="flex items-center justify-between gap-3 p-3.5 mb-3 bg-blue-50 border border-blue-200 rounded-xl cursor-pointer">
+                <span>
+                  <span className="text-sm font-semibold text-slate-900 block">Also allow Documents to Sign</span>
+                  <span className="text-[11px] text-slate-500">
+                    Self Service → Documents to Sign: sign documents HR sends them (drawn signature, in order with other signers). Needed before HR can ask them to sign. Off by default.
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setSignDocsEnabled((v) => !v)}
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${
+                    signDocsEnabled ? 'bg-emerald-500' : 'bg-slate-300'
+                  }`}
+                  title={signDocsEnabled ? 'On — click to turn off' : 'Off — click to turn on'}
+                >
+                  <span
+                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                      signDocsEnabled ? 'translate-x-[18px]' : 'translate-x-1'
                     }`}
                   />
                 </button>
