@@ -222,12 +222,6 @@ describe("Exit dues (live server)", () => {
     assert.equal(ex.code, 201);
     const exitId = ex.body.id;
     try {
-      // Settling also needs the exit in Clearance with every department
-      // cleared — done up front so only the SIM and the loan are left to block.
-      assert.equal((await call("PUT", `/api/exit-requests/${exitId}/status`, admin.token, { status: "clearance" })).code, 200);
-      for (const item of ex.body.clearance_items || []) {
-        assert.equal((await call("PUT", `/api/exit-clearance-items/${item.id}`, admin.token, { is_cleared: true, remarks: "Cleared" })).code, 200);
-      }
       const dues = (await call("GET", `/api/exit-requests/${exitId}/dues`, admin.token)).body.items;
       const loanKey = `loan:${loan.body.id}`;
       assert.ok(dues.some((d: any) => d.kind === "sim" && d.blocking));
@@ -236,6 +230,33 @@ describe("Exit dues (live server)", () => {
       // Adding needs the settlement draft first.
       assert.equal((await call("POST", `/api/exit-requests/${exitId}/settlement/add-dues`, admin.token, { keys: [loanKey] })).code, 404);
       const st = (await call("GET", `/api/exit-requests/${exitId}/settlement`, admin.token)).body;
+
+      // Clearance first: while the exit is still Pending and no department
+      // has cleared it, it can't be paid — every department is named.
+      const items: any[] = ex.body.clearance_items || [];
+      assert.ok(items.length > 0);
+      const kinds = (r: any) => r.body.blocking.map((d: any) => d.kind);
+      const paid0 = await call("PUT", `/api/exit-requests/${exitId}/settlement`, admin.token, { ...st, gratuity_amount: 20000, status: "paid" });
+      assert.equal(paid0.code, 409);
+      assert.ok(kinds(paid0).includes("status"), JSON.stringify(paid0.body));
+      assert.equal(kinds(paid0).filter((k: string) => k === "clearance").length, items.length);
+      assert.equal((await call("PUT", `/api/exit-requests/${exitId}/status`, admin.token, { status: "settled" })).code, 409);
+
+      // In Clearance with all but one department cleared: still refused,
+      // and the one left is the one named.
+      assert.equal((await call("PUT", `/api/exit-requests/${exitId}/status`, admin.token, { status: "clearance" })).code, 200);
+      const last = items[items.length - 1];
+      for (const item of items.slice(0, -1)) {
+        assert.equal((await call("PUT", `/api/exit-clearance-items/${item.id}`, admin.token, { is_cleared: true, remarks: "Cleared" })).code, 200);
+      }
+      const paidOne = await call("PUT", `/api/exit-requests/${exitId}/settlement`, admin.token, { ...st, gratuity_amount: 20000, status: "paid" });
+      assert.equal(paidOne.code, 409);
+      assert.ok(!kinds(paidOne).includes("status"));
+      const left = paidOne.body.blocking.filter((d: any) => d.kind === "clearance");
+      assert.equal(left.length, 1);
+      assert.equal(left[0].key, `clearance:${last.id}`);
+      assert.equal((await call("PUT", `/api/exit-requests/${exitId}/status`, admin.token, { status: "settled" })).code, 409);
+      assert.equal((await call("PUT", `/api/exit-clearance-items/${last.id}`, admin.token, { is_cleared: true, remarks: "Cleared" })).code, 200);
 
       const paid1 = await call("PUT", `/api/exit-requests/${exitId}/settlement`, admin.token, { ...st, gratuity_amount: 20000, status: "paid" });
       assert.equal(paid1.code, 409);
