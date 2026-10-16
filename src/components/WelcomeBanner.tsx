@@ -47,9 +47,9 @@ export const WelcomeBanner: React.FC<WelcomeBannerProps> = ({ title, subtitle })
       >
         <defs>
           <linearGradient id="welcomeBannerGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-            <stop offset="0%" stopColor="#7F00FF" />
-            <stop offset="50%" stopColor="#6300C6" />
-            <stop offset="100%" stopColor="#47008E" />
+            <stop offset="0%" style={{ stopColor: 'var(--g-banner-1, #7F00FF)' }} />
+            <stop offset="50%" style={{ stopColor: 'var(--g-banner-2, #6300C6)' }} />
+            <stop offset="100%" style={{ stopColor: 'var(--g-banner-3, #47008E)' }} />
           </linearGradient>
         </defs>
         <path d={path} fill="url(#welcomeBannerGradient)" />

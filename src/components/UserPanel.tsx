@@ -1192,7 +1192,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
             ? [{ key: 'mySignatures', label: 'Documents to Sign', icon: PenLine, iconBg: 'from-blue-300 to-blue-600 shadow-[0_6px_16px_-2px_rgba(37,99,235,0.35)]', onClick: () => openSelfService('mySignatures') }]
             : []),
           ...(user.role === 'superadmin' || !!user.can_view_roster
-            ? [{ key: 'myRoster', label: 'My Duty Roster', icon: CalendarRange, iconBg: 'from-purple-300 to-purple-600 shadow-[0_6px_16px_-2px_rgba(127,0,255,0.35)]', onClick: () => openSelfService('myRoster') }]
+            ? [{ key: 'myRoster', label: 'My Duty Roster', icon: CalendarRange, iconBg: 'from-purple-300 to-purple-600 shadow-[0_6px_16px_-2px_rgba(var(--g-accent-rgb,127,0,255),0.35)]', onClick: () => openSelfService('myRoster') }]
             : []),
           ...(user.role === 'superadmin' || !!user.can_view_targets
             ? [{ key: 'myTargets', label: 'My Targets', icon: Target, iconBg: 'from-fuchsia-300 to-fuchsia-500 shadow-[0_6px_16px_-2px_rgba(192,38,211,0.35)]', onClick: () => openSelfService('myTargets') }]

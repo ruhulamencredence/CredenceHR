@@ -119,7 +119,7 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
           open ? 'translate-x-0' : '-translate-x-[110%]'
         } ${collapsed ? 'w-[84px]' : 'w-[248px]'}`}
         style={{
-          background: 'linear-gradient(165deg, rgba(127,0,255,0.94) 0%, rgba(99,0,198,0.94) 55%, rgba(71,0,142,0.96) 100%)',
+          background: 'linear-gradient(165deg, rgba(var(--g-accent-rgb,127,0,255),0.94) 0%, rgba(99,0,198,0.94) 55%, rgba(71,0,142,0.96) 100%)',
           boxShadow: '12px 0 40px rgba(47,0,94,0.35)',
           paddingTop: 'var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px))',
         }}

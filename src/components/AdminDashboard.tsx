@@ -830,7 +830,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
                   tabIndex={tile.onClick ? 0 : undefined}
                   className={`relative flex items-center gap-2.5 sm:gap-3.5 rounded-2xl px-3 py-3 sm:px-5 sm:py-4 transition-all hover:-translate-y-0.5 ${
                     featured
-                      ? 'text-white shadow-[0_12px_28px_-12px_rgba(127,0,255,0.65)]'
+                      ? 'text-white shadow-[0_12px_28px_-12px_rgba(var(--g-accent-rgb,127,0,255),0.65)]'
                       : 'bg-white/90 border border-white shadow-[0_6px_20px_-12px_rgba(31,38,135,0.25)] hover:shadow-[0_12px_28px_-14px_rgba(31,38,135,0.35)]'
                   } ${tile.comingSoon ? 'opacity-60' : ''} ${tile.onClick ? 'cursor-pointer' : ''}`}
                   style={featured ? { background: 'var(--g-gradient)' } : undefined}
@@ -1007,7 +1007,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
                   <div key={d.label} className="flex-1 flex flex-col items-center gap-1">
                     <div className="w-full flex items-end justify-center gap-1 h-32">
                       <div
-                        className="w-[22px] rounded-t-lg rounded-b-sm bg-gradient-to-b from-purple-500 to-[#7F00FF]"
+                        className="w-[22px] rounded-t-lg rounded-b-sm bg-gradient-to-b from-purple-500 to-[var(--g-accent)]"
                         style={{ height: `${(d.claimSum / maxClaimChart) * 100}%`, minHeight: d.claimSum > 0 ? 4 : 0 }}
                         title={`Claim: ${formatMoney(d.claimSum)}`}
                       />
@@ -1022,7 +1022,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
                 ))}
               </div>
               <div className="flex items-center gap-4 mt-3 text-[10px] text-slate-500">
-                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[#7F00FF] inline-block" /> Claim Amount</span>
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[var(--g-accent)] inline-block" /> Claim Amount</span>
                 <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[#e4d4ff] inline-block" /> Disbursed</span>
               </div>
             </div>
