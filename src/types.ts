@@ -1310,6 +1310,11 @@ export interface MonthlyAttendanceReportDay {
   // absent_days below, whether or not the person checked in.
   day_type?: HolidayDayType | null;
   holiday_title?: string | null;
+  // Set on a working day the person was on approved leave and didn't check
+  // in — such a day is Leave, not Absent.
+  leave_type?: string | null;
+  future?: boolean;
+  before_joining?: boolean;
 }
 
 export interface MonthlyAttendanceReportRow {
@@ -1326,6 +1331,8 @@ export interface MonthlyAttendanceReportRow {
   // present_days and absent_days.
   holiday_days: number;
   absent_days: number;
+  // Working days on approved leave without a check-in.
+  leave_days?: number;
   days: MonthlyAttendanceReportDay[];
 }
 

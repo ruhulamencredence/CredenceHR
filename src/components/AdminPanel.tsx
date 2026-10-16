@@ -1745,13 +1745,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       autoTable(doc, {
         startY: contentStartY,
         margin: { top: contentStartY, left: 6, right: 6 },
-        head: [['Employee', ...dayHeaders, 'P', 'H', 'A']],
+        head: [['Employee', ...dayHeaders, 'P', 'H', 'L', 'A']],
         body: monthlyReport.users.map((u: any) => {
           const daySymbols = u.days.map((d: any) => {
             const isHoliday = !!d.day_type;
-            return d.present ? 'P' : isHoliday ? (d.day_type === 'weekend' ? 'W' : 'H') : d.future || d.before_joining ? '' : '-';
+            return d.present ? 'P' : isHoliday ? (d.day_type === 'weekend' ? 'W' : 'H') : d.leave_type ? 'L' : d.future || d.before_joining ? '' : '-';
           });
-          return [u.user_name, ...daySymbols, String(u.present_days), String(u.holiday_days ?? 0), String(u.absent_days)];
+          return [u.user_name, ...daySymbols, String(u.present_days), String(u.holiday_days ?? 0), String(u.leave_days ?? 0), String(u.absent_days)];
         }),
         styles: { fontSize: 5.5, cellPadding: 0.8, halign: 'center', overflow: 'visible' },
         columnStyles: { 0: { cellWidth: 26, halign: 'left', fontStyle: 'bold' } },
@@ -1765,6 +1765,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
             if (val === 'P') data.cell.styles.textColor = [5, 150, 105];
             else if (val === 'H') data.cell.styles.textColor = [217, 119, 6];
             else if (val === 'W') data.cell.styles.textColor = [2, 132, 199];
+            else if (val === 'L') data.cell.styles.textColor = [13, 148, 136];
             else if (val === '-') data.cell.styles.textColor = [148, 163, 184];
           }
         },
@@ -1779,7 +1780,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(7.5);
       doc.setTextColor(100, 116, 139);
-      doc.text('P = Present   H = Holiday   W = Weekend   - = Absent', 6, finalY + 13);
+      doc.text('P = Present   H = Holiday   W = Weekend   L = Leave   - = Absent', 6, finalY + 13);
 
       finalizePdfPageNumbers(doc);
       const filename = `Monthly_Attendance_Report_${monthlyReport.year}_${String(monthlyReport.month).padStart(2, '0')}.pdf`;
@@ -4693,6 +4694,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                       ))}
                       <th className="px-2 py-2.5 text-center">Present</th>
                       <th className="px-2 py-2.5 text-center">Holiday</th>
+                      <th className="px-2 py-2.5 text-center">Leave</th>
                       <th className="px-2 py-2.5 text-center">Absent</th>
                     </tr>
                   </thead>
@@ -4704,12 +4706,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                           // A Global Calendar date (Admin Panel -> Holidays) is never
                           // shown as Absent, whether or not this person checked in.
                           const isHoliday = !!d.day_type;
-                          const label = d.present ? 'P' : isHoliday ? (d.day_type === 'weekend' ? 'W' : 'H') : d.future || d.before_joining ? '' : '·';
+                          const label = d.present ? 'P' : isHoliday ? (d.day_type === 'weekend' ? 'W' : 'H') : d.leave_type ? 'L' : d.future || d.before_joining ? '' : '·';
                           const colorClass = d.present
                             ? d.source === 'office' ? 'text-sky-600' : 'text-emerald-600'
                             : isHoliday
                               ? d.day_type === 'weekend' ? 'text-violet-500' : 'text-amber-500'
-                              : 'text-slate-300';
+                              : d.leave_type ? 'text-teal-600' : 'text-slate-300';
                           // "Which way" attendance was given (GPS via Remote
                           // Attendance, or ZKT via the office biometric device),
                           // plus either Check In/Out remarks, in the tooltip.
@@ -4729,7 +4731,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                               ? `${d.date}${d.project_name ? ' — ' + d.project_name : ''}${sourcePart}${remarksPart ? ' — ' + remarksPart : ''}`
                               : isHoliday
                                 ? `${d.date} — ${d.holiday_title || (d.day_type === 'weekend' ? 'Weekend' : 'Holiday')}`
-                                : d.date;
+                                : d.leave_type
+                                  ? `${d.date} — ${d.leave_type} leave`
+                                  : d.date;
                           if (monthlyCellDisplay === 'times') {
                             const inTime = shortTime(d.check_in_at);
                             const outTime = shortTime(d.check_out_at);
@@ -4758,6 +4762,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                         })}
                         <td className="px-2 py-3 text-center text-xs font-semibold text-emerald-700">{u.present_days}</td>
                         <td className="px-2 py-3 text-center text-xs font-semibold text-amber-600">{u.holiday_days ?? 0}</td>
+                        <td className="px-2 py-3 text-center text-xs font-semibold text-teal-600">{u.leave_days ?? 0}</td>
                         <td className="px-2 py-3 text-center text-xs font-semibold text-rose-600">{u.absent_days}</td>
                       </tr>
                     ))}

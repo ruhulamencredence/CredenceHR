@@ -974,8 +974,16 @@ export function registerOnboardingRoutes(app: Express, deps: OnboardingDeps) {
       if (pre.candidate_id)
         await queryDB("/*unscoped*/ UPDATE job_candidates SET employee_id = ? WHERE id = ?", [r.employeeId, Number(pre.candidate_id)]).catch(() => {});
       await endAllSessions(queryDB, r.userId, "signed_out").catch(() => {});
+      // The default Access Template — when the approver may grant access
+      // themself (Superadmin, or "Can grant module access"), the same rule
+      // Data Import follows for the logins it creates.
       let accessApplied = false;
-      if (req.user.role === "superadmin") {
+      let canGrant = req.user.role === "superadmin";
+      if (!canGrant) {
+        const me: any[] = (await queryDB("SELECT can_grant_module_access FROM users WHERE id = ?", [req.user.id]).catch(() => [])) || [];
+        canGrant = Number(me[0]?.can_grant_module_access || 0) === 1;
+      }
+      if (canGrant) {
         try {
           await applyAccessTemplate(queryDB, r.userId, await ensureDefaultAccessTemplate(queryDB), req.user.id, Number(pre.company_id));
           accessApplied = true;
