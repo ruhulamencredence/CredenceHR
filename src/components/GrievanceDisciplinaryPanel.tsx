@@ -2,9 +2,9 @@ import { activePeople } from '../lib/activePeople';
 import React, { useEffect, useState } from 'react';
 import { Gavel, Plus, X, AlertTriangle, CheckCircle2, MessageSquareWarning, ShieldAlert } from 'lucide-react';
 import { apiUrl } from '../lib/api';
-import { Spinner } from './Spinner';
 import { confirmDialog } from '../lib/confirmDialog';
 import { GRIEVANCE_TAB_EVENT, GRIEVANCE_TAB_KEY, GrievanceAdminTab } from '../lib/grievanceNav';
+import { LoadingBlock } from './LoadingBlock';
 
 interface GrievanceDisciplinaryPanelProps {
   token: string;
@@ -314,10 +314,7 @@ export const GrievanceDisciplinaryPanel: React.FC<GrievanceDisciplinaryPanelProp
       )}
 
       {loading ? (
-        <div className="flex flex-col items-center justify-center py-16 text-slate-400">
-          <Spinner size={24} className="mb-2" />
-          <p className="text-xs">Loading…</p>
-        </div>
+        <LoadingBlock />
       ) : tab === 'grievances' ? (
         <div className="p-4 space-y-2.5">
           {grievances.map((g) => (

@@ -13,9 +13,9 @@ import { formatDate, todayDateOnlyString } from '../lib/formatDate';
 import { ApprovalBadge } from './ApprovalBadge';
 import { AttendanceCorrectionModal } from './AttendanceCorrectionModal';
 import { AttendanceCorrectionStatusModal } from './AttendanceCorrectionStatusModal';
-import { Spinner } from './Spinner';
 import { ModulePath } from './ModulePath';
 import { setHeaderPageTitle } from '../lib/headerPageTitle';
+import { LoadingBlock } from './LoadingBlock';
 
 interface TimesheetProps {
   token: string;
@@ -533,9 +533,7 @@ useLiveRefresh(() => loadData());
           </div>
 
           {loading ? (
-            <div className="flex justify-center py-14">
-              <Spinner size={20} className="text-slate-400" />
-            </div>
+            <LoadingBlock />
           ) : (
             <div className="px-3 sm:px-6 py-5">
               {/* Month Wise */}

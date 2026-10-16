@@ -13,11 +13,11 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { ClipboardCheck, PlayCircle, Paperclip, CheckCircle2, Circle, MinusCircle, ArrowLeft, FileText, AlertTriangle } from 'lucide-react';
-import { Spinner } from './Spinner';
 import { apiUrl } from '../lib/api';
 import { LetterComposer, type ComposerInit } from './HrOpsLetters';
 import { HrOpsJoinerOnboarding, type OnboardingAccess } from './HrOpsJoinerOnboarding';
 import { useHrApi, Notice, Badge, fmtDate, inputCls, btnPrimary, btnGhost, type HrOpsEmployee, type HrOpsMeta } from './HrOpsShared';
+import { LoadingBlock } from './LoadingBlock';
 
 interface Joiner {
   employee_id: number;
@@ -230,9 +230,7 @@ const OnboardingChecklist: React.FC<{ token: string; meta: HrOpsMeta; employees:
           </div>
         </div>
         {itemsLoading && items.length === 0 ? (
-          <div className="flex items-center justify-center gap-2 py-16 text-sm text-slate-500">
-            <Spinner size={16} /> Loading…
-          </div>
+          <LoadingBlock />
         ) : (
           groups.map((g) => (
             <div key={g} className="rounded-xl border border-slate-200 bg-white overflow-hidden">
@@ -392,9 +390,7 @@ const OnboardingChecklist: React.FC<{ token: string; meta: HrOpsMeta; employees:
         </div>
       )}
       {loading ? (
-        <div className="flex items-center justify-center gap-2 py-16 text-sm text-slate-500">
-          <Spinner size={16} /> Loading…
-        </div>
+        <LoadingBlock />
       ) : joiners.length === 0 ? (
         <div className="text-center py-14 text-sm text-slate-400">
           <ClipboardCheck className="w-9 h-9 mx-auto mb-2 text-slate-300" />

@@ -9,6 +9,7 @@ import { formatDate } from '../lib/formatDate';
 import { Spinner } from './Spinner';
 import { confirmDialog } from '../lib/confirmDialog';
 import { ClaimChangesNotice, ReclaimTick, ReturnButton } from './ClaimReviewBits';
+import { LoadingBlock } from './LoadingBlock';
 
 interface ApprovalManagerProps {
   token: string;
@@ -353,9 +354,7 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
 
       <div className="overflow-x-auto">
         {loading ? (
-          <div className="p-10 flex justify-center">
-            <Spinner size={20} className="text-slate-400" />
-          </div>
+          <LoadingBlock />
         ) : requests.length === 0 ? (
           <div className="p-10 text-center text-sm text-slate-400">
             {view === 'mine' ? "Nothing is waiting on you right now." : 'No approval requests yet.'}

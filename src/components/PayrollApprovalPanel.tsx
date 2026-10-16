@@ -17,6 +17,7 @@ import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
 import { confirmDialog } from '../lib/confirmDialog';
 import { PayrollPaymentVouchers } from './PayrollPaymentVouchers';
+import { LoadingBlock } from './LoadingBlock';
 
 interface ApprovalState {
   month_year: string;
@@ -147,9 +148,7 @@ export const PayrollApprovalPanel: React.FC<{ token: string; monthYear?: string 
 
       {!data ? (
         !error && (
-          <div className="py-16 flex justify-center">
-            <Spinner size={24} />
-          </div>
+          <LoadingBlock />
         )
       ) : (
         <>

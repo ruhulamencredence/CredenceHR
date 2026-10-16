@@ -101,7 +101,7 @@ export const EmptyNote: React.FC<{ icon: React.ReactNode; text: string }> = ({ i
 );
 
 export const RowsSkeleton: React.FC<{ rows?: number }> = ({ rows = 4 }) => (
-  <div className="liquid-glass-inset rounded-[24px] divide-y divide-slate-200/60" style={{ animation: 'skeleton-in .25s ease .15s both' }}>
+  <div className="liquid-glass-inset rounded-[24px] divide-y divide-slate-200/60" style={{ animation: 'skeleton-in .2s ease both' }}>
     {Array.from({ length: rows }).map((_, i) => (
       <div key={i} className="px-4 py-3 space-y-2">
         <div className={`h-3 rounded bg-slate-200/80 ${i % 2 ? 'w-1/3' : 'w-1/2'}`} />

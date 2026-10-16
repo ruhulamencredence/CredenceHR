@@ -39,6 +39,7 @@ import { Spinner } from './Spinner';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
 import { savePdfCrossPlatform } from '../lib/saveFile';
 import credenceLogo from '../assets/credence-logo.png';
+import { LoadingBlock } from './LoadingBlock';
 
 interface PayslipManagementPanelProps {
   token: string;
@@ -330,7 +331,7 @@ export const PayslipManagementPanel: React.FC<PayslipManagementPanelProps> = ({ 
       {/* Individual list */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
         {loading ? (
-          <div className="flex justify-center py-16"><Spinner size={26} /></div>
+          <LoadingBlock />
         ) : error ? (
           <p className="text-xs text-rose-600 text-center py-16">{error}</p>
         ) : records.length === 0 ? (

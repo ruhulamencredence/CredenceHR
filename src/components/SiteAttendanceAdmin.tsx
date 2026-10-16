@@ -23,6 +23,7 @@ import { OfficeAttendancePanel } from './OfficeAttendancePanel';
 import { SheetEditor, SheetStatusChip, SiteSheet, Counts } from './TeamAttendance';
 import { useHrApi, Modal, Notice, fmtDate, monthLabel, inputCls, labelCls, btnPrimary, btnGhost } from './HrOpsShared';
 import { confirmDialog } from '../lib/confirmDialog';
+import { LoadingBlock } from './LoadingBlock';
 
 interface TeamMember {
   employee_id: number;
@@ -106,7 +107,7 @@ const TodayView: React.FC<{ token: string }> = ({ token }) => {
   useEffect(() => {
     load();
   }, [load]);
-  if (!data) return <div className="py-10 flex justify-center"><Spinner /></div>;
+  if (!data) return <LoadingBlock />;
   const t = data.total;
   return (
     <div className="space-y-4">
@@ -237,7 +238,7 @@ const ReviewView: React.FC<{ token: string; requireApproval: boolean }> = ({ tok
       </div>
       <Notice msg={msg} onClose={() => setMsg(null)} />
       {rows === null ? (
-        <div className="py-10 flex justify-center"><Spinner /></div>
+        <LoadingBlock />
       ) : (
         <div className="rounded-xl border border-slate-200 bg-white divide-y divide-slate-100">
           {rows.length === 0 && <div className="p-6 text-center text-xs text-slate-400">Nothing here.</div>}
@@ -346,7 +347,7 @@ const RegisterView: React.FC<{ token: string; teams: Team[] }> = ({ token, teams
         </span>
       </div>
       {!data ? (
-        <div className="py-10 flex justify-center"><Spinner /></div>
+        <LoadingBlock />
       ) : (
         <div className="rounded-xl border border-slate-200 bg-white overflow-auto max-h-[70vh]">
           <table className="text-[11px] border-collapse">

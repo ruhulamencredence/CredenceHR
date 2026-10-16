@@ -20,6 +20,7 @@ import { apiUrl } from '../lib/api';
 import { RecordModal, UploadDocumentModal } from './HrOps360Parts';
 import { useHrApi, Modal, Notice, Badge, fmtDate, inputCls, labelCls, btnPrimary, btnGhost } from './HrOpsShared';
 import { confirmDialog } from '../lib/confirmDialog';
+import { LoadingBlock } from './LoadingBlock';
 
 async function openFile(token: string, path: string) {
   const res = await fetch(apiUrl(path), { headers: { Authorization: `Bearer ${token}` } });
@@ -78,9 +79,7 @@ export const FixGapsModal: React.FC<{
         }
       >
         {!docs || !family ? (
-          <div className="flex items-center justify-center gap-2 py-10 text-sm text-slate-500">
-            <Spinner size={16} /> Loading…
-          </div>
+          <LoadingBlock />
         ) : (
           <div className="space-y-4">
             <Notice msg={msg} onClose={() => setMsg(null)} />
@@ -331,9 +330,7 @@ export const InfoRequestsReview: React.FC<{ token: string; canApproveDocs: boole
   };
   if (!data)
     return (
-      <div className="flex items-center justify-center gap-2 py-16 text-sm text-slate-500">
-        <Spinner size={16} /> Loading…
-      </div>
+      <LoadingBlock />
     );
   const s = data.summary;
   const list = data.items.filter((i) => i.status === status && (!q || `${i.employee_name} ${i.employee_code} ${i.item_label}`.toLowerCase().includes(q.toLowerCase())));

@@ -9,8 +9,8 @@ import { Bell, ChevronLeft } from 'lucide-react';
 import { ActiveNotice } from '../types';
 import { apiUrl } from '../lib/api';
 import { formatDate } from '../lib/formatDate';
-import { Spinner } from './Spinner';
 import { ModulePath } from './ModulePath';
+import { LoadingBlock } from './LoadingBlock';
 
 interface NoticeBoardProps {
   token: string;
@@ -86,9 +86,7 @@ export const NoticeBoard: React.FC<NoticeBoardProps> = ({ token, onBack }) => {
         </div>
 
         {loading ? (
-          <div className="flex items-center justify-center py-20">
-            <Spinner size={28} />
-          </div>
+          <LoadingBlock />
         ) : error ? (
           <div className="text-sm text-rose-600 bg-rose-50 border border-rose-200 rounded-xl px-4 py-3">{error}</div>
         ) : notices.length === 0 ? (

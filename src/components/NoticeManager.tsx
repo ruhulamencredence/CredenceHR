@@ -7,8 +7,8 @@ import {
 import { Notice, NoticeRecipient, User } from '../types';
 import { apiUrl } from '../lib/api';
 import { formatDate } from '../lib/formatDate';
-import { Spinner } from './Spinner';
 import { confirmDialog } from '../lib/confirmDialog';
+import { LoadingBlock } from './LoadingBlock';
 
 interface NoticeManagerProps {
   token: string;
@@ -249,9 +249,7 @@ export const NoticeManager: React.FC<NoticeManagerProps> = ({ token, user }) => 
 
       {/* --- List --- */}
       {loading ? (
-        <div className="flex items-center justify-center py-16 text-slate-400 gap-2 text-sm">
-          <Spinner size={16} /> Loading notices…
-        </div>
+        <LoadingBlock />
       ) : notices.length === 0 ? (
         <div className="bg-white border border-dashed border-slate-300 rounded-2xl p-10 text-center">
           <Bell className="w-8 h-8 text-slate-300 mx-auto mb-2" />

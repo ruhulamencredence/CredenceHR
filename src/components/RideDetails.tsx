@@ -14,7 +14,7 @@ import 'leaflet/dist/leaflet.css';
 import { X } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
-import { Spinner } from './Spinner';
+import { LoadingBlock } from './LoadingBlock';
 
 type LatLng = [number, number];
 
@@ -205,9 +205,7 @@ export function RideDetails({ requisitionId, onClose }: RideDetailsProps) {
         <div className="overflow-y-auto flex-1">
           {error && <div className="px-4 py-3 text-sm text-red-600">{error}</div>}
           {!data && !error && (
-            <div className="px-4 py-10 flex justify-center">
-              <Spinner size={20} />
-            </div>
+            <LoadingBlock />
           )}
 
           {data && (

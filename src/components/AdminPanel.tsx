@@ -50,7 +50,6 @@ import { AccessTemplatesModal } from './AccessTemplatesModal';
 import { BudgetSubmissionReport } from './BudgetSubmissionReport';
 import { ProgressOverlay, useLongTask, xhrJson } from './ProgressOverlay';
 import { AccessTemplate, applyTemplateToUser, canEditUserFeatures } from '../lib/accessTemplates';
-import { Spinner } from './Spinner';
 import { apiUrl } from '../lib/api';
 import { Capacitor } from '@capacitor/core';
 import { ModulePath } from './ModulePath';
@@ -62,6 +61,7 @@ import { useBackButtonClose } from '../lib/useBackButtonClose';
 import { confirmDialog } from '../lib/confirmDialog';
 import { PagerBar } from './PagerBar';
 import { ADMIN_TAB_KEYS, adminUrlEnabled, adminTabToPath, adminPathToTab } from '../lib/adminUrl';
+import { LoadingBlock } from './LoadingBlock';
 
 // Module Access modal (Admin Panel -> Users -> per-Admin/User "Module
 // Access") groups the same Admin Panel tabs into the same labeled clusters
@@ -4927,7 +4927,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           </div>
 
           {leaveApplicationsReportLoading ? (
-            <div className="p-10 flex justify-center"><Spinner /></div>
+            <LoadingBlock />
           ) : leaveApplicationsReportError ? (
             <p className="p-6 text-sm text-rose-600">{leaveApplicationsReportError}</p>
           ) : (

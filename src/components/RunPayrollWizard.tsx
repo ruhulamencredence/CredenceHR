@@ -22,6 +22,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { X, ChevronRight, ChevronLeft, RefreshCw, CheckCircle2, AlertTriangle, Info, Clock, Undo2 } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
+import { LoadingBlock } from './LoadingBlock';
 
 interface RunPayrollWizardProps {
   token: string;
@@ -415,7 +416,7 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
                 </button>
               </div>
               {loadingSummary ? (
-                <div className="flex justify-center py-16"><Spinner size={26} /></div>
+                <LoadingBlock />
               ) : summaryError ? (
                 <p className="text-xs text-rose-600 text-center py-16">{summaryError}</p>
               ) : (
@@ -574,7 +575,7 @@ export const RunPayrollWizard: React.FC<RunPayrollWizardProps> = ({ token, initi
                 </button>
               </div>
               {calculating ? (
-                <div className="flex justify-center py-16"><Spinner size={26} /></div>
+                <LoadingBlock />
               ) : previewError ? (
                 <p className="text-xs text-rose-600 text-center py-16">{previewError}</p>
               ) : (
@@ -880,7 +881,7 @@ const LateDaysModal: React.FC<{
 
         <div className="flex-1 overflow-y-auto p-5 space-y-3">
           {loading ? (
-            <div className="flex justify-center py-10"><Spinner size={24} /></div>
+            <LoadingBlock />
           ) : error ? (
             <p className="text-xs text-rose-600 text-center py-10">{error}</p>
           ) : days.length === 0 ? (

@@ -14,7 +14,7 @@ import { Search, Download, CheckCircle2, Clock3, XCircle, ChevronDown, ChevronRi
 import { Budget } from '../types';
 import { apiUrl } from '../lib/api';
 import { formatDate } from '../lib/formatDate';
-import { Spinner } from './Spinner';
+import { LoadingBlock } from './LoadingBlock';
 
 type Status = 'not_submitted' | 'job_submitted' | 'final_submitted';
 
@@ -210,9 +210,7 @@ export function BudgetSubmissionReport({ token, budgets }: BudgetSubmissionRepor
       </div>
 
       {loading ? (
-        <div className="flex justify-center py-12">
-          <Spinner size={20} className="text-slate-400" />
-        </div>
+        <LoadingBlock />
       ) : error ? (
         <p className="text-xs text-rose-600 text-center py-12">{error}</p>
       ) : visible.length === 0 ? (

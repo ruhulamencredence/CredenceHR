@@ -11,7 +11,7 @@ import React, { useEffect, useState } from 'react';
 import { X, History, CheckCircle2, XCircle, Pencil, PackageCheck, AlertTriangle, Send, RotateCcw, ThumbsUp } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
-import { Spinner } from './Spinner';
+import { LoadingBlock } from './LoadingBlock';
 
 interface HistoryItem {
   id: number;
@@ -94,9 +94,7 @@ export function AssetRequisitionHistoryModal({ token, requisitionId, onClose }: 
           {error ? (
             <p className="text-xs text-rose-600">{error}</p>
           ) : !data ? (
-            <div className="flex justify-center py-10">
-              <Spinner size={20} className="text-slate-400" />
-            </div>
+            <LoadingBlock />
           ) : (
             <>
               <section>

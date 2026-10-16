@@ -20,9 +20,9 @@ const Bar: React.FC<{ className: string }> = ({ className }) => (
   <div className={`rounded bg-slate-200/80 ${className}`} />
 );
 
-// Fades in after a short pause, so a fast load never flashes it.
+// Fades in quickly (no pause — a blank page first reads as broken).
 const DELAYED: React.CSSProperties = {
-  animation: "skeleton-in .25s ease .15s both",
+  animation: "skeleton-in .2s ease both",
 };
 
 const CardSkeleton: React.FC<{ rows?: number }> = ({ rows = 4 }) => (

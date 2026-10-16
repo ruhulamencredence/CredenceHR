@@ -14,11 +14,11 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import { FileDown, FileSpreadsheet, Search } from 'lucide-react';
-import { Spinner } from './Spinner';
 import { finalizePdfPageNumbers } from '../lib/pdfLetterhead';
 import { drawStandardHeader, loadPdfCompany, pdfMoney, standardTable } from '../lib/pdfStandard';
 import { savePdfCrossPlatform } from '../lib/saveFile';
 import { inputCls, labelCls, mbApi, monthLabel, num, OperatorBadge } from './MobileBillParts';
+import { LoadingBlock } from './LoadingBlock';
 
 interface LimitChangeRow {
   id: number;
@@ -184,9 +184,7 @@ export const MobileLimitHistoryReport: React.FC<{ token: string }> = ({ token })
       {error && <p className="text-sm text-rose-600">{error}</p>}
       {!rows ? (
         !error && (
-          <div className="py-10 flex justify-center">
-            <Spinner size={24} />
-          </div>
+          <LoadingBlock />
         )
       ) : (
         <div className="rounded-2xl bg-white border border-slate-200 overflow-x-auto">

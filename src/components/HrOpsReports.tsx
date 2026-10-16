@@ -62,6 +62,7 @@ import { FixGapsModal, RequestInfoModal, InfoRequestsReview } from './HrOpsGapTo
 import { useHrApi, Modal, Notice, Badge, fmtDate, monthLabel, taka, inputCls, labelCls, btnPrimary, btnGhost } from './HrOpsShared';
 import { confirmDialog } from '../lib/confirmDialog';
 import { ColumnFilterMenu } from './ColumnFilterMenu';
+import { LoadingBlock } from './LoadingBlock';
 
 // ---------------------------------------------------------------------------
 // Types (mirror HrOpsReportsRoutes.ts)
@@ -1181,7 +1182,7 @@ const CompanyNames: React.FC<{ token: string }> = ({ token }) => {
       setMsg({ type: 'error', text: e.message });
     }
   };
-  if (!rows) return <div className="flex items-center justify-center gap-2 py-16 text-sm text-slate-500"><Spinner size={16} /> Loading…</div>;
+  if (!rows) return <LoadingBlock />;
   const list = rows.filter((r) => !q || r.name.toLowerCase().includes(q.toLowerCase()) || r.variants.some((v) => v.name.toLowerCase().includes(q.toLowerCase())));
   return (
     <div className="space-y-3">
@@ -1335,9 +1336,7 @@ export const HrOpsReports: React.FC<{ token: string; onOpenEmployee: (id: number
   if (error) return <Notice msg={{ type: 'error', text: error }} />;
   if (!catalog)
     return (
-      <div className="flex items-center justify-center gap-2 py-16 text-sm text-slate-500">
-        <Spinner size={16} /> Loading…
-      </div>
+      <LoadingBlock />
     );
 
   const VIEWS: { key: View; label: string; icon: React.ComponentType<{ className?: string }> }[] = [

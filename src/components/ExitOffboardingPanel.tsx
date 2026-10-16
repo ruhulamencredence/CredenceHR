@@ -8,6 +8,7 @@ import { ExitDuesCard, DuesBlockedModal, type ExitDue } from './ExitDuesCard';
 import { ExitPendingList } from './ExitPendingList';
 import { ClearanceDepartments } from './ClearanceDepartments';
 import { saveClearanceCertificatePdf, saveSettlementSheetPdf, type ExitDocuments } from '../lib/exitDocuments';
+import { LoadingBlock } from './LoadingBlock';
 
 interface ExitOffboardingPanelProps {
   token: string;
@@ -445,10 +446,7 @@ export const ExitOffboardingPanel: React.FC<ExitOffboardingPanelProps> = ({ toke
       )}
 
       {loading ? (
-        <div className="flex flex-col items-center justify-center py-16 text-slate-400">
-          <Spinner size={24} className="mb-2" />
-          <p className="text-xs">Loading exit requests…</p>
-        </div>
+        <LoadingBlock />
       ) : (
         <div className="p-4 space-y-2.5">
           {requests.map((r) => {

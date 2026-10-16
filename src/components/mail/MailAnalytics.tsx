@@ -157,7 +157,7 @@ export const MailAnalyticsPopup: React.FC<{ token: string; onClose: () => void }
       {error ? (
         <div className="text-sm text-rose-600 py-6 text-center">{error}</div>
       ) : !data ? (
-        <div className="space-y-3" style={{ animation: 'skeleton-in .25s ease .15s both' }}>
+        <div className="space-y-3" style={{ animation: 'skeleton-in .2s ease both' }}>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">{Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-[72px] rounded-[20px] bg-white/60" />)}</div>
           <div className="h-64 rounded-[24px] bg-white/60" />
         </div>

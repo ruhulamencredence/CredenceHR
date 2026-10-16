@@ -42,6 +42,7 @@ import {
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
 import { confirmDialog } from '../lib/confirmDialog';
+import { LoadingBlock } from './LoadingBlock';
 
 interface LoanAdvanceManagementPanelProps {
   token: string;
@@ -334,7 +335,7 @@ export const LoanAdvanceManagementPanel: React.FC<LoanAdvanceManagementPanelProp
             </button>
           </div>
           {requestsLoading ? (
-            <div className="flex justify-center py-16"><Spinner size={26} /></div>
+            <LoadingBlock />
           ) : pendingRequests.length === 0 ? (
             <p className="text-xs text-slate-400 text-center py-16">No pending requests.</p>
           ) : (
@@ -402,7 +403,7 @@ export const LoanAdvanceManagementPanel: React.FC<LoanAdvanceManagementPanelProp
 
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
         {loading ? (
-          <div className="flex justify-center py-16"><Spinner size={26} /></div>
+          <LoadingBlock />
         ) : error ? (
           <p className="text-xs text-rose-600 text-center py-16">{error}</p>
         ) : advances.length === 0 ? (

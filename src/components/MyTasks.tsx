@@ -14,8 +14,8 @@ import { Capacitor } from '@capacitor/core';
 import { ArrowLeft, ClipboardList, Plus, Send } from 'lucide-react';
 import { User } from '../types';
 import { ModulePath } from './ModulePath';
-import { Spinner } from './Spinner';
 import { api, NewTaskForm, RecurrenceList, RequestToHrForm, Task, TaskAccess, TaskCard, TaskDrawer, takePendingTaskId } from './TaskParts';
+import { LoadingBlock } from './LoadingBlock';
 
 type Tab = 'assigned' | 'requested' | 'team' | 'repeat';
 
@@ -116,9 +116,7 @@ useLiveRefresh(() => load());
         {tab === 'repeat' ? (
           <RecurrenceList token={token} scope="team" reloadKey={repeatKey} />
         ) : !data ? (
-          <div className="py-10 flex justify-center">
-            <Spinner size={24} />
-          </div>
+          <LoadingBlock />
         ) : (
           <>
             <div className="space-y-2">

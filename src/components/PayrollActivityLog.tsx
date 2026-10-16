@@ -11,7 +11,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import * as XLSX from 'xlsx';
 import { Eye, FileSpreadsheet, LogIn, MousePointerClick, Search } from 'lucide-react';
 import { apiUrl } from '../lib/api';
-import { Spinner } from './Spinner';
+import { LoadingBlock } from './LoadingBlock';
 
 interface LogRow {
   id: number;
@@ -127,9 +127,7 @@ export const PayrollActivityLog: React.FC<{ token: string }> = ({ token }) => {
       {error && <div className="text-xs px-3 py-2 rounded-xl bg-rose-50 text-rose-700">{error}</div>}
       {!rows ? (
         !error && (
-          <div className="py-16 flex justify-center">
-            <Spinner size={24} />
-          </div>
+          <LoadingBlock />
         )
       ) : (
         <div className="bg-white rounded-2xl border border-slate-200 overflow-x-auto">

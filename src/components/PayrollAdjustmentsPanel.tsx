@@ -17,8 +17,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ArrowDownCircle, ArrowUpCircle, Ban, Pencil, Plus, RefreshCw, Scale, Search, Trash2, X } from 'lucide-react';
 import { apiUrl } from '../lib/api';
-import { Spinner } from './Spinner';
 import { confirmDialog } from '../lib/confirmDialog';
+import { LoadingBlock } from './LoadingBlock';
 
 interface EmployeeLite {
   id: number;
@@ -258,9 +258,7 @@ export const PayrollAdjustmentsPanel: React.FC<{ token: string }> = ({ token }) 
       {subTab === 'items' ? (
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
           {!items ? (
-            <div className="py-10 flex justify-center">
-              <Spinner />
-            </div>
+            <LoadingBlock />
           ) : items.filter((r) => match(r, r.name)).length === 0 ? (
             <p className="py-10 text-center text-xs text-slate-500">No monthly allowance or deduction yet. Add one — for example Food Allowance taken from salary.</p>
           ) : (
@@ -353,9 +351,7 @@ export const PayrollAdjustmentsPanel: React.FC<{ token: string }> = ({ token }) 
       ) : (
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
           {!adjustments ? (
-            <div className="py-10 flex justify-center">
-              <Spinner />
-            </div>
+            <LoadingBlock />
           ) : adjustments.filter((r) => match(r, r.label)).length === 0 ? (
             <p className="py-10 text-center text-xs text-slate-500">No salary adjustment yet.</p>
           ) : (

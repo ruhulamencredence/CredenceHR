@@ -6,8 +6,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Server, Plus, Trash2, Edit2, X } from 'lucide-react';
 import { apiUrl } from '../lib/api';
-import { Spinner } from './Spinner';
 import { confirmDialog } from '../lib/confirmDialog';
+import { LoadingBlock } from './LoadingBlock';
 
 interface ServerProfilesPanelProps {
   token: string;
@@ -254,9 +254,7 @@ export const ServerProfilesPanel: React.FC<ServerProfilesPanelProps> = ({ token 
       )}
 
       {loading ? (
-        <div className="flex justify-center py-10">
-          <Spinner />
-        </div>
+        <LoadingBlock />
       ) : rows.length === 0 ? (
         <div className="text-center py-10 text-sm text-slate-400">No servers added yet.</div>
       ) : (

@@ -33,6 +33,7 @@ import {
   type HrLetter
 } from './HrOpsShared';
 import { letterFileName } from '../lib/hrLetterPdf';
+import { LoadingBlock } from './LoadingBlock';
 
 interface Template {
   id: number;
@@ -411,9 +412,7 @@ export const HrOpsLetters: React.FC<{ token: string; meta: HrOpsMeta; employees:
       </div>
 
       {loading ? (
-        <div className="flex items-center justify-center gap-2 py-16 text-sm text-slate-500">
-          <Spinner size={16} /> Loading…
-        </div>
+        <LoadingBlock />
       ) : view === 'register' ? (
         <>
           <div className="flex flex-wrap gap-2">

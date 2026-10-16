@@ -14,6 +14,7 @@ import React, { useEffect, useState } from 'react';
 import { TrendingUp, Send } from 'lucide-react';
 import { Spinner } from './Spinner';
 import { useHrApi, Notice, Badge, fmtDate, taka, inputCls, labelCls, btnPrimary, type HrOpsMeta } from './HrOpsShared';
+import { LoadingBlock } from './LoadingBlock';
 
 interface Policy {
   id: number;
@@ -165,9 +166,7 @@ export const HrOpsIncrements: React.FC<{ token: string; meta: HrOpsMeta; onGoSet
         )}
       </div>
       {loading ? (
-        <div className="flex items-center justify-center gap-2 py-16 text-sm text-slate-500">
-          <Spinner size={16} /> Loading…
-        </div>
+        <LoadingBlock />
       ) : rows.length === 0 ? (
         <p className="text-sm text-slate-400 text-center py-12">Nobody is due under this rule in this window.</p>
       ) : (

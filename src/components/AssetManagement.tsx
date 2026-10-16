@@ -30,13 +30,13 @@ import {
   ArrowLeft, Package, Inbox, Clock, CheckCircle2, XCircle, AlertTriangle, Plus
 } from 'lucide-react';
 import { apiUrl } from '../lib/api';
-import { Spinner } from './Spinner';
 import { ModulePath } from './ModulePath';
 import { NewAssetRequisitionModal } from './NewAssetRequisitionModal';
 import { AssetFulfillModal } from './AssetFulfillModal';
 import { AssetRequisitionHistoryModal } from './AssetRequisitionHistoryModal';
 import { useWideWeb } from '../lib/useWideWeb';
 import { takeQuickAccessTab } from '../lib/quickAccess';
+import { LoadingBlock } from './LoadingBlock';
 
 interface PendingClaim {
   id: number;
@@ -638,9 +638,7 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
 
             {tab === 'my-assets' && !wideWeb && (
               loading ? (
-                <div className="flex justify-center py-14">
-                  <Spinner size={20} className="text-slate-400" />
-                </div>
+                <LoadingBlock />
               ) : myAssets.length === 0 ? (
                 <div className="flex flex-col items-center gap-1.5 text-center py-10 text-slate-400">
                   <Inbox className="w-6 h-6 text-slate-300" />
@@ -783,9 +781,7 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
 
             {tab === 'status' && !wideWeb && (
               loading ? (
-                <div className="flex justify-center py-14">
-                  <Spinner size={20} className="text-slate-400" />
-                </div>
+                <LoadingBlock />
               ) : requisitions.length === 0 ? (
                 <div className="flex flex-col items-center gap-1.5 text-center py-10 text-slate-400">
                   <Inbox className="w-6 h-6 text-slate-300" />
@@ -871,9 +867,7 @@ export function AssetManagement({ onBack }: AssetManagementProps) {
                   </div>
                 )}
                 {loading ? (
-                  <div className="flex justify-center py-14">
-                    <Spinner size={20} className="text-slate-400" />
-                  </div>
+                  <LoadingBlock />
                 ) : awaitingFulfillment.length === 0 ? (
                   <div className="flex flex-col items-center gap-1.5 text-center py-10 text-slate-400">
                     <Inbox className="w-6 h-6 text-slate-300" />

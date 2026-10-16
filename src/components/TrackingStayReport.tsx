@@ -21,7 +21,7 @@ import { formatDate } from '../lib/formatDate';
 import { finalizePdfPageNumbers } from '../lib/pdfLetterhead';
 import { drawStandardHeader, loadPdfCompany, standardTable } from '../lib/pdfStandard';
 import { savePdfCrossPlatform } from '../lib/saveFile';
-import { Spinner } from './Spinner';
+import { LoadingBlock } from './LoadingBlock';
 
 interface Stay {
   place_id: number;
@@ -322,9 +322,7 @@ export const TrackingStayReport: React.FC<{
         <div className="flex-1 overflow-y-auto p-5 space-y-5">
           {error && <p className="text-sm text-rose-600">{error}</p>}
           {loading && !report && (
-            <div className="py-10 flex justify-center">
-              <Spinner size={24} />
-            </div>
+            <LoadingBlock />
           )}
           {report && (
             <>

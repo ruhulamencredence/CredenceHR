@@ -15,8 +15,8 @@ import { ArrowLeft, Plus, Target as TargetIcon } from 'lucide-react';
 import { User } from '../types';
 import { useLiveRefresh } from '../lib/liveRefresh';
 import { ModulePath } from './ModulePath';
-import { Spinner } from './Spinner';
 import { periodLabel, ProgressBar, takePendingTargetId, Target, TargetCard, TargetDrawer, TargetForm, targetApi, TeamMember } from './TargetParts';
+import { LoadingBlock } from './LoadingBlock';
 
 interface Access {
   enabled: boolean;
@@ -154,9 +154,7 @@ export const MyTargets: React.FC<{ token: string; user: User; onBack?: () => voi
 
         {error && <p className="text-sm text-rose-600 mb-2">{error}</p>}
         {!list ? (
-          <div className="py-10 flex justify-center">
-            <Spinner size={24} />
-          </div>
+          <LoadingBlock />
         ) : (
           <>
             {tab === 'team' && team && (

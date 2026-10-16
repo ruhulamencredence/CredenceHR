@@ -5,8 +5,8 @@ import {
 } from 'lucide-react';
 import { ApprovalTemplate, ApprovalTemplateStep, ApprovalRequestType, User } from '../types';
 import { apiUrl } from '../lib/api';
-import { Spinner } from './Spinner';
 import { confirmDialog } from '../lib/confirmDialog';
+import { LoadingBlock } from './LoadingBlock';
 
 interface ApprovalTemplateManagerProps {
   token: string;
@@ -443,9 +443,7 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
       {subView === 'templates' && (
         <div className="overflow-x-auto">
           {loading ? (
-            <div className="p-10 flex justify-center">
-              <Spinner size={20} className="text-slate-400" />
-            </div>
+            <LoadingBlock />
           ) : templates.length === 0 ? (
             <div className="p-10 text-center text-sm text-slate-400">
               No templates yet for {REQUEST_TYPES.find((r) => r.key === requestType)?.label}.
@@ -549,9 +547,7 @@ export const ApprovalTemplateManager: React.FC<ApprovalTemplateManagerProps> = (
             )}
           </div>
           {assignLoading ? (
-            <div className="p-10 flex justify-center">
-              <Spinner size={20} className="text-slate-400" />
-            </div>
+            <LoadingBlock />
           ) : (
             <table className="w-full text-sm mt-2">
               <thead className="bg-slate-50 text-[11px] uppercase tracking-wider text-slate-500">

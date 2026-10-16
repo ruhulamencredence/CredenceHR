@@ -11,10 +11,10 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { ArrowLeft, CalendarRange, ChevronLeft, ChevronRight, Moon } from 'lucide-react';
 import { ModulePath } from './ModulePath';
-import { Spinner } from './Spinner';
 import { apiUrl } from '../lib/api';
 import { useLiveRefresh } from '../lib/liveRefresh';
 import { shiftTime, type Shift } from '../lib/roster';
+import { LoadingBlock } from './LoadingBlock';
 
 interface MyDay {
   date: string;
@@ -84,7 +84,7 @@ export const MyRoster: React.FC<{ token: string; onBack?: () => void }> = ({ tok
   }, [data]);
   // Calendar cells, the week starting on Saturday.
   const cells = useMemo(() => {
-    if (!data) return [];
+    if (!data || !data.days?.length) return [];
     const lead = (data.days[0].weekday + 1) % 7;
     return [...Array.from({ length: lead }, () => null), ...data.days];
   }, [data]);
@@ -120,9 +120,7 @@ export const MyRoster: React.FC<{ token: string; onBack?: () => void }> = ({ tok
 
         {error && <div className="text-xs px-3 py-2 rounded-xl bg-rose-50 text-rose-700 mb-3">{error}</div>}
         {!data && !error ? (
-          <div className="py-16 flex justify-center">
-            <Spinner />
-          </div>
+          <LoadingBlock />
         ) : data && !data.linked ? (
           <div className="rounded-2xl bg-white border border-slate-200 p-8 text-center text-sm text-slate-500">Your login isn't linked to an employee record yet, so there's no roster to show.</div>
         ) : (

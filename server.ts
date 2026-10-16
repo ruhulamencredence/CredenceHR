@@ -2943,7 +2943,10 @@ async function startServer() {
         }
       })
     );
-    app.get("*all", (req, res) => {
+    // Every other address is the app itself (index.html). A regular
+    // expression, because the Express 4 this app runs on reads "*all" as
+    // "any path ending in all" — / and /admin/... got "Cannot GET".
+    app.get(/^(?!\/api\/|\/assets\/).*/, (req, res) => {
       res.setHeader("Cache-Control", "no-cache");
       res.sendFile(path.join(distPath, "index.html"));
     });

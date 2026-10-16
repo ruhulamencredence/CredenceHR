@@ -18,6 +18,7 @@ import { Spinner } from './Spinner';
 import { readFileBase64 } from './HrOps360Parts';
 import { useHrApi, Modal, Notice, TypeToDelete, inputCls, labelCls, btnPrimary, btnGhost } from './HrOpsShared';
 import { confirmDialog } from '../lib/confirmDialog';
+import { LoadingBlock } from './LoadingBlock';
 
 interface Workspace {
   id: number;
@@ -338,7 +339,7 @@ export const PlatformWorkspaces: React.FC<{ token: string }> = ({ token }) => {
   useEffect(() => {
     load();
   }, [load]);
-  if (!list) return <div className="py-10 flex justify-center"><Spinner /></div>;
+  if (!list) return <LoadingBlock />;
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-2 flex-wrap">

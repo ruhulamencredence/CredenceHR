@@ -17,6 +17,7 @@ import { Spinner } from './Spinner';
 import { apiUrl } from '../lib/api';
 import { confirmDialog } from '../lib/confirmDialog';
 import { useKeyboardInset, scrollFocusedFieldIntoView } from '../lib/useKeyboardInset';
+import { LoadingBlock } from './LoadingBlock';
 
 interface MyLoanRequest {
   id: number;
@@ -136,9 +137,7 @@ export const MyLoans: React.FC<{ token: string; onBack?: () => void }> = ({ toke
 
         {!data ? (
           !error && (
-            <div className="py-16 flex justify-center">
-              <Spinner size={24} />
-            </div>
+            <LoadingBlock />
           )
         ) : !data.linked ? (
           <div className="rounded-2xl bg-white border border-slate-200 p-8 text-center text-sm text-slate-500">{data.blocked_reason}</div>

@@ -14,12 +14,12 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import { FileDown, FileSpreadsheet, UserPlus, UserMinus, TrendingUp, ArrowLeftRight, BadgeCheck, Users, AlertTriangle } from 'lucide-react';
-import { Spinner } from './Spinner';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
 import { savePdfCrossPlatform } from '../lib/saveFile';
 import credenceLogo from '../assets/credence-logo.png';
 import { useHrApi, taka, fmtDate, monthLabel, btnGhost, inputCls, labelCls, Notice, type HrOpsMeta, type HrOpsEmployee } from './HrOpsShared';
 import { HrRemindersCard } from './HrRemindersCard';
+import { LoadingBlock } from './LoadingBlock';
 
 const DIM_LABEL: Record<string, string> = {
   department: 'Department',
@@ -262,9 +262,7 @@ export const HrOpsDashboard: React.FC<{
       </div>
 
       {loading || !report ? (
-        <div className="flex items-center justify-center gap-2 py-16 text-sm text-slate-500">
-          <Spinner size={16} /> Loading report…
-        </div>
+        <LoadingBlock />
       ) : (
         <>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-3">
