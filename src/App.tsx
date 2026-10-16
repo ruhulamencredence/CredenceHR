@@ -29,6 +29,8 @@ const AlertsPage = lazy(() => import('./components/AlertsPage').then(m => ({ def
 const CredenceMail = lazy(() => import('./components/mail/CredenceMail').then(m => ({ default: m.CredenceMail })));
 // My Duty Roster (Self Service, users.can_view_roster).
 const MyRoster = lazy(() => import('./components/MyRoster').then(m => ({ default: m.MyRoster })));
+// Documents to Sign (Self Service, users.can_sign_documents).
+const MySignatures = lazy(() => import('./components/MySignatures').then(m => ({ default: m.MySignatures })));
 
 import { AppLoader } from './components/AppLoader';
 import { HrOpsPageSkeleton } from './components/HrOpsSkeleton';
@@ -119,7 +121,7 @@ export default function App() {
   // this account was actually looking at, instead of resetting to the
   // Admin/User Panel default every time.
   const selfServiceViewStorageKey = user ? `mpr_self_service_view_${user.id}` : null;
-  const [selfServiceView, setSelfServiceView] = useState<'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | 'credenceMail' | 'myRoster' | null>(() => {
+  const [selfServiceView, setSelfServiceView] = useState<'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | 'credenceMail' | 'myRoster' | 'mySignatures' | null>(() => {
     try {
       // A link straight to an Admin Panel page (/admin/departments) opens that page.
       if (openedOnAdminUrl()) return null;
@@ -136,6 +138,7 @@ export default function App() {
       if (saved === 'payroll' && canOpenSelfView('payroll', user)) return 'payroll';
       if (saved === 'credenceMail' && canOpenSelfView('credenceMail', user)) return 'credenceMail';
       if (saved === 'myRoster' && canOpenSelfView('myRoster', user)) return 'myRoster';
+      if (saved === 'mySignatures' && canOpenSelfView('mySignatures', user)) return 'mySignatures';
     } catch {
       // ignore — falls through to the "no Self Service page open" default below
     }
@@ -834,13 +837,33 @@ export default function App() {
     window.addEventListener('credence:open-admin-module', onOpen);
     return () => window.removeEventListener('credence:open-admin-module', onOpen);
   }, []);
+  // An E-Signature alert: waiting for this account's signature -> Documents
+  // to Sign; signed / declined -> Document Vault for whoever has it, else
+  // Documents to Sign.
+  useEffect(() => {
+    const onOpen = (e: Event) => {
+      const title = String((e as CustomEvent).detail?.title || '');
+      const hasVault = !!user && (user.role === 'superadmin' || (user.module_permissions || []).includes('document_vault'));
+      const hasSelf = canOpenSelfView('mySignatures', user);
+      if (!/waiting for your signature/i.test(title) && hasVault) {
+        window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'document_vault' }));
+      } else if (hasSelf) {
+        setShowProfilePage(false);
+        setShowChat(false);
+        setShowAlertsPage(false);
+        setSelfServiceView('mySignatures');
+      }
+    };
+    window.addEventListener('credence:open-esign', onOpen);
+    return () => window.removeEventListener('credence:open-esign', onOpen);
+  }, [user]);
   // Same, for a Self Service page (e.g. a Site Attendance alert or the
   // mobile Team Attendance tile -> Team Attendance).
   useEffect(() => {
     const onOpen = (e: Event) => {
       const target = (e as CustomEvent).detail;
       // Credence Mail only for an account that has it (a mail alert).
-      if (target !== 'teamAttendance' && !((target === 'credenceMail' || target === 'myRoster') && canOpenSelfView(target, user))) return;
+      if (target !== 'teamAttendance' && !((target === 'credenceMail' || target === 'myRoster' || target === 'mySignatures') && canOpenSelfView(target, user))) return;
       setShowProfilePage(false);
       setShowChat(false);
       setShowAlertsPage(false);
@@ -1110,7 +1133,7 @@ export default function App() {
       setViewMode('admin');
       setAdminNavRequest({ target, ts: Date.now() });
     },
-    onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | 'credenceMail' | 'myRoster') => {
+    onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | 'credenceMail' | 'myRoster' | 'mySignatures') => {
       setShowProfilePage(false);
           setShowChat(false);
           setShowAlertsPage(false);
@@ -1463,6 +1486,8 @@ export default function App() {
           <CredenceMail token={token} user={user} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'myRoster' && canOpenSelfView('myRoster', user) ? (
           <MyRoster token={token} onBack={() => setSelfServiceView(null)} />
+        ) : selfServiceView === 'mySignatures' && canOpenSelfView('mySignatures', user) ? (
+          <MySignatures token={token} user={user} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'myTargets' ? (
           <MyTargets token={token} user={user} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'myLetters' ? (

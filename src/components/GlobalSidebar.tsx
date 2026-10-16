@@ -7,7 +7,7 @@ import {
   Contact, Calendar, Clock, Fingerprint, Banknote, Package, LayoutDashboard, Server, MessageSquare,
   ChevronsLeft, ChevronsRight, ShieldAlert, Search, PieChart, FileUp,
   Target, UserPlus, Gavel, FolderLock, Sparkles, ExternalLink, Car, HandCoins,
-  ClipboardList, BookOpen, ClipboardCheck, TrendingUp, Settings, Pencil, Check, Mail, CalendarRange,
+  ClipboardList, BookOpen, ClipboardCheck, TrendingUp, Settings, Pencil, Check, Mail, CalendarRange, PenLine,
 } from 'lucide-react';
 import { User, AdminModuleKey, REPORTS_INSIGHTS_MODULES, DATA_IMPORT_MODULES } from '../types';
 import credenceLogo from '../assets/credence-logo.png';
@@ -49,7 +49,7 @@ interface GlobalSidebarProps {
   onGoToUserClaims: (target: 'movementClaims' | 'conveyanceBill') => void;
   // Everyday employee self-service items — not Admin-gated, shown to every
   // account regardless of role/module access.
-  onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | 'credenceMail' | 'myRoster') => void;
+  onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | 'credenceMail' | 'myRoster' | 'mySignatures') => void;
   // Admin Panel's own Movement Claims / Conveyance Bill Claim review tabs —
   // separate feature from onGoToUserClaims above, gated by module_permissions
   // like every other Admin Panel module.
@@ -370,6 +370,11 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   if (isSuperAdmin || !!user.can_view_roster) {
     selfServiceItems.push({ key: 'myRoster', label: 'My Duty Roster', icon: CalendarRange, onClick: () => onGoToSelfServiceTab('myRoster') });
   }
+  // Documents to Sign (MySignatures.tsx) — documents HR sent this account
+  // to sign. users.can_sign_documents, off until turned on in Module Access.
+  if (isSuperAdmin || !!user.can_sign_documents) {
+    selfServiceItems.push({ key: 'mySignatures', label: 'Documents to Sign', icon: PenLine, onClick: () => onGoToSelfServiceTab('mySignatures') });
+  }
   // My Targets (MyTargets.tsx) — monthly / yearly targets and their tasks;
   // a supervisor's Team tab too. users.can_view_targets.
   if (isSuperAdmin || !!user.can_view_targets) {
@@ -647,7 +652,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   const isItem = (e: Entry): e is NavItem => !('heading' in e);
   const makeGroups = (list: MenuGroup[]) => list.filter((g) => g.entries.some(isItem));
   const selfGroups = makeGroups([
-    { key: 'g_work', label: 'Work & Approvals', icon: ListChecks, entries: pick('myTasks', 'myTargets', 'approveApplications', 'teamAttendance') },
+    { key: 'g_work', label: 'Work & Approvals', icon: ListChecks, entries: pick('myTasks', 'myTargets', 'approveApplications', 'mySignatures', 'teamAttendance') },
     { key: 'g_pepm_op', label: 'PEPM Operation', icon: Briefcase, entries: pick('entry', 'jobs', 'entryDetails', 'jobEdit') },
     { key: 'g_leave_att', label: 'Leave & Attendance', icon: CalendarClock, entries: pick('leaveApplication', 'timesheet', 'myRoster') },
     { key: 'g_requests', label: 'Requests & Claims', icon: Wallet, entries: pick('userMovementClaims', 'userConveyanceClaims', 'vehicleManagement', 'assetManagement', 'myMobileSim', 'myLoans', 'myLetters') },
