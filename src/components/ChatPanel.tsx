@@ -1181,7 +1181,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                       <div
                         className={`px-3 py-2 rounded-[18px] text-sm text-slate-800 border ${
                           isMe
-                            ? 'bg-[rgba(127,0,255,0.10)] border-[rgba(127,0,255,0.10)] rounded-br-[4px]'
+                            ? 'bg-[rgba(var(--g-accent-rgb,127,0,255),0.10)] border-[rgba(var(--g-accent-rgb,127,0,255),0.10)] rounded-br-[4px]'
                             : 'bg-white/75 border-white shadow-[0_2px_8px_-4px_rgba(31,38,135,0.15)] rounded-bl-[4px]'
                         }`}
                       >

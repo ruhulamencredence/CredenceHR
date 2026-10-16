@@ -17,7 +17,7 @@
 // index.css's body::before (a position: fixed, window-sized layer) keeps it
 // anchored to the viewport either way, rather than scrolling with content.
 
-export type BackgroundThemeId = 'default' | 'violet' | 'deep-violet' | 'sunset' | 'frosted-glass' | 'apple-glow';
+export type BackgroundThemeId = 'default' | 'violet' | 'deep-violet' | 'sunset' | 'frosted-glass' | 'apple-glow' | 'mono';
 
 export interface BackgroundTheme {
   id: BackgroundThemeId;
@@ -26,6 +26,9 @@ export interface BackgroundTheme {
   // just a quick visual reference the account taps.
   swatch: string;
   gradient: string;
+  // A theme that restyles the whole app, not just the background: sets
+  // <html data-ui="..."> and index.css does the rest (colours, sidebar).
+  ui?: 'mono';
 }
 
 // Color-stop percentages pushed further out again (light stop's own share
@@ -93,6 +96,17 @@ export const BACKGROUND_THEMES: BackgroundTheme[] = [
       'radial-gradient(ellipse 60% 40% at 10% 95%, rgba(240,220,255,0.75) 0%, rgba(240,220,255,0) 70%)',
       'linear-gradient(180deg, #fdfcff 0%, #f7f3ff 55%, #f2ecff 100%)'
     ].join(', ')
+  },
+  {
+    // Minimal Mono: a quiet light-grey workspace with white cards and a
+    // white sidebar, black for the main actions and neutral greys in place
+    // of violet; status colours (green / amber / red) stay. Whole-app theme —
+    // see html[data-ui="mono"] in index.css.
+    id: 'mono',
+    label: 'Minimal Mono',
+    swatch: '#18181B',
+    gradient: 'linear-gradient(180deg, #f6f6f7 0%, #f1f1f2 100%)',
+    ui: 'mono'
   }
 ];
 
@@ -128,6 +142,8 @@ export function getSavedBackgroundTheme(): BackgroundThemeId {
 export function applyBackgroundTheme(id: BackgroundThemeId, remember = false): void {
   const theme = BACKGROUND_THEMES.find((t) => t.id === id) || BACKGROUND_THEMES[0];
   document.documentElement.style.setProperty('--g-bg-gradient', theme.gradient);
+  if (theme.ui) document.documentElement.dataset.ui = theme.ui;
+  else delete document.documentElement.dataset.ui;
   if (!remember) return;
   try {
     localStorage.setItem(STORAGE_KEY, theme.id);

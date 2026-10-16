@@ -123,6 +123,8 @@
     the exact supplied hex values.
   */
   --g-accent: #7F00FF;
+  /* The accent as r,g,b — for rgba(var(--g-accent-rgb), a) glows and shadows. */
+  --g-accent-rgb: 127, 0, 255;
   --g-accent-hover: #6300C6;
   --g-accent-soft: #F3E8FF;
   --g-accent-100: #EFE0FF;
@@ -418,3 +420,125 @@ body::before {
     display: none;
   }
 }
+
+/*
+  Minimal Mono theme (Profile -> Appearance -> "Minimal Mono";
+  lib/backgroundTheme.ts sets <html data-ui="mono">): a light-grey
+  workspace, white cards and a white sidebar, black for the main actions,
+  neutral greys in place of violet. Tailwind v4 colours are CSS variables, so
+  remapping the violet / indigo / purple / fuchsia / blue scales here turns
+  every bg-/text-/border-/gradient utility of those colours grey at once;
+  green / amber / red status colours are left as they are.
+*/
+html[data-ui="mono"] {
+  --g-bg: #f2f2f3;
+  --g-surface: #ffffff;
+  --g-surface-muted: #f6f6f7;
+  --g-border: #e7e7ea;
+  --g-text: #18181b;
+  --g-text-muted: #71717a;
+
+  --g-accent: #18181b;
+  --g-accent-rgb: 24, 24, 27;
+  --g-accent-hover: #000000;
+  --g-accent-soft: #f4f4f5;
+  --g-accent-100: #f4f4f5;
+  --g-accent-200: #e4e4e7;
+  --g-accent-300: #d4d4d8;
+  --g-accent-400: #a1a1aa;
+  --g-accent-500: #27272a;
+  --g-accent-600: #18181b;
+  --g-accent-700: #18181b;
+  --g-accent-800: #09090b;
+  --g-accent-900: #09090b;
+  --g-accent-950: #09090b;
+  --g-accent-975: #09090b;
+  --g-gradient: linear-gradient(90deg, #3f3f46 0%, #27272a 50%, #18181b 100%);
+
+  --g-sidebar-bg: #ffffff;
+  /* The app header on the phone app and the welcome banner under it stay
+     one dark card (they carry white text). */
+  --g-header-gradient: linear-gradient(90deg, #3f3f46 0%, #27272a 50%, #18181b 100%);
+  --g-banner-1: #3f3f46;
+  --g-banner-2: #27272a;
+  --g-banner-3: #18181b;
+
+  --mono-50: #fafafa;
+  --mono-100: #f4f4f5;
+  --mono-200: #e4e4e7;
+  --mono-300: #d4d4d8;
+  --mono-400: #a1a1aa;
+  --mono-500: #52525b;
+  --mono-600: #27272a;
+  --mono-700: #18181b;
+  --mono-800: #18181b;
+  --mono-900: #09090b;
+  --mono-950: #09090b;
+}
+html[data-ui="mono"] {
+  --color-violet-50: var(--mono-50); --color-violet-100: var(--mono-100); --color-violet-200: var(--mono-200); --color-violet-300: var(--mono-300); --color-violet-400: var(--mono-400); --color-violet-500: var(--mono-500); --color-violet-600: var(--mono-600); --color-violet-700: var(--mono-700); --color-violet-800: var(--mono-800); --color-violet-900: var(--mono-900); --color-violet-950: var(--mono-950);
+  --color-purple-50: var(--mono-50); --color-purple-100: var(--mono-100); --color-purple-200: var(--mono-200); --color-purple-300: var(--mono-300); --color-purple-400: var(--mono-400); --color-purple-500: var(--mono-500); --color-purple-600: var(--mono-600); --color-purple-700: var(--mono-700); --color-purple-800: var(--mono-800); --color-purple-900: var(--mono-900); --color-purple-950: var(--mono-950);
+  --color-indigo-50: var(--mono-50); --color-indigo-100: var(--mono-100); --color-indigo-200: var(--mono-200); --color-indigo-300: var(--mono-300); --color-indigo-400: var(--mono-400); --color-indigo-500: var(--mono-500); --color-indigo-600: var(--mono-600); --color-indigo-700: var(--mono-700); --color-indigo-800: var(--mono-800); --color-indigo-900: var(--mono-900); --color-indigo-950: var(--mono-950);
+  --color-fuchsia-50: var(--mono-50); --color-fuchsia-100: var(--mono-100); --color-fuchsia-200: var(--mono-200); --color-fuchsia-300: var(--mono-300); --color-fuchsia-400: var(--mono-400); --color-fuchsia-500: var(--mono-500); --color-fuchsia-600: var(--mono-600); --color-fuchsia-700: var(--mono-700); --color-fuchsia-800: var(--mono-800); --color-fuchsia-900: var(--mono-900); --color-fuchsia-950: var(--mono-950);
+  --color-blue-50: var(--mono-50); --color-blue-100: var(--mono-100); --color-blue-200: var(--mono-200); --color-blue-300: var(--mono-300); --color-blue-400: var(--mono-400); --color-blue-500: var(--mono-500); --color-blue-600: var(--mono-600); --color-blue-700: var(--mono-700); --color-blue-800: var(--mono-800); --color-blue-900: var(--mono-900); --color-blue-950: var(--mono-950);
+}
+/* Cards: white with a hairline border and a barely-there shadow. */
+html[data-ui="mono"] .gemini-card {
+  border-radius: 16px;
+  box-shadow: 0 1px 2px rgba(24, 24, 27, 0.04);
+}
+html[data-ui="mono"] .shadow-sm { box-shadow: 0 1px 2px rgba(24, 24, 27, 0.04) !important; }
+/* Popups stay liquid glass, in neutral tones. */
+html[data-ui="mono"] .liquid-glass::before {
+  background: radial-gradient(120% 60% at 15% -10%, rgba(255, 255, 255, 0.85), transparent 55%);
+}
+html[data-ui="mono"] .liquid-glass-button {
+  background: #18181b;
+  border-color: #18181b;
+  box-shadow: 0 6px 16px -8px rgba(0, 0, 0, 0.45);
+}
+html[data-ui="mono"] .liquid-glass-button::after { display: none; }
+
+/* Sidebar (GlobalSidebar.tsx, .gsidebar): white, dark text, the open item a
+   light grey pill — its utilities are written for the violet sidebar
+   (text-white/…, bg-white/…), so they are mapped here. */
+html[data-ui="mono"] .gsidebar {
+  border-right: 1px solid var(--g-border) !important;
+  box-shadow: none !important;
+}
+html[data-ui="mono"] .gsidebar [class*="text-white"] { color: #52525b !important; }
+html[data-ui="mono"] .gsidebar [class*="text-white/4"],
+html[data-ui="mono"] .gsidebar [class*="text-white/5"] { color: #a1a1aa !important; }
+html[data-ui="mono"] .gsidebar [class*="hover:text-white"]:hover { color: #18181b !important; }
+html[data-ui="mono"] .gsidebar [class*="bg-white/15"] { background-color: #f1f1f2 !important; color: #18181b !important; }
+html[data-ui="mono"] .gsidebar [class*="bg-white/15"] [class*="text-white"] { color: #18181b !important; }
+html[data-ui="mono"] .gsidebar .h-px[class*="bg-white/15"] { background-color: var(--g-border) !important; }
+/* Menu rows and favourite tiles sit flat on the white (the open one gets
+   the grey pill above); the search box keeps a light grey well. */
+html[data-ui="mono"] .gsidebar [class*="bg-white/10"]:not(input),
+html[data-ui="mono"] .gsidebar [class*="bg-white/5"]:not(input) { background-color: transparent !important; }
+html[data-ui="mono"] .gsidebar input[class*="bg-white/10"],
+html[data-ui="mono"] .gsidebar [class*="bg-black/15"] { background-color: #f4f4f5 !important; }
+html[data-ui="mono"] .gsidebar [class*="hover:bg-white/10"]:hover,
+html[data-ui="mono"] .gsidebar [class*="hover:bg-white/5"]:hover { background-color: #f4f4f5 !important; }
+html[data-ui="mono"] .gsidebar input { color: #18181b !important; }
+html[data-ui="mono"] .gsidebar input::placeholder { color: #a1a1aa !important; }
+html[data-ui="mono"] .gsidebar [class*="ring-white"] { --tw-ring-color: #e4e4e7 !important; }
+html[data-ui="mono"] .gsidebar [class*="border-white"] { border-color: var(--g-border) !important; }
+/* The Logout pill: black, like the reference's main action. */
+html[data-ui="mono"] .gsidebar button.bg-white { background-color: #18181b !important; color: #ffffff !important; }
+/* Search results / collapsed flyout menus: white cards. */
+html[data-ui="mono"] .gsidebar-pop,
+html[data-ui="mono"] [data-gsidebar-flyout] {
+  background: #ffffff !important;
+  border: 1px solid var(--g-border) !important;
+  box-shadow: 0 12px 32px -12px rgba(24, 24, 27, 0.25) !important;
+}
+html[data-ui="mono"] [data-gsidebar-flyout] [class*="text-white"] { color: #52525b !important; }
+html[data-ui="mono"] [data-gsidebar-flyout] [class*="bg-white/15"] { background-color: #f1f1f2 !important; color: #18181b !important; }
+html[data-ui="mono"] [data-gsidebar-flyout] [class*="hover:bg-white/10"]:hover { background-color: #f4f4f5 !important; }
+/* Page wrappers that paint their own pastel background: let the theme's
+   grey through; the violet ones go neutral. */
+html[data-ui="mono"] .bg-\[\#dceeff\] { background-color: transparent !important; }
+html[data-ui="mono"] .bg-\[\#e4d4ff\] { background-color: #f4f4f5 !important; }
+html[data-ui="mono"] .bg-\[\#7F00FF\] { background-color: #18181b !important; }

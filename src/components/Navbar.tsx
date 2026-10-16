@@ -203,7 +203,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         // banner directly below it into one continuous card, instead of
         // looking like two separate pieces.
         background: transparentHeader
-          ? 'linear-gradient(90deg, #7F00FF 0%, #6300C6 50%, #47008E 100%)'
+          ? 'var(--g-header-gradient, linear-gradient(90deg, #7F00FF 0%, #6300C6 50%, #47008E 100%))'
           : 'var(--g-surface)',
         borderBottom: transparentHeader ? 'none' : '1px solid var(--g-border)',
         // App.tsx now makes the native status bar fully transparent and
