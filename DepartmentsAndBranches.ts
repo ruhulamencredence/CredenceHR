@@ -402,6 +402,13 @@ export function registerDepartmentsAndBranchesRoutes(app: Express, deps: Departm
         } catch {
           // Non-fatal — see comment above.
         }
+        // Same for the Duty Roster's per-user Department scope
+        // (duty_roster_department_access, RosterRoutes.ts).
+        try {
+          await queryDB("UPDATE duty_roster_department_access SET department = ? WHERE department = ?", [name, existing[0].name]);
+        } catch {
+          // Non-fatal — see comment above.
+        }
       }
       res.json({ success: true });
     } catch (err: any) {

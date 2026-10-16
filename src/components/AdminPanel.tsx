@@ -684,6 +684,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // unrestricted.
   const [conveyanceClaimDepts, setConveyanceClaimDepts] = useState<Set<string>>(new Set());
   const [loadingConveyanceClaimDepts, setLoadingConveyanceClaimDepts] = useState(false);
+  // Department scope for the 'duty_roster' module (PUT /api/users/:id/roster-
+  // departments). Empty set = every Department and the shifts too (HR's full
+  // setup); ticked = only those Departments' roster, shifts read only.
+  const [rosterDepts, setRosterDepts] = useState<Set<string>>(new Set());
+  const [loadingRosterDepts, setLoadingRosterDepts] = useState(false);
   const [userPanelAccessEnabled, setUserPanelAccessEnabled] = useState(false);
   const [leaveManagementAccessEnabled, setLeaveManagementAccessEnabled] = useState(false);
   const [movementClaimAccessEnabled, setMovementClaimAccessEnabled] = useState(false);
@@ -845,6 +850,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       })
       .catch(() => {})
       .finally(() => setLoadingConveyanceClaimDepts(false));
+
+    // Duty Roster Department scope — fetched fresh on open, never pre-ticked
+    // (nothing ticked means every Department, which is what HR needs).
+    setRosterDepts(new Set());
+    setLoadingRosterDepts(true);
+    fetch(apiUrl(`/api/users/${u.id}/roster-departments`), {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+      .then((res) => (res.ok ? res.json() : { departments: [] }))
+      .then((data) => setRosterDepts(new Set(Array.isArray(data?.departments) ? data.departments : [])))
+      .catch(() => {})
+      .finally(() => setLoadingRosterDepts(false));
   };
 
   const openManageModules = (u: User) => {
@@ -896,6 +913,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     });
   };
 
+  const toggleRosterDept = (name: string) => {
+    setRosterDepts((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  };
   const toggleConveyanceClaimDept = (name: string) => {
     setConveyanceClaimDepts((prev) => {
       const next = new Set(prev);
@@ -1012,6 +1037,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         });
         const conveyanceDeptData = await conveyanceDeptRes.json();
         if (!conveyanceDeptRes.ok) throw new Error(conveyanceDeptData.error || 'Failed to update Conveyance Claim Department access');
+      }
+
+      // Duty Roster Department scope — same "only while the module is ticked" rule.
+      if (selectedModules.has('duty_roster')) {
+        const rosterDeptRes = await fetch(apiUrl(`/api/users/${managingModulesFor.id}/roster-departments`), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ departments: Array.from(rosterDepts) })
+        });
+        const rosterDeptData = await rosterDeptRes.json();
+        if (!rosterDeptRes.ok) throw new Error(rosterDeptData.error || 'Failed to update Duty Roster Department access');
       }
 
       // Also save the "User Panel Access" toggle, only if it actually changed —
@@ -8397,6 +8433,37 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                                   selected={conveyanceClaimDepts}
                                   onToggle={toggleConveyanceClaimDept}
                                   onSetMany={(keys, checked) => setManyInSet(setConveyanceClaimDepts, keys, checked)}
+                                  tone="amber"
+                                  searchPlaceholder="Search departments…"
+                                />
+                              )}
+                            </div>
+                          )}
+                          {m.key === 'duty_roster' && selectedModules.has('duty_roster') && (
+                            <div className="ml-2 mt-1 mb-1 p-3 bg-amber-50 border border-amber-200 rounded-xl">
+                              <p className="text-[11px] font-semibold text-slate-700 flex items-center gap-1.5 mb-1">
+                                <Building2 className="w-3.5 h-3.5 text-amber-600" />
+                                Departments whose roster they set
+                              </p>
+                              <p className="text-[11px] text-slate-500 mb-2">
+                                Nothing ticked = every Department, and the shifts too (full setup, e.g. HR). Tick one or
+                                more (e.g. Security) and {managingModulesFor?.role === 'user' ? 'this User' : 'this Admin'} sees
+                                and sets the roster of only those Departments' employees, and can't change the shifts.
+                              </p>
+                              {loadingRosterDepts ? (
+                                <p className="text-[11px] text-slate-400">Loading…</p>
+                              ) : departments.length === 0 ? (
+                                <p className="text-[11px] text-slate-400">No Departments set up yet (Admin Panel -&gt; Departments).</p>
+                              ) : (
+                                <ModuleAccessChecklist
+                                  items={departments.map((d) => ({
+                                    key: d.name,
+                                    label: d.name,
+                                    badge: d.supervisor_user_id === managingModulesFor?.id ? 'Supervisor' : undefined
+                                  }))}
+                                  selected={rosterDepts}
+                                  onToggle={toggleRosterDept}
+                                  onSetMany={(keys, checked) => setManyInSet(setRosterDepts, keys, checked)}
                                   tone="amber"
                                   searchPlaceholder="Search departments…"
                                 />
