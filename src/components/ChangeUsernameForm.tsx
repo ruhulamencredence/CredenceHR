@@ -125,7 +125,7 @@ export const ChangeUsernameForm: React.FC<ChangeUsernameFormProps> = ({ token, c
                 type="submit"
                 disabled={saving}
                 className="w-full py-3 rounded-full text-white text-sm font-semibold shadow-sm disabled:opacity-60 flex items-center justify-center gap-2"
-                style={{ background: 'linear-gradient(90deg, #7F00FF, #6300C6)' }}
+                style={{ background: 'linear-gradient(90deg, var(--g-accent, #7F00FF), var(--g-accent-hover, #6300C6))' }}
               >
                 {saving && <Spinner size={16} className="text-white" />}
                 Update Username

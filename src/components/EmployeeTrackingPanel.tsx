@@ -66,7 +66,7 @@ const STALE_AFTER_MIN = 20;
 // Deterministic fallback avatar colors (same idea as GlobalSidebar/Navbar's
 // initials bubble) — no profile photo on file yet, so every user still gets a
 // stable, distinguishable dot color instead of everyone showing identical grey.
-const AVATAR_PALETTE = ['#7F00FF', '#059669', '#0891b2', '#d97706', '#dc2626', '#4f46e5', '#be185d', '#0d9488'];
+const AVATAR_PALETTE = ['var(--g-avatar-1, #7F00FF)', '#059669', '#0891b2', '#d97706', '#dc2626', '#4f46e5', '#be185d', '#0d9488'];
 function avatarColor(seed: string): string {
   let hash = 0;
   for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
@@ -102,7 +102,7 @@ const liveMarkerIcon = (stale: boolean, name: string, photoUrl: string | null | 
 
 const pathPointIcon = L.divIcon({
   className: '',
-  html: `<div style="width:10px;height:10px;border-radius:9999px;background:#7F00FF;border:2px solid white;box-shadow:0 1px 3px rgba(0,0,0,0.35);"></div>`,
+  html: `<div style="width:10px;height:10px;border-radius:9999px;background:var(--g-accent,#7F00FF);border:2px solid white;box-shadow:0 1px 3px rgba(0,0,0,0.35);"></div>`,
   iconSize: [10, 10],
   iconAnchor: [5, 5]
 });

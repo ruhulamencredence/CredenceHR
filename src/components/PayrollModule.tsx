@@ -118,9 +118,10 @@ interface PayrollRecord {
   remarks: string | null;
 }
 
+// CSS variables so a whole-app theme (Minimal Mono) can recolour the charts.
 const DEPT_COLORS = [
-  '#2563eb', '#16a34a', '#f59e0b', '#db2777', '#7c3aed',
-  '#0891b2', '#dc2626', '#65a30d', '#0d9488', '#9333ea'
+  'var(--g-chart-1, #2563eb)', 'var(--g-chart-2, #16a34a)', 'var(--g-chart-3, #f59e0b)', 'var(--g-chart-4, #db2777)', 'var(--g-chart-5, #7c3aed)',
+  'var(--g-chart-6, #0891b2)', 'var(--g-chart-7, #dc2626)', 'var(--g-chart-8, #65a30d)', 'var(--g-chart-9, #0d9488)', 'var(--g-chart-10, #9333ea)'
 ];
 
 const currentMonthYear = () => new Date().toISOString().slice(0, 7);
@@ -168,7 +169,7 @@ const TrendChart: React.FC<{ points: TrendPoint[] }> = ({ points }) => {
               width={barWidth}
               height={Math.max(barHeight, p.total > 0 ? 2 : 0)}
               rx={4}
-              fill="#2563eb"
+              style={{ fill: 'var(--g-chart-1, #2563eb)' }}
               opacity={i === points.length - 1 ? 1 : 0.55}
             />
             <text x={x + barWidth / 2} y={height - 12} textAnchor="middle" fontSize="10" fill="#64748b">
@@ -215,7 +216,7 @@ const DepartmentDonut: React.FC<{ slices: DeptSlice[] }> = ({ slices }) => {
                 cy={size / 2}
                 r={r}
                 fill="none"
-                stroke={DEPT_COLORS[i % DEPT_COLORS.length]}
+                style={{ stroke: DEPT_COLORS[i % DEPT_COLORS.length] }}
                 strokeWidth={strokeWidth}
                 strokeDasharray={`${dash} ${circumference - dash}`}
                 strokeDashoffset={-offsetSoFar}
@@ -258,7 +259,7 @@ const SummaryCard: React.FC<{
   sub?: string;
 }> = ({ icon, iconBg, label, value, sub }) => (
   <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 flex items-start gap-3">
-    <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${iconBg}`}>{icon}</div>
+    <div className={`kpi-icon w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${iconBg}`}>{icon}</div>
     <div className="min-w-0">
       <p className="text-[11px] text-slate-500">{label}</p>
       <p className="text-lg font-semibold text-slate-800 truncate">{value}</p>

@@ -542,3 +542,45 @@ html[data-ui="mono"] [data-gsidebar-flyout] [class*="hover:bg-white/10"]:hover {
 html[data-ui="mono"] .bg-\[\#dceeff\] { background-color: transparent !important; }
 html[data-ui="mono"] .bg-\[\#e4d4ff\] { background-color: #f4f4f5 !important; }
 html[data-ui="mono"] .bg-\[\#7F00FF\] { background-color: #18181b !important; }
+
+/* Minimal Mono — the rest: avatars, charts, dashboard icons, maps. */
+html[data-ui="mono"] {
+  --g-avatar-1: #3f3f46;
+  --g-avatar-2: #52525b;
+  --g-avatar-3: #71717a;
+  --g-avatar-4: #27272a;
+  --g-avatar-5: #52525b;
+  --g-badge-check: #d4d4d8;
+  --g-boot-bg: #18181b;
+  --g-info: #18181b;
+  /* Charts: one dark bar colour, and a grey ramp (dark to light) for
+     slices / series so neighbours still read apart. */
+  --g-chart-1: #18181b;
+  --g-chart-2: #52525b;
+  --g-chart-3: #a1a1aa;
+  --g-chart-4: #3f3f46;
+  --g-chart-5: #71717a;
+  --g-chart-6: #d4d4d8;
+  --g-chart-7: #27272a;
+  --g-chart-8: #8a8a93;
+  --g-chart-9: #60606a;
+  --g-chart-10: #bdbdc4;
+}
+/* Admin Dashboard stat tiles: a quiet grey well with a dark icon. */
+html[data-ui="mono"] .kpi-icon {
+  background: #f4f4f5 !important;
+  color: #18181b !important;
+  box-shadow: inset 0 0 0 1px #e7e7ea;
+}
+html[data-ui="mono"] .kpi-icon svg { color: #18181b !important; }
+/* Maps: grey map tiles; violet routes / pins / circles in near-black. */
+html[data-ui="mono"] .leaflet-tile-pane { filter: grayscale(1) contrast(1.02) brightness(1.03); }
+html[data-ui="mono"] .leaflet-container path[stroke="#7F00FF" i] { stroke: #18181b; }
+html[data-ui="mono"] .leaflet-container path[fill="#7F00FF" i] { fill: #18181b; }
+html[data-ui="mono"] .leaflet-container [fill="#7F00FF" i] { fill: #18181b; }
+/* Home / More menu app tiles: black tiles with white icons. */
+html[data-ui="mono"] .app-tile-icon {
+  background-image: none !important;
+  background-color: #18181b !important;
+  box-shadow: 0 4px 10px -6px rgba(0, 0, 0, 0.45) !important;
+}

@@ -88,9 +88,9 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
   ].filter((i) => canSee(i.tab as AdminModuleKey));
 
   const roleAvatarColors: Record<string, string> = {
-    superadmin: '#7F00FF',
-    admin: '#B36AFF',
-    user: '#D2A8FF',
+    superadmin: 'var(--g-avatar-1, #7F00FF)',
+    admin: 'var(--g-avatar-2, #B36AFF)',
+    user: 'var(--g-avatar-3, #D2A8FF)',
   };
 
   const selectAndClose = (tab: AdminTab) => {
@@ -173,7 +173,7 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
             name={user.name}
             fallback={initials}
             className="w-11 h-11 text-sm ring-2 ring-white/30"
-            color={roleAvatarColors[user.role] || '#B36AFF'}
+            color={roleAvatarColors[user.role] || 'var(--g-avatar-2, #B36AFF)'}
           />
           {!collapsed && (
             <>
@@ -313,7 +313,7 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
                         name={u.name}
                         fallback={uInitials}
                         className="w-6 h-6 text-[10px]"
-                        color={roleAvatarColors[u.role] || '#B36AFF'}
+                        color={roleAvatarColors[u.role] || 'var(--g-avatar-2, #B36AFF)'}
                       />
                       {!collapsed && <span className="text-[12.5px] truncate">{u.name}</span>}
                     </button>

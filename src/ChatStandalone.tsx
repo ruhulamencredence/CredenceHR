@@ -47,7 +47,7 @@ export default function ChatStandalone() {
         <p style={{ color: '#5f6368', fontSize: 14 }}>
           You need to sign in to CredenceHR first before opening Chat.
         </p>
-        <a href="/" style={{ color: '#7F00FF', fontWeight: 600, fontSize: 14 }}>
+        <a href="/" style={{ color: 'var(--g-accent, #7F00FF)', fontWeight: 600, fontSize: 14 }}>
           Go to CredenceHR
         </a>
       </div>

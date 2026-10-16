@@ -184,7 +184,7 @@ export function BottomNav({ active, onChange, canViewMovementClaim = true, canVi
                           className="flex flex-col items-center gap-1 active:scale-95 transition-transform"
                         >
                           <span className="liquid-glass-inset relative w-[52px] h-[52px] rounded-[18px] flex items-center justify-center">
-                            <span className={`w-8 h-8 rounded-[10px] bg-gradient-to-br ${iconBg} flex items-center justify-center`}>
+                            <span className={`app-tile-icon w-8 h-8 rounded-[10px] bg-gradient-to-br ${iconBg} flex items-center justify-center`}>
                               <Icon className="w-4 h-4 text-white" />
                             </span>
                             {!!badge && (
