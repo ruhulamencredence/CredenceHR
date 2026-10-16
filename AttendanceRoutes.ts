@@ -942,6 +942,25 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
       // Weekend/Holiday is a working day.
       const roster = await loadRoster(queryDB, monthStart, monthEnd, [...employeeIdByUserId.values()]);
 
+      // Approved leave: a working day on leave with no check-in is Leave,
+      // not Absent.
+      const leaveByUserDate = new Map<string, string>();
+      if (relevantUsers.length) {
+        const leaveRows = await queryDB(
+          `SELECT user_id, leave_type, start_date, end_date FROM leave_applications
+            WHERE status = 'approved' AND start_date <= ? AND end_date >= ? AND user_id IN (${relevantUsers.map(() => "?").join(",")})`,
+          [monthEnd, monthStart, ...relevantUsers.map((u: any) => u.id)]
+        );
+        for (const l of leaveRows) {
+          const start = String(l.start_date).slice(0, 10);
+          const end = String(l.end_date).slice(0, 10);
+          for (let d = 1; d <= daysInMonth; d++) {
+            const dateStr = `${prefix}-${String(d).padStart(2, "0")}`;
+            if (dateStr >= start && dateStr <= end) leaveByUserDate.set(`${l.user_id}|${dateStr}`, String(l.leave_type));
+          }
+        }
+      }
+
       const result = relevantUsers.map((u: any) => {
         const dayMap = byUser.get(u.id) || new Map<string, any>();
         const joiningDate = joiningDateByUserId.get(Number(u.id)) || null;
@@ -952,6 +971,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
         let completeDays = 0;
         let holidayDays = 0;
         let absentDays = 0;
+        let leaveDays = 0;
         const days: any[] = [];
         for (let d = 1; d <= daysInMonth; d++) {
           const dateStr = `${prefix}-${String(d).padStart(2, "0")}`;
@@ -988,7 +1008,9 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
           // neither presentDays nor absent_days below, even when the person
           // didn't check in; it's not a normal working day at all.
           const holiday = holidayMap.get(dateStr);
+          const leaveType = !holiday && !hasIn ? leaveByUserDate.get(`${u.id}|${dateStr}`) || null : null;
           if (holiday) holidayDays++;
+          else if (leaveType) leaveDays++;
           else if (!hasIn && !isFuture && !beforeJoining) absentDays++;
 
           if (hasIn) presentDays++;
@@ -1005,7 +1027,8 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
             day_type: holiday ? holiday.day_type : null,
             holiday_title: holiday ? holiday.title : null,
             future: isFuture,
-            before_joining: beforeJoining
+            before_joining: beforeJoining,
+            leave_type: leaveType
           });
         }
         return {
@@ -1017,6 +1040,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
           complete_days: completeDays,
           holiday_days: holidayDays,
           absent_days: absentDays,
+          leave_days: leaveDays,
           days
         };
       });
@@ -1036,7 +1060,7 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
             const d = u.days?.[i];
             if (!d) continue;
             if (d.present) present++;
-            else if (!d.day_type) absent++;
+            else if (!d.day_type && !d.leave_type && !d.future && !d.before_joining) absent++;
           }
           return { day: i + 1, present, absent };
         });

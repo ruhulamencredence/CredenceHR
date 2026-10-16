@@ -2181,14 +2181,16 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
          WHERE user_id = ? AND status = 'approved' AND start_date <= ? AND end_date >= ?`,
         [employee.user_id, monthEnd, monthStart]
       );
+      // Only working days without attendance count as leave (a Friday or
+      // holiday inside the leave isn't a working day lost) — same rule as
+      // the payroll wizard's attendance summary.
+      const leaveDates = new Set<string>();
       for (const l of leaveRows) {
-        const rawStart = String(l.start_date).slice(0, 10);
-        const rawEnd = String(l.end_date).slice(0, 10);
-        const start = rawStart < monthStart ? monthStart : rawStart;
-        const end = rawEnd > monthEnd ? monthEnd : rawEnd;
-        leaveDays += Math.max(0, Math.round((new Date(end).getTime() - new Date(start).getTime()) / 86400000) + 1);
+        const start = String(l.start_date).slice(0, 10);
+        const end = String(l.end_date).slice(0, 10);
+        for (const d of period.dates) if (d >= start && d <= end && !holidayMap.has(d) && !presentDays.has(d)) leaveDates.add(d);
       }
-      leaveDays = Math.min(workingDays, leaveDays);
+      leaveDays = Math.min(workingDays, leaveDates.size);
 
       const policy = await getLatePolicyForMonth(monthYear);
       // Single-employee call — both Record keys point at the same
@@ -2667,7 +2669,12 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       // Approved Leave Applications overlapping this month — clipped to the
       // days that actually fall inside the month, since a leave range can
       // straddle two months but only the overlapping part counts here.
-      const leaveDaysByUser = new Map<number, number>();
+      // The dates each person is on approved leave this period. Counted below
+      // only on their working days that have no attendance: a leave that
+      // runs over a Friday / holiday used to add those days too, which
+      // pushed present + leave past the working days and hid a real absent
+      // day (absent = working - present - leave), so it was paid.
+      const leaveDatesByUser = new Map<number, Set<string>>();
       if (userIds.length > 0) {
         const leavePlaceholders = userIds.map(() => "?").join(",");
         const leaveRows = await queryDB(
@@ -2676,10 +2683,11 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
           [monthEnd, monthStart, ...userIds]
         );
         for (const l of leaveRows) {
-          const start = String(l.start_date).slice(0, 10) < monthStart ? monthStart : String(l.start_date).slice(0, 10);
-          const end = String(l.end_date).slice(0, 10) > monthEnd ? monthEnd : String(l.end_date).slice(0, 10);
-          const days = Math.max(0, Math.round((new Date(end).getTime() - new Date(start).getTime()) / 86400000) + 1);
-          leaveDaysByUser.set(l.user_id, (leaveDaysByUser.get(l.user_id) || 0) + days);
+          const start = String(l.start_date).slice(0, 10);
+          const end = String(l.end_date).slice(0, 10);
+          const set = leaveDatesByUser.get(Number(l.user_id)) || new Set<string>();
+          for (const d of period.dates) if (d >= start && d <= end) set.add(d);
+          leaveDatesByUser.set(Number(l.user_id), set);
         }
       }
 
@@ -2733,7 +2741,9 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         const hasAttendanceData = presentDates.size > 0 || siteTracked.has(Number(e.id));
         const upcomingDays = upcomingDaysOf(e);
         const present = hasAttendanceData ? Math.min(workingDays, presentDates.size + upcomingDays) : workingDays;
-        const leave = Math.min(workingDays, (e.user_id ? leaveDaysByUser.get(Number(e.user_id)) || 0 : 0) + siteLeaveDays);
+        const hol = holidaysOf(e);
+        const appLeaveDays = [...(e.user_id ? leaveDatesByUser.get(Number(e.user_id)) || [] : [])].filter((d) => !hol.has(d) && !presentDates.has(d) && !siteLeaveByEmployee.get(Number(e.id))?.has(d)).length;
+        const leave = Math.min(workingDays, appLeaveDays + siteLeaveDays);
         const absent = Math.max(0, workingDays - present - leave);
         const lateCount = lateDatesByEmployee.get(e.id)?.length || 0;
         const lateDeductionDays = Math.floor(lateCount / latesPerDay);
