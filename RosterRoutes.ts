@@ -25,6 +25,12 @@
 //   Admin Panel module "duty_roster" — layer "read" sees shifts and the
 //   roster; layer "roster_manage" (explicit-only) adds / edits shifts and sets
 //   the roster.
+//   Department Access (Module Access -> Duty Roster -> departments,
+//   duty_roster_department_access): an account with departments ticked sees
+//   and sets the roster of those departments' employees only, and can't
+//   change the shifts themselves; no departments ticked = every department
+//   and the shifts too (HR's full setup). Same "no rows = unrestricted" rule
+//   as attendance_report_department_access.
 //   Self Service -> My Duty Roster: users.can_view_roster, OFF by default,
 //   toggled in Module Access.
 
@@ -58,6 +64,17 @@ export async function ensureRosterSchema(dbPool: any): Promise<void> {
     }
   };
   await run("users.can_view_roster", "ALTER TABLE users ADD COLUMN can_view_roster TINYINT(1) NOT NULL DEFAULT 0", ["ER_DUP_FIELDNAME"]);
+  await run(
+    "duty_roster_department_access",
+    `CREATE TABLE IF NOT EXISTS duty_roster_department_access (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NOT NULL,
+      department VARCHAR(150) NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY unique_user_department (user_id, department),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )`
+  );
   await run(
     "duty_shifts",
     `CREATE TABLE IF NOT EXISTS duty_shifts (
@@ -197,6 +214,17 @@ export class RosterIndex {
   }
 }
 
+// The Departments an account may set the roster for, or null for every
+// Department (no rows). A Superadmin is never restricted — callers check.
+export async function getRosterDeptScope(queryDB: QueryDB, userId: number): Promise<string[] | null> {
+  try {
+    const rows: any[] = (await queryDB("SELECT department FROM duty_roster_department_access WHERE user_id = ?", [userId])) || [];
+    return rows.length ? rows.map((r) => String(r.department)) : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function loadShifts(queryDB: QueryDB, activeOnly = false): Promise<RosterShift[]> {
   const rows: any[] = (await queryDB("SELECT * FROM duty_shifts ORDER BY start_time, name").catch(() => [])) || [];
   return rows.filter((r) => !activeOnly || Number(r.is_active ?? 1) === 1).map(shiftFromRow);
@@ -279,6 +307,15 @@ export function registerRosterRoutes(app: Express, deps: RegisterRosterRoutesDep
   const fail = (res: any, err: any) => res.status(err?.statusCode || 500).json({ error: err?.message || String(err) });
   const bad = (message: string, statusCode = 400) => Object.assign(new Error(message), { statusCode });
 
+  const scopeOf = (user: any) => (user.role === "superadmin" ? Promise.resolve(null) : getRosterDeptScope(queryDB, Number(user.id)));
+  // Shifts are the whole company's; an account limited to some Departments
+  // only sets those Departments' roster.
+  const shiftEditGuard = async (req: any, res: any, next: any) => {
+    if (await scopeOf(req.user)) return res.status(403).json({ error: "Your Duty Roster access is limited to some departments, so you can't change the shifts. Ask HR." });
+    next();
+  };
+  const canEditShifts = [...canManage, shiftEditGuard];
+
   async function companyEmployees(): Promise<any[]> {
     const rows: any[] = (await queryDB("SELECT * FROM all_employees")) || [];
     return rows.filter((e) => Number(e.company_id ?? 1) === activeCompanyId());
@@ -307,13 +344,15 @@ export function registerRosterRoutes(app: Express, deps: RegisterRosterRoutesDep
   // ---- shifts ----
   app.get("/api/roster/shifts", ...canRead, async (req: any, res) => {
     try {
-      res.json({ can_manage: await hasModuleLayer(req.user, "duty_roster", "roster_manage"), shifts: await loadShifts(queryDB), inactive: ((await queryDB("SELECT id, is_active FROM duty_shifts").catch(() => [])) || []).filter((r: any) => Number(r.is_active ?? 1) !== 1).map((r: any) => Number(r.id)) });
+      const scope = await scopeOf(req.user);
+      const canManageRoster = await hasModuleLayer(req.user, "duty_roster", "roster_manage");
+      res.json({ can_manage: canManageRoster, can_edit_shifts: canManageRoster && !scope, departments: scope, shifts: await loadShifts(queryDB), inactive: ((await queryDB("SELECT id, is_active FROM duty_shifts").catch(() => [])) || []).filter((r: any) => Number(r.is_active ?? 1) !== 1).map((r: any) => Number(r.id)) });
     } catch (err) {
       fail(res, err);
     }
   });
 
-  app.post("/api/roster/shifts", ...canManage, async (req: any, res) => {
+  app.post("/api/roster/shifts", ...canEditShifts, async (req: any, res) => {
     try {
       const s = readShiftBody(req.body);
       const dup = (await loadShifts(queryDB, true)).find((x) => x.code === s.code);
@@ -328,7 +367,7 @@ export function registerRosterRoutes(app: Express, deps: RegisterRosterRoutesDep
     }
   });
 
-  app.put("/api/roster/shifts/:id", ...canManage, async (req: any, res) => {
+  app.put("/api/roster/shifts/:id", ...canEditShifts, async (req: any, res) => {
     try {
       const id = Number(req.params.id);
       const s = readShiftBody(req.body);
@@ -349,7 +388,7 @@ export function registerRosterRoutes(app: Express, deps: RegisterRosterRoutesDep
 
   // A shift already on the roster is only switched off (kept for the days it
   // was worked); an unused one is removed.
-  app.delete("/api/roster/shifts/:id", ...canManage, async (req: any, res) => {
+  app.delete("/api/roster/shifts/:id", ...canEditShifts, async (req: any, res) => {
     try {
       const id = Number(req.params.id);
       const used: any[] = (await queryDB("SELECT id FROM duty_roster WHERE shift_id = ? LIMIT 1", [id])) || [];
@@ -379,7 +418,8 @@ export function registerRosterRoutes(app: Express, deps: RegisterRosterRoutesDep
         getEmployeeBranchTypeByEmployeeId(queryDB),
         queryDB("SELECT id, branch_name FROM branches").catch(() => [])
       ]);
-      const active = employees.filter((e) => Number(e.is_active ?? 1) === 1);
+      const scope = await scopeOf(req.user);
+      const active = employees.filter((e) => Number(e.is_active ?? 1) === 1 && (!scope || scope.includes(String(e.department || ""))));
       const raw: any[] =
         (await queryDB("SELECT employee_id, roster_date, shift_id, is_off, note FROM duty_roster WHERE roster_date BETWEEN ? AND ?", [from, to]).catch(() => [])) || [];
       const branchName = new Map<number, string>((branches || []).map((b: any) => [Number(b.id), b.branch_name]));
@@ -398,6 +438,7 @@ export function registerRosterRoutes(app: Express, deps: RegisterRosterRoutesDep
       res.json({
         from,
         to,
+        departments: scope,
         holidays,
         employees: active
           .map((e) => ({
@@ -426,6 +467,7 @@ export function registerRosterRoutes(app: Express, deps: RegisterRosterRoutesDep
       if (!cells.length) throw bad("Nothing to save.");
       if (cells.length > MAX_CELLS) throw bad(`At most ${MAX_CELLS} cells at a time.`);
       const employees = new Map<number, any>((await companyEmployees()).map((e) => [Number(e.id), e]));
+      const scope = await scopeOf(req.user);
       const shifts = new Map<number, RosterShift>((await loadShifts(queryDB)).map((s) => [s.id, s]));
       const inactive = new Set<number>(((await queryDB("SELECT id, is_active FROM duty_shifts").catch(() => [])) || []).filter((r: any) => Number(r.is_active ?? 1) !== 1).map((r: any) => Number(r.id)));
       const seen = new Set<string>();
@@ -435,6 +477,9 @@ export function registerRosterRoutes(app: Express, deps: RegisterRosterRoutesDep
         const employeeId = Number(c?.employee_id);
         const date = String(c?.date || "");
         if (!employees.has(employeeId)) throw bad("One of the employees isn't in this company.");
+        if (scope && !scope.includes(String(employees.get(employeeId).department || ""))) {
+          throw bad(`${employees.get(employeeId).name} isn't in your departments (${scope.join(", ")}).`, 403);
+        }
         if (!DATE_RE.test(date)) throw bad("Every date must be YYYY-MM-DD.");
         const key = `${employeeId}|${date}`;
         if (seen.has(key)) continue;

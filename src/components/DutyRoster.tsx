@@ -257,6 +257,9 @@ export const DutyRoster: React.FC<{ token: string; user: User }> = ({ token }) =
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [inactive, setInactive] = useState<Set<number>>(new Set());
   const [canManage, setCanManage] = useState(false);
+  // Shifts are edited only by an account not limited to some Departments.
+  const [canEditShifts, setCanEditShifts] = useState(false);
+  const [scope, setScope] = useState<string[] | null>(null);
   const [data, setData] = useState<RosterData | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -271,7 +274,9 @@ export const DutyRoster: React.FC<{ token: string; user: User }> = ({ token }) =
   const painting = useRef(false);
 
   const loadShifts = useCallback(async () => {
-    const r = await api<{ can_manage: boolean; shifts: Shift[]; inactive: number[] }>(token, '/api/roster/shifts');
+    const r = await api<{ can_manage: boolean; can_edit_shifts: boolean; departments: string[] | null; shifts: Shift[]; inactive: number[] }>(token, '/api/roster/shifts');
+    setCanEditShifts(!!r.can_edit_shifts);
+    setScope(r.departments || null);
     setShifts(r.shifts);
     setInactive(new Set(r.inactive));
     setCanManage(r.can_manage);
@@ -453,6 +458,11 @@ export const DutyRoster: React.FC<{ token: string; user: User }> = ({ token }) =
 
       {error && <div className="text-xs px-3 py-2 rounded-xl bg-rose-50 text-rose-700">{error}</div>}
       {notice && <div className="text-xs px-3 py-2 rounded-xl bg-emerald-50 text-emerald-700">{notice}</div>}
+      {scope && (
+        <div className="text-xs px-3 py-2 rounded-xl bg-amber-50 text-amber-800">
+          You {canManage ? 'set' : 'see'} the roster for: <b>{scope.join(', ')}</b>. Shifts are set up by HR.
+        </div>
+      )}
 
       {tab === 'shifts' ? (
         <div className="space-y-3">
@@ -460,14 +470,14 @@ export const DutyRoster: React.FC<{ token: string; user: User }> = ({ token }) =
             <p className="text-xs text-slate-600 max-w-2xl">
               A rostered shift decides when that person is late (its start + grace) and makes the day a working day even on a calendar Weekend. Days with no shift follow the Late Attendance Policy as before.
             </p>
-            {canManage && (
+            {canEditShifts && (
               <button type="button" onClick={() => setEditing('new')} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-violet-600 text-white hover:bg-violet-700">
                 <Plus className="w-4 h-4" /> New shift
               </button>
             )}
           </div>
           {!shifts.length ? (
-            <div className="rounded-2xl bg-white border border-slate-200 p-8 text-center text-sm text-slate-500">{canManage ? 'No shifts yet — add Morning, Evening, Night…' : 'No shifts yet.'}</div>
+            <div className="rounded-2xl bg-white border border-slate-200 p-8 text-center text-sm text-slate-500">{canEditShifts ? 'No shifts yet — add Morning, Evening, Night…' : 'No shifts yet — HR adds them.'}</div>
           ) : (
             <div className="rounded-2xl bg-white border border-slate-200 overflow-hidden">
               <div className="overflow-x-auto">
@@ -478,7 +488,7 @@ export const DutyRoster: React.FC<{ token: string; user: User }> = ({ token }) =
                       <th className="px-4 py-2.5 font-semibold">Time</th>
                       <th className="px-4 py-2.5 font-semibold">Delay after</th>
                       <th className="px-4 py-2.5 font-semibold">Extreme Delay after</th>
-                      {canManage && <th className="px-4 py-2.5 font-semibold text-right">Actions</th>}
+                      {canEditShifts && <th className="px-4 py-2.5 font-semibold text-right">Actions</th>}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -497,7 +507,7 @@ export const DutyRoster: React.FC<{ token: string; user: User }> = ({ token }) =
                         <td className="px-4 py-2.5 text-slate-700 whitespace-nowrap">{shiftTime(s)}</td>
                         <td className="px-4 py-2.5 text-slate-600">{s.grace_minutes == null ? 'Policy' : `${s.grace_minutes} min`}</td>
                         <td className="px-4 py-2.5 text-slate-600">{s.extreme_grace_minutes == null ? 'Policy' : `${s.extreme_grace_minutes} min`}</td>
-                        {canManage && (
+                        {canEditShifts && (
                           <td className="px-4 py-2.5 text-right whitespace-nowrap">
                             <button type="button" onClick={() => setEditing(s)} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-600" aria-label={`Edit ${s.name}`} title="Edit">
                               <Pencil className="w-4 h-4" />
