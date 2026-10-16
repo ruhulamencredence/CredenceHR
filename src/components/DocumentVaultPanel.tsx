@@ -1,7 +1,8 @@
 import { activePeople } from '../lib/activePeople';
 import React, { useEffect, useState } from 'react';
-import { FolderLock, Plus, X, AlertTriangle, CheckCircle2, FileText, Trash2, Download, ShieldCheck, PenLine } from 'lucide-react';
+import { FolderLock, Plus, X, AlertTriangle, CheckCircle2, FileText, Trash2, Download, ShieldCheck, PenLine, Settings2 } from 'lucide-react';
 import { DocumentSignaturesPopup } from './DocumentSignaturesPopup';
+import { ESignSettingsPopup } from './ESignSettingsPopup';
 import { esignFetch, STATUS_LABEL, STATUS_CLS, type SignStatus } from '../lib/esign';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
@@ -76,6 +77,14 @@ export const DocumentVaultPanel: React.FC<DocumentVaultPanelProps> = ({ token })
   const [uploading, setUploading] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [signDoc, setSignDoc] = useState<VaultDocument | null>(null);
+  // E-Signature settings — the button only for the "E-Signature settings" layer.
+  const [canEsignSettings, setCanEsignSettings] = useState(false);
+  const [showEsignSettings, setShowEsignSettings] = useState(false);
+  useEffect(() => {
+    esignFetch<{ can_edit: boolean }>(token, '/api/esign/settings')
+      .then((r) => setCanEsignSettings(!!r.can_edit))
+      .catch(() => setCanEsignSettings(false));
+  }, [token]);
 
   const fetchAll = async () => {
     setLoading(true);
@@ -178,6 +187,12 @@ export const DocumentVaultPanel: React.FC<DocumentVaultPanelProps> = ({ token })
             <p className="text-xs text-slate-500 mt-0.5 max-w-md">Store employee documents, track e-signature and expiry status.</p>
           </div>
         </div>
+        <div className="flex items-center gap-2">
+        {canEsignSettings && (
+          <button type="button" onClick={() => setShowEsignSettings(true)} className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-xl">
+            <Settings2 className="w-3.5 h-3.5" /> E-Signature settings
+          </button>
+        )}
         <button
           type="button"
           onClick={() => setShowUpload((v) => !v)}
@@ -185,6 +200,7 @@ export const DocumentVaultPanel: React.FC<DocumentVaultPanelProps> = ({ token })
         >
           <Plus className="w-3.5 h-3.5" /> Upload Document
         </button>
+        </div>
       </div>
 
       {showUpload && (
@@ -330,6 +346,16 @@ export const DocumentVaultPanel: React.FC<DocumentVaultPanelProps> = ({ token })
           })}
           {documents.length === 0 && <p className="px-2 py-10 text-center text-xs text-slate-400">No documents uploaded yet.</p>}
         </div>
+      )}
+      {showEsignSettings && (
+        <ESignSettingsPopup
+          token={token}
+          onClose={() => setShowEsignSettings(false)}
+          onSaved={(m) => {
+            setShowEsignSettings(false);
+            setSuccess(m);
+          }}
+        />
       )}
       {signDoc && (
         <DocumentSignaturesPopup token={token} docId={signDoc.id} ownerId={signDoc.user_id} ownerName={signDoc.user_name} onClose={() => setSignDoc(null)} onChanged={() => void fetchAll()} />

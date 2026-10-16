@@ -12,11 +12,12 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
-import { ArrowLeft, PenLine, FileText, Download, Eye, CheckCircle2, Clock, XCircle, ShieldCheck, Loader2, Copy, Check } from 'lucide-react';
+import { ArrowLeft, PenLine, FileText, Download, Eye, CheckCircle2, Clock, XCircle, ShieldCheck, Loader2, Copy, Check, KeyRound, BookOpenCheck } from 'lucide-react';
 import type { User } from '../types';
 import { ModulePath } from './ModulePath';
 import { Spinner } from './Spinner';
 import { SignaturePad } from './SignaturePad';
+import { DocReader } from './DocReader';
 import { MailPopup as Popup, inputCls, labelCls, ghostBtn } from './mail/MailPopup';
 import { useLiveRefresh } from '../lib/liveRefresh';
 import { esignFetch, openProtectedFile, dhakaTime, verifyLink, STATUS_LABEL, STATUS_CLS, type ESignDoc } from '../lib/esign';
@@ -51,14 +52,39 @@ const SignPopup: React.FC<{ token: string; user: User; d: ESignDoc; saved: strin
   const [agree, setAgree] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const ready = agree && name.trim().length >= 2 && (useSaved ? !!saved : !!drawn);
+  // E-Signature settings: read to the end first / a code from email.
+  const [read, setRead] = useState(!!d.i_read);
+  const [reading, setReading] = useState(false);
+  const [otp, setOtp] = useState('');
+  const [sentTo, setSentTo] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
+  const [wait, setWait] = useState(0);
+  useEffect(() => {
+    if (wait <= 0) return;
+    const t = setTimeout(() => setWait((w) => w - 1), 1000);
+    return () => clearTimeout(t);
+  }, [wait]);
+  const sendCode = async () => {
+    setSending(true);
+    setError('');
+    try {
+      const r = await esignFetch<{ sent_to: string }>(token, `/api/esign/documents/${d.id}/otp`, { method: 'POST' });
+      setSentTo(r.sent_to);
+      setWait(60);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setSending(false);
+    }
+  };
+  const ready = agree && name.trim().length >= 2 && (useSaved ? !!saved : !!drawn) && (!d.require_read || read) && (!d.otp_required || otp.length === 6);
   const submit = async () => {
     setBusy(true);
     setError('');
     try {
       const r = await esignFetch<ESignDoc>(token, `/api/esign/documents/${d.id}/sign`, {
         method: 'POST',
-        body: { signed_name: name.trim(), image: useSaved ? null : drawn, save_signature: !useSaved && keep, agree: true }
+        body: { signed_name: name.trim(), image: useSaved ? null : drawn, save_signature: !useSaved && keep, agree: true, otp: d.otp_required ? otp : undefined }
       });
       onDone(r.sign_status === 'completed' ? 'Signed — everyone has signed, the signed PDF is ready.' : 'Signed. The next signer has been told.');
     } catch (e: any) {
@@ -68,6 +94,7 @@ const SignPopup: React.FC<{ token: string; user: User; d: ESignDoc; saved: strin
     }
   };
   return (
+    <>
     <Popup
       title="Sign document"
       icon={<PenLine className="w-4 h-4 text-blue-600" />}
@@ -91,10 +118,15 @@ const SignPopup: React.FC<{ token: string; user: User; d: ESignDoc; saved: strin
               {d.file_name} · {d.owner_name}
             </div>
           </div>
-          <button type="button" onClick={() => void openProtectedFile(token, `/api/employee-documents/${d.id}/file`).catch((e) => setError(e.message))} className="liquid-glass-chip rounded-full px-3 py-1.5 text-xs font-semibold text-slate-700 inline-flex items-center gap-1">
-            <Eye className="w-3.5 h-3.5" /> Read
+          <button type="button" onClick={() => setReading(true)} className="liquid-glass-chip rounded-full px-3 py-1.5 text-xs font-semibold text-slate-700 inline-flex items-center gap-1">
+            {read ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> : <Eye className="w-3.5 h-3.5" />} Read
           </button>
         </div>
+        {d.require_read && !read && (
+          <p className="text-[11px] px-3 py-2 rounded-xl bg-amber-50 text-amber-800 flex items-center gap-1.5">
+            <BookOpenCheck className="w-3.5 h-3.5 shrink-0" /> Open <b>Read</b> and scroll to the end of the document before signing.
+          </p>
+        )}
 
         {saved && (
           <div className="flex gap-2">
@@ -126,6 +158,29 @@ const SignPopup: React.FC<{ token: string; user: User; d: ESignDoc; saved: strin
           <label className={labelCls}>Your full name</label>
           <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} />
         </div>
+        {d.otp_required && (
+          <div className="liquid-glass-inset rounded-2xl p-3">
+            <div className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+              <KeyRound className="w-3.5 h-3.5 text-blue-600" /> Code from your email
+            </div>
+            <p className="text-[11px] text-slate-500 mt-0.5">{sentTo ? `Sent to ${sentTo}. It works once, for 5 minutes.` : 'A 6-digit code is emailed to you to confirm it is really you.'}</p>
+            <div className="flex gap-2 mt-2">
+              <input
+                className={`${inputCls} tracking-[0.4em] text-center font-semibold`}
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={6}
+                value={otp}
+                onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                placeholder="••••••"
+                aria-label="6-digit code"
+              />
+              <button type="button" onClick={() => void sendCode()} disabled={sending || wait > 0} className="liquid-glass-chip rounded-full px-3 text-xs font-semibold text-slate-700 whitespace-nowrap disabled:opacity-50">
+                {sending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : wait > 0 ? `Again in ${wait}s` : sentTo ? 'Send again' : 'Send code'}
+              </button>
+            </div>
+          </div>
+        )}
         <label className="flex items-start gap-2 text-xs text-slate-700 cursor-pointer">
           <input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} className="accent-blue-600 mt-0.5" />
           <span>I have read this document and I agree to sign it electronically. My name, signature, the time and this device's address are recorded on it.</span>
@@ -133,6 +188,8 @@ const SignPopup: React.FC<{ token: string; user: User; d: ESignDoc; saved: strin
         {error && <div className="text-xs px-3 py-2 rounded-xl bg-rose-50 text-rose-700">{error}</div>}
       </div>
     </Popup>
+    {reading && <DocReader token={token} docId={d.id} title={d.doc_type} alreadyRead={read} onClose={() => setReading(false)} onRead={() => setRead(true)} />}
+    </>
   );
 };
 

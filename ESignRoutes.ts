@@ -18,6 +18,21 @@
 //      file to check it is the genuine one.
 //   4. Several signers in order — e.g. Employee -> HR Manager -> MD; only the
 //      signer whose turn it is can sign, the next one gets an alert.
+//   5. Proof of who signed (each part switchable in E-Signature settings,
+//      esign_settings, all OFF until turned on):
+//      - OTP: a 6-digit code emailed to the signer, needed to sign (5 min,
+//        one use, 5 wrong tries locks it for 15 min, kept only as a hash);
+//        on for every document type or only some;
+//      - read to the end: the signer must scroll the document to its end in
+//        the in-app reader before signing (time spent is recorded);
+//      always on:
+//      - history: every step (sent, opened, read, code sent / wrong / right,
+//        signed, declined, cancelled, completed, downloaded, checked on
+//        /verify) with time, IP and device, each row hash-chained to the one
+//        before (document_events) so a changed or deleted row shows; printed
+//        on an Audit Trail page of the signed PDF;
+//      - server seal: HMAC-SHA256 of the signed PDF's SHA-256 + the history
+//        with ESIGN_SEAL_KEY (.env); /verify checks it.
 //
 // Access:
 //   Admin Panel -> Document Vault (module "document_vault"): send a document
@@ -25,6 +40,7 @@
 //   signers / an order is its own explicit-only layer "sign_request".
 //   Self Service -> Documents to Sign: users.can_sign_documents, OFF by
 //   default (Module Access). A signer must have it before HR can add them.
+//   E-Signature settings: the explicit-only layer "esign_settings".
 //   /verify/<code>: public by design (the point is that a bank or embassy
 //   can check a document), and shows only the document type, the owner's
 //   name, the signers and the dates — never the file.
@@ -34,6 +50,7 @@ import type { Express } from "express";
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
 import QRCode from "qrcode";
 import type { AlertType } from "./Alerts";
+import { sendMail, isMailerConfigured } from "./mailer";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 
@@ -71,6 +88,56 @@ export async function ensureESignSchema(dbPool: any): Promise<void> {
     ["completed_at", "DATETIME NULL"]
   ];
   for (const [c, def] of cols) await run(`employee_documents.${c}`, `ALTER TABLE employee_documents ADD COLUMN ${c} ${def}`, ["ER_DUP_FIELDNAME", "ER_NO_SUCH_TABLE"]);
+  await run("employee_documents.seal", "ALTER TABLE employee_documents ADD COLUMN seal CHAR(64) NULL", ["ER_DUP_FIELDNAME", "ER_NO_SUCH_TABLE"]);
+  await run("employee_documents.events_head", "ALTER TABLE employee_documents ADD COLUMN events_head CHAR(64) NULL", ["ER_DUP_FIELDNAME", "ER_NO_SUCH_TABLE"]);
+  await run(
+    "esign_settings",
+    `CREATE TABLE IF NOT EXISTS esign_settings (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      company_id INT NOT NULL DEFAULT 1,
+      otp_required TINYINT(1) NOT NULL DEFAULT 0,
+      otp_doc_types TEXT NULL,
+      require_read TINYINT(1) NOT NULL DEFAULT 0,
+      updated_by INT NULL,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uniq_esign_settings_company (company_id)
+    )`
+  );
+  await run(
+    "esign_otps",
+    `CREATE TABLE IF NOT EXISTS esign_otps (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      document_id INT NOT NULL,
+      user_id INT NOT NULL,
+      code_hash CHAR(64) NOT NULL,
+      sent_to VARCHAR(255) NULL,
+      expires_at DATETIME NOT NULL,
+      attempts INT NOT NULL DEFAULT 0,
+      locked_until DATETIME NULL,
+      used_at DATETIME NULL,
+      created_at DATETIME NOT NULL,
+      INDEX idx_esign_otps_doc_user (document_id, user_id),
+      FOREIGN KEY (document_id) REFERENCES employee_documents(id) ON DELETE CASCADE
+    )`
+  );
+  await run(
+    "document_events",
+    `CREATE TABLE IF NOT EXISTS document_events (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      document_id INT NOT NULL,
+      seq INT NOT NULL,
+      event VARCHAR(32) NOT NULL,
+      user_id INT NULL,
+      ip VARCHAR(64) NULL,
+      user_agent VARCHAR(255) NULL,
+      detail VARCHAR(500) NULL,
+      at_iso VARCHAR(32) NOT NULL,
+      prev_hash CHAR(64) NOT NULL,
+      hash CHAR(64) NOT NULL,
+      UNIQUE KEY uniq_doc_event_seq (document_id, seq),
+      FOREIGN KEY (document_id) REFERENCES employee_documents(id) ON DELETE CASCADE
+    )`
+  );
   await run("verify_code key", "ALTER TABLE employee_documents ADD UNIQUE KEY uniq_doc_verify_code (verify_code)", ["ER_DUP_KEYNAME", "ER_NO_SUCH_TABLE"]);
   await run(
     "user_signatures",
@@ -179,6 +246,9 @@ export async function buildSignedPdf(opts: {
   verifyCode: string;
   verifyUrl: string;
   signers: SignerForPdf[];
+  events?: { at: string; label: string; who: string; ip: string | null; device: string; detail: string | null }[];
+  eventsHead?: string;
+  sealed?: boolean;
 }): Promise<Buffer> {
   let pdf: PDFDocument;
   if (opts.kind === "pdf") {
@@ -248,7 +318,7 @@ export async function buildSignedPdf(opts: {
   y -= 30;
   const row = (k: string, v: string) => {
     cert.drawText(pdfText(k), { x: 40, y, size: 8.5, font: bold, color: rgb(0.25, 0.25, 0.3) });
-    const f = fitText(font, v, 8.5, W - 40 - 160 - (y > 720 ? 110 : 0));
+    const f = fitText(font, v, 8.5, W - 40 - 160 - (y > 700 ? 110 : 0));
     cert.drawText(f.s, { x: 160, y, size: f.sz, font, color: rgb(0.1, 0.1, 0.15) });
     y -= 15;
   };
@@ -288,12 +358,149 @@ export async function buildSignedPdf(opts: {
     cert.drawText(pdfText(n), { x: 40, y, size: 8, font, color: gray });
     y -= 12;
   }
+  // Audit Trail: every step, hash-chained.
+  if (opts.events && opts.events.length) {
+    let page = pdf.addPage([595.28, 841.89]);
+    let yy = 800;
+    const head = () => {
+      page.drawText("Audit Trail", { x: 40, y: yy, size: 18, font: bold, color: violet });
+      yy -= 16;
+      page.drawText(pdfText(`${opts.docType} · verification code ${opts.verifyCode}`), { x: 40, y: yy, size: 8.5, font, color: gray });
+      yy -= 22;
+      for (const [x, t] of [[40, "When (BST)"], [150, "What"], [300, "Who"], [430, "IP / device"]] as [number, string][]) page.drawText(t, { x, y: yy, size: 8, font: bold, color: rgb(0.25, 0.25, 0.3) });
+      yy -= 12;
+    };
+    head();
+    for (const e of opts.events) {
+      if (yy < 90) {
+        page = pdf.addPage([595.28, 841.89]);
+        yy = 800;
+        head();
+      }
+      page.drawLine({ start: { x: 40, y: yy + 9 }, end: { x: 555, y: yy + 9 }, thickness: 0.3, color: rgb(0.88, 0.88, 0.92) });
+      const cell = (f: PDFFont, text: string, size: number, width: number, x: number, color = rgb(0.15, 0.15, 0.2)) => {
+        const t = fitText(f, text, size, width);
+        page.drawText(t.s, { x, y: yy, size: t.sz, font: f, color });
+      };
+      cell(font, dhaka(e.at).replace(" (BST)", ""), 7.5, 105, 40);
+      cell(bold, e.label, 7.5, 145, 150);
+      cell(font, e.who, 7.5, 125, 300);
+      cell(font, [e.ip, e.device].filter(Boolean).join(" · "), 7, 125, 430, gray);
+      if (e.detail) {
+        yy -= 10;
+        cell(font, e.detail, 7, 405, 150, gray);
+      }
+      yy -= 14;
+    }
+    yy -= 10;
+    if (yy < 80) {
+      page = pdf.addPage([595.28, 841.89]);
+      yy = 800;
+    }
+    page.drawText("History fingerprint (last hash of the chain)", { x: 40, y: yy, size: 8, font: bold, color: rgb(0.25, 0.25, 0.3) });
+    yy -= 11;
+    page.drawText(pdfText(opts.eventsHead || ""), { x: 40, y: yy, size: 7, font, color: gray });
+    yy -= 14;
+    page.drawText(
+      pdfText(opts.sealed ? "Sealed by the CredenceHR server (HMAC-SHA256) - the verify page checks the seal." : "Not sealed by the server (no seal key set)."),
+      { x: 40, y: yy, size: 8, font, color: gray }
+    );
+  }
   for (const p of pdf.getPages()) footer(p);
   pdf.setTitle(`${pdfText(opts.docType)} (signed)`);
   pdf.setProducer("CredenceHR E-Signature");
   pdf.setCreator("CredenceHR");
   return Buffer.from(await pdf.save());
 }
+
+// ---------------------------------------------------------------------------
+// History (hash-chained) and server seal
+// ---------------------------------------------------------------------------
+export const EVENT_LABEL: Record<string, string> = {
+  sent: "Sent for signing",
+  notified: "Told it is their turn",
+  viewed: "Opened the document",
+  read: "Read it to the end",
+  otp_sent: "Sign-in code sent",
+  otp_wrong: "Wrong code entered",
+  otp_locked: "Code locked (too many wrong tries)",
+  otp_ok: "Code confirmed",
+  signed: "Signed",
+  declined: "Declined",
+  cancelled: "Signing cancelled",
+  completed: "Signed by everyone — signed PDF made",
+  downloaded: "Downloaded the signed PDF",
+  verified_view: "Looked up on the verify page",
+  verified_check: "A copy was checked on the verify page"
+};
+export const reqMeta = (req: any) => ({
+  ip: req ? String(req.headers?.["x-forwarded-for"] || req.socket?.remoteAddress || "").split(",")[0].trim().slice(0, 64) || null : null,
+  ua: req ? String(req.headers?.["user-agent"] || "").slice(0, 255) || null : null
+});
+const ZERO = "0".repeat(64);
+const eventHash = (r: { document_id: number; seq: number; event: string; user_id: number | null; ip: string | null; user_agent: string | null; detail: string | null; at_iso: string; prev_hash: string }) =>
+  crypto
+    .createHash("sha256")
+    .update(JSON.stringify([Number(r.document_id), Number(r.seq), r.event, r.user_id == null ? null : Number(r.user_id), r.ip || null, r.user_agent || null, r.detail || null, r.at_iso, r.prev_hash]))
+    .digest("hex");
+
+export async function loadDocEvents(queryDB: QueryDB, docId: number): Promise<any[]> {
+  return ((await queryDB("/*unscoped*/ SELECT * FROM document_events WHERE document_id = ? ORDER BY seq", [docId]).catch(() => [])) || []) as any[];
+}
+// Every row's hash re-made from its own fields and the row before it.
+export function checkEventChain(rows: any[]): { ok: boolean; broken_at: number | null; head: string } {
+  let prev = ZERO;
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    if (Number(r.seq) !== i + 1 || r.prev_hash !== prev || eventHash(r) !== r.hash) return { ok: false, broken_at: i + 1, head: prev };
+    prev = r.hash;
+  }
+  return { ok: true, broken_at: null, head: prev };
+}
+// One history row; never throws (a failed log must not undo the action).
+export async function logDocEvent(queryDB: QueryDB, docId: number, event: string, opts: { userId?: number | null; req?: any; detail?: string | null } = {}) {
+  const { ip, ua } = reqMeta(opts.req);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const last: any[] = (await queryDB("/*unscoped*/ SELECT seq, hash FROM document_events WHERE document_id = ? ORDER BY seq DESC LIMIT 1", [docId])) || [];
+      const row = {
+        document_id: docId,
+        seq: last.length ? Number(last[0].seq) + 1 : 1,
+        event,
+        user_id: opts.userId ?? null,
+        ip,
+        user_agent: ua,
+        detail: opts.detail ? String(opts.detail).slice(0, 500) : null,
+        at_iso: new Date().toISOString(),
+        prev_hash: last.length ? String(last[0].hash) : ZERO
+      };
+      await queryDB(
+        "INSERT INTO document_events (document_id, seq, event, user_id, ip, user_agent, detail, at_iso, prev_hash, hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [row.document_id, row.seq, row.event, row.user_id, row.ip, row.user_agent, row.detail, row.at_iso, row.prev_hash, eventHash(row)]
+      );
+      return;
+    } catch (err: any) {
+      if (err?.code !== "ER_DUP_ENTRY") {
+        console.warn(`⚠️ E-Signature history (${event}): ${err?.message || err}`);
+        return;
+      }
+    }
+  }
+}
+// Server seal over the signed PDF and its history at signing time.
+const sealKey = () => String(process.env.ESIGN_SEAL_KEY || "").trim();
+export const sealOf = (signedSha: string, head: string, code: string) =>
+  sealKey() ? crypto.createHmac("sha256", sealKey()).update(`${signedSha}|${head}|${code}`).digest("hex") : null;
+const shortUa = (ua: string | null) => {
+  const s = String(ua || "");
+  const os = /Android/i.test(s) ? "Android" : /iPhone|iPad/i.test(s) ? "iOS" : /Windows/i.test(s) ? "Windows" : /Mac OS/i.test(s) ? "Mac" : /Linux/i.test(s) ? "Linux" : "";
+  const br = /Edg\//.test(s) ? "Edge" : /Chrome\//.test(s) ? "Chrome" : /Firefox\//.test(s) ? "Firefox" : /Safari\//.test(s) ? "Safari" : "";
+  return [br, os].filter(Boolean).join(" on ") || (s ? s.slice(0, 40) : "");
+};
+const maskEmail = (e: string) => {
+  const [u, d] = String(e).split("@");
+  return d ? `${u.slice(0, 2)}${"*".repeat(Math.max(1, u.length - 2))}@${d}` : e;
+};
 
 // ---------------------------------------------------------------------------
 // Routes
@@ -306,6 +513,28 @@ export function registerESignRoutes(app: Express, deps: RegisterESignRoutesDeps)
   const notify = async (userId: number | null | undefined, title: string, message: string, docId: number) => {
     if (userId) await createAlert(queryDB, { userId: Number(userId), type: "document_sign", title, message, relatedType: "employee_document", relatedId: docId });
   };
+
+  // ---- settings (esign_settings, one row per company; all off by default) ----
+  async function loadSettings() {
+    const rows: any[] = (await queryDB("SELECT * FROM esign_settings LIMIT 1").catch(() => [])) || [];
+    const r = rows[0];
+    let types: string[] = [];
+    try {
+      types = r?.otp_doc_types ? JSON.parse(r.otp_doc_types) : [];
+    } catch {
+      types = [];
+    }
+    return { otp_required: Number(r?.otp_required) === 1, otp_doc_types: Array.isArray(types) ? types.map(String) : [], require_read: Number(r?.require_read) === 1 };
+  }
+  const otpNeeded = (st: Awaited<ReturnType<typeof loadSettings>>, docType: string) => st.otp_required && (!st.otp_doc_types.length || st.otp_doc_types.includes(String(docType)));
+  // The signer's "read to the end" since the document was last sent.
+  async function hasRead(docId: number, userId: number) {
+    const ev = await loadDocEvents(queryDB, docId);
+    const lastSent = [...ev].reverse().find((e) => e.event === "sent");
+    return ev.some((e) => e.event === "read" && Number(e.user_id) === userId && (!lastSent || Number(e.seq) > Number(lastSent.seq)));
+  }
+  const otpSecret = () => sealKey() || "credencehr-esign";
+  const otpHash = (docId: number, userId: number, code: string) => crypto.createHash("sha256").update(`${docId}|${userId}|${code}|${otpSecret()}`).digest("hex");
 
   async function isVaultManager(user: any) {
     if (user.role === "superadmin") return true;
@@ -370,7 +599,9 @@ export function registerESignRoutes(app: Express, deps: RegisterESignRoutesDeps)
       requested_at: iso(doc.sign_requested_at),
       completed_at: iso(doc.completed_at),
       has_signed_file: doc.sign_status === "completed",
-      signers: signers.map((s) => signerView(s, users))
+      signers: signers.map((s) => signerView(s, users)),
+      otp_required: otpNeeded(await loadSettings(), doc.doc_type),
+      require_read: (await loadSettings()).require_read
     };
   }
 
@@ -443,7 +674,13 @@ export function registerESignRoutes(app: Express, deps: RegisterESignRoutesDeps)
         [sha256(file), code, placement, req.user.id, new Date(), id]
       );
       const owner = (await usersByIds([Number(doc.user_id)])).get(Number(doc.user_id));
+      await logDocEvent(queryDB, id, "sent", {
+        userId: Number(req.user.id),
+        req,
+        detail: `To ${signers.map((s, i) => `${i + 1}. ${users.get(s.user_id).name}${s.label ? ` (${s.label})` : ""}`).join(", ")} · original SHA-256 ${sha256(file)}`
+      });
       await notify(signers[0].user_id, "Document waiting for your signature", `${doc.doc_type} of ${owner?.name || "an employee"}. Open Self Service → Documents to Sign.`, id);
+      await logDocEvent(queryDB, id, "notified", { detail: users.get(signers[0].user_id).name });
       res.json(await docView(await loadDoc(id)));
     } catch (err) {
       fail(res, err);
@@ -457,6 +694,7 @@ export function registerESignRoutes(app: Express, deps: RegisterESignRoutesDeps)
       if (doc.sign_status !== "pending") throw bad("Only a document that is out for signing can be cancelled.");
       await queryDB("UPDATE employee_documents SET sign_status = 'cancelled' WHERE id = ?", [id]);
       await queryDB("UPDATE document_signers SET status = 'cancelled' WHERE document_id = ? AND status IN ('pending', 'waiting')", [id]);
+      await logDocEvent(queryDB, id, "cancelled", { userId: Number(req.user.id), req });
       res.json(await docView(await loadDoc(id)));
     } catch (err) {
       fail(res, err);
@@ -473,6 +711,7 @@ export function registerESignRoutes(app: Express, deps: RegisterESignRoutesDeps)
       if (!(await isVaultManager(req.user)) && Number(doc.user_id) !== me && !signers.some((s) => Number(s.signer_user_id) === me)) throw bad("Not authorized.", 403);
       const file = toBuffer(doc.signed_file);
       if (doc.sign_status !== "completed" || !file) throw bad("This document isn't signed by everyone yet.", 404);
+      await logDocEvent(queryDB, id, "downloaded", { userId: me, req });
       const base = String(doc.file_name || `document_${id}`).replace(/\.[^.]+$/, "");
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(`${base} (signed).pdf`)}"`);
@@ -495,7 +734,7 @@ export function registerESignRoutes(app: Express, deps: RegisterESignRoutesDeps)
         if (!doc || doc.sign_status === "none") continue;
         const v = await docView(doc);
         const my = v.signers.find((s) => s.user_id === me) || null;
-        out.push({ ...v, my_step: my?.step ?? null, my_status: my?.status ?? null, my_turn: v.sign_status === "pending" && my?.status === "pending" });
+        out.push({ ...v, my_step: my?.step ?? null, my_status: my?.status ?? null, my_turn: v.sign_status === "pending" && my?.status === "pending", i_read: my ? await hasRead(id, me) : false });
       }
       out.sort((a, b) => Number(b.my_turn) - Number(a.my_turn) || String(b.requested_at || "").localeCompare(String(a.requested_at || "")));
       res.json(out);
@@ -557,6 +796,8 @@ export function registerESignRoutes(app: Express, deps: RegisterESignRoutesDeps)
       if (mine.status !== "pending") throw bad(mine.status === "signed" ? "You have already signed this document." : "It isn't your turn to sign yet.", 409);
       const file = toBuffer(doc.file_data);
       if (!file || sha256(file) !== doc.sha256) throw bad("The document was changed after it was sent for signing, so it can't be signed. Ask HR to send it again.", 409);
+      const settings = await loadSettings();
+      if (settings.require_read && !(await hasRead(id, me))) throw bad("Read the document to the end first (Read).", 409);
       let image: Buffer;
       if (req.body?.image) image = readSignatureImage(req.body.image);
       else {
@@ -564,6 +805,27 @@ export function registerESignRoutes(app: Express, deps: RegisterESignRoutesDeps)
         const b = toBuffer(saved[0]?.image);
         if (!b) throw bad("Draw or upload your signature.");
         image = b;
+      }
+      // OTP last, once everything else is in order (a wrong code costs a try).
+      if (otpNeeded(settings, doc.doc_type)) {
+        const code = String(req.body?.otp || "").replace(/\D/g, "");
+        const rows: any[] = (await queryDB("SELECT * FROM esign_otps WHERE document_id = ? AND user_id = ? ORDER BY id DESC LIMIT 1", [id, me])) || [];
+        const o = rows[0];
+        const nowMs = Date.now();
+        const t = (v: any) => new Date(String(v).replace(" ", "T")).getTime();
+        if (!o || o.used_at) throw bad("Ask for a code first (Send code).", 400);
+        if (o.locked_until && t(o.locked_until) > nowMs) throw bad("Too many wrong codes — try again in 15 minutes.", 429);
+        if (t(o.expires_at) < nowMs) throw bad("The code has expired — send a new one.", 400);
+        if (code.length !== 6) throw bad("Type the 6-digit code from your email.", 400);
+        if (otpHash(id, me, code) !== o.code_hash) {
+          const attempts = Number(o.attempts) + 1;
+          const lock = attempts >= 5 ? new Date(nowMs + 15 * 60_000) : null;
+          await queryDB("UPDATE esign_otps SET attempts = ?, locked_until = ? WHERE id = ?", [attempts, lock, Number(o.id)]);
+          await logDocEvent(queryDB, id, lock ? "otp_locked" : "otp_wrong", { userId: me, req });
+          throw bad(lock ? "Wrong code 5 times — locked for 15 minutes." : `Wrong code — ${5 - attempts} tries left.`, lock ? 429 : 400);
+        }
+        await queryDB("UPDATE esign_otps SET used_at = ? WHERE id = ?", [new Date(), Number(o.id)]);
+        await logDocEvent(queryDB, id, "otp_ok", { userId: me, req });
       }
       if (req.body?.save_signature) await queryDB("INSERT INTO user_signatures (user_id, image) VALUES (?, ?) ON DUPLICATE KEY UPDATE image = VALUES(image)", [me, image]);
       const ip = String(req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "").split(",")[0].trim().slice(0, 64) || null;
@@ -575,15 +837,19 @@ export function registerESignRoutes(app: Express, deps: RegisterESignRoutesDeps)
         [signedName, image, now, ip, ua, Number(mine.id)]
       );
       if (upd && upd.affectedRows === 0) throw bad("You have already signed this document.", 409);
+      await logDocEvent(queryDB, id, "signed", { userId: me, req, detail: `As "${signedName}"${mine.label ? ` (${mine.label})` : ""} · signature image SHA-256 ${sha256(image).slice(0, 16)}…` });
       const next = signers.find((s) => Number(s.step_order) > Number(mine.step_order) && s.status === "waiting");
       const owner = (await usersByIds([Number(doc.user_id)])).get(Number(doc.user_id));
       if (next) {
         await queryDB("UPDATE document_signers SET status = 'pending' WHERE id = ?", [Number(next.id)]);
         await notify(Number(next.signer_user_id), "Document waiting for your signature", `${doc.doc_type} of ${owner?.name || "an employee"} — ${signedName} signed before you. Open Self Service → Documents to Sign.`, id);
+        await logDocEvent(queryDB, id, "notified", { detail: (await usersByIds([Number(next.signer_user_id)])).get(Number(next.signer_user_id))?.name || null });
       } else {
         // Everyone signed: build the signed copy.
         const all = await signersOf(id);
-        const users = await usersByIds([...all.map((s) => Number(s.signer_user_id)), Number(doc.sign_requested_by)]);
+        const evRows = await loadDocEvents(queryDB, id);
+        const users = await usersByIds([...all.map((s) => Number(s.signer_user_id)), Number(doc.sign_requested_by), ...evRows.map((e) => Number(e.user_id)).filter(Boolean)]);
+        const chain = checkEventChain(evRows);
         const pdf = await buildSignedPdf({
           file,
           kind: SIGNABLE(doc.file_mimetype, doc.file_name)!,
@@ -603,9 +869,21 @@ export function registerESignRoutes(app: Express, deps: RegisterESignRoutesDeps)
             signed_at: s.signed_at,
             image: toBuffer(s.signature_image),
             ip: s.ip || null
-          }))
+          })),
+          events: evRows.map((e) => ({
+            at: e.at_iso,
+            label: EVENT_LABEL[e.event] || e.event,
+            who: e.user_id ? users.get(Number(e.user_id))?.name || `#${e.user_id}` : e.event === "notified" ? `to ${e.detail || ""}` : "—",
+            ip: e.ip || null,
+            device: shortUa(e.user_agent),
+            detail: e.event === "notified" ? null : e.detail || null
+          })),
+          eventsHead: chain.head,
+          sealed: !!sealKey()
         });
-        await queryDB("UPDATE employee_documents SET signed_file = ?, signed_sha256 = ?, sign_status = 'completed', completed_at = ? WHERE id = ?", [pdf, sha256(pdf), now, id]);
+        const signedSha = sha256(pdf);
+        await queryDB("UPDATE employee_documents SET signed_file = ?, signed_sha256 = ?, sign_status = 'completed', completed_at = ?, events_head = ?, seal = ? WHERE id = ?", [pdf, signedSha, now, chain.head, sealOf(signedSha, chain.head, doc.verify_code), id]);
+        await logDocEvent(queryDB, id, "completed", { detail: `Signed PDF SHA-256 ${signedSha}` });
         const tell = new Set<number>([Number(doc.user_id), Number(doc.sign_requested_by)].filter(Boolean));
         for (const uid of tell) await notify(uid, "Document signed by everyone", `${doc.doc_type} of ${owner?.name || "an employee"} is signed. The signed PDF is ready.`, id);
       }
@@ -627,9 +905,129 @@ export function registerESignRoutes(app: Express, deps: RegisterESignRoutesDeps)
       if (!mine || mine.status !== "pending") throw bad("It isn't your turn to sign this document.", 403);
       await queryDB("UPDATE document_signers SET status = 'declined', decline_reason = ?, signed_at = ? WHERE id = ?", [reason, new Date(), Number(mine.id)]);
       await queryDB("UPDATE employee_documents SET sign_status = 'declined' WHERE id = ?", [id]);
+      await logDocEvent(queryDB, id, "declined", { userId: me, req, detail: reason });
       const who = (await usersByIds([me])).get(me);
       await notify(Number(doc.sign_requested_by), "Signature declined", `${who?.name || "A signer"} declined to sign ${doc.doc_type}: ${reason}`, id);
       res.json(await docView(await loadDoc(id)));
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+  // ---- E-Signature settings (layer "esign_settings") ----
+  app.get("/api/esign/settings", ...adminGate, async (req: any, res) => {
+    try {
+      const types: any[] = (await queryDB("SELECT DISTINCT doc_type FROM employee_documents").catch(() => [])) || [];
+      res.json({
+        ...(await loadSettings()),
+        can_edit: await hasModuleLayer(req.user, "document_vault", "esign_settings"),
+        email_ready: isMailerConfigured(),
+        seal_ready: !!sealKey(),
+        doc_types: [...new Set(types.map((t) => String(t.doc_type)).filter(Boolean))].sort()
+      });
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+  app.put("/api/esign/settings", ...adminGate, async (req: any, res) => {
+    try {
+      if (!(await hasModuleLayer(req.user, "document_vault", "esign_settings"))) throw bad("You don't have permission to change the E-Signature settings.", 403);
+      const otp = !!req.body?.otp_required;
+      if (otp && !isMailerConfigured()) throw bad("Email isn't set up on the server (SMTP_HOST / SMTP_USER / SMTP_PASS in .env), so codes can't be sent. Set it up first.");
+      const types = Array.isArray(req.body?.otp_doc_types) ? [...new Set(req.body.otp_doc_types.map((t: any) => String(t).trim().slice(0, 100)).filter(Boolean))].slice(0, 50) : [];
+      const read = !!req.body?.require_read;
+      const cur: any[] = (await queryDB("SELECT id FROM esign_settings LIMIT 1").catch(() => [])) || [];
+      if (cur.length) await queryDB("UPDATE esign_settings SET otp_required = ?, otp_doc_types = ?, require_read = ?, updated_by = ? WHERE id = ?", [otp ? 1 : 0, JSON.stringify(types), read ? 1 : 0, req.user.id, Number(cur[0].id)]);
+      else await queryDB("INSERT INTO esign_settings (otp_required, otp_doc_types, require_read, updated_by) VALUES (?, ?, ?, ?)", [otp ? 1 : 0, JSON.stringify(types), read ? 1 : 0, req.user.id]);
+      res.json(await loadSettings());
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+  // ---- OTP: a 6-digit code to the signer's email ----
+  app.post("/api/esign/documents/:id/otp", authenticateToken, requireSigner, async (req: any, res) => {
+    try {
+      const id = Number(req.params.id);
+      const me = Number(req.user.id);
+      const doc = await loadDoc(id);
+      if (doc.sign_status !== "pending") throw bad("This document isn't waiting for signatures.");
+      const mine = (await signersOf(id)).find((s) => Number(s.signer_user_id) === me);
+      if (!mine || mine.status !== "pending") throw bad("It isn't your turn to sign this document.", 403);
+      if (!otpNeeded(await loadSettings(), doc.doc_type)) throw bad("No code is needed for this document.");
+      const nowMs = Date.now();
+      const t = (v: any) => new Date(String(v).replace(" ", "T")).getTime();
+      const recent: any[] = (await queryDB("SELECT * FROM esign_otps WHERE document_id = ? AND user_id = ? ORDER BY id DESC LIMIT 6", [id, me])) || [];
+      if (recent[0]?.locked_until && t(recent[0].locked_until) > nowMs) throw bad("Too many wrong codes — try again in 15 minutes.", 429);
+      if (recent[0] && nowMs - t(recent[0].created_at) < 60_000) throw bad("A code was just sent — wait a minute before asking again.", 429);
+      if (recent.filter((o) => nowMs - t(o.created_at) < 3600_000).length >= 5) throw bad("Too many codes this hour — try again later.", 429);
+      const u: any[] = (await queryDB("SELECT email, name FROM users WHERE id = ?", [me])) || [];
+      const email = String(u[0]?.email || "").trim();
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw bad("Your account has no email address to send the code to. Ask HR to add it.");
+      const code = String(crypto.randomInt(0, 1_000_000)).padStart(6, "0");
+      const r: any = await queryDB(
+        "INSERT INTO esign_otps (document_id, user_id, code_hash, sent_to, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        [id, me, otpHash(id, me, code), maskEmail(email), new Date(nowMs + 5 * 60_000), new Date(nowMs)]
+      );
+      const sent = await sendMail({
+        to: email,
+        subject: `${code} is your signing code`,
+        html: `<div style="font-family:Arial,sans-serif;font-size:14px;color:#1e1b4b">
+          <p>Hello ${String(u[0]?.name || "").replace(/[<>&]/g, "")},</p>
+          <p>Your code to sign <b>${String(doc.doc_type).replace(/[<>&]/g, "")}</b> in CredenceHR is:</p>
+          <p style="font-size:28px;font-weight:bold;letter-spacing:6px">${code}</p>
+          <p>It works once, for 5 minutes. If you didn't ask to sign anything, don't share it and tell HR.</p></div>`
+      });
+      if (!sent.success) {
+        await queryDB("DELETE FROM esign_otps WHERE id = ?", [Number(r.insertId)]);
+        throw bad(`The code couldn't be emailed: ${sent.error}`, 502);
+      }
+      await logDocEvent(queryDB, id, "otp_sent", { userId: me, req, detail: `By email to ${maskEmail(email)}` });
+      res.json({ sent_to: maskEmail(email), expires_in: 300 });
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+  // ---- "Read to the end" from the in-app reader ----
+  app.post("/api/esign/documents/:id/read", authenticateToken, requireSigner, async (req: any, res) => {
+    try {
+      const id = Number(req.params.id);
+      const me = Number(req.user.id);
+      const doc = await loadDoc(id);
+      if (doc.sign_status !== "pending") throw bad("This document isn't waiting for signatures.");
+      if (!(await signersOf(id)).some((s) => Number(s.signer_user_id) === me)) throw bad("You aren't a signer of this document.", 403);
+      const secs = Math.max(0, Math.min(86400, Math.round(Number(req.body?.seconds) || 0)));
+      const pages = Math.max(0, Math.min(5000, Math.round(Number(req.body?.pages) || 0)));
+      if (!(await hasRead(id, me))) await logDocEvent(queryDB, id, "read", { userId: me, req, detail: `${pages ? `${pages} page${pages === 1 ? "" : "s"}, ` : ""}${secs} seconds` });
+      res.json({ success: true });
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+  // ---- History (Document Vault) ----
+  app.get("/api/esign/documents/:id/events", ...adminGate, async (req: any, res) => {
+    try {
+      const id = Number(req.params.id);
+      await loadDoc(id);
+      const rows = await loadDocEvents(queryDB, id);
+      const chain = checkEventChain(rows);
+      const users = await usersByIds(rows.map((r) => Number(r.user_id)).filter(Boolean));
+      res.json({
+        chain_ok: chain.ok,
+        broken_at: chain.broken_at,
+        events: rows.map((r) => ({
+          seq: Number(r.seq),
+          event: r.event,
+          label: EVENT_LABEL[r.event] || r.event,
+          user_name: r.user_id ? users.get(Number(r.user_id))?.name || null : null,
+          ip: r.ip || null,
+          device: shortUa(r.user_agent),
+          detail: r.detail || null,
+          at: r.at_iso
+        }))
+      });
     } catch (err) {
       fail(res, err);
     }
@@ -654,7 +1052,7 @@ export function registerESignRoutes(app: Express, deps: RegisterESignRoutesDeps)
     if (!CODE_RE.test(code)) throw bad("That verification code isn't valid.", 404);
     const rows: any[] =
       (await queryDB(
-        "/*unscoped*/ SELECT id, user_id, doc_type, sign_status, sha256, signed_sha256, sign_requested_at, completed_at FROM employee_documents WHERE verify_code = ?",
+        "/*unscoped*/ SELECT id, user_id, doc_type, sign_status, sha256, signed_sha256, sign_requested_at, completed_at, seal, events_head, verify_code, signed_file FROM employee_documents WHERE verify_code = ?",
         [code]
       )) || [];
     const doc = rows[0];
@@ -663,6 +1061,20 @@ export function registerESignRoutes(app: Express, deps: RegisterESignRoutesDeps)
     const ids = [Number(doc.user_id), ...signers.map((s) => Number(s.signer_user_id))];
     const users: any[] = (await queryDB(`/*unscoped*/ SELECT id, name FROM users WHERE id IN (${ids.map(() => "?").join(",")})`, ids)) || [];
     const nameOf = new Map<number, string>(users.map((u) => [Number(u.id), u.name]));
+    // Integrity of what is on record: the stored signed PDF still has its
+    // fingerprint, the history chain is unbroken, the server seal matches.
+    const events = await loadDocEvents(queryDB, Number(doc.id));
+    const chain = checkEventChain(events);
+    const signedFile = toBuffer(doc.signed_file);
+    const integrity =
+      doc.sign_status === "completed"
+        ? {
+            file_ok: !!signedFile && sha256(signedFile) === doc.signed_sha256,
+            history_ok: chain.ok && (!doc.events_head || events.some((e) => e.hash === doc.events_head)),
+            seal: !doc.seal ? "none" : sealKey() ? (sealOf(doc.signed_sha256, doc.events_head || "", doc.verify_code) === doc.seal ? "valid" : "invalid") : "unknown"
+          }
+        : null;
+    delete doc.signed_file;
     return {
       doc,
       view: {
@@ -674,6 +1086,7 @@ export function registerESignRoutes(app: Express, deps: RegisterESignRoutesDeps)
         completed_at: iso(doc.completed_at),
         signed_sha256: doc.signed_sha256 || null,
         original_sha256: doc.sha256 || null,
+        integrity,
         signers: signers.map((s) => ({
           step: Number(s.step_order),
           name: s.status === "signed" ? s.signed_name || nameOf.get(Number(s.signer_user_id)) : nameOf.get(Number(s.signer_user_id)) || null,
@@ -687,7 +1100,9 @@ export function registerESignRoutes(app: Express, deps: RegisterESignRoutesDeps)
   app.get("/api/public/verify/:code", async (req: any, res) => {
     try {
       if (limited(req)) throw bad("Too many checks — wait a minute.", 429);
-      res.json((await publicView(String(req.params.code || "").toUpperCase())).view);
+      const { doc, view } = await publicView(String(req.params.code || "").toUpperCase());
+      await logDocEvent(queryDB, Number(doc.id), "verified_view", { req });
+      res.json(view);
     } catch (err) {
       fail(res, err);
     }
@@ -703,6 +1118,7 @@ export function registerESignRoutes(app: Express, deps: RegisterESignRoutesDeps)
       if (buf.length > 20 * 1024 * 1024) throw bad("The file is too big.");
       const h = sha256(buf);
       const match = doc.signed_sha256 && h === doc.signed_sha256 ? "signed" : doc.sha256 && h === doc.sha256 ? "original" : "none";
+      await logDocEvent(queryDB, Number(doc.id), "verified_check", { req, detail: match === "signed" ? "Matched the signed copy" : match === "original" ? "Matched the unsigned original" : "Did NOT match" });
       res.json({ match, sha256: h });
     } catch (err) {
       fail(res, err);

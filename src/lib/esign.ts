@@ -40,6 +40,10 @@ export interface ESignDoc {
   my_step?: number | null;
   my_status?: ESignSigner['status'] | null;
   my_turn?: boolean;
+  i_read?: boolean;
+  // E-Signature settings applied to this document.
+  otp_required?: boolean;
+  require_read?: boolean;
 }
 
 export async function esignFetch<T>(token: string | null, path: string, init?: { method?: string; body?: unknown }): Promise<T> {
