@@ -17,7 +17,7 @@
 // index.css's body::before (a position: fixed, window-sized layer) keeps it
 // anchored to the viewport either way, rather than scrolling with content.
 
-export type BackgroundThemeId = 'default' | 'violet' | 'deep-violet' | 'sunset' | 'frosted-glass' | 'apple-glow' | 'mono';
+export type BackgroundThemeId = 'default' | 'frosted-glass' | 'apple-glow' | 'mono';
 
 export interface BackgroundTheme {
   id: BackgroundThemeId;
@@ -49,27 +49,6 @@ export const BACKGROUND_THEMES: BackgroundTheme[] = [
     label: 'Classic',
     swatch: '#DBEEFF',
     gradient: 'linear-gradient(160deg, #eaf6ff 0%, #dbeeff 30%, #e7dcff 65%, #ede0ff 100%)'
-  },
-  {
-    id: 'violet',
-    label: 'Violet',
-    swatch: '#B36AFF',
-    gradient:
-      'radial-gradient(ellipse 90% 60% at 50% 20%, #EFE0FF 0%, #D2A8FF 65%, #7F00FF 90%, #47008E 100%)'
-  },
-  {
-    id: 'deep-violet',
-    label: 'Deep Violet',
-    swatch: '#6300C6',
-    gradient:
-      'radial-gradient(ellipse 90% 60% at 50% 20%, #F3E8FF 0%, #B36AFF 62%, #6300C6 88%, #380071 100%)'
-  },
-  {
-    id: 'sunset',
-    label: 'Sunset',
-    swatch: '#EA4B1E',
-    gradient:
-      'radial-gradient(ellipse 90% 60% at 50% 20%, #FFE9DE 0%, #FFB38F 60%, #7F00FF 88%, #380071 100%)'
   },
   {
     id: 'frosted-glass',
@@ -121,6 +100,8 @@ export const CHAT_CONVERSATION_BACKGROUND = BACKGROUND_THEMES.find((t) => t.id =
 const STORAGE_KEY = 'mpr_bg_theme_v2';
 const OLD_STORAGE_KEY = 'mpr_bg_theme';
 const DEFAULT_THEME: BackgroundThemeId = 'apple-glow';
+// A saved theme that no longer exists (Violet, Deep Violet and Sunset were
+// removed) falls back to the default.
 const isTheme = (v: string | null): v is BackgroundThemeId => BACKGROUND_THEMES.some((t) => t.id === v);
 
 export function getSavedBackgroundTheme(): BackgroundThemeId {
