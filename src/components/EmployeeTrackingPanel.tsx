@@ -20,6 +20,7 @@ import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../
 import { savePdfCrossPlatform } from '../lib/saveFile';
 import credenceLogo from '../assets/credence-logo.png';
 
+import { STD_STYLES, STD_HEAD } from '../lib/pdfStandard';
 // "18-Aug-2026, 02:19 PM" — same dd-MMM-yyyy date as formatDate, plus a local
 // 12-hour time, for report rows where the exact moment (not just the day)
 // matters. Reads local (not UTC) components, same reasoning as
@@ -310,6 +311,7 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
       const contentStartY = drawPdfLetterhead(doc, logoImg, letterheadOptions);
 
       autoTable(doc, {
+      theme: 'grid',
         startY: contentStartY,
         margin: { top: contentStartY, left: 8, right: 8 },
         head: [['SL', 'Date & Time', 'Location', 'Accuracy (m)', 'Battery']],
@@ -320,10 +322,9 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
           p.accuracy_m != null ? String(p.accuracy_m) : '—',
           p.battery_pct != null ? `${p.battery_pct}%` : '—'
         ]),
-        styles: { fontSize: 8, cellPadding: 1.5, overflow: 'linebreak' },
+        styles: { ...STD_STYLES, fontSize: 8, cellPadding: 1.5, overflow: 'linebreak' },
         columnStyles: { 0: { cellWidth: 10 }, 1: { cellWidth: 38 }, 3: { cellWidth: 22 }, 4: { cellWidth: 16 } },
-        headStyles: { fillColor: [5, 150, 105], textColor: 255, fontSize: 8 },
-        alternateRowStyles: { fillColor: [248, 250, 252] },
+        headStyles: { ...STD_HEAD, fontSize: 8 },
         didDrawPage: () => { drawPdfLetterhead(doc, logoImg, letterheadOptions); }
       });
 

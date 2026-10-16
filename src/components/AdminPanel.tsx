@@ -63,6 +63,7 @@ import { PagerBar } from './PagerBar';
 import { ADMIN_TAB_KEYS, adminUrlEnabled, adminTabToPath, adminPathToTab } from '../lib/adminUrl';
 import { LoadingBlock } from './LoadingBlock';
 
+import { STD_STYLES, STD_HEAD } from '../lib/pdfStandard';
 // Module Access modal (Admin Panel -> Users -> per-Admin/User "Module
 // Access") groups the same Admin Panel tabs into the same labeled clusters
 // GlobalSidebar.tsx itself uses (PEPM Manage / HR + its own nested
@@ -1743,6 +1744,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       const dayHeaders = Array.from({ length: monthlyReport.days_in_month }, (_, i) => String(i + 1));
 
       autoTable(doc, {
+      theme: 'grid',
         startY: contentStartY,
         margin: { top: contentStartY, left: 6, right: 6 },
         head: [['Employee', ...dayHeaders, 'P', 'H', 'L', 'A']],
@@ -1753,10 +1755,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           });
           return [u.user_name, ...daySymbols, String(u.present_days), String(u.holiday_days ?? 0), String(u.leave_days ?? 0), String(u.absent_days)];
         }),
-        styles: { fontSize: 5.5, cellPadding: 0.8, halign: 'center', overflow: 'visible' },
+        styles: { ...STD_STYLES, fontSize: 5.5, cellPadding: 0.8, halign: 'center', overflow: 'visible' },
         columnStyles: { 0: { cellWidth: 26, halign: 'left', fontStyle: 'bold' } },
-        headStyles: { fillColor: [37, 99, 235], textColor: 255, fontSize: 5.5 },
-        alternateRowStyles: { fillColor: [248, 250, 252] },
+        headStyles: { ...STD_HEAD, fontSize: 5.5 },
         // Same color convention as the on-screen grid: green Present, amber
         // Holiday, sky Weekend, slate Absent.
         didParseCell: (data: any) => {
@@ -1824,13 +1825,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     ];
 
     autoTable(doc, {
+      theme: 'grid',
       startY: contentStartY,
       margin: { top: contentStartY, left: 10, right: 10 },
       head: [['Status', 'Employee', 'Department', 'Project', 'Check In', 'Check Out', 'Source']],
       body: rows,
-      styles: { fontSize: 7.5, cellPadding: 1.5, overflow: 'linebreak' },
-      headStyles: { fillColor: [37, 99, 235], textColor: 255, fontSize: 7.5 },
-      alternateRowStyles: { fillColor: [248, 250, 252] },
+      styles: { ...STD_STYLES, fontSize: 7.5, cellPadding: 1.5, overflow: 'linebreak' },
+      headStyles: { ...STD_HEAD, fontSize: 7.5 },
       didParseCell: (data: any) => {
         if (data.section === 'body' && data.column.index === 0) {
           const val = data.cell.raw;

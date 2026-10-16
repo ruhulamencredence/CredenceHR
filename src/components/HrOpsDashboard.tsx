@@ -21,6 +21,7 @@ import { useHrApi, taka, fmtDate, monthLabel, btnGhost, inputCls, labelCls, Noti
 import { HrRemindersCard } from './HrRemindersCard';
 import { LoadingBlock } from './LoadingBlock';
 
+import { STD_STYLES, STD_HEAD } from '../lib/pdfStandard';
 const DIM_LABEL: Record<string, string> = {
   department: 'Department',
   branch: 'Branch',
@@ -135,19 +136,21 @@ export const HrOpsDashboard: React.FC<{
       if (filterBy && filterValue) filters.push([DIM_LABEL[filterBy], filterValue]);
       let y = drawPdfLetterhead(doc, logo, { reportTitle: 'Monthly HR Operations Report', filters });
       autoTable(doc, {
+      theme: 'grid',
         startY: y,
         head: [['Opening', 'Closing', 'Joined', 'Separated', 'Turnover %', 'Promotions', 'Transfers', 'Increments', 'Increment Total', 'Confirmations']],
         body: [[s.opening, s.closing, s.joined, s.separated, s.turnover_pct, s.promotions, s.transfers, s.increments, taka(s.increment_total), s.confirmations].map(String)],
-        styles: { fontSize: 8.5, halign: 'center' },
-        headStyles: { fillColor: [124, 58, 237] }
+        styles: { ...STD_STYLES, fontSize: 8.5, halign: 'center' },
+        headStyles: { ...STD_HEAD }
       });
       y = (doc as any).lastAutoTable.finalY + 6;
       autoTable(doc, {
+      theme: 'grid',
         startY: y,
         head: [[DIM_LABEL[report.group_by], 'Opening', 'Closing', 'Joined', 'Separated', 'Promotions', 'Transfers', 'Increments', 'Confirmations']],
         body: report.groups.map((g) => [g.key, g.opening, g.closing, g.joined, g.separated, g.promotions, g.transfers, g.increments, g.confirmations].map(String)),
-        styles: { fontSize: 8 },
-        headStyles: { fillColor: [71, 85, 105] }
+        styles: { ...STD_STYLES, fontSize: 8 },
+        headStyles: { ...STD_HEAD }
       });
       for (const l of LISTS) {
         const rows = report.lists[l.key] || [];
@@ -162,11 +165,12 @@ export const HrOpsDashboard: React.FC<{
         doc.setTextColor(30, 41, 59);
         doc.text(`${l.label} (${rows.length})`, 14, y);
         autoTable(doc, {
+      theme: 'grid',
           startY: y + 2,
           head: [l.cols.map((c) => c[1])],
           body: rows.map((r) => l.cols.map((c) => String(cell(r, c[0])))),
-          styles: { fontSize: 8 },
-          headStyles: { fillColor: [148, 163, 184] }
+          styles: { ...STD_STYLES, fontSize: 8 },
+          headStyles: { ...STD_HEAD }
         });
       }
       finalizePdfPageNumbers(doc);

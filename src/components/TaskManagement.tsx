@@ -20,6 +20,7 @@ import { savePdfCrossPlatform } from '../lib/saveFile';
 import credenceLogo from '../assets/credence-logo.png';
 import { api, cap, fmtDate, NewTaskForm, RecurrenceList, SOURCE_LABEL, STATUS_LABEL, Task, TaskAccess, TaskCard, TaskDrawer, takePendingTaskId } from './TaskParts';
 
+import { STD_STYLES, STD_HEAD } from '../lib/pdfStandard';
 type Tab = 'requests' | 'all' | 'repeat' | 'report';
 
 interface ReportRow {
@@ -271,18 +272,19 @@ const TaskReport: React.FC<{ token: string; tasks: Task[] }> = ({ token, tasks }
       };
       const startY = drawPdfLetterhead(doc, logoImg, opts);
       autoTable(doc, {
+      theme: 'grid',
         startY,
         margin: { top: startY, left: 8, right: 8 },
         head: [['SL', 'Person', 'Tasks', 'Done', 'On time', 'Late', 'Still open', 'Overdue', 'Requests handled', 'Done %']],
         body: data.rows.map((r, i) => [String(i + 1), r.name, r.total, r.done, r.on_time, r.late, r.open, r.overdue, r.requests, pct(r.done, r.total)].map(String)),
-        styles: { fontSize: 8, cellPadding: 1.5 },
-        headStyles: { fillColor: [124, 58, 237], textColor: 255, fontSize: 8 },
-        alternateRowStyles: { fillColor: [248, 250, 252] },
+        styles: { ...STD_STYLES, fontSize: 8, cellPadding: 1.5 },
+        headStyles: { ...STD_HEAD, fontSize: 8 },
         didDrawPage: () => {
           drawPdfLetterhead(doc, logoImg, opts);
         }
       });
       autoTable(doc, {
+      theme: 'grid',
         head: [['#', 'Task', 'From', 'Given to', 'Due', 'Status', 'Done on']],
         body: monthTasks.map((t) => [
           String(t.id),
@@ -294,8 +296,8 @@ const TaskReport: React.FC<{ token: string; tasks: Task[] }> = ({ token, tasks }
           t.completed_at ? `${fmtDate(t.completed_at)}${t.on_time === false ? ' (late)' : ''}` : ''
         ]),
         margin: { top: startY, left: 8, right: 8 },
-        styles: { fontSize: 7.5, cellPadding: 1.3, overflow: 'linebreak' },
-        headStyles: { fillColor: [100, 116, 139], textColor: 255, fontSize: 8 },
+        styles: { ...STD_STYLES, fontSize: 7.5, cellPadding: 1.3, overflow: 'linebreak' },
+        headStyles: { ...STD_HEAD, fontSize: 8 },
         didDrawPage: () => {
           drawPdfLetterhead(doc, logoImg, opts);
         }

@@ -39,6 +39,7 @@ import { HrOpsPageSkeleton } from './components/HrOpsSkeleton';
 import { AdminPageSkeleton, ListPageSkeleton } from './components/PageSkeletons';
 import { AppErrorBoundary } from './components/AppErrorBoundary';
 import { retryImport } from './lib/chunkReload';
+import { preloadPdfCompany } from './lib/pdfStandard';
 import { ModulePath } from './components/ModulePath';
 import { UserDashboardSkeleton } from './components/UserDashboardSkeleton';
 import { Spinner } from './components/Spinner';
@@ -825,6 +826,12 @@ export default function App() {
       </button>
     </div>
   );
+
+  // The company's name, address and logo for every report PDF's header
+  // (lib/pdfStandard.ts), loaded once after sign-in.
+  useEffect(() => {
+    if (token) preloadPdfCompany(token);
+  }, [token]);
 
   // Download the Admin Panel's code in the background once an account that
   // can open it is signed in, so opening it later doesn't wait on it.

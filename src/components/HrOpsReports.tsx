@@ -64,6 +64,7 @@ import { confirmDialog } from '../lib/confirmDialog';
 import { ColumnFilterMenu } from './ColumnFilterMenu';
 import { LoadingBlock } from './LoadingBlock';
 
+import { STD_STYLES, STD_HEAD } from '../lib/pdfStandard';
 // ---------------------------------------------------------------------------
 // Types (mirror HrOpsReportsRoutes.ts)
 // ---------------------------------------------------------------------------
@@ -418,21 +419,23 @@ async function exportPdf(title: string, r: ReportResult, filtersText: string) {
   });
   if (r.groups && r.group_by) {
     autoTable(doc, {
+      theme: 'grid',
       startY: y,
       head: [[pdfSafe(r.group_by.label), 'Employees']],
       body: r.groups.map((g) => [pdfSafe(g.key), String(g.count)]),
-      styles: { fontSize: 8, cellPadding: 1.6 },
-      headStyles: { fillColor: [37, 99, 235] },
+      styles: { ...STD_STYLES, fontSize: 8, cellPadding: 1.6 },
+      headStyles: { ...STD_HEAD },
       tableWidth: 120
     });
     y = (doc as any).lastAutoTable.finalY + 6;
   }
   autoTable(doc, {
+      theme: 'grid',
     startY: y,
     head: [r.columns.map((c) => pdfSafe(c.label))],
     body: r.rows.map((row) => r.columns.map((c) => pdfSafe(display(row[c.key], c.type)))),
-    styles: { fontSize: wide ? 6.5 : 7.5, cellPadding: 1.4 },
-    headStyles: { fillColor: [37, 99, 235] }
+    styles: { ...STD_STYLES, fontSize: wide ? 6.5 : 7.5, cellPadding: 1.4 },
+    headStyles: { ...STD_HEAD }
   });
   finalizePdfPageNumbers(doc);
   await savePdfCrossPlatform(doc, `${title.replace(/[^\w]+/g, '_')}.pdf`);
