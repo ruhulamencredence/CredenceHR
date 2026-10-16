@@ -38,6 +38,7 @@
 
 import type { Express } from "express";
 import { getHolidayMapsByGroup, getEmployeeBranchTypeMap, getEmployeeBranchTypeByEmployeeId, type HolidayAppliesTo } from "./holidayRoutes";
+import { loadRoster, lateThresholds, nightShiftCheckIn, type RosterIndex } from "./RosterRoutes";
 import { loadSiteEntries } from "./SiteAttendanceRoutes";
 import { buildServiceBook, loadEmployeeWorld, loadSettings, snapshotOf, currentValues, toDate, num, monthsBetween } from "./HROperationsRoutes";
 
@@ -361,6 +362,8 @@ export interface AttendanceDay {
   leave_type: string | null;
   source: string | null;
   correction: string | null;
+  // Duty Roster shift for the day ("Night 22:00–06:00"), if one is rostered.
+  shift: string | null;
 }
 
 // Every attendance input for a date range, indexed for per-employee lookup.
@@ -380,6 +383,8 @@ export interface AttendanceData {
   // Confirmed Site Attendance (supervisor muster roll) entries.
   siteByEmployee: Map<number, any[]>;
   policies: any[];
+  // Duty Roster (RosterRoutes.ts): Off days and rostered shifts.
+  roster: RosterIndex;
 }
 
 const indexBy = <K>(rows: any[], key: (r: any) => K | null) => {
@@ -399,7 +404,7 @@ async function rowsInRange(queryDB: QueryDB, table: string, column: string, from
 
 export async function loadAttendanceData(queryDB: QueryDB, from: string, to: string, emp?: any): Promise<AttendanceData> {
   const userId = emp?.user_id ? Number(emp.user_id) : null;
-  const [branchTypes, branchByEmployee, holidays, remote, punches, leaves, corrections, waivers, policies, site] = await Promise.all([
+  const [branchTypes, branchByEmployee, holidays, remote, punches, leaves, corrections, waivers, policies, site, roster] = await Promise.all([
     getEmployeeBranchTypeMap(queryDB),
     getEmployeeBranchTypeByEmployeeId(queryDB),
     getHolidayMapsByGroup(queryDB, from, to),
@@ -413,7 +418,8 @@ export async function loadAttendanceData(queryDB: QueryDB, from: string, to: str
     emp ? (userId ? rowsFor(queryDB, "attendance_corrections", "user_id", userId) : Promise.resolve([])) : rowsInRange(queryDB, "attendance_corrections", "attendance_date", from, to),
     emp ? rowsFor(queryDB, "late_waivers", "employee_id", Number(emp.id)) : rowsInRange(queryDB, "late_waivers", "waiver_date", from, to),
     queryDB("SELECT * FROM late_policy_settings").catch(() => []),
-    loadSiteEntries(queryDB, from, to, emp ? Number(emp.id) : undefined)
+    loadSiteEntries(queryDB, from, to, emp ? Number(emp.id) : undefined),
+    loadRoster(queryDB, from, to, emp ? [Number(emp.id)] : undefined)
   ]);
   return {
     branchTypes,
@@ -425,7 +431,8 @@ export async function loadAttendanceData(queryDB: QueryDB, from: string, to: str
     correctionsByUser: indexBy<number>(corrections, (r) => (r.user_id != null ? Number(r.user_id) : null)),
     waiversByEmployee: indexBy<number>(waivers, (r) => (r.employee_id != null ? Number(r.employee_id) : null)),
     siteByEmployee: indexBy<number>(site, (r) => (r.employee_id != null ? Number(r.employee_id) : null)),
-    policies
+    policies,
+    roster
   };
 }
 
@@ -434,7 +441,8 @@ export async function loadAttendanceData(queryDB: QueryDB, from: string, to: str
 export function computeAttendanceDays(data: AttendanceData, emp: any, from: string, to: string, today: string, leaveLabel: (k: string) => string): AttendanceDay[] {
   const userId = emp.user_id ? Number(emp.user_id) : null;
   const group: HolidayAppliesTo = data.branchByEmployee.get(Number(emp.id)) || (userId && data.branchTypes.get(userId)) || "head_office";
-  const holidays = data.holidays[group];
+  // Their group's calendar with their Duty Roster laid over it.
+  const holidays = data.roster.holidaysFor(Number(emp.id), data.holidays[group]);
   const joining = toDate(emp.joining_date);
   const lastDay = Number(emp.is_active ?? 1) === 0 ? toDate(emp.job_status_effective_date) || toDate(emp.status_effective_date) : null;
 
@@ -467,14 +475,28 @@ export function computeAttendanceDays(data: AttendanceData, emp: any, from: stri
     if (r.check_out_at) keepOut(d, new Date(r.check_out_at));
     note(d, "Remote");
   }
+  const nightPunches = new Map<string, Date[]>();
   for (const p of punches) {
     if (!p.punch_time) continue;
     const t = new Date(p.punch_time);
     const d = ymd(t);
     if (d < from || d > to) continue;
-    keepIn(d, t);
-    keepOut(d, t);
+    const shift = data.roster.shiftOn(Number(emp.id), d);
+    if (shift?.crosses_midnight) {
+      // A night shift's arrival is its first punch near the shift start;
+      // the early-morning punches are the previous night's check-out.
+      if (!nightPunches.has(d)) nightPunches.set(d, []);
+      nightPunches.get(d)!.push(t);
+      keepOut(d, t);
+    } else {
+      keepIn(d, t);
+      keepOut(d, t);
+    }
     note(d, "Office device");
+  }
+  for (const [d, list] of nightPunches) {
+    const arrival = nightShiftCheckIn(list, data.roster.shiftOn(Number(emp.id), d)!);
+    if (arrival) keepIn(d, arrival);
   }
   // Site Attendance: Present without a time still counts as present (at the
   // shift start, so never late); Late carries the arrival time; Leave is a
@@ -534,11 +556,11 @@ export function computeAttendanceDays(data: AttendanceData, emp: any, from: stri
     else status = "absent";
     let late: AttendanceDay["late"] = null;
     if (inAt && !hol) {
-      const pol = policyFor(d);
-      const [h, m] = String(pol.shift_start_time || "09:00").split(":").map(Number);
+      // The rostered shift's start and grace when there is one, else the policy's.
+      const th = lateThresholds(policyFor(d), data.roster.shiftOn(Number(emp.id), d));
       const mins = minutesOf(inAt);
-      if (mins > h * 60 + m + Number(pol.extreme_grace_minutes ?? 60)) late = "extreme";
-      else if (mins > h * 60 + m + Number(pol.grace_minutes ?? 10)) late = "late";
+      if (mins > th.extreme) late = "extreme";
+      else if (mins > th.delay) late = "late";
     }
     days.push({
       date: d,
@@ -551,7 +573,11 @@ export function computeAttendanceDays(data: AttendanceData, emp: any, from: stri
       waived: !!late && waived.has(d),
       leave_type: leaveByDay.get(d) || null,
       source: source.has(d) ? [...source.get(d)!].join(" + ") : null,
-      correction: correctionByDay.get(d) || null
+      correction: correctionByDay.get(d) || null,
+      shift: (() => {
+        const sh = data.roster.shiftOn(Number(emp.id), d);
+        return sh ? `${sh.name} ${sh.start_time.slice(0, 5)}–${sh.end_time.slice(0, 5)}` : null;
+      })()
     });
   }
   return days;

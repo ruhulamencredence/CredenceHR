@@ -7,7 +7,7 @@ import {
   Contact, Calendar, Clock, Fingerprint, Banknote, Package, LayoutDashboard, Server, MessageSquare,
   ChevronsLeft, ChevronsRight, ShieldAlert, Search, PieChart, FileUp,
   Target, UserPlus, Gavel, FolderLock, Sparkles, ExternalLink, Car, HandCoins,
-  ClipboardList, BookOpen, ClipboardCheck, TrendingUp, Settings, Pencil, Check, Mail,
+  ClipboardList, BookOpen, ClipboardCheck, TrendingUp, Settings, Pencil, Check, Mail, CalendarRange,
 } from 'lucide-react';
 import { User, AdminModuleKey, REPORTS_INSIGHTS_MODULES, DATA_IMPORT_MODULES } from '../types';
 import credenceLogo from '../assets/credence-logo.png';
@@ -49,7 +49,7 @@ interface GlobalSidebarProps {
   onGoToUserClaims: (target: 'movementClaims' | 'conveyanceBill') => void;
   // Everyday employee self-service items — not Admin-gated, shown to every
   // account regardless of role/module access.
-  onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | 'credenceMail') => void;
+  onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | 'credenceMail' | 'myRoster') => void;
   // Admin Panel's own Movement Claims / Conveyance Bill Claim review tabs —
   // separate feature from onGoToUserClaims above, gated by module_permissions
   // like every other Admin Panel module.
@@ -365,6 +365,11 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   if (isSuperAdmin || !!user.can_use_mail) {
     selfServiceItems.push({ key: 'credenceMail', label: 'Credence Mail', icon: Mail, onClick: () => onGoToSelfServiceTab('credenceMail') });
   }
+  // My Duty Roster (MyRoster.tsx) — this account's own shifts and Off days.
+  // users.can_view_roster, off until turned on in Module Access.
+  if (isSuperAdmin || !!user.can_view_roster) {
+    selfServiceItems.push({ key: 'myRoster', label: 'My Duty Roster', icon: CalendarRange, onClick: () => onGoToSelfServiceTab('myRoster') });
+  }
   // My Targets (MyTargets.tsx) — monthly / yearly targets and their tasks;
   // a supervisor's Team tab too. users.can_view_targets.
   if (isSuperAdmin || !!user.can_view_targets) {
@@ -434,6 +439,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     { key: 'attendance', label: 'Remote Attendance', icon: Navigation, onClick: () => onGoToAdminModule('attendance') },
     { key: 'attendance_reports', label: 'Monthly Attendance Report', icon: Calendar, onClick: () => onGoToAdminModule('attendance_reports') },
     { key: 'office_attendance', label: 'Office Attendance', icon: Fingerprint, onClick: () => onGoToAdminModule('office_attendance') },
+    { key: 'duty_roster', label: 'Duty Roster', icon: CalendarRange, onClick: () => onGoToAdminModule('duty_roster') },
   ].filter((i) => canSeeModule(i.key as AdminModuleKey));
   // Site Attendance (supervisor muster roll) lives inside Office Attendance
   // (SiteAttendanceAdmin.tsx) — same module grant, its own entry here.
@@ -643,7 +649,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   const selfGroups = makeGroups([
     { key: 'g_work', label: 'Work & Approvals', icon: ListChecks, entries: pick('myTasks', 'myTargets', 'approveApplications', 'teamAttendance') },
     { key: 'g_pepm_op', label: 'PEPM Operation', icon: Briefcase, entries: pick('entry', 'jobs', 'entryDetails', 'jobEdit') },
-    { key: 'g_leave_att', label: 'Leave & Attendance', icon: CalendarClock, entries: pick('leaveApplication', 'timesheet') },
+    { key: 'g_leave_att', label: 'Leave & Attendance', icon: CalendarClock, entries: pick('leaveApplication', 'timesheet', 'myRoster') },
     { key: 'g_requests', label: 'Requests & Claims', icon: Wallet, entries: pick('userMovementClaims', 'userConveyanceClaims', 'vehicleManagement', 'assetManagement', 'myMobileSim', 'myLoans', 'myLetters') },
     { key: 'g_others', label: 'Others', icon: Users2, entries: pick('credenceMail', 'chat', 'alerts', 'erp360', 'employeeDirectory', 'myCases', 'resignation') }
   ]);
@@ -660,7 +666,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
       key: 'g_attendance',
       label: 'Attendance & Leave',
       icon: Fingerprint,
-      entries: pick('attendance', 'office_attendance', 'site_attendance', 'attendance_reports', 'leave_applications', 'leaveManagement', 'holidays')
+      entries: pick('attendance', 'office_attendance', 'site_attendance', 'duty_roster', 'attendance_reports', 'leave_applications', 'leaveManagement', 'holidays')
     },
     { key: 'g_payroll', label: 'Payroll & Claims', icon: Banknote, entries: pick('payroll', 'claims', 'conveyance', 'disbursement', 'bill_claim_policy') },
     {

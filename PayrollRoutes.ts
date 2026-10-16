@@ -42,6 +42,7 @@ import { createAlert } from "./Alerts";
 import { finalizeAdvanceRequest, rejectAdvanceRequest } from "./LoanRequestRoutes";
 import { monthLocked, lockedMessage, settlePaidPayroll, batchFor } from "./PayrollApprovalRoutes";
 import { getHolidayMap, getHolidayMapsByGroup, getEmployeeBranchTypeMap, getEmployeeBranchTypeByEmployeeId, HolidayAppliesTo } from "./holidayRoutes";
+import { loadRoster, lateThresholds, nightShiftCheckIn } from "./RosterRoutes";
 import { loadSiteEntries } from "./SiteAttendanceRoutes";
 import { activeCompanyId } from "./companyContext";
 import { isMailerConfigured, sendMail } from "./mailer";
@@ -1795,15 +1796,28 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
     policy: any,
     excludeWaivers: boolean = true
   ): Promise<{ lateDatesByEmployee: Map<number, string[]>; extremeLateDatesByEmployee: Map<number, string[]> }> {
+    const userIdToEmployeeId = new Map<number, number>();
+    for (const e of employees) {
+      if (e.user_id) userIdToEmployeeId.set(Number(e.user_id), Number(e.id));
+    }
+    // Duty Roster (RosterRoutes.ts): an Off day is never late, a rostered
+    // shift is a working day even on a calendar Weekend/Holiday, and late is
+    // measured from that shift's own start time.
+    const roster = await loadRoster(queryDB, monthStart, monthEnd, employees.map((e: any) => Number(e.id)));
     // Head Office and Project-site Employees can each have their own
     // Weekend/Holiday calendar — a date late-marked for one group can be an
     // ordinary working day for the other, so "is this date a holiday" is
     // resolved per-user, never off one shared map.
-    const isHolidayForUser = (userId: number, dateStr: string) =>
-      !!holidayMapsByGroup[branchTypeByUserId.get(userId) || "head_office"].get(dateStr);
+    const isHolidayForUser = (userId: number, dateStr: string) => {
+      const base = holidayMapsByGroup[branchTypeByUserId.get(userId) || "head_office"];
+      const employeeId = userIdToEmployeeId.get(userId);
+      return !!(employeeId ? roster.holidaysFor(employeeId, base) : base).get(dateStr);
+    };
 
     const userIds = employees.filter((e: any) => e.user_id).map((e: any) => Number(e.user_id));
     const firstCheckInByUserDate = new Map<number, Map<string, Date>>();
+    // Remote check-ins kept on their own as well, for night shifts below.
+    const remoteFirstByUserDate = new Map<number, Map<string, Date>>();
 
     if (userIds.length > 0) {
       const placeholders = userIds.map(() => "?").join(",");
@@ -1819,6 +1833,8 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         if (isHolidayForUser(Number(r.user_id), dateStr)) continue;
         if (!firstCheckInByUserDate.has(r.user_id)) firstCheckInByUserDate.set(r.user_id, new Map());
         firstCheckInByUserDate.get(r.user_id)!.set(dateStr, new Date(r.first_check_in));
+        if (!remoteFirstByUserDate.has(Number(r.user_id))) remoteFirstByUserDate.set(Number(r.user_id), new Map());
+        remoteFirstByUserDate.get(Number(r.user_id))!.set(dateStr, new Date(r.first_check_in));
       }
 
       const pinToUserId = new Map<string, number>();
@@ -1845,6 +1861,45 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
           // Keep whichever source's check-in was earlier that day.
           if (!existing || punchTime < existing) firstCheckInByUserDate.get(userId)!.set(dateStr, punchTime);
         }
+
+        // Night shifts: the first punch of such a date is usually the
+        // previous night's check-out, so the arrival is re-read from that
+        // date's punches near the shift's start (nightShiftCheckIn).
+        const nightPins = pins.filter((pin) => {
+          const employeeId = userIdToEmployeeId.get(pinToUserId.get(pin)!);
+          if (!employeeId) return false;
+          for (const d of roster.daysOf(employeeId).values()) if (d.shift?.crosses_midnight) return true;
+          return false;
+        });
+        if (nightPins.length) {
+          const punchRows = await queryDB(
+            `SELECT device_user_pin, punch_time FROM zk_attendance_logs
+             WHERE DATE(punch_time) BETWEEN ? AND ? AND device_user_pin IN (${nightPins.map(() => "?").join(",")})`,
+            [monthStart, monthEnd, ...nightPins]
+          );
+          const punchesByUserDate = new Map<string, Date[]>();
+          for (const r of punchRows) {
+            const userId = pinToUserId.get(r.device_user_pin);
+            if (!userId) continue;
+            const t = new Date(r.punch_time);
+            const key = `${userId}|${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`;
+            if (!punchesByUserDate.has(key)) punchesByUserDate.set(key, []);
+            punchesByUserDate.get(key)!.push(t);
+          }
+          for (const pin of nightPins) {
+            const userId = pinToUserId.get(pin)!;
+            const employeeId = userIdToEmployeeId.get(userId)!;
+            for (const [dateStr, d] of roster.daysOf(employeeId)) {
+              if (!d.shift?.crosses_midnight || dateStr < monthStart || dateStr > monthEnd) continue;
+              const office = nightShiftCheckIn(punchesByUserDate.get(`${userId}|${dateStr}`) || [], d.shift);
+              const remote = remoteFirstByUserDate.get(userId)?.get(dateStr) || null;
+              const arrival = office && remote ? (office < remote ? office : remote) : office || remote;
+              if (!firstCheckInByUserDate.has(userId)) firstCheckInByUserDate.set(userId, new Map());
+              if (arrival) firstCheckInByUserDate.get(userId)!.set(dateStr, arrival);
+              else firstCheckInByUserDate.get(userId)!.delete(dateStr);
+            }
+          }
+        }
       }
     }
 
@@ -1859,15 +1914,6 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         [monthStart, monthEnd]
       );
       waivedKeys = new Set<string>(waiverRows.map((w: any) => `${w.employee_id}_${String(w.waiver_date).slice(0, 10)}`));
-    }
-
-    const [startH, startM] = String(policy.shift_start_time).split(":").map(Number);
-    const thresholdMinutes = startH * 60 + startM + Number(policy.grace_minutes);
-    const extremeThresholdMinutes = startH * 60 + startM + Number(policy.extreme_grace_minutes ?? 60);
-
-    const userIdToEmployeeId = new Map<number, number>();
-    for (const e of employees) {
-      if (e.user_id) userIdToEmployeeId.set(Number(e.user_id), Number(e.id));
     }
 
     // Re-keyed by Employee, so Site Attendance (supervisor muster roll —
@@ -1887,7 +1933,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       for (const r of siteEntries) {
         const employeeId = Number(r.employee_id);
         const dateStr = String(r.attendance_date instanceof Date ? r.attendance_date.toLocaleDateString("en-CA") : r.attendance_date).slice(0, 10);
-        if (holidayMapsByGroup[groupByEmployee.get(employeeId) || "head_office"].get(dateStr)) continue;
+        if (roster.holidaysFor(employeeId, holidayMapsByGroup[groupByEmployee.get(employeeId) || "head_office"]).get(dateStr)) continue;
         const at = new Date(`${dateStr}T${String(r.in_time).slice(0, 5)}:00`);
         if (!firstCheckInByEmployeeDate.has(employeeId)) firstCheckInByEmployeeDate.set(employeeId, new Map());
         const existing = firstCheckInByEmployeeDate.get(employeeId)!.get(dateStr);
@@ -1900,11 +1946,14 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
     for (const [employeeId, dateMap] of firstCheckInByEmployeeDate.entries()) {
       for (const [dateStr, checkInAt] of dateMap.entries()) {
         if (waivedKeys.has(`${employeeId}_${dateStr}`)) continue;
+        // The rostered shift's start (and grace) when there is one, else the
+        // Late Attendance Policy's.
+        const th = lateThresholds(policy, roster.shiftOn(employeeId, dateStr));
         const minutesOfDay = checkInAt.getHours() * 60 + checkInAt.getMinutes();
-        if (minutesOfDay > extremeThresholdMinutes) {
+        if (minutesOfDay > th.extreme) {
           if (!extremeLateDatesByEmployee.has(employeeId)) extremeLateDatesByEmployee.set(employeeId, []);
           extremeLateDatesByEmployee.get(employeeId)!.push(dateStr);
-        } else if (minutesOfDay > thresholdMinutes) {
+        } else if (minutesOfDay > th.delay) {
           if (!lateDatesByEmployee.has(employeeId)) lateDatesByEmployee.set(employeeId, []);
           lateDatesByEmployee.get(employeeId)!.push(dateStr);
         }
@@ -2084,7 +2133,9 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
 
       const branchTypeByUserId = await getEmployeeBranchTypeMap(queryDB, Number(employee.user_id));
       const myGroup: HolidayAppliesTo = branchTypeByUserId.get(Number(employee.user_id)) || "head_office";
-      const holidayMap = await getHolidayMap(queryDB, monthStart, monthEnd, myGroup);
+      // This person's calendar with their Duty Roster laid over it (an Off
+      // day is not a working day; a rostered shift on a Weekend is).
+      const holidayMap = (await loadRoster(queryDB, monthStart, monthEnd, [Number(employee.id)])).holidaysFor(Number(employee.id), await getHolidayMap(queryDB, monthStart, monthEnd, myGroup));
       // Days before this person's Joining Date aren't theirs to attend — they
       // count as neither working days nor Absent, so someone who joins on the
       // 28th doesn't open their dashboard to 27 days "absent".
@@ -2235,7 +2286,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         if (period.start > to) break;
         const monthStart = period.start < from ? from : period.start;
         const monthEnd = period.end > to ? to : period.end;
-        const holidayMap = await getHolidayMap(queryDB, monthStart, monthEnd, myGroup);
+        const holidayMap = (await loadRoster(queryDB, monthStart, monthEnd, [Number(employee.id)])).holidaysFor(Number(employee.id), await getHolidayMap(queryDB, monthStart, monthEnd, myGroup));
         const policy = await getLatePolicyForMonth(monthYear);
         const { lateDatesByEmployee, extremeLateDatesByEmployee } = await computeLateDatesByEmployee(
           [employee], monthStart, monthEnd, { head_office: holidayMap, project_site: holidayMap }, branchTypeByUserId, policy
@@ -2517,11 +2568,17 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       const groupByEmployeeId = await getEmployeeBranchTypeByEmployeeId(queryDB);
       const groupOf = (e: any): HolidayAppliesTo =>
         groupByEmployeeId.get(Number(e.id)) || (e.user_id ? branchTypeByUserId.get(Number(e.user_id)) : undefined) || "head_office";
+      // Each Employee's own calendar with their Duty Roster laid over it — an
+      // Off day is not a working day, a rostered shift on a Weekend is.
+      const roster = await loadRoster(queryDB, monthStart, monthEnd, employees.map((e: any) => Number(e.id)));
+      const holidaysOf = (e: any) => roster.holidaysFor(Number(e.id), holidayMapsByGroup[groupOf(e)]);
+      const employeeByUserId = new Map<number, any>(employees.filter((e: any) => e.user_id).map((e: any) => [Number(e.user_id), e]));
+      const holidaysOfUser = (userId: number) => {
+        const e = employeeByUserId.get(Number(userId));
+        return e ? holidaysOf(e) : holidayMapsByGroup[branchTypeByUserId.get(Number(userId)) || "head_office"];
+      };
       const workingDaysByEmployeeId = new Map<number, number>(
-        employees.map((e: any) => {
-          const group = groupOf(e);
-          return [Number(e.id), Math.max(1, daysInMonth - holidayMapsByGroup[group].size)];
-        })
+        employees.map((e: any) => [Number(e.id), Math.max(1, daysInMonth - holidaysOf(e).size)])
       );
 
       const existingRows = await queryDB("SELECT employee_id FROM payrolls WHERE month_year = ?", [monthYear]);
@@ -2554,8 +2611,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         );
         for (const r of remoteRows) {
           const dateStr = String(r.attendance_date).slice(0, 10);
-          const group = branchTypeByUserId.get(Number(r.user_id)) || "head_office";
-          if (holidayMapsByGroup[group].has(dateStr)) continue;
+          if (holidaysOfUser(Number(r.user_id)).has(dateStr)) continue;
           if (!presentDaysByUser.has(r.user_id)) presentDaysByUser.set(r.user_id, new Set());
           presentDaysByUser.get(r.user_id)!.add(dateStr);
         }
@@ -2580,8 +2636,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
           const dateStr = String(r.attendance_date).slice(0, 10);
           const userId = pinToUserId.get(r.device_user_pin);
           if (!userId) continue;
-          const group = branchTypeByUserId.get(userId) || "head_office";
-          if (holidayMapsByGroup[group].has(dateStr)) continue;
+          if (holidaysOfUser(userId).has(dateStr)) continue;
           if (!presentDaysByUser.has(userId)) presentDaysByUser.set(userId, new Set());
           presentDaysByUser.get(userId)!.add(dateStr);
         }
@@ -2602,7 +2657,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         if (!e) continue;
         siteTracked.add(employeeId);
         const dateStr = String(r.attendance_date instanceof Date ? r.attendance_date.toLocaleDateString("en-CA") : r.attendance_date).slice(0, 10);
-        if (holidayMapsByGroup[groupOf(e)].has(dateStr)) continue;
+        if (holidaysOf(e).has(dateStr)) continue;
         const target = r.status === "present" || r.status === "late" ? sitePresentByEmployee : r.status === "leave" ? siteLeaveByEmployee : null;
         if (!target) continue;
         if (!target.has(employeeId)) target.set(employeeId, new Set());
@@ -2656,14 +2711,12 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       // counted as expected-present instead of Absent — otherwise everyone's
       // pay would be cut for days that simply haven't happened.
       const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Dhaka" });
-      const upcomingDaysByGroup: Record<string, number> = {};
-      for (const group of Object.keys(holidayMapsByGroup)) {
+      const upcomingDaysOf = (e: any) => {
+        const hol = holidaysOf(e);
         let n = 0;
-        for (const dateStr of period.dates) {
-          if (dateStr > todayStr && !(holidayMapsByGroup as any)[group].has(dateStr)) n++;
-        }
-        upcomingDaysByGroup[group] = n;
-      }
+        for (const dateStr of period.dates) if (dateStr > todayStr && !hol.has(dateStr)) n++;
+        return n;
+      };
 
       const result = employees.map((e: any) => {
         // has_attendance_data must mean "we actually found at least one
@@ -2678,8 +2731,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         ]);
         const siteLeaveDays = [...(siteLeaveByEmployee.get(Number(e.id)) || [])].filter((d) => !presentDates.has(d)).length;
         const hasAttendanceData = presentDates.size > 0 || siteTracked.has(Number(e.id));
-        const group = groupOf(e);
-        const upcomingDays = upcomingDaysByGroup[group] || 0;
+        const upcomingDays = upcomingDaysOf(e);
         const present = hasAttendanceData ? Math.min(workingDays, presentDates.size + upcomingDays) : workingDays;
         const leave = Math.min(workingDays, (e.user_id ? leaveDaysByUser.get(Number(e.user_id)) || 0 : 0) + siteLeaveDays);
         const absent = Math.max(0, workingDays - present - leave);

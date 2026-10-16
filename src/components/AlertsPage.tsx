@@ -242,6 +242,9 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
           }
         : alert.type === 'site_attendance'
         ? () => window.dispatchEvent(new CustomEvent('credence:open-self-service', { detail: 'teamAttendance' }))
+        : alert.type === 'roster'
+        ? // Self Service -> My Duty Roster (App.tsx, MyRoster.tsx).
+          () => window.dispatchEvent(new CustomEvent('credence:open-self-service', { detail: 'myRoster' }))
         : alert.type === 'hr_letter'
         ? /^New Letter|Request Rejected$/.test(alert.title)
           ? onOpenMyLetters

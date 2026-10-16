@@ -28,6 +28,7 @@ import type { Express } from "express";
 // already does for holidayRoutes.ts's getHolidayMap, since holidayRoutes.ts
 // has no dependency back on this file.
 import { getHolidayMapsByGroup, getEmployeeBranchTypeMap } from "./holidayRoutes";
+import { loadRoster } from "./RosterRoutes";
 
 interface AttendanceRouteDeps {
   authenticateToken: any;
@@ -930,16 +931,23 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
 
       // Joining Date per login — a day before someone joined is blank on the
       // report, never Absent (same as a day that hasn't happened yet).
-      const joinRows = await queryDB("SELECT user_id, joining_date FROM all_employees WHERE user_id IS NOT NULL");
+      const joinRows = await queryDB("SELECT id, user_id, joining_date FROM all_employees WHERE user_id IS NOT NULL");
       const joiningDateByUserId = new Map<number, string>();
+      const employeeIdByUserId = new Map<number, number>();
       for (const j of joinRows) {
         if (j.joining_date) joiningDateByUserId.set(Number(j.user_id), String(j.joining_date).slice(0, 10));
+        employeeIdByUserId.set(Number(j.user_id), Number(j.id));
       }
+      // Duty Roster: an Off day counts like a Weekend, a rostered shift on a
+      // Weekend/Holiday is a working day.
+      const roster = await loadRoster(queryDB, monthStart, monthEnd, [...employeeIdByUserId.values()]);
 
       const result = relevantUsers.map((u: any) => {
         const dayMap = byUser.get(u.id) || new Map<string, any>();
         const joiningDate = joiningDateByUserId.get(Number(u.id)) || null;
-        const holidayMap = holidayMapsByGroup[branchTypeByUserId.get(u.id) || "head_office"];
+        const baseHolidays = holidayMapsByGroup[branchTypeByUserId.get(u.id) || "head_office"];
+        const employeeId = employeeIdByUserId.get(Number(u.id));
+        const holidayMap = employeeId ? roster.holidaysFor(employeeId, baseHolidays) : baseHolidays;
         let presentDays = 0;
         let completeDays = 0;
         let holidayDays = 0;
@@ -1162,8 +1170,14 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
       // Employees can get a different answer for the exact same date.
       const holidayMapsByGroupToday = await getHolidayMapsByGroup(queryDB, date, date);
       const branchTypeByUserIdToday = await getEmployeeBranchTypeMap(queryDB);
-      const isHolidayForUser = (userId: number) =>
-        !!holidayMapsByGroupToday[branchTypeByUserIdToday.get(userId) || "head_office"].get(date);
+      const empRowsToday: any[] = (await queryDB("SELECT id, user_id FROM all_employees WHERE user_id IS NOT NULL").catch(() => [])) || [];
+      const employeeIdByUserIdToday = new Map<number, number>(empRowsToday.map((e: any) => [Number(e.user_id), Number(e.id)]));
+      const rosterToday = await loadRoster(queryDB, date, date, [...employeeIdByUserIdToday.values()]);
+      const isHolidayForUser = (userId: number) => {
+        const base = holidayMapsByGroupToday[branchTypeByUserIdToday.get(userId) || "head_office"];
+        const employeeId = employeeIdByUserIdToday.get(Number(userId));
+        return !!(employeeId ? rosterToday.holidaysFor(employeeId, base) : base).get(date);
+      };
 
       const presentIds = new Set(present.map((p: any) => p.user_id));
       const absentOrHoliday = relevantUsers

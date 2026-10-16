@@ -64,7 +64,8 @@ const EMPLOYEE_TABLES = new Set([
   "pending_bonuses",
   "salary_adjustments",
   "salary_structures",
-  "site_attendance_entries"
+  "site_attendance_entries",
+  "duty_roster"
 ]);
 
 // Tables whose rows belong to a login (users.id).
@@ -129,7 +130,8 @@ export const OWN_TABLES = new Set([
   "mobile_limit_requests",
   "payroll_batches",
   "payroll_batch_events",
-  "payroll_access_log"
+  "payroll_access_log",
+  "duty_shifts"
 ]);
 
 // Shared by every company of a group (PEPM budgets & rate file, chat…) but
