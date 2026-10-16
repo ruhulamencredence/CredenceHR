@@ -733,6 +733,7 @@ export interface User {
   can_view_roster?: boolean;
   // Self Service -> Documents to Sign (ESignRoutes.ts) — off by default.
   can_sign_documents?: boolean;
+  can_view_payslip?: boolean;
   // Admin Panel -> Users -> Block: this login can't sign in (AccountBlock.ts).
   is_blocked?: boolean | number;
   // The linked Employee record is active (false once Resigned / Terminated / blocked).

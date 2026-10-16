@@ -712,6 +712,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [rosterAccessEnabled, setRosterAccessEnabled] = useState(false);
   // Documents to Sign (ESignRoutes.ts) — off by default.
   const [signDocsEnabled, setSignDocsEnabled] = useState(false);
+  // My Payslip (PayslipRoutes.ts) — off by default.
+  const [payslipAccessEnabled, setPayslipAccessEnabled] = useState(false);
   const [tasksAccessEnabled, setTasksAccessEnabled] = useState(false);
   const [mobileBillAccessEnabled, setMobileBillAccessEnabled] = useState(false);
   const [serviceBookAccessEnabled, setServiceBookAccessEnabled] = useState(false);
@@ -746,6 +748,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     setMailAccessEnabled(!!u.can_use_mail);
     setRosterAccessEnabled(!!u.can_view_roster);
     setSignDocsEnabled(!!u.can_sign_documents);
+    setPayslipAccessEnabled(!!u.can_view_payslip);
     setTasksAccessEnabled(!!u.can_view_tasks);
     setMobileBillAccessEnabled(!!u.can_view_mobile_bill);
     setServiceBookAccessEnabled(!!u.can_view_service_book);
@@ -1289,6 +1292,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         });
         const sdData = await sdRes.json();
         if (!sdRes.ok) throw new Error(sdData.error || 'Failed to update Documents to Sign access');
+      }
+
+      if (payslipAccessEnabled !== !!managingModulesFor.can_view_payslip) {
+        const psRes = await fetch(apiUrl(`/api/users/${managingModulesFor.id}/payslip-access`), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ can_view_payslip: payslipAccessEnabled })
+        });
+        const psData = await psRes.json();
+        if (!psRes.ok) throw new Error(psData.error || 'Failed to update My Payslip access');
       }
 
       setManagingModulesFor(null);
@@ -8047,6 +8060,28 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   <span
                     className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
                       signDocsEnabled ? 'translate-x-[18px]' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </label>
+              <label className="flex items-center justify-between gap-3 p-3.5 mb-3 bg-sky-50 border border-sky-200 rounded-xl cursor-pointer">
+                <span>
+                  <span className="text-sm font-semibold text-slate-900 block">Also allow My Payslip</span>
+                  <span className="text-[11px] text-slate-500">
+                    Self Service → My Payslip: see and download their own payslips for months Payroll has approved or paid. Off by default.
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setPayslipAccessEnabled((v) => !v)}
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${
+                    payslipAccessEnabled ? 'bg-emerald-500' : 'bg-slate-300'
+                  }`}
+                  title={payslipAccessEnabled ? 'On — click to turn off' : 'Off — click to turn on'}
+                >
+                  <span
+                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                      payslipAccessEnabled ? 'translate-x-[18px]' : 'translate-x-1'
                     }`}
                   />
                 </button>

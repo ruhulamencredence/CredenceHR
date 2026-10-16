@@ -218,6 +218,16 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
             }
             window.dispatchEvent(new CustomEvent('credence:open-target'));
           }
+        : alert.type === 'payroll_approval' && alert.title === 'Salary Paid'
+        ? // My Payslip with that month open (App.tsx, MyPayslips.tsx).
+          () => {
+            try {
+              if (alert.related_id) sessionStorage.setItem('open_payslip_id', String(alert.related_id));
+            } catch {
+              // storage unavailable — the list opens instead
+            }
+            window.dispatchEvent(new CustomEvent('credence:open-self-service', { detail: 'myPayslips' }));
+          }
         : alert.type === 'payroll_approval' && alert.title !== 'Salary Paid'
         ? // Audit / Accounts / HR: Payroll -> Approval (App.tsx).
           () => window.dispatchEvent(new CustomEvent('credence:open-payroll-approval'))

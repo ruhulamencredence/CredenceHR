@@ -49,6 +49,7 @@ import type { AlertType } from "./Alerts";
 import { applyDueEmployeeTransfers } from "./EmployeeTransferRoutes";
 import { applyCompanyTransfer } from "./CompanyRoutes";
 import { blockEmployeeLogin } from "./AccountBlock";
+import { isMailerConfigured, sendMail } from "./mailer";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 
@@ -539,6 +540,14 @@ export async function ensureHROperationsSchema(dbPool: any): Promise<void> {
       await dbPool.query(ddl);
     } catch (err: any) {
       console.warn(`⚠️ Could not ensure ${name} table exists: ` + err.message);
+    }
+  }
+  // Where a letter was emailed to someone who can no longer log in.
+  for (const col of ["emailed_to VARCHAR(255) NULL", "emailed_at TIMESTAMP NULL"]) {
+    try {
+      await dbPool.query(`ALTER TABLE hr_letters ADD COLUMN ${col}`);
+    } catch (err: any) {
+      if (err.code !== "ER_DUP_FIELDNAME") console.warn(`⚠️ hr_letters.${col.split(" ")[0]}: ` + err.message);
     }
   }
   // Seed defaults once (only when the table is still empty).
@@ -2097,7 +2106,38 @@ export function registerHROperationsRoutes(app: Express, deps: HROperationsRoute
         relatedId: letterId
       });
     }
-    return { id: letterId, ref_no: ref };
+    // Someone who can't log in any more (left the company, login blocked)
+    // would never see it under My Letters — e.g. the release letter, which
+    // comes after the final settlement. Email it to them instead.
+    const mailed = await emailLetterIfLockedOut(emp, { ref, subject, text, letterDate: r.letter_date, letterId, settings });
+    return { id: letterId, ref_no: ref, ...mailed };
+  }
+
+  async function emailLetterIfLockedOut(
+    emp: any,
+    l: { ref: string; subject: string; text: string; letterDate: string; letterId: number; settings: any }
+  ): Promise<{ emailed_to?: string; email_error?: string }> {
+    if (!emp) return {};
+    const user: any = emp.user_id ? ((await queryDB("SELECT email, is_blocked FROM users WHERE id = ?", [emp.user_id])) || [])[0] : null;
+    const lockedOut = !user || Number(user.is_blocked) === 1 || Number(emp.is_active) === 0;
+    if (!lockedOut) return {};
+    const to = String(emp.personal_email || user?.email || emp.email || "").trim();
+    if (!to) return { email_error: `${emp.name} can't log in any more and has no email on file — hand the letter over in person.` };
+    if (!isMailerConfigured()) return { email_error: `${emp.name} can't log in any more, and email isn't set up on the server — hand the letter over in person.` };
+    const esc = (v: any) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+    const st = l.settings || {};
+    const html = `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#0f172a;max-width:680px">
+<p style="margin:0 0 4px;font-size:18px;font-weight:bold">${esc(st.company_name)}</p>
+${st.company_address ? `<p style="margin:0 0 16px;color:#64748b">${esc(st.company_address)}</p>` : ""}
+<p style="margin:0">Ref: ${esc(l.ref)}<br>Date: ${esc(l.letterDate)}</p>
+<p style="margin:16px 0;font-weight:bold">Subject: ${esc(l.subject)}</p>
+${esc(l.text).split(/\n{2,}/).map((p) => `<p style="margin:0 0 12px;line-height:1.5">${p.replace(/\n/g, "<br>")}</p>`).join("\n")}
+<p style="margin:24px 0 0">${esc(st.signatory_name)}<br><span style="color:#64748b">${esc(st.signatory_designation)}</span></p>
+</div>`;
+    const sent = await sendMail({ to, subject: `${l.subject} — ${l.ref}`, html });
+    if (!sent.success) return { email_error: `Couldn't email it to ${to}: ${sent.error}` };
+    await queryDB("UPDATE hr_letters SET emailed_to = ?, emailed_at = NOW() WHERE id = ?", [to, l.letterId]).catch(() => {});
+    return { emailed_to: to };
   }
 
   app.post("/api/hr-ops/letters", ...gate, async (req: any, res: any) => {

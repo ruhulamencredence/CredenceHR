@@ -33,7 +33,8 @@ export type SelfServiceFeature =
   | 'can_view_targets'
   | 'can_use_mail'
   | 'can_view_roster'
-  | 'can_sign_documents';
+  | 'can_sign_documents'
+  | 'can_view_payslip';
 const SELF_SERVICE_ENDPOINT: Record<SelfServiceFeature, string> = {
   can_view_movement_claims: 'movement-claim-access',
   can_view_conveyance_claims: 'conveyance-claim-access',
@@ -46,7 +47,8 @@ const SELF_SERVICE_ENDPOINT: Record<SelfServiceFeature, string> = {
   can_view_targets: 'targets-access',
   can_use_mail: 'mail-access',
   can_view_roster: 'roster-access',
-  can_sign_documents: 'sign-documents-access'
+  can_sign_documents: 'sign-documents-access',
+  can_view_payslip: 'payslip-access'
 };
 export const isSelfServiceFeature = (f: TemplateFeature): f is SelfServiceFeature => f in SELF_SERVICE_ENDPOINT;
 
@@ -67,7 +69,8 @@ export const TEMPLATE_FEATURES: { key: TemplateFeature; label: string; selfServi
   { key: 'can_view_targets', label: 'My Targets', selfService: true },
   { key: 'can_use_mail', label: 'Credence Mail', selfService: true },
   { key: 'can_view_roster', label: 'My Duty Roster', selfService: true },
-  { key: 'can_sign_documents', label: 'Documents to Sign', selfService: true }
+  { key: 'can_sign_documents', label: 'Documents to Sign', selfService: true },
+  { key: 'can_view_payslip', label: 'My Payslip', selfService: true }
 ];
 
 export interface AccessTemplate {
