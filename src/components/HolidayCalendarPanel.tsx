@@ -8,8 +8,8 @@ import { CalendarDays, Plus, Trash2, Edit2, X, Sun, CalendarClock, ChevronLeft, 
 import { HolidayEntry, HolidayDayType, HolidayAppliesTo } from '../types';
 import { apiUrl } from '../lib/api';
 import { formatDate } from '../lib/formatDate';
-import { Spinner } from './Spinner';
 import { confirmDialog } from '../lib/confirmDialog';
+import { LoadingBlock } from './LoadingBlock';
 
 interface HolidayCalendarPanelProps {
   token: string;
@@ -450,9 +450,7 @@ export const HolidayCalendarPanel: React.FC<HolidayCalendarPanelProps> = ({ toke
       </div>
 
       {loading ? (
-        <div className="flex justify-center py-16">
-          <Spinner />
-        </div>
+        <LoadingBlock />
       ) : entriesForGroup.length === 0 ? (
         <div className="text-center py-16 text-slate-400">
           <CalendarDays className="w-10 h-10 mx-auto mb-2 opacity-40" />

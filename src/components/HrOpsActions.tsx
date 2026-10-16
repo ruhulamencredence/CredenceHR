@@ -31,6 +31,7 @@ import {
   type HrOpsMeta
 } from './HrOpsShared';
 import { confirmDialog } from '../lib/confirmDialog';
+import { LoadingBlock } from './LoadingBlock';
 
 interface HrAction {
   id: number;
@@ -407,9 +408,7 @@ export const HrOpsActions: React.FC<{ token: string; meta: HrOpsMeta; employees:
       </div>
 
       {loading ? (
-        <div className="flex items-center justify-center gap-2 py-16 text-sm text-slate-500">
-          <Spinner size={16} /> Loading…
-        </div>
+        <LoadingBlock />
       ) : list.length === 0 ? (
         <p className="text-sm text-slate-400 text-center py-12">No HR actions yet.</p>
       ) : (

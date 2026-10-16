@@ -18,6 +18,7 @@ import { Spinner } from './Spinner';
 import { readFileBase64 } from './HrOps360Parts';
 import { useHrApi, Modal, Notice, TypeToDelete, inputCls, labelCls, btnPrimary, btnGhost } from './HrOpsShared';
 import { useMyCompanies } from '../lib/company';
+import { LoadingBlock } from './LoadingBlock';
 
 interface Company {
   id: number;
@@ -322,7 +323,7 @@ export const SystemCompanies: React.FC<{ token: string }> = ({ token }) => {
     }
   };
 
-  if (!companies) return <div className="py-10 flex justify-center"><Spinner /></div>;
+  if (!companies) return <LoadingBlock />;
   const active = companies.filter((c) => c.is_active);
   const shown = (users || []).filter((u) => !q.trim() || [u.name, u.email].some((v) => String(v || '').toLowerCase().includes(q.trim().toLowerCase())));
 

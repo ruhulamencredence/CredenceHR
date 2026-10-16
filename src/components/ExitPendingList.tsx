@@ -13,7 +13,7 @@
 import React, { useEffect, useState } from 'react';
 import { AlertTriangle, CalendarClock, CheckCircle2, ClipboardList, Package, Wallet } from 'lucide-react';
 import { apiUrl } from '../lib/api';
-import { Spinner } from './Spinner';
+import { LoadingBlock } from './LoadingBlock';
 
 interface PendingExit {
   id: number;
@@ -84,9 +84,7 @@ export const ExitPendingList: React.FC<{ token: string; refreshKey: number; onOp
   if (error) return <p className="mx-6 my-4 text-xs text-rose-600">{error}</p>;
   if (!data)
     return (
-      <div className="py-8 flex justify-center">
-        <Spinner size={20} />
-      </div>
+      <LoadingBlock />
     );
 
   const s = data.summary;

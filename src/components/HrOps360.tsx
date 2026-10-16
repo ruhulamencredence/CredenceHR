@@ -157,7 +157,7 @@ function useSection<T>(api: ReturnType<typeof useHrApi>, rawPath: string | null,
 
 // A tab's own data loading: rows in the shape of the list that will appear.
 const Loading = () => (
-  <div className="py-4" role="status" aria-label="Loading" style={{ animation: 'skeleton-in .25s ease .15s both' }}>
+  <div className="py-4" role="status" aria-label="Loading" style={{ animation: 'skeleton-in .2s ease both' }}>
   <div className="space-y-3 animate-pulse">
     {[0, 1, 2, 3].map((i) => (
       <div key={i} className="flex items-center gap-3 rounded-lg border border-slate-100 px-3 py-3">

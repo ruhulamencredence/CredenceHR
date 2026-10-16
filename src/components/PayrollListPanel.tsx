@@ -9,6 +9,7 @@ import { Search, CheckCircle2, Clock, Banknote, Trash2, RefreshCw, PauseCircle, 
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
 import { confirmDialog } from '../lib/confirmDialog';
+import { LoadingBlock } from './LoadingBlock';
 
 interface PayrollListPanelProps {
   token: string;
@@ -297,7 +298,7 @@ export const PayrollListPanel: React.FC<PayrollListPanelProps> = ({ token }) => 
       )}
 
       {loading ? (
-        <div className="flex justify-center py-16"><Spinner size={26} /></div>
+        <LoadingBlock />
       ) : error ? (
         <p className="text-xs text-rose-600 text-center py-16">{error}</p>
       ) : records.length === 0 ? (

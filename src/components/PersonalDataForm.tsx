@@ -7,6 +7,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { ChevronLeft, Camera, User as UserIcon, Briefcase, Building2, MapPin, AlertCircle } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
+import { LoadingBlock } from './LoadingBlock';
 
 interface PersonalDataFormProps {
   token: string;
@@ -221,9 +222,7 @@ export const PersonalDataForm: React.FC<PersonalDataFormProps> = ({ token, onBac
         </div>
 
         {loading ? (
-          <div className="flex items-center justify-center py-20">
-            <Spinner size={28} />
-          </div>
+          <LoadingBlock />
         ) : (
           /* One column on a phone; the two sections sit side by side from md
              up, where stacking them left the right half of the page empty.

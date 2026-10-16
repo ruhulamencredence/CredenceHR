@@ -14,6 +14,7 @@ import { Building2, CalendarX, Plus } from 'lucide-react';
 import { Spinner } from './Spinner';
 import { useHrApi, Modal, Notice, fmtDate, inputCls, labelCls, btnPrimary, btnGhost } from './HrOpsShared';
 import { confirmDialog } from '../lib/confirmDialog';
+import { LoadingBlock } from './LoadingBlock';
 
 interface GroupCompany {
   id: number;
@@ -109,9 +110,7 @@ export const CompanyAssignmentsModal: React.FC<{ token: string; employeeId: numb
   return (
     <Modal title={`Companies — ${employeeName}`} onClose={onClose} wide>
       {!data ? (
-        <div className="py-8 flex justify-center">
-          <Spinner />
-        </div>
+        <LoadingBlock />
       ) : (
         <div className="space-y-4">
           <Notice msg={msg} onClose={() => setMsg(null)} />

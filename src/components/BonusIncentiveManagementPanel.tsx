@@ -31,6 +31,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Gift, RefreshCw, AlertTriangle, CheckCircle2, Sparkles, Clock3, X } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
+import { LoadingBlock } from './LoadingBlock';
 
 interface BonusIncentiveManagementPanelProps {
   token: string;
@@ -562,7 +563,7 @@ export const BonusIncentiveManagementPanel: React.FC<BonusIncentiveManagementPan
       {/* Preview & apply */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
         {loading ? (
-          <div className="flex justify-center py-16"><Spinner size={26} /></div>
+          <LoadingBlock />
         ) : loadError ? (
           <p className="text-xs text-rose-600 text-center py-16">{loadError}</p>
         ) : rows.length === 0 ? (

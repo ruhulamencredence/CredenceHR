@@ -11,7 +11,7 @@ import { apiUrl } from '../lib/api';
 import { formatDate } from '../lib/formatDate';
 import { reverseGeocode } from '../lib/reverseGeocode';
 import ClaimLocationMap from './ClaimLocationMap';
-import { Spinner } from './Spinner';
+import { LoadingBlock } from './LoadingBlock';
 
 interface MyClaimsCardProps {
   token: string;
@@ -165,9 +165,7 @@ export const MyClaimsCard: React.FC<MyClaimsCardProps> = ({ token, onBack, refre
       </div>
 
       {loading ? (
-        <div className="flex-1 flex justify-center py-10">
-          <Spinner size={20} className="text-slate-400" />
-        </div>
+        <LoadingBlock />
       ) : shown.length === 0 ? (
         <div className="flex-1 flex flex-col items-center gap-2 text-center py-10 px-5 text-slate-400">
           <Inbox className="w-5 h-5 text-slate-300" />

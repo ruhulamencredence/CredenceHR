@@ -6,7 +6,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { CheckCircle2, XCircle, History, Search } from 'lucide-react';
 import { apiUrl } from '../lib/api';
-import { Spinner } from './Spinner';
+import { LoadingBlock } from './LoadingBlock';
 
 // GET /api/my-approvals/history — every approve / reject this account made.
 interface HistoryItem {
@@ -104,9 +104,7 @@ export const ApprovalHistory: React.FC<{ token: string }> = ({ token }) => {
       </div>
 
       {loading ? (
-        <div className="flex justify-center py-14">
-          <Spinner size={20} className="text-slate-400" />
-        </div>
+        <LoadingBlock />
       ) : error ? (
         <div className="mx-6 my-4 text-xs px-3 py-2.5 rounded-xl bg-rose-50 text-rose-700">{error}</div>
       ) : (

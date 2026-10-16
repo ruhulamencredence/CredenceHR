@@ -10,9 +10,13 @@ import type { User } from './types.ts';
 import { applyBackgroundTheme, getSavedBackgroundTheme } from './lib/backgroundTheme.ts';
 import './index.css';
 import { installCompanyHeader } from './lib/company.ts';
+import { installChunkReload } from './lib/chunkReload.ts';
+import { AppErrorBoundary } from './components/AppErrorBoundary.tsx';
 
 // Multi-company: every /api call carries the picked company (src/lib/company.ts).
 installCompanyHeader();
+// A tab left open across a deploy reloads once instead of going white.
+installChunkReload();
 
 // Applied here, before the first paint, rather than in a useEffect once
 // App has mounted — otherwise the default background gradient would flash
@@ -63,6 +67,6 @@ function Root() {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    {isPrivacyPolicy ? <PrivacyPolicy /> : isVerify ? <VerifyPage /> : isStandaloneChat ? <ChatStandalone /> : <Root />}
+    <AppErrorBoundary>{isPrivacyPolicy ? <PrivacyPolicy /> : isVerify ? <VerifyPage /> : isStandaloneChat ? <ChatStandalone /> : <Root />}</AppErrorBoundary>
   </StrictMode>,
 );

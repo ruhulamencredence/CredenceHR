@@ -13,7 +13,7 @@ import { apiUrl } from '../lib/api';
 import { isHrSideCaseAlert, openGrievanceAdmin } from '../lib/grievanceNav';
 import { formatDate } from '../lib/formatDate';
 import { ModulePath } from './ModulePath';
-import { Spinner } from './Spinner';
+import { LoadingBlock } from './LoadingBlock';
 
 interface AlertsPageProps {
   token: string;
@@ -311,9 +311,7 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
               smoothly. */}
           <div className="max-sm:px-2 max-sm:space-y-2">
             {loading ? (
-              <div className="px-4 py-16 flex items-center justify-center">
-                <Spinner size={24} />
-              </div>
+              <LoadingBlock />
             ) : alerts.length === 0 ? (
               <div className="px-4 py-16 text-center text-sm text-slate-400">No alerts yet.</div>
             ) : (

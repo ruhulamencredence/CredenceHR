@@ -6,6 +6,7 @@ import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
 import { ModulePath } from './ModulePath';
 import { confirmDialog } from '../lib/confirmDialog';
+import { LoadingBlock } from './LoadingBlock';
 
 interface LeaveManageProps {
   token: string;
@@ -1515,10 +1516,7 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
           )}
 
           {loading ? (
-            <div className="flex flex-col items-center justify-center py-16 text-slate-400">
-              <Spinner size={24} className="mb-2" />
-              <p className="text-xs">Loading Leave balances...</p>
-            </div>
+            <LoadingBlock />
           ) : canManageAll && isNativeApp ? (
             <div className="p-4 space-y-2.5">
               {filtered.map((b) => {

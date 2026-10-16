@@ -14,7 +14,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { History, Search, Building2, Briefcase, Users2, ArrowRight, X } from 'lucide-react';
 import { EmployeeTransfer, EmployeeChangeLogEntry } from '../types';
 import { apiUrl } from '../lib/api';
-import { Spinner } from './Spinner';
+import { LoadingBlock } from './LoadingBlock';
 
 // ---- Shared helpers ------------------------------------------------------
 // Field-level rows in employee_change_log use raw column names; these turn
@@ -299,9 +299,7 @@ export const EmployeeChangeHistory: React.FC<{ token: string }> = ({ token }) =>
           <button type="button" onClick={() => setReloadTick((n) => n + 1)} className="font-semibold underline">Retry</button>
         </div>
       ) : loading && timeline.length === 0 ? (
-        <div className="flex items-center justify-center py-16 text-slate-400 gap-2 text-sm">
-          <Spinner size={16} /> Loading change history…
-        </div>
+        <LoadingBlock />
       ) : timeline.length === 0 ? (
         <div className="bg-white border border-dashed border-slate-300 rounded-2xl p-10 text-center">
           <History className="w-8 h-8 text-slate-300 mx-auto mb-2" />

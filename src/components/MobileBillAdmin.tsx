@@ -47,6 +47,7 @@ import {
 } from './MobileBillParts';
 import { MobileBillReports } from './MobileBillReports';
 import { confirmDialog } from '../lib/confirmDialog';
+import { LoadingBlock } from './LoadingBlock';
 
 type Tab = 'bills' | 'sims' | 'limits' | 'requests' | 'reports';
 const OPERATORS = ['Grameenphone', 'Robi', 'Airtel', 'Banglalink', 'Teletalk'];
@@ -291,9 +292,7 @@ const BillsTab: React.FC<{ token: string }> = ({ token }) => {
 
       {error && <p className="text-sm text-rose-600">{error}</p>}
       {!rows ? (
-        <div className="py-10 flex justify-center">
-          <Spinner size={24} />
-        </div>
+        <LoadingBlock />
       ) : (
         <div className="rounded-2xl bg-white border border-slate-200 overflow-x-auto">
           <table className="w-full text-xs">
@@ -712,9 +711,7 @@ const SimsTab: React.FC<{ token: string }> = ({ token }) => {
       </div>
       {error && <p className="text-sm text-rose-600">{error}</p>}
       {!sims ? (
-        <div className="py-10 flex justify-center">
-          <Spinner size={24} />
-        </div>
+        <LoadingBlock />
       ) : (
         <div className="rounded-2xl bg-white border border-slate-200 overflow-x-auto">
           <table className="w-full text-xs">

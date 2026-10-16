@@ -16,6 +16,7 @@ import { Camera, CheckCircle2, Clock, Paperclip, Plus, Send, Trash2, XCircle } f
 import { Spinner } from './Spinner';
 import { readFileBase64 } from './HrOps360Parts';
 import { useHrApi, Badge, Notice, fmtDate, inputCls, labelCls, btnPrimary, btnGhost } from './HrOpsShared';
+import { LoadingBlock } from './LoadingBlock';
 
 interface MyItem {
   id: number;
@@ -215,9 +216,7 @@ useLiveRefresh(() => load());
   }, []);
   if (!data)
     return (
-      <div className="flex items-center justify-center gap-2 py-16 text-sm text-slate-500">
-        <Spinner size={16} /> Loading…
-      </div>
+      <LoadingBlock />
     );
   const todo = data.items.filter((i) => i.status === 'pending' || i.status === 'rejected');
   const rest = data.items.filter((i) => i.status === 'submitted' || i.status === 'approved');

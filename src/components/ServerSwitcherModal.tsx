@@ -6,8 +6,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Server, Check, X, RefreshCw } from 'lucide-react';
 import { apiUrl } from '../lib/api';
-import { Spinner } from './Spinner';
 import { confirmDialog } from '../lib/confirmDialog';
+import { LoadingBlock } from './LoadingBlock';
 
 interface CatalogEntry {
   id: number;
@@ -121,9 +121,7 @@ export const ServerSwitcherModal: React.FC<ServerSwitcherModalProps> = ({ token,
 
         <div className="flex-1 overflow-y-auto -mx-1 px-1 space-y-2">
           {loading && (
-            <div className="flex justify-center py-8">
-              <Spinner />
-            </div>
+            <LoadingBlock />
           )}
 
           {!loading && error && (

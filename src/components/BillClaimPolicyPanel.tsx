@@ -9,6 +9,7 @@ import { apiUrl } from '../lib/api';
 import { BillClaimCategory, BillClaimPolicyDef, BillClaimPolicyValues } from '../types';
 import { Spinner } from './Spinner';
 import { confirmDialog } from '../lib/confirmDialog';
+import { LoadingBlock } from './LoadingBlock';
 
 // Admin Panel -> HRM -> Claims/Bill/Disbursement -> Bill Claim Policy.
 // The rules list is drawn from what the server sends (GET /api/bill-claim-policy
@@ -366,9 +367,7 @@ export const BillClaimPolicyPanel: React.FC<{ token: string }> = ({ token }) => 
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 text-sm text-slate-500 p-10 justify-center">
-        <Spinner size={16} /> Loading Bill Claim Policy…
-      </div>
+      <LoadingBlock />
     );
   }
 

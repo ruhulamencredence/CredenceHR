@@ -17,10 +17,10 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { Banknote, FileSpreadsheet, Landmark, Printer, Smartphone } from 'lucide-react';
 import { apiUrl } from '../lib/api';
-import { Spinner } from './Spinner';
 import { finalizePdfPageNumbers } from '../lib/pdfLetterhead';
 import { drawStandardHeader, loadPdfCompany, pdfMoney, standardTable } from '../lib/pdfStandard';
 import { savePdfCrossPlatform } from '../lib/saveFile';
+import { LoadingBlock } from './LoadingBlock';
 
 interface SheetRow {
   employee_name: string;
@@ -203,9 +203,7 @@ export const PayrollPaymentVouchers: React.FC<{ token: string; month: string; pa
       </div>
       {error && <div className="mt-3 text-xs px-3 py-2 rounded-xl bg-rose-50 text-rose-700">{error}</div>}
       {!rows && !error ? (
-        <div className="py-8 flex justify-center">
-          <Spinner size={20} />
-        </div>
+        <LoadingBlock />
       ) : groups.length === 0 ? (
         <p className="text-xs text-slate-400 mt-3">Nothing to pay for this month.</p>
       ) : (

@@ -10,7 +10,7 @@ import { apiUrl } from '../lib/api';
 import { formatDate } from '../lib/formatDate';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
 import ClaimLocationMap from './ClaimLocationMap';
-import { Spinner } from './Spinner';
+import { LoadingBlock } from './LoadingBlock';
 
 interface MyClaimsModalProps {
   token: string;
@@ -78,9 +78,7 @@ export default function MyClaimsModal({ token, onClose, onCheckOut }: MyClaimsMo
 
         <div className="overflow-y-auto flex-1">
           {loading ? (
-            <div className="flex justify-center py-14">
-              <Spinner size={20} className="text-slate-400" />
-            </div>
+            <LoadingBlock />
           ) : claims.length === 0 ? (
             <div className="flex flex-col items-center gap-2 text-center py-14 px-5 text-slate-400">
               <Inbox className="w-6 h-6 text-slate-300" />

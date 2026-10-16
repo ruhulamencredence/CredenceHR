@@ -42,6 +42,7 @@ import { apiUrl } from '../lib/api';
 import { DataImport } from './DataImport';
 import { Spinner } from './Spinner';
 import { confirmDialog } from '../lib/confirmDialog';
+import { LoadingBlock } from './LoadingBlock';
 
 interface SalaryStructureSetupPanelProps {
   token: string;
@@ -326,7 +327,7 @@ const SalaryComponentsPanel: React.FC<{ authHeaders: Record<string, string> }> =
       )}
 
       {loading ? (
-        <div className="flex justify-center py-16"><Spinner size={26} /></div>
+        <LoadingBlock />
       ) : error ? (
         <p className="text-xs text-rose-600 text-center py-16">{error}</p>
       ) : (
@@ -546,7 +547,7 @@ const PayGradesPanel: React.FC<{ authHeaders: Record<string, string> }> = ({ aut
       )}
 
       {loading ? (
-        <div className="flex justify-center py-16"><Spinner size={26} /></div>
+        <LoadingBlock />
       ) : error ? (
         <p className="text-xs text-rose-600 text-center py-16">{error}</p>
       ) : grades.length === 0 ? (
@@ -1052,7 +1053,7 @@ const IndividualSalaryPanel: React.FC<{ authHeaders: Record<string, string> }> =
       )}
 
       {loading ? (
-        <div className="flex justify-center py-16"><Spinner size={26} /></div>
+        <LoadingBlock />
       ) : error ? (
         <p className="text-xs text-rose-600 text-center py-16">{error}</p>
       ) : groups.length === 0 ? (
@@ -1662,7 +1663,7 @@ const LatePolicyPanel: React.FC<{ authHeaders: Record<string, string> }> = ({ au
           <h3 className="text-xs font-semibold text-slate-700">Change History</h3>
         </div>
         {loading ? (
-          <div className="flex justify-center py-10"><Spinner size={22} /></div>
+          <LoadingBlock />
         ) : error ? (
           <p className="text-xs text-rose-600 text-center py-10">{error}</p>
         ) : history.length === 0 ? (
@@ -1789,9 +1790,7 @@ const SalaryMonthPanel: React.FC<{ authHeaders: Record<string, string> }> = ({ a
     return error ? (
       <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-sm text-rose-700">{error}</div>
     ) : (
-      <div className="flex items-center justify-center py-16 text-slate-400 gap-2 text-sm">
-        <Spinner size={16} /> Loading…
-      </div>
+      <LoadingBlock />
     );
   }
   // Same rule as the server: a salary month starts the day after the

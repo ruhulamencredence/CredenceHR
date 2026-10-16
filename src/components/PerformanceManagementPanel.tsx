@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Target, Plus, X, AlertTriangle, CheckCircle2, Save } from 'lucide-react';
 import { apiUrl } from '../lib/api';
-import { Spinner } from './Spinner';
+import { LoadingBlock } from './LoadingBlock';
 
 interface PerformanceManagementPanelProps {
   token: string;
@@ -337,10 +337,7 @@ export const PerformanceManagementPanel: React.FC<PerformanceManagementPanelProp
       )}
 
       {loading ? (
-        <div className="flex flex-col items-center justify-center py-16 text-slate-400">
-          <Spinner size={24} className="mb-2" />
-          <p className="text-xs">Loading…</p>
-        </div>
+        <LoadingBlock />
       ) : (
         <div className="p-6">
           <div className="flex flex-wrap gap-2 mb-5">

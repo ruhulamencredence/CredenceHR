@@ -218,7 +218,7 @@ export const MailAdministration: React.FC<{ token: string; user: User }> = ({ to
           </div>
 
           {!data && !error ? (
-            <div className="rounded-2xl bg-white border border-slate-200 divide-y divide-slate-100" style={{ animation: 'skeleton-in .25s ease .15s both' }}>
+            <div className="rounded-2xl bg-white border border-slate-200 divide-y divide-slate-100" style={{ animation: 'skeleton-in .2s ease both' }}>
               {Array.from({ length: 5 }).map((_, i) => (
                 <div key={i} className="px-4 py-3 flex items-center gap-4">
                   <div className="h-3 w-40 rounded bg-slate-200/80" />

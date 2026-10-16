@@ -11,9 +11,9 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Activity, Globe, LogOut, Monitor, RefreshCw, Search, ShieldCheck, Smartphone, Users } from 'lucide-react';
-import { Spinner } from './Spinner';
 import { useHrApi, Notice, inputCls } from './HrOpsShared';
 import { confirmDialog } from '../lib/confirmDialog';
+import { LoadingBlock } from './LoadingBlock';
 
 interface Session {
   id: number;
@@ -230,7 +230,7 @@ export const ActiveUsers: React.FC<{ token: string }> = ({ token }) => {
     </button>
   );
 
-  if (!data) return <div className="py-10 flex justify-center"><Spinner /></div>;
+  if (!data) return <LoadingBlock />;
   const sum = data.summary;
   const cards: [string, number, React.ReactNode, string][] = [
     ['Online now', sum.online_users, <Activity className="w-4 h-4" />, 'text-emerald-600 bg-emerald-50'],

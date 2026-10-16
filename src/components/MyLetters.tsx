@@ -26,6 +26,7 @@ import { useHrApi, Badge, fmtDate, letterPdfBytes, saveLetterPdf, inputCls, labe
 import { ServiceTimeline, serviceLength, type ServiceBookData } from './HrOpsServiceBook';
 import { MyInfoRequests, useMyOpenRequests } from './MyInfoRequests';
 import { Employee360 } from './HrOps360';
+import { LoadingBlock } from './LoadingBlock';
 
 interface MyLetter {
   id: number;
@@ -180,9 +181,7 @@ useLiveRefresh(() => load(true));
         <div className="space-y-4">
           <Notice msg={msg} onClose={() => setMsg(null)} />
           {loading ? (
-            <div className="flex items-center justify-center gap-2 py-16 text-sm text-slate-500">
-              <Spinner size={16} /> Loading…
-            </div>
+            <LoadingBlock />
           ) : !data?.employee ? (
             <div className="rounded-2xl bg-white border border-slate-200 p-8 text-center text-sm text-slate-500">Your login isn't linked to an Employee record yet — please contact HR.</div>
           ) : tab === 'book' && canServiceBook ? (

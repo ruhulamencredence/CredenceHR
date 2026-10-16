@@ -18,22 +18,25 @@ import { ProfilePage } from './components/ProfilePage';
 // eagerly-loaded bundle every visitor's phone has to fetch before they can
 // even see the login form. See the Suspense fallback below for what shows
 // during the brief gap while a panel's own chunk downloads after login.
-const UserPanel = lazy(() => import('./components/UserPanel').then(m => ({ default: m.UserPanel })));
-const AdminPanel = lazy(() => import('./components/AdminPanel').then(m => ({ default: m.AdminPanel })));
+const UserPanel = lazy(retryImport(() => import('./components/UserPanel').then(m => ({ default: m.UserPanel }))));
+const AdminPanel = lazy(retryImport(() => import('./components/AdminPanel').then(m => ({ default: m.AdminPanel }))));
 // Chat pulls in its own Socket.IO client — lazy-loaded for the same reason
 // as UserPanel/AdminPanel above, so an account that never opens Chat never
 // pays for it.
-const ChatPanel = lazy(() => import('./components/ChatPanel').then(m => ({ default: m.ChatPanel })));
-const AlertsPage = lazy(() => import('./components/AlertsPage').then(m => ({ default: m.AlertsPage })));
+const ChatPanel = lazy(retryImport(() => import('./components/ChatPanel').then(m => ({ default: m.ChatPanel }))));
+const AlertsPage = lazy(retryImport(() => import('./components/AlertsPage').then(m => ({ default: m.AlertsPage }))));
 // Credence Mail (Self Service, users.can_use_mail) — its own chunk.
-const CredenceMail = lazy(() => import('./components/mail/CredenceMail').then(m => ({ default: m.CredenceMail })));
+const CredenceMail = lazy(retryImport(() => import('./components/mail/CredenceMail').then(m => ({ default: m.CredenceMail }))));
 // My Duty Roster (Self Service, users.can_view_roster).
-const MyRoster = lazy(() => import('./components/MyRoster').then(m => ({ default: m.MyRoster })));
+const MyRoster = lazy(retryImport(() => import('./components/MyRoster').then(m => ({ default: m.MyRoster }))));
 // Documents to Sign (Self Service, users.can_sign_documents).
-const MySignatures = lazy(() => import('./components/MySignatures').then(m => ({ default: m.MySignatures })));
+const MySignatures = lazy(retryImport(() => import('./components/MySignatures').then(m => ({ default: m.MySignatures }))));
 
 import { AppLoader } from './components/AppLoader';
 import { HrOpsPageSkeleton } from './components/HrOpsSkeleton';
+import { AdminPageSkeleton, ListPageSkeleton } from './components/PageSkeletons';
+import { AppErrorBoundary } from './components/AppErrorBoundary';
+import { retryImport } from './lib/chunkReload';
 import { ModulePath } from './components/ModulePath';
 import { UserDashboardSkeleton } from './components/UserDashboardSkeleton';
 import { Spinner } from './components/Spinner';
@@ -820,6 +823,19 @@ export default function App() {
     </div>
   );
 
+  // Download the Admin Panel's code in the background once an account that
+  // can open it is signed in, so opening it later doesn't wait on it.
+  useEffect(() => {
+    if (!user) return;
+    const canAdmin = user.role === 'admin' || user.role === 'superadmin' || (user.module_permissions || []).length > 0;
+    if (!canAdmin) return;
+    const idle = (window as any).requestIdleCallback || ((cb: () => void) => setTimeout(cb, 1500));
+    const id = idle(() => {
+      import('./components/AdminPanel').catch(() => {});
+    });
+    return () => ((window as any).cancelIdleCallback ? (window as any).cancelIdleCallback(id) : clearTimeout(id));
+  }, [user]);
+
   // Opens an Admin Panel module from places that don't get
   // onGoToAdminModule as a prop (the header's alerts bell — e.g. an HR
   // Operations alert). Same state changes as sidebarNavProps.onGoToAdminModule.
@@ -1358,18 +1374,23 @@ export default function App() {
 
         <div className="flex-1 min-w-0 flex flex-col">
       <main className="flex-1">
-        {/* The User Dashboard gets a placeholder in its own layout (see
-            UserDashboardSkeleton) so nothing jumps when it arrives. The Admin
-            Panel, Chat and Alerts show nothing while their code loads — each
-            has its own loading state, and a generic skeleton first just
-            flickers — except HR Operations, whose page skeleton fades in
-            only after a moment (HrOpsSkeleton.tsx). Every other page keeps
-            the generic loader. */}
+        {/* While a page's code downloads it shows a placeholder at once,
+            never a blank page: the User Dashboard its own layout
+            (UserDashboardSkeleton), HR Operations its page skeleton, any
+            other Admin Panel tab AdminPageSkeleton, Chat / Alerts a list
+            skeleton, every other page the generic loader. An error on a
+            page (or its code failing to download after a deploy) shows a
+            card instead of a white screen (AppErrorBoundary). */}
+        <AppErrorBoundary resetKey={`${isAdminView}|${selfServiceView}|${showChat}|${showAlertsPage}|${showProfilePage}|${adminActiveTab}`}>
         <Suspense
           fallback={
             isAdminView && !showProfilePage && !selfServiceView && !showChat && !showAlertsPage && (adminNavRequest?.target || (adminUrlEnabled() && adminPathToTab(window.location.pathname)) || adminActiveTab) === 'hr_operations' ? (
               <HrOpsPageSkeleton />
-            ) : showChat || showAlertsPage || (isAdminView && !showProfilePage && !selfServiceView) ? null : !showProfilePage && !selfServiceView ? (
+            ) : showChat || showAlertsPage ? (
+              <ListPageSkeleton />
+            ) : isAdminView && !showProfilePage && !selfServiceView ? (
+              <AdminPageSkeleton />
+            ) : !showProfilePage && !selfServiceView ? (
               <UserDashboardSkeleton showAttendance={!!user?.can_use_attendance} showLeaveSummary={!!user?.can_view_leave_summary} showTracking={user?.role === 'superadmin' || (user?.module_permissions || []).includes('tracking')} />
             ) : (
               <AppLoader />
@@ -1565,6 +1586,7 @@ export default function App() {
           </>
         )}
         </Suspense>
+        </AppErrorBoundary>
       </main>
 
       {/* This footer line is web-only — hidden on the Capacitor Android APK

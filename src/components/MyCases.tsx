@@ -15,6 +15,7 @@ import { ArrowLeft, Gavel, Plus, X, MessageSquare, AlertTriangle, CheckCircle2 }
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
 import { ModulePath } from './ModulePath';
+import { LoadingBlock } from './LoadingBlock';
 
 interface Feedback {
   id: number;
@@ -346,9 +347,7 @@ export const MyCases: React.FC<{ token: string; onBack?: () => void }> = ({ toke
         )}
 
         {!cases ? (
-          <div className="flex justify-center py-16">
-            <Spinner size={22} className="text-slate-400" />
-          </div>
+          <LoadingBlock />
         ) : (
           <>
             <div className="flex gap-1.5 overflow-x-auto pb-2 mb-3">

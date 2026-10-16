@@ -19,8 +19,8 @@ import { User } from '../types';
 import { finalizePdfPageNumbers } from '../lib/pdfLetterhead';
 import { drawStandardHeader, loadPdfCompany, standardTable } from '../lib/pdfStandard';
 import { savePdfCrossPlatform } from '../lib/saveFile';
-import { Spinner } from './Spinner';
 import { fmtDate, periodLabel, ProgressBar, STATUS_LABEL, StatusBadge, Target, TargetDrawer, targetApi, TASK_STATUS_LABEL, TargetStatus, todayYmd } from './TargetParts';
+import { LoadingBlock } from './LoadingBlock';
 
 interface Counts {
   targets: number;
@@ -289,9 +289,7 @@ export const TargetReports: React.FC<{ token: string; user: User }> = ({ token }
       {error && <p className="text-sm text-rose-600">{error}</p>}
       {!data ? (
         !error && (
-          <div className="py-10 flex justify-center">
-            <Spinner size={24} />
-          </div>
+          <LoadingBlock />
         )
       ) : (
         <>

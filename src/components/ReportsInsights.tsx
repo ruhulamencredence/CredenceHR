@@ -29,6 +29,7 @@ import credenceLogo from '../assets/credence-logo.png';
 import { pdfSafe } from './HrOps360Parts';
 import { fmtDate, taka } from './HrOpsShared';
 import { Spinner } from './Spinner';
+import { LoadingBlock } from './LoadingBlock';
 
 // Admin Panel -> Reports & Insights: every operational report (Attendance,
 // Leave, Claim, Bill, Asset, Vehicle) in one place. The list, filters and
@@ -272,9 +273,7 @@ export const ReportsInsights: React.FC<{ token: string }> = ({ token }) => {
   }
   if (!catalog) {
     return (
-      <div className="flex justify-center py-16">
-        <Spinner size={22} className="text-slate-400" />
-      </div>
+      <LoadingBlock variant="cards" rows={9} />
     );
   }
 

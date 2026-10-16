@@ -7,6 +7,7 @@ import { esignFetch, STATUS_LABEL, STATUS_CLS, type SignStatus } from '../lib/es
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
 import { confirmDialog } from '../lib/confirmDialog';
+import { LoadingBlock } from './LoadingBlock';
 
 interface DocumentVaultPanelProps {
   token: string;
@@ -270,10 +271,7 @@ export const DocumentVaultPanel: React.FC<DocumentVaultPanelProps> = ({ token })
       )}
 
       {loading ? (
-        <div className="flex flex-col items-center justify-center py-16 text-slate-400">
-          <Spinner size={24} className="mb-2" />
-          <p className="text-xs">Loading…</p>
-        </div>
+        <LoadingBlock />
       ) : (
         <div className="p-4 space-y-2">
           {documents.map((d) => {

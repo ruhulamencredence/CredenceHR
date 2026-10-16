@@ -19,6 +19,7 @@ import { ClaimBillLines } from './ClaimBillLines';
 import { formatDate } from '../lib/formatDate';
 import { ApprovalHistory } from './ApprovalHistory';
 import { ClaimChangesNotice, ClaimReviewFields, ReclaimTick, ReturnButton } from './ClaimReviewBits';
+import { LoadingBlock } from './LoadingBlock';
 
 interface ApproveApplicationsProps {
   token: string;
@@ -485,9 +486,7 @@ useLiveRefresh(() => load(true));
           )}
 
           {loading ? (
-            <div className="flex justify-center py-14">
-              <Spinner size={20} className="text-slate-400" />
-            </div>
+            <LoadingBlock />
           ) : items.length === 0 ? (
             <div className="flex flex-col items-center gap-2 text-center py-14 px-5 text-slate-400">
               <Inbox className="w-6 h-6 text-slate-300" />

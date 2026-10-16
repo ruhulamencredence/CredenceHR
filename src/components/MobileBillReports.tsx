@@ -18,12 +18,12 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import { FileDown, FileSpreadsheet } from 'lucide-react';
-import { Spinner } from './Spinner';
 import { finalizePdfPageNumbers } from '../lib/pdfLetterhead';
 import { drawStandardHeader, loadPdfCompany, pdfMoney, standardTable } from '../lib/pdfStandard';
 import { savePdfCrossPlatform } from '../lib/saveFile';
 import { MobileLimitHistoryReport } from './MobileLimitHistoryReport';
 import { inputCls, labelCls, MbSim, mbApi, monthLabel, monthsBetween, num, OperatorBadge, shiftMonth, thisMonth, tk } from './MobileBillParts';
+import { LoadingBlock } from './LoadingBlock';
 
 type View = 'matrix' | 'operator' | 'usage' | 'excess' | 'limits';
 interface Bill {
@@ -317,9 +317,7 @@ export const MobileBillReports: React.FC<{ token: string }> = ({ token }) => {
       </div>
       {error && <p className="text-sm text-rose-600">{error}</p>}
       {!data ? (
-        <div className="py-10 flex justify-center">
-          <Spinner size={24} />
-        </div>
+        <LoadingBlock />
       ) : view === 'matrix' ? (
         <div className="rounded-2xl bg-white border border-slate-200 overflow-x-auto">
           <table className="w-full text-xs">

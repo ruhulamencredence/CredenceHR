@@ -39,6 +39,7 @@ import { LoanAdvanceManagementPanel } from './LoanAdvanceManagementPanel';
 import { PayrollApprovalPanel } from './PayrollApprovalPanel';
 import { PayrollActivityLog } from './PayrollActivityLog';
 import { BonusIncentiveManagementPanel } from './BonusIncentiveManagementPanel';
+import { LoadingBlock } from './LoadingBlock';
 
 interface PayrollModuleProps {
   token: string;
@@ -365,7 +366,7 @@ const GeneratePayslipModal: React.FC<{ token: string; monthYear: string; onClose
 
         <div className="p-2">
           {loading ? (
-            <div className="flex justify-center py-10"><Spinner size={24} /></div>
+            <LoadingBlock />
           ) : error ? (
             <p className="text-xs text-rose-600 text-center py-10">{error}</p>
           ) : records.length === 0 ? (
@@ -799,7 +800,7 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({ token, onBack }) =
             <p className="text-xs text-slate-400 mt-1">Ask an Admin to grant Payroll access from Admin Panel → Users → Module Access.</p>
           </div>
         ) : loading && !summary ? (
-          <div className="flex justify-center py-20"><Spinner size={28} /></div>
+          <LoadingBlock />
         ) : loadError ? (
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-10 text-center">
             <p className="text-sm text-rose-600">{loadError}</p>

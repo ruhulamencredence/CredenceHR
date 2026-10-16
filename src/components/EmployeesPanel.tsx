@@ -10,6 +10,7 @@ import { Spinner } from './Spinner';
 import { EmployeeChangeHistory, HistoryEntryCard, buildHistoryTimeline, HISTORY_FILTERS, HistoryFilter } from './EmployeeChangeHistory';
 import { RecordFields, useNameSuggestions, refreshNameSuggestions } from './HrOps360Parts';
 import { confirmDialog } from '../lib/confirmDialog';
+import { LoadingBlock } from './LoadingBlock';
 
 // Add/Edit Employee modal tabs — Basic + Employee Info fields live under
 // "info", the rest mirror the reference HR system's own tab split (Status /
@@ -1948,9 +1949,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
 
                   <div className="rounded-xl border border-slate-200 overflow-hidden">
                     {loadingSupervisors ? (
-                      <div className="flex items-center justify-center py-8 text-slate-400 gap-2 text-xs">
-                        <Spinner size={14} /> Loading supervisors…
-                      </div>
+                      <LoadingBlock />
                     ) : supervisors.length === 0 ? (
                       <p className="text-xs text-slate-400 text-center py-8">No supervisor assigned yet.</p>
                     ) : (
@@ -2121,9 +2120,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
 
                   <div className="rounded-xl border border-slate-200 overflow-hidden">
                     {loadingPaymentAccounts ? (
-                      <div className="flex items-center justify-center py-8 text-slate-400 gap-2 text-xs">
-                        <Spinner size={14} /> Loading payment accounts…
-                      </div>
+                      <LoadingBlock />
                     ) : paymentAccounts.length === 0 ? (
                       <p className="text-xs text-slate-400 text-center py-8">
                         No Bank/MFS/Cash account set up yet — Payroll will use the Run Payroll wizard's single Payment Method for this employee.

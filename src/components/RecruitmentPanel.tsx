@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { UserPlus, Plus, X, AlertTriangle, ChevronDown, ChevronUp, Star, ClipboardCheck } from 'lucide-react';
 import { apiUrl } from '../lib/api';
-import { Spinner } from './Spinner';
 import { StartJoinerOnboarding, type OnboardingAccess } from './HrOpsJoinerOnboarding';
+import { LoadingBlock } from './LoadingBlock';
 
 interface RecruitmentPanelProps {
   token: string;
@@ -321,10 +321,7 @@ export const RecruitmentPanel: React.FC<RecruitmentPanelProps> = ({ token }) => 
       )}
 
       {loading ? (
-        <div className="flex flex-col items-center justify-center py-16 text-slate-400">
-          <Spinner size={24} className="mb-2" />
-          <p className="text-xs">Loading…</p>
-        </div>
+        <LoadingBlock />
       ) : (
         <div className="p-4 space-y-2.5">
           {postings.map((p) => {

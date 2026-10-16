@@ -274,7 +274,7 @@ const MailboxesPopup: React.FC<{ token: string; userName: string; accounts: Mail
 // List
 // ---------------------------------------------------------------------------
 const ListSkeleton: React.FC = () => (
-  <div className="divide-y divide-slate-100" style={{ animation: 'skeleton-in .25s ease .15s both' }}>
+  <div className="divide-y divide-slate-100" style={{ animation: 'skeleton-in .2s ease both' }}>
     {Array.from({ length: 8 }).map((_, i) => (
       <div key={i} className="flex items-start gap-3 px-4 py-3">
         <div className="w-10 h-10 rounded-full bg-slate-200/80 shrink-0" />
@@ -294,7 +294,7 @@ const ListSkeleton: React.FC = () => (
 // The whole page, while the first call runs.
 const PageSkeleton: React.FC = () => (
   <div className="flex h-full min-h-0">
-    <div className="hidden md:block w-56 shrink-0 p-3 space-y-2" style={{ animation: 'skeleton-in .25s ease .15s both' }}>
+    <div className="hidden md:block w-56 shrink-0 p-3 space-y-2" style={{ animation: 'skeleton-in .2s ease both' }}>
       <div className="h-10 rounded-2xl bg-slate-200/80" />
       {Array.from({ length: 7 }).map((_, i) => <div key={i} className="h-8 rounded-xl bg-slate-100" />)}
     </div>

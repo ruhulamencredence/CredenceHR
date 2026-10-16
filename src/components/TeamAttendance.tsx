@@ -36,6 +36,7 @@ import { Spinner } from './Spinner';
 import { ModulePath } from './ModulePath';
 import { useHrApi, Notice, fmtDate, inputCls, btnPrimary, btnGhost } from './HrOpsShared';
 import { confirmDialog } from '../lib/confirmDialog';
+import { LoadingBlock } from './LoadingBlock';
 
 export type SiteStatus = 'present' | 'late' | 'absent' | 'leave';
 export interface SiteTeam {
@@ -416,7 +417,7 @@ export const SheetEditor: React.FC<{
     }
   };
 
-  if (loading && !data) return <div className="py-10 flex justify-center"><Spinner /></div>;
+  if (loading && !data) return <LoadingBlock />;
   if (!data) return <Notice msg={msg} />;
 
   const q = query.trim().toLowerCase();
@@ -749,9 +750,7 @@ export const TeamAttendance: React.FC<{ token: string; onBack?: () => void }> = 
         </div>
 
         {teams === null ? (
-          <div className="py-10 flex justify-center">
-            <Spinner />
-          </div>
+          <LoadingBlock />
         ) : teams.length === 0 ? (
           <div className="rounded-xl border border-slate-200 bg-white p-6 text-center text-sm text-slate-500">
             You are not the attendance supervisor of any team. HR sets this up in Office Attendance → Site Attendance.

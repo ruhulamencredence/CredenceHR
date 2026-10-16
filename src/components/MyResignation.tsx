@@ -11,6 +11,7 @@ import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
 import { ModulePath } from './ModulePath';
 import { User } from '../types';
+import { LoadingBlock } from './LoadingBlock';
 
 interface MyResignationProps {
   token: string;
@@ -200,9 +201,7 @@ useLiveRefresh(() => load(true));
           )}
 
           {loading ? (
-            <div className="flex justify-center py-14">
-              <Spinner size={20} className="text-slate-400" />
-            </div>
+            <LoadingBlock />
           ) : requests.length === 0 && !showNew ? (
             <div className="flex flex-col items-center justify-center py-14 px-6 text-center">
               <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center mb-3">

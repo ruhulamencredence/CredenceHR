@@ -15,12 +15,12 @@ import { Capacitor } from '@capacitor/core';
 import { ArrowLeft, PenLine, FileText, Download, Eye, CheckCircle2, Clock, XCircle, ShieldCheck, Loader2, Copy, Check, KeyRound, BookOpenCheck } from 'lucide-react';
 import type { User } from '../types';
 import { ModulePath } from './ModulePath';
-import { Spinner } from './Spinner';
 import { SignaturePad } from './SignaturePad';
 import { DocReader } from './DocReader';
 import { MailPopup as Popup, inputCls, labelCls, ghostBtn } from './mail/MailPopup';
 import { useLiveRefresh } from '../lib/liveRefresh';
 import { esignFetch, openProtectedFile, dhakaTime, verifyLink, STATUS_LABEL, STATUS_CLS, type ESignDoc } from '../lib/esign';
+import { LoadingBlock } from './LoadingBlock';
 
 const signBtn = 'liquid-glass-button rounded-full px-5 py-2 text-sm font-semibold text-white bg-blue-600 disabled:opacity-60 inline-flex items-center gap-2';
 
@@ -328,9 +328,7 @@ export const MySignatures: React.FC<{ token: string; user: User; onBack?: () => 
         </div>
 
         {!docs && !error ? (
-          <div className="py-16 flex justify-center">
-            <Spinner />
-          </div>
+          <LoadingBlock />
         ) : docs && !shown.length ? (
           <div className="rounded-2xl bg-white border border-slate-200 p-8 text-center text-sm text-slate-500">{tab === 'todo' ? 'Nothing is waiting for your signature.' : 'No documents yet.'}</div>
         ) : (

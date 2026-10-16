@@ -9,6 +9,7 @@ import { apiUrl } from '../lib/api';
 import { DeliveryDateCondition, DeliveryConditionType, Project, Budget } from '../types';
 import { Spinner } from './Spinner';
 import { confirmDialog } from '../lib/confirmDialog';
+import { LoadingBlock } from './LoadingBlock';
 
 interface DeliveryDateConditionsPanelProps {
   token: string;
@@ -358,9 +359,7 @@ export const DeliveryDateConditionsPanel: React.FC<DeliveryDateConditionsPanelPr
 
   if (loading) {
     return (
-      <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm flex items-center justify-center py-12">
-        <Spinner />
-      </div>
+      <LoadingBlock />
     );
   }
 

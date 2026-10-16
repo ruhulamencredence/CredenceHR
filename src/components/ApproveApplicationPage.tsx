@@ -9,6 +9,7 @@ import { ArrowLeft, ShieldCheck, CheckCircle2, XCircle, AlertCircle, Inbox, Refr
 import { apiUrl } from '../lib/api';
 import { formatDate } from '../lib/formatDate';
 import { Spinner } from './Spinner';
+import { LoadingBlock } from './LoadingBlock';
 
 // One row from GET /api/my-approvals — a trimmed-down ApprovalRequest, same
 // shape PendingApprovalsCard.tsx (the Dashboard card version of this) uses.
@@ -154,9 +155,7 @@ useLiveRefresh(() => load(true));
 
       <div className="px-5 sm:px-6 py-4">
         {loading && items.length === 0 ? (
-          <div className="p-8 flex justify-center">
-            <Spinner size={18} className="text-slate-400" />
-          </div>
+          <LoadingBlock />
         ) : items.length === 0 ? (
           <div className="flex flex-col items-center gap-1.5 text-center py-10 text-slate-400">
             <Inbox className="w-6 h-6 text-slate-300" />

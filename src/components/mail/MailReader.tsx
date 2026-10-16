@@ -121,7 +121,7 @@ const OneMail: React.FC<{ token: string; m: MailMessage; open: boolean; onToggle
 };
 
 export const ReaderSkeleton: React.FC = () => (
-  <div className="p-4 sm:p-6 space-y-4" style={{ animation: 'skeleton-in .25s ease .15s both' }}>
+  <div className="p-4 sm:p-6 space-y-4" style={{ animation: 'skeleton-in .2s ease both' }}>
     <div className="h-5 w-2/3 rounded bg-slate-200/80" />
     <div className="rounded-2xl bg-white border border-slate-200/80 p-4 space-y-4">
       <div className="flex items-center gap-3">

@@ -15,6 +15,7 @@ import { AlertTriangle, CalendarDays, CheckCircle2, ChevronDown, ChevronUp, Copy
 import { apiUrl } from '../lib/api';
 import { confirmDialog } from '../lib/confirmDialog';
 import { Spinner } from './Spinner';
+import { LoadingBlock } from './LoadingBlock';
 
 export type TargetStatus = 'draft' | 'pending' | 'active' | 'rejected' | 'cancelled' | 'closed';
 export type TaskStatus = 'not_started' | 'in_progress' | 'completed' | 'blocked';
@@ -540,7 +541,7 @@ export const TargetDrawer: React.FC<{
         footer={hasFooter ? footer : undefined}
       >
         {!t ? (
-          error ? <p className="text-sm text-rose-600">{error}</p> : <div className="py-10 flex justify-center"><Spinner size={24} /></div>
+          error ? <p className="text-sm text-rose-600">{error}</p> : <LoadingBlock />
         ) : (
           <div className="space-y-4">
             <div className="liquid-glass-inset rounded-2xl p-4">

@@ -13,9 +13,9 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { ArrowLeft, Plus, Smartphone, TrendingUp } from 'lucide-react';
 import { ModulePath } from './ModulePath';
-import { Spinner } from './Spinner';
 import { LimitRequestForm, MbRequest, MbSim, mbApi, monthLabel, OperatorBadge, requestStage, StatusPill, tk } from './MobileBillParts';
 import { confirmDialog } from '../lib/confirmDialog';
+import { LoadingBlock } from './LoadingBlock';
 
 type MySim = MbSim & { bills: { month: string; amount: number; limit_amount: number }[] };
 
@@ -70,9 +70,7 @@ useLiveRefresh(() => load());
 
         {error && <p className="text-sm text-rose-600 mb-3">{error}</p>}
         {!data ? (
-          <div className="py-10 flex justify-center">
-            <Spinner size={24} />
-          </div>
+          <LoadingBlock />
         ) : (
           <>
             {data.sims.length === 0 && <p className="text-sm text-slate-500 py-8 text-center">No company SIM is given to you yet.</p>}
