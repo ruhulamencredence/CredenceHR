@@ -149,7 +149,8 @@ function initialsOf(name: string): string {
   return name.split(' ').filter(Boolean).slice(0, 2).map((p) => p[0]?.toUpperCase()).join('') || '?';
 }
 
-const AVATAR_COLORS = ['#7F00FF', '#B36AFF', '#D2A8FF', '#6300C6', '#9B4DFF'];
+// CSS variables so a whole-app theme (Minimal Mono) can recolour them.
+const AVATAR_COLORS = ['var(--g-avatar-1, #7F00FF)', 'var(--g-avatar-2, #B36AFF)', 'var(--g-avatar-3, #D2A8FF)', 'var(--g-avatar-4, #6300C6)', 'var(--g-avatar-5, #9B4DFF)'];
 function avatarColorFor(seed: number): string {
   return AVATAR_COLORS[Math.abs(seed) % AVATAR_COLORS.length];
 }
@@ -836,7 +837,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ token, user, onN
                   style={featured ? { background: 'var(--g-gradient)' } : undefined}
                 >
                   <span
-                    className="w-9 h-9 sm:w-11 sm:h-11 rounded-full flex items-center justify-center shrink-0"
+                    className={`w-9 h-9 sm:w-11 sm:h-11 rounded-full flex items-center justify-center shrink-0 ${featured ? '' : 'kpi-icon'}`}
                     style={{ background: featured ? 'rgba(255,255,255,0.2)' : `${iconColor}1A`, color: featured ? '#fff' : iconColor }}
                   >
                     <tile.icon className="w-4 h-4 sm:w-5 sm:h-5" />

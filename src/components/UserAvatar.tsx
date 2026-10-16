@@ -15,7 +15,7 @@
 import React, { useEffect, useState } from 'react';
 import { apiUrl } from '../lib/api';
 
-const AVATAR_PALETTE = ['#7F00FF', '#059669', '#0891b2', '#d97706', '#dc2626', '#4f46e5', '#be185d', '#0d9488'];
+const AVATAR_PALETTE = ['var(--g-avatar-1, #7F00FF)', '#059669', '#0891b2', '#d97706', '#dc2626', '#4f46e5', '#be185d', '#0d9488'];
 
 export function avatarColorFor(seed: string): string {
   let hash = 0;

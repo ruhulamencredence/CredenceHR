@@ -188,9 +188,9 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     .join('') || '?';
 
   const roleAvatarColors: Record<string, string> = {
-    superadmin: '#7F00FF',
-    admin: '#B36AFF',
-    user: '#D2A8FF',
+    superadmin: 'var(--g-avatar-1, #7F00FF)',
+    admin: 'var(--g-avatar-2, #B36AFF)',
+    user: 'var(--g-avatar-3, #D2A8FF)',
   };
 
   // Whether this account has a User Panel at all — a plain User always does;
@@ -994,7 +994,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
             >
               <div
                 className="w-11 h-11 rounded-full flex items-center justify-center text-sm font-bold text-white ring-2 ring-white/30 overflow-hidden"
-                style={{ background: roleAvatarColors[user.role] || '#B36AFF' }}
+                style={{ background: roleAvatarColors[user.role] || 'var(--g-avatar-2, #B36AFF)' }}
               >
                 {photoUrl ? <img src={photoUrl} alt={user.name} className="w-full h-full object-cover" /> : initials}
               </div>
