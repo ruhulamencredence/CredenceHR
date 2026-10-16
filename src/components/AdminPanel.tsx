@@ -40,6 +40,7 @@ import { HROperationsPanel } from './HROperationsPanel';
 import { TaskManagement } from './TaskManagement';
 import { TargetReports } from './TargetReports';
 import { MailAdministration } from './mail/MailAdministration';
+import { DutyRoster } from './DutyRoster';
 import { MobileBillAdmin } from './MobileBillAdmin';
 import { AdminDashboard } from './AdminDashboard';
 import { UserAccessDrawer, UserAccessChips, userInitials, ROLE_BADGE, ROLE_LABEL } from './UserAccessDrawer';
@@ -73,7 +74,7 @@ import { ADMIN_TAB_KEYS, adminUrlEnabled, adminTabToPath, adminPathToTab } from 
 const MODULE_ACCESS_GROUPS: { label: string; keys: AdminModuleKey[] }[] = [
   { label: 'PEPM Manage', keys: ['reports', 'mprs', 'imports', 'recycle', 'editlog'] },
   { label: 'HR', keys: ['approvals', 'notices', 'holidays', 'leave_applications', 'departments', 'task_management', 'mobile_bill', 'target_reports'] },
-  { label: 'HR - Attendance', keys: ['attendance', 'attendance_reports', 'office_attendance'] },
+  { label: 'HR - Attendance', keys: ['attendance', 'attendance_reports', 'office_attendance', 'duty_roster'] },
   { label: 'HR - Claims/Bill/Disbursement', keys: ['claims', 'conveyance', 'disbursement'] },
   { label: 'HR - Employee', keys: ['employees', 'tracking', 'asset_management', 'vehicle_management', 'vehicle_maintainer'] },
   { label: 'HR Operations', keys: ['hr_operations'] },
@@ -85,7 +86,7 @@ const MODULE_ACCESS_GROUPS: { label: string; keys: AdminModuleKey[] }[] = [
       (key) => ![
         'reports', 'mprs', 'imports', 'recycle', 'editlog',
         'approvals', 'notices', 'holidays', 'leave_applications', 'departments', 'task_management', 'mobile_bill', 'target_reports',
-        'attendance', 'attendance_reports', 'office_attendance',
+        'attendance', 'attendance_reports', 'office_attendance', 'duty_roster',
         'claims', 'conveyance', 'disbursement',
         'employees', 'tracking', 'asset_management', 'vehicle_management', 'vehicle_maintainer',
         'users', 'projects', 'branches', 'mail_admin',
@@ -494,7 +495,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     tab === 'permanent_delete_log' || tab === 'companies' || tab === 'devices' || tab === 'active_users' ? isSuperAdmin :
     isSuperAdmin || visibleModules.includes(tab as AdminModuleKey);
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'reports_insights' | 'data_import' | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'bill_claim_policy' | 'disbursement' | 'holidays' | 'asset_management' | 'vehicle_management' | 'permanent_delete_log' | 'companies' | 'devices' | 'active_users' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'hr_operations' | 'task_management' | 'mobile_bill' | 'target_reports' | 'mail_admin'>(
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'reports_insights' | 'data_import' | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'bill_claim_policy' | 'disbursement' | 'holidays' | 'asset_management' | 'vehicle_management' | 'permanent_delete_log' | 'companies' | 'devices' | 'active_users' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'hr_operations' | 'task_management' | 'mobile_bill' | 'target_reports' | 'mail_admin' | 'duty_roster'>(
     () => {
       // Restores whichever tab this Admin was last looking at — see the
       // "pull down to reload" note in App.tsx: since a reload now has to be
@@ -702,6 +703,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [callsAccessEnabled, setCallsAccessEnabled] = useState(false);
   // Credence Mail (MailRoutes.ts) — off by default.
   const [mailAccessEnabled, setMailAccessEnabled] = useState(false);
+  // My Duty Roster (RosterRoutes.ts) — off by default.
+  const [rosterAccessEnabled, setRosterAccessEnabled] = useState(false);
   const [tasksAccessEnabled, setTasksAccessEnabled] = useState(false);
   const [mobileBillAccessEnabled, setMobileBillAccessEnabled] = useState(false);
   const [serviceBookAccessEnabled, setServiceBookAccessEnabled] = useState(false);
@@ -734,6 +737,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     setLeaveApplicationAccessEnabled(!!u.can_view_leave_application || !!u.can_view_my_leave);
     setCallsAccessEnabled(!!u.can_use_calls);
     setMailAccessEnabled(!!u.can_use_mail);
+    setRosterAccessEnabled(!!u.can_view_roster);
     setTasksAccessEnabled(!!u.can_view_tasks);
     setMobileBillAccessEnabled(!!u.can_view_mobile_bill);
     setServiceBookAccessEnabled(!!u.can_view_service_book);
@@ -1226,6 +1230,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         });
         const maData = await maRes.json();
         if (!maRes.ok) throw new Error(maData.error || 'Failed to update Mail access');
+      }
+
+      if (rosterAccessEnabled !== !!managingModulesFor.can_view_roster) {
+        const roRes = await fetch(apiUrl(`/api/users/${managingModulesFor.id}/roster-access`), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ can_view_roster: rosterAccessEnabled })
+        });
+        const roData = await roRes.json();
+        if (!roRes.ok) throw new Error(roData.error || 'Failed to update My Duty Roster access');
       }
 
       setManagingModulesFor(null);
@@ -2127,7 +2141,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // Tabs that read none of the shared lists.
   const SELF_CONTAINED_TABS = new Set<string>([
     'dashboard', 'reports_insights', 'data_import', 'hr_analytics', 'exit_offboarding', 'performance_management',
-    'recruitment', 'grievance_disciplinary', 'document_vault', 'hr_operations', 'task_management', 'mobile_bill', 'target_reports', 'mail_admin',
+    'recruitment', 'grievance_disciplinary', 'document_vault', 'hr_operations', 'task_management', 'mobile_bill', 'target_reports', 'mail_admin', 'duty_roster',
     'devices', 'active_users', 'companies'
   ]);
   const ALL_SHARED: SharedKey[] = ['projects', 'branches', 'mprNumbers', 'entries', 'users', 'people', 'budgets', 'permissions', 'departments'];
@@ -5068,6 +5082,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       {activeTab === 'target_reports' && <TargetReports token={token} user={user} />}
       {activeTab === 'mobile_bill' && <MobileBillAdmin token={token} />}
       {activeTab === 'mail_admin' && canSee('mail_admin') && <MailAdministration token={token} user={user} />}
+      {activeTab === 'duty_roster' && canSee('duty_roster') && <DutyRoster token={token} user={user} />}
 
       {/* TAB: PERMANENT DELETE LOG — Superadmin-only (see GET
           /api/entries/permanent-delete-log and the comment on DELETE
@@ -7939,6 +7954,28 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   <span
                     className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
                       mailAccessEnabled ? 'translate-x-[18px]' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </label>
+              <label className="flex items-center justify-between gap-3 p-3.5 mb-3 bg-purple-50 border border-purple-200 rounded-xl cursor-pointer">
+                <span>
+                  <span className="text-sm font-semibold text-slate-900 block">Also allow My Duty Roster</span>
+                  <span className="text-[11px] text-slate-500">
+                    Self Service → My Duty Roster: see their own shifts and Off days, and get an alert when HR changes them. Off by default.
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setRosterAccessEnabled((v) => !v)}
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${
+                    rosterAccessEnabled ? 'bg-emerald-500' : 'bg-slate-300'
+                  }`}
+                  title={rosterAccessEnabled ? 'On — click to turn off' : 'Off — click to turn on'}
+                >
+                  <span
+                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                      rosterAccessEnabled ? 'translate-x-[18px]' : 'translate-x-1'
                     }`}
                   />
                 </button>

@@ -29,6 +29,7 @@ export const ADMIN_TAB_PATH: Record<string, string[]> = {
   attendance: [...HRM, 'Attendance', 'Remote Attendance'],
   attendance_reports: [...HRM, 'Attendance', 'Monthly Attendance Report'],
   office_attendance: [...HRM, 'Attendance', 'Office Attendance'],
+  duty_roster: [...HRM, 'Attendance', 'Duty Roster'],
 
   claims: [...HRM, 'Claims/Bill/Disbursement', 'Movement Claims'],
   conveyance: [...HRM, 'Claims/Bill/Disbursement', 'Bill Claim'],

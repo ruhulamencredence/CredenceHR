@@ -29,7 +29,8 @@ export const TEMPLATE_FEATURE_COLUMNS: Record<string, string[]> = {
   can_view_service_book: ["can_view_service_book"],
   can_view_loan_request: ["can_view_loan_request"],
   can_view_targets: ["can_view_targets"],
-  can_use_mail: ["can_use_mail"]
+  can_use_mail: ["can_use_mail"],
+  can_view_roster: ["can_view_roster"]
 };
 export const TEMPLATE_FEATURES = Object.keys(TEMPLATE_FEATURE_COLUMNS);
 

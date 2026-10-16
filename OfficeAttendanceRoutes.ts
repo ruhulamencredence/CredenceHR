@@ -9,6 +9,7 @@
 import { syncAllZkDevices } from "./zkSync";
 import { syncZkDevice } from "./zkSync";
 import type { Express } from "express";
+import { loadRoster, lateThresholds, nightShiftCheckIn } from "./RosterRoutes";
 
 export interface RegisterOfficeAttendanceRoutesDeps {
   authenticateToken: any;
@@ -238,21 +239,46 @@ export function registerOfficeAttendanceRoutes(app: Express, deps: RegisterOffic
         // same physical tap, skipped.
       }
 
+      // Duty Roster: each row's shift, and Delay / Extreme Delay measured
+      // from that shift's start (or the Late Attendance Policy's when no
+      // shift is rostered). A night shift's Check In is its first punch near
+      // the shift start, not the previous night's early-morning check-out.
+      const roster = await loadRoster(queryDB, dateFrom, dateTo);
+      const policies: any[] = (await queryDB("SELECT * FROM late_policy_settings").catch(() => [])) || [];
+      const policyOn = (date: string) =>
+        policies
+          .filter((p: any) => String(p.effective_date || "").slice(0, 10) <= `${date.slice(0, 7)}-01`)
+          .sort((a: any, b: any) => String(b.effective_date).localeCompare(String(a.effective_date)) || Number(b.id) - Number(a.id))[0] || null;
       const rows = Array.from(groups.values())
-        .map(({ meta, kept }) => ({
-          employee_id: meta.employee_id,
-          name: meta.name,
-          designation: meta.designation,
-          department: meta.department,
-          attendance_date: meta.attendance_date,
-          // Same COUNT(*) > 1 guard as before: a day with only one KEPT tap
-          // so far (typically today, before the person has punched Out)
-          // must report check_out_at as NULL rather than repeating the
-          // Check In time.
-          check_in_at: kept[0] ?? null,
-          check_out_at: kept.length > 1 ? kept[kept.length - 1] : null,
-          punch_count: kept.length
-        }))
+        .map(({ meta, kept }) => {
+          const date = String(meta.attendance_date).slice(0, 10);
+          const shift = roster.shiftOn(Number(meta.employee_id), date);
+          const rosterDay = roster.get(Number(meta.employee_id), date);
+          const checkIn = shift?.crosses_midnight ? nightShiftCheckIn(kept, shift) : kept[0] ?? null;
+          let late: "delay" | "extreme" | null = null;
+          if (checkIn && !rosterDay?.is_off) {
+            const th = lateThresholds(policyOn(date), shift);
+            const m = checkIn.getHours() * 60 + checkIn.getMinutes();
+            late = m > th.extreme ? "extreme" : m > th.delay ? "delay" : null;
+          }
+          return {
+            employee_id: meta.employee_id,
+            name: meta.name,
+            designation: meta.designation,
+            department: meta.department,
+            attendance_date: meta.attendance_date,
+            // Same COUNT(*) > 1 guard as before: a day with only one KEPT tap
+            // so far (typically today, before the person has punched Out)
+            // must report check_out_at as NULL rather than repeating the
+            // Check In time.
+            check_in_at: checkIn,
+            check_out_at: kept.length > 1 && kept[kept.length - 1] !== checkIn ? kept[kept.length - 1] : null,
+            punch_count: kept.length,
+            shift: shift ? { name: shift.name, code: shift.code, start: shift.start_time.slice(0, 5), end: shift.end_time.slice(0, 5), color: shift.color } : null,
+            roster_off: !!rosterDay?.is_off,
+            late
+          };
+        })
         .sort((a, b) => {
           const ad = new Date(a.attendance_date).getTime();
           const bd = new Date(b.attendance_date).getTime();

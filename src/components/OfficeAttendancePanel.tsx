@@ -592,7 +592,20 @@ export const OfficeAttendancePanel: React.FC<OfficeAttendancePanelProps> = ({ to
                 <td className="px-3 py-2 text-slate-500">{r.department || '—'}</td>
                 <td className="px-3 py-2 text-slate-600">{formatDate(r.attendance_date)}</td>
                 <td className="px-3 py-2 text-emerald-700">
-                  <span className="flex items-center gap-1"><LogIn className="w-3 h-3" /> {timeOnly(r.check_in_at)}</span>
+                  <span className="flex items-center gap-1 flex-wrap">
+                    <LogIn className="w-3 h-3" /> {timeOnly(r.check_in_at)}
+                    {r.late && (
+                      <span className={`text-[10px] font-semibold rounded px-1.5 py-0.5 ${r.late === 'extreme' ? 'bg-rose-50 text-rose-700' : 'bg-amber-50 text-amber-700'}`}>
+                        {r.late === 'extreme' ? 'Extreme Delay' : 'Delay'}
+                      </span>
+                    )}
+                    {r.shift && (
+                      <span className="text-[10px] font-semibold rounded px-1.5 py-0.5 text-white" style={{ background: r.shift.color }} title={`${r.shift.name} ${r.shift.start}–${r.shift.end} (Duty Roster)`}>
+                        {r.shift.code} {r.shift.start}
+                      </span>
+                    )}
+                    {r.roster_off && <span className="text-[10px] font-semibold rounded px-1.5 py-0.5 bg-slate-100 text-slate-600" title="Off day on the Duty Roster">Off day</span>}
+                  </span>
                 </td>
                 <td className="px-3 py-2 text-slate-600">
                   <span className="flex items-center gap-1"><LogOut className="w-3 h-3" /> {timeOnly(r.check_out_at)}</span>

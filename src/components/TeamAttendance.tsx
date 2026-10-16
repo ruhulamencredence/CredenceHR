@@ -85,6 +85,8 @@ interface SheetRow {
   remarks: string | null;
   app_leave: string | null;
   holiday: { title: string; type: string } | null;
+  // Duty Roster shift for the day, if one is rostered.
+  shift?: { name: string; code: string; start: string; end: string } | null;
   marked_by_other_team: string | null;
 }
 interface SheetData {
@@ -534,6 +536,8 @@ export const SheetEditor: React.FC<{
                   <div className="text-[11px] text-slate-500 truncate">
                     {[r.employee_code, r.designation].filter(Boolean).join(' · ') || '—'}
                   </div>
+                  {r.shift && <div className="text-[10px] font-semibold text-violet-700">Shift: {r.shift.name} {r.shift.start}–{r.shift.end}</div>}
+                  {!r.shift && r.holiday?.title === 'Off day (roster)' && <div className="text-[10px] font-semibold text-slate-600">Off day (roster)</div>}
                   {r.app_leave && <div className="text-[10px] font-semibold text-sky-700">On approved leave ({r.app_leave})</div>}
                   {r.marked_by_other_team && <div className="text-[10px] font-semibold text-slate-600">Already marked by {r.marked_by_other_team}</div>}
                 </div>

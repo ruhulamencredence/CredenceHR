@@ -37,6 +37,7 @@
 import type { Express } from "express";
 import type { AlertType } from "./Alerts";
 import { getHolidayMapsByGroup, getEmployeeBranchTypeByEmployeeId, type HolidayAppliesTo } from "./holidayRoutes";
+import { loadRoster } from "./RosterRoutes";
 import { runsBackgroundJobs } from "./jobRunner";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
@@ -339,13 +340,26 @@ export function registerSiteAttendanceRoutes(app: Express, deps: SiteAttendanceR
     return m;
   }
 
+  // Each person's own calendar for the date, with their Duty Roster laid
+  // over it (an Off day reads like a Weekend; a rostered shift on a Weekend
+  // is a working day).
   async function holidayFor(date: string, employeeIds: number[]) {
-    const [maps, groups] = await Promise.all([getHolidayMapsByGroup(queryDB, date, date), getEmployeeBranchTypeByEmployeeId(queryDB)]);
+    const [maps, groups, roster] = await Promise.all([getHolidayMapsByGroup(queryDB, date, date), getEmployeeBranchTypeByEmployeeId(queryDB), loadRoster(queryDB, date, date, employeeIds)]);
     const out = new Map<number, { title: string; type: string } | null>();
     for (const id of employeeIds) {
       const g: HolidayAppliesTo = groups.get(id) || "head_office";
-      const h: any = (maps as any)[g]?.get(date);
+      const h: any = roster.holidaysFor(id, (maps as any)[g] || new Map()).get(date);
       out.set(id, h ? { title: h.title || (h.day_type === "weekend" ? "Weekend" : "Holiday"), type: h.day_type } : null);
+    }
+    return out;
+  }
+  // The rostered shift of each person for the date (name and time), if any.
+  async function shiftFor(date: string, employeeIds: number[]) {
+    const roster = await loadRoster(queryDB, date, date, employeeIds);
+    const out = new Map<number, { name: string; code: string; start: string; end: string } | null>();
+    for (const id of employeeIds) {
+      const sh = roster.shiftOn(id, date);
+      out.set(id, sh ? { name: sh.name, code: sh.code, start: sh.start_time.slice(0, 5), end: sh.end_time.slice(0, 5) } : null);
     }
     return out;
   }
@@ -403,6 +417,7 @@ export function registerSiteAttendanceRoutes(app: Express, deps: SiteAttendanceR
       }
       const leaves = await appLeaveOn(date);
       const holidays = await holidayFor(date, people.map((p) => p.employee_id));
+      const shifts = await shiftFor(date, people.map((p) => p.employee_id));
       const lock = lockReason(s, date, today, settings, hr);
       res.json({
         team: view,
@@ -426,6 +441,7 @@ export function registerSiteAttendanceRoutes(app: Express, deps: SiteAttendanceR
             remarks: e?.remarks || null,
             app_leave: emp?.user_id != null ? leaves.get(Number(emp.user_id)) || null : null,
             holiday: holidays.get(p.employee_id) || null,
+            shift: shifts.get(p.employee_id) || null,
             marked_by_other_team: otherTeam.get(p.employee_id) || null
           };
         })
@@ -916,7 +932,7 @@ export function registerSiteAttendanceRoutes(app: Express, deps: SiteAttendanceR
       });
       const ids = new Set<number>(entries.map((e) => Number(e.employee_id)));
       for (const mem of w.members) if (!teamId || Number(mem.team_id) === teamId) ids.add(Number(mem.employee_id));
-      const [maps, groups] = await Promise.all([getHolidayMapsByGroup(queryDB, from, to), getEmployeeBranchTypeByEmployeeId(queryDB)]);
+      const [maps, groups, roster] = await Promise.all([getHolidayMapsByGroup(queryDB, from, to), getEmployeeBranchTypeByEmployeeId(queryDB), loadRoster(queryDB, from, to, [...ids])]);
       const teamOf = new Map<number, number>(w.members.map((mm) => [Number(mm.employee_id), Number(mm.team_id)]));
       const today = todayInDhaka();
       const rows = [...ids]
@@ -924,7 +940,7 @@ export function registerSiteAttendanceRoutes(app: Express, deps: SiteAttendanceR
         .filter(Boolean)
         .map((e: any) => {
           const id = Number(e.id);
-          const hol = (maps as any)[groups.get(id) || "head_office"] as Map<string, any>;
+          const hol = roster.holidaysFor(id, ((maps as any)[groups.get(id) || "head_office"] as Map<string, any>) || new Map());
           const mine = entries.filter((x) => Number(x.employee_id) === id);
           const cells: Record<string, { code: string; confirmed: boolean; in: string | null; out: string | null }> = {};
           const tot = { present: 0, late: 0, absent: 0, leave: 0, not_marked: 0, holiday: 0 };
@@ -940,7 +956,7 @@ export function registerSiteAttendanceRoutes(app: Express, deps: SiteAttendanceR
               cells[ds] = { code, confirmed: Number(x.confirmed) === 1, in: x.in_time || null, out: x.out_time || null };
               (tot as any)[x.status]++;
             } else if (hol?.get(ds)) {
-              cells[ds] = { code: hol.get(ds).day_type === "weekend" ? "W" : "H", confirmed: true, in: null, out: null };
+              cells[ds] = { code: hol.get(ds).roster_off ? "O" : hol.get(ds).day_type === "weekend" ? "W" : "H", confirmed: true, in: null, out: null };
               tot.holiday++;
             } else if (ds <= today) tot.not_marked++;
           }

@@ -289,7 +289,9 @@ const CELL_CLS: Record<string, string> = {
   A: 'bg-rose-50 text-rose-700',
   LV: 'bg-sky-50 text-sky-700',
   W: 'bg-slate-100 text-slate-400',
-  H: 'bg-violet-50 text-violet-600'
+  H: 'bg-violet-50 text-violet-600',
+  // Off day on the Duty Roster.
+  O: 'bg-slate-100 text-slate-500'
 };
 const RegisterView: React.FC<{ token: string; teams: Team[] }> = ({ token, teams }) => {
   const api = useHrApi(token);
@@ -340,7 +342,7 @@ const RegisterView: React.FC<{ token: string; teams: Team[] }> = ({ token, teams
           <Download className="w-3.5 h-3.5" /> Excel
         </button>
         <span className="text-[11px] text-slate-500">
-          P present · L late · A absent · LV leave · W weekend · H holiday · faded = not yet approved
+          P present · L late · A absent · LV leave · W weekend · H holiday · O roster Off day · faded = not yet approved
         </span>
       </div>
       {!data ? (

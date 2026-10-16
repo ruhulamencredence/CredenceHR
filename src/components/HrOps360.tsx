@@ -988,7 +988,7 @@ const AttendanceTab: React.FC<{ api: Api; ov: P360Overview; reloadKey: number }>
                   <div key={`x${i}`} />
                 ))}
                 {data.days.map((d: any) => (
-                  <div key={d.date} className={`rounded-lg border p-1 sm:p-1.5 min-h-[52px] sm:min-h-[64px] ${DAY_STYLE[d.status]}`} title={[d.holiday, d.leave_type, d.source, d.correction && `Correction ${d.correction}`].filter(Boolean).join(' · ')}>
+                  <div key={d.date} className={`rounded-lg border p-1 sm:p-1.5 min-h-[52px] sm:min-h-[64px] ${DAY_STYLE[d.status]}`} title={[d.shift && `Shift: ${d.shift}`, d.holiday, d.leave_type, d.source, d.correction && `Correction ${d.correction}`].filter(Boolean).join(' · ')}>
                     <div className="flex items-center justify-between">
                       <span className="text-[11px] font-bold">{Number(d.date.slice(8))}</span>
                       {d.late && !d.waived && <span className={`w-1.5 h-1.5 rounded-full ${d.late === 'extreme' ? 'bg-rose-500' : 'bg-amber-500'}`} />}
