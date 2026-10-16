@@ -9,7 +9,7 @@
 // download the signed PDF and share its verification link.
 
 import React, { useEffect, useState } from 'react';
-import { PenLine, ArrowUp, ArrowDown, X, Plus, Send, Loader2, Download, ShieldCheck, Copy, Check, ExternalLink, CheckCircle2, Clock, XCircle } from 'lucide-react';
+import { PenLine, ArrowUp, ArrowDown, X, Plus, Send, Loader2, Download, ShieldCheck, Copy, Check, ExternalLink, CheckCircle2, Clock, XCircle, History, ShieldAlert } from 'lucide-react';
 import { MailPopup as Popup, inputCls, labelCls, ghostBtn } from './mail/MailPopup';
 import { confirmDialog } from '../lib/confirmDialog';
 import { esignFetch, openProtectedFile, dhakaTime, verifyLink, STATUS_LABEL, STATUS_CLS, type ESignDoc } from '../lib/esign';
@@ -27,6 +27,11 @@ export const DocumentSignaturesPopup: React.FC<{ token: string; docId: number; o
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
+  const [history, setHistory] = useState<{ chain_ok: boolean; broken_at: number | null; events: { seq: number; label: string; user_name: string | null; ip: string | null; device: string; detail: string | null; at: string }[] } | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
+  useEffect(() => {
+    if (showHistory) void esignFetch<typeof history>(token, `/api/esign/documents/${docId}/events`).then(setHistory).catch((e) => setError(e.message));
+  }, [showHistory, docId, token, doc?.sign_status]);
 
   const load = async () => {
     try {
@@ -254,6 +259,35 @@ export const DocumentSignaturesPopup: React.FC<{ token: string; docId: number; o
                 </a>
               </div>
               {doc.sha256 && <div className="text-[10px] text-slate-400 mt-1 break-all">Original SHA-256 {doc.sha256}</div>}
+            </div>
+          )}
+          {doc && doc.sign_status !== 'none' && (
+            <div>
+              <button type="button" onClick={() => setShowHistory((v) => !v)} className="text-xs font-semibold text-slate-600 hover:text-slate-900 inline-flex items-center gap-1.5">
+                <History className="w-3.5 h-3.5" /> {showHistory ? 'Hide history' : 'History'}
+              </button>
+              {showHistory && history && (
+                <div className="mt-2">
+                  <p className={`text-[11px] font-semibold flex items-center gap-1.5 mb-1.5 ${history.chain_ok ? 'text-emerald-700' : 'text-rose-700'}`}>
+                    {history.chain_ok ? <ShieldCheck className="w-3.5 h-3.5" /> : <ShieldAlert className="w-3.5 h-3.5" />}
+                    {history.chain_ok ? `History intact — ${history.events.length} entries, each chained to the one before.` : `History was changed — entry ${history.broken_at} doesn't match.`}
+                  </p>
+                  <ul className="liquid-glass-inset rounded-2xl divide-y divide-white/70 max-h-64 overflow-y-auto">
+                    {history.events.map((e) => (
+                      <li key={e.seq} className="px-3 py-2">
+                        <div className="flex items-baseline justify-between gap-2">
+                          <span className="text-xs font-semibold text-slate-800">
+                            {e.label}
+                            {e.user_name ? <span className="font-normal text-slate-500"> · {e.user_name}</span> : null}
+                          </span>
+                          <span className="text-[10px] text-slate-500 whitespace-nowrap">{dhakaTime(e.at)}</span>
+                        </div>
+                        {(e.detail || e.ip) && <div className="text-[10px] text-slate-500 break-all">{[e.detail, [e.ip, e.device].filter(Boolean).join(' · ')].filter(Boolean).join(' — ')}</div>}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </div>
           )}
           {error && <div className="text-xs px-3 py-2 rounded-xl bg-rose-50 text-rose-700">{error}</div>}

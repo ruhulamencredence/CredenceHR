@@ -23,6 +23,7 @@ interface PublicView {
   completed_at: string | null;
   signed_sha256: string | null;
   original_sha256: string | null;
+  integrity: { file_ok: boolean; history_ok: boolean; seal: 'valid' | 'invalid' | 'none' | 'unknown' } | null;
   signers: { step: number; name: string | null; label: string | null; status: string; signed_at: string | null }[];
 }
 
@@ -148,6 +149,24 @@ export default function VerifyPage() {
               ))}
             </div>
 
+            {done && data.integrity && (
+              <div className="rounded-2xl bg-white border border-slate-200 divide-y divide-slate-100">
+                {(
+                  [
+                    [data.integrity.file_ok, 'The signed copy on record is unchanged', 'The signed copy on record was changed'],
+                    [data.integrity.history_ok, 'The signing history is intact', 'The signing history was changed'],
+                    ...(data.integrity.seal === 'none' || data.integrity.seal === 'unknown'
+                      ? []
+                      : [[data.integrity.seal === 'valid', 'Sealed by the CredenceHR server', "The server seal doesn't match"] as [boolean, string, string]])
+                  ] as [boolean, string, string][]
+                ).map(([ok, good, badText]) => (
+                  <div key={good} className="px-4 py-2.5 flex items-center gap-2 text-sm">
+                    {ok ? <CheckCircle2 className="w-4 h-4 text-emerald-600" /> : <XCircle className="w-4 h-4 text-rose-600" />}
+                    <span className={ok ? 'text-slate-700' : 'text-rose-700 font-semibold'}>{ok ? good : badText}</span>
+                  </div>
+                ))}
+              </div>
+            )}
             {done && (
               <div className="rounded-2xl bg-white border border-slate-200 p-4">
                 <div className="text-sm font-semibold mb-1">Is your copy the genuine one?</div>

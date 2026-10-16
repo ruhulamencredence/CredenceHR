@@ -131,7 +131,8 @@ export const OWN_TABLES = new Set([
   "payroll_batches",
   "payroll_batch_events",
   "payroll_access_log",
-  "duty_shifts"
+  "duty_shifts",
+  "esign_settings"
 ]);
 
 // Shared by every company of a group (PEPM budgets & rate file, chat…) but
@@ -194,6 +195,8 @@ export const LINKED_TABLES = new Map<string, [string, string]>([
   ["conveyance_claim_department_access", ["user_id", "users"]],
   ["document_signatures", ["document_id", "employee_documents"]],
   ["document_signers", ["document_id", "employee_documents"]],
+  ["esign_otps", ["document_id", "employee_documents"]],
+  ["document_events", ["document_id", "employee_documents"]],
   ["user_signatures", ["user_id", "users"]],
   ["employee_template_assignments", ["employee_user_id", "users"]],
   ["exit_clearance_items", ["exit_id", "exit_requests"]],

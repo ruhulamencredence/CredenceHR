@@ -27,6 +27,7 @@
 // every INSERT/UPDATE is all-`?`-placeholders.
 
 import type { Express } from "express";
+import { logDocEvent } from "./ESignRoutes";
 
 interface DocumentVaultRouteDeps {
   authenticateToken: any;
@@ -200,6 +201,14 @@ export function registerDocumentVaultRoutes(app: Express, deps: DocumentVaultRou
       const isSigner = !isOwner && ((await queryDB("SELECT id FROM document_signers WHERE document_id = ? AND signer_user_id = ?", [id, req.user.id]).catch(() => [])) || []).length > 0;
       if (!isOwner && !isSigner && !(await canManage(req.user.id, req.user.role))) {
         return res.status(403).json({ error: "Not authorized." });
+      }
+      // E-Signature history: a signer / the employee opening it while it is
+      // being signed (ESignRoutes.ts).
+      // (once per person per 2 minutes — the reader and a download both open it).
+      if ((isOwner || isSigner) && doc.sign_status === "pending") {
+        const last: any[] = (await queryDB("SELECT event, user_id, at_iso FROM document_events WHERE document_id = ? ORDER BY seq DESC LIMIT 1", [id]).catch(() => [])) || [];
+        const again = last[0] && last[0].event === "viewed" && Number(last[0].user_id) === Number(req.user.id) && Date.now() - new Date(last[0].at_iso).getTime() < 120_000;
+        if (!again) await logDocEvent(queryDB, id, "viewed", { userId: Number(req.user.id), req });
       }
       if (!doc.file_data) return res.status(404).json({ error: "No file stored on this document." });
       const buffer: Buffer = Buffer.isBuffer(doc.file_data) ? doc.file_data : Buffer.from(doc.file_data);
