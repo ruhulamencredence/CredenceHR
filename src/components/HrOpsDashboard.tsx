@@ -16,6 +16,7 @@ import * as XLSX from 'xlsx';
 import { FileDown, FileSpreadsheet, UserPlus, UserMinus, TrendingUp, ArrowLeftRight, BadgeCheck, Users, AlertTriangle } from 'lucide-react';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
 import { savePdfCrossPlatform } from '../lib/saveFile';
+import { EmailReportButton, emailReport, useCanEmailReports } from '../lib/reportEmail';
 import credenceLogo from '../assets/credence-logo.png';
 import { useHrApi, taka, fmtDate, monthLabel, btnGhost, inputCls, labelCls, Notice, type HrOpsMeta, type HrOpsEmployee } from './HrOpsShared';
 import { HrRemindersCard } from './HrRemindersCard';
@@ -60,6 +61,7 @@ export const HrOpsDashboard: React.FC<{
   onChanged?: () => void;
 }> = ({ token, onOpenEmployee, meta, employees, onChanged }) => {
   const api = useHrApi(token);
+  const canEmailReports = useCanEmailReports();
   // Accounts with the "reminders_receive" layer see every watched date (with
   // its next step) instead of the two probation / contract lists.
   const [remindersAccess, setRemindersAccess] = useState(false);
@@ -124,7 +126,7 @@ export const HrOpsDashboard: React.FC<{
     return v ?? '—';
   };
 
-  const exportPdf = async () => {
+  const exportPdf = async (mode: 'save' | 'email' = 'save') => {
     if (!report) return;
     try {
       const logo = await loadImageElement(credenceLogo);
@@ -174,6 +176,10 @@ export const HrOpsDashboard: React.FC<{
         });
       }
       finalizePdfPageNumbers(doc);
+      if (mode === 'email') {
+        await emailReport(doc, { fileName: `HR_Operations_${report.month}.pdf`, title: 'Monthly HR Operations Report' });
+        return;
+      }
       await savePdfCrossPlatform(doc, `HR_Operations_${report.month}.pdf`);
     } catch (e: any) {
       setMsg({ type: 'error', text: e.message || 'Could not build the PDF.' });
@@ -256,9 +262,10 @@ export const HrOpsDashboard: React.FC<{
           </div>
         </div>
         <div className="flex gap-2 ml-auto">
-          <button type="button" onClick={exportPdf} disabled={!report} className={btnGhost}>
+          <button type="button" onClick={() => exportPdf()} disabled={!report} className={btnGhost}>
             <FileDown className="w-3.5 h-3.5" /> PDF
           </button>
+          {canEmailReports && <EmailReportButton onClick={() => exportPdf('email')} disabled={!report} className={btnGhost} />}
           <button type="button" onClick={exportExcel} disabled={!report} className={btnGhost}>
             <FileSpreadsheet className="w-3.5 h-3.5" /> Excel
           </button>

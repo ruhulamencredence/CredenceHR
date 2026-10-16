@@ -49,6 +49,9 @@ import {
 import { companyStore } from "./companyContext";
 import { contextForCompany } from "./CompanyRoutes";
 import { runsBackgroundJobs } from "./jobRunner";
+import * as XLSX from "xlsx";
+import { isMailerConfigured, sendMail } from "./mailer";
+import { canEmailReports, reportEmailHtml } from "./ReportEmailRoutes";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 
@@ -783,6 +786,10 @@ interface Schedule {
   hour?: number; // 0-23, Dhaka time
   recipients?: number[];
   only_if_rows?: boolean;
+  // Also email it, as an Excel file, to the recipients (and extra_emails) —
+  // only while the owner has "Email reports" (users.can_email_reports).
+  email?: boolean;
+  extra_emails?: string[];
 }
 
 function dhakaNow() {
@@ -877,7 +884,11 @@ export function registerHrReportsRoutes(app: Express, deps: HrReportsRouteDeps) 
       day: Math.min(28, Math.max(1, Number(s.day ?? 1))),
       hour: Math.min(23, Math.max(0, Number(s.hour ?? 9))),
       recipients: Array.isArray(s.recipients) ? [...new Set(s.recipients.map(Number).filter(Boolean))].slice(0, 50) as number[] : [],
-      only_if_rows: s.only_if_rows !== false
+      only_if_rows: s.only_if_rows !== false,
+      email: !!s.email,
+      extra_emails: Array.isArray(s.extra_emails)
+        ? ([...new Set(s.extra_emails.map((e: any) => String(e).trim().toLowerCase()).filter((e: string) => /^[^\s@<>(),;:"]+@[^\s@<>(),;:"]+\.[^\s@<>(),;:"]+$/.test(e) && e.length <= 254))].slice(0, 10) as string[])
+        : []
     };
   }
   const publicSaved = (r: any) => ({
@@ -898,7 +909,7 @@ export function registerHrReportsRoutes(app: Express, deps: HrReportsRouteDeps) 
 
   // Runs a saved report as its owner, stores the result and alerts every
   // recipient. Used by the scheduler and by "Send now".
-  async function executeSaved(r: any, period: string | null, force: boolean): Promise<{ run_id: number | null; count: number; notified: number }> {
+  async function executeSaved(r: any, period: string | null, force: boolean): Promise<{ run_id: number | null; count: number; notified: number; emailed?: number; email_error?: string }> {
     const ownerId = Number(r.owner_user_id);
     const mods = await modulesOf(ownerId);
     if (!has(mods, "hr_operations")) return { run_id: null, count: 0, notified: 0 };
@@ -915,8 +926,10 @@ export function registerHrReportsRoutes(app: Express, deps: HrReportsRouteDeps) 
     const runId = Number(ins.insertId);
     const top = result.groups?.slice(0, 3).map((g) => `${g.key}: ${g.count}`).join(", ");
     let notified = 0;
+    const mailTo: string[] = [];
     for (const uid of recipients) {
       if (!has(await modulesOf(uid), "hr_operations")) continue;
+      mailTo.push(String(uid));
       await createAlert(queryDB, {
         userId: uid,
         type: "hr_report",
@@ -927,7 +940,45 @@ export function registerHrReportsRoutes(app: Express, deps: HrReportsRouteDeps) 
       }).catch(() => {});
       notified++;
     }
-    return { run_id: runId, count: result.total, notified };
+    const mailed = schedule?.email ? await emailRun(r, ownerId, period, result, mailTo.map(Number), schedule.extra_emails || []) : {};
+    return { run_id: runId, count: result.total, notified, ...mailed };
+  }
+
+  // The run as an Excel file (same sheets as the page's Excel export),
+  // emailed to the recipients' addresses on file and the extra addresses.
+  async function emailRun(r: any, ownerId: number, period: string | null, result: any, userIds: number[], extra: string[]): Promise<{ emailed: number; email_error?: string }> {
+    if (!(await canEmailReports(queryDB, ownerId))) return { emailed: 0, email_error: "The report's owner doesn't have Email reports turned on." };
+    if (!isMailerConfigured()) return { emailed: 0, email_error: "Email isn't set up on the server (SMTP settings)." };
+    const people: any[] = userIds.length
+      ? (await queryDB(
+          `SELECT u.email, e.personal_email FROM users u LEFT JOIN all_employees e ON e.user_id = u.id
+            WHERE u.id IN (${userIds.map(() => "?").join(",")}) AND COALESCE(u.is_blocked, 0) = 0`,
+          userIds
+        )) || []
+      : [];
+    const to = new Set<string>([...people.map((p) => String(p.email || p.personal_email || "").trim().toLowerCase()).filter(Boolean), ...extra]);
+    if (!to.size) return { emailed: 0, email_error: "None of the recipients has an email address on file." };
+    const cell = (v: any, type: string) => (v === null || v === undefined ? "" : type === "list" ? (Array.isArray(v) ? v.join(", ") : String(v)) : type === "bool" ? (v ? "Yes" : "No") : type === "date" ? String(v).slice(0, 10) : v);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([result.columns.map((c: any) => c.label), ...result.rows.map((row: any) => result.columns.map((c: any) => cell(row[c.key], c.type)))]), "Employees");
+    if (result.groups && result.group_by) {
+      const byId = new Map(result.rows.map((x: any) => [x.employee_id, x.name]));
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([[result.group_by.label, "Employees", "Names"], ...result.groups.map((g: any) => [g.key, g.count, g.employee_ids.map((id: number) => byId.get(id)).join(", ")])]), "Summary");
+    }
+    const content: Buffer = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+    const fileName = `${String(r.name).replace(/[^\w]+/g, "_")}${period ? `_${period}` : ""}.xlsx`;
+    const owner = ((await queryDB("SELECT name FROM users WHERE id = ?", [ownerId])) || [])[0];
+    const html = reportEmailHtml({ title: r.name, message: `${result.total} employee(s)${period ? ` — ${period}` : ""}. The full list is attached as an Excel file.`, senderName: owner?.name || "CredenceHR", fileName });
+    let emailed = 0;
+    for (const email of to) {
+      const sent = await sendMail({ to: email, subject: `Report: ${r.name}${period ? ` (${period})` : ""}`, html, attachments: [{ filename: fileName, content, contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }] });
+      if (sent.success) emailed++;
+    }
+    await queryDB(
+      "INSERT INTO report_email_log (company_id, sent_by, report_title, file_name, recipients_json, failed_json) VALUES (?, ?, ?, ?, ?, ?)",
+      [Number(r.company_id ?? 1), ownerId, r.name, fileName, JSON.stringify([...to]), emailed < to.size ? JSON.stringify({ failed: to.size - emailed }) : null]
+    ).catch(() => {});
+    return emailed ? { emailed } : { emailed: 0, email_error: "Couldn't send the email." };
   }
 
   // ---- scheduler: every 10 minutes, runs whatever is due ----
@@ -1007,6 +1058,11 @@ export function registerHrReportsRoutes(app: Express, deps: HrReportsRouteDeps) 
     }
   });
 
+  // Emailing a scheduled report needs "Email reports" on the owner's account.
+  async function checkEmailSchedule(req: any, s: Schedule | null) {
+    if (s?.email && !(await canEmailReports(queryDB, Number(req.user.id)))) throw bad("Emailing reports isn't turned on for your account.", 403);
+  }
+
   // ---- saved reports (private to their owner) ----
   app.get("/api/hr-ops/saved-reports", ...gate, async (req: any, res: any) => {
     try {
@@ -1021,6 +1077,7 @@ export function registerHrReportsRoutes(app: Express, deps: HrReportsRouteDeps) 
       const name = String(req.body?.name || "").trim().slice(0, 150);
       if (!name) throw bad("Give the report a name.");
       const schedule = cleanSchedule(req.body?.schedule);
+      await checkEmailSchedule(req, schedule);
       const now = dhakaNow();
       const r: any = await queryDB("INSERT INTO hr_saved_reports (owner_user_id, name, config_json, schedule_json, last_period) VALUES (?, ?, ?, ?, ?)", [
         req.user.id,
@@ -1045,6 +1102,7 @@ export function registerHrReportsRoutes(app: Express, deps: HrReportsRouteDeps) 
       let lastPeriod = r.last_period;
       if (req.body?.schedule !== undefined) {
         const s = cleanSchedule(req.body.schedule);
+        await checkEmailSchedule(req, s);
         scheduleJson = s ? JSON.stringify(s) : null;
         const oldS = cleanSchedule(parseJson(r.schedule_json, null));
         if (s && JSON.stringify({ ...s, recipients: [] }) !== JSON.stringify(oldS ? { ...oldS, recipients: [] } : null)) lastPeriod = duePeriod(s, dhakaNow());
@@ -1067,7 +1125,8 @@ export function registerHrReportsRoutes(app: Express, deps: HrReportsRouteDeps) 
   app.post("/api/hr-ops/saved-reports/:id/send", ...gate, async (req: any, res: any) => {
     try {
       const r = await ownSaved(req, Number(req.params.id));
-      if (!cleanSchedule(parseJson(r.schedule_json, null))?.recipients?.length) throw bad("Add at least one recipient to the schedule first.");
+      const sc = cleanSchedule(parseJson(r.schedule_json, null));
+      if (!sc?.recipients?.length && !(sc?.email && sc.extra_emails?.length)) throw bad("Add at least one recipient to the schedule first.");
       res.json({ success: true, ...(await executeSaved(r, null, true)) });
     } catch (err) {
       fail(res, err);

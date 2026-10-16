@@ -29,6 +29,7 @@ import { ModulePath } from './ModulePath';
 import { Spinner } from './Spinner';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
 import { savePdfCrossPlatform } from '../lib/saveFile';
+import { EmailReportButton, emailReport, useCanEmailReports } from '../lib/reportEmail';
 import credenceLogo from '../assets/credence-logo.png';
 import { PayrollListPanel } from './PayrollListPanel';
 import { SalaryStructureSetupPanel } from './SalaryStructureSetupPanel';
@@ -281,6 +282,7 @@ const GeneratePayslipModal: React.FC<{ token: string; monthYear: string; onClose
   const [loading, setLoading] = useState(true);
   const [generatingId, setGeneratingId] = useState<number | null>(null);
   const [error, setError] = useState('');
+  const canEmailReports = useCanEmailReports();
 
   useEffect(() => {
     (async () => {
@@ -298,7 +300,7 @@ const GeneratePayslipModal: React.FC<{ token: string; monthYear: string; onClose
     })();
   }, [monthYear]);
 
-  const downloadPayslip = async (record: PayrollRecord) => {
+  const downloadPayslip = async (record: PayrollRecord, mode: 'save' | 'email' = 'save') => {
     setGeneratingId(record.id);
     try {
       const logoImg = await loadImageElement(credenceLogo);
@@ -344,6 +346,10 @@ const GeneratePayslipModal: React.FC<{ token: string; monthYear: string; onClose
       }
 
       finalizePdfPageNumbers(doc);
+      if (mode === 'email') {
+        await emailReport(doc, { fileName: `Payslip_${record.employee_name.replace(/\s+/g, '_')}_${record.month_year}.pdf`, title: `Payslip — ${monthLabel(record.month_year)}` });
+        return;
+      }
       await savePdfCrossPlatform(doc, `Payslip_${record.employee_name.replace(/\s+/g, '_')}_${record.month_year}.pdf`);
     } finally {
       setGeneratingId(null);
@@ -380,13 +386,22 @@ const GeneratePayslipModal: React.FC<{ token: string; monthYear: string; onClose
                     <p className="text-sm font-medium text-slate-800 truncate">{r.employee_name}</p>
                     <p className="text-[11px] text-slate-400">{r.department || '—'} &middot; Net {money(r.net_salary)}</p>
                   </div>
-                  <button
-                    onClick={() => downloadPayslip(r)}
-                    disabled={generatingId === r.id}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold rounded-lg transition-all disabled:opacity-50 shrink-0"
-                  >
-                    {generatingId === r.id ? <Spinner size={14} /> : <FileDown className="w-3.5 h-3.5" />} PDF
-                  </button>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      onClick={() => downloadPayslip(r)}
+                      disabled={generatingId === r.id}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold rounded-lg transition-all disabled:opacity-50 shrink-0"
+                    >
+                      {generatingId === r.id ? <Spinner size={14} /> : <FileDown className="w-3.5 h-3.5" />} PDF
+                    </button>
+                    {canEmailReports && (
+                      <EmailReportButton
+                        onClick={() => downloadPayslip(r, 'email')}
+                        disabled={generatingId === r.id}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-semibold rounded-lg transition-all disabled:opacity-50 shrink-0"
+                      />
+                    )}
+                  </div>
                 </li>
               ))}
             </ul>
@@ -411,6 +426,7 @@ const DownloadReportsModal: React.FC<{ token: string; monthYear: string; onClose
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState<'excel' | 'pdf' | null>(null);
   const [error, setError] = useState('');
+  const canEmailReports = useCanEmailReports();
 
   useEffect(() => {
     (async () => {
@@ -462,7 +478,7 @@ const DownloadReportsModal: React.FC<{ token: string; monthYear: string; onClose
     }
   };
 
-  const exportPdf = async () => {
+  const exportPdf = async (mode: 'save' | 'email' = 'save') => {
     setExporting('pdf');
     try {
       const logoImg = await loadImageElement(credenceLogo);
@@ -492,6 +508,10 @@ const DownloadReportsModal: React.FC<{ token: string; monthYear: string; onClose
         headStyles: { ...STD_HEAD, fontSize: 8 },
       });
       finalizePdfPageNumbers(doc);
+      if (mode === 'email') {
+        await emailReport(doc, { fileName: `Payroll_Report_${monthYear}.pdf`, title: `Payroll Report — ${monthLabel(monthYear)}` });
+        return;
+      }
       await savePdfCrossPlatform(doc, `Payroll_Report_${monthYear}.pdf`);
     } finally {
       setExporting(null);
@@ -526,12 +546,19 @@ const DownloadReportsModal: React.FC<{ token: string; monthYear: string; onClose
                 {exporting === 'excel' ? <Spinner size={16} /> : <FileSpreadsheet className="w-4 h-4" />} Export as Excel
               </button>
               <button
-                onClick={exportPdf}
+                onClick={() => exportPdf()}
                 disabled={records.length === 0 || exporting !== null}
                 className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-sm font-semibold rounded-lg transition-all disabled:opacity-50"
               >
                 {exporting === 'pdf' ? <Spinner size={16} /> : <FileDown className="w-4 h-4" />} Export as PDF
               </button>
+              {canEmailReports && (
+                <EmailReportButton
+                  onClick={() => exportPdf('email')}
+                  disabled={records.length === 0 || exporting !== null}
+                  className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-sm font-semibold rounded-lg transition-all disabled:opacity-50"
+                />
+              )}
             </>
           )}
         </div>

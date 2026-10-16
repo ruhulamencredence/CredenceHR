@@ -20,6 +20,7 @@ import { apiUrl } from '../lib/api';
 import { finalizePdfPageNumbers } from '../lib/pdfLetterhead';
 import { drawStandardHeader, loadPdfCompany, pdfMoney, standardTable } from '../lib/pdfStandard';
 import { savePdfCrossPlatform } from '../lib/saveFile';
+import { EmailReportButton, emailReport, useCanEmailReports } from '../lib/reportEmail';
 import { LoadingBlock } from './LoadingBlock';
 
 interface SheetRow {
@@ -77,6 +78,7 @@ export const PayrollPaymentVouchers: React.FC<{ token: string; month: string; pa
   const [rows, setRows] = useState<SheetRow[] | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState('');
+  const canEmailReports = useCanEmailReports();
 
   useEffect(() => {
     setRows(null);
@@ -130,7 +132,7 @@ export const PayrollPaymentVouchers: React.FC<{ token: string; month: string; pa
     XLSX.writeFile(wb, all ? `Salary-Vouchers-${month}.xlsx` : `Salary-Voucher-${month}-${safe(list[0].title)}.xlsx`);
   };
 
-  const pdfFor = async (list: Group[], all: boolean) => {
+  const pdfFor = async (list: Group[], all: boolean, mode: 'save' | 'email' = 'save') => {
     setBusy(all ? 'all' : list[0].key);
     try {
       const co = await loadPdfCompany(token);
@@ -172,6 +174,13 @@ export const PayrollPaymentVouchers: React.FC<{ token: string; month: string; pa
         });
       });
       finalizePdfPageNumbers(doc);
+      if (mode === 'email') {
+        await emailReport(doc, {
+          fileName: all ? `Salary-Vouchers-${month}.pdf` : `Salary-Voucher-${month}-${safe(list[0].title)}.pdf`,
+          title: all ? `Salary Payment Vouchers — ${month}` : `Salary Payment Voucher — ${list[0].title}`
+        });
+        return;
+      }
       await savePdfCrossPlatform(doc, all ? `Salary-Vouchers-${month}.pdf` : `Salary-Voucher-${month}-${safe(list[0].title)}.pdf`);
     } catch (e: any) {
       setError(e.message || 'Could not make the PDF.');
@@ -198,6 +207,14 @@ export const PayrollPaymentVouchers: React.FC<{ token: string; month: string; pa
             <button type="button" disabled={busy === 'all'} onClick={() => pdfFor(groups, true)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-semibold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-50">
               <Printer className="w-3.5 h-3.5" /> All (PDF)
             </button>
+            {canEmailReports && (
+              <EmailReportButton
+                onClick={() => pdfFor(groups, true, 'email')}
+                disabled={busy === 'all'}
+                label="All (Email)"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px] font-semibold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              />
+            )}
           </div>
         )}
       </div>
@@ -233,6 +250,13 @@ export const PayrollPaymentVouchers: React.FC<{ token: string; month: string; pa
                   <button type="button" disabled={busy === g.key} onClick={() => pdfFor([g], false)} className="flex-1 inline-flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg text-[11px] font-semibold bg-blue-50 text-blue-700 hover:bg-blue-100 disabled:opacity-50">
                     <Printer className="w-3.5 h-3.5" /> {busy === g.key ? 'Making…' : 'PDF / Print'}
                   </button>
+                  {canEmailReports && (
+                    <EmailReportButton
+                      onClick={() => pdfFor([g], false, 'email')}
+                      disabled={busy === g.key}
+                      className="flex-1 inline-flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg text-[11px] font-semibold bg-blue-50 text-blue-700 hover:bg-blue-100 disabled:opacity-50"
+                    />
+                  )}
                 </div>
               </div>
             ))}

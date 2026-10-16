@@ -25,6 +25,7 @@ import {
 import { apiUrl } from '../lib/api';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
 import { savePdfCrossPlatform } from '../lib/saveFile';
+import { EmailReportButton, emailReport, useCanEmailReports } from '../lib/reportEmail';
 import credenceLogo from '../assets/credence-logo.png';
 import { pdfSafe } from './HrOps360Parts';
 import { fmtDate, taka } from './HrOpsShared';
@@ -136,7 +137,7 @@ function exportExcel(r: Result, filtersText: string) {
   XLSX.writeFile(wb, `${fileBase(r)}.xlsx`);
 }
 
-async function exportPdf(r: Result, filtersText: string) {
+async function exportPdf(r: Result, filtersText: string, mode: 'save' | 'email' = 'save') {
   const logo = await loadImageElement(credenceLogo);
   const wide = r.columns.length > 7;
   const doc = new jsPDF({ orientation: wide ? 'landscape' : 'portrait' });
@@ -158,6 +159,10 @@ async function exportPdf(r: Result, filtersText: string) {
     columnStyles: Object.fromEntries(r.columns.map((c, i) => [i, isNumeric(c.type) ? { halign: 'right' as const } : {}]))
   });
   finalizePdfPageNumbers(doc);
+  if (mode === 'email') {
+    await emailReport(doc, { fileName: `${fileBase(r)}.pdf`, title: pdfSafe(r.title) });
+    return;
+  }
   await savePdfCrossPlatform(doc, `${fileBase(r)}.pdf`);
 }
 
@@ -178,6 +183,7 @@ export const ReportsInsights: React.FC<{ token: string }> = ({ token }) => {
   const [result, setResult] = useState<Result | null>(null);
   const [tableFilter, setTableFilter] = useState('');
   const [exporting, setExporting] = useState<'' | 'pdf' | 'xlsx'>('');
+  const canEmailReports = useCanEmailReports();
 
   useEffect(() => {
     let cancelled = false;
@@ -245,13 +251,13 @@ export const ReportsInsights: React.FC<{ token: string }> = ({ token }) => {
   }, [result, tableFilter]);
   const shownResult: Result | null = result ? { ...result, rows: shownRows } : null;
 
-  const doExport = async (kind: 'pdf' | 'xlsx') => {
+  const doExport = async (kind: 'pdf' | 'xlsx', mode: 'save' | 'email' = 'save') => {
     if (!shownResult) return;
     setExporting(kind);
     try {
       const text = [filtersText, tableFilter ? `Find: ${tableFilter}` : ''].filter(Boolean).join(' · ');
       if (kind === 'xlsx') exportExcel(shownResult, text);
-      else await exportPdf(shownResult, text);
+      else await exportPdf(shownResult, text, mode);
     } finally {
       setExporting('');
     }
@@ -502,6 +508,13 @@ export const ReportsInsights: React.FC<{ token: string }> = ({ token }) => {
                 >
                   <FileDown className="w-3.5 h-3.5" /> {exporting === 'pdf' ? 'Exporting…' : 'PDF'}
                 </button>
+                {canEmailReports && (
+                  <EmailReportButton
+                    onClick={() => doExport('pdf', 'email')}
+                    disabled={!shownRows.length || !!exporting}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-rose-200 text-rose-700 bg-rose-50 hover:bg-rose-100 disabled:opacity-50"
+                  />
+                )}
               </div>
             </div>
             {result.summary.length > 0 && (

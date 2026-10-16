@@ -7,6 +7,7 @@ import autoTable from 'jspdf-autotable';
 import credenceLogo from '../assets/credence-logo.png';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
 import { savePdfCrossPlatform } from '../lib/saveFile';
+import { EmailReportButton, emailReport, useCanEmailReports } from '../lib/reportEmail';
 import { Project, Branch, MprNumber, Entry, User, Budget, BudgetItem, BudgetSubmission, UserProjectPermission, EntryEditHistory, EntryPermanentDeleteLog, BulkUserRow, BulkUserResultItem, AdminModuleKey, ADMIN_MODULES, REPORTS_INSIGHTS_MODULES, DATA_IMPORT_MODULES, PermissionLayerKey, PERMISSION_LAYERS, PERMISSION_LAYER_MODULES, EXPLICIT_ONLY_LAYERS, layersFor, LeaveManageLayerKey, LEAVE_MANAGE_LAYERS, AttendanceRecord, ClaimsNavRequest, AdminNavRequest, Department, LeaveApplication, PendingJobEdit } from '../types';
 import { Building2, FileText, Users, Users2, BarChart3, Plus, Trash2, Edit2, Search, Filter, UserCheck, Calendar, CalendarClock, Download, Upload, FolderPlus, X, Eye, FileSpreadsheet, KeyRound, History, RotateCcw, Recycle, ListChecks, FileDown, MapPin, LayoutGrid, Navigation, LogIn, LogOut, Bell, Route, ShieldCheck, Wallet, Contact, Lock, Unlock, Mail, CheckCircle2, XCircle, Clock3, ShieldAlert, Copy, Eraser, LayoutTemplate } from 'lucide-react';
 import LocationMapPicker from './LocationMapPicker';
@@ -456,6 +457,7 @@ const LastLoginAddress: React.FC<{ lat: number; lng: number; asOf?: string }> = 
 
 export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRequest, adminNavRequest, onActiveTabChange }) => {
   const isSuperAdmin = user.role === 'superadmin';
+  const canEmailReports = useCanEmailReports();
   // Which Admin Panel tabs THIS logged-in Admin/Superadmin may see. A Superadmin
   // always gets every tab; a plain Admin only gets the ones the Superadmin granted
   // (user.module_permissions, refreshed on every login/app-open by App.tsx).
@@ -715,6 +717,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [signDocsEnabled, setSignDocsEnabled] = useState(false);
   // My Payslip (PayslipRoutes.ts) — off by default.
   const [payslipAccessEnabled, setPayslipAccessEnabled] = useState(false);
+  // Email reports (ReportEmailRoutes.ts) — off by default.
+  const [reportEmailEnabled, setReportEmailEnabled] = useState(false);
   const [tasksAccessEnabled, setTasksAccessEnabled] = useState(false);
   const [mobileBillAccessEnabled, setMobileBillAccessEnabled] = useState(false);
   const [serviceBookAccessEnabled, setServiceBookAccessEnabled] = useState(false);
@@ -750,6 +754,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     setRosterAccessEnabled(!!u.can_view_roster);
     setSignDocsEnabled(!!u.can_sign_documents);
     setPayslipAccessEnabled(!!u.can_view_payslip);
+    setReportEmailEnabled(!!u.can_email_reports);
     setTasksAccessEnabled(!!u.can_view_tasks);
     setMobileBillAccessEnabled(!!u.can_view_mobile_bill);
     setServiceBookAccessEnabled(!!u.can_view_service_book);
@@ -1305,6 +1310,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         if (!psRes.ok) throw new Error(psData.error || 'Failed to update My Payslip access');
       }
 
+      if (reportEmailEnabled !== !!managingModulesFor.can_email_reports) {
+        const reRes = await fetch(apiUrl(`/api/users/${managingModulesFor.id}/report-email-access`), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ can_email_reports: reportEmailEnabled })
+        });
+        const reData = await reRes.json();
+        if (!reRes.ok) throw new Error(reData.error || 'Failed to update Email reports access');
+      }
+
       setManagingModulesFor(null);
       fetchAllData();
       setMessage({ type: 'success', text: 'Module access updated.' });
@@ -1722,7 +1737,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // grid uses in "Symbols" mode — the actual per-day Check In/Out times don't
   // fit legibly across that many columns on paper, so the PDF always uses
   // symbols regardless of which mode the on-screen toggle is set to.
-  const handleExportMonthlyReportPdf = async () => {
+  const handleExportMonthlyReportPdf = async (mode: 'save' | 'email' = 'save') => {
     if (!monthlyReport || monthlyReportTotal(monthlyReport) === 0 || exportingMonthlyReport) return;
     setExportingMonthlyReport(true);
     try {
@@ -1785,6 +1800,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
 
       finalizePdfPageNumbers(doc);
       const filename = `Monthly_Attendance_Report_${monthlyReport.year}_${String(monthlyReport.month).padStart(2, '0')}.pdf`;
+      if (mode === 'email') {
+        await emailReport(doc, { fileName: filename, title: letterheadOptions.reportTitle });
+        return;
+      }
       await savePdfCrossPlatform(doc, filename);
     } catch (err) {
       console.error('Failed to export the monthly attendance report', err);
@@ -1796,7 +1815,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // Export PDF — Date Wise. Portrait, one row per Employee across all three
   // groups (Present / Absent / Holiday) with a colored Status column, same
   // convention as ConveyanceBillPanel/UserPanel's own PDF exports.
-  const handleExportDailyReportPdf = async () => {
+  const handleExportDailyReportPdf = async (mode: 'save' | 'email' = 'save') => {
     if (!dailyReport) return;
     const logoImg = await loadImageElement(credenceLogo);
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
@@ -1855,6 +1874,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
 
     finalizePdfPageNumbers(doc);
     const filename = `Daily_Attendance_Report_${dailyReport.date}.pdf`;
+    if (mode === 'email') {
+      await emailReport(doc, { fileName: filename, title: letterheadOptions.reportTitle });
+      return;
+    }
     await savePdfCrossPlatform(doc, filename);
   };
 
@@ -4635,13 +4658,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
 
                   <button
                     type="button"
-                    onClick={handleExportMonthlyReportPdf}
+                    onClick={() => handleExportMonthlyReportPdf()}
                     disabled={monthlyReportTotal(monthlyReport) === 0 || exportingMonthlyReport}
                     title="Download this report as a PDF"
                     className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-medium whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed transition-colors ml-1"
                   >
                     <FileDown className="w-3.5 h-3.5" /> {exportingMonthlyReport ? 'Preparing…' : 'Export PDF'}
                   </button>
+                  {canEmailReports && (
+                    <EmailReportButton
+                      onClick={() => handleExportMonthlyReportPdf('email')}
+                      disabled={monthlyReportTotal(monthlyReport) === 0 || exportingMonthlyReport}
+                      className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-emerald-600 bg-white hover:bg-emerald-50 text-emerald-700 font-medium whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed transition-colors ml-1"
+                    />
+                  )}
                 </>
               ) : (
                 <>
@@ -4664,13 +4694,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
 
                   <button
                     type="button"
-                    onClick={handleExportDailyReportPdf}
+                    onClick={() => handleExportDailyReportPdf()}
                     disabled={!dailyReport}
                     title="Download this report as a PDF"
                     className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-medium whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed transition-colors ml-1"
                   >
                     <FileDown className="w-3.5 h-3.5" /> Export PDF
                   </button>
+                  {canEmailReports && (
+                    <EmailReportButton onClick={() => handleExportDailyReportPdf('email')} disabled={!dailyReport} className="flex items-center gap-1.5 text-xs px-3 py-2 rounded-lg border border-emerald-600 bg-white hover:bg-emerald-50 text-emerald-700 font-medium whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed transition-colors ml-1" />
+                  )}
                 </>
               )}
             </div>
@@ -8088,6 +8121,28 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   <span
                     className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
                       payslipAccessEnabled ? 'translate-x-[18px]' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </label>
+              <label className="flex items-center justify-between gap-3 p-3.5 mb-3 bg-violet-50 border border-violet-200 rounded-xl cursor-pointer">
+                <span>
+                  <span className="text-sm font-semibold text-slate-900 block">Also allow Email reports</span>
+                  <span className="text-[11px] text-slate-500">
+                    An "Email" button next to the PDF button of the reports they can open: sends that report as a PDF to people in the app or to typed email addresses. Scheduled HR reports can also go by email. Off by default.
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setReportEmailEnabled((v) => !v)}
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${
+                    reportEmailEnabled ? 'bg-emerald-500' : 'bg-slate-300'
+                  }`}
+                  title={reportEmailEnabled ? 'On — click to turn off' : 'Off — click to turn on'}
+                >
+                  <span
+                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                      reportEmailEnabled ? 'translate-x-[18px]' : 'translate-x-1'
                     }`}
                   />
                 </button>

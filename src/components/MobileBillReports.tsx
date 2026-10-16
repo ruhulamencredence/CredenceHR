@@ -21,6 +21,7 @@ import { FileDown, FileSpreadsheet } from 'lucide-react';
 import { finalizePdfPageNumbers } from '../lib/pdfLetterhead';
 import { drawStandardHeader, loadPdfCompany, pdfMoney, standardTable } from '../lib/pdfStandard';
 import { savePdfCrossPlatform } from '../lib/saveFile';
+import { EmailReportButton, emailReport, useCanEmailReports } from '../lib/reportEmail';
 import { MobileLimitHistoryReport } from './MobileLimitHistoryReport';
 import { inputCls, labelCls, MbSim, mbApi, monthLabel, monthsBetween, num, OperatorBadge, shiftMonth, thisMonth, tk } from './MobileBillParts';
 import { LoadingBlock } from './LoadingBlock';
@@ -50,6 +51,7 @@ export const MobileBillReports: React.FC<{ token: string }> = ({ token }) => {
   const [data, setData] = useState<{ sims: MbSim[]; bills: Bill[] } | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const canEmailReports = useCanEmailReports();
   // Mobile Bill's "Limit Change History" layer.
   const [canLimitHistory, setCanLimitHistory] = useState(false);
   useEffect(() => {
@@ -203,7 +205,7 @@ export const MobileBillReports: React.FC<{ token: string }> = ({ token }) => {
     XLSX.utils.book_append_sheet(wb, ws, current.title.slice(0, 28).replace(/[\\/?*[\]:]/g, ''));
     XLSX.writeFile(wb, `${current.title.replace(/[^\w]+/g, '-')}-${to}.xlsx`);
   };
-  const pdf = async () => {
+  const pdf = async (mode: 'save' | 'email' = 'save') => {
     setBusy(true);
     try {
       const co = await loadPdfCompany(token);
@@ -235,6 +237,10 @@ export const MobileBillReports: React.FC<{ token: string }> = ({ token }) => {
         doc.text('Excess = bill over the official ceiling. Report only - not deducted from salary.', 8, y + 6);
       }
       finalizePdfPageNumbers(doc);
+      if (mode === 'email') {
+        await emailReport(doc, { fileName: `${current.title.replace(/[^\w]+/g, '-')}-${to}.pdf`, title: current.title });
+        return;
+      }
       await savePdfCrossPlatform(doc, `${current.title.replace(/[^\w]+/g, '-')}-${to}.pdf`);
     } catch (e: any) {
       setError(e.message || 'Could not make the PDF.');
@@ -307,9 +313,10 @@ export const MobileBillReports: React.FC<{ token: string }> = ({ token }) => {
           </select>
         </div>
         <div className="flex gap-2 ml-auto">
-          <button type="button" disabled={!data || busy} onClick={pdf} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+          <button type="button" disabled={!data || busy} onClick={() => pdf()} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-50">
             <FileDown className="w-3.5 h-3.5" /> PDF
           </button>
+          {canEmailReports && <EmailReportButton onClick={() => pdf('email')} disabled={!data || busy} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-50" />}
           <button type="button" disabled={!data} onClick={excel} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-50">
             <FileSpreadsheet className="w-3.5 h-3.5" /> Excel
           </button>

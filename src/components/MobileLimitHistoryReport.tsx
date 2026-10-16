@@ -17,6 +17,7 @@ import { FileDown, FileSpreadsheet, Search } from 'lucide-react';
 import { finalizePdfPageNumbers } from '../lib/pdfLetterhead';
 import { drawStandardHeader, loadPdfCompany, pdfMoney, standardTable } from '../lib/pdfStandard';
 import { savePdfCrossPlatform } from '../lib/saveFile';
+import { EmailReportButton, emailReport, useCanEmailReports } from '../lib/reportEmail';
 import { inputCls, labelCls, mbApi, monthLabel, num, OperatorBadge } from './MobileBillParts';
 import { LoadingBlock } from './LoadingBlock';
 
@@ -62,6 +63,7 @@ export const MobileLimitHistoryReport: React.FC<{ token: string }> = ({ token })
   const [rows, setRows] = useState<LimitChangeRow[] | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const canEmailReports = useCanEmailReports();
 
   useEffect(() => {
     setRows(null);
@@ -112,7 +114,7 @@ export const MobileLimitHistoryReport: React.FC<{ token: string }> = ({ token })
     XLSX.utils.book_append_sheet(wb, ws, 'Limit Changes');
     XLSX.writeFile(wb, `Mobile-Limit-Changes-${from}-to-${to}.xlsx`);
   };
-  const pdf = async () => {
+  const pdf = async (mode: 'save' | 'email' = 'save') => {
     setBusy(true);
     try {
       const co = await loadPdfCompany(token);
@@ -128,6 +130,10 @@ export const MobileLimitHistoryReport: React.FC<{ token: string }> = ({ token })
         columnStyles: { 0: { halign: 'center', cellWidth: 9 }, 7: { halign: 'right' }, 8: { halign: 'right' }, 9: { halign: 'right' } }
       });
       finalizePdfPageNumbers(doc);
+      if (mode === 'email') {
+        await emailReport(doc, { fileName: `Mobile-Limit-Changes-${from}-to-${to}.pdf`, title });
+        return;
+      }
       await savePdfCrossPlatform(doc, `Mobile-Limit-Changes-${from}-to-${to}.pdf`);
     } catch (e: any) {
       setError(e.message || 'Could not make the PDF.');
@@ -173,9 +179,10 @@ export const MobileLimitHistoryReport: React.FC<{ token: string }> = ({ token })
           <input className={`${inputCls} pl-8`} value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Number, name, ID…" />
         </div>
         <div className="flex gap-2 ml-auto">
-          <button type="button" disabled={!rows || busy} onClick={pdf} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+          <button type="button" disabled={!rows || busy} onClick={() => pdf()} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-50">
             <FileDown className="w-3.5 h-3.5" /> PDF
           </button>
+          {canEmailReports && <EmailReportButton onClick={() => pdf('email')} disabled={!rows || busy} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-50" />}
           <button type="button" disabled={!rows} onClick={excel} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-50">
             <FileSpreadsheet className="w-3.5 h-3.5" /> Excel
           </button>

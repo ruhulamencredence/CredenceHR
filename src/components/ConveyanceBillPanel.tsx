@@ -18,6 +18,7 @@ import { formatDate, todayDateOnlyString } from '../lib/formatDate';
 import credenceLogo from '../assets/credence-logo.png';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
 import { savePdfCrossPlatform } from '../lib/saveFile';
+import { EmailReportButton, emailReport, useCanEmailReports } from '../lib/reportEmail';
 import { UserClaimStatusBadge } from './UserClaimStatusBadge';
 import ClaimLocationMap from './ClaimLocationMap';
 import { Spinner } from './Spinner';
@@ -54,6 +55,7 @@ const blankItemDraft = () => ({
 // Claims" tab) or is added fully by hand.
 export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token, users, currentUserId }) => {
   const authHeaders = { Authorization: `Bearer ${token}` };
+  const canEmailReports = useCanEmailReports();
   const plainUsers = users.filter((u) => u.role === 'user');
 
   const [bills, setBills] = useState<ConveyanceBill[]>([]);
@@ -329,7 +331,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
   };
 
   // ---- PDF export ----
-  const handleExportPdf = async (bill: ConveyanceBill) => {
+  const handleExportPdf = async (bill: ConveyanceBill, mode: 'save' | 'email' = 'save') => {
     const logoImg = await loadImageElement(credenceLogo);
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
     const items = bill.items || [];
@@ -398,6 +400,10 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
 
     finalizePdfPageNumbers(doc);
     const filename = `Conveyance_Bill_${bill.id}_${bill.user_name?.replace(/\s+/g, '_') || 'user'}.pdf`;
+    if (mode === 'email') {
+      await emailReport(doc, { fileName: filename, title: letterheadOptions.reportTitle });
+      return;
+    }
     await savePdfCrossPlatform(doc, filename);
   };
 
@@ -764,6 +770,12 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
                   >
                     <FileDown className="w-3.5 h-3.5" /> Export PDF
                   </button>
+                )}
+                {canEmailReports && billDetail && (billDetail.items?.length || 0) > 0 && (
+                  <EmailReportButton
+                    onClick={() => handleExportPdf(billDetail, 'email')}
+                    className="flex items-center gap-1.5 py-2 px-3 bg-white border border-emerald-600 hover:bg-emerald-50 text-emerald-700 font-semibold rounded-xl text-xs transition-all shadow-sm whitespace-nowrap"
+                  />
                 )}
                 <button onClick={closeDetail} className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors" title="Close">
                   <X className="w-5 h-5" />

@@ -21,6 +21,7 @@ import credenceLogo from '../assets/credence-logo.png';
 import { api, cap, fmtDate, NewTaskForm, RecurrenceList, SOURCE_LABEL, STATUS_LABEL, Task, TaskAccess, TaskCard, TaskDrawer, takePendingTaskId } from './TaskParts';
 
 import { STD_STYLES, STD_HEAD } from '../lib/pdfStandard';
+import { EmailReportButton, emailReport, useCanEmailReports } from '../lib/reportEmail';
 type Tab = 'requests' | 'all' | 'repeat' | 'report';
 
 interface ReportRow {
@@ -240,6 +241,7 @@ const TaskReport: React.FC<{ token: string; tasks: Task[] }> = ({ token, tasks }
   const [data, setData] = useState<{ month: string; rows: ReportRow[]; unassigned_requests: number } | null>(null);
   const [error, setError] = useState('');
   const [exporting, setExporting] = useState(false);
+  const canEmailReports = useCanEmailReports();
 
   useEffect(() => {
     setData(null);
@@ -255,7 +257,7 @@ const TaskReport: React.FC<{ token: string; tasks: Task[] }> = ({ token, tasks }
   );
   const pct = (a: number, b: number) => (b ? `${Math.round((a / b) * 100)}%` : '—');
 
-  const downloadPdf = async () => {
+  const downloadPdf = async (mode: 'save' | 'email' = 'save') => {
     if (!data) return;
     setExporting(true);
     try {
@@ -303,6 +305,10 @@ const TaskReport: React.FC<{ token: string; tasks: Task[] }> = ({ token, tasks }
         }
       });
       finalizePdfPageNumbers(doc);
+      if (mode === 'email') {
+        await emailReport(doc, { fileName: `Task-Report-${data.month}.pdf`, title: 'Task Report' });
+        return;
+      }
       await savePdfCrossPlatform(doc, `Task-Report-${data.month}.pdf`);
     } catch (err: any) {
       setError(err.message || 'Could not make the PDF.');
@@ -354,9 +360,12 @@ const TaskReport: React.FC<{ token: string; tasks: Task[] }> = ({ token, tasks }
         <button type="button" onClick={downloadExcel} disabled={!data} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-emerald-600 text-white disabled:opacity-50">
           <FileSpreadsheet className="w-3.5 h-3.5" /> Excel
         </button>
-        <button type="button" onClick={downloadPdf} disabled={!data || exporting} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-rose-600 text-white disabled:opacity-50">
+        <button type="button" onClick={() => downloadPdf()} disabled={!data || exporting} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-rose-600 text-white disabled:opacity-50">
           <FileDown className="w-3.5 h-3.5" /> {exporting ? 'Making PDF…' : 'PDF'}
         </button>
+        {canEmailReports && (
+          <EmailReportButton onClick={() => downloadPdf('email')} disabled={!data || exporting} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-50" />
+        )}
       </div>
       {error && <p className="text-sm text-rose-600">{error}</p>}
       {!data ? (

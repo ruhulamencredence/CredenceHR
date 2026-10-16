@@ -55,6 +55,7 @@ import { apiUrl } from '../lib/api';
 import { NewActionModal } from './HrOpsActions';
 import { LetterComposer } from './HrOpsLetters';
 import { ServiceTimeline, serviceLength, saveServiceBookPdf } from './HrOpsServiceBook';
+import { EmailReportButton, useCanEmailReports } from '../lib/reportEmail';
 import {
   useHrApi,
   EmployeePicker,
@@ -587,6 +588,7 @@ export const Employee360: React.FC<{
 type Api = ReturnType<typeof useHrApi>;
 
 const OverviewTab: React.FC<{ ov: P360Overview; emp: HrOpsEmployee | null; onEditService: () => void }> = ({ ov, emp, onEditService }) => {
+  const canEmailReports = useCanEmailReports();
   const self = useContext(SelfBook);
   const e = ov.employee;
   return (
@@ -617,9 +619,17 @@ const OverviewTab: React.FC<{ ov: P360Overview; emp: HrOpsEmployee | null; onEdi
       <Card
         title="Service history (latest first)"
         action={
-          <button type="button" className="text-[11px] font-semibold text-blue-600 inline-flex items-center gap-1" onClick={() => saveServiceBookPdf({ employee: ov.employee, events: ov.events })}>
-            <FileDown className="w-3 h-3" /> PDF
-          </button>
+          <span className="inline-flex items-center gap-3">
+            <button type="button" className="text-[11px] font-semibold text-blue-600 inline-flex items-center gap-1" onClick={() => saveServiceBookPdf({ employee: ov.employee, events: ov.events })}>
+              <FileDown className="w-3 h-3" /> PDF
+            </button>
+            {canEmailReports && (
+              <EmailReportButton
+                onClick={() => saveServiceBookPdf({ employee: ov.employee, events: ov.events }, 'email')}
+                className="text-[11px] font-semibold text-blue-600 inline-flex items-center gap-1 [&>svg]:w-3 [&>svg]:h-3"
+              />
+            )}
+          </span>
         }
       >
         <ServiceTimeline events={ov.events} />

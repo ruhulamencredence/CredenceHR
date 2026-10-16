@@ -52,6 +52,7 @@ import { ensureMailSchema, registerMailRoutes } from "./MailRoutes";
 import { ensureRosterSchema, registerRosterRoutes } from "./RosterRoutes";
 import { ensureESignSchema, registerESignRoutes } from "./ESignRoutes";
 import { ensurePayslipSchema, registerPayslipRoutes } from "./PayslipRoutes";
+import { ensureReportEmailSchema, registerReportEmailRoutes } from "./ReportEmailRoutes";
 import { registerWebPushRoutes, ensureWebPushSchema } from "./WebPushService";
 import { sendPushToUserIds } from "./PushNotificationService";
 import { registerEmployeeDirectoryRoutes } from "./EmployeeDirectoryRoutes";
@@ -226,6 +227,8 @@ async function initDB() {
     await ensureESignSchema(dbPool);
     // Self Service -> My Payslip switch (PayslipRoutes.ts).
     await ensurePayslipSchema(dbPool);
+    // "Email" next to every report's PDF button (ReportEmailRoutes.ts).
+    await ensureReportEmailSchema(dbPool);
     await ensureZkSchema(dbPool);
     // ZKTeco polling + daily pulls: one process only (jobRunner.ts).
     if (runsBackgroundJobs()) startZkSyncSchedule(dbPool);
@@ -2624,6 +2627,8 @@ async function startServer() {
   registerESignRoutes(app, { authenticateToken, requireAdmin, requireModule, hasModuleLayer, getAdminModules, queryDB, createAlert });
   // Self Service -> My Payslip (PayslipRoutes.ts, users.can_view_payslip).
   registerPayslipRoutes(app, { authenticateToken, queryDB });
+  // Email a report PDF / Excel (ReportEmailRoutes.ts, users.can_email_reports).
+  registerReportEmailRoutes(app, { authenticateToken, queryDB });
   registerHROperationsRoutes(app, { authenticateToken, requireAdmin, requireModule, queryDB, getAdminModules, todayInDhaka, createAlert });
   registerOnboardingRoutes(app, { authenticateToken, requireModule, hasModuleLayer, queryDB, withTransaction: isMySQLConnected && dbPool ? withDbTransaction : undefined });
   // HR reminders (probation / contract / document / retirement / increment
