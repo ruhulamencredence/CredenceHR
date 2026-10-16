@@ -15,6 +15,7 @@ import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from './p
 import { savePdfCrossPlatform } from './saveFile';
 import credenceLogo from '../assets/credence-logo.png';
 
+import { STD_STYLES, STD_HEAD, STD_FOOT } from './pdfStandard';
 export interface ExitDocuments {
   employee: { name: string | null; employee_code: string | null; designation: string | null; department: string | null; joining_date: string | null };
   exit: { id: number; exit_type: string; reason: string | null; notice_date: string | null; last_working_day: string | null; status: string };
@@ -92,12 +93,13 @@ export async function saveClearanceCertificatePdf(d: ExitDocuments) {
   doc.text(lines, 14, y + 2);
   y += lines.length * 5 + 6;
   autoTable(doc, {
+      theme: 'grid',
     startY: y,
     head: [['Department', 'Item', 'Status', 'Cleared by', 'Date', 'Remarks']],
     body: d.clearance.map((c) => [c.department, c.item_label, c.is_cleared ? 'Cleared' : 'Pending', c.is_cleared ? c.cleared_by || '—' : '—', c.is_cleared ? day(c.cleared_at) : '—', c.remarks || '']),
-    styles: { fontSize: 8.5, cellPadding: 2.2 },
+    styles: { ...STD_STYLES, fontSize: 8.5, cellPadding: 2.2 },
     columnStyles: { 0: { cellWidth: 22 }, 2: { cellWidth: 20 }, 4: { cellWidth: 26 } },
-    headStyles: { fillColor: [124, 58, 237] },
+    headStyles: { ...STD_HEAD },
     didParseCell: (h) => {
       if (h.section === 'body' && h.column.index === 2) h.cell.styles.textColor = h.cell.raw === 'Cleared' ? [4, 120, 87] : [180, 83, 9];
     }
@@ -135,14 +137,15 @@ export async function saveSettlementSheetPdf(d: ExitDocuments) {
   if (otherDues > 0 || s.added_dues.length === 0) body.push(['Outstanding dues', `- ${bdt(s.added_dues.length ? otherDues : s.outstanding_dues)}`]);
   body.push(['Other deductions', `- ${bdt(s.other_deductions)}`]);
   autoTable(doc, {
+      theme: 'grid',
     startY: y,
     head: [['Item', 'Amount']],
     body: body as any,
     foot: [['Net payable', bdt(s.net_payable)]],
-    styles: { fontSize: 9.5, cellPadding: 2.6 },
+    styles: { ...STD_STYLES, fontSize: 9.5, cellPadding: 2.6 },
     columnStyles: { 1: { halign: 'right', cellWidth: 55 } },
-    headStyles: { fillColor: [124, 58, 237] },
-    footStyles: { fillColor: [236, 253, 245], textColor: [4, 120, 87], fontStyle: 'bold', fontSize: 11 }
+    headStyles: { ...STD_HEAD },
+    footStyles: { ...STD_FOOT, fontSize: 11 }
   });
   let end = (doc as any).lastAutoTable.finalY;
   if (s.notes) {

@@ -26,6 +26,7 @@ import { useBillClaimCategoryNames } from '../lib/billClaimCategories';
 import { confirmDialog } from '../lib/confirmDialog';
 import { NewConveyanceClaimModal } from './NewConveyanceClaimModal';
 
+import { STD_STYLES, STD_HEAD } from '../lib/pdfStandard';
 interface ConveyanceBillPanelProps {
   token: string;
   users: User[];
@@ -344,6 +345,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
     const contentStartY = drawPdfLetterhead(doc, logoImg, letterheadOptions);
 
     autoTable(doc, {
+      theme: 'grid',
       startY: contentStartY,
       margin: { top: contentStartY, left: 8, right: 8 },
       head: [['SL', 'Date', 'Particulars', 'From', 'To', 'Distance (KM)', 'Rate/KM', 'Amount', 'Remarks']],
@@ -358,7 +360,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
         it.amount.toFixed(2),
         it.remarks || ''
       ]),
-      styles: { fontSize: 7, cellPadding: 1.5, overflow: 'linebreak' },
+      styles: { ...STD_STYLES, fontSize: 7, cellPadding: 1.5, overflow: 'linebreak' },
       columnStyles: {
         0: { cellWidth: 8 },
         1: { cellWidth: 18 },
@@ -370,8 +372,7 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
         7: { cellWidth: 18 },
         8: { cellWidth: 24 }
       },
-      headStyles: { fillColor: [37, 99, 235], textColor: 255, fontSize: 7 },
-      alternateRowStyles: { fillColor: [248, 250, 252] },
+      headStyles: { ...STD_HEAD, fontSize: 7 },
       didDrawPage: () => { drawPdfLetterhead(doc, logoImg, letterheadOptions); }
     });
 

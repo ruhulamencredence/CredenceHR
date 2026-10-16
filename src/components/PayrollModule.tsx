@@ -41,6 +41,7 @@ import { PayrollActivityLog } from './PayrollActivityLog';
 import { BonusIncentiveManagementPanel } from './BonusIncentiveManagementPanel';
 import { LoadingBlock } from './LoadingBlock';
 
+import { STD_STYLES, STD_HEAD, STD_FOOT } from '../lib/pdfStandard';
 interface PayrollModuleProps {
   token: string;
   onBack: () => void;
@@ -320,9 +321,9 @@ const GeneratePayslipModal: React.FC<{ token: string; monthYear: string; onClose
         body: payslipRows(record, pdfMoney),
         foot: [['Gross Earned', pdfMoney(record.gross_earned), 'Total Deduction', pdfMoney(record.total_deduction)]],
         theme: 'grid',
-        styles: { fontSize: 9, cellPadding: 2.5 },
-        headStyles: { fillColor: [37, 99, 235], textColor: 255 },
-        footStyles: { fillColor: [241, 245, 249], textColor: [15, 23, 42], fontStyle: 'bold' }
+        styles: { ...STD_STYLES, fontSize: 9, cellPadding: 2.5 },
+        headStyles: { ...STD_HEAD },
+        footStyles: { ...STD_FOOT }
       });
 
       const finalY = (doc as any).lastAutoTable.finalY + 10;
@@ -474,6 +475,7 @@ const DownloadReportsModal: React.FC<{ token: string; monthYear: string; onClose
         ]
       });
       autoTable(doc, {
+      theme: 'grid',
         startY,
         margin: { top: startY, left: 10, right: 10 },
         head: [['Employee', 'Code', 'Department', 'Gross Earned', 'Total Deduction', 'Net Salary', 'Status']],
@@ -486,9 +488,8 @@ const DownloadReportsModal: React.FC<{ token: string; monthYear: string; onClose
           money(r.net_salary),
           r.payment_status
         ]),
-        styles: { fontSize: 8, cellPadding: 1.5 },
-        headStyles: { fillColor: [37, 99, 235], textColor: 255, fontSize: 8 },
-        alternateRowStyles: { fillColor: [248, 250, 252] }
+        styles: { ...STD_STYLES, fontSize: 8, cellPadding: 1.5 },
+        headStyles: { ...STD_HEAD, fontSize: 8 },
       });
       finalizePdfPageNumbers(doc);
       await savePdfCrossPlatform(doc, `Payroll_Report_${monthYear}.pdf`);

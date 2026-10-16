@@ -47,6 +47,7 @@ import { BottomNav } from './BottomNav';
 import { ModulePath } from './ModulePath';
 import { confirmDialog } from '../lib/confirmDialog';
 
+import { STD_STYLES, STD_HEAD } from '../lib/pdfStandard';
 interface UserPanelProps {
   token: string;
   user: User;
@@ -2390,6 +2391,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
     const contentStartY = drawPdfLetterhead(doc, logoImg, letterheadOptions);
 
     autoTable(doc, {
+      theme: 'grid',
       startY: contentStartY,
       margin: { top: contentStartY, left: 8, right: 8 },
       head: [['SL', 'Job No', 'Job Name', 'MPR No', 'Item Name', 'Specification', 'Qty', 'Job Duration', 'Delivery Date', 'Budget']],
@@ -2409,7 +2411,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
       // usable width here vs ~270mm before), so every column gets an explicit,
       // tight width — long text wraps onto a second line within its cell
       // (autoTable's default) rather than overflowing or getting truncated.
-      styles: { fontSize: 6.5, cellPadding: 1.3, overflow: 'linebreak' },
+      styles: { ...STD_STYLES, fontSize: 6.5, cellPadding: 1.3, overflow: 'linebreak' },
       columnStyles: {
         0: { cellWidth: 7 }, // SL
         1: { cellWidth: 15 }, // Job No
@@ -2422,8 +2424,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
         8: { cellWidth: 16 }, // Delivery Date
         9: { cellWidth: 18 } // Budget
       },
-      headStyles: { fillColor: [37, 99, 235], textColor: 255, fontSize: 6.5 },
-      alternateRowStyles: { fillColor: [248, 250, 252] },
+      headStyles: { ...STD_HEAD, fontSize: 6.5 },
       // Repeats the full letterhead (logo, title, filters box) on every page of
       // a multi-page table, not just the first.
       didDrawPage: () => drawPdfLetterhead(doc, logoImg, letterheadOptions)

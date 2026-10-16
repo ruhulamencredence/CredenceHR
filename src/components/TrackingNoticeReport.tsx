@@ -21,6 +21,7 @@ import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../
 import { savePdfCrossPlatform } from '../lib/saveFile';
 import credenceLogo from '../assets/credence-logo.png';
 
+import { STD_STYLES, STD_HEAD } from '../lib/pdfStandard';
 interface Send {
   notice_id: number;
   title: string;
@@ -112,6 +113,7 @@ export const TrackingNoticeReport: React.FC<{ token: string; onClose: () => void
       };
       const startY = drawPdfLetterhead(doc, logoImg, opts);
       autoTable(doc, {
+      theme: 'grid',
         startY,
         margin: { top: startY, left: 8, right: 8 },
         head: [['SL', 'Employee', 'Department', 'Notices', 'Opened', 'Sent on (reason)']],
@@ -123,10 +125,9 @@ export const TrackingNoticeReport: React.FC<{ token: string; onClose: () => void
           `${r.seen} of ${r.notices}`,
           r.sends.map((s) => `${dateTime(s.sent_at)} — ${s.reason || '—'}${s.seen_at ? ' (opened)' : ''}`).join('\n')
         ]),
-        styles: { fontSize: 8, cellPadding: 1.5, overflow: 'linebreak', valign: 'top' },
-        headStyles: { fillColor: [37, 99, 235], textColor: 255, fontSize: 8 },
+        styles: { ...STD_STYLES, fontSize: 8, cellPadding: 1.5, overflow: 'linebreak', valign: 'top' },
+        headStyles: { ...STD_HEAD, fontSize: 8 },
         columnStyles: { 0: { cellWidth: 10 }, 1: { cellWidth: 55 }, 2: { cellWidth: 35 }, 3: { cellWidth: 18 }, 4: { cellWidth: 20 } },
-        alternateRowStyles: { fillColor: [248, 250, 252] },
         didDrawPage: () => {
           drawPdfLetterhead(doc, logoImg, opts);
         }

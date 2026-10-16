@@ -13,6 +13,7 @@ import { payslipRows, pdfMoney, PayslipLine } from './payslipRows';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from './pdfLetterhead';
 import credenceLogo from '../assets/credence-logo.png';
 
+import { STD_STYLES, STD_HEAD, STD_FOOT } from './pdfStandard';
 export interface PayrollRecord {
   id: number;
   employee_id: number;
@@ -77,9 +78,9 @@ export const drawPayslipPage = (doc: jsPDF, logoImg: HTMLImageElement, record: P
     body: payslipRows(record, pdfMoney),
     foot: [['Gross Earned', pdfMoney(record.gross_earned), 'Total Deduction', pdfMoney(record.total_deduction)]],
     theme: 'grid',
-    styles: { fontSize: 9, cellPadding: 2.5 },
-    headStyles: { fillColor: [37, 99, 235], textColor: 255 },
-    footStyles: { fillColor: [241, 245, 249], textColor: [15, 23, 42], fontStyle: 'bold' }
+    styles: { ...STD_STYLES, fontSize: 9, cellPadding: 2.5 },
+    headStyles: { ...STD_HEAD },
+    footStyles: { ...STD_FOOT }
   });
 
   const finalY = (doc as any).lastAutoTable.finalY + 10;

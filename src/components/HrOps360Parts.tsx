@@ -22,6 +22,7 @@ import { serviceLength, type ServiceEvent } from './HrOpsServiceBook';
 import { apiUrl } from '../lib/api';
 import { useHrApi, Modal, Notice, fmtDate, monthLabel, inputCls, labelCls, btnPrimary, btnGhost } from './HrOpsShared';
 
+import { STD_STYLES, STD_HEAD } from '../lib/pdfStandard';
 // ---------------------------------------------------------------------------
 // Types (mirror HrOps360Routes.ts)
 // ---------------------------------------------------------------------------
@@ -810,11 +811,12 @@ export async function saveDossierPdf(d: DossierData, picked: Set<string>) {
     doc.setTextColor(30, 41, 59);
     doc.text(pdfSafe(t.title), 14, y + 4);
     autoTable(doc, {
+      theme: 'grid',
       startY: y + 6,
       head: [t.head.map(pdfSafe)],
       body: t.rows.length ? t.rows.map((r) => r.map((c) => pdfSafe(c))) : [[{ content: 'No records', colSpan: t.head.length, styles: { textColor: [148, 163, 184] } } as any]],
-      styles: { fontSize: 7.5, cellPadding: 1.6 },
-      headStyles: { fillColor: [37, 99, 235] },
+      styles: { ...STD_STYLES, fontSize: 7.5, cellPadding: 1.6 },
+      headStyles: { ...STD_HEAD },
       margin: { left: 14, right: 14 }
     });
     y = (doc as any).lastAutoTable.finalY + 6;

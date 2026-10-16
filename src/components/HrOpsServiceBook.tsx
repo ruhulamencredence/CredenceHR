@@ -18,6 +18,7 @@ import { savePdfCrossPlatform } from '../lib/saveFile';
 import credenceLogo from '../assets/credence-logo.png';
 import { Badge, fmtDate } from './HrOpsShared';
 
+import { STD_STYLES, STD_HEAD } from '../lib/pdfStandard';
 export interface ServiceEvent {
   date: string | null;
   kind: string;
@@ -127,6 +128,7 @@ export async function saveServiceBookPdf(data: ServiceBookData) {
     ]
   });
   autoTable(doc, {
+      theme: 'grid',
     startY: y,
     head: [['Date', 'Event', 'Details', 'Status / Approved by']],
     body: data.events.map((ev) => [
@@ -136,9 +138,9 @@ export async function saveServiceBookPdf(data: ServiceBookData) {
       [ev.detail, ev.reason].filter(Boolean).join('\n').replace(/→/g, '->'),
       ev.status === 'pending' ? 'Pending' : ev.approved_by?.length ? ev.approved_by.join(' -> ') : ev.kind === 'letter' ? (ev.acknowledged ? 'Acknowledged' : 'Issued') : ''
     ]),
-    styles: { fontSize: 8, cellPadding: 2 },
+    styles: { ...STD_STYLES, fontSize: 8, cellPadding: 2 },
     columnStyles: { 0: { cellWidth: 24 }, 1: { cellWidth: 36 }, 3: { cellWidth: 40 } },
-    headStyles: { fillColor: [124, 58, 237] }
+    headStyles: { ...STD_HEAD }
   });
   finalizePdfPageNumbers(doc);
   await savePdfCrossPlatform(doc, `Service_Book_${e.name.replace(/\s+/g, '_')}.pdf`);

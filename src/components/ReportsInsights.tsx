@@ -31,6 +31,7 @@ import { fmtDate, taka } from './HrOpsShared';
 import { Spinner } from './Spinner';
 import { LoadingBlock } from './LoadingBlock';
 
+import { STD_STYLES, STD_HEAD } from '../lib/pdfStandard';
 // Admin Panel -> Reports & Insights: every operational report (Attendance,
 // Leave, Claim, Bill, Asset, Vehicle) in one place. The list, filters and
 // data come from ReportsInsightsRoutes.ts; this page only renders them and
@@ -148,12 +149,12 @@ async function exportPdf(r: Result, filtersText: string) {
     ]
   });
   autoTable(doc, {
+      theme: 'grid',
     startY: y,
     head: [r.columns.map((c) => pdfSafe(c.label))],
     body: r.rows.map((row) => r.columns.map((c) => pdfSafe(display(row[c.key], c.type)))),
-    styles: { fontSize: r.columns.length > 11 ? 6 : wide ? 6.8 : 7.8, cellPadding: 1.4 },
-    headStyles: { fillColor: [109, 40, 217] },
-    alternateRowStyles: { fillColor: [248, 245, 255] },
+    styles: { ...STD_STYLES, fontSize: r.columns.length > 11 ? 6 : wide ? 6.8 : 7.8, cellPadding: 1.4 },
+    headStyles: { ...STD_HEAD },
     columnStyles: Object.fromEntries(r.columns.map((c, i) => [i, isNumeric(c.type) ? { halign: 'right' as const } : {}]))
   });
   finalizePdfPageNumbers(doc);
