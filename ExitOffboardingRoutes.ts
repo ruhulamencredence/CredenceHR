@@ -589,10 +589,18 @@ export function registerExitOffboardingRoutes(app: Express, deps: ExitOffboardin
     try {
       const body = req.body || {};
       const canManage = await canManageExits(req.user.id, req.user.role);
-      const targetUserId = canManage && body.user_id ? Number(body.user_id) : req.user.id;
+      // Read user_id for everyone so another person's id is refused, not
+      // quietly turned into a resignation for the caller.
+      const targetUserId = body.user_id ? Number(body.user_id) : Number(req.user.id);
       const exitType = canManage && body.exit_type === "termination" ? "termination" : "resignation";
-      if (!canManage && targetUserId !== req.user.id) {
+      if (!canManage && targetUserId !== Number(req.user.id)) {
         return res.status(403).json({ error: "You can only submit your own resignation." });
+      }
+      // One open exit per person: a second one would open a second set of
+      // clearance items and a second settlement.
+      const open: any = await queryDB("SELECT id FROM exit_requests WHERE user_id = ? AND status IN ('pending', 'clearance') LIMIT 1", [targetUserId]);
+      if (open.length) {
+        return res.status(409).json({ error: "There is already an open resignation / exit for this person.", exit_id: Number(open[0].id) });
       }
       const reason = typeof body.reason === "string" ? body.reason.trim().slice(0, 2000) : null;
       const noticeDate = body.notice_date ? String(body.notice_date).trim() : null;
