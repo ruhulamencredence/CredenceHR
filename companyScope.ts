@@ -132,7 +132,8 @@ export const OWN_TABLES = new Set([
   "payroll_batch_events",
   "payroll_access_log",
   "duty_shifts",
-  "esign_settings"
+  "esign_settings",
+  "esign_certificates"
 ]);
 
 // Shared by every company of a group (PEPM budgets & rate file, chat…) but

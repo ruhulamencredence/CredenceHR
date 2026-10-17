@@ -24,6 +24,7 @@ interface PublicView {
   signed_sha256: string | null;
   original_sha256: string | null;
   integrity: { file_ok: boolean; history_ok: boolean; seal: 'valid' | 'invalid' | 'none' | 'unknown' } | null;
+  certificate: { subject: string; issuer: string | null; self_signed: boolean } | null;
   signers: { step: number; name: string | null; label: string | null; status: string; signed_at: string | null }[];
 }
 
@@ -165,6 +166,15 @@ export default function VerifyPage() {
                     <span className={ok ? 'text-slate-700' : 'text-rose-700 font-semibold'}>{ok ? good : badText}</span>
                   </div>
                 ))}
+                {data.certificate && (
+                  <div className="px-4 py-2.5 flex items-start gap-2 text-sm">
+                    <ShieldCheck className="w-4 h-4 text-emerald-600 mt-0.5 shrink-0" />
+                    <span className="text-slate-700">
+                      The PDF is digitally signed with the certificate of <b>{data.certificate.subject}</b>
+                      {data.certificate.self_signed ? ' (self-signed)' : data.certificate.issuer ? `, issued by ${data.certificate.issuer}` : ''}. Open it in Adobe Reader to see the signature.
+                    </span>
+                  </div>
+                )}
               </div>
             )}
             {done && (

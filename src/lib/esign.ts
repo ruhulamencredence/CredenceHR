@@ -44,6 +44,22 @@ export interface ESignDoc {
   // E-Signature settings applied to this document.
   otp_required?: boolean;
   require_read?: boolean;
+  // Signed inside the PDF with a certificate (ESignCertificate.ts).
+  certificate?: { subject: string; issuer: string | null; self_signed: boolean } | null;
+  // Made in HR Operations -> Letters or Exit / Offboarding.
+  source_type?: string | null;
+  source_id?: number | null;
+}
+export interface ESignCertInfo {
+  source: 'file' | 'self_signed';
+  subject: string;
+  organization: string | null;
+  issuer: string;
+  self_signed: boolean;
+  valid_from: string;
+  valid_to: string;
+  expired: boolean;
+  fingerprint: string;
 }
 
 export async function esignFetch<T>(token: string | null, path: string, init?: { method?: string; body?: unknown }): Promise<T> {

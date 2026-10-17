@@ -34,6 +34,7 @@ import {
 } from './HrOpsShared';
 import { letterFileName } from '../lib/hrLetterPdf';
 import { LoadingBlock } from './LoadingBlock';
+import { SendForSigningButton, useSignSources } from './SendForSigningButton';
 
 interface Template {
   id: number;
@@ -341,6 +342,8 @@ export const HrOpsLetters: React.FC<{ token: string; meta: HrOpsMeta; employees:
   const [typeFilter, setTypeFilter] = useState('');
   const [ackFilter, setAckFilter] = useState('');
   const company = companyFromSettings(meta.settings);
+  // E-Signature: "Send for signing" (Document Vault access only).
+  const signing = useSignSources(token, ['hr_letter']);
 
   const load = async () => {
     setLoading(true);
@@ -489,6 +492,20 @@ export const HrOpsLetters: React.FC<{ token: string; meta: HrOpsMeta; employees:
                         <button type="button" title="Download PDF" className="p-1.5 rounded-md hover:bg-slate-100 text-slate-600" onClick={() => saveLetterPdf(company, l)}>
                           <Download className="w-4 h-4" />
                         </button>
+                        {l.status === 'issued' && signing.enabled && (
+                          <SendForSigningButton
+                            compact
+                            token={token}
+                            sourceType="hr_letter"
+                            sourceId={l.id}
+                            state={signing.stateOf('hr_letter', l.id)}
+                            ownerName={l.employee_name}
+                            docType={l.letter_label}
+                            makePdf={async () => ({ bytes: await letterPdfBytes(company, l), fileName: letterFileName(l.ref_no, l.employee_name) })}
+                            onChanged={() => void signing.reload()}
+                            onError={(text) => setMsg({ type: 'error', text })}
+                          />
+                        )}
                         {l.status === 'issued' && (
                           <button type="button" title="Cancel letter" className="p-1.5 rounded-md hover:bg-rose-50 text-rose-500" onClick={() => cancel(l)}>
                             <Ban className="w-4 h-4" />

@@ -5,13 +5,15 @@
 
 // Document Vault -> E-Signature settings (ESignRoutes.ts, esign_settings),
 // shown only with the "E-Signature settings" layer: switch the sign-in code
-// (OTP by email) and "read to the end before signing" on or off. Both start
+// (OTP by email), "read to the end before signing" and the digital signature
+// with the company's certificate (ESignCertificate.ts) on or off. All start
 // off. The history and the server seal are always on.
 
 import React, { useEffect, useState } from 'react';
-import { Settings2, Loader2, Save, KeyRound, BookOpenCheck, History, ShieldCheck } from 'lucide-react';
+import { Settings2, Loader2, Save, KeyRound, BookOpenCheck, History, ShieldCheck, BadgeCheck, Download } from 'lucide-react';
 import { MailPopup as Popup, ghostBtn, Toggle } from './mail/MailPopup';
-import { esignFetch } from '../lib/esign';
+import { esignFetch, type ESignCertInfo } from '../lib/esign';
+import { apiUrl } from '../lib/api';
 
 interface Settings {
   otp_required: boolean;
@@ -21,6 +23,10 @@ interface Settings {
   email_ready: boolean;
   seal_ready: boolean;
   doc_types: string[];
+  pki_sign: boolean;
+  certificate: ESignCertInfo | null;
+  certificate_error: string | null;
+  cert_from_env: boolean;
 }
 const PRESETS = ['Appointment Letter', 'Employment Contract', 'NID / Passport Copy', 'Certificate', 'Experience Letter', 'Other'];
 
@@ -30,6 +36,7 @@ export const ESignSettingsPopup: React.FC<{ token: string; onClose: () => void; 
   const [allTypes, setAllTypes] = useState(true);
   const [types, setTypes] = useState<Set<string>>(new Set());
   const [read, setRead] = useState(false);
+  const [pki, setPki] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   useEffect(() => {
@@ -40,6 +47,7 @@ export const ESignSettingsPopup: React.FC<{ token: string; onClose: () => void; 
         setAllTypes(!r.otp_doc_types.length);
         setTypes(new Set(r.otp_doc_types));
         setRead(r.require_read);
+        setPki(r.pki_sign);
       })
       .catch((e) => setError(e.message));
   }, [token]);
@@ -48,7 +56,7 @@ export const ESignSettingsPopup: React.FC<{ token: string; onClose: () => void; 
     setBusy(true);
     setError('');
     try {
-      await esignFetch(token, '/api/esign/settings', { method: 'PUT', body: { otp_required: otp, otp_doc_types: allTypes ? [] : [...types], require_read: read } });
+      await esignFetch(token, '/api/esign/settings', { method: 'PUT', body: { otp_required: otp, otp_doc_types: allTypes ? [] : [...types], require_read: read, pki_sign: pki } });
       onSaved('E-Signature settings saved.');
     } catch (e: any) {
       setError(e.message);
@@ -56,6 +64,21 @@ export const ESignSettingsPopup: React.FC<{ token: string; onClose: () => void; 
       setBusy(false);
     }
   };
+  const downloadCert = async () => {
+    try {
+      const res = await fetch(apiUrl('/api/esign/certificate.cer'), { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) throw new Error((await res.json().catch(() => null))?.error || `Request failed (${res.status})`);
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(await res.blob());
+      a.download = `${s?.certificate?.subject || 'company'} e-signature certificate.cer`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 10_000);
+    } catch (e: any) {
+      setError(e.message);
+    }
+  };
+  const cert = s?.certificate;
+  const day = (v: string) => new Date(v).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
   return (
     <Popup
       title="E-Signature settings"
@@ -122,6 +145,42 @@ export const ESignSettingsPopup: React.FC<{ token: string; onClose: () => void; 
                 <BookOpenCheck className="w-4 h-4 text-blue-600" /> Read to the end
               </div>
               <Toggle checked={read} onChange={setRead} label="Signers must scroll the document to its end first" hint="In the in-app reader; the time they spent is written in the history." />
+            </div>
+            <div className="liquid-glass-inset rounded-2xl p-3 space-y-2">
+              <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                <BadgeCheck className="w-4 h-4 text-blue-600" /> Digital signature (certificate)
+              </div>
+              <Toggle
+                checked={pki}
+                onChange={setPki}
+                label="Also sign the finished PDF with the company's certificate"
+                hint="Adobe Reader and other PDF readers then show the PDF as signed, and flag any change made after signing — without the verify page."
+              />
+              {s.certificate_error ? (
+                <p className="text-[11px] px-3 py-2 rounded-xl bg-rose-50 text-rose-700">Certificate in ESIGN_CERT_FILE can't be used: {s.certificate_error}</p>
+              ) : cert ? (
+                <div className="text-[11px] text-slate-600 rounded-xl bg-white/60 px-3 py-2 space-y-0.5">
+                  <div>
+                    <span className="font-semibold text-slate-800">{cert.subject}</span>
+                    {cert.self_signed ? ' · self-signed' : ` · issued by ${cert.issuer}`}
+                  </div>
+                  <div className={cert.expired ? 'text-rose-600 font-semibold' : ''}>
+                    Valid {day(cert.valid_from)} – {day(cert.valid_to)}
+                    {cert.expired ? ' · expired' : ''}
+                  </div>
+                  <button type="button" onClick={() => void downloadCert()} className="inline-flex items-center gap-1 text-blue-600 font-semibold mt-1">
+                    <Download className="w-3 h-3" /> Certificate (.cer)
+                  </button>
+                </div>
+              ) : (
+                pki && <p className="text-[11px] text-slate-500">A self-signed certificate in the company's name is made when you save.</p>
+              )}
+              {!s.cert_from_env && (
+                <p className="text-[11px] px-3 py-2 rounded-xl bg-amber-50 text-amber-800">
+                  Self-signed: the signature still catches any change, but Adobe shows "validity unknown" because no authority vouches for it. For a fully valid
+                  signature, buy a certificate from a licensed Certifying Authority (CCA, Bangladesh) and set ESIGN_CERT_FILE and ESIGN_CERT_PASSWORD on the server.
+                </p>
+              )}
             </div>
             <div className="liquid-glass-inset rounded-2xl p-3 text-[11px] text-slate-600 space-y-1.5">
               <div className="flex items-start gap-2">
