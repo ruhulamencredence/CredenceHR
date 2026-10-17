@@ -47,7 +47,19 @@ interface Detail {
   sheets: SheetT[];
   all_layers: { name: string; lines: number; polys: number; texts: number; leaders: number }[];
   guessed: { beam: string[]; column: string[] };
-  can_edit: boolean; can_delete: boolean;
+  can_edit: boolean; can_delete: boolean; can_budget?: boolean;
+  budget_config?: BudgetCfg; budget?: BudgetOut;
+}
+type Part = 'beam' | 'column' | 'slab';
+interface BudgetCfg {
+  cementBagCft: number; dryFactor: number; wastagePct: number; steelWastagePct: number;
+  mix: Record<Part, [number, number, number]>; steelKgPerCft: Record<Part, number>;
+  rates: { cement: number; sand: number; stone: number; steel: number; shuttering: number };
+}
+interface BudgetOut {
+  repeatsNote: string; total: number; rateMissing: boolean; notes: string[];
+  parts: { key: Part; label: string; concrete: number; cement: number; sand: number; stone: number; steel: number; shuttering: number }[];
+  lines: { key: string; label: string; qty: number; unit: string; rate: number; amount: number }[];
 }
 interface ListItem { id: number; title: string; file_name: string | null; created_at: string; created_by_name: string | null }
 
@@ -182,15 +194,16 @@ const SheetView: React.FC<{ token: string; id: number; onBack: () => void }> = (
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [picked, setPicked] = useState<string | null>(null);
+  const [bcfg, setBcfg] = useState<BudgetCfg | null>(null);
 
-  const apply = (r: Detail) => { setD(r); setSettings(r.settings); setOv(r.overrides || {}); setTitle(r.title); setDirty(false); };
+  const apply = (r: Detail) => { setD(r); setBcfg(r.budget_config || null); setSettings(r.settings); setOv(r.overrides || {}); setTitle(r.title); setDirty(false); };
   useEffect(() => {
     api<Detail>(token, `/api/measurement-sheets/${id}`).then(apply).catch((e) => setErr(e.message));
   }, [token, id]);
 
   const save = async () => {
     setSaving(true); setErr('');
-    try { apply(await api<Detail>(token, `/api/measurement-sheets/${id}`, { method: 'PUT', body: { title, settings, overrides: ov } })); }
+    try { apply(await api<Detail>(token, `/api/measurement-sheets/${id}`, { method: 'PUT', body: { title, settings, overrides: ov, ...(bcfg && d?.can_budget ? { budget: bcfg } : {}) } })); }
     catch (e: any) { setErr(e.message); }
     setSaving(false);
   };
@@ -217,8 +230,8 @@ const SheetView: React.FC<{ token: string; id: number; onBack: () => void }> = (
         <button type="button" className="liquid-glass-chip p-2 rounded-full" onClick={onBack} aria-label="Back"><ArrowLeft className="w-4 h-4" /></button>
         {edit ? <input className={`${inputCls} !w-auto flex-1 min-w-[10rem] max-w-md font-semibold`} value={title} onChange={(e) => { setTitle(e.target.value); setDirty(true); }} aria-label="Title" /> : <h2 className="text-lg font-bold text-slate-900">{d.title}</h2>}
         <div className="flex-1" />
-        <button type="button" className={ghostBtn} onClick={() => exportExcel(d.title, d.sheets, settings)}><FileSpreadsheet className="w-4 h-4 inline mr-1" />Excel</button>
-        <button type="button" className={ghostBtn} onClick={() => exportPdf(d.title, d.file_name, d.sheets, settings)}><FileText className="w-4 h-4 inline mr-1" />PDF</button>
+        <button type="button" className={ghostBtn} onClick={() => exportExcel(d.title, d.sheets, settings, d.budget)}><FileSpreadsheet className="w-4 h-4 inline mr-1" />Excel</button>
+        <button type="button" className={ghostBtn} onClick={() => exportPdf(d.title, d.file_name, d.sheets, settings, d.budget)}><FileText className="w-4 h-4 inline mr-1" />PDF</button>
         {d.can_delete && <button type="button" className="liquid-glass-chip p-2 rounded-full text-red-600" onClick={remove} aria-label="Delete sheet"><Trash2 className="w-4 h-4" /></button>}
       </div>
       {err && <div className="mb-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl px-3 py-2">{err}</div>}
@@ -240,11 +253,12 @@ const SheetView: React.FC<{ token: string; id: number; onBack: () => void }> = (
           </div>
         </div>
       )}
-      <Tabs tabs={[{ key: 'sheet', label: 'Measurement sheet' }, { key: 'plan', label: 'Plan' }, { key: 'beams', label: 'Beams' }, { key: 'slabs', label: 'Slabs' }, { key: 'settings', label: 'Settings' }]} value={tab} onChange={setTab} />
+      <Tabs tabs={[{ key: 'sheet', label: 'Measurement sheet' }, { key: 'plan', label: 'Plan' }, { key: 'beams', label: 'Beams' }, { key: 'slabs', label: 'Slabs' }, ...(d.can_budget && d.budget ? [{ key: 'budget', label: 'Material Budget' }] : []), { key: 'settings', label: 'Settings' }]} value={tab} onChange={setTab} />
       {tab === 'sheet' && <SheetTable sheet={sheet} edit={edit} extra={o.extra || []} onExtra={(extra) => setO((x) => ({ ...x, extra }))} />}
       {tab === 'plan' && <PlanView plan={plan} tagOf={tagOf} picked={picked} setPicked={setPicked} ov={o} />}
       {tab === 'beams' && <BeamsTab plan={plan} edit={edit} ov={o} setO={setO} tagOf={tagOf} settings={settings} picked={picked} />}
       {tab === 'slabs' && <SlabsTab plan={plan} edit={edit} ov={o} setO={setO} settings={settings} />}
+      {tab === 'budget' && d.can_budget && d.budget && bcfg && <BudgetTab budget={d.budget} cfg={bcfg} edit={edit} onChange={(c) => { setBcfg(c); setDirty(true); }} />}
       {tab === 'settings' && <SettingsTab d={d} settings={settings} setS={setS} edit={edit} onReset={() => { setSettings(d.settings); setDirty(true); }} />}
       <p className="text-xs text-slate-400 mt-4">{d.file_name} · read {fmtDate(d.created_at)} · drawing unit: {d.model.unitName}</p>
     </div>
@@ -460,6 +474,68 @@ const SlabsTab: React.FC<{ plan: Plan; edit: boolean; ov: Overrides; setO: (fn: 
   </div>
 );
 
+const PART_LABEL: Record<Part, string> = { beam: 'Beams', column: 'Columns & walls', slab: 'Slab' };
+const BudgetTab: React.FC<{ budget: BudgetOut; cfg: BudgetCfg; edit: boolean; onChange: (c: BudgetCfg) => void }> = ({ budget, cfg, edit, onChange }) => {
+  const num = (v: string) => (v.trim() === '' || !Number.isFinite(Number(v)) ? 0 : Number(v));
+  const setRate = (k: keyof BudgetCfg['rates'], v: string) => onChange({ ...cfg, rates: { ...cfg.rates, [k]: num(v) } });
+  const setMix = (p: Part, i: number, v: string) => { const m = [...cfg.mix[p]] as [number, number, number]; m[i] = num(v); onChange({ ...cfg, mix: { ...cfg.mix, [p]: m } }); };
+  const field = (label: string, value: number, on: (v: string) => void, aria: string) => (
+    <div><label className={labelCls}>{label}</label><input disabled={!edit} className={inputCls} inputMode="decimal" value={value} aria-label={aria} onChange={(e) => on(e.target.value)} /></div>
+  );
+  return (
+    <div className="space-y-4">
+      <div className="liquid-glass-inset rounded-2xl p-3 overflow-x-auto">
+        <div className="font-bold text-slate-900 mb-2">Material needed</div>
+        <table className="w-full text-sm min-w-[640px]">
+          <thead><tr className="text-left text-xs text-slate-500 border-b border-slate-200"><th className="py-1.5">Element</th><th className="text-right">Concrete (cft)</th><th className="text-right">Cement (bag)</th><th className="text-right">Sand (cft)</th><th className="text-right">Stone (cft)</th><th className="text-right">Rod (kg)</th><th className="text-right">Shuttering (sft)</th></tr></thead>
+          <tbody>
+            {budget.parts.map((p) => (
+              <tr key={p.key} className="border-b border-slate-100"><td className="py-1 font-semibold">{p.label}</td>{[p.concrete, p.cement, p.sand, p.stone, p.steel, p.shuttering].map((v, i) => <td key={i} className="text-right tabular-nums">{q2(v)}</td>)}</tr>
+            ))}
+            <tr className="font-bold"><td className="py-1">Total</td>{(['concrete', 'cement', 'sand', 'stone', 'steel', 'shuttering'] as const).map((k) => <td key={k} className="text-right tabular-nums">{q2(budget.parts.reduce((t, p) => t + p[k], 0))}</td>)}</tr>
+          </tbody>
+        </table>
+        <div className="text-xs text-slate-500 mt-1">Rod total: {q2(budget.parts.reduce((t, p) => t + p.steel, 0) / 1000)} ton</div>
+      </div>
+      <div className="liquid-glass-inset rounded-2xl p-3 overflow-x-auto">
+        <div className="font-bold text-slate-900 mb-2">Cost</div>
+        <table className="w-full text-sm min-w-[520px]">
+          <thead><tr className="text-left text-xs text-slate-500 border-b border-slate-200"><th className="py-1.5">Material</th><th className="text-right">Qty</th><th>Unit</th><th className="text-right">Rate (Tk)</th><th className="text-right">Amount (Tk)</th></tr></thead>
+          <tbody>
+            {budget.lines.map((l) => (
+              <tr key={l.key} className="border-b border-slate-100"><td className="py-1">{l.label}</td><td className="text-right tabular-nums">{q2(l.qty)}</td><td className="pl-1">{l.unit}</td>
+                <td className="text-right"><input disabled={!edit} className={`${inputCls} !py-1 !w-28 text-right`} inputMode="decimal" value={cfg.rates[l.key as keyof BudgetCfg['rates']]} aria-label={`${l.label} rate`} onChange={(e) => setRate(l.key as keyof BudgetCfg['rates'], e.target.value)} /></td>
+                <td className="text-right tabular-nums">{q2(l.amount)}</td></tr>
+            ))}
+            <tr className="font-bold"><td className="py-1.5" colSpan={4}>Total material cost</td><td className="text-right tabular-nums">Tk {q2(budget.total)}</td></tr>
+          </tbody>
+        </table>
+        {budget.rateMissing && <div className="text-xs text-amber-700 mt-2">Some rates are 0 — fill them in and Save & recalculate to get the cost.</div>}
+      </div>
+      <div className="liquid-glass-inset rounded-2xl p-4 space-y-4">
+        <div className="font-bold text-slate-900">Mix and rod, per element</div>
+        <div className="grid gap-3 sm:grid-cols-3">
+          {(['beam', 'column', 'slab'] as Part[]).map((p) => (
+            <div key={p} className="space-y-2">
+              <div className="text-sm font-semibold">{PART_LABEL[p]}</div>
+              <label className={labelCls}>Mix (cement : sand : stone)</label>
+              <div className="flex gap-1.5">{[0, 1, 2].map((i) => <input key={i} disabled={!edit} className={inputCls} inputMode="decimal" value={cfg.mix[p][i]} aria-label={`${PART_LABEL[p]} mix ${i + 1}`} onChange={(e) => setMix(p, i, e.target.value)} />)}</div>
+              {field('Rod (kg per cft of concrete)', cfg.steelKgPerCft[p], (v) => onChange({ ...cfg, steelKgPerCft: { ...cfg.steelKgPerCft, [p]: num(v) } }), `${PART_LABEL[p]} rod kg per cft`)}
+            </div>
+          ))}
+        </div>
+        <div className="grid gap-3 sm:grid-cols-4">
+          {field('Cement bag volume (cft)', cfg.cementBagCft, (v) => onChange({ ...cfg, cementBagCft: num(v) }), 'Cement bag volume')}
+          {field('Dry volume factor', cfg.dryFactor, (v) => onChange({ ...cfg, dryFactor: num(v) }), 'Dry volume factor')}
+          {field('Waste — materials (%)', cfg.wastagePct, (v) => onChange({ ...cfg, wastagePct: num(v) }), 'Material waste')}
+          {field('Waste — rod (%)', cfg.steelWastagePct, (v) => onChange({ ...cfg, steelWastagePct: num(v) }), 'Rod waste')}
+        </div>
+        <ul className="text-xs text-slate-500 list-disc pl-5 space-y-0.5">{[...budget.notes, ...(budget.repeatsNote ? [budget.repeatsNote] : [])].map((n, i) => <li key={i}>{n}</li>)}</ul>
+      </div>
+    </div>
+  );
+};
+
 const SettingsTab: React.FC<{ d: Detail; settings: Settings; setS: (p: Partial<Settings>) => void; edit: boolean; onReset: () => void }> = ({ d, settings, setS, edit, onReset }) => {
   const num = (label: string, k: keyof Settings, hint?: string) => (
     <div><label className={labelCls}>{label}</label><input disabled={!edit} className={inputCls} inputMode="decimal" value={String(settings[k] ?? '')} onChange={(e) => setS({ [k]: Number(e.target.value) || 0 } as any)} />{hint && <div className="text-[11px] text-slate-400 mt-0.5">{hint}</div>}</div>
@@ -498,7 +574,7 @@ const SettingsTab: React.FC<{ d: Detail; settings: Settings; setS: (p: Partial<S
 // ---------------------------------------------------------------------------
 const fileBase = (t: string) => t.replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, '') || 'Measurement_Sheet';
 
-function exportExcel(title: string, sheets: SheetT[], settings: Settings) {
+function exportExcel(title: string, sheets: SheetT[], settings: Settings, budget?: BudgetOut) {
   const wb = XLSX.utils.book_new();
   sheets.forEach((sh) => {
     const aoa: any[][] = [[title], [sh.plan.title + (sh.repeats > 1 ? ` — x${sh.repeats} floors` : '')], []];
@@ -516,10 +592,21 @@ function exportExcel(title: string, sheets: SheetT[], settings: Settings) {
     ws['!cols'] = [{ wch: 52 }, { wch: 7 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 7 }, { wch: 30 }];
     XLSX.utils.book_append_sheet(wb, ws, sh.plan.title.replace(/[\\/?*[\]:]/g, ' ').slice(0, 31) || 'Plan');
   });
+  if (budget) {
+    const aoa: any[][] = [[title], ['Material Budget'], [], ['Element', 'Concrete (cft)', 'Cement (bag)', 'Sand (cft)', 'Stone (cft)', 'Rod (kg)', 'Shuttering (sft)']];
+    budget.parts.forEach((p) => aoa.push([p.label, p.concrete, p.cement, p.sand, p.stone, p.steel, p.shuttering]));
+    aoa.push([], ['Material', 'Qty', 'Unit', 'Rate (Tk)', 'Amount (Tk)']);
+    budget.lines.forEach((l) => aoa.push([l.label, l.qty, l.unit, l.rate, l.amount]));
+    aoa.push(['Total material cost', '', '', '', budget.total], []);
+    budget.notes.forEach((n) => aoa.push([n]));
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws['!cols'] = [{ wch: 30 }, { wch: 16 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 16 }];
+    XLSX.utils.book_append_sheet(wb, ws, 'Material Budget');
+  }
   XLSX.writeFile(wb, `${fileBase(title)}.xlsx`);
 }
 
-function exportPdf(title: string, fileName: string | null, sheets: SheetT[], settings: Settings) {
+function exportPdf(title: string, fileName: string | null, sheets: SheetT[], settings: Settings, budget?: BudgetOut) {
   const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
   sheets.forEach((sh, i) => {
     if (i > 0) doc.addPage();
@@ -548,5 +635,22 @@ function exportPdf(title: string, fileName: string | null, sheets: SheetT[], set
     if (y + lines.length * 10 > 560) { doc.addPage(); y = 40; }
     doc.text(lines, 40, y + 8);
   });
+  if (budget) {
+    doc.addPage();
+    doc.setFontSize(14); doc.setFont('helvetica', 'bold'); doc.text('Material Budget', 40, 40);
+    doc.setFontSize(10); doc.setFont('helvetica', 'normal'); doc.text(title, 40, 56);
+    autoTable(doc, {
+      startY: 70, head: [['Element', 'Concrete (cft)', 'Cement (bag)', 'Sand (cft)', 'Stone (cft)', 'Rod (kg)', 'Shuttering (sft)']],
+      body: budget.parts.map((p) => [p.label, q2(p.concrete), q2(p.cement), q2(p.sand), q2(p.stone), q2(p.steel), q2(p.shuttering)]),
+      styles: { fontSize: 8, cellPadding: 3 }, headStyles: { fillColor: [14, 116, 144] }, margin: { left: 40, right: 40 }
+    });
+    autoTable(doc, {
+      startY: (doc as any).lastAutoTable.finalY + 14, head: [['Material', 'Qty', 'Unit', 'Rate (Tk)', 'Amount (Tk)']],
+      body: [...budget.lines.map((l) => [l.label, q2(l.qty), l.unit, q2(l.rate), q2(l.amount)]), [{ content: 'Total material cost', colSpan: 4, styles: { fontStyle: 'bold', halign: 'right' } }, { content: q2(budget.total), styles: { fontStyle: 'bold' } }]],
+      styles: { fontSize: 8, cellPadding: 3 }, headStyles: { fillColor: [14, 116, 144] }, margin: { left: 40, right: 40 }
+    });
+    doc.setFontSize(8);
+    doc.text(doc.splitTextToSize(budget.notes.join('  •  '), 760), 40, (doc as any).lastAutoTable.finalY + 16);
+  }
   doc.save(`${fileBase(title)}.pdf`);
 }

@@ -331,7 +331,7 @@ const MAIL_ADMIN_LAYER_KEYS = ["read", "mail_open", "mail_password"] as const;
 // "roster_manage" = add / edit shifts and set who works which shift when.
 // Explicit-only — the no-saved-layers default is "read" alone.
 const DUTY_ROSTER_LAYER_KEYS = ["read", "roster_manage"] as const;
-const MEASUREMENT_LAYER_KEYS = ["read", "edit_add", "delete_trash"] as const;
+const MEASUREMENT_LAYER_KEYS = ["read", "edit_add", "delete_trash", "material_budget"] as const;
 // Document Vault: "read" = everything it did before (upload, view, send a
 // document for its own employee's signature); "sign_request" = ask anyone
 // else / several people in order to sign (ESignRoutes.ts). Explicit-only.
@@ -2241,7 +2241,7 @@ async function startServer() {
           ? grantedLayers
           : moduleKey === "tracking"
             ? [...TRACKING_DEFAULT_LAYERS]
-            : moduleKey === "payroll" || moduleKey === "office_attendance" || moduleKey === "conveyance" || moduleKey === "hr_operations" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "attendance_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "document_vault" || moduleKey === "measurement_sheet"
+            : moduleKey === "payroll" || moduleKey === "office_attendance" || moduleKey === "conveyance" || moduleKey === "hr_operations" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "attendance_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "document_vault"
               ? ["read"]
               : moduleKey === "mobile_bill"
                 ? [...MOBILE_BILL_LAYER_KEYS]
@@ -2269,7 +2269,7 @@ async function startServer() {
     const defaults: readonly string[] =
       moduleKey === "tracking"
         ? TRACKING_DEFAULT_LAYERS
-        : moduleKey === "payroll" || moduleKey === "office_attendance" || moduleKey === "conveyance" || moduleKey === "hr_operations" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "attendance_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "document_vault" || moduleKey === "measurement_sheet"
+        : moduleKey === "payroll" || moduleKey === "office_attendance" || moduleKey === "conveyance" || moduleKey === "hr_operations" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "attendance_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "document_vault"
           ? ["read"]
           : moduleKey === "mobile_bill"
             ? MOBILE_BILL_LAYER_KEYS
