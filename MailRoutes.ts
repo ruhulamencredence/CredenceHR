@@ -448,10 +448,10 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     const rows: any[] = (await queryDB("SELECT id, role FROM users WHERE id = ?", [target])) || [];
     if (!rows[0]) throw bad("Unknown mailbox owner.", 404);
     if (rows[0].role === "superadmin" && req.user.role !== "superadmin") throw bad("Only the Superadmin can open this mailbox.", 403);
-    // Only reading: nothing in the mailbox may change (a manual sync just
-    // fetches new mail).
+    // Only reading: nothing in the mailbox may change (a manual sync and a
+    // search on the mail server just fetch mail).
     const path = String(req.path || "");
-    if (req.method !== "GET" && !(req.method === "POST" && path === "/api/mail/sync")) throw bad("An opened mailbox is read only.", 403);
+    if (req.method !== "GET" && !(req.method === "POST" && (path === "/api/mail/sync" || path === "/api/mail/search-server"))) throw bad("An opened mailbox is read only.", 403);
     // One log line per person per mailbox every 30 minutes, not per click.
     const key = `${req.user.id}:${target}`;
     if (Date.now() - (lastOpenLog.get(key) || 0) > 30 * 60_000) {
@@ -1301,9 +1301,12 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
       }
       const q = str(req.query.q, 200);
       if (q) {
-        where.push("(subject LIKE ? OR from_name LIKE ? OR from_email LIKE ? OR to_json LIKE ? OR snippet LIKE ?)");
-        const t = `%${q}%`;
-        params.push(t, t, t, t, t);
+        // Each word on its own, anywhere in the mail (subject, people, text).
+        for (const word of q.split(/\s+/).filter(Boolean).slice(0, 8)) {
+          where.push("(subject LIKE ? OR from_name LIKE ? OR from_email LIKE ? OR to_json LIKE ? OR cc_json LIKE ? OR snippet LIKE ? OR body LIKE ?)");
+          const t = `%${word.replace(/[\\%_]/g, (c) => "\\" + c)}%`;
+          params.push(t, t, t, t, t, t, t);
+        }
       }
       const limit = Math.min(200, Math.max(1, Math.floor(Number(req.query.limit)) || 50));
       const page = Math.max(1, Math.floor(Number(req.query.page)) || 1);
@@ -1313,6 +1316,68 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
         queryDB(`SELECT ${LIST_COLS} FROM mail_messages WHERE ${w} ORDER BY mail_date DESC, id DESC LIMIT ${limit} OFFSET ${(page - 1) * limit}`, params)
       ]);
       res.json({ items: rows.map((r: any) => toApi(r, false)), total: Number(countRows[0]?.n || 0), unread: Number(countRows[0]?.unread || 0), page, limit });
+    })
+  );
+
+  // Search the mail server itself. A mailbox comes in with only its latest
+  // INITIAL_SYNC mails, so older mail could never be found from here.
+  // Matches not stored yet are fetched like any other mail (newest first,
+  // up to 50 a search); the list's own search then shows them.
+  const SERVER_SEARCH_MAX = 50;
+  app.post(
+    "/api/mail/search-server",
+    ...gate,
+    handler(async (req, res) => {
+      const q = str(req.body?.q, 200).trim();
+      const label = str(req.body?.label, 60) || "Inbox";
+      const roles = label === "Inbox" ? ["inbox"] : label === "Sent" ? ["sent"] : label === "Spam" ? ["junk"] : ["All", "Starred", "Important"].includes(label) ? ["inbox", "sent"] : [];
+      if (q.length < 2 || !roles.length) return res.json({ added: 0 });
+      const list = req.body?.accountId ? [await accountOf(uid(req), req.body.accountId)] : await accountsOf(uid(req));
+      let added = 0;
+      const errors: string[] = [];
+      for (const a of list) {
+        try {
+          const work = withAccountLock(Number(a.id), () =>
+            withImap(a, async (c) => {
+              const folders = await foldersOf(a, c);
+              for (const role of roles) {
+                const path = folders[role];
+                if (!path) continue;
+                const lock = await c.getMailboxLock(path);
+                try {
+                  // The mail server gets the longest word (IMAP can't AND several
+                  // either-or tests); the list's own search then needs every word.
+                  const word = q.split(/\s+/).filter(Boolean).sort((x, y) => y.length - x.length)[0];
+                  const found: any = await c.search({ or: [{ subject: word }, { from: word }, { to: word }, { body: word }] }, { uid: true }).catch(() => false);
+                  const uids: number[] = Array.isArray(found) ? found.map(Number) : [];
+                  if (!uids.length) continue;
+                  const have = new Set<number>();
+                  for (let i = 0; i < uids.length; i += 500) {
+                    const part = uids.slice(i, i + 500);
+                    const rows: any[] = await queryDB(
+                      `SELECT uid FROM mail_messages WHERE account_id = ? AND folder_role = ? AND uid IN (${part.map(() => "?").join(",")})`,
+                      [Number(a.id), role, ...part]
+                    );
+                    for (const r of rows) have.add(Number(r.uid));
+                  }
+                  const missing = uids.filter((u) => !have.has(u)).sort((x, y) => y - x).slice(0, SERVER_SEARCH_MAX);
+                  if (!missing.length) continue;
+                  const msgs: any[] = [];
+                  for await (const m of c.fetch(missing.join(","), { uid: true, envelope: true, flags: true, source: true, internalDate: true }, { uid: true })) msgs.push(m);
+                  for (const m of msgs) if (await storeFetched(a, role, m, false)) added++;
+                } finally {
+                  lock.release();
+                }
+              }
+            })
+          );
+          // A slow server: answer anyway; the mail still lands for the next look.
+          await Promise.race([work, new Promise((r) => setTimeout(r, 25_000))]);
+        } catch (e: any) {
+          errors.push(e?.status ? e.message : imapError(e));
+        }
+      }
+      res.json({ added, errors });
     })
   );
 
