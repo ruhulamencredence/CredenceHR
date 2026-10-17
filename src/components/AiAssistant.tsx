@@ -18,6 +18,7 @@ import type { User } from '../types';
 import { downloadAssistantExcel, downloadAssistantPdf, type AssistantReport } from '../lib/assistantReportExport';
 import { EmailReportButton, useCanEmailReports } from '../lib/reportEmail';
 import { LiveChat, SupportInbox, supportApi, useSupportSocket, type SupportMessage, type SupportSession } from './AssistantSupport';
+import { useIsPhone, useScrolling } from '../lib/useScrolling';
 
 interface Action { label: string; nav: string }
 // A leave application the Assistant filled in (AiAssistantRoutes.ts LeaveDraft).
@@ -208,6 +209,7 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
   const allowed = !!user && !user.is_onboarding && (user.role === 'superadmin' || user.can_use_ai_assistant !== false);
   const storeKey = user ? `credence_assistant_${user.id}` : '';
   const [open, setOpen] = useState(false);
+  const isPhone = useIsPhone();
   const [msgs, setMsgs] = useState<Msg[]>(() => {
     try {
       const raw = storeKey ? sessionStorage.getItem(storeKey) : null;
@@ -402,8 +404,13 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
 
   return (
     <>
+      {/* Phones: a small tab tucked against the right edge instead of a
+          round button over the page — drag it up / down (the place is
+          remembered), and it slides away while the page scrolls. */}
+      {!open && !hidden && isPhone && <EdgeTab count={waiting + unread} onOpen={() => setOpen(true)} />}
+
       {/* .liquid-glass-button sets position: relative, so the wrapper is what's fixed. */}
-      {!open && !hidden && (
+      {!open && !hidden && !isPhone && (
         <div className="assistant-fab fixed z-50 right-4 md:right-7 bottom-[calc(88px+env(safe-area-inset-bottom,0px))] md:bottom-[100px]">
           <button
             type="button"
@@ -607,3 +614,86 @@ export const AiAssistant: React.FC<Props> = ({ token, user, onNavigate, hidden }
 };
 
 export default AiAssistant;
+
+// ---- the phone edge tab ------------------------------------------------------
+const TAB_KEY = 'credence_assistant_tab_y';
+const TAB_H = 48;
+
+const EdgeTab: React.FC<{ count: number; onOpen: () => void }> = ({ count, onOpen }) => {
+  const scrolling = useScrolling();
+  // Distance from the bottom of the screen, so it stays put above the
+  // keyboard / bottom bars on any phone height.
+  const [bottom, setBottom] = useState<number>(() => {
+    try {
+      const v = Number(localStorage.getItem(TAB_KEY));
+      if (Number.isFinite(v) && v > 0) return v;
+    } catch {
+      // storage unavailable — the default place
+    }
+    return 132;
+  });
+  const drag = useRef<{ startY: number; startBottom: number; moved: boolean } | null>(null);
+  const justDragged = useRef(false);
+  const clamp = (b: number) => Math.min(window.innerHeight - TAB_H - 80, Math.max(72, b));
+  useEffect(() => {
+    const onResize = () => setBottom((b) => clamp(b));
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  return (
+    <div
+      className="assistant-fab assistant-edge-tab fixed z-50 right-0 transition-transform duration-300 ease-out"
+      style={{ bottom: `calc(${bottom}px + env(safe-area-inset-bottom, 0px))`, transform: scrolling && !drag.current ? 'translateX(110%)' : 'translateX(0)' }}
+    >
+      <button
+        type="button"
+        title="Credence Assistant — drag to move"
+        aria-label="Open Credence Assistant"
+        onPointerDown={(e) => {
+          drag.current = { startY: e.clientY, startBottom: bottom, moved: false };
+          (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+        }}
+        onPointerMove={(e) => {
+          const d = drag.current;
+          if (!d) return;
+          const dy = e.clientY - d.startY;
+          if (Math.abs(dy) > 6) d.moved = true;
+          if (d.moved) setBottom(clamp(d.startBottom - dy));
+        }}
+        onPointerUp={() => {
+          const d = drag.current;
+          drag.current = null;
+          justDragged.current = !!d?.moved;
+          if (d?.moved) {
+            try {
+              localStorage.setItem(TAB_KEY, String(Math.round(bottom)));
+            } catch {
+              // storage unavailable — the place just isn't remembered
+            }
+          }
+        }}
+        onPointerCancel={() => (drag.current = null)}
+        // Opens on the click (not on finger-up), so the click that follows a
+        // tap doesn't land on the Assistant's backdrop and close it again.
+        onClick={() => {
+          if (justDragged.current) {
+            justDragged.current = false;
+            return;
+          }
+          onOpen();
+        }}
+        className="liquid-glass-button w-10 rounded-l-2xl rounded-r-none flex items-center justify-center touch-none select-none shadow-lg"
+        style={{ height: TAB_H }}
+      >
+        <Sparkles className="w-[18px] h-[18px]" />
+      </button>
+      {count > 0 && (
+        <span className="absolute -top-1.5 left-[-6px] min-w-[18px] h-[18px] px-1 bg-rose-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center border-2 border-white pointer-events-none">
+          {count}
+        </span>
+      )}
+    </div>
+  );
+};
+
