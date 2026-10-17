@@ -223,6 +223,45 @@ export function registerMeasurementRoutes(app: Express, deps: RegisterMeasuremen
     }
   });
 
+  // Everything the reader found in the drawing, for the "Full drawing" preview:
+  // per layer one path of its lines / polylines / leaders (inches) and its texts.
+  app.get("/api/measurement-sheets/:id/drawing", ...canRead, async (req: any, res) => {
+    try {
+      const row = await load(req.params.id);
+      const raw = unpack(row.raw_gz);
+      const k = raw.inchPerUnit;
+      const f = (v: number) => Math.round(v * k * 10) / 10;
+      const layers = new Map<string, { name: string; d: string[]; texts: { t: string; x: number; y: number; h: number; r: number }[] }>();
+      const L = (name: string) => {
+        let l = layers.get(name);
+        if (!l) layers.set(name, (l = { name, d: [], texts: [] }));
+        return l;
+      };
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      const grow = (x: number, y: number) => { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; };
+      for (const l of raw.lines) { L(l.layer).d.push(`M${f(l.a.x)} ${f(l.a.y)}L${f(l.b.x)} ${f(l.b.y)}`); grow(f(l.a.x), f(l.a.y)); grow(f(l.b.x), f(l.b.y)); }
+      const path = (pts: { x: number; y: number }[], closed: boolean) => pts.map((p, i) => `${i ? "L" : "M"}${f(p.x)} ${f(p.y)}`).join("") + (closed ? "Z" : "");
+      for (const p of raw.polys) { if (p.pts.length > 1) { L(p.layer).d.push(path(p.pts, p.closed)); p.pts.forEach((q) => grow(f(q.x), f(q.y))); } }
+      for (const p of raw.leaders) { if (p.pts.length > 1) { L(p.layer).d.push(path(p.pts, false)); p.pts.forEach((q) => grow(f(q.x), f(q.y))); } }
+      for (const t of raw.texts) { L(t.layer).texts.push({ t: String(t.text).slice(0, 200), x: f(t.at.x), y: f(t.at.y), h: Math.max(1, f(t.height || 0)), r: Math.round(t.rotation || 0) }); }
+      if (!Number.isFinite(x0)) { x0 = y0 = 0; x1 = y1 = 100; }
+      // The main body of the drawing: stray notes or a title block far away would
+      // otherwise shrink the plan to a dot, so the first view ignores the outer 2%.
+      const xs: number[] = [], ys: number[] = [];
+      for (const l of raw.lines) { xs.push(f(l.a.x), f(l.b.x)); ys.push(f(l.a.y), f(l.b.y)); }
+      for (const p of raw.polys) for (const q of p.pts) { xs.push(f(q.x)); ys.push(f(q.y)); }
+      const pct = (a: number[], q: number) => { const v = [...a].sort((m, n) => m - n); return v.length ? v[Math.min(v.length - 1, Math.max(0, Math.floor(v.length * q)))] : 0; };
+      // First view: the beam plan(s) the sheet was made from, with a margin.
+      const plans = analyse(raw, normaliseSettings(parseJson(row.settings_json, {}))).plans;
+      const planBox = plans.length ? plans.reduce((m, p) => ({ x0: Math.min(m.x0, p.bbox.x0), y0: Math.min(m.y0, p.bbox.y0), x1: Math.max(m.x1, p.bbox.x1), y1: Math.max(m.y1, p.bbox.y1) }), { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity }) : null;
+      const mg = planBox ? Math.max(planBox.x1 - planBox.x0, planBox.y1 - planBox.y0) * 0.25 : 0;
+      const focus = planBox ? { x0: planBox.x0 - mg, y0: planBox.y0 - mg, x1: planBox.x1 + mg, y1: planBox.y1 + mg } : xs.length > 20 ? { x0: pct(xs, 0.02), x1: pct(xs, 0.98), y0: pct(ys, 0.02), y1: pct(ys, 0.98) } : { x0, y0, x1, y1 };
+      res.json({ bbox: { x0, y0, x1, y1 }, focus, layers: [...layers.values()].map((l) => ({ name: l.name, d: l.d.join(""), texts: l.texts })), notes: raw.notes });
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
   app.put("/api/measurement-sheets/:id", ...canEdit, async (req: any, res) => {
     try {
       const row = await load(req.params.id);
