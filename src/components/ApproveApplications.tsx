@@ -20,6 +20,7 @@ import { formatDate } from '../lib/formatDate';
 import { ApprovalHistory } from './ApprovalHistory';
 import { ClaimChangesNotice, ClaimReviewFields, ReclaimTick, ReturnButton } from './ClaimReviewBits';
 import { LoadingBlock } from './LoadingBlock';
+import { ApproverSignatureCard } from './ApproverSignatureCard';
 
 interface ApproveApplicationsProps {
   token: string;
@@ -417,6 +418,7 @@ useLiveRefresh(() => load(true));
           </>
         )}
 
+        <ApproverSignatureCard token={token} />
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
           <div className="flex items-center justify-between gap-3 px-6 py-5 border-b border-slate-100 flex-wrap">
             <div className="flex items-center gap-3">

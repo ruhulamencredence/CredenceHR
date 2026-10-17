@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import jsPDF from 'jspdf';
+import { loadBillApprovers, drawApproverBlock } from '../lib/approverSignatures';
 import autoTable from 'jspdf-autotable';
 import { Banknote, Filter, Printer, CheckSquare, Square, RotateCcw, X, ReceiptText } from 'lucide-react';
 import { ConveyanceBill, ConveyanceBillItem, User } from '../types';
@@ -282,15 +283,26 @@ export const DisbursementPanel: React.FC<DisbursementPanelProps> = ({ token, use
 
     // Signature lines — a Voucher is a physical payout receipt, so leave room
     // for both the person disbursing and the claimant receiving to sign.
-    const sigY = y + 32;
+    // Each approving Layer's signature (Bill Claim Policy -> "Put each approver's
+    // signature on the Bill and Voucher"); with none, the plain "Approved By" line.
+    const approvers = await loadBillApprovers(token, bill.id);
+    let sigY = y + 32;
+    if (approvers.length) {
+      const below = drawApproverBlock(doc, approvers, y + 16, 8, pageWidth - 8, { perRow: 3, title: 'Approved By' });
+      sigY = below + 14;
+      if (sigY > pageHeight - 20) {
+        doc.addPage();
+        sigY = 30;
+      }
+    }
     doc.setDrawColor(120, 120, 120);
     doc.setLineWidth(0.2);
     doc.line(8, sigY, 62, sigY);
-    doc.line(pageWidth / 2 - 27, sigY, pageWidth / 2 + 27, sigY);
+    if (!approvers.length) doc.line(pageWidth / 2 - 27, sigY, pageWidth / 2 + 27, sigY);
     doc.line(pageWidth - 62, sigY, pageWidth - 8, sigY);
     doc.setFontSize(7.5);
     doc.text('Prepared By', 35, sigY + 4, { align: 'center' });
-    doc.text('Approved By', pageWidth / 2, sigY + 4, { align: 'center' });
+    if (!approvers.length) doc.text('Approved By', pageWidth / 2, sigY + 4, { align: 'center' });
     doc.text('Received By (Claimant)', pageWidth - 35, sigY + 4, { align: 'center' });
 
     finalizePdfPageNumbers(doc);

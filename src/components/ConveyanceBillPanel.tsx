@@ -18,6 +18,7 @@ import { formatDate, todayDateOnlyString } from '../lib/formatDate';
 import credenceLogo from '../assets/credence-logo.png';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
 import { savePdfCrossPlatform } from '../lib/saveFile';
+import { loadBillApprovers, drawApproverBlock } from '../lib/approverSignatures';
 import { EmailReportButton, emailReport, useCanEmailReports } from '../lib/reportEmail';
 import { UserClaimStatusBadge } from './UserClaimStatusBadge';
 import ClaimLocationMap from './ClaimLocationMap';
@@ -388,15 +389,26 @@ export const ConveyanceBillPanel: React.FC<ConveyanceBillPanelProps> = ({ token,
     // Signature lines — a Conveyance Bill is a physical claim document, so leave
     // room for the Claimant/Approver to sign the printed copy.
     const pageWidth = doc.internal.pageSize.getWidth();
-    const sigY = finalY + 30;
+    // Each approving Layer's signature (Bill Claim Policy -> "Put each approver's
+    // signature on the Bill and Voucher"); with none, the plain "Approved By" line.
+    const approvers = await loadBillApprovers(token, bill.id);
+    let sigY = finalY + 30;
+    if (approvers.length) {
+      const below = drawApproverBlock(doc, approvers, finalY + 16, 14, pageWidth - 14, { perRow: 3, title: 'Approved By' });
+      sigY = below + 14;
+      if (sigY > doc.internal.pageSize.getHeight() - 20) {
+        doc.addPage();
+        sigY = 30;
+      }
+    }
     doc.setDrawColor(148, 163, 184);
     doc.setLineWidth(0.2);
     doc.line(14, sigY, 74, sigY);
-    doc.line(pageWidth - 74, sigY, pageWidth - 14, sigY);
+    if (!approvers.length) doc.line(pageWidth - 74, sigY, pageWidth - 14, sigY);
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8);
     doc.text('Claimant\'s Signature', 14, sigY + 4);
-    doc.text('Approved By', pageWidth - 74, sigY + 4);
+    if (!approvers.length) doc.text('Approved By', pageWidth - 74, sigY + 4);
 
     finalizePdfPageNumbers(doc);
     const filename = `Conveyance_Bill_${bill.id}_${bill.user_name?.replace(/\s+/g, '_') || 'user'}.pdf`;

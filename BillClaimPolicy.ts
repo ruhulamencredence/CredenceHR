@@ -151,6 +151,14 @@ export const POLICY_DEFS: PolicyDef[] = [
     default: true
   },
   {
+    key: "approver_signature",
+    group: "review",
+    label: "Put each approver's signature on the Bill and Voucher",
+    help: "When a Layer approves a claim, that approver's saved signature (Approve Application → My signature) is kept with that approval and printed under \"Approved By\" on the Conveyance Bill and Payment Voucher PDFs, with their name, Layer and the date. An approver with no saved signature is printed by name only.",
+    type: "boolean",
+    default: false
+  },
+  {
     key: "decision_reason_required",
     group: "review",
     label: "A reason is required to Return or Reject",

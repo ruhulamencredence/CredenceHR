@@ -474,6 +474,54 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
     }
   });
 
+  // Who approved the claims on this bill, Layer by Layer, with the signature each
+  // kept when approving (Bill Claim Policy -> "Put each approver's signature on
+  // the Bill and Voucher"; off -> enabled:false and nothing else). One entry per
+  // approver and Layer even when several claims on the bill went through the
+  // same people. For the "Approved By" block of the Bill and Payment Voucher PDFs.
+  app.get("/api/conveyance-bills/:id/approver-signatures", authenticateToken, requireAdmin, requireAnyModule(["conveyance", "disbursement"]), async (req, res) => {
+    try {
+      const policy = await loadPolicy(queryDB);
+      if (!policy.approver_signature) return res.json({ enabled: false, approvers: [] });
+      const items: any[] = (await queryDB("SELECT user_claim_id FROM conveyance_bill_items WHERE bill_id = ?", [req.params.id])) || [];
+      const ucIds = [...new Set(items.map((it) => Number(it.user_claim_id)).filter((v) => v > 0))];
+      if (!ucIds.length) return res.json({ enabled: true, approvers: [] });
+      const ph = ucIds.map(() => "?").join(",");
+      const requests: any[] = (await queryDB(`SELECT * FROM approval_requests WHERE source_type = 'user_claim' AND source_id IN (${ph})`, ucIds)) || [];
+      const reqIds = requests.map((r) => Number(r.id));
+      const sigs: any[] = reqIds.length ? (await queryDB(`SELECT * FROM claim_approval_signatures WHERE approval_request_id IN (${reqIds.map(() => "?").join(",")})`, reqIds).catch(() => [])) || [] : [];
+      const tmplIds = [...new Set(requests.map((r) => Number(r.template_id)).filter((v) => v > 0))];
+      const steps: any[] = tmplIds.length ? (await queryDB(`SELECT template_id, step_order, label FROM approval_template_steps WHERE template_id IN (${tmplIds.map(() => "?").join(",")})`, tmplIds)) || [] : [];
+      const out = new Map<string, any>();
+      for (const r of requests) {
+        let actions: any[] = [];
+        try { actions = JSON.parse(r.actions_json || "[]"); } catch { actions = []; }
+        const offset = Number(r.supervisor_step_user_id) > 0 ? 1 : 0;
+        for (const a of actions) {
+          if (a.action !== "approved") continue;
+          const step = Number(a.step_order);
+          const key = `${step}:${a.approver_id}`;
+          const sig = sigs.find((x) => Number(x.approval_request_id) === Number(r.id) && Number(x.step_order) === step && Number(x.approver_user_id) === Number(a.approver_id));
+          const prev = out.get(key);
+          if (prev && (prev.image || !sig)) continue;
+          const tmpl = steps.find((t) => Number(t.template_id) === Number(r.template_id) && Number(t.step_order) === step - offset);
+          const img = sig?.image ? (Buffer.isBuffer(sig.image) ? sig.image : Buffer.from(sig.image)) : null;
+          out.set(key, {
+            step_order: step,
+            label: step === 1 && offset ? "Supervisor" : tmpl?.label || `Layer ${step}`,
+            approver_id: Number(a.approver_id),
+            approver_name: a.approver_name || null,
+            approved_at: a.acted_at || null,
+            image: img ? `data:image/png;base64,${img.toString("base64")}` : null
+          });
+        }
+      }
+      res.json({ enabled: true, approvers: [...out.values()].sort((x, y) => x.step_order - y.step_order || String(x.approver_name).localeCompare(String(y.approver_name))) });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // "New Bill" is gone: a bill is made only when a Conveyance Bill Claim is
   // approved through its chain. To claim for someone else, use
   // POST /api/user-claims/on-behalf/:userId (that claim gets approved like

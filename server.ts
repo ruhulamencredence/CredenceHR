@@ -980,6 +980,21 @@ async function performApprovalAction(
     JSON.stringify(actions),
     requestId
   ]);
+  // Conveyance Bill Claim: keep this approver's signature with this approval
+  // (Bill Claim Policy -> "Put each approver's signature…"); never blocks the approval.
+  if (request.source_type === "user_claim" && action === "approved" && claimPolicy?.approver_signature) {
+    try {
+      const sig: any[] = (await queryDB("SELECT image FROM user_signatures WHERE user_id = ?", [actorUser.id])) || [];
+      if (sig[0]?.image) {
+        await queryDB(
+          "INSERT INTO claim_approval_signatures (approval_request_id, step_order, approver_user_id, image, signed_at) VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE image = VALUES(image), signed_at = VALUES(signed_at)",
+          [requestId, Number(request.current_step), actorUser.id, sig[0].image, new Date()]
+        );
+      }
+    } catch (sigErr: any) {
+      console.warn("⚠️ Could not keep the approver's signature for approval #" + requestId + ": " + sigErr.message);
+    }
+  }
   // Open pages of the requester (Ride Status, My Leave…) and the approver's
   // other tabs refresh at once, even when this layer sends no alert.
   notifyRecordChanged([Number(request.requested_by), Number(actorUser.id)], { type: "approval", relatedType: request.source_type, relatedId: Number(request.source_id) });
