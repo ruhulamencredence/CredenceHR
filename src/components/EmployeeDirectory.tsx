@@ -12,6 +12,7 @@ import {
 import { User, Department, EmployeeDirectoryEntry } from '../types';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
+import { fetchPhoto } from './UserAvatar';
 import { ModulePath } from './ModulePath';
 import { registerHeaderSearch, unregisterHeaderSearch, setHeaderSearchBarHidden } from '../lib/headerSearch';
 
@@ -103,7 +104,7 @@ const photoUrlCache = new Map<number, string | null>();
 // (Self Service -> Personal Data, same source as the Navbar/GlobalSidebar
 // avatar) via GET /api/profile/photo/:userId, falling back to the initials
 // Avatar while loading, when the employee has no linked user_id, or when
-// they simply haven't uploaded a photo (404).
+// they simply haven't uploaded a photo (204).
 const EmployeePhoto: React.FC<{
   userId: number | null;
   token: string;
@@ -116,23 +117,10 @@ const EmployeePhoto: React.FC<{
   useEffect(() => {
     if (!userId || photoUrlCache.has(userId)) return;
     let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch(apiUrl(`/api/profile/photo/${userId}`), {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        if (!res.ok) {
-          photoUrlCache.set(userId, null);
-          return;
-        }
-        const blob = await res.blob();
-        const objectUrl = URL.createObjectURL(blob);
-        photoUrlCache.set(userId, objectUrl);
-        if (!cancelled) setUrl(objectUrl);
-      } catch {
-        photoUrlCache.set(userId, null);
-      }
-    })();
+    fetchPhoto(userId, token).then((objectUrl) => {
+      photoUrlCache.set(userId, objectUrl);
+      if (!cancelled) setUrl(objectUrl);
+    });
     return () => {
       cancelled = true;
     };

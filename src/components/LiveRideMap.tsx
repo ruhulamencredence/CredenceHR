@@ -172,7 +172,7 @@ export function LiveRideMap({ requisitionId, onClose }: LiveRideMapProps) {
     const token = localStorage.getItem('mpr_token');
     for (const id of ids) {
       fetch(apiUrl(`/api/profile/photo/${id}`), { headers: { Authorization: `Bearer ${token}` } })
-        .then((r) => (r.ok ? r.blob() : null))
+        .then((r) => (r.ok && r.status !== 204 ? r.blob() : null))
         .then((blob) => {
           if (cancelled) return;
           setPhotos((prev) => ({ ...prev, [id]: blob && blob.size > 0 ? URL.createObjectURL(blob) : null }));

@@ -34,7 +34,7 @@ export function useProfilePhoto(token: string, version: number = 0): string | nu
         const res = await fetch(apiUrl('/api/profile/photo'), {
           headers: { Authorization: `Bearer ${token}` }
         });
-        if (!res.ok || cancelled) return;
+        if (!res.ok || res.status === 204 || cancelled) return;
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
         if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);

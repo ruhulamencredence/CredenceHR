@@ -33,16 +33,16 @@ const urlCache = new Map<number, string | null>();
 const inflight = new Map<number, Promise<string | null>>();
 const listeners = new Set<() => void>();
 
-function fetchPhoto(userId: number, token: string): Promise<string | null> {
+export function fetchPhoto(userId: number, token: string): Promise<string | null> {
   if (urlCache.has(userId)) return Promise.resolve(urlCache.get(userId)!);
   const running = inflight.get(userId);
   if (running) return running;
   const p = (async () => {
     try {
       const res = await fetch(apiUrl(`/api/profile/photo/${userId}`), { headers: { Authorization: `Bearer ${token}` } });
-      if (!res.ok) {
-        // 404 = no photo yet. Other errors (offline, 5xx) aren't cached so the next render retries.
-        if (res.status === 404) urlCache.set(userId, null);
+      if (!res.ok || res.status === 204) {
+        // 204 (404 on older servers) = no photo yet. Other errors (offline, 5xx) aren't cached so the next render retries.
+        if (res.status === 204 || res.status === 404) urlCache.set(userId, null);
         return null;
       }
       const url = URL.createObjectURL(await res.blob());

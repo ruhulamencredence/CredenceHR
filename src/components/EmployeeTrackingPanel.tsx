@@ -204,7 +204,7 @@ export const EmployeeTrackingPanel: React.FC<EmployeeTrackingPanelProps> = ({ to
             headers: { Authorization: `Bearer ${token}` }
           });
           if (cancelled) return;
-          if (!res.ok) {
+          if (!res.ok || res.status === 204) {
             photoUrlsRef.current[userId] = null;
           } else {
             const blob = await res.blob();
