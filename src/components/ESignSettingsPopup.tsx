@@ -10,7 +10,7 @@
 // off. The history and the server seal are always on.
 
 import React, { useEffect, useState } from 'react';
-import { Settings2, Loader2, Save, KeyRound, BookOpenCheck, History, ShieldCheck, BadgeCheck, Download } from 'lucide-react';
+import { Settings2, Loader2, Save, KeyRound, BookOpenCheck, History, ShieldCheck, BadgeCheck, Download, Mail, CheckCircle2, Circle } from 'lucide-react';
 import { MailPopup as Popup, ghostBtn, Toggle } from './mail/MailPopup';
 import { esignFetch, type ESignCertInfo } from '../lib/esign';
 import { apiUrl } from '../lib/api';
@@ -24,6 +24,8 @@ interface Settings {
   seal_ready: boolean;
   doc_types: string[];
   pki_sign: boolean;
+  email_signed: boolean;
+  setup: { key: string; label: string; ok: boolean; fix: string; needed: boolean }[];
   certificate: ESignCertInfo | null;
   certificate_error: string | null;
   cert_from_env: boolean;
@@ -37,6 +39,7 @@ export const ESignSettingsPopup: React.FC<{ token: string; onClose: () => void; 
   const [types, setTypes] = useState<Set<string>>(new Set());
   const [read, setRead] = useState(false);
   const [pki, setPki] = useState(false);
+  const [emailSigned, setEmailSigned] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   useEffect(() => {
@@ -48,6 +51,7 @@ export const ESignSettingsPopup: React.FC<{ token: string; onClose: () => void; 
         setTypes(new Set(r.otp_doc_types));
         setRead(r.require_read);
         setPki(r.pki_sign);
+        setEmailSigned(r.email_signed);
       })
       .catch((e) => setError(e.message));
   }, [token]);
@@ -56,7 +60,7 @@ export const ESignSettingsPopup: React.FC<{ token: string; onClose: () => void; 
     setBusy(true);
     setError('');
     try {
-      await esignFetch(token, '/api/esign/settings', { method: 'PUT', body: { otp_required: otp, otp_doc_types: allTypes ? [] : [...types], require_read: read, pki_sign: pki } });
+      await esignFetch(token, '/api/esign/settings', { method: 'PUT', body: { otp_required: otp, otp_doc_types: allTypes ? [] : [...types], require_read: read, pki_sign: pki, email_signed: emailSigned } });
       onSaved('E-Signature settings saved.');
     } catch (e: any) {
       setError(e.message);
@@ -101,6 +105,31 @@ export const ESignSettingsPopup: React.FC<{ token: string; onClose: () => void; 
       ) : (
         s && (
           <div className="space-y-4">
+            <div className="liquid-glass-inset rounded-2xl p-3 space-y-2">
+              <div className="flex items-center justify-between gap-2 text-sm font-semibold text-slate-800">
+                <span>{s.setup.every((x) => x.ok || !x.needed) ? 'Setup: ready to use' : 'Setup: a few things left'}</span>
+                <span className="text-[11px] font-normal text-slate-500">{s.setup.filter((x) => x.ok).length} of {s.setup.length} done</span>
+              </div>
+              <ul className="space-y-1.5">
+                {s.setup.map((x) => (
+                  <li key={x.key} className="flex items-start gap-2 text-xs">
+                    {x.ok ? <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-px" /> : <Circle className={`w-4 h-4 shrink-0 mt-px ${x.needed ? 'text-rose-500' : 'text-amber-500'}`} />}
+                    <span className="min-w-0">
+                      <span className={x.ok ? 'text-slate-600' : 'text-slate-900 font-semibold'}>{x.label}</span>
+                      {!x.ok && <span className="block text-[11px] text-slate-500">{x.fix}</span>}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <p className="text-[11px] text-slate-500">Signing already works without the switches below; turn them on one at a time when you need them.</p>
+            </div>
+            <div className="liquid-glass-inset rounded-2xl p-3 space-y-2">
+              <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                <Mail className="w-4 h-4 text-blue-600" /> Email the signed PDF
+              </div>
+              <Toggle checked={emailSigned} onChange={setEmailSigned} label="When everyone has signed, email the signed PDF to the employee" hint="Goes to the employee's Credence Mail mailbox (or the email on their account), as an attachment." />
+              {!s.email_ready && <p className="text-[11px] px-3 py-2 rounded-xl bg-amber-50 text-amber-800">Email isn't set up on the server yet (SMTP_HOST / SMTP_USER / SMTP_PASS), so this can't be turned on.</p>}
+            </div>
             <div className="liquid-glass-inset rounded-2xl p-3 space-y-3">
               <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
                 <KeyRound className="w-4 h-4 text-blue-600" /> Sign-in code (OTP)
