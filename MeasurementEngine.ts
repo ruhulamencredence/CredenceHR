@@ -80,7 +80,12 @@ let libP: Promise<any> | null = null;
 async function lib() {
   if (!libP) {
     libP = (async () => {
-      const mod: any = await import("@mlightcad/libredwg-web");
+      let mod: any;
+      try {
+        mod = await import("@mlightcad/libredwg-web");
+      } catch {
+        throw Object.assign(new Error("The drawing reader is not installed on this server. Run `npm install` in the project folder, restart the server, and try again."), { statusCode: 500 });
+      }
       const dir = process.env.MS_LIBREDWG_WASM || path.join(process.cwd(), "node_modules", "@mlightcad", "libredwg-web", "wasm") + path.sep;
       return { LibreDwg: mod.LibreDwg, Dwg_File_Type: mod.Dwg_File_Type, instance: await mod.LibreDwg.create(dir) };
     })();
