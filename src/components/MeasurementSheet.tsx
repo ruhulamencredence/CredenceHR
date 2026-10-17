@@ -58,6 +58,7 @@ interface BudgetCfg {
 }
 interface BudgetOut {
   repeatsNote: string; total: number; rateMissing: boolean; notes: string[];
+  base: Record<Part, { concrete: number; shuttering: number }>;
   parts: { key: Part; label: string; concrete: number; cement: number; sand: number; stone: number; steel: number; shuttering: number }[];
   lines: { key: string; label: string; qty: number; unit: string; rate: number; amount: number }[];
 }
@@ -230,8 +231,8 @@ const SheetView: React.FC<{ token: string; id: number; onBack: () => void }> = (
         <button type="button" className="liquid-glass-chip p-2 rounded-full" onClick={onBack} aria-label="Back"><ArrowLeft className="w-4 h-4" /></button>
         {edit ? <input className={`${inputCls} !w-auto flex-1 min-w-[10rem] max-w-md font-semibold`} value={title} onChange={(e) => { setTitle(e.target.value); setDirty(true); }} aria-label="Title" /> : <h2 className="text-lg font-bold text-slate-900">{d.title}</h2>}
         <div className="flex-1" />
-        <button type="button" className={ghostBtn} onClick={() => exportExcel(d.title, d.sheets, settings, d.budget)}><FileSpreadsheet className="w-4 h-4 inline mr-1" />Excel</button>
-        <button type="button" className={ghostBtn} onClick={() => exportPdf(d.title, d.file_name, d.sheets, settings, d.budget)}><FileText className="w-4 h-4 inline mr-1" />PDF</button>
+        <button type="button" className={ghostBtn} onClick={() => exportExcel(d.title, d.sheets, settings, d.budget && bcfg ? liveBudget(d.budget, bcfg) : d.budget)}><FileSpreadsheet className="w-4 h-4 inline mr-1" />Excel</button>
+        <button type="button" className={ghostBtn} onClick={() => exportPdf(d.title, d.file_name, d.sheets, settings, d.budget && bcfg ? liveBudget(d.budget, bcfg) : d.budget)}><FileText className="w-4 h-4 inline mr-1" />PDF</button>
         {d.can_delete && <button type="button" className="liquid-glass-chip p-2 rounded-full text-red-600" onClick={remove} aria-label="Delete sheet"><Trash2 className="w-4 h-4" /></button>}
       </div>
       {err && <div className="mb-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl px-3 py-2">{err}</div>}
@@ -534,7 +535,27 @@ const SlabsTab: React.FC<{ plan: Plan; edit: boolean; ov: Overrides; setO: (fn: 
 );
 
 const PART_LABEL: Record<Part, string> = { beam: 'Beams', column: 'Columns & walls', slab: 'Slab' };
-const BudgetTab: React.FC<{ budget: BudgetOut; cfg: BudgetCfg; edit: boolean; onChange: (c: BudgetCfg) => void }> = ({ budget, cfg, edit, onChange }) => {
+// The same sums as the server's buildBudget, so figures follow the typing at once.
+const r2c = (v: number) => Math.round(v * 100) / 100;
+function liveBudget(b: BudgetOut, c: BudgetCfg): BudgetOut {
+  const w = 1 + c.wastagePct / 100, ws = 1 + c.steelWastagePct / 100;
+  const parts = b.parts.map((p) => {
+    const [x, y, z] = c.mix[p.key];
+    const sum = (x + y + z) || 1;
+    const base = b.base[p.key];
+    const dry = base.concrete * c.dryFactor;
+    return { ...p, concrete: r2c(base.concrete), cement: r2c(((dry * (x / sum)) / (c.cementBagCft || 1)) * w), sand: r2c(dry * (y / sum) * w), stone: r2c(dry * (z / sum) * w), steel: r2c(base.concrete * c.steelKgPerCft[p.key] * ws), shuttering: r2c(base.shuttering * w) };
+  });
+  const tot = (f: (p: (typeof parts)[number]) => number) => r2c(parts.reduce((t, p) => t + f(p), 0));
+  const lines = b.lines.map((l) => {
+    const qty = l.key === 'cement' ? tot((p) => p.cement) : l.key === 'sand' ? tot((p) => p.sand) : l.key === 'stone' ? tot((p) => p.stone) : l.key === 'steel' ? tot((p) => p.steel) : tot((p) => p.shuttering);
+    const rate = c.rates[l.key as keyof BudgetCfg['rates']] || 0;
+    return { ...l, qty, rate, amount: r2c(qty * rate) };
+  });
+  return { ...b, parts, lines, total: r2c(lines.reduce((t, l) => t + l.amount, 0)), rateMissing: lines.some((l) => l.rate === 0) };
+}
+const BudgetTab: React.FC<{ budget: BudgetOut; cfg: BudgetCfg; edit: boolean; onChange: (c: BudgetCfg) => void }> = ({ budget: saved, cfg, edit, onChange }) => {
+  const budget = useMemo(() => liveBudget(saved, cfg), [saved, cfg]);
   const num = (v: string) => (v.trim() === '' || !Number.isFinite(Number(v)) ? 0 : Number(v));
   const setRate = (k: keyof BudgetCfg['rates'], v: string) => onChange({ ...cfg, rates: { ...cfg.rates, [k]: num(v) } });
   const setMix = (p: Part, i: number, v: string) => { const m = [...cfg.mix[p]] as [number, number, number]; m[i] = num(v); onChange({ ...cfg, mix: { ...cfg.mix, [p]: m } }); };
@@ -569,7 +590,7 @@ const BudgetTab: React.FC<{ budget: BudgetOut; cfg: BudgetCfg; edit: boolean; on
             <tr className="font-bold"><td className="py-1.5" colSpan={4}>Total material cost</td><td className="text-right tabular-nums">Tk {q2(budget.total)}</td></tr>
           </tbody>
         </table>
-        {budget.rateMissing && <div className="text-xs text-amber-700 mt-2">Some rates are 0 — fill them in and Save & recalculate to get the cost.</div>}
+        {budget.rateMissing && <div className="text-xs text-amber-700 mt-2">Some rates are 0 — fill them in to get the cost, then Save to keep them.</div>}
       </div>
       <div className="liquid-glass-inset rounded-2xl p-4 space-y-4">
         <div className="font-bold text-slate-900">Mix and rod, per element</div>

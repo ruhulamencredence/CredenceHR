@@ -949,6 +949,8 @@ export interface Budget {
   total: number;
   rateMissing: boolean;
   notes: string[];
+  /** Measured concrete (cft) and shuttering (sft) before waste: the client re-works the budget from these as the person types. */
+  base: Record<BudgetPart, { concrete: number; shuttering: number }>;
 }
 
 export function buildBudget(sheets: Sheet[], ovs: Record<string, Overrides>, cfgIn: any): Budget {
@@ -1003,6 +1005,7 @@ export function buildBudget(sheets: Sheet[], ovs: Record<string, Overrides>, cfg
     lines,
     total: r2(lines.reduce((t, l) => t + l.amount, 0)),
     rateMissing: lines.some((l) => l.rate === 0),
+    base,
     notes: [
       `Cement, sand and stone from the mix ratio of each element (dry volume = ${c.dryFactor} x wet concrete, one cement bag = ${c.cementBagCft} cft), plus ${c.wastagePct}% waste.`,
       `Rod is an estimate from kg per cft of concrete (+${c.steelWastagePct}% waste) — the exact figure comes from the bar bending schedule.`,
