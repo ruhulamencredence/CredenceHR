@@ -7,7 +7,8 @@
 // (HR Operations -> Letters) or an exit's Clearance Certificate / Settlement
 // Sheet. The page's own PDF becomes a Document Vault document linked to it
 // (POST /api/esign/sources, ESignRoutes.ts) and the usual Signatures popup
-// opens to pick the signers. Needs Document Vault access: the list call is
+// opens to pick the signers (a letter starts with its issuer, signing on the
+// letter's own signature line). Needs Document Vault access: the list call is
 // refused without it, and then no button is shown at all.
 
 import React, { useCallback, useEffect, useState } from 'react';
@@ -69,12 +70,14 @@ export const SendForSigningButton: React.FC<{
   state: SignSourceState | null;
   ownerName: string | null;
   docType: string;
-  // Makes the same PDF the page downloads.
-  makePdf: () => Promise<{ bytes: Uint8Array; fileName: string }>;
+  // Makes the same PDF the page downloads (and where its signature line is).
+  makePdf: () => Promise<{ bytes: Uint8Array; fileName: string; signBox?: { page: number; x: number; y: number; w: number; h: number } }>;
+  // Who signs, in order, when it is sent for the first time (default: the employee).
+  initialSigners?: { user_id: number; label: string; on_line?: boolean }[] | null;
   onChanged: () => void;
   onError: (message: string) => void;
   compact?: boolean;
-}> = ({ token, sourceType, sourceId, state, ownerName, docType, makePdf, onChanged, onError, compact }) => {
+}> = ({ token, sourceType, sourceId, state, ownerName, docType, makePdf, initialSigners, onChanged, onError, compact }) => {
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState<{ docId: number; ownerId: number } | null>(null);
   const status: SignStatus = state?.sign_status || 'none';
@@ -92,10 +95,10 @@ export const SendForSigningButton: React.FC<{
         const d = await esignFetch<ESignDoc>(token, `/api/esign/documents/${state.document_id}`);
         setOpen({ docId: d.id, ownerId: d.owner_id });
       } else {
-        const { bytes, fileName } = await makePdf();
+        const { bytes, fileName, signBox } = await makePdf();
         const d = await esignFetch<ESignDoc>(token, '/api/esign/sources', {
           method: 'POST',
-          body: { source_type: sourceType, source_id: sourceId, file_base64: toBase64(bytes), file_name: fileName, doc_type: docType }
+          body: { source_type: sourceType, source_id: sourceId, file_base64: toBase64(bytes), file_name: fileName, doc_type: docType, sign_box: signBox || null }
         });
         setOpen({ docId: d.id, ownerId: d.owner_id });
       }
@@ -128,6 +131,7 @@ export const SendForSigningButton: React.FC<{
           docId={open.docId}
           ownerId={open.ownerId}
           ownerName={ownerName}
+          initialSigners={initialSigners}
           onClose={() => {
             setOpen(null);
             onChanged();

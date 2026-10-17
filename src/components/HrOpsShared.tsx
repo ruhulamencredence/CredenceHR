@@ -72,6 +72,8 @@ export interface HrLetter {
   cancelled_reason: string | null;
   issued_by_name: string | null;
   hr_action_id: number | null;
+  // The employee's login account (E-Signature).
+  employee_user_id?: number | null;
 }
 
 export function useHrApi(token: string) {
@@ -313,6 +315,12 @@ export const companyFromSettings = (s: Record<string, string>): LetterPdfCompany
 export async function letterPdfBytes(company: LetterPdfCompany, l: { ref_no: string; letter_date: string | null; subject: string; body: string; acknowledged_at?: string | null; employee_name?: string }, draft = false) {
   const doc = await buildLetterPdf({ company, ref_no: l.ref_no, letter_date: l.letter_date, subject: l.subject, body: l.body, draft, acknowledged_at: l.acknowledged_at, employee_name: l.employee_name });
   return new Uint8Array(doc.output('arraybuffer'));
+}
+// The same PDF plus where its signature line is, to send for e-signature.
+export async function letterPdfForSigning(company: LetterPdfCompany, l: { ref_no: string; letter_date: string | null; subject: string; body: string; acknowledged_at?: string | null; employee_name?: string }) {
+  let signBox: { page: number; x: number; y: number; w: number; h: number } | undefined;
+  const doc = await buildLetterPdf({ company, ref_no: l.ref_no, letter_date: l.letter_date, subject: l.subject, body: l.body, acknowledged_at: l.acknowledged_at, employee_name: l.employee_name, onSignBox: (b) => (signBox = b) });
+  return { bytes: new Uint8Array(doc.output('arraybuffer')), signBox };
 }
 export async function saveLetterPdf(company: LetterPdfCompany, l: { ref_no: string; letter_date: string | null; subject: string; body: string; acknowledged_at?: string | null; employee_name?: string }) {
   const doc = await buildLetterPdf({ company, ref_no: l.ref_no, letter_date: l.letter_date, subject: l.subject, body: l.body, acknowledged_at: l.acknowledged_at, employee_name: l.employee_name });

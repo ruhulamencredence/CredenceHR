@@ -45,6 +45,22 @@ const CompanySettings: React.FC<{ token: string; meta: HrOpsMeta; onSaved: () =>
         <div className="sm:col-span-2">{f('company_address', 'Company address (letterhead)')}</div>
         {f('signatory_name', 'Signatory name', 'e.g. Md. Karim, Head of HR')}
         {f('signatory_designation', 'Signatory designation')}
+        <div className="sm:col-span-2">
+          <label className={labelCls}>Signatory account (e-signature)</label>
+          <select value={s.signatory_user_id || ''} onChange={(e) => setS({ ...s, signatory_user_id: e.target.value })} className={inputCls}>
+            <option value="">— None (letters are sent to the employee to sign) —</option>
+            {meta.users
+              .filter((u) => u.role !== 'superadmin' || String(u.id) === s.signatory_user_id)
+              .map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.name}
+                </option>
+              ))}
+          </select>
+          <p className="text-[11px] text-slate-500 mt-1">
+            The person above, as a login account. Letters sent for signing from Letters go to them first and their signature goes on the letter's signature line; salary / experience certificates, NOC, release and bank letters are signed by them only. Turn on "Documents to Sign" for them in Module Access.
+          </p>
+        </div>
         {f('default_probation_months', 'Default probation (months)', '6')}
       </div>
       <div>

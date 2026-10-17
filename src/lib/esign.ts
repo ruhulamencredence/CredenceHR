@@ -19,6 +19,8 @@ export interface ESignSigner {
   signed_name: string | null;
   signed_at: string | null;
   decline_reason: string | null;
+  // Signs on the document's own signature line.
+  on_line?: boolean;
 }
 export interface ESignDoc {
   id: number;
@@ -49,6 +51,8 @@ export interface ESignDoc {
   // Made in HR Operations -> Letters or Exit / Offboarding.
   source_type?: string | null;
   source_id?: number | null;
+  // The PDF says where its own signature line is.
+  has_sign_box?: boolean;
 }
 export interface ESignCertInfo {
   source: 'file' | 'self_signed';
