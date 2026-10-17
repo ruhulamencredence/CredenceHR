@@ -255,7 +255,7 @@ const SheetView: React.FC<{ token: string; id: number; onBack: () => void }> = (
       )}
       <Tabs tabs={[{ key: 'sheet', label: 'Measurement sheet' }, { key: 'plan', label: 'Plan' }, { key: 'beams', label: 'Beams' }, { key: 'slabs', label: 'Slabs' }, ...(d.can_budget && d.budget ? [{ key: 'budget', label: 'Material Budget' }] : []), { key: 'settings', label: 'Settings' }]} value={tab} onChange={setTab} />
       {tab === 'sheet' && <SheetTable sheet={sheet} edit={edit} extra={o.extra || []} onExtra={(extra) => setO((x) => ({ ...x, extra }))} />}
-      {tab === 'plan' && <PlanView plan={plan} tagOf={tagOf} picked={picked} setPicked={setPicked} ov={o} />}
+      {tab === 'plan' && <PlanView token={token} id={id} plan={plan} tagOf={tagOf} picked={picked} setPicked={setPicked} ov={o} />}
       {tab === 'beams' && <BeamsTab plan={plan} edit={edit} ov={o} setO={setO} tagOf={tagOf} settings={settings} picked={picked} />}
       {tab === 'slabs' && <SlabsTab plan={plan} edit={edit} ov={o} setO={setO} settings={settings} />}
       {tab === 'budget' && d.can_budget && d.budget && bcfg && <BudgetTab budget={d.budget} cfg={bcfg} edit={edit} onChange={(c) => { setBcfg(c); setDirty(true); }} />}
@@ -352,7 +352,59 @@ const ExtraPopup: React.FC<{ onClose: () => void; onAdd: (e: Extra) => void }> =
 };
 
 // ---------------------------------------------------------------------------
-const PlanView: React.FC<{ plan: Plan; tagOf: (b: Beam) => string | null; picked: string | null; setPicked: (id: string | null) => void; ov: Overrides }> = ({ plan, tagOf, picked, setPicked, ov }) => {
+interface DrawingData { bbox: { x0: number; y0: number; x1: number; y1: number }; focus: { x0: number; y0: number; x1: number; y1: number }; layers: { name: string; d: string; texts: { t: string; x: number; y: number; h: number; r: number }[] }[]; notes: string[] }
+const layerColor = (n: string) => `hsl(${hue(n)} 55% 38%)`;
+
+// The whole drawing as the reader found it: every layer's lines and texts, with
+// wheel / pinch zoom and drag to move.
+const boxOf = (b: { x0: number; y0: number; x1: number; y1: number }) => { const p = Math.max(b.x1 - b.x0, b.y1 - b.y0, 1) * 0.04; return { x: b.x0 - p, y: -b.y1 - p, w: b.x1 - b.x0 + 2 * p, h: b.y1 - b.y0 + 2 * p }; };
+const FullDrawing: React.FC<{ token: string; id: number }> = ({ token, id }) => {
+  const [data, setData] = useState<DrawingData | null>(null);
+  const [err, setErr] = useState('');
+  const [off, setOff] = useState<Set<string>>(new Set());
+  const [vb, setVb] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  const [drag, setDrag] = useState<{ cx: number; cy: number; vx: number; vy: number } | null>(null);
+  useEffect(() => { api<DrawingData>(token, `/api/measurement-sheets/${id}/drawing`).then((r) => { setData(r); setVb(boxOf(r.focus)); }).catch((e) => setErr(e.message)); }, [token, id]);
+  if (err) return <div className="text-sm text-red-700">{err}</div>;
+  if (!data || !vb) return <div className="py-10 text-center text-slate-500"><Loader2 className="w-5 h-5 animate-spin inline" /></div>;
+  const zoom = (f: number, cx = 0.5, cy = 0.5) => setVb((v) => v && ({ x: v.x + v.w * cx * (1 - f), y: v.y + v.h * cy * (1 - f), w: v.w * f, h: v.h * f }));
+  const stroke = vb.w / 900;
+  return (
+    <div>
+      <div className="flex flex-wrap gap-1.5 mb-2">
+        {data.layers.map((l) => { const on = !off.has(l.name); return (
+          <button key={l.name} type="button" onClick={() => setOff((p) => { const n = new Set(p); on ? n.add(l.name) : n.delete(l.name); return n; })} className={`text-xs px-2.5 py-1 rounded-full border ${on ? 'bg-white text-slate-800 border-slate-300' : 'bg-slate-100 text-slate-400 border-slate-200 line-through'}`}>
+            <span className="inline-block w-2 h-2 rounded-full mr-1.5" style={{ background: layerColor(l.name) }} />{l.name}
+          </button>); })}
+      </div>
+      <div className="liquid-glass-inset rounded-2xl p-1 relative overflow-hidden">
+        <div className="absolute right-3 top-3 z-10 flex gap-1">
+          <button type="button" className="liquid-glass-chip px-2.5 py-1 rounded-full text-sm" onClick={() => zoom(0.7)} aria-label="Zoom in">+</button>
+          <button type="button" className="liquid-glass-chip px-2.5 py-1 rounded-full text-sm" onClick={() => zoom(1 / 0.7)} aria-label="Zoom out">−</button>
+          <button type="button" className="liquid-glass-chip px-3 py-1 rounded-full text-xs" onClick={() => setVb(boxOf(data.focus))}>Fit</button>
+          <button type="button" className="liquid-glass-chip px-3 py-1 rounded-full text-xs" onClick={() => setVb(boxOf(data.bbox))}>All</button>
+        </div>
+        <svg viewBox={`${vb.x} ${vb.y} ${vb.w} ${vb.h}`} className="w-full h-[70vh] bg-white rounded-xl touch-none select-none" role="img" aria-label="Full drawing preview"
+          style={{ cursor: drag ? 'grabbing' : 'grab' }}
+          onWheel={(e) => { const r = e.currentTarget.getBoundingClientRect(); zoom(e.deltaY > 0 ? 1.15 : 1 / 1.15, (e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height); }}
+          onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); setDrag({ cx: e.clientX, cy: e.clientY, vx: vb.x, vy: vb.y }); }}
+          onPointerMove={(e) => { if (!drag) return; const r = e.currentTarget.getBoundingClientRect(); setVb({ ...vb, x: drag.vx - ((e.clientX - drag.cx) / r.width) * vb.w, y: drag.vy - ((e.clientY - drag.cy) / r.height) * vb.h }); }}
+          onPointerUp={() => setDrag(null)}>
+          {data.layers.filter((l) => !off.has(l.name)).map((l) => (
+            <g key={l.name} stroke={layerColor(l.name)} fill="none" strokeWidth={stroke}>
+              <path d={l.d} transform="scale(1,-1)" vectorEffect="non-scaling-stroke" strokeWidth={1} />
+              {l.texts.map((t, i) => <text key={i} x={t.x} y={-t.y} fontSize={Math.max(t.h, vb.w / 400)} fill={layerColor(l.name)} stroke="none" transform={t.r ? `rotate(${-t.r} ${t.x} ${-t.y})` : undefined}>{t.t}</text>)}
+            </g>
+          ))}
+        </svg>
+      </div>
+      <p className="text-xs text-slate-500 mt-2">The drawing as the reader found it: lines, polylines, leaders and texts. Turn layers on or off above; scroll or +/− to zoom, drag to move. Arcs, circles, hatches, dimensions and blocks are not drawn here.{data.notes.length ? ` ${data.notes.join(' ')}` : ''}</p>
+    </div>
+  );
+};
+
+const PlanView: React.FC<{ token: string; id: number; plan: Plan; tagOf: (b: Beam) => string | null; picked: string | null; setPicked: (id: string | null) => void; ov: Overrides }> = ({ token, id, plan, tagOf, picked, setPicked, ov }) => {
+  const [mode, setMode] = useState<'found' | 'full'>('found');
   const { x0, y0, x1, y1 } = plan.bbox;
   const pad = 30;
   const W = x1 - x0 + pad * 2, H = y1 - y0 + pad * 2;
@@ -362,6 +414,12 @@ const PlanView: React.FC<{ plan: Plan; tagOf: (b: Beam) => string | null; picked
   const skipped = new Set(ov.skipBeams || []);
   return (
     <div>
+      <div className="mb-2 inline-flex liquid-glass-inset rounded-full p-1 gap-1">
+        {([['found', 'Beams, columns & slab'], ['full', 'Full drawing']] as const).map(([k, label]) => (
+          <button key={k} type="button" onClick={() => setMode(k)} className={`text-xs font-semibold px-3 py-1.5 rounded-full ${mode === k ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600'}`}>{label}</button>
+        ))}
+      </div>
+      {mode === 'full' ? <FullDrawing token={token} id={id} /> : (<>
       <div className="liquid-glass-inset rounded-2xl p-2 overflow-auto">
         <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto min-w-[640px]" role="img" aria-label="Plan preview">
           {plan.panels.map((p) => {
@@ -384,6 +442,7 @@ const PlanView: React.FC<{ plan: Plan; tagOf: (b: Beam) => string | null; picked
         </svg>
       </div>
       <p className="text-xs text-slate-500 mt-2">Beams are coloured by their tag; <span className="text-red-600 font-semibold">red</span> = no tag. Tap a beam to select it in the Beams tab. Black = columns / walls, blue wash = slab panels.</p>
+      </>)}
     </div>
   );
 };
