@@ -502,6 +502,41 @@ export const CredenceMail: React.FC<{
     }
   }, [token, accountFilter, status?.enabled, accounts.length]);
 
+  // Search as you type (a short pause after the last key); Enter searches at once.
+  useEffect(() => {
+    const next = qInput.trim();
+    if (next === q) return;
+    const t = setTimeout(() => {
+      setQ(next);
+      setSelectedId(null);
+    }, 450);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qInput]);
+
+  // Older mail than the mailbox brought in when it was connected is only on
+  // the mail server: look there too, once per search, and show what it finds.
+  const [serverSearch, setServerSearch] = useState<'' | 'busy' | 'done'>('');
+  const serverSearchKey = useRef('');
+  useEffect(() => {
+    const key = `${folder}|${accountFilter}|${q}`;
+    serverSearchKey.current = key;
+    if (!status?.enabled || !accounts.length || q.length < 2 || !['Inbox', 'Sent', 'Spam', 'All', 'Starred', 'Important'].includes(folder)) {
+      setServerSearch('');
+      return;
+    }
+    setServerSearch('busy');
+    // Not cancelled by the list reloading meanwhile — only a newer search wins.
+    mailFetch<{ added: number }>(token, '/search-server', { method: 'POST', body: { q, label: folder, accountId: accountFilter || undefined } })
+      .then((r) => {
+        if (serverSearchKey.current !== key) return;
+        setServerSearch('done');
+        if (r.added > 0) refreshRef.current();
+      })
+      .catch(() => serverSearchKey.current === key && setServerSearch('done'));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q, folder, accountFilter, status?.enabled, accounts.length]);
+
   useEffect(() => {
     setChecked(new Set());
     void loadList();
@@ -1035,6 +1070,9 @@ export const CredenceMail: React.FC<{
           <div className="text-xs text-slate-500 px-1">
             {q ? `Results for “${q}” in ${folderTitle}` : folderTitle}
             {list ? ` · ${list.total}` : ''}
+            {q && serverSearch === 'busy' && (
+              <span className="inline-flex items-center gap-1 ml-2 text-slate-400"><Loader2 className="w-3 h-3 animate-spin" /> looking for older mail on the server…</span>
+            )}
           </div>
         )}
       </div>
