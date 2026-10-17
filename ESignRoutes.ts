@@ -165,6 +165,7 @@ export async function ensureESignSchema(dbPool: any): Promise<void> {
       FOREIGN KEY (document_id) REFERENCES employee_documents(id) ON DELETE CASCADE
     )`
   );
+  await run("esign_settings.email_signed", "ALTER TABLE esign_settings ADD COLUMN email_signed TINYINT(1) NOT NULL DEFAULT 0", ["ER_DUP_FIELDNAME"]);
   await run("esign_settings.pki_sign", "ALTER TABLE esign_settings ADD COLUMN pki_sign TINYINT(1) NOT NULL DEFAULT 0", ["ER_DUP_FIELDNAME"]);
   await ensureESignCertificateSchema(dbPool);
   await run("document_signers.on_line", "ALTER TABLE document_signers ADD COLUMN on_line TINYINT(1) NOT NULL DEFAULT 0", ["ER_DUP_FIELDNAME", "ER_NO_SUCH_TABLE"]);
@@ -526,7 +527,9 @@ export const EVENT_LABEL: Record<string, string> = {
   completed: "Signed by everyone — signed PDF made",
   downloaded: "Downloaded the signed PDF",
   verified_view: "Looked up on the verify page",
-  verified_check: "A copy was checked on the verify page"
+  verified_check: "A copy was checked on the verify page",
+  emailed: "Signed PDF emailed to the employee",
+  email_failed: "Signed PDF could not be emailed"
 };
 export const reqMeta = (req: any) => ({
   ip: req ? String(req.headers?.["x-forwarded-for"] || req.socket?.remoteAddress || "").split(",")[0].trim().slice(0, 64) || null : null,
@@ -609,6 +612,23 @@ export function registerESignRoutes(app: Express, deps: RegisterESignRoutesDeps)
     if (userId) await createAlert(queryDB, { userId: Number(userId), type: "document_sign", title, message, relatedType: "employee_document", relatedId: docId });
   };
 
+  // What is still missing before e-signature works well, with what to do.
+  async function setupChecklist() {
+    const hs: any[] = (await queryDB("SELECT setting_value FROM hr_ops_settings WHERE setting_key = 'signatory_user_id'").catch(() => [])) || [];
+    const sigId = Number(hs[0]?.setting_value) || 0;
+    const sig: any[] = sigId ? (await queryDB("SELECT id, role, can_sign_documents FROM users WHERE id = ?", [sigId]).catch(() => [])) || [] : [];
+    const sigOk = !!sig[0] && (sig[0].role === "superadmin" || Number(sig[0].can_sign_documents) === 1);
+    const cnt: any[] = (await queryDB("SELECT COUNT(*) AS n FROM users WHERE can_sign_documents = 1").catch(() => [{ n: 0 }])) || [];
+    const baseUrl = String(process.env.PUBLIC_APP_URL || "").trim();
+    return [
+      { key: "email", label: "Email on the server (for codes and emailing signed PDFs)", ok: isMailerConfigured(), fix: "Put SMTP_HOST, SMTP_USER, SMTP_PASS (and SMTP_FROM) in the server's .env and restart.", needed: false },
+      { key: "url", label: "Public address (for the QR code on signed PDFs)", ok: !!baseUrl, fix: "Put PUBLIC_APP_URL in the server's .env (e.g. https://hr.yourcompany.com) and restart.", needed: true },
+      { key: "seal", label: "Server seal key", ok: !!sealKey(), fix: "Put a long random ESIGN_SEAL_KEY in the server's .env (openssl rand -hex 32) and restart. Never change it later.", needed: true },
+      { key: "signatory", label: !sigId ? "Letter signatory chosen" : sig[0] ? "Letter signatory can sign (Documents to Sign on)" : "Letter signatory (that account no longer exists)", ok: sigOk, fix: !sigId || !sig[0] ? "HR Operations → Settings → Company & Letter No. → Signatory account." : "Admin Panel → Users → the signatory → Module Access → turn on Documents to Sign.", needed: false },
+      { key: "signers", label: "Someone has Documents to Sign turned on", ok: Number(cnt[0]?.n) > 0, fix: "Admin Panel → Users → Manage → Module Access → Also allow Documents to Sign.", needed: true }
+    ];
+  }
+
   // ---- settings (esign_settings, one row per company; all off by default) ----
   async function loadSettings() {
     const rows: any[] = (await queryDB("SELECT * FROM esign_settings LIMIT 1").catch(() => [])) || [];
@@ -623,8 +643,17 @@ export function registerESignRoutes(app: Express, deps: RegisterESignRoutesDeps)
       otp_required: Number(r?.otp_required) === 1,
       otp_doc_types: Array.isArray(types) ? types.map(String) : [],
       require_read: Number(r?.require_read) === 1,
-      pki_sign: Number(r?.pki_sign) === 1
+      pki_sign: Number(r?.pki_sign) === 1,
+      email_signed: Number(r?.email_signed) === 1
     };
+  }
+  // The mailbox a person reads in Credence Mail (their default one first),
+  // else the email on their account — where codes and signed PDFs go.
+  const okMail = (v: any) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(v || "").trim());
+  async function mailboxOf(userId: number): Promise<string> {
+    const boxes: any[] = (await queryDB("SELECT email FROM mail_accounts WHERE user_id = ? ORDER BY is_default DESC, id", [userId]).catch(() => [])) || [];
+    const u: any[] = (await queryDB("SELECT email FROM users WHERE id = ?", [userId]).catch(() => [])) || [];
+    return String(boxes.find((b) => okMail(b.email))?.email || (okMail(u[0]?.email) ? u[0].email : "")).trim();
   }
   // ---- certificate (ESignCertificate.ts) ----
   const companyName = async () => {
@@ -1128,6 +1157,29 @@ export function registerESignRoutes(app: Express, deps: RegisterESignRoutesDeps)
           [pdf, signedSha, now, chain.head, sealOf(signedSha, chain.head, doc.verify_code), pki?.info.subject ?? null, pki?.info.issuer ?? null, pki ? (pki.info.self_signed ? 1 : 0) : null, id]
         );
         await logDocEvent(queryDB, id, "completed", { detail: `Signed PDF SHA-256 ${signedSha}${pkiNote}` });
+        // "Email the signed PDF to the employee" (E-Signature settings): sent
+        // in the background — a mail problem never undoes or delays the signing.
+        if (settings.email_signed && isMailerConfigured()) {
+          const ownerId = Number(doc.user_id);
+          const pdfBytes = pdf;
+          void (async () => {
+            try {
+              const to = await mailboxOf(ownerId);
+              if (!to) throw new Error("the employee has no mailbox or email");
+              const esc = (v: any) => String(v ?? "").replace(/[<>&]/g, "");
+              const sent = await sendMail({
+                to,
+                subject: `${doc.doc_type} — signed copy`,
+                html: `<div style="font-family:Arial,sans-serif;font-size:14px;color:#1e1b4b"><p>Hello ${esc(owner?.name)},</p><p>Your <b>${esc(doc.doc_type)}</b> has been signed. The signed PDF is attached.</p><p>Anyone can check it is genuine at <a href="${esc(publicBase(req))}/verify/${esc(doc.verify_code)}">${esc(publicBase(req))}/verify/${esc(doc.verify_code)}</a> (code ${esc(doc.verify_code)}).</p></div>`,
+                attachments: [{ filename: `${String(doc.file_name || "document").replace(/\.[^.]+$/, "").replace(/[^\w .()-]+/g, "_")} (signed).pdf`, content: pdfBytes, contentType: "application/pdf" }]
+              });
+              if (!sent.success) throw new Error(sent.error || "send failed");
+              await logDocEvent(queryDB, id, "emailed", { detail: `To ${maskEmail(to)}` });
+            } catch (err: any) {
+              await logDocEvent(queryDB, id, "email_failed", { detail: String(err?.message || err).slice(0, 200) });
+            }
+          })();
+        }
         const tell = new Set<number>([Number(doc.user_id), Number(doc.sign_requested_by)].filter(Boolean));
         for (const uid of tell) await notify(uid, "Document signed by everyone", `${doc.doc_type} of ${owner?.name || "an employee"} is signed. The signed PDF is ready.`, id);
       }
@@ -1167,6 +1219,7 @@ export function registerESignRoutes(app: Express, deps: RegisterESignRoutesDeps)
         can_edit: await hasModuleLayer(req.user, "document_vault", "esign_settings"),
         email_ready: isMailerConfigured(),
         seal_ready: !!sealKey(),
+        setup: await setupChecklist(),
         ...(await (async () => {
           try {
             return { certificate: certView(await certificate(false)), certificate_error: null as string | null, cert_from_env: certFromEnvConfigured() };
@@ -1189,6 +1242,8 @@ export function registerESignRoutes(app: Express, deps: RegisterESignRoutesDeps)
       const read = !!req.body?.require_read;
       // Not sent by an older screen -> keep what is saved.
       const pkiOn = req.body?.pki_sign === undefined ? (await loadSettings()).pki_sign : !!req.body.pki_sign;
+      const emailOn = req.body?.email_signed === undefined ? (await loadSettings()).email_signed : !!req.body.email_signed;
+      if (emailOn && !isMailerConfigured()) throw bad("Email isn't set up on the server (SMTP_HOST / SMTP_USER / SMTP_PASS in .env), so signed PDFs can't be emailed. Set it up first.");
       if (pkiOn) {
         // Turning it on makes sure there is a certificate that works (the
         // company's self-signed one is made now when none is set in .env).
@@ -1202,8 +1257,8 @@ export function registerESignRoutes(app: Express, deps: RegisterESignRoutesDeps)
         if (c.info.expired) throw bad(`The certificate expired on ${c.info.valid_to.slice(0, 10)} — put a new one in ESIGN_CERT_FILE.`);
       }
       const cur: any[] = (await queryDB("SELECT id FROM esign_settings LIMIT 1").catch(() => [])) || [];
-      if (cur.length) await queryDB("UPDATE esign_settings SET otp_required = ?, otp_doc_types = ?, require_read = ?, pki_sign = ?, updated_by = ? WHERE id = ?", [otp ? 1 : 0, JSON.stringify(types), read ? 1 : 0, pkiOn ? 1 : 0, req.user.id, Number(cur[0].id)]);
-      else await queryDB("INSERT INTO esign_settings (otp_required, otp_doc_types, require_read, pki_sign, updated_by) VALUES (?, ?, ?, ?, ?)", [otp ? 1 : 0, JSON.stringify(types), read ? 1 : 0, pkiOn ? 1 : 0, req.user.id]);
+      if (cur.length) await queryDB("UPDATE esign_settings SET otp_required = ?, otp_doc_types = ?, require_read = ?, pki_sign = ?, email_signed = ?, updated_by = ? WHERE id = ?", [otp ? 1 : 0, JSON.stringify(types), read ? 1 : 0, pkiOn ? 1 : 0, emailOn ? 1 : 0, req.user.id, Number(cur[0].id)]);
+      else await queryDB("INSERT INTO esign_settings (otp_required, otp_doc_types, require_read, pki_sign, email_signed, updated_by) VALUES (?, ?, ?, ?, ?, ?)", [otp ? 1 : 0, JSON.stringify(types), read ? 1 : 0, pkiOn ? 1 : 0, emailOn ? 1 : 0, req.user.id]);
       res.json(await loadSettings());
     } catch (err) {
       fail(res, err);
@@ -1243,9 +1298,7 @@ export function registerESignRoutes(app: Express, deps: RegisterESignRoutesDeps)
       const u: any[] = (await queryDB("SELECT email, name FROM users WHERE id = ?", [me])) || [];
       // The code goes to the mailbox the person reads in Credence Mail (their
       // default one first); only without one, to the email on their account.
-      const boxes: any[] = (await queryDB("SELECT email FROM mail_accounts WHERE user_id = ? ORDER BY is_default DESC, id", [me]).catch(() => [])) || [];
-      const okMail = (v: any) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(v || "").trim());
-      const email = String(boxes.find((b) => okMail(b.email))?.email || (okMail(u[0]?.email) ? u[0].email : "")).trim();
+      const email = await mailboxOf(me);
       if (!email) throw bad("There is no mailbox to send the code to. Connect your mailbox in Credence Mail first (Self Service → Credence Mail), or ask HR to add an email to your account.");
       const code = String(crypto.randomInt(0, 1_000_000)).padStart(6, "0");
       const r: any = await queryDB(
