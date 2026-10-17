@@ -399,7 +399,7 @@ const FullDrawing: React.FC<{ token: string; id: number }> = ({ token, id }) => 
           ))}
         </svg>
       </div>
-      <p className="text-xs text-slate-500 mt-2">The drawing as the reader found it: lines, polylines, leaders and texts. Turn layers on or off above; scroll or +/− to zoom, drag to move. Arcs, circles, hatches, dimensions and blocks are not drawn here.{data.notes.length ? ` ${data.notes.join(' ')}` : ''}</p>
+      <p className="text-xs text-slate-500 mt-2">The drawing as the reader found it: lines, polylines, leaders and texts. Turn layers on or off above; scroll or +/− to zoom, drag to move. Hatches, dimensions and blocks are not drawn here.{data.notes.length ? ` ${data.notes.join(' ')}` : ''}</p>
     </div>
   );
 };

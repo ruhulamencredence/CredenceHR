@@ -242,6 +242,17 @@ export function registerMeasurementRoutes(app: Express, deps: RegisterMeasuremen
       for (const l of raw.lines) { L(l.layer).d.push(`M${f(l.a.x)} ${f(l.a.y)}L${f(l.b.x)} ${f(l.b.y)}`); grow(f(l.a.x), f(l.a.y)); grow(f(l.b.x), f(l.b.y)); }
       const path = (pts: { x: number; y: number }[], closed: boolean) => pts.map((p, i) => `${i ? "L" : "M"}${f(p.x)} ${f(p.y)}`).join("") + (closed ? "Z" : "");
       for (const p of raw.polys) { if (p.pts.length > 1) { L(p.layer).d.push(path(p.pts, p.closed)); p.pts.forEach((q) => grow(f(q.x), f(q.y))); } }
+      // Circles and arcs are drawn as short straight pieces (a piece every ~10 degrees).
+      const arcPath = (c: { x: number; y: number }, r: number, a0: number, a1: number) => {
+        let sweep = a1 - a0;
+        while (sweep <= 0) sweep += Math.PI * 2;
+        const n = Math.max(2, Math.ceil(sweep / (Math.PI / 18)));
+        let d = "";
+        for (let i = 0; i <= n; i++) { const a = a0 + (sweep * i) / n; d += `${i ? "L" : "M"}${f(c.x + r * Math.cos(a))} ${f(c.y + r * Math.sin(a))}`; }
+        return d;
+      };
+      for (const ci of raw.circles || []) { L(ci.layer).d.push(arcPath(ci.c, ci.r, 0, Math.PI * 2 - 1e-6) + "Z"); grow(f(ci.c.x - ci.r), f(ci.c.y - ci.r)); grow(f(ci.c.x + ci.r), f(ci.c.y + ci.r)); }
+      for (const ar of raw.arcs || []) { L(ar.layer).d.push(arcPath(ar.c, ar.r, ar.a0, ar.a1)); grow(f(ar.c.x - ar.r), f(ar.c.y - ar.r)); grow(f(ar.c.x + ar.r), f(ar.c.y + ar.r)); }
       for (const p of raw.leaders) { if (p.pts.length > 1) { L(p.layer).d.push(path(p.pts, false)); p.pts.forEach((q) => grow(f(q.x), f(q.y))); } }
       for (const t of raw.texts) { L(t.layer).texts.push({ t: String(t.text).slice(0, 200), x: f(t.at.x), y: f(t.at.y), h: Math.max(1, f(t.height || 0)), r: Math.round(t.rotation || 0) }); }
       if (!Number.isFinite(x0)) { x0 = y0 = 0; x1 = y1 = 100; }

@@ -44,6 +44,9 @@ export interface RawLine { layer: string; a: Pt; b: Pt }
 export interface RawPoly { layer: string; pts: Pt[]; closed: boolean }
 export interface RawText { layer: string; text: string; at: Pt; height: number; rotation: number }
 export interface RawLeader { layer: string; pts: Pt[] }
+export interface RawCircle { layer: string; c: Pt; r: number }
+/** Angles in radians, counter-clockwise from a0 to a1. */
+export interface RawArc { layer: string; c: Pt; r: number; a0: number; a1: number }
 export interface RawDrawing {
   /** Name of one drawing unit in inches (1 = the drawing is in inches, 12 = feet, 1/25.4 = mm). */
   inchPerUnit: number;
@@ -52,6 +55,9 @@ export interface RawDrawing {
   polys: RawPoly[];
   texts: RawText[];
   leaders: RawLeader[];
+  /** Circles and arcs (older saved drawings have none until they are uploaded again). */
+  circles?: RawCircle[];
+  arcs?: RawArc[];
   layers: { name: string; lines: number; polys: number; texts: number; leaders: number }[];
   notes: string[];
 }
@@ -126,7 +132,7 @@ export async function readDrawing(file: Buffer, kind: "dwg" | "dxf" = "dwg"): Pr
     unit = UNITS[1];
     notes.push(`The drawing does not say what unit it is in (INSUNITS ${insUnits}); inches are assumed. Change it in the settings if the sizes look wrong.`);
   }
-  const raw: RawDrawing = { inchPerUnit: unit[1], unitName: unit[0], lines: [], polys: [], texts: [], leaders: [], layers: [], notes };
+  const raw: RawDrawing = { inchPerUnit: unit[1], unitName: unit[0], lines: [], polys: [], texts: [], leaders: [], circles: [], arcs: [], layers: [], notes };
   const stats = new Map<string, { name: string; lines: number; polys: number; texts: number; leaders: number }>();
   const st = (l: string) => {
     if (!stats.has(l)) stats.set(l, { name: l, lines: 0, polys: 0, texts: 0, leaders: 0 });
@@ -164,6 +170,24 @@ export async function readDrawing(file: Buffer, kind: "dwg" | "dxf" = "dwg"): Pr
         if (pts.length >= 2) {
           raw.leaders.push({ layer, pts });
           st(layer).leaders++;
+        }
+        break;
+      }
+      case "CIRCLE": {
+        const r = num(e.radius);
+        if (r > 0 && e.center) {
+          raw.circles!.push({ layer, c: pt(e.center), r });
+          st(layer).polys++;
+        }
+        break;
+      }
+      case "ARC": {
+        const r = num(e.radius);
+        if (r > 0 && e.center) {
+          let a0 = num(e.startAngle), a1 = num(e.endAngle);
+          if (Math.abs(a0) > 6.4 || Math.abs(a1) > 6.4) { a0 = (a0 * Math.PI) / 180; a1 = (a1 * Math.PI) / 180; } // degrees
+          raw.arcs!.push({ layer, c: pt(e.center), r, a0, a1 });
+          st(layer).polys++;
         }
         break;
       }
@@ -257,6 +281,8 @@ export interface Column {
   w: number;
   d: number;
   kind: "column" | "wall";
+  /** A circle on the column layer: w = d = its diameter. */
+  round?: boolean;
 }
 export interface Panel {
   id: string;
@@ -481,6 +507,14 @@ export function analyse(raw: RawDrawing, settingsIn: Partial<MsSettings> = {}): 
     const w = x1 - x0, d = y1 - y0;
     if (Math.min(w, d) < 6 || Math.max(w, d) > 160 || w * d > 5000) continue;
     colsAll.push({ id: "", x0, y0, x1, y1, w, d, kind: Math.max(w, d) > 60 ? "wall" : "column" });
+  }
+
+  for (const ci of raw.circles || []) {
+    if (!colLayerSet.has(ci.layer)) continue;
+    const dia = ci.r * 2 * k;
+    if (dia < 6 || dia > 60) continue;
+    const cx = ci.c.x * k, cy = ci.c.y * k;
+    colsAll.push({ id: "", x0: cx - dia / 2, y0: cy - dia / 2, x1: cx + dia / 2, y1: cy + dia / 2, w: dia, d: dia, kind: "column", round: true });
   }
 
   // ---- plans: clusters of beam segments ----
@@ -822,22 +856,23 @@ export function buildSheet(plan: Plan, settingsIn: Partial<MsSettings>, ov: Over
     const rows: SheetRow[] = [];
     const skipC = new Set(ov.skipColumns || []);
     const cols = plan.columns.filter((c) => !skipC.has(c.id));
-    const sizeKey = (c: Column) => `${c.kind}:${Math.round(Math.max(c.w, c.d))}x${Math.round(Math.min(c.w, c.d))}`;
+    const sizeKey = (c: Column) => c.round ? `round:${Math.round(c.w)}x${Math.round(c.w)}` : `${c.kind}:${Math.round(Math.max(c.w, c.d))}x${Math.round(Math.min(c.w, c.d))}`;
     const groups = [...new Set(cols.map(sizeKey))].sort();
     let totC = 0, totS = 0;
     for (const g of groups) {
       const list = cols.filter((c) => sizeKey(c) === g);
       const [kind, sz] = g.split(":");
       const [a, bb] = sz.split("x").map(Number);
-      rows.push({ id: `h-${g}`, desc: `${kind === "wall" ? "RCC wall" : "Column"} ${a}"x${bb}"`, nos: 0, l: null, b: null, d: null, qty: 0, unit: "cft", kind: "head" });
+      const round = kind === "round";
+      rows.push({ id: `h-${g}`, desc: round ? `Round column Ø${a}"` : `${kind === "wall" ? "RCC wall" : "Column"} ${a}"x${bb}"`, nos: 0, l: null, b: null, d: null, qty: 0, unit: "cft", kind: "head" });
       let qc = 0, qs = 0;
       for (const c of list) {
         const H = (ov.columnHeights?.[c.id] ?? s.storeyHeightFt);
-        const cft = (a / 12) * (bb / 12) * H;
-        rows.push({ id: c.id, ref: c.id, desc: c.id, nos: 1, l: r3(a / 12), b: r3(bb / 12), d: r3(H), qty: r3(cft), unit: "cft", kind: "item" });
-        qc += cft; qs += 2 * (a / 12 + bb / 12) * H;
+        const cft = round ? (Math.PI / 4) * (a / 12) ** 2 * H : (a / 12) * (bb / 12) * H;
+        rows.push({ id: c.id, ref: c.id, desc: c.id, nos: 1, l: r3(a / 12), b: round ? null : r3(bb / 12), d: r3(H), qty: r3(cft), unit: "cft", kind: "item", remark: round ? `round, Ø${a}" — area ${r3((Math.PI / 4) * (a / 12) ** 2)} sft` : undefined });
+        qc += cft; qs += (round ? Math.PI * (a / 12) : 2 * (a / 12 + bb / 12)) * H;
       }
-      rows.push({ id: `s-${g}`, desc: `Total ${kind} ${a}"x${bb}"`, nos: list.length, l: null, b: null, d: null, qty: r3(qc), unit: "cft", kind: "sub", remark: `Shuttering ${r2(qs)} sft` });
+      rows.push({ id: `s-${g}`, desc: round ? `Total round column Ø${a}"` : `Total ${kind} ${a}"x${bb}"`, nos: list.length, l: null, b: null, d: null, qty: r3(qc), unit: "cft", kind: "sub", remark: `Shuttering ${r2(qs)} sft` });
       totC += qc; totS += qs;
     }
     sections.push({ key: "column", title: "B. RCC columns and walls", rows, totals: [{ label: "Concrete", qty: r2(totC), unit: "cft" }, { label: "Shuttering (4 sides)", qty: r2(totS), unit: "sft" }, { label: "Columns / walls", qty: cols.length, unit: "nos" }] });
@@ -861,7 +896,7 @@ export function buildSheet(plan: Plan, settingsIn: Partial<MsSettings>, ov: Over
     }
     if (s.deductSlabFromBeam) {
       const beamArea = beams.reduce((sum, b) => sum + (b.length / 12) * (sizeOf(b.tag).w / 12), 0);
-      const colArea = plan.columns.filter((c) => !(ov.skipColumns || []).includes(c.id)).reduce((sum, c) => sum + (c.w / 12) * (c.d / 12), 0);
+      const colArea = plan.columns.filter((c) => !(ov.skipColumns || []).includes(c.id)).reduce((sum, c) => sum + (c.round ? (Math.PI / 4) * (c.w / 12) ** 2 : (c.w / 12) * (c.d / 12)), 0);
       const cft = (beamArea + colArea) * (s.slabThicknessIn / 12);
       rows.push({ id: "slab-over", desc: "Slab over the beams and columns", nos: 1, l: null, b: null, d: r3(s.slabThicknessIn / 12), qty: r3(cft), unit: "cft", kind: "item", remark: `${r2(beamArea + colArea)} sft (beam top ${r2(beamArea)} + column top ${r2(colArea)}), because the beams above are measured below the slab` });
       totA += beamArea + colArea; totV += cft;
