@@ -117,6 +117,9 @@ const DEFAULT_SETTINGS: Record<string, string> = {
   ref_format: "{CODE}/HR/{TYPE}/{YYYY}/{SEQ}",
   signatory_name: "Head of HR",
   signatory_designation: "Human Resources Department",
+  // The login account of that signatory: letters sent for e-signature
+  // (ESignRoutes.ts) are signed by it on the letter's signature line.
+  signatory_user_id: "",
   default_probation_months: "6",
   // Employee 360 -> Documents: the document types every Employee should have
   // on file (one per line); anything not uploaded is listed as missing.
@@ -2167,6 +2170,7 @@ ${esc(l.text).split(/\n{2,}/).map((p) => `<p style="margin:0 0 12px;line-height:
             employee_name: empMap.get(Number(l.employee_id))?.name || "(removed)",
             employee_code: empMap.get(Number(l.employee_id))?.employee_id || null,
             designation: empMap.get(Number(l.employee_id))?.designation || null,
+            employee_user_id: empMap.get(Number(l.employee_id))?.user_id ? Number(empMap.get(Number(l.employee_id)).user_id) : null,
             issued_by_name: users.find((u: any) => Number(u.id) === Number(l.issued_by))?.name || null
           }))
       );

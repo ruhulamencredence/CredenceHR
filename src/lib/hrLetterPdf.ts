@@ -29,6 +29,9 @@ export interface LetterPdfInput {
   body: string;
   // "DRAFT" watermark for a preview that hasn't been issued yet.
   draft?: boolean;
+  // Told where the signature line is (PDF points, origin bottom-left), so
+  // an e-signature can be put on it (ESignRoutes.ts, sign_box).
+  onSignBox?: (box: { page: number; x: number; y: number; w: number; h: number }) => void;
   // Shown under the signature when the Employee has acknowledged it.
   acknowledged_at?: string | null;
   employee_name?: string;
@@ -149,6 +152,10 @@ export async function buildLetterPdf(input: LetterPdfInput): Promise<jsPDF> {
   doc.setDrawColor(148, 163, 184);
   doc.setLineWidth(0.3);
   doc.line(left, y, left + 55, y);
+  if (input.onSignBox) {
+    const pt = 72 / 25.4;
+    input.onSignBox({ page: doc.getCurrentPageInfo().pageNumber - 1, x: left * pt, y: (pageHeight - y) * pt, w: 55 * pt, h: 17 * pt });
+  }
   y += 5;
   doc.setFont('helvetica', 'bold');
   doc.text(input.company.signatory_name || 'Authorised Signatory', left, y);

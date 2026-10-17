@@ -27,6 +27,7 @@ import {
   btnGhost,
   companyFromSettings,
   letterPdfBytes,
+  letterPdfForSigning,
   saveLetterPdf,
   type HrOpsEmployee,
   type HrOpsMeta,
@@ -51,6 +52,21 @@ export interface ComposerInit {
   letter_type?: string;
   hr_action_id?: number | null;
   request?: { id: number; employee_id: number; letter_type: string; purpose: string | null } | null;
+}
+
+// Who signs a letter sent for e-signature: certificates (handed to a bank, an
+// embassy, a new employer) only by the issuer — the signatory account in
+// Settings — on the letter's own signature line; letters that change the
+// employee's terms by the issuer, then the employee to say they received it.
+const ISSUER_ONLY = new Set(['salary_certificate', 'experience', 'noc', 'bank_account', 'release', 'general']);
+export function letterSigners(meta: HrOpsMeta, letterType: string, employeeUserId: number | null) {
+  const issuer = Number(meta.settings.signatory_user_id) || null;
+  // Not set, or that account has since been deleted -> the employee signs.
+  if (!issuer || !meta.users.some((u) => u.id === issuer)) return null;
+  const label = meta.settings.signatory_designation ? `${meta.settings.signatory_name || 'Authorised Signatory'}, ${meta.settings.signatory_designation}` : meta.settings.signatory_name || 'Authorised Signatory';
+  const list: { user_id: number; label: string; on_line?: boolean }[] = [{ user_id: issuer, label: label.slice(0, 100), on_line: true }];
+  if (!ISSUER_ONLY.has(letterType) && employeeUserId && employeeUserId !== issuer) list.push({ user_id: employeeUserId, label: 'Employee (received)' });
+  return list;
 }
 
 const todayStr = () => {
@@ -501,7 +517,8 @@ export const HrOpsLetters: React.FC<{ token: string; meta: HrOpsMeta; employees:
                             state={signing.stateOf('hr_letter', l.id)}
                             ownerName={l.employee_name}
                             docType={l.letter_label}
-                            makePdf={async () => ({ bytes: await letterPdfBytes(company, l), fileName: letterFileName(l.ref_no, l.employee_name) })}
+                            makePdf={async () => ({ ...(await letterPdfForSigning(company, l)), fileName: letterFileName(l.ref_no, l.employee_name) })}
+                            initialSigners={letterSigners(meta, l.letter_type, l.employee_user_id ?? null)}
                             onChanged={() => void signing.reload()}
                             onError={(text) => setMsg({ type: 'error', text })}
                           />

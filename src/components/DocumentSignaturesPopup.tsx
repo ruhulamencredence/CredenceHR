@@ -17,11 +17,22 @@ import { esignFetch, openProtectedFile, dhakaTime, verifyLink, STATUS_LABEL, STA
 interface Person { id: number; name: string; can_sign: boolean }
 const sendBtn = 'liquid-glass-button rounded-full px-5 py-2 text-sm font-semibold text-white bg-blue-600 disabled:opacity-60 inline-flex items-center gap-2';
 
-export const DocumentSignaturesPopup: React.FC<{ token: string; docId: number; ownerId: number; ownerName: string | null; onClose: () => void; onChanged: () => void }> = ({ token, docId, ownerId, ownerName, onClose, onChanged }) => {
+export const DocumentSignaturesPopup: React.FC<{
+  token: string;
+  docId: number;
+  ownerId: number;
+  ownerName: string | null;
+  // First-time signers (e.g. a letter: its issuer on the signature line).
+  initialSigners?: { user_id: number; label: string; on_line?: boolean }[] | null;
+  onClose: () => void;
+  onChanged: () => void;
+}> = ({ token, docId, ownerId, ownerName, initialSigners, onClose, onChanged }) => {
   const [doc, setDoc] = useState<ESignDoc | null>(null);
   const [people, setPeople] = useState<Person[]>([]);
   const [canOthers, setCanOthers] = useState(false);
-  const [list, setList] = useState<{ user_id: number; label: string }[]>([{ user_id: ownerId, label: 'Employee' }]);
+  const [list, setList] = useState<{ user_id: number; label: string; on_line?: boolean }[]>(() =>
+    initialSigners?.length ? initialSigners : [{ user_id: ownerId, label: 'Employee' }]
+  );
   const [placement, setPlacement] = useState<'page' | 'last_page'>('page');
   const [pick, setPick] = useState('');
   const [busy, setBusy] = useState(false);
@@ -44,7 +55,7 @@ export const DocumentSignaturesPopup: React.FC<{ token: string; docId: number; o
       setPeople(p);
       setCanOthers(c.can_request_others);
       if (d.signers.length && d.sign_status !== 'none') {
-        setList(d.signers.map((s) => ({ user_id: s.user_id, label: s.label || '' })));
+        setList(d.signers.map((s) => ({ user_id: s.user_id, label: s.label || '', on_line: !!s.on_line })));
         setPlacement(d.placement);
       }
     } catch (e: any) {
@@ -71,7 +82,8 @@ export const DocumentSignaturesPopup: React.FC<{ token: string; docId: number; o
     setBusy(true);
     setError('');
     try {
-      setDoc(await esignFetch<ESignDoc>(token, `/api/esign/documents/${docId}/request`, { method: 'POST', body: { signers: list, placement } }));
+      const signers = list.map((s) => ({ ...s, on_line: !!doc?.has_sign_box && !!s.on_line }));
+      setDoc(await esignFetch<ESignDoc>(token, `/api/esign/documents/${docId}/request`, { method: 'POST', body: { signers, placement } }));
       onChanged();
     } catch (e: any) {
       setError(e.message);
@@ -158,6 +170,16 @@ export const DocumentSignaturesPopup: React.FC<{ token: string; docId: number; o
                         onChange={(e) => setList((l) => l.map((x, k) => (k === i ? { ...x, label: e.target.value } : x)))}
                         aria-label={`Role of ${nameOf(s.user_id)}`}
                         />
+                        {doc?.has_sign_box && (
+                          <button
+                            type="button"
+                            onClick={() => setList((l) => l.map((x, k) => ({ ...x, on_line: k === i ? !x.on_line : false })))}
+                            aria-pressed={!!s.on_line}
+                            className={`mt-1 text-[10px] font-semibold rounded-full px-2 py-0.5 border inline-flex items-center gap-1 ${s.on_line ? 'bg-blue-600 text-white border-blue-600' : 'bg-white/70 text-slate-500 border-slate-200'}`}
+                          >
+                            <PenLine className="w-3 h-3" /> {s.on_line ? "Signs on the letter's signature line" : "Sign on the letter's signature line"}
+                          </button>
+                        )}
                       </span>
                       {canOthers && (
                         <>
@@ -202,7 +224,7 @@ export const DocumentSignaturesPopup: React.FC<{ token: string; docId: number; o
                   </button>
                 </div>
               ) : (
-                <p className="text-[11px] text-slate-500">Only the employee signs. Adding HR / management signers needs the "Request signatures from others" permission.</p>
+                <p className="text-[11px] text-slate-500">Adding other HR / management signers needs the "Request signatures from others" permission (the employee and the letter signatory set in HR Operations → Settings don't).</p>
               )}
               <div>
                 <div className={labelCls}>Where the signatures go</div>
@@ -231,6 +253,7 @@ export const DocumentSignaturesPopup: React.FC<{ token: string; docId: number; o
                         <span className="block text-sm font-semibold text-slate-800 truncate">
                           {s.step}. {s.name}
                           {s.label ? <span className="font-normal text-slate-500"> · {s.label}</span> : null}
+                          {s.on_line ? <span className="font-normal text-blue-600"> · on the signature line</span> : null}
                         </span>
                         <span className="block text-[11px] text-slate-500">
                           {s.status === 'signed' ? `Signed ${dhakaTime(s.signed_at)}` : s.status === 'pending' ? 'Their turn now' : s.status === 'cancelled' ? 'Cancelled' : 'Waiting'}

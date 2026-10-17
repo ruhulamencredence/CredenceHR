@@ -17,7 +17,8 @@
 import { useLiveRefresh } from '../lib/liveRefresh';
 import React, { useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
-import { ArrowLeft, FileText, CheckCircle2, Clock, Download, Eye, Send, BookOpen, Inbox, ClipboardList } from 'lucide-react';
+import { ArrowLeft, FileText, CheckCircle2, Clock, Download, Eye, Send, BookOpen, Inbox, ClipboardList, BadgeCheck } from 'lucide-react';
+import { esignFetch, openProtectedFile } from '../lib/esign';
 import { Spinner } from './Spinner';
 import { ModulePath } from './ModulePath';
 import { PdfPreviewModal } from './PdfPreviewModal';
@@ -50,6 +51,7 @@ interface MyData {
 export const MyLetters: React.FC<{ token: string; onBack?: () => void; canServiceBook?: boolean }> = ({ token, onBack, canServiceBook = false }) => {
   const isNativeApp = Capacitor.isNativePlatform();
   const api = useHrApi(token);
+  const [signed, setSigned] = useState<Map<number, { document_id: number; verify_code: string | null }>>(new Map());
   // An alert about a request opens straight on Pending Items.
   const [tab, setTab] = useState<'letters' | 'pending' | 'record' | 'book'>(() => {
     try {
@@ -95,9 +97,15 @@ useLiveRefresh(() => load(true));
   const load = async (silent?: unknown) => {
     if (silent !== true) setLoading(true);
     try {
-      const [d, b] = await Promise.all([api.get<MyData>('/api/hr-ops/my/letters'), api.get<ServiceBookData>('/api/hr-ops/my/service-book')]);
+      const [d, b, sg] = await Promise.all([
+        api.get<MyData>('/api/hr-ops/my/letters'),
+        api.get<ServiceBookData>('/api/hr-ops/my/service-book'),
+        // Letters signed electronically (ESignRoutes.ts): the signed copy.
+        esignFetch<{ source_id: number; document_id: number; verify_code: string | null }[]>(token, '/api/esign/my-sources?type=hr_letter').catch(() => [])
+      ]);
       setData(d);
       setBook(b);
+      setSigned(new Map(sg.map((x) => [x.source_id, x] as const)));
       if (!reqType && d.requestable?.length) setReqType(d.requestable[0].key);
     } catch (e: any) {
       setMsg({ type: 'error', text: e.message });
@@ -226,6 +234,16 @@ useLiveRefresh(() => load(true));
                           <button type="button" className={btnGhost} onClick={() => saveLetterPdf(company, asPdf(l))}>
                             <Download className="w-3.5 h-3.5" /> Download
                           </button>
+                          {signed.has(l.id) && (
+                            <button
+                              type="button"
+                              className={btnPrimary}
+                              title={signed.get(l.id)?.verify_code ? `Verification code ${signed.get(l.id)?.verify_code}` : undefined}
+                              onClick={() => void openProtectedFile(token, `/api/esign/documents/${signed.get(l.id)!.document_id}/signed`).catch((e) => setMsg({ type: 'error', text: e.message }))}
+                            >
+                              <BadgeCheck className="w-3.5 h-3.5" /> Signed copy (PDF)
+                            </button>
+                          )}
                           {needsAck ? (
                             <button type="button" className={btnPrimary} disabled={acking === l.id} onClick={() => acknowledge(l)}>
                               {acking === l.id ? <Spinner size={14} /> : <CheckCircle2 className="w-3.5 h-3.5" />} I have received this letter

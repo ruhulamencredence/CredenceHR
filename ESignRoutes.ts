@@ -40,7 +40,12 @@
 //   7. Sent from where the document is made: an HR letter (HR Operations ->
 //      Letters) or an exit's Clearance Certificate / Settlement Sheet becomes
 //      a Document Vault document linked to it (source_type / source_id) and
-//      is sent from the same Signatures popup.
+//      is sent from the same Signatures popup. A letter also says where its
+//      own signature line is (sign_box): the signer marked "on the line"
+//      (the issuer — HR Operations -> Settings -> signatory account) signs
+//      right there on the letter, the way a salary or experience certificate
+//      is signed on paper. That signatory may be asked to sign without the
+//      "Request signatures from others" layer.
 //
 // Access:
 //   Admin Panel -> Document Vault (module "document_vault"): send a document
@@ -106,7 +111,8 @@ export async function ensureESignSchema(dbPool: any): Promise<void> {
     ["pki_issuer", "VARCHAR(255) NULL"],
     ["pki_self_signed", "TINYINT(1) NULL"],
     ["source_type", "VARCHAR(32) NULL"],
-    ["source_id", "INT NULL"]
+    ["source_id", "INT NULL"],
+    ["sign_box", "VARCHAR(200) NULL"]
   ] as [string, string][]) {
     await run(`employee_documents.${c}`, `ALTER TABLE employee_documents ADD COLUMN ${c} ${def}`, ["ER_DUP_FIELDNAME", "ER_NO_SUCH_TABLE"]);
   }
@@ -161,6 +167,7 @@ export async function ensureESignSchema(dbPool: any): Promise<void> {
   );
   await run("esign_settings.pki_sign", "ALTER TABLE esign_settings ADD COLUMN pki_sign TINYINT(1) NOT NULL DEFAULT 0", ["ER_DUP_FIELDNAME"]);
   await ensureESignCertificateSchema(dbPool);
+  await run("document_signers.on_line", "ALTER TABLE document_signers ADD COLUMN on_line TINYINT(1) NOT NULL DEFAULT 0", ["ER_DUP_FIELDNAME", "ER_NO_SUCH_TABLE"]);
   await run("verify_code key", "ALTER TABLE employee_documents ADD UNIQUE KEY uniq_doc_verify_code (verify_code)", ["ER_DUP_KEYNAME", "ER_NO_SUCH_TABLE"]);
   await run(
     "user_signatures",
@@ -245,12 +252,23 @@ function fitText(font: PDFFont, text: string, size: number, width: number) {
 }
 
 interface SignerForPdf {
+  onLine?: boolean;
   name: string;
   label: string | null;
   signed_name: string;
   signed_at: any;
   image: Buffer | null;
   ip: string | null;
+}
+
+export interface SignBox { page: number; x: number; y: number; w: number; h: number }
+// From the page that made the PDF; anything odd -> no box.
+export function readSignBox(v: any): SignBox | null {
+  const o = typeof v === "string" ? (() => { try { return JSON.parse(v); } catch { return null; } })() : v;
+  if (!o || typeof o !== "object") return null;
+  const n = (k: string, min: number, max: number) => { const x = Number(o[k]); return Number.isFinite(x) && x >= min && x <= max ? Math.round(x * 100) / 100 : null; };
+  const box = { page: n("page", 0, 500), x: n("x", 0, 2000), y: n("y", 0, 3000), w: n("w", 10, 1000), h: n("h", 10, 500) };
+  return Object.values(box).some((x) => x === null) ? null : (box as SignBox);
 }
 
 // The signed copy: the original (a PDF, or an image made into a page) with a
@@ -275,6 +293,9 @@ export async function buildSignedPdf(opts: {
   // Digital signature (ESignCertificate.ts): a note on the certificate page
   // and the signature's reserved place; the caller then signs the bytes.
   certificate?: { subject: string; organization: string | null; issuer: string; self_signed: boolean } | null;
+  // The document's own signature line (PDF points, origin bottom-left): the
+  // signer marked onLine signs there.
+  signBox?: SignBox | null;
 }): Promise<Buffer> {
   let pdf: PDFDocument;
   if (opts.kind === "pdf") {
@@ -302,6 +323,43 @@ export async function buildSignedPdf(opts: {
     page.drawRectangle({ x: 14, y: 6, width: width - 28, height: 13, color: rgb(1, 1, 1), opacity: 0.85 });
     page.drawText(f.s, { x: 20, y: 10, size: f.sz, font, color: gray });
   };
+
+  // On the document's own signature line (e.g. "Sincerely, ____ Head of HR").
+  const lineIdx = opts.signBox ? opts.signers.findIndex((s) => s.onLine) : -1;
+  if (opts.signBox && lineIdx >= 0) {
+    const page = pdf.getPages()[Math.min(opts.signBox.page, pdf.getPageCount() - 1)];
+    const b = opts.signBox;
+    const img = images[lineIdx];
+    if (img) {
+      const sc = Math.min(b.w / img.width, b.h / img.height);
+      page.drawImage(img, { x: b.x, y: b.y + 1, width: img.width * sc, height: img.height * sc });
+    }
+    page.drawText(pdfText(`e-signed ${dhaka(opts.signers[lineIdx].signed_at)}`), { x: b.x + b.w + 6, y: b.y + 8, size: 6, font, color: gray });
+    page.drawText(pdfText(opts.verifyCode), { x: b.x + b.w + 6, y: b.y + 1, size: 6, font, color: gray });
+    // Everyone else (e.g. the employee, "received") signs on the same row,
+    // from the right edge, as far as there is room; all of them are on the
+    // Signature Certificate page anyway.
+    const pageW = page.getSize().width;
+    let right = pageW - b.x;
+    opts.signers.forEach((s, i) => {
+      if (i === lineIdx) return;
+      const x = right - b.w;
+      if (x < b.x + b.w + 110) return;
+      right = x - 16;
+      const im = images[i];
+      if (im) {
+        const sc = Math.min(b.w / im.width, b.h / im.height);
+        page.drawImage(im, { x, y: b.y + 1, width: im.width * sc, height: im.height * sc });
+      }
+      page.drawLine({ start: { x, y: b.y }, end: { x: x + b.w, y: b.y }, thickness: 0.85, color: rgb(0.58, 0.64, 0.72) });
+      const n = fitText(bold, s.signed_name, 9, b.w);
+      page.drawText(n.s, { x, y: b.y - 13, size: n.sz, font: bold, color: rgb(0.12, 0.16, 0.23) });
+      const l = fitText(font, s.label || "", 8, b.w);
+      if (l.s) page.drawText(l.s, { x, y: b.y - 24, size: l.sz, font, color: rgb(0.28, 0.33, 0.41) });
+      const t = fitText(font, `e-signed ${dhaka(s.signed_at)}`, 6, b.w);
+      page.drawText(t.s, { x, y: b.y - 33, size: t.sz, font, color: gray });
+    });
+  }
 
   // Signatures along the bottom of the last original page.
   if (opts.placement === "last_page") {
@@ -604,7 +662,7 @@ export function registerESignRoutes(app: Express, deps: RegisterESignRoutesDeps)
       (await queryDB(
         withFile
           ? "SELECT * FROM employee_documents WHERE id = ?"
-          : "SELECT id, user_id, doc_type, file_name, file_mimetype, requires_signature, sha256, verify_code, sign_status, sign_placement, signed_sha256, sign_requested_by, sign_requested_at, completed_at, uploaded_at, pki_subject, pki_issuer, pki_self_signed, source_type, source_id FROM employee_documents WHERE id = ?",
+          : "SELECT id, user_id, doc_type, file_name, file_mimetype, requires_signature, sha256, verify_code, sign_status, sign_placement, signed_sha256, sign_requested_by, sign_requested_at, completed_at, uploaded_at, pki_subject, pki_issuer, pki_self_signed, source_type, source_id, sign_box FROM employee_documents WHERE id = ?",
         [id]
       )) || [];
     if (!rows.length) throw bad("Document not found.", 404);
@@ -628,7 +686,8 @@ export function registerESignRoutes(app: Express, deps: RegisterESignRoutesDeps)
     status: s.status,
     signed_name: s.signed_name || null,
     signed_at: iso(s.signed_at),
-    decline_reason: s.decline_reason || null
+    decline_reason: s.decline_reason || null,
+    on_line: Number(s.on_line) === 1
   });
   async function docView(doc: any) {
     const signers = await signersOf(Number(doc.id));
@@ -653,13 +712,20 @@ export function registerESignRoutes(app: Express, deps: RegisterESignRoutesDeps)
       require_read: (await loadSettings()).require_read,
       certificate: doc.pki_subject ? { subject: doc.pki_subject, issuer: doc.pki_issuer || null, self_signed: Number(doc.pki_self_signed) === 1 } : null,
       source_type: doc.source_type || null,
-      source_id: doc.source_id == null ? null : Number(doc.source_id)
+      source_id: doc.source_id == null ? null : Number(doc.source_id),
+      has_sign_box: !!readSignBox(doc.sign_box)
     };
   }
 
   // ---- HR (Document Vault) ----
+  // The company's letter signatory (HR Operations -> Settings), a login account.
+  async function letterSignatory(): Promise<number | null> {
+    const rows: any[] = (await queryDB("SELECT setting_value FROM hr_ops_settings WHERE setting_key = 'signatory_user_id'").catch(() => [])) || [];
+    const id = Number(rows[0]?.setting_value);
+    return id > 0 ? id : null;
+  }
   app.get("/api/esign/caps", ...adminGate, async (req: any, res) => {
-    res.json({ can_request_others: await hasModuleLayer(req.user, "document_vault", "sign_request") });
+    res.json({ can_request_others: await hasModuleLayer(req.user, "document_vault", "sign_request"), signatory_user_id: await letterSignatory() });
   });
 
   // People who can be asked to sign (Documents to Sign turned on).
@@ -701,12 +767,16 @@ export function registerESignRoutes(app: Express, deps: RegisterESignRoutesDeps)
       const file = toBuffer(doc.file_data);
       if (!file?.length) throw bad("No file stored on this document.");
       const list: any[] = Array.isArray(req.body?.signers) ? req.body.signers : [];
-      const signers = list.map((s) => ({ user_id: Number(s?.user_id), label: String(s?.label || "").trim().slice(0, 100) || null })).filter((s) => s.user_id);
+      const signers = list.map((s) => ({ user_id: Number(s?.user_id), label: String(s?.label || "").trim().slice(0, 100) || null, on_line: s?.on_line === true })).filter((s) => s.user_id);
       if (!signers.length) throw bad("Add at least one signer.");
       if (signers.length > 10) throw bad("At most 10 signers.");
       if (new Set(signers.map((s) => s.user_id)).size !== signers.length) throw bad("The same person can't sign twice.");
-      const onlyOwner = signers.length === 1 && signers[0].user_id === Number(doc.user_id);
-      if (!onlyOwner && !(await hasModuleLayer(req.user, "document_vault", "sign_request"))) {
+      if (signers.filter((s) => s.on_line).length > 1) throw bad("Only one person can sign on the document's signature line.");
+      if (signers.some((s) => s.on_line) && !readSignBox(doc.sign_box)) throw bad("This document has no signature line to sign on.");
+      // The employee themself and the company's letter signatory need no extra permission.
+      const signatory = await letterSignatory();
+      const plain = signers.every((s) => s.user_id === Number(doc.user_id) || (signatory && s.user_id === signatory));
+      if (!plain && !(await hasModuleLayer(req.user, "document_vault", "sign_request"))) {
         throw bad("Asking anyone other than the employee themself to sign needs the 'Request signatures from others' permission.", 403);
       }
       const users = await usersByIds(signers.map((s) => s.user_id));
@@ -718,7 +788,7 @@ export function registerESignRoutes(app: Express, deps: RegisterESignRoutesDeps)
 
       await queryDB("DELETE FROM document_signers WHERE document_id = ?", [id]);
       for (let i = 0; i < signers.length; i++) {
-        await queryDB("INSERT INTO document_signers (document_id, step_order, signer_user_id, label, status) VALUES (?, ?, ?, ?, ?)", [id, i + 1, signers[i].user_id, signers[i].label, i === 0 ? "pending" : "waiting"]);
+        await queryDB("INSERT INTO document_signers (document_id, step_order, signer_user_id, label, status, on_line) VALUES (?, ?, ?, ?, ?, ?)", [id, i + 1, signers[i].user_id, signers[i].label, i === 0 ? "pending" : "waiting", signers[i].on_line ? 1 : 0]);
       }
       const code = doc.verify_code || newVerifyCode();
       await queryDB(
@@ -798,7 +868,21 @@ export function registerESignRoutes(app: Express, deps: RegisterESignRoutesDeps)
       fail(res, err);
     }
   });
-  // Body: { source_type, source_id, file_base64 (PDF), file_name, doc_type }.
+  // Self Service -> My Letters: the employee's own signed letters, to download
+  // the signed copy (GET .../signed allows the owner). Their own documents
+  // only, so no extra switch.
+  app.get("/api/esign/my-sources", authenticateToken, async (req: any, res) => {
+    try {
+      const type = String(req.query.type || "");
+      if (!SOURCE_TYPES[type]) throw bad("Unknown document source.");
+      const rows: any[] = (await queryDB("SELECT id, source_id, verify_code FROM employee_documents WHERE source_type = ? AND user_id = ? AND sign_status = 'completed'", [type, Number(req.user.id)])) || [];
+      res.json(rows.map((d) => ({ source_id: Number(d.source_id), document_id: Number(d.id), verify_code: d.verify_code || null })));
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+  // Body: { source_type, source_id, file_base64 (PDF), file_name, doc_type,
+  // sign_box? (where the PDF's own signature line is) }.
   app.post("/api/esign/sources", ...adminGate, async (req: any, res) => {
     try {
       const type = String(req.body?.source_type || "");
@@ -815,15 +899,17 @@ export function registerESignRoutes(app: Express, deps: RegisterESignRoutesDeps)
       if (file.length > 20 * 1024 * 1024) throw bad("The document is too big (at most 20 MB).");
       const fileName = String(req.body?.file_name || "").trim().slice(0, 255) || `document_${sourceId}.pdf`;
       const docType = src.docType(String(req.body?.doc_type || "").trim().slice(0, 100));
+      const box = readSignBox(req.body?.sign_box);
+      const boxJson = box ? JSON.stringify(box) : null;
       let id: number;
       if (prev[0]) {
         // Never sent, declined or cancelled: send today's copy instead.
         id = Number(prev[0].id);
-        await queryDB("UPDATE employee_documents SET file_data = ?, file_name = ?, file_mimetype = 'application/pdf', doc_type = ?, sign_status = 'none' WHERE id = ?", [file, fileName, docType, id]);
+        await queryDB("UPDATE employee_documents SET file_data = ?, file_name = ?, file_mimetype = 'application/pdf', doc_type = ?, sign_status = 'none', sign_box = ? WHERE id = ?", [file, fileName, docType, boxJson, id]);
       } else {
         const r: any = await queryDB(
-          "INSERT INTO employee_documents (user_id, doc_type, file_name, file_mimetype, file_data, requires_signature, uploaded_by, source_type, source_id) VALUES (?, ?, ?, 'application/pdf', ?, 1, ?, ?, ?)",
-          [ownerId, docType, fileName, file, req.user.id, type, sourceId]
+          "INSERT INTO employee_documents (user_id, doc_type, file_name, file_mimetype, file_data, requires_signature, uploaded_by, source_type, source_id, sign_box) VALUES (?, ?, ?, 'application/pdf', ?, 1, ?, ?, ?, ?)",
+          [ownerId, docType, fileName, file, req.user.id, type, sourceId, boxJson]
         );
         id = Number(r.insertId);
       }
@@ -994,7 +1080,9 @@ export function registerESignRoutes(app: Express, deps: RegisterESignRoutesDeps)
           originalSha256: doc.sha256,
           verifyCode: doc.verify_code,
           verifyUrl: `${publicBase(req)}/verify/${doc.verify_code}`,
+          signBox: readSignBox(doc.sign_box),
           signers: all.map((s) => ({
+            onLine: Number(s.on_line) === 1,
             name: users.get(Number(s.signer_user_id))?.name || "",
             label: s.label || null,
             signed_name: s.signed_name || "",
