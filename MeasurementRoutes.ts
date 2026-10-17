@@ -186,6 +186,7 @@ export function registerMeasurementRoutes(app: Express, deps: RegisterMeasuremen
       try {
         raw = await readDrawing(buf, kind);
       } catch (e: any) {
+        if (e?.statusCode === 500) throw e;
         throw bad(`Could not read this drawing: ${e?.message || e}. Save it again as DXF (or an older DWG version) and retry.`, 422);
       }
       if (!raw.lines.length && !raw.polys.length) throw bad("The drawing has no lines on its model space.", 422);
