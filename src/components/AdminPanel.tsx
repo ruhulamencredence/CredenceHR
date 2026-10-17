@@ -532,6 +532,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // copied, bookmarked and stepped back to with the browser's Back button.
   // The first write replaces the entry (no extra Back step); later ones push.
   const urlSynced = useRef(false);
+  const frozenUsersTab = useRef<React.ReactNode>(null);
+  const frozenDrawer = useRef<React.ReactNode>(null);
   useEffect(() => {
     if (!adminUrlEnabled()) return;
     const target = adminTabToPath(activeTab);
@@ -6515,7 +6517,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       )}
 
       {/* TAB 4: USERS */}
-      {activeTab === 'users' && (
+      {/* While Module Access is open the Users page sits behind it, hidden —
+          the last drawing is reused (same element, so React skips it) and
+          each tick redraws only the popup. Drawn fresh once it closes. */}
+      {activeTab === 'users' && (managingModulesFor && frozenUsersTab.current ? frozenUsersTab.current : (frozenUsersTab.current = (
         <div className="space-y-6">
           {/* Add New User Form */}
           <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6">
@@ -6991,7 +6996,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           )}
           </div>
         </div>
-      )}
+      )))}
 
       {/* TAB: EMPLOYEES — the company-wide employee directory (Employee ID,
           Name, Designation, Department, Email, Phone). Plain hand-entered
@@ -7620,7 +7625,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           (Manage Projects, Module Access, Reset Password, Change Login ID)
           so those appear on top of it. */}
       {managingUserId != null &&
-        (() => {
+        // Frozen like the Users page while Module Access is open over it.
+        (managingModulesFor && frozenDrawer.current ? frozenDrawer.current : (frozenDrawer.current = (() => {
           const mu = users.find((x) => x.id === managingUserId);
           if (!mu) return null;
           return (
@@ -7681,7 +7687,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
               }}
             />
           );
-        })()}
+        })()))}
 
       {/* Manage Projects modal — Admin sets which Projects a User can access */}
       {managingUser && (
@@ -7779,12 +7785,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       )}
 
       {managingModulesFor && (
-        <div
-          className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4"
-          onClick={() => setManagingModulesFor(null)}
-        >
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setManagingModulesFor(null)}>
+          {/* The dim + blur is its own layer behind the card, not the card's
+              parent: as the parent, every tick inside the card made the
+              browser redo the whole-screen blur (≈90 ms a click). */}
+          <div className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm pointer-events-none" aria-hidden="true" />
           <div
-            className="bg-white border border-slate-200 rounded-2xl max-w-md md:max-w-5xl xl:max-w-6xl w-full max-h-[92vh] flex flex-col shadow-2xl"
+            className="relative bg-white border border-slate-200 rounded-2xl max-w-md md:max-w-5xl xl:max-w-6xl w-full max-h-[92vh] flex flex-col shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="p-5 md:p-6 border-b border-slate-200">
@@ -8422,6 +8429,23 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                             />
                             <span className="text-sm font-medium text-slate-900">{m.label}</span>
                           </label>
+                        </React.Fragment>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+              {/* The settings of the ticked modules (Permission Layers,
+                  Department access, group view) live here, under the whole
+                  list, instead of opening right under each module — so ticking
+                  a module never pushes the modules below it to a new place
+                  (a quick second click used to land on the wrong one). */}
+              {(ADMIN_MODULES.some((m) => selectedModules.has(m.key)) || managingModulesFor?.role === 'admin') && (
+                <div className="pt-4 mt-2 border-t border-slate-200">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-2">Permission Layers &amp; department access — ticked modules</p>
+                  <div className="space-y-2">
+                    {ADMIN_MODULES.map((m) => (
+                      <React.Fragment key={m.key}>
                           {(PERMISSION_LAYER_MODULES as readonly AdminModuleKey[]).includes(m.key) && selectedModules.has(m.key) && (
                             <div className="ml-2 mt-1 mb-1 p-3 bg-violet-50 border border-violet-200 rounded-xl">
                               <p className="text-[11px] font-semibold text-slate-700 flex items-center gap-1.5 mb-1">
@@ -8447,7 +8471,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                           {m.key === 'admin_dashboard' && (selectedModules.has('admin_dashboard') || managingModulesFor?.role === 'admin') && (
                             <label className="ml-2 mt-1 mb-1 flex items-center justify-between gap-3 p-3 bg-violet-50 border border-violet-200 rounded-xl cursor-pointer">
                               <span>
-                                <span className="text-xs font-semibold text-slate-800 block">See all companies (group view)</span>
+                                <span className="text-xs font-semibold text-slate-800 block">{m.label}: See all companies (group view)</span>
                                 <span className="text-[11px] text-slate-500">
                                   While working in the mother company, Quick View, attendance and leave on the Admin Dashboard
                                   cover the mother and every sister company. Off: only the company being worked in.
@@ -8475,7 +8499,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                             <div className="ml-2 mt-1 mb-1 p-3 bg-amber-50 border border-amber-200 rounded-xl">
                               <p className="text-[11px] font-semibold text-slate-700 flex items-center gap-1.5 mb-1">
                                 <Building2 className="w-3.5 h-3.5 text-amber-600" />
-                                Department Access for this Report
+                                Department Access — {m.label}
                               </p>
                               <p className="text-[11px] text-slate-500 mb-2">
                                 Leave every Department unchecked to keep seeing all of them (default). Tick one or
@@ -8508,7 +8532,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                             <div className="ml-2 mt-1 mb-1 p-3 bg-amber-50 border border-amber-200 rounded-xl">
                               <p className="text-[11px] font-semibold text-slate-700 flex items-center gap-1.5 mb-1">
                                 <Building2 className="w-3.5 h-3.5 text-amber-600" />
-                                Department Access for this Report
+                                Department Access — {m.label}
                               </p>
                               <p className="text-[11px] text-slate-500 mb-2">
                                 Leave every Department unchecked to keep seeing all of them (default). Tick one or
@@ -8541,7 +8565,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                             <div className="ml-2 mt-1 mb-1 p-3 bg-amber-50 border border-amber-200 rounded-xl">
                               <p className="text-[11px] font-semibold text-slate-700 flex items-center gap-1.5 mb-1">
                                 <Building2 className="w-3.5 h-3.5 text-amber-600" />
-                                Department Access for this Report
+                                Department Access — {m.label}
                               </p>
                               <p className="text-[11px] text-slate-500 mb-2">
                                 Leave every Department unchecked to keep seeing all of them (default). Tick one or
@@ -8574,7 +8598,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                             <div className="ml-2 mt-1 mb-1 p-3 bg-amber-50 border border-amber-200 rounded-xl">
                               <p className="text-[11px] font-semibold text-slate-700 flex items-center gap-1.5 mb-1">
                                 <Building2 className="w-3.5 h-3.5 text-amber-600" />
-                                Departments whose roster they set
+                                {m.label}: Departments whose roster they set
                               </p>
                               <p className="text-[11px] text-slate-500 mb-2">
                                 Nothing ticked = every Department, and the shifts too (full setup, e.g. HR). Tick one or
@@ -8601,12 +8625,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                               )}
                             </div>
                           )}
-                        </React.Fragment>
-                      ))}
-                    </div>
+                      </React.Fragment>
+                    ))}
                   </div>
-                );
-              })}
+                </div>
+              )}
             </div>
             </div>
 

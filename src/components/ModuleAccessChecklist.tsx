@@ -35,7 +35,7 @@ const TONE = {
   violet: { item: 'border-violet-100 hover:bg-violet-100/40', box: 'text-violet-600 focus:ring-violet-600', badge: 'text-violet-700' }
 };
 
-export function ModuleAccessChecklist({
+function ModuleAccessChecklistImpl({
   items,
   selected,
   onToggle,
@@ -122,3 +122,20 @@ export function ModuleAccessChecklist({
     </div>
   );
 }
+
+// Redrawn only when its own items / ticks change — not on every tick
+// elsewhere in the Module Access popup. The onToggle / onSetMany callbacks
+// are new functions on every render but only call functional state updates,
+// so the first ones stay correct.
+const sameItems = (a: ChecklistItem[], b: ChecklistItem[]) =>
+  a.length === b.length && a.every((x, i) => x.key === b[i].key && x.label === b[i].label && x.badge === b[i].badge);
+export const ModuleAccessChecklist = React.memo(
+  ModuleAccessChecklistImpl,
+  (a, b) =>
+    a.selected === b.selected &&
+    a.tone === b.tone &&
+    a.layout === b.layout &&
+    a.searchFrom === b.searchFrom &&
+    a.searchPlaceholder === b.searchPlaceholder &&
+    sameItems(a.items, b.items)
+);
