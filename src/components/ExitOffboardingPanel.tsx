@@ -7,7 +7,8 @@ import { confirmDialog } from '../lib/confirmDialog';
 import { ExitDuesCard, DuesBlockedModal, type ExitDue } from './ExitDuesCard';
 import { ExitPendingList } from './ExitPendingList';
 import { ClearanceDepartments } from './ClearanceDepartments';
-import { saveClearanceCertificatePdf, saveSettlementSheetPdf, type ExitDocuments } from '../lib/exitDocuments';
+import { saveClearanceCertificatePdf, saveSettlementSheetPdf, clearanceCertificatePdfBytes, settlementSheetPdfBytes, type ExitDocuments } from '../lib/exitDocuments';
+import { SendForSigningButton, useSignSources } from './SendForSigningButton';
 import { LoadingBlock } from './LoadingBlock';
 import { EmailReportButton, useCanEmailReports } from '../lib/reportEmail';
 
@@ -92,6 +93,14 @@ export const ExitOffboardingPanel: React.FC<ExitOffboardingPanelProps> = ({ toke
   const [canPdf, setCanPdf] = useState(false);
   const [pdfBusy, setPdfBusy] = useState<string | null>(null);
   const canEmailReports = useCanEmailReports();
+  // E-Signature: send either PDF for signing (Document Vault access only).
+  const signing = useSignSources(token, ['exit_clearance', 'exit_settlement']);
+  const exitPdfBytes = async (exitId: number, which: 'clearance' | 'settlement') => {
+    const res = await fetch(apiUrl(`/api/exit-requests/${exitId}/documents`), { headers: authHeaders });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Could not load the document');
+    return which === 'clearance' ? clearanceCertificatePdfBytes(data as ExitDocuments) : settlementSheetPdfBytes(data as ExitDocuments);
+  };
   const downloadPdf = async (exitId: number, which: 'clearance' | 'settlement', mode: 'save' | 'email' = 'save') => {
     setError('');
     setPdfBusy(`${exitId}:${which}`);
@@ -521,6 +530,19 @@ export const ExitOffboardingPanel: React.FC<ExitOffboardingPanelProps> = ({ toke
                                 disabled={pdfBusy === `${r.id}:${w}`}
                                 title={w === 'clearance' ? 'Email the Clearance Certificate as a PDF' : 'Email the Settlement Sheet as a PDF'}
                                 className="flex items-center gap-1 text-[11px] font-semibold px-3 py-1.5 rounded-lg text-slate-700 border border-slate-200 hover:bg-slate-50 transition-colors disabled:opacity-50"
+                              />
+                            )}
+                            {signing.enabled && r.status !== 'cancelled' && (
+                              <SendForSigningButton
+                                token={token}
+                                sourceType={w === 'clearance' ? 'exit_clearance' : 'exit_settlement'}
+                                sourceId={r.id}
+                                state={signing.stateOf(w === 'clearance' ? 'exit_clearance' : 'exit_settlement', r.id)}
+                                ownerName={r.user_name}
+                                docType={w === 'clearance' ? 'Clearance Certificate' : 'Full & Final Settlement'}
+                                makePdf={() => exitPdfBytes(r.id, w)}
+                                onChanged={() => void signing.reload()}
+                                onError={setError}
                               />
                             )}
                           </React.Fragment>

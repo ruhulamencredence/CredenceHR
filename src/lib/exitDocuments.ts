@@ -79,7 +79,7 @@ function drawSignatures(doc: jsPDF, y: number, labels: string[]) {
   });
 }
 
-export async function saveClearanceCertificatePdf(d: ExitDocuments, mode: 'save' | 'email' = 'save') {
+async function buildClearanceCertificate(d: ExitDocuments) {
   const logo = await loadImageElement(credenceLogo);
   const doc = new jsPDF();
   let y = drawPdfLetterhead(doc, logo, { reportTitle: 'Clearance Certificate', filtersLabel: 'Employee Details:', filters: personRows(d) });
@@ -112,14 +112,23 @@ export async function saveClearanceCertificatePdf(d: ExitDocuments, mode: 'save'
   doc.text(all ? 'All departments cleared' : 'Clearance incomplete', 14, y + 9);
   drawSignatures(doc, y + 10, ['Prepared by (HR)', 'Authorised Signatory']);
   finalizePdfPageNumbers(doc);
+  return { doc, fileName: `Clearance_Certificate_${fileSafe(d.employee.name)}.pdf` };
+}
+export async function saveClearanceCertificatePdf(d: ExitDocuments, mode: 'save' | 'email' = 'save') {
+  const { doc, fileName } = await buildClearanceCertificate(d);
   if (mode === 'email') {
-    await emailReport(doc, { fileName: `Clearance_Certificate_${fileSafe(d.employee.name)}.pdf`, title: 'Clearance Certificate' });
+    await emailReport(doc, { fileName, title: 'Clearance Certificate' });
     return;
   }
-  await savePdfCrossPlatform(doc, `Clearance_Certificate_${fileSafe(d.employee.name)}.pdf`);
+  await savePdfCrossPlatform(doc, fileName);
+}
+// The same PDF as bytes, to send for e-signature (SendForSigningButton.tsx).
+export async function clearanceCertificatePdfBytes(d: ExitDocuments) {
+  const { doc, fileName } = await buildClearanceCertificate(d);
+  return { bytes: new Uint8Array(doc.output('arraybuffer')), fileName };
 }
 
-export async function saveSettlementSheetPdf(d: ExitDocuments, mode: 'save' | 'email' = 'save') {
+async function buildSettlementSheet(d: ExitDocuments) {
   const s = d.settlement;
   if (!s) throw new Error('There is no settlement for this exit yet — open the settlement first.');
   const logo = await loadImageElement(credenceLogo);
@@ -163,9 +172,17 @@ export async function saveSettlementSheetPdf(d: ExitDocuments, mode: 'save' | 'e
   }
   drawSignatures(doc, end + 6, ['Prepared by' + (s.prepared_by ? ` (${s.prepared_by})` : ''), 'Employee (received)', 'Approved by']);
   finalizePdfPageNumbers(doc);
+  return { doc, fileName: `Final_Settlement_${fileSafe(d.employee.name)}.pdf` };
+}
+export async function saveSettlementSheetPdf(d: ExitDocuments, mode: 'save' | 'email' = 'save') {
+  const { doc, fileName } = await buildSettlementSheet(d);
   if (mode === 'email') {
-    await emailReport(doc, { fileName: `Final_Settlement_${fileSafe(d.employee.name)}.pdf`, title: 'Full & Final Settlement' });
+    await emailReport(doc, { fileName, title: 'Full & Final Settlement' });
     return;
   }
-  await savePdfCrossPlatform(doc, `Final_Settlement_${fileSafe(d.employee.name)}.pdf`);
+  await savePdfCrossPlatform(doc, fileName);
+}
+export async function settlementSheetPdfBytes(d: ExitDocuments) {
+  const { doc, fileName } = await buildSettlementSheet(d);
+  return { bytes: new Uint8Array(doc.output('arraybuffer')), fileName };
 }

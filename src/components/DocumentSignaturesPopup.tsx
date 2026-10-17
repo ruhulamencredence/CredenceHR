@@ -9,7 +9,7 @@
 // download the signed PDF and share its verification link.
 
 import React, { useEffect, useState } from 'react';
-import { PenLine, ArrowUp, ArrowDown, X, Plus, Send, Loader2, Download, ShieldCheck, Copy, Check, ExternalLink, CheckCircle2, Clock, XCircle, History, ShieldAlert } from 'lucide-react';
+import { PenLine, ArrowUp, ArrowDown, X, Plus, Send, Loader2, Download, ShieldCheck, Copy, Check, ExternalLink, CheckCircle2, Clock, XCircle, History, ShieldAlert, BadgeCheck } from 'lucide-react';
 import { MailPopup as Popup, inputCls, labelCls, ghostBtn } from './mail/MailPopup';
 import { confirmDialog } from '../lib/confirmDialog';
 import { esignFetch, openProtectedFile, dhakaTime, verifyLink, STATUS_LABEL, STATUS_CLS, type ESignDoc } from '../lib/esign';
@@ -250,7 +250,7 @@ export const DocumentSignaturesPopup: React.FC<{ token: string; docId: number; o
                 <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" /> Verification code {doc.verify_code}
               </div>
               <div className="flex items-center gap-2 mt-1">
-                <span className="text-[11px] text-slate-500 truncate flex-1">{verifyLink(doc.verify_code)}</span>
+                <span className="text-[11px] text-slate-500 truncate flex-1 min-w-0">{verifyLink(doc.verify_code)}</span>
                 <button type="button" onClick={() => void navigator.clipboard?.writeText(verifyLink(doc.verify_code!)).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); })} className="liquid-glass-chip p-1.5 rounded-full" aria-label="Copy link">
                   {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
                 </button>
@@ -259,6 +259,15 @@ export const DocumentSignaturesPopup: React.FC<{ token: string; docId: number; o
                 </a>
               </div>
               {doc.sha256 && <div className="text-[10px] text-slate-400 mt-1 break-all">Original SHA-256 {doc.sha256}</div>}
+              {doc.certificate && (
+                <div className="text-[11px] text-emerald-700 mt-1 flex items-start gap-1">
+                  <BadgeCheck className="w-3.5 h-3.5 mt-px shrink-0" />
+                  <span className="min-w-0">
+                    Digitally signed with the certificate of {doc.certificate.subject}
+                    {doc.certificate.self_signed ? ' (self-signed)' : doc.certificate.issuer ? `, issued by ${doc.certificate.issuer}` : ''}
+                  </span>
+                </div>
+              )}
             </div>
           )}
           {doc && doc.sign_status !== 'none' && (

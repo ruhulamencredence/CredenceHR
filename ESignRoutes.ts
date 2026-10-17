@@ -33,6 +33,14 @@
 //        on an Audit Trail page of the signed PDF;
 //      - server seal: HMAC-SHA256 of the signed PDF's SHA-256 + the history
 //        with ESIGN_SEAL_KEY (.env); /verify checks it.
+//   6. Digital signature with a certificate (switch in E-Signature settings,
+//      off until turned on): the finished PDF is also signed inside the file
+//      with the company's certificate, so Adobe Reader shows it as signed and
+//      catches any change by itself (ESignCertificate.ts).
+//   7. Sent from where the document is made: an HR letter (HR Operations ->
+//      Letters) or an exit's Clearance Certificate / Settlement Sheet becomes
+//      a Document Vault document linked to it (source_type / source_id) and
+//      is sent from the same Signatures popup.
 //
 // Access:
 //   Admin Panel -> Document Vault (module "document_vault"): send a document
@@ -51,6 +59,8 @@ import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf
 import QRCode from "qrcode";
 import type { AlertType } from "./Alerts";
 import { sendMail, isMailerConfigured } from "./mailer";
+import { activeCompanyId } from "./companyContext";
+import { activeCertificate, addSignaturePlaceholder, certFromEnvConfigured, ensureESignCertificateSchema, signPdfWith, type LoadedCert } from "./ESignCertificate";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 
@@ -90,6 +100,17 @@ export async function ensureESignSchema(dbPool: any): Promise<void> {
   for (const [c, def] of cols) await run(`employee_documents.${c}`, `ALTER TABLE employee_documents ADD COLUMN ${c} ${def}`, ["ER_DUP_FIELDNAME", "ER_NO_SUCH_TABLE"]);
   await run("employee_documents.seal", "ALTER TABLE employee_documents ADD COLUMN seal CHAR(64) NULL", ["ER_DUP_FIELDNAME", "ER_NO_SUCH_TABLE"]);
   await run("employee_documents.events_head", "ALTER TABLE employee_documents ADD COLUMN events_head CHAR(64) NULL", ["ER_DUP_FIELDNAME", "ER_NO_SUCH_TABLE"]);
+  // Digital signature (ESignCertificate.ts) and where the document came from.
+  for (const [c, def] of [
+    ["pki_subject", "VARCHAR(255) NULL"],
+    ["pki_issuer", "VARCHAR(255) NULL"],
+    ["pki_self_signed", "TINYINT(1) NULL"],
+    ["source_type", "VARCHAR(32) NULL"],
+    ["source_id", "INT NULL"]
+  ] as [string, string][]) {
+    await run(`employee_documents.${c}`, `ALTER TABLE employee_documents ADD COLUMN ${c} ${def}`, ["ER_DUP_FIELDNAME", "ER_NO_SUCH_TABLE"]);
+  }
+  await run("employee_documents source key", "ALTER TABLE employee_documents ADD INDEX idx_doc_source (source_type, source_id)", ["ER_DUP_KEYNAME", "ER_NO_SUCH_TABLE"]);
   await run(
     "esign_settings",
     `CREATE TABLE IF NOT EXISTS esign_settings (
@@ -138,6 +159,8 @@ export async function ensureESignSchema(dbPool: any): Promise<void> {
       FOREIGN KEY (document_id) REFERENCES employee_documents(id) ON DELETE CASCADE
     )`
   );
+  await run("esign_settings.pki_sign", "ALTER TABLE esign_settings ADD COLUMN pki_sign TINYINT(1) NOT NULL DEFAULT 0", ["ER_DUP_FIELDNAME"]);
+  await ensureESignCertificateSchema(dbPool);
   await run("verify_code key", "ALTER TABLE employee_documents ADD UNIQUE KEY uniq_doc_verify_code (verify_code)", ["ER_DUP_KEYNAME", "ER_NO_SUCH_TABLE"]);
   await run(
     "user_signatures",
@@ -249,6 +272,9 @@ export async function buildSignedPdf(opts: {
   events?: { at: string; label: string; who: string; ip: string | null; device: string; detail: string | null }[];
   eventsHead?: string;
   sealed?: boolean;
+  // Digital signature (ESignCertificate.ts): a note on the certificate page
+  // and the signature's reserved place; the caller then signs the bytes.
+  certificate?: { subject: string; organization: string | null; issuer: string; self_signed: boolean } | null;
 }): Promise<Buffer> {
   let pdf: PDFDocument;
   if (opts.kind === "pdf") {
@@ -352,7 +378,14 @@ export async function buildSignedPdf(opts: {
   const notes = [
     "How to check this document: open the link above (or scan the QR code) and drop in this PDF.",
     "If even one byte of the file was changed after signing, it will not match.",
-    "Each signer signed in the order shown, after signing in to CredenceHR with their own account."
+    "Each signer signed in the order shown, after signing in to CredenceHR with their own account.",
+    ...(opts.certificate
+      ? [
+          `The PDF itself is digitally signed with the certificate of ${opts.certificate.subject}` +
+            (opts.certificate.self_signed ? " (self-signed)." : `, issued by ${opts.certificate.issuer}.`),
+          "A PDF reader (e.g. Adobe Reader) shows that signature and flags any change made after signing."
+        ]
+      : [])
   ];
   for (const n of notes) {
     cert.drawText(pdfText(n), { x: 40, y, size: 8, font, color: gray });
@@ -410,6 +443,10 @@ export async function buildSignedPdf(opts: {
   pdf.setTitle(`${pdfText(opts.docType)} (signed)`);
   pdf.setProducer("CredenceHR E-Signature");
   pdf.setCreator("CredenceHR");
+  if (opts.certificate) {
+    addSignaturePlaceholder(pdf, opts.certificate, `Signed by ${opts.signers.map((s) => pdfText(s.signed_name)).join(", ")} in CredenceHR (verification code ${opts.verifyCode})`);
+    return Buffer.from(await pdf.save({ useObjectStreams: false }));
+  }
   return Buffer.from(await pdf.save());
 }
 
@@ -524,8 +561,20 @@ export function registerESignRoutes(app: Express, deps: RegisterESignRoutesDeps)
     } catch {
       types = [];
     }
-    return { otp_required: Number(r?.otp_required) === 1, otp_doc_types: Array.isArray(types) ? types.map(String) : [], require_read: Number(r?.require_read) === 1 };
+    return {
+      otp_required: Number(r?.otp_required) === 1,
+      otp_doc_types: Array.isArray(types) ? types.map(String) : [],
+      require_read: Number(r?.require_read) === 1,
+      pki_sign: Number(r?.pki_sign) === 1
+    };
   }
+  // ---- certificate (ESignCertificate.ts) ----
+  const companyName = async () => {
+    const rows: any[] = (await queryDB("/*unscoped*/ SELECT name FROM companies WHERE id = ?", [activeCompanyId()]).catch(() => [])) || [];
+    return String(rows[0]?.name || "CredenceHR");
+  };
+  const certificate = (create = false) => activeCertificate(queryDB, companyName, create);
+  const certView = (c: LoadedCert | null) => (c ? c.info : null);
   const otpNeeded = (st: Awaited<ReturnType<typeof loadSettings>>, docType: string) => st.otp_required && (!st.otp_doc_types.length || st.otp_doc_types.includes(String(docType)));
   // The signer's "read to the end" since the document was last sent.
   async function hasRead(docId: number, userId: number) {
@@ -555,7 +604,7 @@ export function registerESignRoutes(app: Express, deps: RegisterESignRoutesDeps)
       (await queryDB(
         withFile
           ? "SELECT * FROM employee_documents WHERE id = ?"
-          : "SELECT id, user_id, doc_type, file_name, file_mimetype, requires_signature, sha256, verify_code, sign_status, sign_placement, signed_sha256, sign_requested_by, sign_requested_at, completed_at, uploaded_at FROM employee_documents WHERE id = ?",
+          : "SELECT id, user_id, doc_type, file_name, file_mimetype, requires_signature, sha256, verify_code, sign_status, sign_placement, signed_sha256, sign_requested_by, sign_requested_at, completed_at, uploaded_at, pki_subject, pki_issuer, pki_self_signed, source_type, source_id FROM employee_documents WHERE id = ?",
         [id]
       )) || [];
     if (!rows.length) throw bad("Document not found.", 404);
@@ -601,7 +650,10 @@ export function registerESignRoutes(app: Express, deps: RegisterESignRoutesDeps)
       has_signed_file: doc.sign_status === "completed",
       signers: signers.map((s) => signerView(s, users)),
       otp_required: otpNeeded(await loadSettings(), doc.doc_type),
-      require_read: (await loadSettings()).require_read
+      require_read: (await loadSettings()).require_read,
+      certificate: doc.pki_subject ? { subject: doc.pki_subject, issuer: doc.pki_issuer || null, self_signed: Number(doc.pki_self_signed) === 1 } : null,
+      source_type: doc.source_type || null,
+      source_id: doc.source_id == null ? null : Number(doc.source_id)
     };
   }
 
@@ -670,7 +722,7 @@ export function registerESignRoutes(app: Express, deps: RegisterESignRoutesDeps)
       }
       const code = doc.verify_code || newVerifyCode();
       await queryDB(
-        "UPDATE employee_documents SET requires_signature = 1, sha256 = ?, verify_code = ?, sign_status = 'pending', sign_placement = ?, signed_file = NULL, signed_sha256 = NULL, sign_requested_by = ?, sign_requested_at = ?, completed_at = NULL WHERE id = ?",
+        "UPDATE employee_documents SET requires_signature = 1, sha256 = ?, verify_code = ?, sign_status = 'pending', sign_placement = ?, signed_file = NULL, signed_sha256 = NULL, sign_requested_by = ?, sign_requested_at = ?, completed_at = NULL, pki_subject = NULL, pki_issuer = NULL, pki_self_signed = NULL WHERE id = ?",
         [sha256(file), code, placement, req.user.id, new Date(), id]
       );
       const owner = (await usersByIds([Number(doc.user_id)])).get(Number(doc.user_id));
@@ -695,6 +747,86 @@ export function registerESignRoutes(app: Express, deps: RegisterESignRoutesDeps)
       await queryDB("UPDATE employee_documents SET sign_status = 'cancelled' WHERE id = ?", [id]);
       await queryDB("UPDATE document_signers SET status = 'cancelled' WHERE document_id = ? AND status IN ('pending', 'waiting')", [id]);
       await logDocEvent(queryDB, id, "cancelled", { userId: Number(req.user.id), req });
+      res.json(await docView(await loadDoc(id)));
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+  // ---- Sent from where the document is made (HR letters, exit documents) ----
+  // The page makes the PDF (the same one it downloads) and sends it here; it
+  // becomes a Document Vault document of that employee, linked to its source,
+  // and is then sent from the usual Signatures popup. The owner is always
+  // looked up here, never taken from the page.
+  const SOURCE_TYPES: Record<string, { docType: (given: string) => string; owner: (id: number) => Promise<number | null> }> = {
+    hr_letter: {
+      docType: (given) => given || "HR Letter",
+      owner: async (id) => {
+        const l: any[] = (await queryDB("SELECT employee_id, status FROM hr_letters WHERE id = ?", [id])) || [];
+        if (!l.length) throw bad("Letter not found.", 404);
+        if (l[0].status === "cancelled") throw bad("This letter is cancelled.");
+        const e: any[] = (await queryDB("SELECT user_id FROM all_employees WHERE id = ?", [Number(l[0].employee_id)])) || [];
+        return e[0]?.user_id ? Number(e[0].user_id) : null;
+      }
+    },
+    exit_clearance: { docType: () => "Clearance Certificate", owner: async (id) => exitOwner(id) },
+    exit_settlement: { docType: () => "Full & Final Settlement", owner: async (id) => exitOwner(id) }
+  };
+  async function exitOwner(id: number) {
+    const r: any[] = (await queryDB("SELECT user_id, status FROM exit_requests WHERE id = ?", [id])) || [];
+    if (!r.length) throw bad("Exit request not found.", 404);
+    if (r[0].status === "cancelled") throw bad("This exit is cancelled.");
+    return r[0].user_id ? Number(r[0].user_id) : null;
+  }
+  // ?type=hr_letter -> the latest document of each source of that type.
+  app.get("/api/esign/sources", ...adminGate, async (req: any, res) => {
+    try {
+      const type = String(req.query.type || "");
+      if (!SOURCE_TYPES[type]) throw bad("Unknown document source.");
+      const docs: any[] = (await queryDB("SELECT id, source_id, sign_status FROM employee_documents WHERE source_type = ?", [type])) || [];
+      const ids = docs.map((d) => Number(d.id));
+      const signers: any[] = ids.length ? (await queryDB(`SELECT document_id, status FROM document_signers WHERE document_id IN (${ids.map(() => "?").join(",")})`, ids)) || [] : [];
+      const latest = new Map<number, any>();
+      for (const d of docs) if (!latest.has(Number(d.source_id)) || Number(d.id) > Number(latest.get(Number(d.source_id)).id)) latest.set(Number(d.source_id), d);
+      res.json(
+        [...latest.values()].map((d) => {
+          const mine = signers.filter((s) => Number(s.document_id) === Number(d.id));
+          return { source_id: Number(d.source_id), document_id: Number(d.id), sign_status: d.sign_status || "none", signers_total: mine.length, signers_done: mine.filter((s) => s.status === "signed").length };
+        })
+      );
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+  // Body: { source_type, source_id, file_base64 (PDF), file_name, doc_type }.
+  app.post("/api/esign/sources", ...adminGate, async (req: any, res) => {
+    try {
+      const type = String(req.body?.source_type || "");
+      const src = SOURCE_TYPES[type];
+      const sourceId = Number(req.body?.source_id);
+      if (!src || !sourceId) throw bad("Unknown document source.");
+      const ownerId = await src.owner(sourceId);
+      if (!ownerId) throw bad("This employee has no login account, so they can't sign. Link one in Users first.");
+      const prev: any[] = (await queryDB("SELECT id, sign_status FROM employee_documents WHERE source_type = ? AND source_id = ? ORDER BY id DESC LIMIT 1", [type, sourceId])) || [];
+      // Already out for signing / signed: open that one, the file stays as signed.
+      if (prev[0] && ["pending", "completed"].includes(prev[0].sign_status)) return res.json(await docView(await loadDoc(Number(prev[0].id))));
+      const file = Buffer.from(String(req.body?.file_base64 || ""), "base64");
+      if (file.length < 100 || file.subarray(0, 5).toString("latin1") !== "%PDF-") throw bad("The document must be a PDF.");
+      if (file.length > 20 * 1024 * 1024) throw bad("The document is too big (at most 20 MB).");
+      const fileName = String(req.body?.file_name || "").trim().slice(0, 255) || `document_${sourceId}.pdf`;
+      const docType = src.docType(String(req.body?.doc_type || "").trim().slice(0, 100));
+      let id: number;
+      if (prev[0]) {
+        // Never sent, declined or cancelled: send today's copy instead.
+        id = Number(prev[0].id);
+        await queryDB("UPDATE employee_documents SET file_data = ?, file_name = ?, file_mimetype = 'application/pdf', doc_type = ?, sign_status = 'none' WHERE id = ?", [file, fileName, docType, id]);
+      } else {
+        const r: any = await queryDB(
+          "INSERT INTO employee_documents (user_id, doc_type, file_name, file_mimetype, file_data, requires_signature, uploaded_by, source_type, source_id) VALUES (?, ?, ?, 'application/pdf', ?, 1, ?, ?, ?)",
+          [ownerId, docType, fileName, file, req.user.id, type, sourceId]
+        );
+        id = Number(r.insertId);
+      }
       res.json(await docView(await loadDoc(id)));
     } catch (err) {
       fail(res, err);
@@ -850,7 +982,7 @@ export function registerESignRoutes(app: Express, deps: RegisterESignRoutesDeps)
         const evRows = await loadDocEvents(queryDB, id);
         const users = await usersByIds([...all.map((s) => Number(s.signer_user_id)), Number(doc.sign_requested_by), ...evRows.map((e) => Number(e.user_id)).filter(Boolean)]);
         const chain = checkEventChain(evRows);
-        const pdf = await buildSignedPdf({
+        const pdfOpts: Parameters<typeof buildSignedPdf>[0] = {
           file,
           kind: SIGNABLE(doc.file_mimetype, doc.file_name)!,
           placement: doc.sign_placement === "last_page" ? "last_page" : "page",
@@ -880,10 +1012,34 @@ export function registerESignRoutes(app: Express, deps: RegisterESignRoutesDeps)
           })),
           eventsHead: chain.head,
           sealed: !!sealKey()
-        });
+        };
+        // Digital signature with the company's certificate, when it is on. A
+        // certificate problem never stops the signing — the PDF is then made
+        // without it and the history says why.
+        let pdf: Buffer | null = null;
+        let pki: LoadedCert | null = null;
+        let pkiNote = "";
+        if (settings.pki_sign) {
+          try {
+            pki = await certificate(true);
+            if (!pki) throw new Error("no certificate");
+            if (pki.info.expired) throw new Error(`the certificate expired on ${pki.info.valid_to.slice(0, 10)}`);
+            pdf = await signPdfWith(await buildSignedPdf({ ...pdfOpts, certificate: pki.info }), pki);
+            pkiNote = ` · digitally signed with the certificate of ${pki.info.subject}${pki.info.self_signed ? " (self-signed)" : `, issued by ${pki.info.issuer}`}`;
+          } catch (err: any) {
+            console.warn(`⚠️ E-Signature certificate (document ${id}): ${err?.message || err}`);
+            pdf = null;
+            pki = null;
+            pkiNote = ` · NOT digitally signed with the certificate: ${String(err?.message || err).slice(0, 200)}`;
+          }
+        }
+        if (!pdf) pdf = await buildSignedPdf(pdfOpts);
         const signedSha = sha256(pdf);
-        await queryDB("UPDATE employee_documents SET signed_file = ?, signed_sha256 = ?, sign_status = 'completed', completed_at = ?, events_head = ?, seal = ? WHERE id = ?", [pdf, signedSha, now, chain.head, sealOf(signedSha, chain.head, doc.verify_code), id]);
-        await logDocEvent(queryDB, id, "completed", { detail: `Signed PDF SHA-256 ${signedSha}` });
+        await queryDB(
+          "UPDATE employee_documents SET signed_file = ?, signed_sha256 = ?, sign_status = 'completed', completed_at = ?, events_head = ?, seal = ?, pki_subject = ?, pki_issuer = ?, pki_self_signed = ? WHERE id = ?",
+          [pdf, signedSha, now, chain.head, sealOf(signedSha, chain.head, doc.verify_code), pki?.info.subject ?? null, pki?.info.issuer ?? null, pki ? (pki.info.self_signed ? 1 : 0) : null, id]
+        );
+        await logDocEvent(queryDB, id, "completed", { detail: `Signed PDF SHA-256 ${signedSha}${pkiNote}` });
         const tell = new Set<number>([Number(doc.user_id), Number(doc.sign_requested_by)].filter(Boolean));
         for (const uid of tell) await notify(uid, "Document signed by everyone", `${doc.doc_type} of ${owner?.name || "an employee"} is signed. The signed PDF is ready.`, id);
       }
@@ -923,6 +1079,13 @@ export function registerESignRoutes(app: Express, deps: RegisterESignRoutesDeps)
         can_edit: await hasModuleLayer(req.user, "document_vault", "esign_settings"),
         email_ready: isMailerConfigured(),
         seal_ready: !!sealKey(),
+        ...(await (async () => {
+          try {
+            return { certificate: certView(await certificate(false)), certificate_error: null as string | null, cert_from_env: certFromEnvConfigured() };
+          } catch (err: any) {
+            return { certificate: null, certificate_error: String(err?.message || err), cert_from_env: true };
+          }
+        })()),
         doc_types: [...new Set(types.map((t) => String(t.doc_type)).filter(Boolean))].sort()
       });
     } catch (err) {
@@ -936,10 +1099,38 @@ export function registerESignRoutes(app: Express, deps: RegisterESignRoutesDeps)
       if (otp && !isMailerConfigured()) throw bad("Email isn't set up on the server (SMTP_HOST / SMTP_USER / SMTP_PASS in .env), so codes can't be sent. Set it up first.");
       const types = Array.isArray(req.body?.otp_doc_types) ? [...new Set(req.body.otp_doc_types.map((t: any) => String(t).trim().slice(0, 100)).filter(Boolean))].slice(0, 50) : [];
       const read = !!req.body?.require_read;
+      // Not sent by an older screen -> keep what is saved.
+      const pkiOn = req.body?.pki_sign === undefined ? (await loadSettings()).pki_sign : !!req.body.pki_sign;
+      if (pkiOn) {
+        // Turning it on makes sure there is a certificate that works (the
+        // company's self-signed one is made now when none is set in .env).
+        let c: LoadedCert | null = null;
+        try {
+          c = await certificate(true);
+        } catch (err: any) {
+          throw bad(`The certificate can't be used: ${err?.message || err}`);
+        }
+        if (!c) throw bad("No certificate could be made.");
+        if (c.info.expired) throw bad(`The certificate expired on ${c.info.valid_to.slice(0, 10)} — put a new one in ESIGN_CERT_FILE.`);
+      }
       const cur: any[] = (await queryDB("SELECT id FROM esign_settings LIMIT 1").catch(() => [])) || [];
-      if (cur.length) await queryDB("UPDATE esign_settings SET otp_required = ?, otp_doc_types = ?, require_read = ?, updated_by = ? WHERE id = ?", [otp ? 1 : 0, JSON.stringify(types), read ? 1 : 0, req.user.id, Number(cur[0].id)]);
-      else await queryDB("INSERT INTO esign_settings (otp_required, otp_doc_types, require_read, updated_by) VALUES (?, ?, ?, ?)", [otp ? 1 : 0, JSON.stringify(types), read ? 1 : 0, req.user.id]);
+      if (cur.length) await queryDB("UPDATE esign_settings SET otp_required = ?, otp_doc_types = ?, require_read = ?, pki_sign = ?, updated_by = ? WHERE id = ?", [otp ? 1 : 0, JSON.stringify(types), read ? 1 : 0, pkiOn ? 1 : 0, req.user.id, Number(cur[0].id)]);
+      else await queryDB("INSERT INTO esign_settings (otp_required, otp_doc_types, require_read, pki_sign, updated_by) VALUES (?, ?, ?, ?, ?)", [otp ? 1 : 0, JSON.stringify(types), read ? 1 : 0, pkiOn ? 1 : 0, req.user.id]);
       res.json(await loadSettings());
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+  // The public half of the certificate (.cer), e.g. for a bank that wants to
+  // add the company's self-signed certificate to Adobe's trusted list.
+  app.get("/api/esign/certificate.cer", ...adminGate, async (_req: any, res) => {
+    try {
+      const c = await certificate(false);
+      if (!c) throw bad("There is no certificate yet — turn on Digital signature in E-Signature settings.", 404);
+      res.setHeader("Content-Type", "application/x-x509-ca-cert");
+      res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(`${c.info.subject} e-signature certificate.cer`)}"`);
+      res.send(c.pem);
     } catch (err) {
       fail(res, err);
     }
@@ -1052,7 +1243,7 @@ export function registerESignRoutes(app: Express, deps: RegisterESignRoutesDeps)
     if (!CODE_RE.test(code)) throw bad("That verification code isn't valid.", 404);
     const rows: any[] =
       (await queryDB(
-        "/*unscoped*/ SELECT id, user_id, doc_type, sign_status, sha256, signed_sha256, sign_requested_at, completed_at, seal, events_head, verify_code, signed_file FROM employee_documents WHERE verify_code = ?",
+        "/*unscoped*/ SELECT id, user_id, doc_type, sign_status, sha256, signed_sha256, sign_requested_at, completed_at, seal, events_head, verify_code, signed_file, pki_subject, pki_issuer, pki_self_signed FROM employee_documents WHERE verify_code = ?",
         [code]
       )) || [];
     const doc = rows[0];
@@ -1087,6 +1278,10 @@ export function registerESignRoutes(app: Express, deps: RegisterESignRoutesDeps)
         signed_sha256: doc.signed_sha256 || null,
         original_sha256: doc.sha256 || null,
         integrity,
+        certificate:
+          doc.sign_status === "completed" && doc.pki_subject
+            ? { subject: doc.pki_subject, issuer: doc.pki_issuer || null, self_signed: Number(doc.pki_self_signed) === 1 }
+            : null,
         signers: signers.map((s) => ({
           step: Number(s.step_order),
           name: s.status === "signed" ? s.signed_name || nameOf.get(Number(s.signer_user_id)) : nameOf.get(Number(s.signer_user_id)) || null,
