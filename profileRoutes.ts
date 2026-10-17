@@ -183,7 +183,10 @@ export function registerProfileRoutes(app: Express, deps: ProfileRouteDeps) {
         [targetId]
       );
       const row = rows[0];
-      if (!row || !row.photo_data) return res.status(404).json({ error: "No photo on file." });
+      // No photo is the normal case for most people, not an error: 204, so the
+      // browser console doesn't fill with a red 404 per colleague. Callers
+      // treat 204 as "show the initials".
+      if (!row || !row.photo_data) return res.status(204).end();
       const buffer: Buffer = Buffer.isBuffer(row.photo_data) ? row.photo_data : Buffer.from(row.photo_data);
       res.setHeader("Content-Type", row.photo_mimetype || "image/jpeg");
       res.setHeader("Cache-Control", "private, max-age=300");

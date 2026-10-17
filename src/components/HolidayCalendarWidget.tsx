@@ -85,7 +85,7 @@ const PersonPhoto: React.FC<{ userId: number; name: string; token: string; class
       photoCache.set(
         userId,
         fetch(apiUrl(`/api/profile/photo/${userId}`), { headers: { Authorization: `Bearer ${token}` } })
-          .then((r) => (r.ok ? r.blob().then((b) => URL.createObjectURL(b)) : null))
+          .then((r) => (r.ok && r.status !== 204 ? r.blob().then((b) => URL.createObjectURL(b)) : null))
           .catch(() => null)
       );
     }
