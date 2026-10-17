@@ -115,6 +115,7 @@ export const CONFIG_TABLES = new Map<string, string>(SHARE_KINDS.flatMap((k) => 
 // Company-owned records that are never shared.
 export const OWN_TABLES = new Set([
   "site_attendance_teams",
+  "measurement_sheets",
   "site_attendance_settings",
   "zk_devices",
   "hr_saved_reports",

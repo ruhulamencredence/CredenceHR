@@ -42,6 +42,7 @@ import { TaskManagement } from './TaskManagement';
 import { TargetReports } from './TargetReports';
 import { MailAdministration } from './mail/MailAdministration';
 import { DutyRoster } from './DutyRoster';
+import { MeasurementSheet } from './MeasurementSheet';
 import { MobileBillAdmin } from './MobileBillAdmin';
 import { AdminDashboard } from './AdminDashboard';
 import { UserAccessDrawer, UserAccessChips, userInitials, ROLE_BADGE, ROLE_LABEL } from './UserAccessDrawer';
@@ -74,7 +75,7 @@ import { STD_STYLES, STD_HEAD } from '../lib/pdfStandard';
 // here since this list has no nested-group UI. Any ADMIN_MODULES key not
 // listed under one of these falls into "Other" automatically.
 const MODULE_ACCESS_GROUPS: { label: string; keys: AdminModuleKey[] }[] = [
-  { label: 'PEPM Manage', keys: ['reports', 'mprs', 'imports', 'recycle', 'editlog'] },
+  { label: 'PEPM Manage', keys: ['reports', 'mprs', 'imports', 'recycle', 'editlog', 'measurement_sheet'] },
   { label: 'HR', keys: ['approvals', 'notices', 'holidays', 'leave_applications', 'departments', 'task_management', 'mobile_bill', 'target_reports'] },
   { label: 'HR - Attendance', keys: ['attendance', 'attendance_reports', 'office_attendance', 'duty_roster'] },
   { label: 'HR - Claims/Bill/Disbursement', keys: ['claims', 'conveyance', 'disbursement'] },
@@ -86,7 +87,7 @@ const MODULE_ACCESS_GROUPS: { label: string; keys: AdminModuleKey[] }[] = [
     label: 'Other',
     keys: ADMIN_MODULES.map((m) => m.key).filter(
       (key) => ![
-        'reports', 'mprs', 'imports', 'recycle', 'editlog',
+        'reports', 'mprs', 'imports', 'recycle', 'editlog', 'measurement_sheet',
         'approvals', 'notices', 'holidays', 'leave_applications', 'departments', 'task_management', 'mobile_bill', 'target_reports',
         'attendance', 'attendance_reports', 'office_attendance', 'duty_roster',
         'claims', 'conveyance', 'disbursement',
@@ -498,7 +499,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     tab === 'permanent_delete_log' || tab === 'companies' || tab === 'devices' || tab === 'active_users' ? isSuperAdmin :
     isSuperAdmin || visibleModules.includes(tab as AdminModuleKey);
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'reports_insights' | 'data_import' | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'bill_claim_policy' | 'disbursement' | 'holidays' | 'asset_management' | 'vehicle_management' | 'permanent_delete_log' | 'companies' | 'devices' | 'active_users' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'hr_operations' | 'task_management' | 'mobile_bill' | 'target_reports' | 'mail_admin' | 'duty_roster'>(
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'reports_insights' | 'data_import' | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'bill_claim_policy' | 'disbursement' | 'holidays' | 'asset_management' | 'vehicle_management' | 'permanent_delete_log' | 'companies' | 'devices' | 'active_users' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'hr_operations' | 'task_management' | 'mobile_bill' | 'target_reports' | 'mail_admin' | 'duty_roster' | 'measurement_sheet'>(
     () => {
       // Restores whichever tab this Admin was last looking at — see the
       // "pull down to reload" note in App.tsx: since a reload now has to be
@@ -2230,7 +2231,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // Tabs that read none of the shared lists.
   const SELF_CONTAINED_TABS = new Set<string>([
     'dashboard', 'reports_insights', 'data_import', 'hr_analytics', 'exit_offboarding', 'performance_management',
-    'recruitment', 'grievance_disciplinary', 'document_vault', 'hr_operations', 'task_management', 'mobile_bill', 'target_reports', 'mail_admin', 'duty_roster',
+    'recruitment', 'grievance_disciplinary', 'document_vault', 'hr_operations', 'task_management', 'mobile_bill', 'target_reports', 'mail_admin', 'duty_roster', 'measurement_sheet',
     'devices', 'active_users', 'companies'
   ]);
   const ALL_SHARED: SharedKey[] = ['projects', 'branches', 'mprNumbers', 'entries', 'users', 'people', 'budgets', 'permissions', 'departments'];
@@ -5186,6 +5187,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       {activeTab === 'mobile_bill' && <MobileBillAdmin token={token} />}
       {activeTab === 'mail_admin' && canSee('mail_admin') && <MailAdministration token={token} user={user} />}
       {activeTab === 'duty_roster' && canSee('duty_roster') && <DutyRoster token={token} user={user} />}
+      {activeTab === 'measurement_sheet' && canSee('measurement_sheet') && <MeasurementSheet token={token} />}
 
       {/* TAB: PERMANENT DELETE LOG — Superadmin-only (see GET
           /api/entries/permanent-delete-log and the comment on DELETE
