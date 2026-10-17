@@ -65,6 +65,7 @@ import QRCode from "qrcode";
 import type { AlertType } from "./Alerts";
 import { sendMail, isMailerConfigured } from "./mailer";
 import { activeCompanyId } from "./companyContext";
+import { loadPolicy } from "./BillClaimPolicy";
 import { activeCertificate, addSignaturePlaceholder, certFromEnvConfigured, ensureESignCertificateSchema, signPdfWith, type LoadedCert } from "./ESignCertificate";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
@@ -163,6 +164,21 @@ export async function ensureESignSchema(dbPool: any): Promise<void> {
       hash CHAR(64) NOT NULL,
       UNIQUE KEY uniq_doc_event_seq (document_id, seq),
       FOREIGN KEY (document_id) REFERENCES employee_documents(id) ON DELETE CASCADE
+    )`
+  );
+  // Conveyance Bill Claim: the approver's signature as it was when they approved
+  // (Bill Claim Policy -> "Put each approver's signature on the Bill and Voucher").
+  await run(
+    "claim_approval_signatures",
+    `CREATE TABLE IF NOT EXISTS claim_approval_signatures (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      approval_request_id INT NOT NULL,
+      step_order INT NOT NULL,
+      approver_user_id INT NOT NULL,
+      image MEDIUMBLOB NOT NULL,
+      signed_at DATETIME NOT NULL,
+      UNIQUE KEY uniq_claim_sig (approval_request_id, step_order, approver_user_id),
+      INDEX idx_claim_sig_request (approval_request_id)
     )`
   );
   await run("esign_settings.email_signed", "ALTER TABLE esign_settings ADD COLUMN email_signed TINYINT(1) NOT NULL DEFAULT 0", ["ER_DUP_FIELDNAME"]);
@@ -1008,6 +1024,43 @@ export function registerESignRoutes(app: Express, deps: RegisterESignRoutesDeps)
     if (buf.subarray(0, 8).toString("hex") !== "89504e470d0a1a0a") throw bad("The signature must be a PNG image.");
     return buf;
   };
+  // Conveyance Bill Claim approvers' own signature (Approve Application ->
+  // "My signature"): the same saved signature as Documents to Sign, but open to
+  // any approver — and only while the Bill Claim Policy has "Put each
+  // approver's signature on the Bill and Voucher" on.
+  const approverSigOn = async () => !!(await loadPolicy(queryDB).catch(() => ({}) as any)).approver_signature;
+  const requireApproverSig = async (req: any, res: any, next: any) => {
+    if (!(await approverSigOn())) return res.status(403).json({ error: "Approver signatures are turned off (Bill Claim Policy)." });
+    next();
+  };
+  app.get("/api/claim-signature", authenticateToken, async (req: any, res) => {
+    try {
+      const enabled = await approverSigOn();
+      if (!enabled) return res.json({ enabled: false, image: null });
+      const rows: any[] = (await queryDB("SELECT image FROM user_signatures WHERE user_id = ?", [req.user.id])) || [];
+      const img = toBuffer(rows[0]?.image);
+      res.json({ enabled: true, image: img ? `data:image/png;base64,${img.toString("base64")}` : null });
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+  app.put("/api/claim-signature", authenticateToken, requireApproverSig, async (req: any, res) => {
+    try {
+      const buf = readSignatureImage(req.body?.image);
+      await queryDB("INSERT INTO user_signatures (user_id, image) VALUES (?, ?) ON DUPLICATE KEY UPDATE image = VALUES(image)", [req.user.id, buf]);
+      res.json({ success: true });
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+  app.delete("/api/claim-signature", authenticateToken, requireApproverSig, async (req: any, res) => {
+    try {
+      await queryDB("DELETE FROM user_signatures WHERE user_id = ?", [req.user.id]);
+      res.json({ success: true });
+    } catch (err) {
+      fail(res, err);
+    }
+  });
   app.put("/api/esign/my-signature", authenticateToken, requireSigner, async (req: any, res) => {
     try {
       const buf = readSignatureImage(req.body?.image);

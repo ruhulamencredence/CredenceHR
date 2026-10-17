@@ -199,6 +199,7 @@ export const LINKED_TABLES = new Map<string, [string, string]>([
   ["esign_otps", ["document_id", "employee_documents"]],
   ["document_events", ["document_id", "employee_documents"]],
   ["user_signatures", ["user_id", "users"]],
+  ["claim_approval_signatures", ["approval_request_id", "approval_requests"]],
   ["employee_template_assignments", ["employee_user_id", "users"]],
   ["exit_clearance_items", ["exit_id", "exit_requests"]],
   ["hr_report_runs", ["report_id", "hr_saved_reports"]],
