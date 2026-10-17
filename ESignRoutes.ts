@@ -1241,8 +1241,12 @@ export function registerESignRoutes(app: Express, deps: RegisterESignRoutesDeps)
       if (recent[0] && nowMs - t(recent[0].created_at) < 60_000) throw bad("A code was just sent — wait a minute before asking again.", 429);
       if (recent.filter((o) => nowMs - t(o.created_at) < 3600_000).length >= 5) throw bad("Too many codes this hour — try again later.", 429);
       const u: any[] = (await queryDB("SELECT email, name FROM users WHERE id = ?", [me])) || [];
-      const email = String(u[0]?.email || "").trim();
-      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw bad("Your account has no email address to send the code to. Ask HR to add it.");
+      // The code goes to the mailbox the person reads in Credence Mail (their
+      // default one first); only without one, to the email on their account.
+      const boxes: any[] = (await queryDB("SELECT email FROM mail_accounts WHERE user_id = ? ORDER BY is_default DESC, id", [me]).catch(() => [])) || [];
+      const okMail = (v: any) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(v || "").trim());
+      const email = String(boxes.find((b) => okMail(b.email))?.email || (okMail(u[0]?.email) ? u[0].email : "")).trim();
+      if (!email) throw bad("There is no mailbox to send the code to. Connect your mailbox in Credence Mail first (Self Service → Credence Mail), or ask HR to add an email to your account.");
       const code = String(crypto.randomInt(0, 1_000_000)).padStart(6, "0");
       const r: any = await queryDB(
         "INSERT INTO esign_otps (document_id, user_id, code_hash, sent_to, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?)",
