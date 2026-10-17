@@ -763,28 +763,27 @@ export const CredenceMail: React.FC<{
   const bulk = async (kind: 'read' | 'unread' | 'trash' | 'spam' | 'inbox' | 'archive') => {
     const ids = checkedItems.map((m) => m.id);
     if (!ids.length) return;
+    const forGood = kind === 'trash' && (folder === 'Trash' || folder === 'Drafts' || folder === 'Scheduled');
+    if (forGood && !(await confirmDialog(`Delete ${ids.length} mail${ids.length > 1 ? 's' : ''} for good? This cannot be undone.`, { tone: 'danger', confirmLabel: 'Delete' }))) return;
+    // The list changes at once; the mail server catches up behind it (one
+    // request for the whole selection — see /messages/batch).
+    const reading = kind === 'read' || kind === 'unread';
+    if (reading) patchLocal(ids, { isRead: kind === 'read' });
+    else {
+      patchLocal(ids, {}, true);
+      if (selectedId && ids.includes(selectedId)) setSelectedId(null);
+    }
+    setChecked(new Set());
     try {
-      if (kind === 'read' || kind === 'unread') {
-        await mailFetch(token, '/messages/batch', { method: 'POST', body: { ids, patch: { isRead: kind === 'read' } } });
-        patchLocal(ids, { isRead: kind === 'read' });
-      } else if (kind === 'trash') {
-        const forGood = folder === 'Trash' || folder === 'Drafts' || folder === 'Scheduled';
-        if (forGood && !(await confirmDialog(`Delete ${ids.length} mail${ids.length > 1 ? 's' : ''} for good? This cannot be undone.`, { tone: 'danger', confirmLabel: 'Delete' }))) return;
-        await mailFetch(token, '/messages/batch', { method: 'POST', body: { ids, action: 'delete' } });
-        patchLocal(ids, {}, true);
-        if (selectedId && ids.includes(selectedId)) setSelectedId(null);
-      } else {
-        const target = kind === 'spam' ? 'Spam' : kind === 'archive' ? 'Archive' : 'Inbox';
-        // Each keeps its own other labels.
-        for (const m of checkedItems) await mailFetch(token, `/messages/${m.id}`, { method: 'PATCH', body: { labels: moveLabels(m, target) } });
-        patchLocal(ids, {}, true);
-        if (selectedId && ids.includes(selectedId)) setSelectedId(null);
-      }
-      setChecked(new Set());
-      void loadCounts();
+      if (reading) await mailFetch(token, '/messages/batch', { method: 'POST', body: { ids, patch: { isRead: kind === 'read' } } });
+      else if (kind === 'trash') await mailFetch(token, '/messages/batch', { method: 'POST', body: { ids, action: 'delete' } });
+      else await mailFetch(token, '/messages/batch', { method: 'POST', body: { ids, action: 'move', to: kind === 'spam' ? 'Spam' : kind === 'archive' ? 'Archive' : 'Inbox' } });
+      if (!reading) say(kind === 'trash' ? (forGood ? `Deleted ${ids.length}.` : `Moved ${ids.length} to Trash.`) : kind === 'spam' ? 'Moved to Spam.' : kind === 'archive' ? 'Archived.' : 'Moved to Inbox.');
     } catch (e: any) {
       say(e.message, 'error');
+      refreshRef.current();
     }
+    void loadCounts();
   };
 
   const loadMore = async () => {

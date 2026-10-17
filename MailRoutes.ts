@@ -1458,10 +1458,15 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
   );
 
   // Delete: to Trash first; from Trash (or a draft / scheduled mail) for good.
+  // In Trash already (or a draft / scheduled mail that only lives here): gone for good.
+  const deletesForGood = (row: any) => {
+    const labels = parseJson<string[]>(row.labels_json, []);
+    return labels.includes("Trash") || (!row.uid && (labels.includes("Drafts") || labels.includes("Scheduled")));
+  };
+  const toTrashLabels = (row: any) => [...parseJson<string[]>(row.labels_json, []).filter((l) => l !== "Inbox" && l !== "Spam" && l !== "Archive"), "Trash"];
   async function deleteOne(userId: number, row: any) {
     const labels = parseJson<string[]>(row.labels_json, []);
-    const local = !row.uid;
-    if (labels.includes("Trash") || (local && (labels.includes("Drafts") || labels.includes("Scheduled")))) {
+    if (deletesForGood(row)) {
       if (row.uid) {
         const a = await accountOf(userId, row.account_id);
         await serverDelete(a, row).catch((e) => console.warn("⚠️ Credence Mail delete:", e?.message));
@@ -1470,7 +1475,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
       await queryDB("DELETE FROM mail_messages WHERE id = ? AND user_id = ?", [Number(row.id), userId]);
       return;
     }
-    await applyPatch(userId, row, { labels: [...labels.filter((l) => l !== "Inbox" && l !== "Spam" && l !== "Archive"), "Trash"] });
+    await applyPatch(userId, row, { labels: toTrashLabels(row) });
   }
 
   app.delete(
@@ -1482,7 +1487,113 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     })
   );
 
-  // Many at once: { ids: [...], patch: {...} } or { ids: [...], action: "delete" }.
+  // Many at once. One mail-server login per mailbox folder for the whole
+  // selection — logging in once per mail made "select 30, Delete" take
+  // minutes on a real server, run into the proxy's timeout and trip the
+  // server's login limit, so the mails never went.
+  async function onServerFolder(userId: number, accountId: number, role: string, fn: (c: ImapFlow, folders: Record<string, string>) => Promise<void>) {
+    const a = await accountOf(userId, accountId);
+    await withAccountLock(Number(a.id), () =>
+      withImap(a, async (c) => {
+        const folders = await foldersOf(a, c);
+        const path = folders[role];
+        if (!path) return;
+        const lock = await c.getMailboxLock(path);
+        try {
+          await fn(c, folders);
+        } finally {
+          lock.release();
+        }
+      })
+    );
+  }
+  const byServerFolder = <T extends { r: any }>(list: T[], extraKey: (x: T) => string = () => "") => {
+    const groups = new Map<string, T[]>();
+    for (const x of list) {
+      if (!x.r.uid || !x.r.folder_role) continue;
+      const k = `${x.r.account_id}|${x.r.folder_role}|${extraKey(x)}`;
+      groups.set(k, [...(groups.get(k) || []), x]);
+    }
+    return [...groups.values()];
+  };
+  const uidList = (list: { r: any }[]) => list.map((x) => Number(x.r.uid)).join(",");
+
+  async function moveMany(userId: number, rows: any[], labelsFor: (r: any) => string[]) {
+    const plan = rows.map((r) => {
+      const labels = labelsFor(r);
+      return { r, labels, role: roleForLabels(labels, r.folder_role) };
+    });
+    const moved = new Map<number, number | null>();
+    for (const g of byServerFolder(plan.filter((x) => x.role && x.role !== x.r.folder_role), (x) => String(x.role))) {
+      const toRole = String(g[0].role);
+      await onServerFolder(userId, Number(g[0].r.account_id), g[0].r.folder_role, async (c, folders) => {
+        if (!folders[toRole]) return;
+        const res: any = await c.messageMove(uidList(g), folders[toRole], { uid: true });
+        const map: Map<number, number> | undefined = res?.uidMap;
+        for (const x of g) moved.set(Number(x.r.id), map?.get(Number(x.r.uid)) ?? null);
+      }).catch((e) => console.warn("⚠️ Credence Mail move:", e?.message));
+    }
+    for (const x of plan) {
+      const id = Number(x.r.id);
+      if (moved.has(id)) await queryDB("UPDATE mail_messages SET labels_json = ?, folder_role = ?, uid = ? WHERE id = ? AND user_id = ?", [JSON.stringify(x.labels), x.role, moved.get(id), id, userId]);
+      else await queryDB("UPDATE mail_messages SET labels_json = ? WHERE id = ? AND user_id = ?", [JSON.stringify(x.labels), id, userId]);
+    }
+  }
+
+  async function deleteMany(userId: number, rows: any[]) {
+    const gone = rows.filter(deletesForGood);
+    for (const g of byServerFolder(gone.map((r) => ({ r })))) {
+      await onServerFolder(userId, Number(g[0].r.account_id), g[0].r.folder_role, async (c) => {
+        await c.messageDelete(uidList(g), { uid: true });
+      }).catch((e) => console.warn("⚠️ Credence Mail delete:", e?.message));
+    }
+    if (gone.length) {
+      const ids = gone.map((r) => Number(r.id));
+      const marks = ids.map(() => "?").join(",");
+      await queryDB(`DELETE FROM mail_files WHERE message_id IN (${marks})`, ids);
+      await queryDB(`DELETE FROM mail_messages WHERE user_id = ? AND id IN (${marks})`, [userId, ...ids]);
+    }
+    await moveMany(userId, rows.filter((r) => !deletesForGood(r)), toTrashLabels);
+  }
+
+  async function flagMany(userId: number, rows: any[], patch: any) {
+    const sets: string[] = [];
+    const vals: any[] = [];
+    const flags: [string, boolean][] = [];
+    if (patch.isRead !== undefined) {
+      sets.push("is_read = ?");
+      vals.push(patch.isRead ? 1 : 0);
+      flags.push(["\\Seen", !!patch.isRead]);
+    }
+    if (patch.isStarred !== undefined) {
+      sets.push("is_starred = ?");
+      vals.push(patch.isStarred ? 1 : 0);
+      flags.push(["\\Flagged", !!patch.isStarred]);
+    }
+    if (patch.isImportant !== undefined) {
+      sets.push("is_important = ?");
+      vals.push(patch.isImportant ? 1 : 0);
+    }
+    if (patch.category !== undefined) {
+      sets.push("category = ?");
+      vals.push(str(patch.category, 30) || "primary");
+    }
+    if (flags.length) {
+      for (const g of byServerFolder(rows.map((r) => ({ r })))) {
+        await onServerFolder(userId, Number(g[0].r.account_id), g[0].r.folder_role, async (c) => {
+          for (const [flag, on] of flags) await (on ? c.messageFlagsAdd(uidList(g), [flag], { uid: true }) : c.messageFlagsRemove(uidList(g), [flag], { uid: true }));
+        }).catch((e) => console.warn("⚠️ Credence Mail flags:", e?.message));
+      }
+    }
+    if (sets.length) {
+      const ids = rows.map((r) => Number(r.id));
+      await queryDB(`UPDATE mail_messages SET ${sets.join(", ")} WHERE user_id = ? AND id IN (${ids.map(() => "?").join(",")})`, [...vals, userId, ...ids]);
+    }
+  }
+
+  // { ids, action: "delete" }  — to Trash, or for good from Trash
+  // { ids, action: "move", to: "Inbox" | "Spam" | "Archive" }
+  // { ids, patch: { isRead, isStarred, isImportant, category } }
   app.post(
     "/api/mail/messages/batch",
     ...gate,
@@ -1490,17 +1601,18 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
       const ids = (Array.isArray(req.body?.ids) ? req.body.ids : []).map(Number).filter((n: number) => n > 0).slice(0, 500);
       if (!ids.length) return res.json({ success: true, done: 0 });
       const rows: any[] = await queryDB(`SELECT ${LIST_COLS}, folder_role, uid FROM mail_messages WHERE user_id = ? AND id IN (${ids.map(() => "?").join(",")})`, [uid(req), ...ids]);
-      let done = 0;
-      for (const r of rows) {
-        try {
-          if (req.body?.action === "delete") await deleteOne(uid(req), r);
-          else await applyPatch(uid(req), r, req.body?.patch || {});
-          done++;
-        } catch (e: any) {
-          console.warn("⚠️ Credence Mail batch:", e?.message);
-        }
+      const action = req.body?.action;
+      if (action === "delete") await deleteMany(uid(req), rows);
+      else if (action === "move") {
+        const to = String(req.body?.to || "");
+        if (!["Inbox", "Spam", "Archive"].includes(to)) throw bad("Move to Inbox, Spam or Archive.");
+        await moveMany(uid(req), rows, (r) => [...parseJson<string[]>(r.labels_json, []).filter((l) => !["Inbox", "Spam", "Trash", "Archive"].includes(l)), to]);
+      } else {
+        const patch = req.body?.patch || {};
+        if (Array.isArray(patch.labels)) for (const r of rows) await applyPatch(uid(req), r, patch);
+        else await flagMany(uid(req), rows, patch);
       }
-      res.json({ success: true, done });
+      res.json({ success: true, done: rows.length });
     })
   );
 
