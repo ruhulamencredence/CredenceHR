@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Home, Route, Clock, CalendarClock, Contact, LayoutGrid, X } from 'lucide-react';
+import { useScrolling } from '../lib/useScrolling';
 
 export type MobileSection = 'budget' | 'jobs' | 'entries' | 'jobEdit' | 'claim' | 'claims' | 'conveyanceClaim' | 'leave' | 'timesheet' | 'employeeDirectory' | null;
 
@@ -112,6 +113,7 @@ export function BottomNav({ active, onChange, canViewMovementClaim = true, canVi
   // sits on the bar's top-right edge. Empty for now; items get added later.
   // Only on the Dashboard (Home); any other page closes it.
   const [moreOpen, setMoreOpen] = useState(false);
+  const scrollingAway = useScrolling() && !moreOpen;
   const showMore = active === null;
   useEffect(() => {
     if (!showMore) setMoreOpen(false);
@@ -140,7 +142,9 @@ export function BottomNav({ active, onChange, canViewMovementClaim = true, canVi
           onClick={() => setMoreOpen((v) => !v)}
           aria-label="More"
           aria-expanded={moreOpen}
-          style={{ bottom: BAR_H + 14 }}
+          // Steps aside while the page scrolls, so it doesn't sit on the
+          // tiles / rows passing under it.
+          style={{ bottom: BAR_H + 14, transform: scrollingAway ? 'translateX(calc(100% + 1.5rem))' : undefined, transition: 'transform 0.3s ease-out' }}
           className="absolute right-4 z-10 flex flex-col items-center justify-center w-11 h-11 rounded-full bg-white/45 backdrop-blur-xl border border-white/70 shadow-[0_8px_20px_-6px_rgba(42,0,85,0.45),inset_0_1px_0_rgba(255,255,255,0.7)] active:scale-95 transition-transform"
         >
           {moreOpen ? (
