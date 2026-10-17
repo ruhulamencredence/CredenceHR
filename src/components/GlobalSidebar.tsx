@@ -7,7 +7,7 @@ import {
   Contact, Calendar, Clock, Fingerprint, Banknote, Package, LayoutDashboard, Server, MessageSquare,
   ChevronsLeft, ChevronsRight, ShieldAlert, Search, PieChart, FileUp,
   Target, UserPlus, Gavel, FolderLock, Sparkles, ExternalLink, Car, HandCoins,
-  ClipboardList, BookOpen, ClipboardCheck, TrendingUp, Settings, Pencil, Check, Mail, CalendarRange, PenLine, ReceiptText,
+  ClipboardList, BookOpen, ClipboardCheck, TrendingUp, Settings, Pencil, Check, Mail, CalendarRange, Ruler, PenLine, ReceiptText,
 } from 'lucide-react';
 import { User, AdminModuleKey, REPORTS_INSIGHTS_MODULES, DATA_IMPORT_MODULES } from '../types';
 import credenceLogo from '../assets/credence-logo.png';
@@ -421,6 +421,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     { key: 'imports', label: 'Data Import', icon: Upload, onClick: () => onGoToAdminModule('imports') },
     { key: 'recycle', label: 'Job Recycle', icon: Recycle, onClick: () => onGoToAdminModule('recycle') },
     { key: 'editlog', label: 'MPR Edit Log', icon: History, onClick: () => onGoToAdminModule('editlog') },
+    { key: 'measurement_sheet', label: 'Measurement Sheet', icon: Ruler, onClick: () => onGoToAdminModule('measurement_sheet') },
   ].filter((i) => pepmOn && canSeeModule(i.key as AdminModuleKey));
 
   // "Claims" — Movement Claims, Conveyance Bill Claim, Conveyance
@@ -697,7 +698,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
       icon: Server,
       entries: pick('users', 'projects', 'branches', 'mail_admin', 'companies', 'devices', 'active_users', 'data_import', 'permanent_delete_log')
     },
-    { key: 'g_pepm', label: 'PEPM Management', icon: BarChart3, entries: pick('reports', 'mprs', 'imports', 'recycle', 'editlog') }
+    { key: 'g_pepm', label: 'PEPM Management', icon: BarChart3, entries: pick('reports', 'mprs', 'imports', 'recycle', 'editlog', 'measurement_sheet') }
   ]);
   const allGroups = [...selfGroups, ...adminGroups];
   // Which group an item lives in (search shows it beside the name).

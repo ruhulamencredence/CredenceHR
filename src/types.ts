@@ -3,7 +3,7 @@ export type UserRole = 'superadmin' | 'admin' | 'user';
 // Every Admin Panel tab. A Superadmin implicitly has all of these; a plain Admin
 // only sees/uses the ones the Superadmin has explicitly granted via
 // PUT /api/users/:id/module-permissions. Mirrors ADMIN_MODULE_KEYS in server.ts.
-export type AdminModuleKey = 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'recycle' | 'editlog' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'disbursement' | 'employees' | 'departments' | 'tracking' | 'office_attendance' | 'holidays' | 'payroll' | 'asset_management' | 'vehicle_management' | 'vehicle_maintainer' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'hr_operations' | 'admin_dashboard' | 'task_management' | 'mobile_bill' | 'target_reports' | 'mail_admin' | 'duty_roster';
+export type AdminModuleKey = 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'recycle' | 'editlog' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'disbursement' | 'employees' | 'departments' | 'tracking' | 'office_attendance' | 'holidays' | 'payroll' | 'asset_management' | 'vehicle_management' | 'vehicle_maintainer' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'hr_operations' | 'admin_dashboard' | 'task_management' | 'mobile_bill' | 'target_reports' | 'mail_admin' | 'duty_roster' | 'measurement_sheet';
 
 // Admin Panel -> Reports & Insights is not its own module grant: it shows for
 // anyone holding at least one of the modules its reports come from (each
@@ -85,7 +85,8 @@ export const ADMIN_MODULES: { key: AdminModuleKey; label: string }[] = [
   { key: 'mail_admin', label: 'Mail Administration' },
   // Duty Roster (DutyRoster.tsx): shifts and who works which shift on which
   // day — read by every attendance and payroll figure.
-  { key: 'duty_roster', label: 'Duty Roster' }
+  { key: 'duty_roster', label: 'Duty Roster' },
+  { key: 'measurement_sheet', label: 'Measurement Sheet' }
 ];
 
 // Granular per-module action layers, layered on top of the coarse module
@@ -107,7 +108,7 @@ export const PERMISSION_LAYERS: { key: PermissionLayerKey; label: string }[] = [
 // being rolled out one module at a time. A module not listed here still only
 // has the old coarse on/off grant (module_permissions), unaffected by any of
 // this. Start: 'departments', then 'projects', then 'approvals', then 'users'.
-export const PERMISSION_LAYER_MODULES: AdminModuleKey[] = ['departments', 'projects', 'approvals', 'users', 'reports', 'tracking', 'payroll', 'mobile_bill', 'office_attendance', 'conveyance', 'hr_operations', 'exit_offboarding', 'target_reports', 'attendance_reports', 'mail_admin', 'duty_roster', 'document_vault'];
+export const PERMISSION_LAYER_MODULES: AdminModuleKey[] = ['departments', 'projects', 'approvals', 'users', 'reports', 'tracking', 'payroll', 'mobile_bill', 'office_attendance', 'conveyance', 'hr_operations', 'exit_offboarding', 'target_reports', 'attendance_reports', 'mail_admin', 'duty_roster', 'document_vault', 'measurement_sheet'];
 
 // A module that uses only some of the layers, with its own labels. PEPM
 // Reports: Read Only, Edit, Delete/Trash, Permanent Delete, and Budget
@@ -203,6 +204,13 @@ export const MODULE_LAYER_OPTIONS: Partial<Record<AdminModuleKey, { key: Permiss
     { key: 'read', label: 'See shifts and roster' },
     { key: 'roster_manage', label: 'Set shifts and roster' }
   ],
+  // PEPM -> Measurement Sheet: open and export sheets; upload a drawing and
+  // change a sheet; delete one. Edit and Delete are explicit only.
+  measurement_sheet: [
+    { key: 'read', label: 'See and export sheets' },
+    { key: 'edit_add', label: 'Upload drawings, edit sheets' },
+    { key: 'delete_trash', label: 'Delete sheets' }
+  ],
   // Document Vault -> E-Signature: asking anyone other than the document's
   // own employee (or several people in order) to sign. Explicit only.
   document_vault: [
@@ -215,7 +223,7 @@ export const MODULE_LAYER_OPTIONS: Partial<Record<AdminModuleKey, { key: Permiss
 };
 // Layers an account has only when explicitly ticked — never part of the
 // "module granted, no layers saved yet" default (requireModuleLayer).
-export const EXPLICIT_ONLY_LAYERS: PermissionLayerKey[] = ['permanent_delete', 'submission_status', 'salary_month', 'salary_hold', 'block_account', 'link_pins', 'audit_approve', 'accounts_pay', 'access_log', 'live', 'on_behalf', 'onboarding_create', 'onboarding_review', 'onboarding_approve', 'exit_dues', 'exit_pdf', 'reminders_receive', 'salary_bulk_upload', 'target_export', 'target_cancel', 'exit_clearance_setup', 'late_list', 'mail_open', 'mail_password', 'roster_manage', 'sign_request', 'esign_settings'];
+export const EXPLICIT_ONLY_LAYERS: PermissionLayerKey[] = ['permanent_delete', 'submission_status', 'salary_month', 'salary_hold', 'block_account', 'link_pins', 'audit_approve', 'accounts_pay', 'access_log', 'live', 'on_behalf', 'onboarding_create', 'onboarding_review', 'onboarding_approve', 'exit_dues', 'exit_pdf', 'reminders_receive', 'salary_bulk_upload', 'target_export', 'target_cancel', 'exit_clearance_setup', 'late_list', 'mail_open', 'mail_password', 'roster_manage', 'sign_request', 'esign_settings', 'edit_add', 'delete_trash'];
 export const layersFor = (moduleKey: AdminModuleKey) => MODULE_LAYER_OPTIONS[moduleKey] || PERMISSION_LAYERS;
 
 // Leave Manage's own operation-specific layers — same independent-checkbox

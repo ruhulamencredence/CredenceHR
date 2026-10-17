@@ -50,6 +50,7 @@ import { registerDataImportRoutes } from "./DataImportRoutes";
 import { registerCallRoutes, setupCallSocket } from "./CallRoutes";
 import { ensureMailSchema, registerMailRoutes } from "./MailRoutes";
 import { ensureRosterSchema, registerRosterRoutes } from "./RosterRoutes";
+import { ensureMeasurementSchema, registerMeasurementRoutes } from "./MeasurementRoutes";
 import { ensureESignSchema, registerESignRoutes } from "./ESignRoutes";
 import { ensurePayslipSchema, registerPayslipRoutes } from "./PayslipRoutes";
 import { ensureReportEmailSchema, registerReportEmailRoutes } from "./ReportEmailRoutes";
@@ -223,6 +224,8 @@ async function initDB() {
     await ensureMailSchema(dbPool);
     // Duty Roster tables (RosterRoutes.ts).
     await ensureRosterSchema(dbPool);
+    // PEPM Management -> Measurement Sheet (MeasurementRoutes.ts).
+    await ensureMeasurementSchema(dbPool);
     // E-Signature on Document Vault documents (ESignRoutes.ts).
     await ensureESignSchema(dbPool);
     // Self Service -> My Payslip switch (PayslipRoutes.ts).
@@ -249,7 +252,7 @@ const USER_CLAIM_CATEGORIES = ["Transport", "Fuel", "Toll", "Parking", "Others"]
 // running day-to-day without also giving them the full Admin Panel ->
 // Vehicle Management tab (fleet CRUD, the Approval Workflow's own queue,
 // etc.). See the two routes' own comments for what the bypass does.
-const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports", "users", "attendance", "attendance_reports", "leave_applications", "recycle", "editlog", "notices", "claims", "approvals", "conveyance", "disbursement", "employees", "departments", "tracking", "office_attendance", "holidays", "payroll", "asset_management", "vehicle_management", "vehicle_maintainer", "exit_offboarding", "performance_management", "recruitment", "grievance_disciplinary", "hr_analytics", "document_vault", "hr_operations", "admin_dashboard", "task_management", "mobile_bill", "target_reports", "mail_admin", "duty_roster"] as const;
+const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports", "users", "attendance", "attendance_reports", "leave_applications", "recycle", "editlog", "notices", "claims", "approvals", "conveyance", "disbursement", "employees", "departments", "tracking", "office_attendance", "holidays", "payroll", "asset_management", "vehicle_management", "vehicle_maintainer", "exit_offboarding", "performance_management", "recruitment", "grievance_disciplinary", "hr_analytics", "document_vault", "hr_operations", "admin_dashboard", "task_management", "mobile_bill", "target_reports", "mail_admin", "duty_roster", "measurement_sheet"] as const;
 
 // Granular per-module action layers — mirrors PermissionLayerKey/
 // PERMISSION_LAYERS in src/types.ts (single source of truth is duplicated
@@ -261,7 +264,7 @@ const PERMISSION_LAYER_KEYS = ["read", "edit_add", "entry_upload", "delete_trash
 const USERS_LAYER_KEYS = [...PERMISSION_LAYER_KEYS, "block_account"] as const;
 // Which modules currently enforce PERMISSION_LAYER_KEYS — mirrors
 // PERMISSION_LAYER_MODULES in src/types.ts. Rolled out module by module.
-const PERMISSION_LAYER_MODULES = ["departments", "projects", "approvals", "users", "reports", "tracking", "payroll", "mobile_bill", "office_attendance", "conveyance", "hr_operations", "exit_offboarding", "target_reports", "attendance_reports", "mail_admin", "duty_roster", "document_vault"] as const;
+const PERMISSION_LAYER_MODULES = ["departments", "projects", "approvals", "users", "reports", "tracking", "payroll", "mobile_bill", "office_attendance", "conveyance", "hr_operations", "exit_offboarding", "target_reports", "attendance_reports", "mail_admin", "duty_roster", "document_vault", "measurement_sheet"] as const;
 // Employee Tracking's layers: "read" = the live map, history and status
 // cards; "stay_report" = the Stay Report (TrackingStayReport.ts). Both are
 // reading, so an account with Employee Tracking and no saved layers has both.
@@ -328,6 +331,7 @@ const MAIL_ADMIN_LAYER_KEYS = ["read", "mail_open", "mail_password"] as const;
 // "roster_manage" = add / edit shifts and set who works which shift when.
 // Explicit-only — the no-saved-layers default is "read" alone.
 const DUTY_ROSTER_LAYER_KEYS = ["read", "roster_manage"] as const;
+const MEASUREMENT_LAYER_KEYS = ["read", "edit_add", "delete_trash"] as const;
 // Document Vault: "read" = everything it did before (upload, view, send a
 // document for its own employee's signature); "sign_request" = ask anyone
 // else / several people in order to sign (ESignRoutes.ts). Explicit-only.
@@ -370,6 +374,7 @@ const MODULE_LAYER_KEY_SETS: Record<string, readonly string[]> = {
   attendance_reports: ATTENDANCE_REPORT_LAYER_KEYS,
   mail_admin: MAIL_ADMIN_LAYER_KEYS,
   duty_roster: DUTY_ROSTER_LAYER_KEYS,
+  measurement_sheet: MEASUREMENT_LAYER_KEYS,
   document_vault: DOCUMENT_VAULT_LAYER_KEYS,
   leave_manage: LEAVE_MANAGE_LAYER_KEYS,
 };
@@ -2236,7 +2241,7 @@ async function startServer() {
           ? grantedLayers
           : moduleKey === "tracking"
             ? [...TRACKING_DEFAULT_LAYERS]
-            : moduleKey === "payroll" || moduleKey === "office_attendance" || moduleKey === "conveyance" || moduleKey === "hr_operations" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "attendance_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "document_vault"
+            : moduleKey === "payroll" || moduleKey === "office_attendance" || moduleKey === "conveyance" || moduleKey === "hr_operations" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "attendance_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "document_vault" || moduleKey === "measurement_sheet"
               ? ["read"]
               : moduleKey === "mobile_bill"
                 ? [...MOBILE_BILL_LAYER_KEYS]
@@ -2264,7 +2269,7 @@ async function startServer() {
     const defaults: readonly string[] =
       moduleKey === "tracking"
         ? TRACKING_DEFAULT_LAYERS
-        : moduleKey === "payroll" || moduleKey === "office_attendance" || moduleKey === "conveyance" || moduleKey === "hr_operations" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "attendance_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "document_vault"
+        : moduleKey === "payroll" || moduleKey === "office_attendance" || moduleKey === "conveyance" || moduleKey === "hr_operations" || moduleKey === "exit_offboarding" || moduleKey === "target_reports" || moduleKey === "attendance_reports" || moduleKey === "mail_admin" || moduleKey === "duty_roster" || moduleKey === "document_vault" || moduleKey === "measurement_sheet"
           ? ["read"]
           : moduleKey === "mobile_bill"
             ? MOBILE_BILL_LAYER_KEYS
@@ -2936,6 +2941,7 @@ async function startServer() {
   // Credence Mail — users' own mailboxes over IMAP/SMTP (MailRoutes.ts).
   registerMailRoutes(app, io, { authenticateToken, queryDB, isMySQL: () => !!(isMySQLConnected && dbPool), requireModuleLayer, hasModuleLayer });
   // Duty Roster — shifts and who works which shift when (RosterRoutes.ts).
+  registerMeasurementRoutes(app, { authenticateToken, requireAdmin, requireModuleLayer, hasModuleLayer, queryDB });
   registerRosterRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer, queryDB, todayInDhaka, createAlert });
 
   if (process.env.NODE_ENV !== "production") {
