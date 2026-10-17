@@ -886,3 +886,127 @@ export function buildSheet(plan: Plan, settingsIn: Partial<MsSettings>, ov: Over
   assumptions.push("Reinforcement (rod) is not measured: it comes from the detailing sheets, not from the beam layout.");
   return { plan: { id: plan.id, title: plan.title }, repeats: s.repeats, assumptions, sections };
 }
+
+// ---------------------------------------------------------------------------
+// Material Budget — what the measured quantities need in materials and money.
+// Concrete cft -> cement / sand / stone chips through the mix ratio (dry volume
+// = wet volume x dryFactor), rod from kg per cft of concrete (an estimate: the
+// real figure comes from the detailing sheets), shuttering from its area.
+// ---------------------------------------------------------------------------
+export type BudgetPart = "beam" | "column" | "slab";
+export interface BudgetConfig {
+  /** Volume of one cement bag (cft). */
+  cementBagCft: number;
+  /** Dry volume of materials for 1 cft of wet concrete. */
+  dryFactor: number;
+  /** Extra on cement / sand / stone / shuttering for waste (%). */
+  wastagePct: number;
+  steelWastagePct: number;
+  /** Mix ratio cement : sand : stone chips. */
+  mix: Record<BudgetPart, [number, number, number]>;
+  /** Rod, kg per cft of concrete. */
+  steelKgPerCft: Record<BudgetPart, number>;
+  /** Rates in Tk (0 = not set). */
+  rates: { cement: number; sand: number; stone: number; steel: number; shuttering: number };
+}
+export const DEFAULT_BUDGET: BudgetConfig = {
+  cementBagCft: 1.25,
+  dryFactor: 1.54,
+  wastagePct: 5,
+  steelWastagePct: 3,
+  mix: { beam: [1, 1.5, 3], column: [1, 1.5, 3], slab: [1, 1.5, 3] },
+  steelKgPerCft: { beam: 4, column: 5, slab: 1.8 },
+  rates: { cement: 0, sand: 0, stone: 0, steel: 0, shuttering: 0 }
+};
+export function normaliseBudget(v: any): BudgetConfig {
+  const d = DEFAULT_BUDGET;
+  const n = (x: any, min: number, max: number, def: number) => (x !== "" && x != null && Number.isFinite(Number(x)) && Number(x) >= min && Number(x) <= max ? Number(x) : def);
+  const parts: BudgetPart[] = ["beam", "column", "slab"];
+  const out: BudgetConfig = {
+    cementBagCft: n(v?.cementBagCft, 0.5, 3, d.cementBagCft),
+    dryFactor: n(v?.dryFactor, 1, 2, d.dryFactor),
+    wastagePct: n(v?.wastagePct, 0, 50, d.wastagePct),
+    steelWastagePct: n(v?.steelWastagePct, 0, 50, d.steelWastagePct),
+    mix: { ...d.mix },
+    steelKgPerCft: { ...d.steelKgPerCft },
+    rates: { ...d.rates }
+  };
+  for (const p of parts) {
+    const m = v?.mix?.[p];
+    out.mix[p] = [n(m?.[0], 0.1, 20, d.mix[p][0]), n(m?.[1], 0, 20, d.mix[p][1]), n(m?.[2], 0, 20, d.mix[p][2])];
+    out.steelKgPerCft[p] = n(v?.steelKgPerCft?.[p], 0, 50, d.steelKgPerCft[p]);
+  }
+  for (const k of Object.keys(d.rates) as (keyof BudgetConfig["rates"])[]) out.rates[k] = n(v?.rates?.[k], 0, 10000000, 0);
+  return out;
+}
+
+export interface BudgetPartLine { key: BudgetPart; label: string; concrete: number; cement: number; sand: number; stone: number; steel: number; shuttering: number }
+export interface BudgetLine { key: string; label: string; qty: number; unit: string; rate: number; amount: number }
+export interface Budget {
+  repeatsNote: string;
+  parts: BudgetPartLine[];
+  lines: BudgetLine[];
+  total: number;
+  rateMissing: boolean;
+  notes: string[];
+}
+
+export function buildBudget(sheets: Sheet[], ovs: Record<string, Overrides>, cfgIn: any): Budget {
+  const c = normaliseBudget(cfgIn);
+  const base: Record<BudgetPart, { concrete: number; shuttering: number }> = { beam: { concrete: 0, shuttering: 0 }, column: { concrete: 0, shuttering: 0 }, slab: { concrete: 0, shuttering: 0 } };
+  for (const sh of sheets) {
+    const k = sh.repeats || 1;
+    for (const sec of sh.sections) {
+      if (sec.key !== "beam" && sec.key !== "column" && sec.key !== "slab") continue;
+      for (const t of sec.totals) {
+        if (t.label === "Concrete") base[sec.key].concrete += t.qty * k;
+        else if (/shuttering/i.test(t.label)) base[sec.key].shuttering += t.qty * k;
+      }
+    }
+    // Hand-added rows count under the element they were added for.
+    for (const e of ovs[sh.plan.id]?.extra || []) {
+      const p: BudgetPart | null = e.section === "beam" || e.section === "column" || e.section === "slab" ? e.section : null;
+      if (!p) continue;
+      if (e.unit === "cft") base[p].concrete += e.nos * (e.l ?? 1) * (e.b ?? 1) * (e.d ?? 1) * k;
+      else if (e.unit === "sft") base[p].shuttering += e.nos * (e.l ?? 1) * (e.b ?? 1) * k;
+    }
+  }
+  const labels: Record<BudgetPart, string> = { beam: "Beams", column: "Columns & walls", slab: "Slab" };
+  const w = 1 + c.wastagePct / 100, ws = 1 + c.steelWastagePct / 100;
+  const parts: BudgetPartLine[] = (["beam", "column", "slab"] as BudgetPart[]).map((p) => {
+    const [a, b, s] = c.mix[p];
+    const sum = a + b + s;
+    const dry = base[p].concrete * c.dryFactor;
+    return {
+      key: p,
+      label: labels[p],
+      concrete: r2(base[p].concrete),
+      cement: r2((dry * (a / sum) / c.cementBagCft) * w),
+      sand: r2(dry * (b / sum) * w),
+      stone: r2(dry * (s / sum) * w),
+      steel: r2(base[p].concrete * c.steelKgPerCft[p] * ws),
+      shuttering: r2(base[p].shuttering * w)
+    };
+  });
+  const sum = (f: (p: BudgetPartLine) => number) => r2(parts.reduce((t, p) => t + f(p), 0));
+  const mk = (key: string, label: string, qty: number, unit: string, rate: number): BudgetLine => ({ key, label, qty, unit, rate, amount: r2(qty * rate) });
+  const lines = [
+    mk("cement", "Cement", sum((p) => p.cement), "bag", c.rates.cement),
+    mk("sand", "Sand", sum((p) => p.sand), "cft", c.rates.sand),
+    mk("stone", "Stone chips / brick chips", sum((p) => p.stone), "cft", c.rates.stone),
+    mk("steel", "Reinforcement rod", sum((p) => p.steel), "kg", c.rates.steel),
+    mk("shuttering", "Shuttering (area)", sum((p) => p.shuttering), "sft", c.rates.shuttering)
+  ];
+  return {
+    repeatsNote: sheets.some((s) => (s.repeats || 1) > 1) ? "Quantities are multiplied by the number of floors each plan repeats for." : "",
+    parts,
+    lines,
+    total: r2(lines.reduce((t, l) => t + l.amount, 0)),
+    rateMissing: lines.some((l) => l.rate === 0),
+    notes: [
+      `Cement, sand and stone from the mix ratio of each element (dry volume = ${c.dryFactor} x wet concrete, one cement bag = ${c.cementBagCft} cft), plus ${c.wastagePct}% waste.`,
+      `Rod is an estimate from kg per cft of concrete (+${c.steelWastagePct}% waste) — the exact figure comes from the bar bending schedule.`,
+      "Brick work, finishing, labour, formwork reuse and everything not on this drawing are not included."
+    ]
+  };
+}

@@ -19,7 +19,7 @@
 
 import type { Express } from "express";
 import zlib from "zlib";
-import { analyse, buildSheet, normaliseSettings, readDrawing, guessBeamLayers, guessColumnLayers, type Overrides, type RawDrawing } from "./MeasurementEngine";
+import { analyse, buildBudget, normaliseBudget, buildSheet, normaliseSettings, readDrawing, guessBeamLayers, guessColumnLayers, type Overrides, type RawDrawing } from "./MeasurementEngine";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 
@@ -41,6 +41,7 @@ export async function ensureMeasurementSchema(dbPool: any): Promise<void> {
         file_name VARCHAR(255) NULL,
         raw_gz LONGBLOB NOT NULL,
         settings_json MEDIUMTEXT NULL,
+        budget_json MEDIUMTEXT NULL,
         overrides_json MEDIUMTEXT NULL,
         created_by INT NULL,
         updated_by INT NULL,
@@ -51,6 +52,11 @@ export async function ensureMeasurementSchema(dbPool: any): Promise<void> {
     );
   } catch (err: any) {
     console.warn(`⚠️ Measurement Sheet (schema): ${err.message}`);
+  }
+  try {
+    await dbPool.query("ALTER TABLE measurement_sheets ADD COLUMN budget_json MEDIUMTEXT NULL");
+  } catch (err: any) {
+    if (err.code !== "ER_DUP_FIELDNAME") console.warn(`⚠️ Measurement Sheet (budget column): ${err.message}`);
   }
 }
 
@@ -118,7 +124,7 @@ function cleanOverrides(v: any): Record<string, Overrides> {
   return out;
 }
 
-function render(row: any, canEdit: boolean, canDelete: boolean) {
+function render(row: any, canEdit: boolean, canDelete: boolean, canBudget = false) {
   const raw = unpack(row.raw_gz);
   const settings = normaliseSettings(parseJson(row.settings_json, {}));
   const overrides = cleanOverrides(parseJson(row.overrides_json, {}));
@@ -137,7 +143,10 @@ function render(row: any, canEdit: boolean, canDelete: boolean) {
     all_layers: raw.layers,
     guessed: { beam: guessBeamLayers(raw.layers), column: guessColumnLayers(raw.layers) },
     can_edit: canEdit,
-    can_delete: canDelete
+    can_delete: canDelete,
+    can_budget: canBudget,
+    // The Material Budget (rates included) is only sent to accounts with its own layer.
+    ...(canBudget ? { budget_config: normaliseBudget(parseJson(row.budget_json, {})), budget: buildBudget(sheets, overrides, parseJson(row.budget_json, {})) } : {})
   };
 }
 
@@ -150,7 +159,8 @@ export function registerMeasurementRoutes(app: Express, deps: RegisterMeasuremen
   const bad = (message: string, statusCode = 400) => Object.assign(new Error(message), { statusCode });
   const flags = async (user: any) => ({
     edit: await hasModuleLayer(user, "measurement_sheet", "edit_add"),
-    del: await hasModuleLayer(user, "measurement_sheet", "delete_trash")
+    del: await hasModuleLayer(user, "measurement_sheet", "delete_trash"),
+    budget: await hasModuleLayer(user, "measurement_sheet", "material_budget")
   });
   const load = async (id: any) => {
     const rows: any[] = (await queryDB("SELECT * FROM measurement_sheets WHERE id = ?", [Number(id)])) || [];
@@ -198,7 +208,7 @@ export function registerMeasurementRoutes(app: Express, deps: RegisterMeasuremen
         "INSERT INTO measurement_sheets (title, file_name, raw_gz, settings_json, overrides_json, created_by, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?)",
         [String(title || name.replace(/\.[^.]+$/, "") || "Measurement sheet").slice(0, 200), name, gz, JSON.stringify(settings), "{}", req.user.id, req.user.id]
       );
-      res.json(render(await load(r.insertId), true, await hasModuleLayer(req.user, "measurement_sheet", "delete_trash")));
+      res.json(render(await load(r.insertId), true, await hasModuleLayer(req.user, "measurement_sheet", "delete_trash"), await hasModuleLayer(req.user, "measurement_sheet", "material_budget")));
     } catch (err) {
       fail(res, err);
     }
@@ -207,7 +217,7 @@ export function registerMeasurementRoutes(app: Express, deps: RegisterMeasuremen
   app.get("/api/measurement-sheets/:id", ...canRead, async (req: any, res) => {
     try {
       const f = await flags(req.user);
-      res.json(render(await load(req.params.id), f.edit, f.del));
+      res.json(render(await load(req.params.id), f.edit, f.del, f.budget));
     } catch (err) {
       fail(res, err);
     }
@@ -221,15 +231,18 @@ export function registerMeasurementRoutes(app: Express, deps: RegisterMeasuremen
       if (!title) throw bad("Give the sheet a title.");
       const settings = b.settings !== undefined ? normaliseSettings(b.settings) : normaliseSettings(parseJson(row.settings_json, {}));
       const overrides = b.overrides !== undefined ? cleanOverrides(b.overrides) : cleanOverrides(parseJson(row.overrides_json, {}));
-      await queryDB("UPDATE measurement_sheets SET title = ?, settings_json = ?, overrides_json = ?, updated_by = ? WHERE id = ?", [
+      const f = await flags(req.user);
+      if (b.budget !== undefined && !f.budget) throw bad("You don't have permission to change the Material Budget. Ask your Superadmin to grant it.", 403);
+      const budgetJson = b.budget !== undefined ? JSON.stringify(normaliseBudget(b.budget)) : row.budget_json;
+      await queryDB("UPDATE measurement_sheets SET title = ?, settings_json = ?, overrides_json = ?, budget_json = ?, updated_by = ? WHERE id = ?", [
         title,
         JSON.stringify(settings),
         JSON.stringify(overrides),
+        budgetJson,
         req.user.id,
         row.id
       ]);
-      const f = await flags(req.user);
-      res.json(render(await load(row.id), f.edit, f.del));
+      res.json(render(await load(row.id), f.edit, f.del, f.budget));
     } catch (err) {
       fail(res, err);
     }
