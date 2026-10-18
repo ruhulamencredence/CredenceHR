@@ -296,6 +296,8 @@ export async function ensureMailSchema(dbPool: any): Promise<void> {
   await run("mail_files.blob_id", "ALTER TABLE mail_files ADD COLUMN blob_id BIGINT NULL", ["ER_DUP_FIELDNAME"]);
   await run("mail_files.blob_id index", "ALTER TABLE mail_files ADD KEY idx_mail_files_blob (blob_id)", ["ER_DUP_KEYNAME"]);
   // 1 = this copy came / went inside CredenceHR, not through the mail server.
+  // An inside-only mailbox held for an Employee with no login yet (user_id 0).
+  await run("mail_accounts.employee_id", "ALTER TABLE mail_accounts ADD COLUMN employee_id INT NULL", ["ER_DUP_FIELDNAME"]);
   // Senders whose pictures always show (no "Show pictures" each time).
   await run("mail_settings.picture_senders_json", "ALTER TABLE mail_settings ADD COLUMN picture_senders_json TEXT NULL", ["ER_DUP_FIELDNAME"]);
   await run("mail_messages.via_internal", "ALTER TABLE mail_messages ADD COLUMN via_internal TINYINT(1) NOT NULL DEFAULT 0", ["ER_DUP_FIELDNAME"]);
@@ -1018,69 +1020,106 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     if (!sys.internalDelivery || !sys.domains.includes(domainOf(a.email))) return out;
     const wanted = [...new Set(recipients.map((x) => x.toLowerCase()))].filter((x) => sys.domains.includes(domainOf(x)));
     if (!wanted.length) return out;
+    const marks = wanted.map(() => "?").join(",");
+    const add = (email: string, t: any) => {
+      const list = out.get(email) || [];
+      if (!list.some((x) => (t.id && x.id === t.id) || (!t.id && x.user_id === t.user_id && x.employee_id === t.employee_id))) list.push(t);
+      out.set(email, list);
+    };
+    // Whether the person can open Credence Mail now (then they're told).
+    const hasAccess = (r: any) => r.role === "superadmin" || (!!Number(r.can_use_mail) && !Number(r.is_onboarding));
     // Unscoped: an address is the same mailbox whichever company is active.
-    const rows: any[] =
+    // 1. A mailbox with that address already in CredenceHR (connected, or
+    //    made here for mail that came before).
+    const boxes: any[] =
       (await queryDB(
-        `/*unscoped*/ SELECT m.id, m.user_id, m.email, u.role, u.can_use_mail, u.is_onboarding, u.is_blocked
-         FROM mail_accounts m JOIN users u ON u.id = m.user_id
-         WHERE m.email IN (${wanted.map(() => "?").join(",")})`,
+        `/*unscoped*/ SELECT m.id, m.user_id, m.employee_id, m.email, u.role, u.can_use_mail, u.is_onboarding, u.is_blocked
+         FROM mail_accounts m LEFT JOIN users u ON u.id = m.user_id
+         WHERE m.email IN (${marks})`,
         wanted
-      )) || [];
-    const on = (r: any) => !Number(r.is_blocked) && (r.role === "superadmin" || (!!Number(r.can_use_mail) && !Number(r.is_onboarding)));
-    for (const r of rows) {
-      if (!on(r)) continue;
-      const k = String(r.email).toLowerCase();
-      out.set(k, [...(out.get(k) || []), r]);
+      ).catch(() => [])) || [];
+    for (const r of boxes) {
+      if (Number(r.user_id) && Number(r.is_blocked)) continue;
+      add(String(r.email).toLowerCase(), { id: Number(r.id), user_id: Number(r.user_id), employee_id: r.employee_id, email: r.email, notify: Number(r.user_id) > 0 && hasAccess(r) });
     }
-    // A colleague who hasn't connected that mailbox in Credence Mail yet, but
-    // whose CredenceHR account has that address (login email, or the
-    // Employee's official email) and Credence Mail on: the mail waits for
-    // them in an inside-only mailbox, made now. When they connect the real
-    // mailbox later it becomes that one, mail and all.
-    const missing = wanted.filter((x) => !out.has(x) && !rows.some((r) => String(r.email).toLowerCase() === x));
-    if (missing.length && opts.create) {
-      const marks = missing.map(() => "?").join(",");
-      const people: any[] = [
-        ...((await queryDB(`/*unscoped*/ SELECT id AS user_id, name, LOWER(TRIM(email)) AS email, role, can_use_mail, is_onboarding, is_blocked FROM users WHERE LOWER(TRIM(email)) IN (${marks})`, missing).catch(() => [])) || []),
-        ...((await queryDB(
-          `/*unscoped*/ SELECT u.id AS user_id, COALESCE(e.name, u.name) AS name, LOWER(TRIM(e.email)) AS email, u.role, u.can_use_mail, u.is_onboarding, u.is_blocked
-           FROM all_employees e JOIN users u ON u.id = e.user_id WHERE e.user_id IS NOT NULL AND LOWER(TRIM(e.email)) IN (${marks})`,
-          missing
-        ).catch(() => [])) || [])
-      ];
-      for (const email of missing) {
-        const owners = [...new Map(people.filter((p) => p.email === email && on(p)).map((p) => [Number(p.user_id), p])).values()];
-        for (const p of owners) {
-          const box = await ensureInternalBox(Number(p.user_id), email, p.name);
-          if (box) out.set(email, [...(out.get(email) || []), box]);
+    // 2. Everyone else whose address it is: a CredenceHR login email, or an
+    //    Employee's email in the Employee Directory (all_employees.email) —
+    //    the mail goes to that Employee whether or not they have a login or
+    //    Credence Mail turned on. It waits in an inside-only mailbox made now
+    //    (for the Employee's login, or — no login yet — held for the
+    //    Employee and handed over when they get one; see claimHeld).
+    const missing = wanted.filter((x) => !out.has(x));
+    if (!missing.length) return out;
+    const mm = missing.map(() => "?").join(",");
+    const people: any[] = [
+      ...((await queryDB(
+        `/*unscoped*/ SELECT u.id AS user_id, NULL AS employee_id, u.name, LOWER(TRIM(u.email)) AS email, u.role, u.can_use_mail, u.is_onboarding, u.is_blocked
+         FROM users u WHERE LOWER(TRIM(u.email)) IN (${mm})`,
+        missing
+      ).catch(() => [])) || []),
+      ...((await queryDB(
+        `/*unscoped*/ SELECT e.user_id, e.id AS employee_id, e.name, LOWER(TRIM(e.email)) AS email, u.role, u.can_use_mail, u.is_onboarding, u.is_blocked
+         FROM all_employees e LEFT JOIN users u ON u.id = e.user_id
+         WHERE COALESCE(e.is_active, 1) = 1 AND LOWER(TRIM(e.email)) IN (${mm})`,
+        missing
+      ).catch(() => [])) || [])
+    ];
+    for (const email of missing) {
+      // One per person: a login wins over its own Employee row.
+      const seen = new Set<string>();
+      for (const p of people.filter((x) => x.email === email)) {
+        const userId = Number(p.user_id) || 0;
+        if (userId && Number(p.is_blocked)) continue;
+        const key = userId ? `u${userId}` : `e${p.employee_id}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const notify = userId > 0 && hasAccess(p);
+        if (!opts.create) {
+          add(email, { id: 0, user_id: userId, employee_id: p.employee_id, email, notify });
+          continue;
         }
+        const box = await ensureInternalBox(userId, email, p.name, userId ? null : Number(p.employee_id));
+        if (box) add(email, { ...box, notify });
       }
-    } else if (missing.length) {
-      // A look only (the Compose preview): who would get it inside.
-      const marks = missing.map(() => "?").join(",");
-      const people: any[] = [
-        ...((await queryDB(`/*unscoped*/ SELECT id AS user_id, LOWER(TRIM(email)) AS email, role, can_use_mail, is_onboarding, is_blocked FROM users WHERE LOWER(TRIM(email)) IN (${marks})`, missing).catch(() => [])) || []),
-        ...((await queryDB(
-          `/*unscoped*/ SELECT u.id AS user_id, LOWER(TRIM(e.email)) AS email, u.role, u.can_use_mail, u.is_onboarding, u.is_blocked
-           FROM all_employees e JOIN users u ON u.id = e.user_id WHERE e.user_id IS NOT NULL AND LOWER(TRIM(e.email)) IN (${marks})`,
-          missing
-        ).catch(() => [])) || [])
-      ];
-      for (const p of people) if (on(p)) out.set(p.email, [...(out.get(p.email) || []), { id: 0, user_id: p.user_id, email: p.email }]);
     }
     return out;
   }
-  async function ensureInternalBox(userId: number, email: string, name: string | null): Promise<any | null> {
-    const has: any[] = (await queryDB("SELECT COUNT(*) AS n FROM mail_accounts WHERE user_id = ?", [userId])) || [];
+  async function ensureInternalBox(userId: number, email: string, name: string | null, employeeId: number | null = null): Promise<any | null> {
+    const has: any[] = userId ? (await queryDB("SELECT COUNT(*) AS n FROM mail_accounts WHERE user_id = ?", [userId])) || [] : [{ n: 1 }];
     const r: any = await queryDB(
-      `INSERT INTO mail_accounts (user_id, email, display_name, provider, imap_host, imap_port, imap_secure, smtp_host, smtp_port, smtp_secure, username, password_enc, tls_insecure, is_default)
-       VALUES (?, ?, ?, 'internal', '', 0, 0, '', 0, 0, ?, '', 0, ?)
+      `INSERT INTO mail_accounts (user_id, employee_id, email, display_name, provider, imap_host, imap_port, imap_secure, smtp_host, smtp_port, smtp_secure, username, password_enc, tls_insecure, is_default)
+       VALUES (?, ?, ?, ?, 'internal', '', 0, 0, '', 0, 0, ?, '', 0, ?)
        ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id)`,
-      [userId, email, name || email.split("@")[0], email, Number(has[0]?.n || 0) ? 0 : 1]
+      [userId, employeeId, email, name || email.split("@")[0], email, Number(has[0]?.n || 0) ? 0 : 1]
     );
     const id = Number(r?.insertId);
     if (!id) return null;
-    return { id, user_id: userId, email };
+    return { id, user_id: userId, employee_id: employeeId, email };
+  }
+
+  // Mail held for an Employee with no login (user_id 0) goes to them once
+  // they have one: into their own mailbox with that address if they have it,
+  // or the held mailbox becomes theirs.
+  const claimChecked = new Map<number, number>();
+  async function claimHeld(userId: number) {
+    if (!userId || Date.now() - (claimChecked.get(userId) || 0) < 60_000) return;
+    claimChecked.set(userId, Date.now());
+    const held: any[] =
+      (await queryDB(
+        `/*unscoped*/ SELECT m.id, m.email FROM mail_accounts m JOIN all_employees e ON e.id = m.employee_id WHERE m.user_id = 0 AND e.user_id = ?`,
+        [userId]
+      ).catch(() => [])) || [];
+    for (const h of held) {
+      const mine: any = ((await queryDB("SELECT id FROM mail_accounts WHERE user_id = ? AND email = ?", [userId, h.email])) || [])[0];
+      if (mine) {
+        await queryDB("UPDATE mail_messages SET user_id = ?, account_id = ? WHERE account_id = ?", [userId, Number(mine.id), Number(h.id)]);
+        await queryDB("DELETE FROM mail_accounts WHERE id = ?", [Number(h.id)]);
+      } else {
+        const n: any[] = (await queryDB("SELECT COUNT(*) AS n FROM mail_accounts WHERE user_id = ?", [userId])) || [];
+        await queryDB("UPDATE mail_accounts SET user_id = ?, is_default = ? WHERE id = ?", [userId, Number(n[0]?.n || 0) ? 0 : 1, Number(h.id)]);
+        await queryDB("UPDATE mail_messages SET user_id = ? WHERE account_id = ?", [userId, Number(h.id)]);
+      }
+    }
   }
 
   // Attachments of internal mail are kept once (mail_blobs), whichever and
@@ -1162,8 +1201,9 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
       for (let i = 0; i < m.files.length; i++) {
         await queryDB("INSERT INTO mail_files (message_id, idx, name, mime, size, data, blob_id) VALUES (?, ?, ?, ?, ?, NULL, ?)", [id, i, m.files[i].name, m.files[i].mime, m.files[i].data.length, blobs[i]]);
       }
+      if (!Number(t.user_id)) continue; // held for an Employee with no login yet
       io.to(`user:${Number(t.user_id)}`).emit("mail:changed", { accountId: Number(t.id) });
-      if (ruled.labels.includes("Inbox")) {
+      if (ruled.labels.includes("Inbox") && t.notify !== false) {
         announceNew(Number(t.user_id), Number(t.id), [{ id, fromName, fromEmail, subject }]);
         if (!opts.auto) {
           const full: any = ((await queryDB("SELECT * FROM mail_accounts WHERE id = ?", [Number(t.id)])) || [])[0];
@@ -1298,6 +1338,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     authenticateToken,
     handler(async (req, res) => {
       const enabled = isMySQL() && (await hasMail(req.user));
+      if (enabled) await claimHeld(uid(req)).catch(() => undefined);
       res.json({
         enabled,
         serverReady: !!mailKey(),
@@ -1412,23 +1453,16 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     if (!sys.internalDelivery) return "internal delivery is turned off (Mail Administration)";
     if (!sys.domains.includes(domainOf(a.email))) return `it's sent from ${a.email}, which isn't one of our domains`;
     if (!sys.domains.includes(domainOf(email))) return "outside address";
-    const people: any[] = [
-      ...((await queryDB(
-        `/*unscoped*/ SELECT u.name, u.role, u.can_use_mail, u.is_onboarding, u.is_blocked FROM mail_accounts m JOIN users u ON u.id = m.user_id WHERE m.email = ?`,
-        [email]
-      ).catch(() => [])) || []),
-      ...((await queryDB(`/*unscoped*/ SELECT name, role, can_use_mail, is_onboarding, is_blocked FROM users WHERE LOWER(TRIM(email)) = ?`, [email]).catch(() => [])) || []),
-      ...((await queryDB(
-        `/*unscoped*/ SELECT u.name, u.role, u.can_use_mail, u.is_onboarding, u.is_blocked FROM all_employees e JOIN users u ON u.id = e.user_id WHERE LOWER(TRIM(e.email)) = ?`,
-        [email]
-      ).catch(() => [])) || [])
-    ];
-    if (!people.length) return "no CredenceHR account has this address (not a login email, an Employee's email, or a connected mailbox)";
-    const p = people[0];
-    if (Number(p.is_blocked)) return `${p.name}'s CredenceHR account is blocked`;
-    if (Number(p.is_onboarding)) return `${p.name} is still onboarding`;
-    if (p.role !== "superadmin" && !Number(p.can_use_mail)) return `Credence Mail is off for ${p.name} (Admin Panel → Users → Module Access)`;
-    return "not on Credence Mail";
+    const blocked: any[] =
+      (await queryDB(
+        `/*unscoped*/ SELECT u.name FROM users u LEFT JOIN all_employees e ON e.user_id = u.id
+         WHERE u.is_blocked = 1 AND (LOWER(TRIM(u.email)) = ? OR LOWER(TRIM(e.email)) = ?) LIMIT 1`,
+        [email, email]
+      ).catch(() => [])) || [];
+    if (blocked[0]) return `${blocked[0].name}'s CredenceHR account is blocked`;
+    const inactive: any[] = (await queryDB(`/*unscoped*/ SELECT name FROM all_employees WHERE LOWER(TRIM(email)) = ? AND is_active = 0 LIMIT 1`, [email]).catch(() => [])) || [];
+    if (inactive[0]) return `${inactive[0].name} is no longer an active Employee`;
+    return "no Employee in the Employee Directory (and no CredenceHR login) has this email";
   }
 
   // Admin: would mail from one address to another stay inside, and if not, why.
@@ -1514,7 +1548,10 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
   app.get(
     "/api/mail/accounts",
     ...gate,
-    handler(async (req, res) => res.json((await accountsOf(uid(req))).map(publicAccount)))
+    handler(async (req, res) => {
+      await claimHeld(uid(req)).catch(() => undefined);
+      res.json((await accountsOf(uid(req))).map(publicAccount));
+    })
   );
 
   // Connect a mailbox: checked against the mail server, then saved.
