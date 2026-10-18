@@ -326,7 +326,9 @@ const ATTENDANCE_REPORT_LAYER_KEYS = ["read", "late_list"] as const;
 // (read only); "mail_password" = see a mailbox's saved password. Both
 // explicit-only — the no-saved-layers default is "read" alone. Every open and
 // every password shown is written to mail_admin_log.
-const MAIL_ADMIN_LAYER_KEYS = ["read", "mail_open", "mail_password"] as const;
+// "mail_settings" = turn internal delivery (mail between our own mailboxes
+// stays inside CredenceHR) on / off and set which domains are ours.
+const MAIL_ADMIN_LAYER_KEYS = ["read", "mail_open", "mail_password", "mail_settings"] as const;
 // Duty Roster (RosterRoutes.ts): "read" = see shifts and the roster;
 // "roster_manage" = add / edit shifts and set who works which shift when.
 // Explicit-only — the no-saved-layers default is "read" alone.
@@ -2224,7 +2226,7 @@ async function startServer() {
   // on for a module is never a silent regression; a Superadmin only actually
   // restricts anything once they explicitly save a narrower set in the
   // Module Access modal.
-  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "block_account" | "limit_history" | "link_pins" | "on_behalf" | "onboarding_create" | "onboarding_review" | "onboarding_approve" | "exit_dues" | "exit_pdf" | "reminders_receive" | "salary_bulk_upload" | "target_export" | "target_cancel" | "exit_clearance_setup" | "late_list" | "mail_open" | "mail_password" | "roster_manage" | "sign_request" | "esign_settings") =>
+  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "block_account" | "limit_history" | "link_pins" | "on_behalf" | "onboarding_create" | "onboarding_review" | "onboarding_approve" | "exit_dues" | "exit_pdf" | "reminders_receive" | "salary_bulk_upload" | "target_export" | "target_cancel" | "exit_clearance_setup" | "late_list" | "mail_open" | "mail_password" | "mail_settings" | "roster_manage" | "sign_request" | "esign_settings") =>
     async (req: any, res: any, next: any) => {
       if (!req.user) return res.status(401).json({ error: "Access token required" });
       if (req.user.onb) return res.status(403).json({ error: "Admin access required" });
