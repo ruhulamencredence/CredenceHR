@@ -716,6 +716,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [mailAccessEnabled, setMailAccessEnabled] = useState(false);
   // Credence Mail -> Mailboxes -> Email Directory — off by default.
   const [mailDirectoryEnabled, setMailDirectoryEnabled] = useState(false);
+  // Credence Mail -> Tools -> My groups — off by default.
+  const [mailGroupsEnabled, setMailGroupsEnabled] = useState(false);
   // My Duty Roster (RosterRoutes.ts) — off by default.
   const [rosterAccessEnabled, setRosterAccessEnabled] = useState(false);
   // Documents to Sign (ESignRoutes.ts) — off by default.
@@ -757,6 +759,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     setCallsAccessEnabled(!!u.can_use_calls);
     setMailAccessEnabled(!!u.can_use_mail);
     setMailDirectoryEnabled(!!u.can_view_mail_directory);
+    setMailGroupsEnabled(!!u.can_use_mail_groups);
     setRosterAccessEnabled(!!u.can_view_roster);
     setSignDocsEnabled(!!u.can_sign_documents);
     setPayslipAccessEnabled(!!u.can_view_payslip);
@@ -1294,6 +1297,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         });
         const mdData = await mdRes.json();
         if (!mdRes.ok) throw new Error(mdData.error || 'Failed to update Email Directory access');
+      }
+
+      if (mailGroupsEnabled !== !!managingModulesFor.can_use_mail_groups) {
+        const mgRes = await fetch(apiUrl(`/api/users/${managingModulesFor.id}/mail-groups-access`), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ can_use_mail_groups: mailGroupsEnabled })
+        });
+        const mgData = await mgRes.json();
+        if (!mgRes.ok) throw new Error(mgData.error || 'Failed to update My groups access');
       }
 
       if (rosterAccessEnabled !== !!managingModulesFor.can_view_roster) {
@@ -8086,12 +8099,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 </button>
               </label>
               {mailAccessEnabled && (
+                <>
                 <label className="flex items-center justify-between gap-3 p-3.5 mb-3 -mt-1 ml-4 bg-indigo-50/60 border border-indigo-200 rounded-xl cursor-pointer">
                   <span>
                     <span className="text-sm font-semibold text-slate-900 block">Mail: Email Directory</span>
                     <span className="text-[11px] text-slate-500">
-                      Credence Mail → Mailboxes → Email Directory: search every employee's email address (ID, designation,
-                      department) and write to them from there. Off by default.
+                      Credence Mail → Email Directory search (top of the page): find any employee's email address (ID,
+                      designation, department) and write to them from there. Off by default.
                     </span>
                   </span>
                   <button
@@ -8109,6 +8123,30 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                     />
                   </button>
                 </label>
+                <label className="flex items-center justify-between gap-3 p-3.5 mb-3 -mt-1 ml-4 bg-indigo-50/60 border border-indigo-200 rounded-xl cursor-pointer">
+                  <span>
+                    <span className="text-sm font-semibold text-slate-900 block">Mail: My groups</span>
+                    <span className="text-[11px] text-slate-500">
+                      Credence Mail → Tools → My groups: keep their own named lists of people (e.g. "My team") and add a
+                      whole list to To / Cc / Bcc at once. Off by default.
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setMailGroupsEnabled((v) => !v)}
+                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${
+                      mailGroupsEnabled ? 'bg-emerald-500' : 'bg-slate-300'
+                    }`}
+                    title={mailGroupsEnabled ? 'On — click to turn off' : 'Off — click to turn on'}
+                  >
+                    <span
+                      className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                        mailGroupsEnabled ? 'translate-x-[18px]' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
+                </label>
+                </>
               )}
               <label className="flex items-center justify-between gap-3 p-3.5 mb-3 bg-purple-50 border border-purple-200 rounded-xl cursor-pointer">
                 <span>

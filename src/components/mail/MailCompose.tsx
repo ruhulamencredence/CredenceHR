@@ -19,7 +19,8 @@ import { confirmDialog } from '../../lib/confirmDialog';
 import { useBackButtonClose } from '../../lib/useBackButtonClose';
 import { useKeyboardInset } from '../../lib/useKeyboardInset';
 import {
-  AddressSuggestion, MailAccount, MailAttachment, MailSignature, MailTemplate, OutgoingFile, fetchAttachment, fileToDataUrl, formatBytes, mailFetch
+  AddressSuggestion, DirectoryPerson, MailAccount, MailAttachment, MailSignature, MailTemplate, OutgoingFile, fetchAttachment, fileToDataUrl, formatBytes,
+  loadDirectory, loadMailGroups, mailFetch, type ComposeGroups
 } from '../../lib/mailApi';
 
 export interface ComposeInit {
@@ -56,37 +57,30 @@ const localDateTime = (d: Date) => {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
 };
 
-// Everyone in the Employee Directory with an email (GET /api/mail/directory),
-// fetched once per visit and shared by every To / Cc / Bcc field.
-export interface DirectoryPerson {
+
+type Suggestion = {
   name: string;
   email: string;
+  sub: string;
+  tag: string;
   employeeId?: string;
-  designation: string;
-  department: string;
-}
-let directoryCache: Promise<DirectoryPerson[]> | null = null;
-const loadDirectory = (token: string) => {
-  if (!directoryCache) {
-    directoryCache = mailFetch<DirectoryPerson[]>(token, '/directory').catch(() => {
-      directoryCache = null;
-      return [];
-    });
-  }
-  return directoryCache;
+  designation?: string;
+  department?: string;
+  // A group: central (its one address goes in) or one's own (every member goes in).
+  key?: string;
+  members?: string[];
 };
-
-type Suggestion = { name: string; email: string; sub: string; tag: string; employeeId?: string; designation?: string; department?: string };
 const SHOW_MAX = 150;
 
-// To / Cc / Bcc: type any address, or pick from the list — employees (all of
-// them, from the dropdown button or as you type), your contacts and people
-// you've written with. Several addresses, comma between.
+// To / Cc / Bcc: type any address, or pick from the list — groups, employees
+// (all of them, from the dropdown button or as you type), your contacts and
+// people you've written with. Several addresses, comma between.
 const AddressField: React.FC<{ token: string; label: string; value: string; onChange: (v: string) => void; autoFocus?: boolean; right?: React.ReactNode }> = ({
   token, label, value, onChange, autoFocus, right
 }) => {
   const [book, setBook] = useState<AddressSuggestion[]>([]);
   const [people, setPeople] = useState<DirectoryPerson[] | null>(null);
+  const [groups, setGroups] = useState<ComposeGroups | null>(null);
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -97,7 +91,8 @@ const AddressField: React.FC<{ token: string; label: string; value: string; onCh
 
   useEffect(() => {
     if (open && !people) void loadDirectory(token).then(setPeople);
-  }, [open, people, token]);
+    if (open && !groups) void loadMailGroups(token).then(setGroups);
+  }, [open, people, groups, token]);
 
   // Own contacts and people written with, as you type.
   useEffect(() => {
@@ -121,6 +116,19 @@ const AddressField: React.FC<{ token: string; label: string; value: string; onCh
     const out: Suggestion[] = [];
     const seen = new Set<string>(chosen);
     const byEmail = new Map((people || []).map((p) => [p.email, p]));
+    // Groups first: they're what people usually look for by name.
+    for (const g of groups?.central || []) {
+      if (seen.has(g.email)) continue;
+      if (q && !`${g.name} ${g.email}`.toLowerCase().includes(q)) continue;
+      seen.add(g.email);
+      out.push({ name: g.name, email: g.email, sub: `${g.count} ${g.count === 1 ? 'person' : 'people'}`, tag: 'Group', key: `g:${g.email}` });
+    }
+    for (const g of groups?.mine || []) {
+      if (q && !g.name.toLowerCase().includes(q)) continue;
+      const left = g.members.filter((m) => !chosen.has(m.toLowerCase()));
+      if (!left.length) continue;
+      out.push({ name: g.name, email: '', sub: `${g.members.length} ${g.members.length === 1 ? 'person' : 'people'} — adds each one`, tag: 'My group', key: `m:${g.id}`, members: left });
+    }
     for (const b of book) {
       if (seen.has(b.email)) continue;
       seen.add(b.email);
@@ -140,7 +148,7 @@ const AddressField: React.FC<{ token: string; label: string; value: string; onCh
       out.push({ name: p.name, email: p.email, sub: '', tag: 'Employee', employeeId: p.employeeId, designation: p.designation, department: p.department });
     }
     return out;
-  }, [book, people, current, chosen]);
+  }, [book, people, groups, current, chosen]);
   const shown = list.slice(0, SHOW_MAX);
   useEffect(() => setActive(0), [current]);
   useEffect(() => {
@@ -149,7 +157,7 @@ const AddressField: React.FC<{ token: string; label: string; value: string; onCh
 
   const pick = (sug: Suggestion) => {
     const parts = value.split(/[,;]/);
-    parts[parts.length - 1] = ` ${sug.email}`;
+    parts[parts.length - 1] = ` ${sug.members ? sug.members.join(', ') : sug.email}`;
     onChange(`${parts.join(',').replace(/^\s*,?\s*/, '')}, `);
     // Stays open for the next one.
     inputRef.current?.focus();
@@ -219,7 +227,7 @@ const AddressField: React.FC<{ token: string; label: string; value: string; onCh
               {shown.map((sug, i) => (
                 <button
                   type="button"
-                  key={sug.email}
+                  key={sug.key || sug.email}
                   data-i={i}
                   onClick={() => pick(sug)}
                   onMouseEnter={() => setActive(i)}
@@ -239,10 +247,10 @@ const AddressField: React.FC<{ token: string; label: string; value: string; onCh
                     )}
                     <span className="block text-xs text-slate-500 truncate">
                       {sug.email}
-                      {sug.sub && <span className="text-slate-400"> · {sug.sub}</span>}
+                      {sug.sub && <span className="text-slate-400">{sug.email ? ' · ' : ''}{sug.sub}</span>}
                     </span>
                   </span>
-                  <span className="text-[10px] text-slate-400 shrink-0">{sug.tag}</span>
+                  <span className={`text-[10px] shrink-0 ${sug.key ? 'font-semibold px-1.5 py-px rounded bg-violet-50 text-violet-700' : 'text-slate-400'}`}>{sug.tag}</span>
                 </button>
               ))}
               {list.length > SHOW_MAX && <div className="px-3 py-2 text-[11px] text-slate-400 border-t border-slate-100">{list.length - SHOW_MAX} more — type a name, Employee ID, department or designation to find them.</div>}
@@ -270,18 +278,24 @@ export const MailCompose: React.FC<{
   const [bcc, setBcc] = useState(init.bcc || '');
   // Which recipients get it inside CredenceHR and which through the mail
   // server (MailRoutes.ts "Internal delivery") — shown under the addresses.
-  const [route, setRoute] = useState<{ internal: string[]; external: string[]; ourOutside: string[]; reasons: Record<string, string> } | null>(null);
+  const [route, setRoute] = useState<{
+    internal: string[];
+    external: string[];
+    ourOutside: string[];
+    reasons: Record<string, string>;
+    groups: { email: string; name: string; count: number; denied: boolean }[];
+  } | null>(null);
   useEffect(() => {
     if (!accountId || !(to + cc + bcc).trim()) return setRoute(null);
     let gone = false;
     const t = setTimeout(() => {
-      mailFetch<{ internal: string[]; external: string[]; ourDomains: string[]; enabled: boolean; reasons?: Record<string, string> }>(token, '/route-preview', { method: 'POST', body: { accountId, to, cc, bcc } })
+      mailFetch<{ internal: string[]; external: string[]; ourDomains: string[]; enabled: boolean; reasons?: Record<string, string>; groups?: { email: string; name: string; count: number; denied: boolean }[] }>(token, '/route-preview', { method: 'POST', body: { accountId, to, cc, bcc } })
         .then((r) => {
           if (gone) return;
           const ours = new Set(r.ourDomains.map((d) => d.toLowerCase()));
           // Ours that still go through the server — each with its reason.
           const reasons = r.reasons || {};
-          setRoute({ internal: r.internal, external: r.external, ourOutside: r.external.filter((x) => ours.has(x.split('@')[1] || '') || (reasons[x] && reasons[x] !== 'outside address')), reasons });
+          setRoute({ internal: r.internal, external: r.external, ourOutside: r.external.filter((x) => ours.has(x.split('@')[1] || '') || (reasons[x] && reasons[x] !== 'outside address')), reasons, groups: r.groups || [] });
         })
         .catch(() => !gone && setRoute(null));
     }, 500);
@@ -614,8 +628,19 @@ export const MailCompose: React.FC<{
       />
       {ccOpen && <AddressField token={token} label="Cc" value={cc} onChange={setCc} />}
       {bccOpen && <AddressField token={token} label="Bcc" value={bcc} onChange={setBcc} />}
-      {route && (route.internal.length > 0 || route.external.length > 0) && (
+      {route && (route.internal.length > 0 || route.external.length > 0 || route.groups.length > 0) && (
         <div className="mx-4 py-1 border-b border-slate-200 text-[11px] text-slate-500 flex flex-wrap gap-x-3 gap-y-0.5" title={[...route.internal.map((x) => `${x}: inside CredenceHR`), ...route.external.map((x) => `${x}: through the mail server`)].join('\n')}>
+          {route.groups.map((g) =>
+            g.denied ? (
+              <span key={g.email} className="basis-full text-rose-700">
+                {g.name} ({g.email}): you can't write to this group — ask Mail Administration to let you.
+              </span>
+            ) : (
+              <span key={g.email} className="text-violet-700">
+                Group {g.name}: {g.count} {g.count === 1 ? 'person' : 'people'}
+              </span>
+            )
+          )}
           {route.internal.length > 0 && <span className="text-emerald-700">{route.internal.length === 1 && !route.external.length ? 'Delivered inside CredenceHR' : `${route.internal.length} inside CredenceHR`}</span>}
           {route.external.length > 0 && (
             <span>

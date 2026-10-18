@@ -10,6 +10,8 @@
 //   mail_password see a mailbox's saved password (explicit-only layer)
 //   mail_settings turn internal delivery on / off, set our domains
 //                 (explicit-only layer; everyone with "read" sees the setting)
+//   mail_groups   add / change / remove central mail groups (explicit-only
+//                 layer; everyone with "read" sees the groups) — MailGroups.tsx
 // Every mailbox opened and every password shown is written to the log.
 // The Superadmin's own mailbox only the Superadmin can open.
 
@@ -19,6 +21,7 @@ import type { User } from '../../types';
 import { apiUrl } from '../../lib/api';
 import { confirmDialog } from '../../lib/confirmDialog';
 import { shortMailDate, fullMailDate } from '../../lib/mailApi';
+import { CentralGroupsAdmin } from './MailGroups';
 
 const CredenceMail = lazy(() => import('./CredenceMail').then((m) => ({ default: m.CredenceMail })));
 
@@ -269,7 +272,7 @@ const CheckAddress: React.FC<{ token: string; domain: string }> = ({ token, doma
 };
 
 export const MailAdministration: React.FC<{ token: string; user: User }> = ({ token, user }) => {
-  const [tab, setTab] = useState<'boxes' | 'delivery' | 'log'>('boxes');
+  const [tab, setTab] = useState<'boxes' | 'delivery' | 'groups' | 'log'>('boxes');
   const [data, setData] = useState<AdminList | null>(null);
   const [log, setLog] = useState<LogRow[] | null>(null);
   const [error, setError] = useState('');
@@ -333,6 +336,7 @@ export const MailAdministration: React.FC<{ token: string; user: User }> = ({ to
               [
                 ['boxes', 'Mailboxes'],
                 ['delivery', 'Internal delivery'],
+                ['groups', 'Groups'],
                 ['log', 'Log']
               ] as const
             ).map(([k, label]) => (
@@ -351,6 +355,8 @@ export const MailAdministration: React.FC<{ token: string; user: User }> = ({ to
 
       {tab === 'delivery' ? (
         <InternalDelivery token={token} />
+      ) : tab === 'groups' ? (
+        <CentralGroupsAdmin token={token} />
       ) : tab === 'boxes' ? (
         <>
           <p className="text-xs text-slate-600">
