@@ -8,8 +8,9 @@
 //
 //   readDrawing()   DWG / DXF  ->  RawDrawing: the lines, polylines, texts and
 //                   leaders by layer, the drawing unit and per-layer counts.
-//                   (@mlightcad/libredwg-web — LibreDWG built for WebAssembly,
-//                   so the server needs nothing installed besides npm packages.)
+//                   (DWG: @mlightcad/libredwg-web — LibreDWG built for
+//                   WebAssembly; DXF: dxf-parser, plain JavaScript — so the
+//                   server needs nothing installed besides npm packages.)
 //   analyse()       RawDrawing + settings -> Model: for each plan (a cluster of
 //                   beam lines — a DWG often holds several floors), its beams,
 //                   columns / walls and slab panels, all in inches.
@@ -82,15 +83,22 @@ export const unitFromName = (n: string): [string, number] | null => {
   return null;
 };
 
+// The DWG reader is pinned to @mlightcad/libredwg-web 0.7.17 (package.json):
+// 0.8.0 / 0.8.1 crash ("memory access out of bounds") on AutoCAD R14 / 2000
+// drawings that 0.7.17 reads.
+const notInstalled = () =>
+  Object.assign(new Error("The drawing reader is not installed on this server. Run `npm install` in the project folder, restart the server, and try again."), { statusCode: 500 });
 let libP: Promise<any> | null = null;
+let libUses = 0;
 async function lib() {
   if (!libP) {
+    libUses = 0;
     libP = (async () => {
       let mod: any;
       try {
         mod = await import("@mlightcad/libredwg-web");
       } catch {
-        throw Object.assign(new Error("The drawing reader is not installed on this server. Run `npm install` in the project folder, restart the server, and try again."), { statusCode: 500 });
+        throw notInstalled();
       }
       const dir = process.env.MS_LIBREDWG_WASM || path.join(process.cwd(), "node_modules", "@mlightcad", "libredwg-web", "wasm") + path.sep;
       return { LibreDwg: mod.LibreDwg, Dwg_File_Type: mod.Dwg_File_Type, instance: await mod.LibreDwg.create(dir) };
@@ -99,6 +107,77 @@ async function lib() {
   }
   return libP;
 }
+// A drawing that crashes the reader leaves its WebAssembly memory broken, and
+// every later drawing would fail with it until the server restarted — so after
+// any failure (and every 20 drawings, as its memory only grows) the next
+// drawing gets a fresh reader.
+const freshReader = () => {
+  libP = null;
+};
+
+const dwgEntities = async (file: Buffer): Promise<{ entities: any[]; insUnits: number }> => {
+  const { instance, Dwg_File_Type } = await lib();
+  if (++libUses >= 20) freshReader();
+  const ab = file.buffer.slice(file.byteOffset, file.byteOffset + file.byteLength);
+  const dwg = instance.dwg_read_data(ab, Dwg_File_Type.DWG);
+  if (!dwg) throw new Error("The drawing could not be read");
+  const db: any = instance.convert(dwg);
+  try {
+    instance.dwg_free(dwg);
+  } catch {
+    // freed with the module
+  }
+  return { entities: db?.entities || [], insUnits: num(db?.header?.INSUNITS, 0) };
+};
+
+// DXF: dxf-parser's entities in the shape LibreDWG gives them, so one loop
+// below reads both. dxf-parser has no LEADER, so it gets one here.
+class LeaderHandler {
+  ForEntityName = "LEADER";
+  parseEntity(scanner: any, curr: any) {
+    const entity: any = { type: curr.value, vertices: [] as Pt[] };
+    curr = scanner.next();
+    while (!scanner.isEOF()) {
+      if (curr.code === 0) break;
+      if (curr.code === 8) entity.layer = curr.value;
+      else if (curr.code === 10) entity.vertices.push({ x: Number(curr.value), y: 0 });
+      else if (curr.code === 20 && entity.vertices.length) entity.vertices[entity.vertices.length - 1].y = Number(curr.value);
+      curr = scanner.next();
+    }
+    return entity;
+  }
+}
+const dxfEntities = async (file: Buffer): Promise<{ entities: any[]; insUnits: number }> => {
+  let DxfParser: any;
+  try {
+    const m: any = await import("dxf-parser");
+    // ESM, tsx and the esbuild CommonJS bundle each wrap it differently.
+    DxfParser = m.default?.default || m.default || m;
+  } catch {
+    throw notInstalled();
+  }
+  const parser = new DxfParser();
+  parser.registerEntityHandler(LeaderHandler);
+  // Binary DXF isn't supported by the parser.
+  if (file.subarray(0, 22).toString("latin1").startsWith("AutoCAD Binary DXF")) throw new Error("This is a binary DXF — save it as an ASCII DXF");
+  const text = file.toString("utf8").includes("\uFFFD") ? file.toString("latin1") : file.toString("utf8");
+  const d: any = parser.parseSync(text);
+  if (!d) throw new Error("The drawing could not be read");
+  const entities = (d.entities || []).map((e: any) => {
+    switch (e.type) {
+      case "LINE":
+        return { type: "LINE", layer: e.layer, startPoint: e.vertices?.[0], endPoint: e.vertices?.[1] };
+      case "LWPOLYLINE":
+      case "POLYLINE":
+        return { type: e.type, layer: e.layer, vertices: e.vertices || [], flag: e.shape ? 1 : 0 };
+      case "MTEXT":
+        return { type: "MTEXT", layer: e.layer, text: e.text, insertionPoint: e.position, height: e.height, rotation: e.rotation };
+      default:
+        return e;
+    }
+  });
+  return { entities, insUnits: num(d.header?.$INSUNITS, 0) };
+};
 
 const num = (v: any, d = 0) => (typeof v === "number" && Number.isFinite(v) ? v : typeof v === "bigint" ? Number(v) : d);
 const pt = (p: any): Pt => ({ x: num(p?.x), y: num(p?.y) });
@@ -115,17 +194,30 @@ export const cleanText = (s: any) =>
     .trim();
 
 export async function readDrawing(file: Buffer, kind: "dwg" | "dxf" = "dwg"): Promise<RawDrawing> {
-  const { instance, Dwg_File_Type } = await lib();
-  const ab = file.buffer.slice(file.byteOffset, file.byteOffset + file.byteLength);
-  const dwg = instance.dwg_read_data(ab, kind === "dxf" ? Dwg_File_Type.DXF : Dwg_File_Type.DWG);
-  if (!dwg) throw new Error("The drawing could not be read. Save it again from AutoCAD (File → Save As → AutoCAD 2018 DWG, or DXF) and upload that.");
-  const db: any = instance.convert(dwg);
-  try {
-    instance.dwg_free(dwg);
-  } catch {
-    // freed with the module
+  let read: { entities: any[]; insUnits: number };
+  if (kind === "dxf") read = await dxfEntities(file);
+  else {
+    try {
+      read = await dwgEntities(file);
+    } catch (e: any) {
+      if (e?.statusCode === 500) throw e;
+      // Once more with a fresh reader: the one used may have been broken by
+      // an earlier drawing.
+      freshReader();
+      try {
+        read = await dwgEntities(file);
+      } catch (e2: any) {
+        freshReader();
+        if (e2?.statusCode === 500) throw e2;
+        throw new Error(
+          /memory access|out of bounds|unreachable|RuntimeError/i.test(String(e2?.message || e2))
+            ? "The drawing reader couldn't open this DWG (its AutoCAD version or one of its objects isn't supported)"
+            : String(e2?.message || e2)
+        );
+      }
+    }
   }
-  const insUnits = num(db?.header?.INSUNITS, 0);
+  const { entities, insUnits } = read;
   const notes: string[] = [];
   let unit = UNITS[insUnits];
   if (!unit) {
@@ -139,7 +231,7 @@ export async function readDrawing(file: Buffer, kind: "dwg" | "dxf" = "dwg"): Pr
     return stats.get(l)!;
   };
   let blocks = 0;
-  for (const e of db?.entities || []) {
+  for (const e of entities) {
     const layer = String(e.layer ?? "0");
     switch (e.type) {
       case "LINE":
