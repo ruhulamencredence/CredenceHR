@@ -714,6 +714,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [callsAccessEnabled, setCallsAccessEnabled] = useState(false);
   // Credence Mail (MailRoutes.ts) — off by default.
   const [mailAccessEnabled, setMailAccessEnabled] = useState(false);
+  // Credence Mail -> Mailboxes -> Email Directory — off by default.
+  const [mailDirectoryEnabled, setMailDirectoryEnabled] = useState(false);
   // My Duty Roster (RosterRoutes.ts) — off by default.
   const [rosterAccessEnabled, setRosterAccessEnabled] = useState(false);
   // Documents to Sign (ESignRoutes.ts) — off by default.
@@ -754,6 +756,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     setLeaveApplicationAccessEnabled(!!u.can_view_leave_application || !!u.can_view_my_leave);
     setCallsAccessEnabled(!!u.can_use_calls);
     setMailAccessEnabled(!!u.can_use_mail);
+    setMailDirectoryEnabled(!!u.can_view_mail_directory);
     setRosterAccessEnabled(!!u.can_view_roster);
     setSignDocsEnabled(!!u.can_sign_documents);
     setPayslipAccessEnabled(!!u.can_view_payslip);
@@ -1281,6 +1284,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         });
         const maData = await maRes.json();
         if (!maRes.ok) throw new Error(maData.error || 'Failed to update Mail access');
+      }
+
+      if (mailDirectoryEnabled !== !!managingModulesFor.can_view_mail_directory) {
+        const mdRes = await fetch(apiUrl(`/api/users/${managingModulesFor.id}/mail-directory-access`), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ can_view_mail_directory: mailDirectoryEnabled })
+        });
+        const mdData = await mdRes.json();
+        if (!mdRes.ok) throw new Error(mdData.error || 'Failed to update Email Directory access');
       }
 
       if (rosterAccessEnabled !== !!managingModulesFor.can_view_roster) {
@@ -8072,6 +8085,31 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   />
                 </button>
               </label>
+              {mailAccessEnabled && (
+                <label className="flex items-center justify-between gap-3 p-3.5 mb-3 -mt-1 ml-4 bg-indigo-50/60 border border-indigo-200 rounded-xl cursor-pointer">
+                  <span>
+                    <span className="text-sm font-semibold text-slate-900 block">Mail: Email Directory</span>
+                    <span className="text-[11px] text-slate-500">
+                      Credence Mail → Mailboxes → Email Directory: search every employee's email address (ID, designation,
+                      department) and write to them from there. Off by default.
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setMailDirectoryEnabled((v) => !v)}
+                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${
+                      mailDirectoryEnabled ? 'bg-emerald-500' : 'bg-slate-300'
+                    }`}
+                    title={mailDirectoryEnabled ? 'On — click to turn off' : 'Off — click to turn on'}
+                  >
+                    <span
+                      className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                        mailDirectoryEnabled ? 'translate-x-[18px]' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
+                </label>
+              )}
               <label className="flex items-center justify-between gap-3 p-3.5 mb-3 bg-purple-50 border border-purple-200 rounded-xl cursor-pointer">
                 <span>
                   <span className="text-sm font-semibold text-slate-900 block">Also allow My Duty Roster</span>
