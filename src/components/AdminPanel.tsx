@@ -1788,7 +1788,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
             else if (val === '-') data.cell.styles.textColor = [148, 163, 184];
           }
         },
-        didDrawPage: () => drawPdfLetterhead(doc, logoImg, letterheadOptions)
+        didDrawPage: () => {
+          drawPdfLetterhead(doc, logoImg, letterheadOptions);
+        }
       });
 
       const finalY = (doc as any).lastAutoTable.finalY;
@@ -1862,7 +1864,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           else if (val === 'Holiday') data.cell.styles.textColor = [217, 119, 6];
         }
       },
-      didDrawPage: () => drawPdfLetterhead(doc, logoImg, letterheadOptions)
+      didDrawPage: () => {
+        drawPdfLetterhead(doc, logoImg, letterheadOptions);
+      }
     });
 
     const finalY = (doc as any).lastAutoTable.finalY;
