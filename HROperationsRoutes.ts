@@ -2247,17 +2247,84 @@ ${esc(l.text).split(/\n{2,}/).map((p) => `<p style="margin:0 0 12px;line-height:
       if (!emp) return res.json({ letters: [], requests: [] });
       const [letters, requests] = await Promise.all([queryDB("SELECT * FROM hr_letters"), queryDB("SELECT * FROM hr_letter_requests")]);
       const settings = await loadSettings(queryDB);
+      // Where each request / letter is now, with whom and why (Self Service
+      // -> My Letters): waiting for HR to issue it, issued but waiting for a
+      // signature (E-Signature, ESignRoutes.ts), done, or rejected.
+      const mineLetters = letters.filter((l: any) => Number(l.employee_id) === Number(emp.id));
+      const mineRequests = requests.filter((r: any) => Number(r.employee_id) === Number(emp.id));
+      const userIds = new Set<number>();
+      for (const r of mineRequests) if (r.handled_by) userIds.add(Number(r.handled_by));
+      const letterIds = mineLetters.map((l: any) => Number(l.id));
+      const signDocs: any[] = letterIds.length
+        ? (await queryDB(
+            `SELECT id, source_id, sign_status, sign_requested_at, completed_at FROM employee_documents WHERE source_type = 'hr_letter' AND source_id IN (${letterIds.map(() => "?").join(",")})`,
+            letterIds
+          ).catch(() => [])) || []
+        : [];
+      const latestDoc = new Map<number, any>();
+      for (const d of signDocs) if (!latestDoc.has(Number(d.source_id)) || Number(d.id) > Number(latestDoc.get(Number(d.source_id)).id)) latestDoc.set(Number(d.source_id), d);
+      const docIds = [...latestDoc.values()].map((d) => Number(d.id));
+      const steps: any[] = docIds.length
+        ? (await queryDB(`SELECT document_id, step_order, signer_user_id, label, status, signed_at, decline_reason FROM document_signers WHERE document_id IN (${docIds.map(() => "?").join(",")}) ORDER BY step_order`, docIds).catch(() => [])) || []
+        : [];
+      for (const st of steps) userIds.add(Number(st.signer_user_id));
+      const hasPending = mineRequests.some((r: any) => r.status === "pending");
+      const hrIds = hasPending ? await hrOperators() : [];
+      for (const id of hrIds) userIds.add(id);
+      const names = new Map<number, { name: string; designation: string | null }>();
+      if (userIds.size) {
+        const ids = [...userIds];
+        const us: any[] = (await queryDB(`SELECT id, name FROM users WHERE id IN (${ids.map(() => "?").join(",")})`, ids).catch(() => [])) || [];
+        const es: any[] = (await queryDB(`SELECT user_id, designation FROM all_employees WHERE user_id IN (${ids.map(() => "?").join(",")})`, ids).catch(() => [])) || [];
+        for (const u of us) names.set(Number(u.id), { name: u.name, designation: es.find((e: any) => Number(e.user_id) === Number(u.id))?.designation || null });
+      }
+      const who = (id: any) => (id ? names.get(Number(id))?.name || null : null);
+      const signingOf = (letterId: number) => {
+        const d = latestDoc.get(letterId);
+        if (!d) return null;
+        const list = steps.filter((x) => Number(x.document_id) === Number(d.id));
+        const current = list.find((x) => x.status === "pending");
+        const declined = list.find((x) => x.status === "declined");
+        return {
+          status: String(d.sign_status || "none"),
+          sent_at: d.sign_requested_at || null,
+          completed_at: d.completed_at || null,
+          waiting_on: current ? { name: who(current.signer_user_id), label: current.label || null } : null,
+          declined: declined ? { name: who(declined.signer_user_id), reason: declined.decline_reason || null } : null,
+          steps: list.map((x) => ({ name: who(x.signer_user_id), label: x.label || null, status: x.status, signed_at: x.signed_at || null }))
+        };
+      };
+      const stageOf = (r: any) => {
+        if (r.status === "rejected") return { stage: "rejected", with: [], why: r.remarks || "Rejected by HR." };
+        if (r.status === "pending") {
+          return {
+            stage: "with_hr",
+            with: hrIds.map((id) => names.get(id)?.name).filter(Boolean),
+            why: "Waiting for HR Operations to prepare and issue the letter."
+          };
+        }
+        const sg = r.letter_id ? signingOf(Number(r.letter_id)) : null;
+        if (sg && sg.status === "pending") {
+          return {
+            stage: "signing",
+            with: sg.waiting_on?.name ? [sg.waiting_on.name] : [],
+            why: sg.waiting_on?.name ? `Issued — waiting for ${sg.waiting_on.name}${sg.waiting_on.label ? ` (${sg.waiting_on.label})` : ""} to sign it.` : "Issued — waiting for signatures."
+          };
+        }
+        if (sg && sg.status === "declined") return { stage: "signing", with: [], why: `Issued, but ${sg.declined?.name || "a signer"} declined to sign${sg.declined?.reason ? `: ${sg.declined.reason}` : "."} HR has to send it again.` };
+        return { stage: "done", with: [], why: "Issued — it is in your letters above." };
+      };
       res.json({
         company: { name: settings.company_name, address: settings.company_address, signatory_name: settings.signatory_name, signatory_designation: settings.signatory_designation },
         employee: { id: Number(emp.id), name: emp.name, employee_code: emp.employee_id, designation: emp.designation, department: emp.department },
         letters: letters
           .filter((l: any) => Number(l.employee_id) === Number(emp.id) && l.status === "issued")
           .sort((a: any, b: any) => Number(b.id) - Number(a.id))
-          .map((l: any) => ({ ...l, id: Number(l.id), letter_date: toDate(l.letter_date), letter_label: LETTER_LABEL.get(l.letter_type) || l.letter_type })),
+          .map((l: any) => ({ ...l, id: Number(l.id), letter_date: toDate(l.letter_date), letter_label: LETTER_LABEL.get(l.letter_type) || l.letter_type, signing: signingOf(Number(l.id)) })),
         requests: requests
           .filter((r: any) => Number(r.employee_id) === Number(emp.id))
           .sort((a: any, b: any) => Number(b.id) - Number(a.id))
-          .map((r: any) => ({ ...r, letter_label: LETTER_LABEL.get(r.letter_type) || r.letter_type })),
+          .map((r: any) => ({ ...r, letter_label: LETTER_LABEL.get(r.letter_type) || r.letter_type, handled_by_name: who(r.handled_by), ...stageOf(r), signing: r.letter_id ? signingOf(Number(r.letter_id)) : null })),
         requestable: LETTER_TYPES.filter((l) => SELF_REQUESTABLE.has(l.key))
       });
     } catch (err) {

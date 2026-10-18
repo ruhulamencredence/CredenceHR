@@ -29,6 +29,57 @@ import { MyInfoRequests, useMyOpenRequests } from './MyInfoRequests';
 import { Employee360 } from './HrOps360';
 import { LoadingBlock } from './LoadingBlock';
 
+// Where a request / letter is now (HROperationsRoutes.ts /api/hr-ops/my/letters).
+interface Signing {
+  status: string;
+  sent_at: string | null;
+  completed_at: string | null;
+  waiting_on: { name: string | null; label: string | null } | null;
+  declined: { name: string | null; reason: string | null } | null;
+  steps: { name: string | null; label: string | null; status: string; signed_at: string | null }[];
+}
+interface MyRequest {
+  id: number;
+  letter_label: string;
+  purpose: string | null;
+  status: string;
+  remarks: string | null;
+  created_at: string;
+  handled_at?: string | null;
+  handled_by_name?: string | null;
+  stage?: 'with_hr' | 'signing' | 'done' | 'rejected';
+  with?: string[];
+  why?: string;
+  signing?: Signing | null;
+}
+const daysSince = (d: string | null | undefined) => {
+  if (!d) return null;
+  const t = new Date(String(d).replace(' ', 'T')).getTime();
+  if (Number.isNaN(t)) return null;
+  const n = Math.floor((Date.now() - t) / 86_400_000);
+  return n <= 0 ? 'today' : n === 1 ? '1 day' : `${n} days`;
+};
+// Who signs in what order, and whose turn it is.
+const SignSteps: React.FC<{ s: Signing }> = ({ s }) => (
+  <div className="flex flex-wrap items-center gap-1 mt-1.5">
+    {s.steps.map((st, i) => (
+      <React.Fragment key={i}>
+        {i > 0 && <span className="text-slate-300 text-[10px]">→</span>}
+        <span
+          className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
+            st.status === 'signed' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : st.status === 'pending' ? 'bg-amber-50 text-amber-700 border-amber-300' : st.status === 'declined' ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-slate-50 text-slate-500 border-slate-200'
+          }`}
+          title={st.status === 'signed' ? `Signed ${fmtDate(st.signed_at || '')}` : st.status === 'pending' ? 'Their turn now' : st.status === 'declined' ? 'Declined' : 'Waiting for the one before'}
+        >
+          {st.name || '—'}
+          {st.label ? ` · ${st.label}` : ''}
+          {st.status === 'signed' ? ' ✓' : st.status === 'pending' ? ' (now)' : ''}
+        </span>
+      </React.Fragment>
+    ))}
+  </div>
+);
+
 interface MyLetter {
   id: number;
   ref_no: string;
@@ -39,12 +90,13 @@ interface MyLetter {
   letter_date: string;
   requires_ack: number;
   acknowledged_at: string | null;
+  signing?: Signing | null;
 }
 interface MyData {
   company?: { name: string; address: string; signatory_name: string; signatory_designation: string };
   employee?: { id: number; name: string; employee_code: string | null; designation: string | null; department: string | null };
   letters: MyLetter[];
-  requests: { id: number; letter_label: string; purpose: string | null; status: string; remarks: string | null; created_at: string }[];
+  requests: MyRequest[];
   requestable?: { key: string; label: string }[];
 }
 
@@ -216,6 +268,19 @@ useLiveRefresh(() => load(true));
                             <div className="text-[11px] text-slate-400 mt-0.5">
                               {l.ref_no} · {fmtDate(l.letter_date)}
                             </div>
+                            {l.signing && l.signing.status === 'pending' && (
+                              <div className="mt-1.5 text-[11px] text-amber-700">
+                                Waiting for {l.signing.waiting_on?.name || 'a signature'}
+                                {l.signing.waiting_on?.label ? ` (${l.signing.waiting_on.label})` : ''} to sign
+                                {daysSince(l.signing.sent_at) ? ` — sent ${daysSince(l.signing.sent_at)} ago` : ''}
+                                <SignSteps s={l.signing} />
+                              </div>
+                            )}
+                            {l.signing && l.signing.status === 'declined' && (
+                              <div className="mt-1.5 text-[11px] text-rose-600">
+                                {l.signing.declined?.name || 'A signer'} declined to sign{l.signing.declined?.reason ? `: ${l.signing.declined.reason}` : ''} — HR has to send it again.
+                              </div>
+                            )}
                           </div>
                           {l.acknowledged_at ? (
                             <Badge tone="approved">
@@ -279,15 +344,59 @@ useLiveRefresh(() => load(true));
                 </button>
                 {data.requests.length > 0 && (
                   <ul className="divide-y divide-slate-100 border-t border-slate-100 pt-1">
-                    {data.requests.map((r) => (
-                      <li key={r.id} className="py-2 flex items-center justify-between gap-2 text-xs">
-                        <span>
-                          <span className="font-semibold text-slate-700">{r.letter_label}</span> <span className="text-slate-400">· {r.purpose}</span>
-                          {r.status === 'rejected' && r.remarks && <span className="block text-rose-600 text-[11px]">{r.remarks}</span>}
-                        </span>
-                        <Badge tone={r.status === 'issued' ? 'approved' : r.status}>{r.status === 'issued' ? 'Issued' : r.status === 'rejected' ? 'Rejected' : 'Pending'}</Badge>
-                      </li>
-                    ))}
+                    {data.requests.map((r) => {
+                      const stage = r.stage || (r.status === 'pending' ? 'with_hr' : r.status === 'rejected' ? 'rejected' : 'done');
+                      const badge = stage === 'with_hr' ? 'With HR' : stage === 'signing' ? 'Waiting for signature' : stage === 'rejected' ? 'Rejected' : 'Issued';
+                      return (
+                        <li key={r.id} className="py-2.5 text-xs">
+                          <div className="flex items-start justify-between gap-2">
+                            <span className="min-w-0">
+                              <span className="font-semibold text-slate-700">{r.letter_label}</span> <span className="text-slate-400">· {r.purpose}</span>
+                              <span className="block text-[11px] text-slate-400">
+                                Requested {fmtDate(r.created_at)}
+                                {stage === 'with_hr' && daysSince(r.created_at) ? ` — waiting ${daysSince(r.created_at)}` : ''}
+                              </span>
+                            </span>
+                            <Badge tone={stage === 'done' ? 'approved' : stage === 'rejected' ? 'rejected' : 'pending'}>{badge}</Badge>
+                          </div>
+                          {/* Where it is, with whom, and why */}
+                          <div className={`mt-1.5 rounded-xl px-3 py-2 text-[11px] ${stage === 'rejected' ? 'bg-rose-50 text-rose-700' : stage === 'done' ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'}`}>
+                            {stage === 'with_hr' && (
+                              <>
+                                <span className="font-semibold">Where:</span> HR Operations — not issued yet.
+                                {r.with && r.with.length > 0 && (
+                                  <span className="block mt-0.5">
+                                    <span className="font-semibold">With:</span> {r.with.slice(0, 4).join(', ')}
+                                    {r.with.length > 4 ? ` and ${r.with.length - 4} more` : ''} (anyone of them can issue it)
+                                  </span>
+                                )}
+                              </>
+                            )}
+                            {stage === 'signing' && (
+                              <>
+                                <span className="font-semibold">Where:</span> {r.why}
+                                {r.handled_by_name && <span className="block mt-0.5">Issued by {r.handled_by_name}{r.handled_at ? ` on ${fmtDate(r.handled_at)}` : ''}.</span>}
+                                {r.signing && <SignSteps s={r.signing} />}
+                              </>
+                            )}
+                            {stage === 'rejected' && (
+                              <>
+                                <span className="font-semibold">Rejected</span>
+                                {r.handled_by_name ? ` by ${r.handled_by_name}` : ''}
+                                {r.handled_at ? ` on ${fmtDate(r.handled_at)}` : ''}
+                                {r.remarks ? ` — ${r.remarks}` : ''}
+                              </>
+                            )}
+                            {stage === 'done' && (
+                              <>
+                                Issued{r.handled_by_name ? ` by ${r.handled_by_name}` : ''}
+                                {r.handled_at ? ` on ${fmtDate(r.handled_at)}` : ''} — it is in your letters above.
+                              </>
+                            )}
+                          </div>
+                        </li>
+                      );
+                    })}
                   </ul>
                 )}
               </div>
