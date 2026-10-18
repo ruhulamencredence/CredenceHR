@@ -55,6 +55,8 @@ export interface MailMessage {
   scheduledSendTime: string | null;
   sendError: string | null;
   messageId: string | null;
+  // Came / went inside CredenceHR, not through the mail server.
+  internal?: boolean;
 }
 
 export interface MailList {

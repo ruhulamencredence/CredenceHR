@@ -132,6 +132,27 @@
 - **ধাপ ৩:** Chromium-এ ৪৪টা পরীক্ষা পাস — Settings (compact, timezone, blocked sender, signature আর logo, vacation reply), Template বসানো, Rule আর তার label, live mail-এ rule আর block, notification ঘণ্টা, mail থেকে Task / Event / Contact / Block, Analytics (tooltip, table), phone-এ drawer আর settings। ধাপ ১ আর ২-এর পরীক্ষা আবার চালিয়ে সব পাস।
 - Attachment একসাথে সর্বোচ্চ ১৫ MB (server-এর ২৫ MB JSON সীমার মধ্যে থাকার জন্য)।
 
+### ভেতরের mail (Internal delivery) — শেষ, পরীক্ষিত
+অফিসের একজনের mail আরেকজনের কাছে cPanel দিয়ে যায় না, CredenceHR নিজেই পৌঁছে দেয়।
+- **কে "ভেতরের":** প্রেরক আর প্রাপক দুজনের ঠিকানাই আমাদের domain-এর (ডিফল্ট `credencehousinglimited.com`)। আর প্রাপকের mailbox Credence Mail-এ যুক্ত, তার Credence Mail চালু, account block করা নেই।
+- **কে "বাইরের":** অন্য domain। অথবা আমাদের domain কিন্তু Credence Mail-এ নেই বা বন্ধ। এদের কাছে mail আগের মতো cPanel SMTP দিয়ে যায়।
+- **মিশ্র প্রাপক:** SMTP দিয়ে যায় শুধু বাইরের জনদের কাছে, আগে সেটা হয়। সফল হলে তারপর ভেতরের জনদের Inbox-এ বসে। এতে কেউ দুটো কপি পায় না।
+  - To আর Cc সবার কাছে আগের মতোই দেখায়। Bcc কারো কাছে দেখায় না।
+- **প্রাপকের দিকে যা আগের মতোই খাটে:** blocked sender, rule, category, alert আর push, vacation reply।
+  - ভেতরের vacation reply-ও ভেতরেই যায়। দুটো away reply একে অপরকে উত্তর দেয় না।
+  - Reply করলে একই conversation-এ থাকে।
+- **Sent আর attachment:**
+  - শুধু ভেতরে গেলে cPanel-এর Sent-এ কপি রাখা হয় না, CredenceHR-এ থাকে।
+  - Attachment একবারই রাখা হয় (`mail_blobs`), যতজনই পাক। কেউ না রাখলে ৬ ঘণ্টা পরপর পরিষ্কার হয়।
+- **চিহ্ন:**
+  - এমন mail-এ সবুজ **"Internal"** লেখা থাকে।
+  - পাঠানোর পর লেখা আসে "Delivered inside CredenceHR", অথবা কতজন ভেতরে আর কতজন mail server দিয়ে।
+- **Setting:** Admin Panel → MIS → Mail Administration → **Internal delivery** tab। চালু বা বন্ধ করা যায়, আর domain-এর তালিকা দেওয়া যায়। ডিফল্ট চালু।
+  - দেখতে পারে Mail Administration-এর "read" যাদের আছে।
+  - বদলাতে পারে শুধু নতুন explicit-only layer **"Internal delivery settings"** (`mail_settings`) যাদের টিক দেওয়া।
+- **সীমাবদ্ধতা:** ভেতরের mail শুধু Credence Mail-এ দেখা যায়। Outlook বা ফোনের mail app-এ cPanel mailbox খুললে সেখানে থাকে না।
+- **পরীক্ষা:** Dovecot আর SMTP test server দিয়ে ৩৯টা API পরীক্ষা পাস। SMTP server-এর log দিয়ে মিলিয়ে দেখা হয়েছে, ভেতরের প্রাপকের কাছে mail সত্যিই SMTP দিয়ে যায়নি।
+
 ## ৫. আপনাদের যা করতে হবে
 
 1. **Repo private করা:** `credence-mail` repo → Settings → Danger Zone → Change visibility → **Private**।

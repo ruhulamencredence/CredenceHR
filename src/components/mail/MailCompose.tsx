@@ -398,8 +398,11 @@ export const MailCompose: React.FC<{
     setBusy(later ? 'schedule' : 'send');
     closing.current = true;
     try {
-      await mailFetch(token, '/send', { method: 'POST', body: { ...payload(), draftId, scheduledAt } });
-      onDone(later ? `Will be sent ${new Date(scheduledAt!).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}.` : 'Sent.');
+      const sent = await mailFetch<{ delivery?: { internal: number; external: number } }>(token, '/send', { method: 'POST', body: { ...payload(), draftId, scheduledAt } });
+      // How it went: inside CredenceHR (our own mailboxes) and / or through the mail server.
+      const d = sent?.delivery;
+      const how = d && d.internal ? (d.external ? ` ${d.internal} inside CredenceHR, ${d.external} through the mail server.` : ' Delivered inside CredenceHR.') : '';
+      onDone(later ? `Will be sent ${new Date(scheduledAt!).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}.` : `Sent.${how}`);
       onClose();
     } catch (e: any) {
       closing.current = false;

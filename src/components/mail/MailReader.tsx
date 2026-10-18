@@ -89,9 +89,16 @@ const OneMail: React.FC<{ token: string; m: MailMessage; open: boolean; onToggle
       </button>
       {open && (
         <div className="px-3 sm:px-4 pb-4">
-          <button type="button" onClick={() => setDetails((v) => !v)} className="text-[11px] text-slate-500 hover:text-slate-800 inline-flex items-center gap-0.5 mb-2">
-            Details {details ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-          </button>
+          <div className="flex items-center gap-2 mb-2">
+            <button type="button" onClick={() => setDetails((v) => !v)} className="text-[11px] text-slate-500 hover:text-slate-800 inline-flex items-center gap-0.5">
+              Details {details ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+            </button>
+            {m.internal && (
+              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200" title="Delivered inside CredenceHR — it didn't go through the mail server">
+                Internal
+              </span>
+            )}
+          </div>
           {details && (
             <div className="mb-3 rounded-xl bg-slate-50 px-3 py-2 text-[11px] text-slate-600 space-y-0.5">
               <div><span className="text-slate-400">From:</span> {m.from.name} &lt;{m.from.email}&gt;</div>
@@ -99,6 +106,7 @@ const OneMail: React.FC<{ token: string; m: MailMessage; open: boolean; onToggle
               {m.cc.length > 0 && <div><span className="text-slate-400">Cc:</span> {m.cc.join(', ')}</div>}
               {m.bcc.length > 0 && <div><span className="text-slate-400">Bcc:</span> {m.bcc.join(', ')}</div>}
               <div><span className="text-slate-400">Date:</span> {fullMailDate(m.date)}</div>
+              {m.internal && <div><span className="text-slate-400">Delivery:</span> inside CredenceHR (not through the mail server)</div>}
             </div>
           )}
           {m.sendError && (
