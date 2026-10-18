@@ -150,6 +150,13 @@
 - **Setting:** Admin Panel → MIS → Mail Administration → **Internal delivery** tab। চালু বা বন্ধ করা যায়, আর domain-এর তালিকা দেওয়া যায়। ডিফল্ট চালু।
   - দেখতে পারে Mail Administration-এর "read" যাদের আছে।
   - বদলাতে পারে শুধু নতুন explicit-only layer **"Internal delivery settings"** (`mail_settings`) যাদের টিক দেওয়া।
+- **Mailbox যুক্ত না থাকলেও:** প্রাপক নিজের mailbox Credence Mail-এ যুক্ত না করে থাকলেও mail ভেতরেই যায়, যদি:
+  - ঠিকানাটা তার CredenceHR account-এর login email বা Employee-র official email হয়, আর
+  - তার Credence Mail চালু থাকে।
+  - তখন তার জন্য একটা "শুধু ভেতরের" mailbox আপনা থেকে তৈরি হয়। পরে সে password দিয়ে mailbox যুক্ত করলে সেটাই আসল mailbox হয়ে যায়, আগের mail সব থেকে যায়।
+  - "শুধু ভেতরের" mailbox থেকে বাইরের ঠিকানায় mail পাঠানো যায় না, কারণ সহ এটা বলা হয়।
+- **Compose-এ দেখা যায়:** ঠিকানার নিচে লেখা আসে কতজন "inside CredenceHR" আর কতজন "through the mail server"। অফিসের কেউ Credence Mail-এ না থাকলে তার নামও সেখানে দেখায়।
+- **ছবি:** নিজের mail, অফিসের domain-এর mail, আর যাদের জন্য "Always from this sender" চাপা হয়েছে, তাদের mail-এর ছবি আর প্রতিবার "Show pictures" না চাপলেও দেখায়।
 - **সীমাবদ্ধতা:** ভেতরের mail শুধু Credence Mail-এ দেখা যায়। Outlook বা ফোনের mail app-এ cPanel mailbox খুললে সেখানে থাকে না।
 - **পরীক্ষা:** Dovecot আর SMTP test server দিয়ে ৩৯টা API পরীক্ষা পাস। SMTP server-এর log দিয়ে মিলিয়ে দেখা হয়েছে, ভেতরের প্রাপকের কাছে mail সত্যিই SMTP দিয়ে যায়নি।
 

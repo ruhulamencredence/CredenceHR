@@ -246,6 +246,26 @@ export const MailCompose: React.FC<{
   const [cc, setCc] = useState(init.cc || '');
   const [bcc, setBcc] = useState(init.bcc || '');
   const [showCc, setShowCc] = useState(!!(init.cc || init.bcc));
+  // Which recipients get it inside CredenceHR and which through the mail
+  // server (MailRoutes.ts "Internal delivery") — shown under the addresses.
+  const [route, setRoute] = useState<{ internal: string[]; external: string[]; ourOutside: string[] } | null>(null);
+  useEffect(() => {
+    if (!accountId || !(to + cc + bcc).trim()) return setRoute(null);
+    let gone = false;
+    const t = setTimeout(() => {
+      mailFetch<{ internal: string[]; external: string[]; ourDomains: string[]; enabled: boolean }>(token, '/route-preview', { method: 'POST', body: { accountId, to, cc, bcc } })
+        .then((r) => {
+          if (gone) return;
+          const ours = new Set(r.ourDomains.map((d) => d.toLowerCase()));
+          setRoute({ internal: r.internal, external: r.external, ourOutside: r.enabled ? r.external.filter((x) => ours.has(x.split('@')[1] || '')) : [] });
+        })
+        .catch(() => !gone && setRoute(null));
+    }, 500);
+    return () => {
+      gone = true;
+      clearTimeout(t);
+    };
+  }, [token, accountId, to, cc, bcc]);
   const [subject, setSubject] = useState(init.subject || '');
   const [sigId, setSigId] = useState<string>(init.draftId ? '' : defaultSig?.id || '');
   const [files, setFiles] = useState<(OutgoingFile & { size: number })[]>([]);
@@ -524,6 +544,17 @@ export const MailCompose: React.FC<{
             />
             {showCc && <AddressField token={token} label="Cc" value={cc} onChange={setCc} />}
             {showCc && <AddressField token={token} label="Bcc" value={bcc} onChange={setBcc} />}
+            {route && (route.internal.length > 0 || route.external.length > 0) && (
+              <div className="px-4 py-1.5 border-b border-slate-200/70 text-[11px] text-slate-500 flex flex-wrap gap-x-3 gap-y-0.5" title={[...route.internal.map((x) => `${x}: inside CredenceHR`), ...route.external.map((x) => `${x}: through the mail server`)].join('\n')}>
+                {route.internal.length > 0 && <span className="text-emerald-700">{route.internal.length === 1 && !route.external.length ? 'Delivered inside CredenceHR' : `${route.internal.length} inside CredenceHR`}</span>}
+                {route.external.length > 0 && (
+                  <span>
+                    {route.internal.length ? `${route.external.length} through the mail server` : 'Through the mail server'}
+                    {route.ourOutside.length > 0 && ` (${route.ourOutside.join(', ')} ${route.ourOutside.length > 1 ? "aren't" : "isn't"} on Credence Mail)`}
+                  </span>
+                )}
+              </div>
+            )}
             <div className="flex items-center gap-2 border-b border-slate-200/70 px-4">
               <input
                 value={subject}

@@ -244,7 +244,9 @@ const MailboxesPopup: React.FC<{ token: string; userName: string; accounts: Mail
                     <div className="flex-1 min-w-0">
                       <div className="text-sm font-medium text-slate-800 truncate">{a.emailAddress}</div>
                       <div className={`text-[11px] truncate ${a.lastError ? 'text-rose-600' : 'text-slate-500'}`}>
-                        {a.lastError || (a.lastSyncAt ? `Checked ${shortMailDate(a.lastSyncAt)}` : 'Connected')}
+                        {a.internalOnly
+                          ? 'Only inside CredenceHR — add it again with its password for outside mail'
+                          : a.lastError || (a.lastSyncAt ? `Checked ${shortMailDate(a.lastSyncAt)}` : 'Connected')}
                       </div>
                     </div>
                     {a.isDefault ? (
@@ -435,6 +437,27 @@ export const CredenceMail: React.FC<{
   const listReq = useRef(0);
   const accounts = status?.accounts || [];
   const ownEmails = useMemo(() => new Set(accounts.map((a) => a.emailAddress.toLowerCase())), [accounts]);
+  // Pictures show without asking in one's own mail, mail from our own
+  // domains, and from senders chosen with "Always from this sender".
+  const ourDomains = useMemo(() => new Set((status?.ourDomains || []).map((d) => d.toLowerCase())), [status]);
+  const pictureSenders = useMemo(() => new Set((settings?.pictureSenders || []).map((d) => d.toLowerCase())), [settings]);
+  const picturesOk = useCallback(
+    (m: MailMessage) => {
+      const from = (m.from.email || '').toLowerCase();
+      return ownEmails.has(from) || ourDomains.has(from.split('@')[1] || '') || pictureSenders.has(from);
+    },
+    [ownEmails, ourDomains, pictureSenders]
+  );
+  const trustSender = async (email: string) => {
+    try {
+      const cur = settings || (await mailFetch<MailSettings>(token, '/settings'));
+      const next = await mailFetch<MailSettings>(token, '/settings', { method: 'PUT', body: { pictureSenders: [...new Set([...(cur.pictureSenders || []), email.toLowerCase()])] } });
+      setSettings(next);
+      say(`Pictures from ${email} will always show.`);
+    } catch (e: any) {
+      say(e.message, 'error');
+    }
+  };
 
   useBackButtonClose(drawer, () => setDrawer(false));
   useBackButtonClose(!!selectedId, () => setSelectedId(null));
@@ -775,10 +798,17 @@ export const CredenceMail: React.FC<{
         if (forGood && !(await confirmDialog('Delete this mail for good? This cannot be undone.', { tone: 'danger', confirmLabel: 'Delete' }))) return;
         // The whole conversation goes, like in other mail apps.
         const ids = forGood ? [m.id] : (thread || [m]).filter((x) => !x.labels.includes('Trash')).map((x) => x.id);
-        await mailFetch(token, '/messages/batch', { method: 'POST', body: { ids, action: 'delete' } });
+        // Gone from the screen at once; the mail server (which can take a few
+        // seconds) catches up behind it — if it fails, the list comes back.
         patchLocal(ids, {}, true);
         setSelectedId(null);
         say(forGood ? 'Deleted.' : 'Moved to Trash.');
+        try {
+          await mailFetch(token, '/messages/batch', { method: 'POST', body: { ids, action: 'delete' } });
+        } catch (e: any) {
+          say(e.message, 'error');
+          refreshRef.current();
+        }
         void loadCounts();
         return;
       }
@@ -1120,7 +1150,17 @@ export const CredenceMail: React.FC<{
   );
 
   const reader = selectedId ? (
-    <MailReader token={token} thread={thread} folder={folder} error={threadError} readOnly={ro} onBack={() => setSelectedId(null)} onAction={(a, m) => void act(a, m)} />
+    <MailReader
+      token={token}
+      thread={thread}
+      folder={folder}
+      error={threadError}
+      readOnly={ro}
+      onBack={() => setSelectedId(null)}
+      onAction={(a, m) => void act(a, m)}
+      picturesOk={picturesOk}
+      onTrustSender={(email) => void trustSender(email)}
+    />
   ) : (
     <div className="hidden md:flex h-full items-center justify-center text-center p-8">
       <div>
