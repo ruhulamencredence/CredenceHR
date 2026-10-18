@@ -2548,15 +2548,15 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     handler(async (_req, res) => {
       const rows: any[] =
         (await queryDB(
-          "SELECT name, email, designation, department FROM all_employees WHERE is_active = 1 AND email IS NOT NULL AND email <> '' ORDER BY name LIMIT 10000"
+          "SELECT name, employee_id, email, designation, department FROM all_employees WHERE is_active = 1 AND email IS NOT NULL AND email <> '' ORDER BY name LIMIT 10000"
         ).catch(() => [])) || [];
       const seen = new Set<string>();
-      const out: { name: string; email: string; designation: string; department: string }[] = [];
+      const out: { name: string; email: string; employeeId: string; designation: string; department: string }[] = [];
       for (const r of rows) {
         const e = String(r.email || "").trim().toLowerCase();
         if (!isEmail(e) || seen.has(e)) continue;
         seen.add(e);
-        out.push({ name: String(r.name || "").trim() || e.split("@")[0], email: e, designation: r.designation || "", department: r.department || "" });
+        out.push({ name: String(r.name || "").trim() || e.split("@")[0], email: e, employeeId: String(r.employee_id || "").trim(), designation: r.designation || "", department: r.department || "" });
       }
       res.setHeader("Cache-Control", "private, max-age=300");
       res.json(out);

@@ -61,6 +61,7 @@ const localDateTime = (d: Date) => {
 export interface DirectoryPerson {
   name: string;
   email: string;
+  employeeId?: string;
   designation: string;
   department: string;
 }
@@ -75,7 +76,7 @@ const loadDirectory = (token: string) => {
   return directoryCache;
 };
 
-type Suggestion = { name: string; email: string; sub: string; tag: string };
+type Suggestion = { name: string; email: string; sub: string; tag: string; employeeId?: string; designation?: string; department?: string };
 const SHOW_MAX = 150;
 
 // To / Cc / Bcc: type any address, or pick from the list — employees (all of
@@ -119,16 +120,24 @@ const AddressField: React.FC<{ token: string; label: string; value: string; onCh
     const q = current.toLowerCase();
     const out: Suggestion[] = [];
     const seen = new Set<string>(chosen);
+    const byEmail = new Map((people || []).map((p) => [p.email, p]));
     for (const b of book) {
       if (seen.has(b.email)) continue;
       seen.add(b.email);
-      out.push({ name: b.name, email: b.email, sub: '', tag: b.source === 'contact' ? 'Contact' : 'Recent' });
+      // A contact or recent address that is an Employee shows as one.
+      const p = byEmail.get(b.email.toLowerCase());
+      out.push(
+        p
+          ? { name: p.name, email: p.email, sub: '', tag: b.source === 'contact' ? 'Contact' : 'Recent', employeeId: p.employeeId, designation: p.designation, department: p.department }
+          : { name: b.name, email: b.email, sub: '', tag: b.source === 'contact' ? 'Contact' : 'Recent' }
+      );
     }
     for (const p of people || []) {
       if (seen.has(p.email)) continue;
-      if (q && !`${p.name} ${p.email} ${p.designation} ${p.department}`.toLowerCase().includes(q)) continue;
+      // Name, email, Employee ID, designation or department.
+      if (q && !`${p.name} ${p.email} ${p.employeeId || ''} ${p.designation} ${p.department}`.toLowerCase().includes(q)) continue;
       seen.add(p.email);
-      out.push({ name: p.name, email: p.email, sub: [p.designation, p.department].filter(Boolean).join(' · '), tag: 'Employee' });
+      out.push({ name: p.name, email: p.email, sub: '', tag: 'Employee', employeeId: p.employeeId, designation: p.designation, department: p.department });
     }
     return out;
   }, [book, people, current, chosen]);
@@ -181,7 +190,7 @@ const AddressField: React.FC<{ token: string; label: string; value: string; onCh
         type="text"
         inputMode="email"
         autoComplete="off"
-        placeholder={label === 'To' ? 'Recipients' : ''}
+        placeholder={label === 'To' ? 'Recipients — name, email or Employee ID' : ''}
         className="flex-1 min-w-0 bg-transparent py-2 text-sm focus:outline-none placeholder:text-slate-500"
       />
       <button
@@ -216,8 +225,18 @@ const AddressField: React.FC<{ token: string; label: string; value: string; onCh
                   onMouseEnter={() => setActive(i)}
                   className={`w-full text-left px-3 py-2 flex items-center justify-between gap-2 ${i === active ? 'bg-[#e8f0fe]' : ''}`}
                 >
-                  <span className="min-w-0">
-                    <span className="block text-sm font-medium text-slate-800 truncate">{sug.name}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-baseline gap-2 min-w-0">
+                      <span className="text-sm font-medium text-slate-800 truncate">{sug.name}</span>
+                      {sug.employeeId && <span className="text-[10px] font-semibold px-1.5 py-px rounded bg-slate-100 text-slate-600 shrink-0">ID {sug.employeeId}</span>}
+                    </span>
+                    {(sug.designation || sug.department) && (
+                      <span className="block text-xs text-slate-600 truncate">
+                        {sug.designation}
+                        {sug.designation && sug.department && <span className="text-slate-400"> · </span>}
+                        {sug.department}
+                      </span>
+                    )}
                     <span className="block text-xs text-slate-500 truncate">
                       {sug.email}
                       {sug.sub && <span className="text-slate-400"> · {sug.sub}</span>}
@@ -226,7 +245,7 @@ const AddressField: React.FC<{ token: string; label: string; value: string; onCh
                   <span className="text-[10px] text-slate-400 shrink-0">{sug.tag}</span>
                 </button>
               ))}
-              {list.length > SHOW_MAX && <div className="px-3 py-2 text-[11px] text-slate-400 border-t border-slate-100">{list.length - SHOW_MAX} more — type a name, department or designation to find them.</div>}
+              {list.length > SHOW_MAX && <div className="px-3 py-2 text-[11px] text-slate-400 border-t border-slate-100">{list.length - SHOW_MAX} more — type a name, Employee ID, department or designation to find them.</div>}
             </>
           )}
         </div>
