@@ -13,7 +13,7 @@ import { Capacitor } from '@capacitor/core';
 import {
   ArrowLeft, Mail, Inbox, Star, Send, FileText, Clock, Archive, ShieldAlert, Trash2, AlertCircle, Pencil, RefreshCw, Search, X, Menu, Paperclip,
   CheckSquare, Square, MailOpen, Plus, Loader2, Server, ChevronDown, Bookmark, LogOut, Check,
-  Users, ListChecks, Filter, BarChart3, Settings, Tag, Eye
+  Users, ListChecks, Filter, BarChart3, Settings, Tag, Eye, Copy
 } from 'lucide-react';
 import { ModulePath } from '../ModulePath';
 import { confirmDialog } from '../../lib/confirmDialog';
@@ -202,9 +202,127 @@ const ConnectMailbox: React.FC<{ token: string; userName: string; onConnected: (
   );
 };
 
-// Mailboxes popup: switch default, remove, add another.
-const MailboxesPopup: React.FC<{ token: string; userName: string; accounts: MailAccount[]; onChanged: () => void; onClose: () => void }> = ({ token, userName, accounts, onChanged, onClose }) => {
+// Mailboxes -> Email Directory (GET /api/mail/directory/browse, only with
+// users.can_view_mail_directory): every employee with an email, searchable
+// by name, email, ID, designation or department.
+interface DirectoryEntry {
+  name: string;
+  email: string;
+  employeeId: string;
+  designation: string;
+  department: string;
+  inCredenceMail: boolean;
+  ourDomain: boolean;
+}
+const DIRECTORY_SHOW = 200;
+const EmailDirectory: React.FC<{ token: string; onWrite: (email: string) => void }> = ({ token, onWrite }) => {
+  const [people, setPeople] = useState<DirectoryEntry[] | null>(null);
+  const [error, setError] = useState('');
+  const [q, setQ] = useState('');
+  const [dept, setDept] = useState('');
+  const [copied, setCopied] = useState('');
+  useEffect(() => {
+    mailFetch<DirectoryEntry[]>(token, '/directory/browse').then(setPeople).catch((e) => {
+      setError(e.message);
+      setPeople([]);
+    });
+  }, [token]);
+  const departments = useMemo(() => [...new Set((people || []).map((p) => p.department).filter(Boolean))].sort(), [people]);
+  const found = useMemo(() => {
+    const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    return (people || []).filter((p) => {
+      if (dept && p.department !== dept) return false;
+      const hay = `${p.name} ${p.email} ${p.employeeId} ${p.designation} ${p.department}`.toLowerCase();
+      return words.every((w) => hay.includes(w));
+    });
+  }, [people, q, dept]);
+  const copy = async (email: string) => {
+    try {
+      await navigator.clipboard.writeText(email);
+      setCopied(email);
+      setTimeout(() => setCopied((c) => (c === email ? '' : c)), 1500);
+    } catch {
+      /* clipboard blocked — the address is on screen anyway */
+    }
+  };
+  const inputCls = 'text-sm px-3 py-2 bg-white/80 border border-slate-200 rounded-xl focus:ring-2 focus:ring-sky-200 focus:outline-none';
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-col sm:flex-row gap-2">
+        <div className="relative flex-1">
+          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Name, email, ID, designation…" aria-label="Search the Email Directory" className={`${inputCls} w-full pl-9`} autoFocus />
+        </div>
+        {departments.length > 1 && (
+          <select value={dept} onChange={(e) => setDept(e.target.value)} aria-label="Department" className={`${inputCls} sm:w-44`}>
+            <option value="">All departments</option>
+            {departments.map((d) => <option key={d} value={d}>{d}</option>)}
+          </select>
+        )}
+      </div>
+      {error && <div className="text-xs px-3 py-2 rounded-xl bg-rose-50 text-rose-700">{error}</div>}
+      {people === null ? (
+        <div className="py-10 flex justify-center"><Loader2 className="w-5 h-5 animate-spin text-slate-400" /></div>
+      ) : (
+        <>
+          <div className="text-[11px] text-slate-500 px-1">
+            {found.length} of {people.length} {people.length === 1 ? 'person' : 'people'}
+            {found.length > DIRECTORY_SHOW && ` — showing the first ${DIRECTORY_SHOW}, type to narrow`}
+          </div>
+          <div className="liquid-glass-inset rounded-[24px] divide-y divide-slate-200/60 max-h-[55vh] overflow-y-auto">
+            {found.length === 0 && <div className="px-4 py-8 text-center text-sm text-slate-500">No one matches.</div>}
+            {found.slice(0, DIRECTORY_SHOW).map((p) => (
+              <div key={p.email} className="flex items-center gap-3 px-3 py-2.5">
+                <MailAvatar name={p.name} email={p.email} size="sm" />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="text-sm font-medium text-slate-800 truncate">{p.name}</span>
+                    {p.employeeId && <span className="text-[10px] font-semibold px-1.5 py-px rounded bg-slate-100 text-slate-600 shrink-0">ID {p.employeeId}</span>}
+                  </div>
+                  {(p.designation || p.department) && (
+                    <div className="text-[11px] text-slate-500 truncate">{[p.designation, p.department].filter(Boolean).join(' · ')}</div>
+                  )}
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="text-[11px] text-sky-700 truncate">{p.email}</span>
+                    {p.ourDomain && (
+                      <span
+                        className="text-[9px] font-semibold px-1.5 py-px rounded-full bg-emerald-50 text-emerald-700 shrink-0"
+                        title={p.inCredenceMail ? 'Has a mailbox in Credence Mail — mail to them stays inside CredenceHR' : 'Our domain — mail to them stays inside CredenceHR'}
+                      >
+                        Internal
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <button type="button" onClick={() => void copy(p.email)} className="p-1.5 rounded-full text-slate-400 hover:text-slate-800 hover:bg-black/5" aria-label={`Copy ${p.email}`} title="Copy address">
+                  {copied === p.email ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
+                </button>
+                <button type="button" onClick={() => onWrite(p.email)} className="p-1.5 rounded-full text-sky-600 hover:bg-sky-50" aria-label={`Write to ${p.name}`} title="Write mail">
+                  <Pencil className="w-4 h-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+};
+
+// Mailboxes popup: switch default, remove, add another — and, with its own
+// switch, the Email Directory.
+const MailboxesPopup: React.FC<{
+  token: string;
+  userName: string;
+  accounts: MailAccount[];
+  canDirectory: boolean;
+  onWrite: (email: string) => void;
+  onChanged: () => void;
+  onClose: () => void;
+}> = ({ token, userName, accounts, canDirectory, onWrite, onChanged, onClose }) => {
   const [adding, setAdding] = useState(false);
+  const [tab, setTab] = useState<'boxes' | 'directory'>('boxes');
+  const directory = canDirectory && tab === 'directory' && !adding;
   const [error, setError] = useState('');
   const keyboardInset = useKeyboardInset();
   useBackButtonClose(true, onClose);
@@ -227,13 +345,29 @@ const MailboxesPopup: React.FC<{ token: string; userName: string; accounts: Mail
   };
   return (
     <div className="fixed inset-0 z-[90] liquid-glass-backdrop flex items-end sm:items-center justify-center p-3 sm:p-4" style={keyboardInset ? { paddingBottom: keyboardInset + 8 } : undefined} onClick={onClose}>
-      <div className="w-full max-w-md max-h-[92vh] flex" onClick={(e) => e.stopPropagation()}>
+      <div className={`w-full ${directory ? 'max-w-xl' : 'max-w-md'} max-h-[92vh] flex`} onClick={(e) => e.stopPropagation()}>
         <div className="liquid-glass liquid-glass-in rounded-[32px] w-full p-5 overflow-y-auto">
           <div className="flex items-center justify-between gap-2 mb-4">
-            <h3 className="text-base font-bold text-slate-900">{adding ? 'Connect another mailbox' : 'Mailboxes'}</h3>
+            <h3 className="text-base font-bold text-slate-900">{adding ? 'Connect another mailbox' : directory ? 'Email Directory' : 'Mailboxes'}</h3>
             <button type="button" onClick={onClose} className="liquid-glass-chip p-1.5 rounded-full text-slate-600 hover:text-slate-900" aria-label="Close"><X className="w-4 h-4" /></button>
           </div>
-          {adding ? (
+          {canDirectory && !adding && (
+            <div className="liquid-glass-inset rounded-full p-1 mb-4 grid grid-cols-2 gap-1 text-sm">
+              {([['boxes', 'My mailboxes', Server], ['directory', 'Email Directory', Users]] as const).map(([k, label, Icon]) => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => setTab(k)}
+                  className={`rounded-full px-3 py-1.5 inline-flex items-center justify-center gap-1.5 ${tab === k ? 'bg-white shadow-sm font-semibold text-slate-900' : 'text-slate-600 hover:text-slate-900'}`}
+                >
+                  <Icon className="w-3.5 h-3.5" /> {label}
+                </button>
+              ))}
+            </div>
+          )}
+          {directory ? (
+            <EmailDirectory token={token} onWrite={onWrite} />
+          ) : adding ? (
             <ConnectMailbox token={token} userName={userName} serverReady onCancel={() => setAdding(false)} onConnected={() => { setAdding(false); onChanged(); }} />
           ) : (
             <>
@@ -1248,6 +1382,11 @@ export const CredenceMail: React.FC<{
           token={token}
           userName={user.name}
           accounts={accounts}
+          canDirectory={!ro && !!status?.canDirectory}
+          onWrite={(email) => {
+            setMailboxes(false);
+            setCompose({ accountId: accountFilter || undefined, to: email });
+          }}
           onClose={() => setMailboxes(false)}
           onChanged={() => {
             void loadStatus();

@@ -762,6 +762,7 @@ export interface User {
   // Chat audio/video calls (CallLayer.tsx) — Self Service switch, off by default.
   can_use_calls?: boolean;
   can_use_mail?: boolean;
+  can_view_mail_directory?: boolean;
   // Self Service -> My Duty Roster (RosterRoutes.ts) — off by default.
   can_view_roster?: boolean;
   // Self Service -> Documents to Sign (ESignRoutes.ts) — off by default.

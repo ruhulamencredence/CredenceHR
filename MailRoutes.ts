@@ -60,6 +60,8 @@ export async function ensureMailSchema(dbPool: any): Promise<void> {
   };
   // Self Service switch, OFF until turned on per account in Module Access.
   await run("users.can_use_mail", "ALTER TABLE users ADD COLUMN can_use_mail TINYINT(1) NOT NULL DEFAULT 0", ["ER_DUP_FIELDNAME"]);
+  // Mailboxes -> Email Directory tab, its own switch (also OFF by default).
+  await run("users.can_view_mail_directory", "ALTER TABLE users ADD COLUMN can_view_mail_directory TINYINT(1) NOT NULL DEFAULT 0", ["ER_DUP_FIELDNAME"]);
   const tables: [string, string][] = [
     [
       "mail_accounts",
@@ -1343,6 +1345,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
         enabled,
         serverReady: !!mailKey(),
         ourDomains: enabled ? (await systemSettings()).domains : [],
+        canDirectory: enabled && (await hasDirectory(req.user)),
         accounts: enabled ? (await accountsOf(uid(req))).map(publicAccount) : []
       });
     })
@@ -2559,6 +2562,47 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
         out.push({ name: String(r.name || "").trim() || e.split("@")[0], email: e, employeeId: String(r.employee_id || "").trim(), designation: r.designation || "", department: r.department || "" });
       }
       res.setHeader("Cache-Control", "private, max-age=300");
+      res.json(out);
+    })
+  );
+
+  // Mailboxes -> Email Directory: the same people, plus whether each one's
+  // mail stays inside CredenceHR. Needs users.can_view_mail_directory.
+  async function hasDirectory(user: any): Promise<boolean> {
+    if (user?.role === "superadmin") return true;
+    const rows: any[] = (await queryDB("SELECT can_view_mail_directory FROM users WHERE id = ?", [Number(user?.id)]).catch(() => [])) || [];
+    return !!Number(rows[0]?.can_view_mail_directory);
+  }
+  app.get(
+    "/api/mail/directory/browse",
+    ...gate,
+    handler(async (req, res) => {
+      noStore(res);
+      if (!(await hasDirectory(req.user))) throw bad("The Email Directory isn't turned on for your account.", 403);
+      const [rows, boxes]: any[] = await Promise.all([
+        queryDB(
+          "SELECT name, employee_id, email, designation, department FROM all_employees WHERE is_active = 1 AND email IS NOT NULL AND email <> '' ORDER BY name LIMIT 10000"
+        ).catch(() => []),
+        queryDB("/*unscoped*/ SELECT DISTINCT LOWER(TRIM(email)) AS email FROM mail_accounts").catch(() => [])
+      ]);
+      const domains = (await systemSettings()).domains;
+      const inBox = new Set<string>((boxes || []).map((b: any) => String(b.email || "")));
+      const seen = new Set<string>();
+      const out: any[] = [];
+      for (const r of rows || []) {
+        const e = String(r.email || "").trim().toLowerCase();
+        if (!isEmail(e) || seen.has(e)) continue;
+        seen.add(e);
+        out.push({
+          name: String(r.name || "").trim() || e.split("@")[0],
+          email: e,
+          employeeId: String(r.employee_id || "").trim(),
+          designation: r.designation || "",
+          department: r.department || "",
+          inCredenceMail: inBox.has(e),
+          ourDomain: domains.includes(e.split("@")[1] || "")
+        });
+      }
       res.json(out);
     })
   );

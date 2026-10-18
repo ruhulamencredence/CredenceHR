@@ -85,6 +85,8 @@ export interface MailStatus {
   // Our own domains (Mail Administration -> Internal delivery): their
   // pictures show without asking.
   ourDomains?: string[];
+  // Mailboxes -> Email Directory tab (users.can_view_mail_directory).
+  canDirectory?: boolean;
 }
 
 export interface SignatureFields {
