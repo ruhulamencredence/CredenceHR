@@ -202,7 +202,14 @@ export function registerMeasurementRoutes(app: Express, deps: RegisterMeasuremen
       if (!raw.lines.length && !raw.polys.length) throw bad("The drawing has no lines on its model space.", 422);
       const settings = normaliseSettings({});
       const model = analyse(raw, settings);
-      if (!model.plans.length) throw bad("No beam plan was found in this drawing. Beam edges must be on a layer with \"beam\" in its name.", 422);
+      if (!model.plans.length) {
+        // Say which layers the drawing does have, so the right one can be named.
+        const names = raw.layers.filter((l) => l.lines + l.polys > 0).slice(0, 12).map((l) => l.name);
+        throw bad(
+          `No beam plan was found in this drawing. Beam edges must be on a layer with "beam" in its name.${names.length ? ` Layers with lines in this drawing: ${names.join(", ")}.` : ""}${raw.notes.length ? ` ${raw.notes.join(" ")}` : ""}`,
+          422
+        );
+      }
       const gz = zlib.gzipSync(Buffer.from(JSON.stringify(raw)));
       const r: any = await queryDB(
         "INSERT INTO measurement_sheets (title, file_name, raw_gz, settings_json, overrides_json, created_by, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?)",
