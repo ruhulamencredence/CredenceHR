@@ -251,16 +251,18 @@ export const MailCompose: React.FC<{
   const [bcc, setBcc] = useState(init.bcc || '');
   // Which recipients get it inside CredenceHR and which through the mail
   // server (MailRoutes.ts "Internal delivery") — shown under the addresses.
-  const [route, setRoute] = useState<{ internal: string[]; external: string[]; ourOutside: string[] } | null>(null);
+  const [route, setRoute] = useState<{ internal: string[]; external: string[]; ourOutside: string[]; reasons: Record<string, string> } | null>(null);
   useEffect(() => {
     if (!accountId || !(to + cc + bcc).trim()) return setRoute(null);
     let gone = false;
     const t = setTimeout(() => {
-      mailFetch<{ internal: string[]; external: string[]; ourDomains: string[]; enabled: boolean }>(token, '/route-preview', { method: 'POST', body: { accountId, to, cc, bcc } })
+      mailFetch<{ internal: string[]; external: string[]; ourDomains: string[]; enabled: boolean; reasons?: Record<string, string> }>(token, '/route-preview', { method: 'POST', body: { accountId, to, cc, bcc } })
         .then((r) => {
           if (gone) return;
           const ours = new Set(r.ourDomains.map((d) => d.toLowerCase()));
-          setRoute({ internal: r.internal, external: r.external, ourOutside: r.enabled ? r.external.filter((x) => ours.has(x.split('@')[1] || '')) : [] });
+          // Ours that still go through the server — each with its reason.
+          const reasons = r.reasons || {};
+          setRoute({ internal: r.internal, external: r.external, ourOutside: r.external.filter((x) => ours.has(x.split('@')[1] || '') || (reasons[x] && reasons[x] !== 'outside address')), reasons });
         })
         .catch(() => !gone && setRoute(null));
     }, 500);
@@ -599,9 +601,13 @@ export const MailCompose: React.FC<{
           {route.external.length > 0 && (
             <span>
               {route.internal.length ? `${route.external.length} through the mail server` : 'Through the mail server'}
-              {route.ourOutside.length > 0 && ` (${route.ourOutside.join(', ')} ${route.ourOutside.length > 1 ? "aren't" : "isn't"} on Credence Mail)`}
             </span>
           )}
+          {route.ourOutside.map((x) => (
+            <span key={x} className="basis-full text-amber-700">
+              {x}: through the mail server — {route.reasons[x] || 'not on Credence Mail'}
+            </span>
+          ))}
         </div>
       )}
       <div className={fieldRow}>

@@ -1041,10 +1041,10 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     if (missing.length && opts.create) {
       const marks = missing.map(() => "?").join(",");
       const people: any[] = [
-        ...((await queryDB(`/*unscoped*/ SELECT id AS user_id, name, LOWER(email) AS email, role, can_use_mail, is_onboarding, is_blocked FROM users WHERE LOWER(email) IN (${marks})`, missing).catch(() => [])) || []),
+        ...((await queryDB(`/*unscoped*/ SELECT id AS user_id, name, LOWER(TRIM(email)) AS email, role, can_use_mail, is_onboarding, is_blocked FROM users WHERE LOWER(TRIM(email)) IN (${marks})`, missing).catch(() => [])) || []),
         ...((await queryDB(
-          `/*unscoped*/ SELECT u.id AS user_id, COALESCE(e.name, u.name) AS name, LOWER(e.email) AS email, u.role, u.can_use_mail, u.is_onboarding, u.is_blocked
-           FROM all_employees e JOIN users u ON u.id = e.user_id WHERE e.user_id IS NOT NULL AND LOWER(e.email) IN (${marks})`,
+          `/*unscoped*/ SELECT u.id AS user_id, COALESCE(e.name, u.name) AS name, LOWER(TRIM(e.email)) AS email, u.role, u.can_use_mail, u.is_onboarding, u.is_blocked
+           FROM all_employees e JOIN users u ON u.id = e.user_id WHERE e.user_id IS NOT NULL AND LOWER(TRIM(e.email)) IN (${marks})`,
           missing
         ).catch(() => [])) || [])
       ];
@@ -1059,10 +1059,10 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
       // A look only (the Compose preview): who would get it inside.
       const marks = missing.map(() => "?").join(",");
       const people: any[] = [
-        ...((await queryDB(`/*unscoped*/ SELECT id AS user_id, LOWER(email) AS email, role, can_use_mail, is_onboarding, is_blocked FROM users WHERE LOWER(email) IN (${marks})`, missing).catch(() => [])) || []),
+        ...((await queryDB(`/*unscoped*/ SELECT id AS user_id, LOWER(TRIM(email)) AS email, role, can_use_mail, is_onboarding, is_blocked FROM users WHERE LOWER(TRIM(email)) IN (${marks})`, missing).catch(() => [])) || []),
         ...((await queryDB(
-          `/*unscoped*/ SELECT u.id AS user_id, LOWER(e.email) AS email, u.role, u.can_use_mail, u.is_onboarding, u.is_blocked
-           FROM all_employees e JOIN users u ON u.id = e.user_id WHERE e.user_id IS NOT NULL AND LOWER(e.email) IN (${marks})`,
+          `/*unscoped*/ SELECT u.id AS user_id, LOWER(TRIM(e.email)) AS email, u.role, u.can_use_mail, u.is_onboarding, u.is_blocked
+           FROM all_employees e JOIN users u ON u.id = e.user_id WHERE e.user_id IS NOT NULL AND LOWER(TRIM(e.email)) IN (${marks})`,
           missing
         ).catch(() => [])) || [])
       ];
@@ -1406,6 +1406,46 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     })
   );
 
+  // Why an address gets the mail through the mail server and not inside.
+  async function whyOutside(a: any, email: string): Promise<string> {
+    const sys = await systemSettings();
+    if (!sys.internalDelivery) return "internal delivery is turned off (Mail Administration)";
+    if (!sys.domains.includes(domainOf(a.email))) return `it's sent from ${a.email}, which isn't one of our domains`;
+    if (!sys.domains.includes(domainOf(email))) return "outside address";
+    const people: any[] = [
+      ...((await queryDB(
+        `/*unscoped*/ SELECT u.name, u.role, u.can_use_mail, u.is_onboarding, u.is_blocked FROM mail_accounts m JOIN users u ON u.id = m.user_id WHERE m.email = ?`,
+        [email]
+      ).catch(() => [])) || []),
+      ...((await queryDB(`/*unscoped*/ SELECT name, role, can_use_mail, is_onboarding, is_blocked FROM users WHERE LOWER(TRIM(email)) = ?`, [email]).catch(() => [])) || []),
+      ...((await queryDB(
+        `/*unscoped*/ SELECT u.name, u.role, u.can_use_mail, u.is_onboarding, u.is_blocked FROM all_employees e JOIN users u ON u.id = e.user_id WHERE LOWER(TRIM(e.email)) = ?`,
+        [email]
+      ).catch(() => [])) || [])
+    ];
+    if (!people.length) return "no CredenceHR account has this address (not a login email, an Employee's email, or a connected mailbox)";
+    const p = people[0];
+    if (Number(p.is_blocked)) return `${p.name}'s CredenceHR account is blocked`;
+    if (Number(p.is_onboarding)) return `${p.name} is still onboarding`;
+    if (p.role !== "superadmin" && !Number(p.can_use_mail)) return `Credence Mail is off for ${p.name} (Admin Panel → Users → Module Access)`;
+    return "not on Credence Mail";
+  }
+
+  // Admin: would mail from one address to another stay inside, and if not, why.
+  app.get(
+    "/api/mail/admin/check",
+    authenticateToken,
+    requireModuleLayer("mail_admin", "read"),
+    handler(async (req, res) => {
+      if (!isMySQL()) throw bad("Credence Mail needs the MySQL database.", 503);
+      const from = str(req.query.from).toLowerCase();
+      const to = str(req.query.to).toLowerCase();
+      if (!isEmail(from) || !isEmail(to)) throw bad("Enter both addresses.");
+      const inside = await internalTargets({ email: from }, [to], { create: false });
+      res.json({ inside: inside.has(to), reason: inside.has(to) ? "Delivered inside CredenceHR." : await whyOutside({ email: from }, to) });
+    })
+  );
+
   // Compose: which of these recipients would get the mail inside CredenceHR
   // and which through the mail server (nothing is created or sent).
   app.post(
@@ -1415,9 +1455,12 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
       const a = await accountOf(uid(req), req.body?.accountId);
       const all = [...new Set([...splitAddresses(req.body?.to), ...splitAddresses(req.body?.cc), ...splitAddresses(req.body?.bcc)].map((x) => x.toLowerCase()))];
       const inside = await internalTargets(a, all, { create: false });
+      const external = all.filter((x) => !inside.has(x));
       res.json({
         internal: all.filter((x) => inside.has(x)),
-        external: all.filter((x) => !inside.has(x)),
+        external,
+        // Why each one goes through the mail server.
+        reasons: Object.fromEntries(await Promise.all(external.map(async (x) => [x, await whyOutside(a, x)]))),
         // So the screen can say why ours went out through the server.
         ourDomains: (await systemSettings()).domains,
         enabled: (await systemSettings()).internalDelivery

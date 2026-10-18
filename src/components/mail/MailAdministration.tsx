@@ -219,9 +219,51 @@ const InternalDelivery: React.FC<{ token: string }> = ({ token }) => {
       <div className="text-[11px] text-amber-800 bg-amber-50 rounded-xl px-3 py-2">
         Internal mail is only in Credence Mail: Outlook or a phone's mail app on the cPanel mailbox doesn't show it.
       </div>
+      <CheckAddress token={token} domain={s.domains[0] || 'credencehousinglimited.com'} />
       {error && <div className="text-xs px-3 py-2 rounded-xl bg-rose-50 text-rose-700">{error}</div>}
       {saved && <div className="text-xs text-emerald-700 flex items-center gap-1"><Check className="w-3.5 h-3.5" /> Saved.</div>}
       {!s.canEdit && <div className="text-[11px] text-slate-500 flex items-center gap-1"><Lock className="w-3.5 h-3.5" /> Changing this needs the "Internal delivery settings" permission.</div>}
+    </div>
+  );
+};
+
+// Would a mail from one address to another stay inside — and if not, why.
+const CheckAddress: React.FC<{ token: string; domain: string }> = ({ token, domain }) => {
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [res, setRes] = useState<{ inside: boolean; reason: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const check = async () => {
+    setBusy(true);
+    setErr('');
+    setRes(null);
+    try {
+      setRes(await adminFetch(token, `/check?from=${encodeURIComponent(from.trim())}&to=${encodeURIComponent(to.trim())}`));
+    } catch (e: any) {
+      setErr(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const input = 'flex-1 min-w-[12rem] text-sm px-3 py-2 rounded-xl bg-white border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-200';
+  return (
+    <div className="border-t border-slate-100 pt-4">
+      <div className="text-xs font-semibold text-slate-700">Check an address</div>
+      <p className="text-[11px] text-slate-500 mt-0.5">Does mail from one of our addresses to another stay inside CredenceHR — and if not, why.</p>
+      <div className="mt-2 flex flex-wrap gap-2">
+        <input value={from} onChange={(e) => setFrom(e.target.value)} placeholder={`From, e.g. you@${domain}`} className={input} />
+        <input value={to} onChange={(e) => setTo(e.target.value)} placeholder={`To, e.g. colleague@${domain}`} className={input} onKeyDown={(e) => e.key === 'Enter' && void check()} />
+        <button type="button" disabled={busy || !from.trim() || !to.trim()} onClick={() => void check()} className="px-3 py-2 rounded-xl text-xs font-semibold bg-slate-900 text-white disabled:opacity-40">
+          {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Check'}
+        </button>
+      </div>
+      {err && <div className="mt-2 text-xs text-rose-600">{err}</div>}
+      {res && (
+        <div className={`mt-2 text-xs px-3 py-2 rounded-xl ${res.inside ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'}`}>
+          {res.inside ? res.reason : `Goes through the mail server: ${res.reason}.`}
+        </div>
+      )}
     </div>
   );
 };
