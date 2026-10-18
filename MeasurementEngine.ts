@@ -115,11 +115,30 @@ const freshReader = () => {
   libP = null;
 };
 
-const dwgEntities = async (file: Buffer): Promise<{ entities: any[]; insUnits: number }> => {
+// A block: its base point and the entities it is drawn with.
+type BlockDef = { base: Pt; entities: any[] };
+type Read = { entities: any[]; insUnits: number; blocks: Map<string, BlockDef>; warning?: number; insertRadians: boolean };
+
+const dwgEntities = async (file: Buffer): Promise<Read> => {
   const { instance, Dwg_File_Type } = await lib();
   if (++libUses >= 20) freshReader();
   const ab = file.buffer.slice(file.byteOffset, file.byteOffset + file.byteLength);
-  const dwg = instance.dwg_read_data(ab, Dwg_File_Type.DWG);
+  // LibreDWG reports objects it skipped as "Open dwg file with error code: N"
+  // on the console (4 = an object type it doesn't know, 64 = a value out of
+  // range, 68 = both…). The drawing is still read; the code goes on the
+  // sheet's notes instead of the server console.
+  let warning: number | undefined;
+  const warn = console.warn;
+  console.warn = (...args: any[]) => {
+    if (String(args[0]).startsWith("Open dwg file with error code")) warning = Number(args[1]) || warning;
+    else warn(...args);
+  };
+  let dwg: any;
+  try {
+    dwg = instance.dwg_read_data(ab, Dwg_File_Type.DWG);
+  } finally {
+    console.warn = warn;
+  }
   if (!dwg) throw new Error("The drawing could not be read");
   const db: any = instance.convert(dwg);
   try {
@@ -127,7 +146,12 @@ const dwgEntities = async (file: Buffer): Promise<{ entities: any[]; insUnits: n
   } catch {
     // freed with the module
   }
-  return { entities: db?.entities || [], insUnits: num(db?.header?.INSUNITS, 0) };
+  const blocks = new Map<string, BlockDef>();
+  for (const b of db?.tables?.BLOCK_RECORD?.entries || []) {
+    if (!b?.name || /^\*(model|paper)_space/i.test(String(b.name))) continue;
+    blocks.set(String(b.name), { base: pt(b.basePoint), entities: b.entities || [] });
+  }
+  return { entities: db?.entities || [], insUnits: num(db?.header?.INSUNITS, 0), blocks, warning, insertRadians: true };
 };
 
 // DXF: dxf-parser's entities in the shape LibreDWG gives them, so one loop
@@ -147,7 +171,22 @@ class LeaderHandler {
     return entity;
   }
 }
-const dxfEntities = async (file: Buffer): Promise<{ entities: any[]; insUnits: number }> => {
+const dxfShape = (e: any) => {
+  switch (e.type) {
+    case "LINE":
+      return { type: "LINE", layer: e.layer, startPoint: e.vertices?.[0], endPoint: e.vertices?.[1] };
+    case "LWPOLYLINE":
+    case "POLYLINE":
+      return { type: e.type, layer: e.layer, vertices: e.vertices || [], flag: e.shape ? 1 : 0 };
+    case "MTEXT":
+      return { type: "MTEXT", layer: e.layer, text: e.text, insertionPoint: e.position, height: e.height, rotation: e.rotation };
+    case "INSERT":
+      return { ...e, insertionPoint: e.position };
+    default:
+      return e;
+  }
+};
+const dxfEntities = async (file: Buffer): Promise<Read> => {
   let DxfParser: any;
   try {
     const m: any = await import("dxf-parser");
@@ -163,21 +202,112 @@ const dxfEntities = async (file: Buffer): Promise<{ entities: any[]; insUnits: n
   const text = file.toString("utf8").includes("\uFFFD") ? file.toString("latin1") : file.toString("utf8");
   const d: any = parser.parseSync(text);
   if (!d) throw new Error("The drawing could not be read");
-  const entities = (d.entities || []).map((e: any) => {
-    switch (e.type) {
-      case "LINE":
-        return { type: "LINE", layer: e.layer, startPoint: e.vertices?.[0], endPoint: e.vertices?.[1] };
-      case "LWPOLYLINE":
-      case "POLYLINE":
-        return { type: e.type, layer: e.layer, vertices: e.vertices || [], flag: e.shape ? 1 : 0 };
-      case "MTEXT":
-        return { type: "MTEXT", layer: e.layer, text: e.text, insertionPoint: e.position, height: e.height, rotation: e.rotation };
-      default:
-        return e;
-    }
-  });
-  return { entities, insUnits: num(d.header?.$INSUNITS, 0) };
+  const entities = (d.entities || []).map(dxfShape);
+  const blocks = new Map<string, BlockDef>();
+  for (const [name, b] of Object.entries<any>(d.blocks || {})) {
+    if (/^\*(model|paper)_space/i.test(name)) continue;
+    blocks.set(name, { base: pt(b?.position), entities: (b?.entities || []).map(dxfShape) });
+  }
+  // DXF gives an INSERT's rotation in degrees, LibreDWG in radians.
+  return { entities, insUnits: num(d.header?.$INSUNITS, 0), blocks, insertRadians: false };
 };
+
+// Blocks opened up: every INSERT becomes the block's own lines, polylines,
+// texts, leaders, circles and arcs, moved, scaled and turned to where the
+// block is placed (and repeated for an array insert), nested blocks too.
+// An entity on layer "0" inside a block takes the INSERT's layer, as in
+// AutoCAD.
+const MAX_DEPTH = 6;
+const MAX_EXPLODED = 400_000;
+function explode(read: Read): { entities: any[]; inserts: number; opened: number; missing: number } {
+  const out: any[] = [];
+  let inserts = 0;
+  let opened = 0;
+  let missing = 0;
+  type Xf = (p: any) => Pt;
+  const walk = (list: any[], xf: Xf | null, scale: number, rot: number, layer0: string | null, depth: number) => {
+    for (const e of list) {
+      if (out.length >= MAX_EXPLODED) return;
+      const layer = layer0 && (e.layer == null || String(e.layer) === "0") ? layer0 : e.layer;
+      if (e.type === "INSERT") {
+        if (depth === 0) inserts++;
+        const b = read.blocks.get(String(e.name));
+        if (!b || depth >= MAX_DEPTH) {
+          if (!b) missing++;
+          continue;
+        }
+        if (depth === 0) opened++;
+        const sx = num(e.xScale, 1) || 1;
+        const sy = num(e.yScale, 1) || 1;
+        const r0 = num(e.rotation);
+        const r = read.insertRadians ? r0 : (r0 * Math.PI) / 180;
+        const cols = Math.max(1, Math.min(100, num(e.columnCount, 1) || 1));
+        const rows = Math.max(1, Math.min(100, num(e.rowCount, 1) || 1));
+        const ip = pt(e.insertionPoint ?? e.position);
+        for (let ci = 0; ci < cols; ci++) {
+          for (let ri = 0; ri < rows; ri++) {
+            // Array inserts step along the block's own (turned) axes.
+            const ox = ci * num(e.columnSpacing);
+            const oy = ri * num(e.rowSpacing);
+            const local: Xf = (p) => {
+              const x = (num(p?.x) - b.base.x) * sx + ox;
+              const y = (num(p?.y) - b.base.y) * sy + oy;
+              return { x: ip.x + x * Math.cos(r) - y * Math.sin(r), y: ip.y + x * Math.sin(r) + y * Math.cos(r) };
+            };
+            const chain: Xf = xf ? (p) => xf(local(p)) : local;
+            walk(b.entities, chain, scale * Math.abs(sx), rot + r, String(layer ?? "0"), depth + 1);
+          }
+        }
+        continue;
+      }
+      if (!xf) {
+        out.push(e);
+        continue;
+      }
+      const T = (p: any) => (p ? xf(p) : p);
+      switch (e.type) {
+        case "LINE":
+          out.push({ ...e, layer, startPoint: T(e.startPoint), endPoint: T(e.endPoint) });
+          break;
+        case "LWPOLYLINE":
+        case "POLYLINE":
+        case "LEADER":
+          out.push({ ...e, layer, vertices: (e.vertices || []).map(T) });
+          break;
+        case "TEXT":
+        case "MTEXT":
+          out.push({
+            ...e,
+            layer,
+            startPoint: T(e.startPoint),
+            insertionPoint: T(e.insertionPoint),
+            textHeight: e.textHeight != null ? num(e.textHeight) * scale : e.textHeight,
+            height: e.height != null ? num(e.height) * scale : e.height
+          });
+          break;
+        case "CIRCLE":
+          out.push({ ...e, layer, center: T(e.center), radius: num(e.radius) * scale });
+          break;
+        case "ARC": {
+          let a0 = num(e.startAngle);
+          let a1 = num(e.endAngle);
+          if (Math.abs(a0) > 6.4 || Math.abs(a1) > 6.4) {
+            a0 = (a0 * Math.PI) / 180;
+            a1 = (a1 * Math.PI) / 180;
+          }
+          // Kept within 0..2π, so it's never mistaken for degrees below.
+          const wrap = (a: number) => ((a % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+          out.push({ ...e, layer, center: T(e.center), radius: num(e.radius) * scale, startAngle: wrap(a0 + rot), endAngle: wrap(a1 + rot) });
+          break;
+        }
+        default:
+          break;
+      }
+    }
+  };
+  walk(read.entities, null, 1, 0, null, 0);
+  return { entities: out, inserts, opened, missing };
+}
 
 const num = (v: any, d = 0) => (typeof v === "number" && Number.isFinite(v) ? v : typeof v === "bigint" ? Number(v) : d);
 const pt = (p: any): Pt => ({ x: num(p?.x), y: num(p?.y) });
@@ -194,7 +324,7 @@ export const cleanText = (s: any) =>
     .trim();
 
 export async function readDrawing(file: Buffer, kind: "dwg" | "dxf" = "dwg"): Promise<RawDrawing> {
-  let read: { entities: any[]; insUnits: number };
+  let read: Read;
   if (kind === "dxf") read = await dxfEntities(file);
   else {
     try {
@@ -217,7 +347,9 @@ export async function readDrawing(file: Buffer, kind: "dwg" | "dxf" = "dwg"): Pr
       }
     }
   }
-  const { entities, insUnits } = read;
+  const { insUnits } = read;
+  const exploded = explode(read);
+  const entities = exploded.entities;
   const notes: string[] = [];
   let unit = UNITS[insUnits];
   if (!unit) {
@@ -230,7 +362,6 @@ export async function readDrawing(file: Buffer, kind: "dwg" | "dxf" = "dwg"): Pr
     if (!stats.has(l)) stats.set(l, { name: l, lines: 0, polys: 0, texts: 0, leaders: 0 });
     return stats.get(l)!;
   };
-  let blocks = 0;
   for (const e of entities) {
     const layer = String(e.layer ?? "0");
     switch (e.type) {
@@ -283,14 +414,13 @@ export async function readDrawing(file: Buffer, kind: "dwg" | "dxf" = "dwg"): Pr
         }
         break;
       }
-      case "INSERT":
-        blocks++;
-        break;
       default:
         break;
     }
   }
-  if (blocks) notes.push(`${blocks} block insert${blocks === 1 ? "" : "s"} in the drawing were not opened — beams or columns drawn inside blocks are not measured.`);
+  if (exploded.opened) notes.push(`${exploded.opened} block${exploded.opened === 1 ? "" : "s"} in the drawing ${exploded.opened === 1 ? "was" : "were"} opened up and measured with the rest.`);
+  if (exploded.missing) notes.push(`${exploded.missing} block insert${exploded.missing === 1 ? "" : "s"} point${exploded.missing === 1 ? "s" : ""} at a block that isn't in the file (an external reference?) — not measured.`);
+  if (read.warning) notes.push(`The drawing reader skipped some objects it doesn't know (LibreDWG code ${read.warning}). Lines, polylines, texts and leaders were read; check the sheet against the drawing.`);
   raw.layers = [...stats.values()].sort((a, b) => b.lines + b.polys - (a.lines + a.polys));
   return raw;
 }
