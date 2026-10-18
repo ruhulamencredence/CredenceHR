@@ -67,7 +67,15 @@ const AttachmentChip: React.FC<{ token: string; messageId: string; a: MailAttach
   );
 };
 
-const OneMail: React.FC<{ token: string; m: MailMessage; open: boolean; onToggle: () => void; isLast: boolean }> = ({ token, m, open, onToggle, isLast }) => {
+const OneMail: React.FC<{
+  token: string;
+  m: MailMessage;
+  open: boolean;
+  onToggle: () => void;
+  isLast: boolean;
+  showPictures?: boolean;
+  onTrustSender?: (email: string) => void;
+}> = ({ token, m, open, onToggle, isLast, showPictures, onTrustSender }) => {
   const [details, setDetails] = useState(false);
   return (
     <div className={`rounded-2xl bg-white border border-slate-200/80 ${open ? '' : 'hover:bg-slate-50'}`}>
@@ -114,7 +122,7 @@ const OneMail: React.FC<{ token: string; m: MailMessage; open: boolean; onToggle
               <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" /> {m.sendError}
             </div>
           )}
-          <MailBody html={m.body || ''} />
+          <MailBody html={m.body || ''} autoShowImages={showPictures} sender={m.from.email} onAlwaysShow={onTrustSender && m.from.email ? () => onTrustSender(m.from.email) : undefined} />
           {m.attachments.length > 0 && (
             <div className="mt-4 flex flex-wrap gap-2">
               {m.attachments.map((a) => (
@@ -155,7 +163,10 @@ export const MailReader: React.FC<{
   readOnly?: boolean;
   onBack?: () => void;
   onAction: (action: ReaderAction, m: MailMessage) => void;
-}> = ({ token, thread, folder, error, readOnly, onBack, onAction }) => {
+  // Pictures that show without asking (own mail, our domains, trusted senders).
+  picturesOk?: (m: MailMessage) => boolean;
+  onTrustSender?: (email: string) => void;
+}> = ({ token, thread, folder, error, readOnly, onBack, onAction, picturesOk, onTrustSender }) => {
   const [openIds, setOpenIds] = useState<Set<string>>(new Set());
   const [more, setMore] = useState(false);
   const last = thread && thread.length ? thread[thread.length - 1] : null;
@@ -268,6 +279,8 @@ export const MailReader: React.FC<{
               m={m}
               isLast={m.id === last.id}
               open={openIds.has(m.id)}
+              showPictures={picturesOk ? picturesOk(m) : false}
+              onTrustSender={readOnly ? undefined : onTrustSender}
               onToggle={() =>
                 setOpenIds((prev) => {
                   const next = new Set(prev);

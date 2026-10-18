@@ -296,6 +296,8 @@ export async function ensureMailSchema(dbPool: any): Promise<void> {
   await run("mail_files.blob_id", "ALTER TABLE mail_files ADD COLUMN blob_id BIGINT NULL", ["ER_DUP_FIELDNAME"]);
   await run("mail_files.blob_id index", "ALTER TABLE mail_files ADD KEY idx_mail_files_blob (blob_id)", ["ER_DUP_KEYNAME"]);
   // 1 = this copy came / went inside CredenceHR, not through the mail server.
+  // Senders whose pictures always show (no "Show pictures" each time).
+  await run("mail_settings.picture_senders_json", "ALTER TABLE mail_settings ADD COLUMN picture_senders_json TEXT NULL", ["ER_DUP_FIELDNAME"]);
   await run("mail_messages.via_internal", "ALTER TABLE mail_messages ADD COLUMN via_internal TINYINT(1) NOT NULL DEFAULT 0", ["ER_DUP_FIELDNAME"]);
   // References chain, so a reply to a reply stays in the same conversation.
   await run("mail_messages.refs", "ALTER TABLE mail_messages ADD COLUMN refs TEXT NULL AFTER in_reply_to", ["ER_DUP_FIELDNAME"]);
@@ -539,6 +541,8 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     smtpSecure: !!Number(a.smtp_secure),
     isDefault: !!Number(a.is_default),
     isConnected: !a.last_error,
+    // Only inside CredenceHR until its owner connects it with the password.
+    internalOnly: a.provider === "internal",
     lastSyncAt: fromDb(a.last_sync_at),
     lastError: a.last_error || null
   });
@@ -579,7 +583,12 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
       return c;
     }
   }
+  // An "internal" mailbox (made for a colleague who got mail inside
+  // CredenceHR before connecting their own) has no mail server behind it.
+  const INTERNAL_ONLY = "This mailbox is only inside CredenceHR. Connect it with its mail password (Mailboxes → Add) to read and send outside mail too.";
+  const isInternalBox = (a: any) => a?.provider === "internal";
   async function withImap<T>(a: any, fn: (c: ImapFlow) => Promise<T>): Promise<T> {
+    if (isInternalBox(a)) throw bad(INTERNAL_ONLY, 409);
     await acquireImap();
     let c: ImapFlow | null = null;
     try {
@@ -603,6 +612,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     } as any);
   }
   async function sendRaw(a: any, envelope: { from: string; to: string[] }, raw: Buffer) {
+    if (isInternalBox(a)) throw bad(`Only colleagues on Credence Mail can get mail from here (${envelope.to.join(", ")} can't). ${INTERNAL_ONLY.replace(/\.$/, "")}`, 409);
     const pass = decryptSecret(a.password_enc);
     try {
       await smtpTransport(a, pass, !!Number(a.tls_insecure)).sendMail({ envelope, raw });
@@ -654,6 +664,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
       signatures: parseJson<any[]>(r.signatures_json, []),
       vacationResponder: parseJson<any>(r.vacation_json, { enabled: false, subject: "", message: "" }),
       blockedSenders: parseJson<string[]>(r.blocked_json, []),
+      pictureSenders: parseJson<string[]>(r.picture_senders_json, []),
       layout: parseJson<any>(r.layout_json, { density: "comfortable", previewPane: "right", theme: "light" }),
       language: r.language || "en",
       timezone: r.timezone || "Asia/Dhaka"
@@ -843,6 +854,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
   // Sync: new mail by UID, folder by folder
   // -------------------------------------------------------------------------
   async function syncAccount(a: any, roles: string[] = SYNC_ROLES): Promise<{ inbox: number; sent: number; junk: number; fresh: any[] }> {
+    if (isInternalBox(a)) return { inbox: 0, sent: 0, junk: 0, fresh: [] };
     return withAccountLock(Number(a.id), () =>
       withImap(a, async (c) => {
         const out = { inbox: 0, sent: 0, junk: 0, fresh: [] as any[] };
@@ -1000,7 +1012,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
 
   // Which recipients get the mail inside CredenceHR: address -> the
   // connected mailboxes with that address (usually one).
-  async function internalTargets(a: any, recipients: string[]): Promise<Map<string, any[]>> {
+  async function internalTargets(a: any, recipients: string[], opts: { create?: boolean } = { create: true }): Promise<Map<string, any[]>> {
     const out = new Map<string, any[]>();
     const sys = await systemSettings();
     if (!sys.internalDelivery || !sys.domains.includes(domainOf(a.email))) return out;
@@ -1014,13 +1026,61 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
          WHERE m.email IN (${wanted.map(() => "?").join(",")})`,
         wanted
       )) || [];
+    const on = (r: any) => !Number(r.is_blocked) && (r.role === "superadmin" || (!!Number(r.can_use_mail) && !Number(r.is_onboarding)));
     for (const r of rows) {
-      const on = !Number(r.is_blocked) && (r.role === "superadmin" || (!!Number(r.can_use_mail) && !Number(r.is_onboarding)));
-      if (!on) continue;
+      if (!on(r)) continue;
       const k = String(r.email).toLowerCase();
       out.set(k, [...(out.get(k) || []), r]);
     }
+    // A colleague who hasn't connected that mailbox in Credence Mail yet, but
+    // whose CredenceHR account has that address (login email, or the
+    // Employee's official email) and Credence Mail on: the mail waits for
+    // them in an inside-only mailbox, made now. When they connect the real
+    // mailbox later it becomes that one, mail and all.
+    const missing = wanted.filter((x) => !out.has(x) && !rows.some((r) => String(r.email).toLowerCase() === x));
+    if (missing.length && opts.create) {
+      const marks = missing.map(() => "?").join(",");
+      const people: any[] = [
+        ...((await queryDB(`/*unscoped*/ SELECT id AS user_id, name, LOWER(email) AS email, role, can_use_mail, is_onboarding, is_blocked FROM users WHERE LOWER(email) IN (${marks})`, missing).catch(() => [])) || []),
+        ...((await queryDB(
+          `/*unscoped*/ SELECT u.id AS user_id, COALESCE(e.name, u.name) AS name, LOWER(e.email) AS email, u.role, u.can_use_mail, u.is_onboarding, u.is_blocked
+           FROM all_employees e JOIN users u ON u.id = e.user_id WHERE e.user_id IS NOT NULL AND LOWER(e.email) IN (${marks})`,
+          missing
+        ).catch(() => [])) || [])
+      ];
+      for (const email of missing) {
+        const owners = [...new Map(people.filter((p) => p.email === email && on(p)).map((p) => [Number(p.user_id), p])).values()];
+        for (const p of owners) {
+          const box = await ensureInternalBox(Number(p.user_id), email, p.name);
+          if (box) out.set(email, [...(out.get(email) || []), box]);
+        }
+      }
+    } else if (missing.length) {
+      // A look only (the Compose preview): who would get it inside.
+      const marks = missing.map(() => "?").join(",");
+      const people: any[] = [
+        ...((await queryDB(`/*unscoped*/ SELECT id AS user_id, LOWER(email) AS email, role, can_use_mail, is_onboarding, is_blocked FROM users WHERE LOWER(email) IN (${marks})`, missing).catch(() => [])) || []),
+        ...((await queryDB(
+          `/*unscoped*/ SELECT u.id AS user_id, LOWER(e.email) AS email, u.role, u.can_use_mail, u.is_onboarding, u.is_blocked
+           FROM all_employees e JOIN users u ON u.id = e.user_id WHERE e.user_id IS NOT NULL AND LOWER(e.email) IN (${marks})`,
+          missing
+        ).catch(() => [])) || [])
+      ];
+      for (const p of people) if (on(p)) out.set(p.email, [...(out.get(p.email) || []), { id: 0, user_id: p.user_id, email: p.email }]);
+    }
     return out;
+  }
+  async function ensureInternalBox(userId: number, email: string, name: string | null): Promise<any | null> {
+    const has: any[] = (await queryDB("SELECT COUNT(*) AS n FROM mail_accounts WHERE user_id = ?", [userId])) || [];
+    const r: any = await queryDB(
+      `INSERT INTO mail_accounts (user_id, email, display_name, provider, imap_host, imap_port, imap_secure, smtp_host, smtp_port, smtp_secure, username, password_enc, tls_insecure, is_default)
+       VALUES (?, ?, ?, 'internal', '', 0, 0, '', 0, 0, ?, '', 0, ?)
+       ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id)`,
+      [userId, email, name || email.split("@")[0], email, Number(has[0]?.n || 0) ? 0 : 1]
+    );
+    const id = Number(r?.insertId);
+    if (!id) return null;
+    return { id, user_id: userId, email };
   }
 
   // Attachments of internal mail are kept once (mail_blobs), whichever and
@@ -1241,6 +1301,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
       res.json({
         enabled,
         serverReady: !!mailKey(),
+        ourDomains: enabled ? (await systemSettings()).domains : [],
         accounts: enabled ? (await accountsOf(uid(req))).map(publicAccount) : []
       });
     })
@@ -1302,8 +1363,9 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
       const row = (await adminMailboxes()).find((r) => Number(r.id) === id);
       if (!row) throw bad("Mailbox not found.", 404);
       if (row.user_role === "superadmin" && req.user.role !== "superadmin") throw bad("Only the Superadmin can see this mailbox's password.", 403);
-      const full: any = ((await queryDB("SELECT password_enc FROM mail_accounts WHERE id = ?", [id])) || [])[0];
+      const full: any = ((await queryDB("SELECT password_enc, provider FROM mail_accounts WHERE id = ?", [id])) || [])[0];
       if (!full) throw bad("Mailbox not found.", 404);
+      if (isInternalBox(full)) throw bad("This mailbox is only inside CredenceHR — it has no saved password.", 409);
       const password = decryptSecret(full.password_enc);
       await queryDB("INSERT INTO mail_admin_log (actor_user_id, target_user_id, account_id, action, ip, created_at) VALUES (?, ?, ?, 'password', ?, UTC_TIMESTAMP())", [
         Number(req.user.id),
@@ -1341,6 +1403,25 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
           mailbox: r.mailbox || null
         }))
       );
+    })
+  );
+
+  // Compose: which of these recipients would get the mail inside CredenceHR
+  // and which through the mail server (nothing is created or sent).
+  app.post(
+    "/api/mail/route-preview",
+    ...gate,
+    handler(async (req, res) => {
+      const a = await accountOf(uid(req), req.body?.accountId);
+      const all = [...new Set([...splitAddresses(req.body?.to), ...splitAddresses(req.body?.cc), ...splitAddresses(req.body?.bcc)].map((x) => x.toLowerCase()))];
+      const inside = await internalTargets(a, all, { create: false });
+      res.json({
+        internal: all.filter((x) => inside.has(x)),
+        external: all.filter((x) => !inside.has(x)),
+        // So the screen can say why ours went out through the server.
+        ourDomains: (await systemSettings()).domains,
+        enabled: (await systemSettings()).internalDelivery
+      });
     })
   );
 
@@ -1588,6 +1669,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
       let added = 0;
       const errors: string[] = [];
       for (const a of list) {
+        if (isInternalBox(a)) continue;
         try {
           const work = withAccountLock(Number(a.id), () =>
             withImap(a, async (c) => {
@@ -2192,6 +2274,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
             ? { enabled: !!b.vacationResponder.enabled, subject: str(b.vacationResponder.subject, 500), message: String(b.vacationResponder.message || "").slice(0, 10_000), startDate: str(b.vacationResponder.startDate, 40) || undefined, endDate: str(b.vacationResponder.endDate, 40) || undefined }
             : cur.vacationResponder,
         blockedSenders: Array.isArray(b.blockedSenders) ? [...new Set(b.blockedSenders.map((x: any) => str(x, 255).toLowerCase()).filter(Boolean))].slice(0, 500) : cur.blockedSenders,
+        pictureSenders: Array.isArray(b.pictureSenders) ? [...new Set(b.pictureSenders.map((x: any) => str(x, 255).toLowerCase()).filter(Boolean))].slice(0, 500) : cur.pictureSenders,
         layout:
           b.layout && typeof b.layout === "object" && !Array.isArray(b.layout)
             ? { density: b.layout.density === "compact" ? "compact" : "comfortable", previewPane: str(b.layout.previewPane, 20) || "right", theme: str(b.layout.theme, 20) || "light" }
@@ -2200,10 +2283,10 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
         timezone: str(b.timezone, 80) || cur.timezone
       };
       await queryDB(
-        `INSERT INTO mail_settings (user_id, signatures_json, vacation_json, blocked_json, layout_json, language, timezone) VALUES (?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO mail_settings (user_id, signatures_json, vacation_json, blocked_json, picture_senders_json, layout_json, language, timezone) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
          ON DUPLICATE KEY UPDATE signatures_json = VALUES(signatures_json), vacation_json = VALUES(vacation_json), blocked_json = VALUES(blocked_json),
-           layout_json = VALUES(layout_json), language = VALUES(language), timezone = VALUES(timezone)`,
-        [uid(req), JSON.stringify(next.signatures), JSON.stringify(next.vacationResponder), JSON.stringify(next.blockedSenders), JSON.stringify(next.layout), next.language, next.timezone]
+           picture_senders_json = VALUES(picture_senders_json), layout_json = VALUES(layout_json), language = VALUES(language), timezone = VALUES(timezone)`,
+        [uid(req), JSON.stringify(next.signatures), JSON.stringify(next.vacationResponder), JSON.stringify(next.blockedSenders), JSON.stringify(next.pictureSenders), JSON.stringify(next.layout), next.language, next.timezone]
       );
       res.json(next);
     })
@@ -2511,7 +2594,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
         ids
       ).catch(() => [])) || [];
     for (const a of accts) {
-      if (idle.has(Number(a.id))) continue;
+      if (idle.has(Number(a.id)) || isInternalBox(a)) continue;
       if (idle.size < MAX_IDLE) await startIdle(a);
       else {
         // Over the cap: a plain sync every few minutes instead.

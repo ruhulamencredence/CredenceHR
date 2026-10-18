@@ -23,6 +23,9 @@ export interface MailAccount {
   isConnected: boolean;
   lastSyncAt: string | null;
   lastError: string | null;
+  // Only inside CredenceHR (made when a colleague's mail arrived before this
+  // mailbox was connected) — connecting it with its password makes it whole.
+  internalOnly?: boolean;
 }
 
 export interface MailAttachment {
@@ -79,6 +82,9 @@ export interface MailStatus {
   enabled: boolean;
   serverReady: boolean;
   accounts: MailAccount[];
+  // Our own domains (Mail Administration -> Internal delivery): their
+  // pictures show without asking.
+  ourDomains?: string[];
 }
 
 export interface SignatureFields {
@@ -156,6 +162,8 @@ export interface MailSettings {
   signatures: MailSignature[];
   vacationResponder: { enabled: boolean; subject: string; message: string; startDate?: string; endDate?: string };
   blockedSenders: string[];
+  // Senders whose pictures always show.
+  pictureSenders?: string[];
   layout: any;
   language: string;
   timezone: string;
