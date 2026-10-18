@@ -85,8 +85,10 @@ export interface MailStatus {
   // Our own domains (Mail Administration -> Internal delivery): their
   // pictures show without asking.
   ourDomains?: string[];
-  // Mailboxes -> Email Directory tab (users.can_view_mail_directory).
+  // Email Directory search (users.can_view_mail_directory).
   canDirectory?: boolean;
+  // Tools -> My groups (users.can_use_mail_groups).
+  canMyGroups?: boolean;
 }
 
 export interface SignatureFields {
@@ -258,6 +260,60 @@ export function mailPhotoUrl(email: string): Promise<string | null> {
   }
   return p;
 }
+
+// Everyone in the Employee Directory with an email (GET /api/mail/directory),
+// fetched once per visit and shared by every To / Cc / Bcc field.
+export interface DirectoryPerson {
+  name: string;
+  email: string;
+  employeeId?: string;
+  designation: string;
+  department: string;
+}
+let directoryCache: Promise<DirectoryPerson[]> | null = null;
+export const loadDirectory = (token: string) => {
+  if (!directoryCache) {
+    directoryCache = mailFetch<DirectoryPerson[]>(token, '/directory').catch(() => {
+      directoryCache = null;
+      return [];
+    });
+  }
+  return directoryCache;
+};
+
+// Groups for the composer (GET /api/mail/groups): the central groups this
+// person may write to (one address reaches everyone in it) and their own
+// groups (a saved list of addresses, put in one by one).
+export interface CentralGroup {
+  email: string;
+  name: string;
+  description: string;
+  count: number;
+}
+export interface MyGroup {
+  id: number;
+  name: string;
+  members: string[];
+}
+export interface ComposeGroups {
+  central: CentralGroup[];
+  mine: MyGroup[];
+  canMine: boolean;
+}
+let groupsCache: Promise<ComposeGroups> | null = null;
+export const loadMailGroups = (token: string) => {
+  if (!groupsCache) {
+    groupsCache = mailFetch<ComposeGroups>(token, '/groups').catch(() => {
+      groupsCache = null;
+      return { central: [], mine: [], canMine: false };
+    });
+  }
+  return groupsCache;
+};
+// After My groups changes (or another mailbox is opened).
+export const forgetMailGroups = () => {
+  groupsCache = null;
+};
 
 // Attachments are fetched with the token (they're not public links).
 export async function fetchAttachment(token: string, messageId: string, idx: number): Promise<Blob> {

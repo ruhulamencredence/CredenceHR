@@ -177,3 +177,28 @@
 - আসল `credencehousinglimited.com` mail server-এ login, পাঠানো আর পাওয়া।
 - cPanel-এর সংযোগের সীমায় আসল আচরণ।
 - ফোনে notification পৌঁছানো।
+
+## Groups
+
+Two kinds, both in `MailRoutes.ts` ("Groups") and `src/components/mail/MailGroups.tsx`.
+
+**Central groups** — Admin Panel → Mail Administration → Groups (`mail_groups` table).
+One address on one of our domains (e.g. `accounts-team@credencehousinglimited.com`)
+that reaches every member when written to from Credence Mail.
+
+- Members: addresses picked by hand, plus optionally every active employee or
+  everyone in some departments. The rules are read from the Employee Directory
+  at send time, so joiners and leavers need no editing.
+- Who may write: anyone on Credence Mail, only its members, or only listed people.
+  A refused sender gets a 403 before anything is saved; the compose preview says so too.
+- Delivery: `sendRouted` opens each group into its members; colleagues get it
+  inside CredenceHR, outside members through SMTP. The To / Cc lines keep the
+  group address, so Reply all goes back to the group. The group address itself
+  never goes to the mail server; mail from outside CredenceHR to it needs a cPanel
+  forwarder.
+- Permission: seeing groups = `mail_admin` "read"; adding / changing / removing =
+  the explicit-only `mail_groups` layer.
+
+**My groups** — Credence Mail → Tools → My groups (`mail_personal_groups` table).
+A person's own named list of addresses; picking it in To / Cc / Bcc adds every
+address. Self Service switch `users.can_use_mail_groups`, off by default.

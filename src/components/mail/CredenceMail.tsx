@@ -13,7 +13,7 @@ import { Capacitor } from '@capacitor/core';
 import {
   ArrowLeft, Mail, Inbox, Star, Send, FileText, Clock, Archive, ShieldAlert, Trash2, AlertCircle, Pencil, RefreshCw, Search, X, Menu, Paperclip,
   CheckSquare, Square, MailOpen, Plus, Loader2, Server, ChevronDown, Bookmark, LogOut, Check,
-  Users, ListChecks, Filter, BarChart3, Settings, Tag, Eye, Copy
+  Users, UsersRound, ListChecks, Filter, BarChart3, Settings, Tag, Eye, Copy
 } from 'lucide-react';
 import { ModulePath } from '../ModulePath';
 import { confirmDialog } from '../../lib/confirmDialog';
@@ -23,7 +23,7 @@ import { useKeyboardInset, scrollFocusedFieldIntoView } from '../../lib/useKeybo
 import type { User } from '../../types';
 import {
   MAIL_CATEGORIES, MAIL_FOLDERS, MailAccount, MailContact, MailCounts, MailFilter, MailList, MailMessage, MailSettings, MailStatus, MailTemplate, SYSTEM_LABELS, mailFetch,
-  setMailPhotoToken, setMailTimeZone, setMailViewAs, shortMailDate, fullMailDate
+  forgetMailGroups, setMailPhotoToken, setMailTimeZone, setMailViewAs, shortMailDate, fullMailDate
 } from '../../lib/mailApi';
 import { MailReader, ReaderAction, MailAvatar } from './MailReader';
 import { MailCompose, ComposeInit } from './MailCompose';
@@ -31,6 +31,7 @@ import { sanitizeMailHtml } from './MailBody';
 import { MailSettingsPopup } from './MailSettings';
 import { MailRulesPopup, MailTemplatesPopup, MailContactsPopup, MailPlannerPopup, FromMail } from './MailTools';
 import { MailAnalyticsPopup } from './MailAnalytics';
+import { MyGroupsPopup } from './MailGroups';
 
 type Tool =
   | { kind: 'settings'; tab?: string }
@@ -38,7 +39,8 @@ type Tool =
   | { kind: 'templates' }
   | { kind: 'contacts'; prefill?: Partial<MailContact> }
   | { kind: 'planner'; tab: 'tasks' | 'calendar'; fromMail?: FromMail }
-  | { kind: 'analytics' };
+  | { kind: 'analytics' }
+  | { kind: 'groups' };
 
 const FOLDER_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   Inbox, Starred: Star, Important: Bookmark, Sent: Send, Drafts: FileText, Scheduled: Clock, Archive, Spam: ShieldAlert, Trash: Trash2
@@ -600,6 +602,8 @@ export const CredenceMail: React.FC<{
   // Every call from here on carries whose mailbox it is (set before the first fetch).
   setMailViewAs(viewAs ? viewAs.userId : null);
   setMailPhotoToken(token);
+  // Groups belong to whoever's mailbox this is.
+  useEffect(() => forgetMailGroups(), [viewAs?.userId]);
   useEffect(() => () => setMailViewAs(null), []);
   const [status, setStatus] = useState<MailStatus | null>(null);
   const [statusError, setStatusError] = useState('');
@@ -1202,6 +1206,7 @@ export const CredenceMail: React.FC<{
       {(
         [
           ['Contacts', Users, () => openTool({ kind: 'contacts' })],
+          ...(status?.canMyGroups ? [['My groups', UsersRound, () => openTool({ kind: 'groups' })]] : []),
           ['Tasks & Calendar', ListChecks, () => openTool({ kind: 'planner', tab: 'tasks' })],
           ['Rules', Filter, () => openTool({ kind: 'rules' })],
           ['Templates', FileText, () => openTool({ kind: 'templates' })],
@@ -1528,6 +1533,7 @@ export const CredenceMail: React.FC<{
         />
       )}
       {tool?.kind === 'analytics' && <MailAnalyticsPopup token={token} onClose={() => setTool(null)} />}
+      {tool?.kind === 'groups' && <MyGroupsPopup token={token} onClose={() => setTool(null)} />}
 
       {toast && (
         <div className="fixed left-1/2 -translate-x-1/2 z-[95] px-4 w-full max-w-sm pointer-events-none" style={{ bottom: 'calc(6rem + env(safe-area-inset-bottom))' }}>

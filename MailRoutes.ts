@@ -305,6 +305,42 @@ export async function ensureMailSchema(dbPool: any): Promise<void> {
   await run("mail_messages.via_internal", "ALTER TABLE mail_messages ADD COLUMN via_internal TINYINT(1) NOT NULL DEFAULT 0", ["ER_DUP_FIELDNAME"]);
   // References chain, so a reply to a reply stays in the same conversation.
   await run("mail_messages.refs", "ALTER TABLE mail_messages ADD COLUMN refs TEXT NULL AFTER in_reply_to", ["ER_DUP_FIELDNAME"]);
+  // Groups (see "Groups" below). Central: one address on our domain that
+  // reaches every member, set up in Mail Administration. Personal: a named
+  // list of addresses in someone's own Credence Mail (users.can_use_mail_groups).
+  await run(
+    "mail_groups",
+    `CREATE TABLE IF NOT EXISTS mail_groups (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      email VARCHAR(255) NOT NULL,
+      name VARCHAR(255) NOT NULL,
+      description VARCHAR(1000) NULL,
+      members_json MEDIUMTEXT NULL,
+      all_employees TINYINT(1) NOT NULL DEFAULT 0,
+      departments_json TEXT NULL,
+      send_policy VARCHAR(16) NOT NULL DEFAULT 'members',
+      senders_json TEXT NULL,
+      is_active TINYINT(1) NOT NULL DEFAULT 1,
+      created_by INT NULL,
+      updated_by INT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_mail_group_email (email)
+    ) DEFAULT CHARSET=utf8mb4`
+  );
+  await run(
+    "mail_personal_groups",
+    `CREATE TABLE IF NOT EXISTS mail_personal_groups (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NOT NULL,
+      name VARCHAR(255) NOT NULL,
+      members_json MEDIUMTEXT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      KEY idx_mail_personal_groups_user (user_id)
+    ) DEFAULT CHARSET=utf8mb4`
+  );
+  await run("users.can_use_mail_groups", "ALTER TABLE users ADD COLUMN can_use_mail_groups TINYINT(1) NOT NULL DEFAULT 0", ["ER_DUP_FIELDNAME"]);
 }
 
 // ---------------------------------------------------------------------------
@@ -1216,11 +1252,90 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     return blobs;
   }
 
+  // -------------------------------------------------------------------------
+  // Groups
+  // -------------------------------------------------------------------------
+  // A central group is an address on one of our domains (e.g.
+  // accounts-team@credencehousinglimited.com) set up in Mail Administration.
+  // Mail sent to it from Credence Mail goes to every member — inside
+  // CredenceHR for colleagues, through the mail server for anyone outside.
+  // Members: addresses picked by hand, plus (optional) every active Employee
+  // or everyone in some departments, read from the Employee Directory each
+  // time, so joiners and leavers are in and out without anyone editing it.
+  // Who may write to it: anyone, only its members, or only the listed people.
+  // The group address itself never goes to the mail server; mail from
+  // outside CredenceHR to it isn't covered (that would be a cPanel forwarder).
+  const GROUP_POLICIES = ["anyone", "members", "listed"] as const;
+  const groupOut = (g: any) => ({
+    id: Number(g.id),
+    email: String(g.email),
+    name: String(g.name || ""),
+    description: g.description || "",
+    members: parseJson<string[]>(g.members_json, []),
+    allEmployees: !!Number(g.all_employees),
+    departments: parseJson<string[]>(g.departments_json, []),
+    sendPolicy: (GROUP_POLICIES as readonly string[]).includes(g.send_policy) ? g.send_policy : "members",
+    senders: parseJson<string[]>(g.senders_json, []),
+    active: !!Number(g.is_active)
+  });
+  async function groupsByEmail(emails: string[]): Promise<Map<string, ReturnType<typeof groupOut>>> {
+    const out = new Map<string, ReturnType<typeof groupOut>>();
+    const list = [...new Set(emails.map((x) => x.toLowerCase()))];
+    if (!list.length) return out;
+    const rows: any[] =
+      (await queryDB(`SELECT * FROM mail_groups WHERE is_active = 1 AND email IN (${list.map(() => "?").join(",")})`, list).catch(() => [])) || [];
+    for (const r of rows) out.set(String(r.email).toLowerCase(), groupOut(r));
+    return out;
+  }
+  // Everyone the group reaches now (lower-case addresses).
+  async function groupMembers(g: ReturnType<typeof groupOut>): Promise<string[]> {
+    const set = new Set(g.members.map((x) => x.toLowerCase()).filter(isEmail));
+    const rule = g.allEmployees ? "" : g.departments.length ? ` AND department IN (${g.departments.map(() => "?").join(",")})` : null;
+    if (rule !== null) {
+      const rows: any[] =
+        (await queryDB(
+          `/*unscoped*/ SELECT LOWER(TRIM(email)) AS email FROM all_employees WHERE is_active = 1 AND email IS NOT NULL AND email <> ''${rule}`,
+          g.allEmployees ? [] : g.departments
+        ).catch(() => [])) || [];
+      for (const r of rows) if (isEmail(r.email)) set.add(r.email);
+    }
+    set.delete(g.email.toLowerCase());
+    return [...set];
+  }
+  async function maySendToGroup(g: ReturnType<typeof groupOut>, sender: string, members: string[]): Promise<boolean> {
+    const s = sender.toLowerCase();
+    if (g.sendPolicy === "anyone") return true;
+    if (g.sendPolicy === "listed") return g.senders.map((x) => x.toLowerCase()).includes(s);
+    return members.includes(s);
+  }
+  // Splits recipients into plain addresses and groups, and opens each group
+  // into its members. A group the sender may not write to is "denied".
+  async function expandGroups(a: any, recipients: string[]) {
+    const all = [...new Set(recipients.map((x) => x.toLowerCase()))];
+    const groups = await groupsByEmail(all);
+    const sender = String(a.email || "").toLowerCase();
+    const rest = all.filter((x) => !groups.has(x));
+    const members = new Set<string>();
+    const info: { email: string; name: string; count: number; denied: boolean }[] = [];
+    for (const [email, g] of groups) {
+      const list = await groupMembers(g);
+      const ok = await maySendToGroup(g, sender, list);
+      info.push({ email, name: g.name, count: list.length, denied: !ok });
+      if (ok) for (const m of list) if (m !== sender) members.add(m);
+    }
+    return { rest, members: [...members], groups: info };
+  }
+
   // Sends one built message: inside CredenceHR to the internal recipients,
   // by SMTP to the rest. SMTP goes first — if it fails, nobody got it yet
   // and the mail can simply be sent again.
   async function sendRouted(a: any, recipients: string[], raw: Buffer, m: Outgoing, opts: { auto?: boolean } = {}) {
-    const all = [...new Set(recipients.map((x) => x.toLowerCase()))];
+    // Group addresses are opened into their members (the To / Cc lines still
+    // show the group, so a Reply all goes back to it).
+    const g = await expandGroups(a, recipients);
+    const denied = g.groups.filter((x) => x.denied);
+    if (denied.length) throw bad(`You can't write to ${denied.map((x) => `${x.name} (${x.email})`).join(", ")} — ask Mail Administration to let you`, 403);
+    const all = [...new Set([...g.rest, ...g.members])];
     const internal = await internalTargets(a, all);
     const external = all.filter((x) => !internal.has(x));
     if (external.length) await sendRaw(a, { from: a.email, to: external }, raw);
@@ -1346,6 +1461,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
         serverReady: !!mailKey(),
         ourDomains: enabled ? (await systemSettings()).domains : [],
         canDirectory: enabled && (await hasDirectory(req.user)),
+        canMyGroups: enabled && (await hasMyGroups(Number(req.user.id))),
         accounts: enabled ? (await accountsOf(uid(req))).map(publicAccount) : []
       });
     })
@@ -1490,11 +1606,15 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     ...gate,
     handler(async (req, res) => {
       const a = await accountOf(uid(req), req.body?.accountId);
-      const all = [...new Set([...splitAddresses(req.body?.to), ...splitAddresses(req.body?.cc), ...splitAddresses(req.body?.bcc)].map((x) => x.toLowerCase()))];
+      const written = [...new Set([...splitAddresses(req.body?.to), ...splitAddresses(req.body?.cc), ...splitAddresses(req.body?.bcc)].map((x) => x.toLowerCase()))];
+      const g = await expandGroups(a, written);
+      const all = [...new Set([...g.rest, ...g.members])];
       const inside = await internalTargets(a, all, { create: false });
       const external = all.filter((x) => !inside.has(x));
       res.json({
         internal: all.filter((x) => inside.has(x)),
+        // Groups written, how many each reaches, and any the sender can't use.
+        groups: g.groups,
         external,
         // Why each one goes through the mail server.
         reasons: Object.fromEntries(await Promise.all(external.map(async (x) => [x, await whyOutside(a, x)]))),
@@ -1544,6 +1664,229 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
       );
       systemCache = null;
       res.json(await publicSystem(req));
+    })
+  );
+
+
+  // ---- Groups: Mail Administration -> Groups ---------------------------------
+  // Seeing them: the module's "read"; adding / changing / removing: the
+  // explicit-only "mail_groups" layer.
+  async function groupDepartments(): Promise<string[]> {
+    const rows: any[] =
+      (await queryDB("/*unscoped*/ SELECT DISTINCT department FROM all_employees WHERE is_active = 1 AND department IS NOT NULL AND department <> '' ORDER BY department").catch(() => [])) || [];
+    return rows.map((r) => String(r.department));
+  }
+  app.get(
+    "/api/mail/admin/groups",
+    authenticateToken,
+    requireModuleLayer("mail_admin", "read"),
+    handler(async (req, res) => {
+      if (!isMySQL()) throw bad("Credence Mail needs the MySQL database.", 503);
+      noStore(res);
+      const rows: any[] = (await queryDB("SELECT * FROM mail_groups ORDER BY name ASC")) || [];
+      const items = [];
+      for (const r of rows) {
+        const g = groupOut(r);
+        items.push({ ...g, memberCount: (await groupMembers(g)).length });
+      }
+      res.json({
+        items,
+        canEdit: await hasModuleLayer(req.user, "mail_admin", "mail_groups"),
+        departments: await groupDepartments(),
+        domains: (await systemSettings()).domains
+      });
+    })
+  );
+  // Who a group reaches right now, with names from the Employee Directory.
+  app.get(
+    "/api/mail/admin/groups/:id/members",
+    authenticateToken,
+    requireModuleLayer("mail_admin", "read"),
+    handler(async (req, res) => {
+      const r: any = ((await queryDB("SELECT * FROM mail_groups WHERE id = ?", [Number(req.params.id)])) || [])[0];
+      if (!r) throw bad("Group not found.", 404);
+      const list = await groupMembers(groupOut(r));
+      const names = new Map<string, any>();
+      if (list.length) {
+        const rows: any[] =
+          (await queryDB(
+            `/*unscoped*/ SELECT LOWER(TRIM(email)) AS email, name, employee_id, designation, department FROM all_employees WHERE LOWER(TRIM(email)) IN (${list.map(() => "?").join(",")})`,
+            list
+          ).catch(() => [])) || [];
+        for (const x of rows) names.set(x.email, x);
+      }
+      noStore(res);
+      res.json(
+        list
+          .map((e) => {
+            const x = names.get(e);
+            return { email: e, name: x?.name || "", employeeId: x?.employee_id || "", designation: x?.designation || "", department: x?.department || "" };
+          })
+          .sort((p, q) => (p.name || p.email).localeCompare(q.name || q.email))
+      );
+    })
+  );
+  // Checks and cleans what the editor sent.
+  async function groupInput(b: any, id: number | null) {
+    const email = str(b.email).toLowerCase();
+    const name = str(b.name);
+    if (!isEmail(email)) throw bad("Enter the group's address, e.g. accounts-team@credencehousinglimited.com.");
+    if (!name) throw bad("Give the group a name.");
+    const domains = (await systemSettings()).domains;
+    if (!domains.includes(domainOf(email))) throw bad(`The group's address must be on one of our domains (${domains.join(", ")}).`);
+    const taken: any[] = (await queryDB("SELECT id FROM mail_groups WHERE email = ? AND id <> ?", [email, id || 0])) || [];
+    if (taken.length) throw bad("Another group already has this address.");
+    // A person's own address can't be a group, or their mail would vanish into it.
+    const person: any[] =
+      (await queryDB(
+        `/*unscoped*/ SELECT name FROM users WHERE LOWER(TRIM(email)) = ? UNION SELECT name FROM all_employees WHERE LOWER(TRIM(email)) = ? LIMIT 1`,
+        [email, email]
+      ).catch(() => [])) || [];
+    if (person.length) throw bad(`${email} is ${person[0].name}'s own address — pick another one for the group.`);
+    const list = (v: any) =>
+      [...new Set<string>((Array.isArray(v) ? v : String(v || "").split(/[\s,;]+/)).map((x: any) => String(x || "").trim().toLowerCase()).filter(Boolean))];
+    const members = list(b.members);
+    const senders = list(b.senders);
+    const wrong = [...members, ...senders].filter((x) => !isEmail(x));
+    if (wrong.length) throw bad(`Not an email address: ${wrong.slice(0, 5).join(", ")}`);
+    if (members.includes(email)) throw bad("A group can't be a member of itself.");
+    const departments = [...new Set<string>((Array.isArray(b.departments) ? b.departments : []).map((x: any) => String(x || "").trim()).filter(Boolean))];
+    const allEmployees = !!b.allEmployees;
+    if (!members.length && !departments.length && !allEmployees) throw bad("Add at least one member, a department, or every employee.");
+    const sendPolicy = (GROUP_POLICIES as readonly string[]).includes(b.sendPolicy) ? b.sendPolicy : "members";
+    if (sendPolicy === "listed" && !senders.length) throw bad("Add who may write to the group, or let everyone / its members.");
+    return {
+      email,
+      name,
+      description: str(b.description, 1000) || null,
+      members: JSON.stringify(members.slice(0, 5000)),
+      allEmployees: allEmployees ? 1 : 0,
+      departments: JSON.stringify(departments.slice(0, 100)),
+      sendPolicy,
+      senders: JSON.stringify(senders.slice(0, 500)),
+      active: b.active === false ? 0 : 1
+    };
+  }
+  app.post(
+    "/api/mail/admin/groups",
+    authenticateToken,
+    requireModuleLayer("mail_admin", "mail_groups"),
+    handler(async (req, res) => {
+      const v = await groupInput(req.body || {}, null);
+      const r: any = await queryDB(
+        `INSERT INTO mail_groups (email, name, description, members_json, all_employees, departments_json, send_policy, senders_json, is_active, created_by, updated_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [v.email, v.name, v.description, v.members, v.allEmployees, v.departments, v.sendPolicy, v.senders, v.active, Number(req.user.id), Number(req.user.id)]
+      );
+      const row: any = ((await queryDB("SELECT * FROM mail_groups WHERE id = ?", [Number(r.insertId)])) || [])[0];
+      res.status(201).json(groupOut(row));
+    })
+  );
+  app.put(
+    "/api/mail/admin/groups/:id",
+    authenticateToken,
+    requireModuleLayer("mail_admin", "mail_groups"),
+    handler(async (req, res) => {
+      const id = Number(req.params.id);
+      const had: any[] = (await queryDB("SELECT id FROM mail_groups WHERE id = ?", [id])) || [];
+      if (!had.length) throw bad("Group not found.", 404);
+      const v = await groupInput(req.body || {}, id);
+      await queryDB(
+        `UPDATE mail_groups SET email = ?, name = ?, description = ?, members_json = ?, all_employees = ?, departments_json = ?, send_policy = ?, senders_json = ?, is_active = ?, updated_by = ? WHERE id = ?`,
+        [v.email, v.name, v.description, v.members, v.allEmployees, v.departments, v.sendPolicy, v.senders, v.active, Number(req.user.id), id]
+      );
+      const row: any = ((await queryDB("SELECT * FROM mail_groups WHERE id = ?", [id])) || [])[0];
+      res.json(groupOut(row));
+    })
+  );
+  app.delete(
+    "/api/mail/admin/groups/:id",
+    authenticateToken,
+    requireModuleLayer("mail_admin", "mail_groups"),
+    handler(async (req, res) => {
+      await queryDB("DELETE FROM mail_groups WHERE id = ?", [Number(req.params.id)]);
+      res.json({ success: true });
+    })
+  );
+
+  // ---- Groups in the composer ----------------------------------------------
+  // The central groups this person may write to, and — with the Self Service
+  // switch — their own groups.
+  async function hasMyGroups(userId: number): Promise<boolean> {
+    const rows: any[] = (await queryDB("SELECT role, can_use_mail_groups FROM users WHERE id = ?", [userId]).catch(() => [])) || [];
+    return rows[0]?.role === "superadmin" || !!Number(rows[0]?.can_use_mail_groups);
+  }
+  const myGroupOut = (r: any) => ({ id: Number(r.id), name: String(r.name || ""), members: parseJson<string[]>(r.members_json, []) });
+  app.get(
+    "/api/mail/groups",
+    ...gate,
+    handler(async (req, res) => {
+      noStore(res);
+      const mine = await accountsOf(uid(req));
+      const senders = mine.map((x: any) => String(x.email).toLowerCase());
+      const rows: any[] = (await queryDB("SELECT * FROM mail_groups WHERE is_active = 1 ORDER BY name ASC").catch(() => [])) || [];
+      const central = [];
+      for (const r of rows) {
+        const g = groupOut(r);
+        const members = await groupMembers(g);
+        let ok = false;
+        for (const s of senders) if (await maySendToGroup(g, s, members)) ok = true;
+        if (ok) central.push({ email: g.email, name: g.name, description: g.description, count: members.length });
+      }
+      const canMine = await hasMyGroups(uid(req));
+      const own: any[] = canMine ? (await queryDB("SELECT * FROM mail_personal_groups WHERE user_id = ? ORDER BY name ASC", [uid(req)])) || [] : [];
+      res.json({ central, mine: own.map(myGroupOut), canMine });
+    })
+  );
+
+  // ---- My groups (Self Service switch users.can_use_mail_groups) -------------
+  const requireMyGroups = async (req: any) => {
+    if (req.mailViewAs) throw bad("Read only.", 403);
+    if (!(await hasMyGroups(uid(req)))) throw bad("My groups isn't turned on for your account.", 403);
+  };
+  const myGroupInput = (b: any) => {
+    const name = str(b.name);
+    if (!name) throw bad("Give the group a name.");
+    const members = [...new Set<string>((Array.isArray(b.members) ? b.members : String(b.members || "").split(/[\s,;]+/)).map((x: any) => String(x || "").trim().toLowerCase()).filter(Boolean))];
+    const wrong = members.filter((x) => !isEmail(x));
+    if (wrong.length) throw bad(`Not an email address: ${wrong.slice(0, 5).join(", ")}`);
+    if (!members.length) throw bad("Add at least one person.");
+    return { name, members: JSON.stringify(members.slice(0, 500)) };
+  };
+  app.post(
+    "/api/mail/my-groups",
+    ...gate,
+    handler(async (req, res) => {
+      await requireMyGroups(req);
+      const n: any[] = (await queryDB("SELECT COUNT(*) AS n FROM mail_personal_groups WHERE user_id = ?", [uid(req)])) || [];
+      if (Number(n[0]?.n || 0) >= 100) throw bad("You can keep up to 100 groups.");
+      const v = myGroupInput(req.body || {});
+      const r: any = await queryDB("INSERT INTO mail_personal_groups (user_id, name, members_json) VALUES (?, ?, ?)", [uid(req), v.name, v.members]);
+      const row: any = ((await queryDB("SELECT * FROM mail_personal_groups WHERE id = ?", [Number(r.insertId)])) || [])[0];
+      res.status(201).json(myGroupOut(row));
+    })
+  );
+  app.put(
+    "/api/mail/my-groups/:id",
+    ...gate,
+    handler(async (req, res) => {
+      await requireMyGroups(req);
+      const id = Number(req.params.id);
+      const had: any[] = (await queryDB("SELECT id FROM mail_personal_groups WHERE id = ? AND user_id = ?", [id, uid(req)])) || [];
+      if (!had.length) throw bad("Group not found.", 404);
+      const v = myGroupInput(req.body || {});
+      await queryDB("UPDATE mail_personal_groups SET name = ?, members_json = ? WHERE id = ? AND user_id = ?", [v.name, v.members, id, uid(req)]);
+      const row: any = ((await queryDB("SELECT * FROM mail_personal_groups WHERE id = ?", [id])) || [])[0];
+      res.json(myGroupOut(row));
+    })
+  );
+  app.delete(
+    "/api/mail/my-groups/:id",
+    ...gate,
+    handler(async (req, res) => {
+      await requireMyGroups(req);
+      await queryDB("DELETE FROM mail_personal_groups WHERE id = ? AND user_id = ?", [Number(req.params.id), uid(req)]);
+      res.json({ success: true });
     })
   );
 
@@ -2268,6 +2611,10 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
       const b = req.body || {};
       const draftId = b.draftId ? Number(b.draftId) : undefined;
       if (draftId) await messageOf(uid(req), draftId, false);
+      // A group the sender may not write to: say so before anything is saved.
+      const groupCheck = await expandGroups(await accountOf(uid(req), b.accountId), [...splitAddresses(b.to), ...splitAddresses(b.cc), ...splitAddresses(b.bcc)]);
+      const deniedGroups = groupCheck.groups.filter((x) => x.denied);
+      if (deniedGroups.length) throw bad(`You can't write to ${deniedGroups.map((x) => `${x.name} (${x.email})`).join(", ")} — ask Mail Administration to let you.`, 403);
       const later = b.scheduledAt && new Date(b.scheduledAt).getTime() > Date.now() + 30_000;
       if (b.scheduledAt && Number.isNaN(new Date(b.scheduledAt).getTime())) throw bad("Pick a valid time to send.");
       const { a, id, to, cc, bcc } = await upsertLocal(uid(req), b, later ? ["Scheduled"] : ["Outbox"], draftId);
