@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Home, Route, Clock, CalendarClock, Contact, LayoutGrid, X } from 'lucide-react';
 import { useScrolling } from '../lib/useScrolling';
 
-export type MobileSection = 'budget' | 'jobs' | 'entries' | 'jobEdit' | 'claim' | 'claims' | 'conveyanceClaim' | 'leave' | 'timesheet' | 'employeeDirectory' | null;
+export type MobileSection = 'budget' | 'jobs' | 'entries' | 'jobEdit' | 'claim' | 'claims' | 'conveyanceClaim' | 'leave' | 'timesheet' | 'employeeDirectory' | 'noticeBoard' | null;
 
 interface BottomNavProps {
   active: MobileSection;
@@ -22,7 +22,7 @@ interface BottomNavProps {
 export interface MoreItem {
   key: string;
   label: string;
-  icon: React.ComponentType<{ className?: string }>;
+  icon: React.ComponentType<{ className?: string; style?: React.CSSProperties }>;
   // Icon badge gradient/glow (Tailwind classes).
   iconBg: string;
   badge?: number;
@@ -32,7 +32,7 @@ export interface MoreItem {
 interface NavItem {
   key: MobileSection;
   label: string;
-  icon: React.ComponentType<{ className?: string }>;
+  icon: React.ComponentType<{ className?: string; style?: React.CSSProperties }>;
 }
 
 const BAR_W = 400;

@@ -1218,8 +1218,8 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
     const validUserIds = new Set<number>(allUsers.map((u: any) => Number(u.id)));
     const cleaned: { approver_user_ids: number[]; approver_type: "employee" | "admin" | "vehicle_maintainer" | "asset_fulfiller" | "conveyance_disburser"; label: string | null }[] = [];
     steps.forEach((step: any, idx: number) => {
-      const ids = Array.isArray(step?.approver_user_ids) ? step.approver_user_ids.map((v: any) => Number(v)).filter((v: number) => Number.isFinite(v)) : [];
-      const uniqueIds = Array.from(new Set(ids));
+      const ids: number[] = Array.isArray(step?.approver_user_ids) ? step.approver_user_ids.map((v: any) => Number(v)).filter((v: number) => Number.isFinite(v)) : [];
+      const uniqueIds: number[] = Array.from(new Set(ids));
       if (uniqueIds.length === 0) {
         throw new Error(`Layer ${idx + 1} needs at least one approver.`);
       }

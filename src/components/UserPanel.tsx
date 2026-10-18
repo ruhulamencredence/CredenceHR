@@ -2429,7 +2429,9 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
       headStyles: { ...STD_HEAD, fontSize: 6.5 },
       // Repeats the full letterhead (logo, title, filters box) on every page of
       // a multi-page table, not just the first.
-      didDrawPage: () => drawPdfLetterhead(doc, logoImg, letterheadOptions)
+      didDrawPage: () => {
+        drawPdfLetterhead(doc, logoImg, letterheadOptions);
+      }
     });
 
     const finalY = (doc as any).lastAutoTable.finalY;

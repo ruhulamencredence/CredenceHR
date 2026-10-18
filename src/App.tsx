@@ -1564,13 +1564,6 @@ export default function App() {
             claimsNavRequest={claimsNavRequest}
             adminNavRequest={adminNavRequest}
             onActiveTabChange={setAdminActiveTab}
-            // AdminPanel's own mobile drawer (navigating BETWEEN admin tabs
-            // while already inside the Admin Panel) is now superseded by the
-            // single GlobalSidebar above — same tabs are reachable from
-            // there, so this drawer is permanently closed rather than
-            // wired to a second mobile hamburger.
-            mobileSidebarOpen={false}
-            onCloseMobileSidebar={() => {}}
           />
         ) : (
           <>

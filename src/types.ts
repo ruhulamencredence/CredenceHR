@@ -523,6 +523,27 @@ export interface ApprovalChainStep {
 // the check-in/out itself already succeeded before this exists). total_steps is a
 // snapshot of the chain's length at creation time; current_step (1-indexed) is
 // which layer it's waiting on right now while status is 'pending'.
+// Approval Templates (Admin Panel -> Approvals -> Templates,
+// ApprovalTemplateManager.tsx; GET /api/approval-templates).
+export type ApprovalRequestType = 'conveyance' | 'leave' | 'timesheet' | 'asset' | 'vehicle' | 'mobile' | 'loan';
+export interface ApprovalTemplateStep {
+  id?: number;
+  step_order: number;
+  label?: string | null;
+  approver_type?: string | null;
+  approvers: { user_id: number; name?: string | null }[];
+}
+export interface ApprovalTemplate {
+  id: number;
+  name: string;
+  request_type: ApprovalRequestType;
+  is_default: boolean | number;
+  is_active: boolean | number;
+  step_count?: number;
+  skip_auto_supervisor?: boolean | number;
+  steps?: ApprovalTemplateStep[];
+}
+
 export interface ApprovalRequest {
   id: number;
   source_type: 'attendance' | 'claim' | 'user_claim' | 'attendance_correction' | 'leave_application' | 'asset_requisition' | 'vehicle_requisition' | 'mobile_limit_request' | 'advance_request';
@@ -550,6 +571,8 @@ export interface ApprovalRequest {
   // Conveyance Bill Claim, "Date — Project" for an Attendance Correction), and
   // who's up next while still pending.
   source_label?: string;
+  // GET /api/approvals: who can act on the current Layer now.
+  current_approver_ids?: number[];
   // Only present when source_type is 'user_claim' — the Conveyance Bill Claim's
   // Amount/Category, so the Approvals queue can show them without a second call.
   source_amount?: number | null;
@@ -1901,7 +1924,9 @@ export interface AdminNavRequest {
   // 'permanent_delete_log' is likewise NOT an AdminModuleKey/module_permissions
   // entry — Superadmin-only, see GET /api/entries/permanent-delete-log in
   // EntriesRoutes.ts.
-  target: 'dashboard' | 'reports_insights' | 'data_import' | 'reports' | 'mprs' | 'imports' | 'editlog' | 'recycle' | 'projects' | 'branches' | 'users' | 'notices' | 'approvals' | 'attendance' | 'attendance_reports' | 'employees' | 'departments' | 'tracking' | 'holidays' | 'disbursement' | 'bill_claim_policy' | 'asset_management' | 'permanent_delete_log' | 'companies' | 'devices' | 'active_users' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'hr_operations';
+  // Every Admin Panel module (claims / conveyance go through ClaimsNavRequest)
+  // plus the pages that aren't modules.
+  target: Exclude<AdminModuleKey, 'claims' | 'conveyance'> | 'dashboard' | 'reports_insights' | 'data_import' | 'bill_claim_policy' | 'permanent_delete_log' | 'companies' | 'devices' | 'active_users' | 'servers';
   ts: number;
 }
 

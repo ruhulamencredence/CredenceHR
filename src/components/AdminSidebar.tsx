@@ -64,15 +64,15 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
     .map((p) => p[0]?.toUpperCase())
     .join('') || 'A';
 
-  const reportsGroup: FlatItem[] = [
+  const reportsGroup: FlatItem[] = ([
     { tab: 'reports', label: 'Reports', icon: BarChart3, count: counts.reports },
     { tab: 'mprs', label: 'MPR Nos', icon: FileText, count: counts.mprs },
     { tab: 'imports', label: 'Data Import', icon: Upload, count: counts.imports },
     { tab: 'recycle', label: 'Job Recycle', icon: Recycle, count: counts.recycle },
     { tab: 'editlog', label: 'MPR Edit Log', icon: History },
-  ].filter((i) => canSee(i.tab as AdminModuleKey));
+  ] as FlatItem[]).filter((i) => canSee(i.tab as AdminModuleKey));
 
-  const flatItems: FlatItem[] = [
+  const flatItems: FlatItem[] = ([
     { tab: 'projects', label: 'Projects', icon: Building2, count: counts.projects },
     { tab: 'branches', label: 'Branches', icon: Building2, count: counts.branches },
     { tab: 'users', label: 'Users', icon: Users, count: counts.users },
@@ -85,7 +85,7 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({
     { tab: 'attendance', label: 'Remote Attendance', icon: Navigation },
     { tab: 'attendance_reports', label: 'Monthly Attendance Report', icon: Calendar },
     { tab: 'tracking', label: 'Employee Tracking', icon: Navigation },
-  ].filter((i) => canSee(i.tab as AdminModuleKey));
+  ] as FlatItem[]).filter((i) => canSee(i.tab as AdminModuleKey));
 
   const roleAvatarColors: Record<string, string> = {
     superadmin: 'var(--g-avatar-1, #7F00FF)',
