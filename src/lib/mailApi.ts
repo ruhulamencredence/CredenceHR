@@ -210,6 +210,55 @@ export async function mailFetch<T = any>(token: string, path: string, init: { me
   return data as T;
 }
 
+// Avatars: a person's Employee profile photo, looked up by email address.
+// Addresses asked for in the same moment go to the server in one call
+// (POST /api/mail/photos -> { email: userId }), then each photo comes from
+// GET /api/profile/photo/:userId. Both are remembered for the visit; null
+// means "no photo, show the initials".
+let photoToken = '';
+export function setMailPhotoToken(token: string) {
+  photoToken = token;
+}
+const photoUrls = new Map<string, Promise<string | null>>();
+const photoByUser = new Map<number, Promise<string | null>>();
+let pendingPhotos = new Map<string, (userId: number | null) => void>();
+let photoTimer: ReturnType<typeof setTimeout> | null = null;
+function flushPhotos() {
+  photoTimer = null;
+  const batch = pendingPhotos;
+  pendingPhotos = new Map();
+  const emails = [...batch.keys()];
+  for (let i = 0; i < emails.length; i += 200) {
+    const part = emails.slice(i, i + 200);
+    mailFetch<Record<string, number>>(photoToken, '/photos', { method: 'POST', body: { emails: part } })
+      .then((ids) => part.forEach((e) => batch.get(e)!(Number(ids?.[e]) || null)))
+      .catch(() => part.forEach((e) => batch.get(e)!(null)));
+  }
+}
+const photoOfUser = (userId: number) => {
+  let p = photoByUser.get(userId);
+  if (!p) {
+    p = fetch(apiUrl(`/api/profile/photo/${userId}`), { headers: { Authorization: `Bearer ${photoToken}` } })
+      .then(async (r) => (r.ok && r.status !== 204 ? URL.createObjectURL(await r.blob()) : null))
+      .catch(() => null);
+    photoByUser.set(userId, p);
+  }
+  return p;
+};
+export function mailPhotoUrl(email: string): Promise<string | null> {
+  const e = (email || '').trim().toLowerCase();
+  if (!photoToken || !e.includes('@')) return Promise.resolve(null);
+  let p = photoUrls.get(e);
+  if (!p) {
+    p = new Promise<number | null>((resolve) => {
+      pendingPhotos.set(e, resolve);
+      if (!photoTimer) photoTimer = setTimeout(flushPhotos, 30);
+    }).then((userId) => (userId ? photoOfUser(userId) : null));
+    photoUrls.set(e, p);
+  }
+  return p;
+}
+
 // Attachments are fetched with the token (they're not public links).
 export async function fetchAttachment(token: string, messageId: string, idx: number): Promise<Blob> {
   const res = await fetch(apiUrl(`/api/mail/messages/${messageId}/attachments/${idx}`), { headers: { Authorization: `Bearer ${token}`, ...viewAsHeader() } });

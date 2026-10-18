@@ -12,7 +12,7 @@ import {
   MoreVertical, ListChecks, CalendarPlus, UserPlus, Filter, Ban
 } from 'lucide-react';
 import { MailBody } from './MailBody';
-import { MailAttachment, MailMessage, SYSTEM_LABELS, fetchAttachment, formatBytes, fullMailDate, saveBlob, shortMailDate } from '../../lib/mailApi';
+import { MailAttachment, MailMessage, SYSTEM_LABELS, fetchAttachment, formatBytes, fullMailDate, mailPhotoUrl, saveBlob, shortMailDate } from '../../lib/mailApi';
 
 export type ReaderAction =
   | 'reply' | 'replyAll' | 'forward' | 'star' | 'unread' | 'trash' | 'spam' | 'notSpam' | 'archive' | 'inbox' | 'unschedule'
@@ -30,11 +30,26 @@ const initials = (s: string) =>
 const AVATAR_COLORS = ['bg-sky-500', 'bg-violet-500', 'bg-emerald-500', 'bg-amber-500', 'bg-rose-500', 'bg-indigo-500', 'bg-teal-500', 'bg-fuchsia-500'];
 export const avatarColor = (s: string) => AVATAR_COLORS[[...(s || '')].reduce((n, c) => n + c.charCodeAt(0), 0) % AVATAR_COLORS.length];
 
-export const MailAvatar: React.FC<{ name: string; email: string; size?: 'sm' | 'md' }> = ({ name, email, size = 'md' }) => (
-  <span className={`${size === 'sm' ? 'w-8 h-8 text-[11px]' : 'w-10 h-10 text-xs'} rounded-full ${avatarColor(email || name)} text-white font-semibold flex items-center justify-center shrink-0`}>
-    {initials(name || email)}
-  </span>
-);
+// The person's Employee profile photo when they have one (mailPhotoUrl),
+// otherwise their initials on a colour.
+export const MailAvatar: React.FC<{ name: string; email: string; size?: 'sm' | 'md' }> = ({ name, email, size = 'md' }) => {
+  const [photo, setPhoto] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    setPhoto(null);
+    void mailPhotoUrl(email).then((u) => live && setPhoto(u));
+    return () => {
+      live = false;
+    };
+  }, [email]);
+  const box = size === 'sm' ? 'w-8 h-8 text-[11px]' : 'w-10 h-10 text-xs';
+  if (photo) return <img src={photo} alt={name || email} className={`${box} rounded-full object-cover shrink-0 bg-slate-100`} onError={() => setPhoto(null)} />;
+  return (
+    <span className={`${box} rounded-full ${avatarColor(email || name)} text-white font-semibold flex items-center justify-center shrink-0`}>
+      {initials(name || email)}
+    </span>
+  );
+};
 
 const AttachmentChip: React.FC<{ token: string; messageId: string; a: MailAttachment }> = ({ token, messageId, a }) => {
   const [busy, setBusy] = useState(false);

@@ -23,7 +23,7 @@ import { useKeyboardInset, scrollFocusedFieldIntoView } from '../../lib/useKeybo
 import type { User } from '../../types';
 import {
   MAIL_CATEGORIES, MAIL_FOLDERS, MailAccount, MailContact, MailCounts, MailFilter, MailList, MailMessage, MailSettings, MailStatus, MailTemplate, SYSTEM_LABELS, mailFetch,
-  setMailTimeZone, setMailViewAs, shortMailDate, fullMailDate
+  setMailPhotoToken, setMailTimeZone, setMailViewAs, shortMailDate, fullMailDate
 } from '../../lib/mailApi';
 import { MailReader, ReaderAction, MailAvatar } from './MailReader';
 import { MailCompose, ComposeInit } from './MailCompose';
@@ -599,6 +599,7 @@ export const CredenceMail: React.FC<{
   const ro = !!viewAs;
   // Every call from here on carries whose mailbox it is (set before the first fetch).
   setMailViewAs(viewAs ? viewAs.userId : null);
+  setMailPhotoToken(token);
   useEffect(() => () => setMailViewAs(null), []);
   const [status, setStatus] = useState<MailStatus | null>(null);
   const [statusError, setStatusError] = useState('');

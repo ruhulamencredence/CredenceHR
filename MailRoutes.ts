@@ -2566,6 +2566,40 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     })
   );
 
+  // Avatars: which of these addresses belong to someone with a profile photo
+  // (Profile page upload, user_profile_details). Matched by login email, the
+  // Employee Directory email or a connected mailbox; returns { email: userId }
+  // only for those with a photo. The picture itself is GET /api/profile/photo/:id,
+  // which any signed-in account may already read (profileRoutes.ts).
+  app.post(
+    "/api/mail/photos",
+    ...gate,
+    handler(async (req, res) => {
+      const emails = [...new Set((Array.isArray(req.body?.emails) ? req.body.emails : []).map((e: any) => String(e || "").trim().toLowerCase()).filter(isEmail))].slice(0, 200) as string[];
+      if (!emails.length) return res.json({});
+      const marks = emails.map(() => "?").join(",");
+      const [byLogin, byDirectory, byBox]: any[] = await Promise.all([
+        queryDB(`SELECT id AS user_id, LOWER(TRIM(email)) AS email FROM users WHERE LOWER(TRIM(email)) IN (${marks})`, emails).catch(() => []),
+        queryDB(`SELECT user_id, LOWER(TRIM(email)) AS email FROM all_employees WHERE user_id IS NOT NULL AND LOWER(TRIM(email)) IN (${marks})`, emails).catch(() => []),
+        queryDB(`SELECT user_id, LOWER(TRIM(email)) AS email FROM mail_accounts WHERE user_id > 0 AND LOWER(TRIM(email)) IN (${marks})`, emails).catch(() => [])
+      ]);
+      // A login email wins, then the directory, then a mailbox.
+      const owner = new Map<string, number>();
+      for (const r of [...(byBox || []), ...(byDirectory || []), ...(byLogin || [])]) if (Number(r.user_id) > 0) owner.set(r.email, Number(r.user_id));
+      const ids = [...new Set(owner.values())];
+      const withPhoto = new Set<number>();
+      if (ids.length) {
+        const rows: any[] =
+          (await queryDB(`SELECT user_id FROM user_profile_details WHERE photo_data IS NOT NULL AND user_id IN (${ids.map(() => "?").join(",")})`, ids).catch(() => [])) || [];
+        for (const r of rows) withPhoto.add(Number(r.user_id));
+      }
+      const out: Record<string, number> = {};
+      for (const [e, id] of owner) if (withPhoto.has(id)) out[e] = id;
+      res.setHeader("Cache-Control", "private, max-age=300");
+      res.json(out);
+    })
+  );
+
   // Mailboxes -> Email Directory: the same people, plus whether each one's
   // mail stays inside CredenceHR. Needs users.can_view_mail_directory.
   async function hasDirectory(user: any): Promise<boolean> {
