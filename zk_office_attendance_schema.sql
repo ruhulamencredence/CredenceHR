@@ -1,3 +1,6 @@
+-- NOTE: not needed to set up CredenceHR — the app creates these tables
+-- itself (with any newer columns) the first time it starts. Kept for reference.
+SET FOREIGN_KEY_CHECKS = 0;
 -- =====================================================================
 -- ZK Office Attendance — schema patch
 -- Run this once against mpr_tracker_db (phpMyAdmin / mysql CLI).
@@ -45,3 +48,5 @@ CREATE TABLE IF NOT EXISTS zk_attendance_logs (
   FOREIGN KEY (device_id) REFERENCES zk_devices(id) ON DELETE CASCADE,
   INDEX idx_pin_time (device_user_pin, punch_time)
 );
+
+SET FOREIGN_KEY_CHECKS = 1;

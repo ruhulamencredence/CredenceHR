@@ -1,5 +1,6 @@
 import express from "express";
 import path from "path";
+import fsSync from "fs";
 import http from "http";
 import cors from "cors";
 import compression from "compression";
@@ -168,6 +169,42 @@ let dbPool: mysql.Pool | null = null;
 let liveIo: SocketIOServer | null = null;
 let isMySQLConnected = false;
 
+// A brand-new, empty database (no `users` table): run schema.sql once, so a new
+// installation only needs an empty database and the .env — every newer table
+// and column is then added by ensureSchemaMigrations and the modules as usual.
+async function bootstrapBaseSchema(pool: mysql.Pool) {
+  const [rows]: any = await pool.query("SHOW TABLES LIKE 'users'");
+  if (Array.isArray(rows) && rows.length) return;
+  const candidates = [
+    path.join(process.cwd(), "schema.sql"),
+    path.join(path.dirname(process.argv[1] || ""), "schema.sql"),
+    path.join(path.dirname(process.argv[1] || ""), "..", "schema.sql")
+  ];
+  const file = candidates.find((f) => fsSync.existsSync(f));
+  if (!file) {
+    console.warn("⚠️ The database is empty and schema.sql wasn't found next to the app — import it by hand (see schema.sql).");
+    return;
+  }
+  const sql = fsSync
+    .readFileSync(file, "utf8")
+    .replace(/^\s*CREATE DATABASE[^;]*;/gim, "")
+    .replace(/^\s*USE\s+[^;]*;/gim, "");
+  const conn = await mysql.createConnection({
+    host: process.env.DB_HOST || "localhost",
+    user: process.env.DB_USER || "root",
+    password: process.env.DB_PASSWORD || "",
+    database: process.env.DB_NAME || "mpr_tracker_db",
+    port: Number(process.env.DB_PORT) || 3306,
+    multipleStatements: true
+  });
+  try {
+    await conn.query(`SET FOREIGN_KEY_CHECKS = 0;\n${sql}\nSET FOREIGN_KEY_CHECKS = 1;`);
+    console.log(`✅ Empty database: created the base tables from ${path.basename(file)}.`);
+  } finally {
+    await conn.end().catch(() => undefined);
+  }
+}
+
 async function initDB() {
   try {
     dbPool = mysql.createPool({
@@ -219,6 +256,7 @@ async function initDB() {
     console.log(" Connected to MySQL Database successfully!");
     isMySQLConnected = true;
     connection.release();
+    await bootstrapBaseSchema(dbPool);
     await ensureSchemaMigrations(dbPool, { EMPLOYEE_EXT_FIELD_DDL, getApprovalChain, queryDB });
     // Credence Mail tables (MailRoutes.ts).
     await ensureMailSchema(dbPool);
