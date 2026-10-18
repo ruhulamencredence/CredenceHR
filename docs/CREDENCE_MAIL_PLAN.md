@@ -155,6 +155,11 @@
   - তার Credence Mail চালু থাকে।
   - তখন তার জন্য একটা "শুধু ভেতরের" mailbox আপনা থেকে তৈরি হয়। পরে সে password দিয়ে mailbox যুক্ত করলে সেটাই আসল mailbox হয়ে যায়, আগের mail সব থেকে যায়।
   - "শুধু ভেতরের" mailbox থেকে বাইরের ঠিকানায় mail পাঠানো যায় না, কারণ সহ এটা বলা হয়।
+- **Employee Directory থেকে মেলানো (নতুন):** প্রাপকের ঠিকানা Employee Directory-র কোনো Employee-র email-এর সাথে মিললে mail সবসময় ভেতরে যায়।
+  - তার Credence Mail বন্ধ থাকলেও যায়। mail তার জন্য জমা থাকে, তবে alert পাঠানো হয় না।
+  - Employee-র login না থাকলেও যায়। mail সেই Employee-র (employee id) নামে জমা থাকে। পরে তার login হলে সব mail তার mailbox-এ চলে যায়।
+  - cPanel দিয়ে যায় শুধু তখন, যখন ঠিকানাটা কোনো সক্রিয় Employee বা login-এর নয়, অথবা account block করা।
+  - Compose আর Mail Administration-এর "Check an address" কারণ দেখায়।
 - **Compose-এ দেখা যায়:** ঠিকানার নিচে লেখা আসে কতজন "inside CredenceHR" আর কতজন "through the mail server"। অফিসের কেউ Credence Mail-এ না থাকলে তার নামও সেখানে দেখায়।
 - **ছবি:** নিজের mail, অফিসের domain-এর mail, আর যাদের জন্য "Always from this sender" চাপা হয়েছে, তাদের mail-এর ছবি আর প্রতিবার "Show pictures" না চাপলেও দেখায়।
 - **সীমাবদ্ধতা:** ভেতরের mail শুধু Credence Mail-এ দেখা যায়। Outlook বা ফোনের mail app-এ cPanel mailbox খুললে সেখানে থাকে না।
