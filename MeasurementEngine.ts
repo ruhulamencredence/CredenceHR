@@ -491,8 +491,8 @@ export interface Beam {
   widthIn: number;
   length: number;
   tag: string | null;
-  /** Where the tag came from. */
-  tagFrom: "leader" | "run" | null;
+  /** Where the tag came from: a leader, the name written on / beside the beam, or the beam in line. */
+  tagFrom: "leader" | "text" | "run" | null;
 }
 export interface Column {
   id: string;
@@ -553,6 +553,17 @@ export const guessBeamLayers = (layers: RawDrawing["layers"]) =>
   layers.filter((l) => /beam/i.test(l.name) && !DIM_WORDS.test(l.name) && l.lines + l.polys >= 4).map((l) => l.name);
 export const guessColumnLayers = (layers: RawDrawing["layers"]) =>
   layers.filter((l) => /(^|[^a-z])(col|column)/i.test(l.name) && !/(dim|text|txt|grid|hatch|tie|rod)/i.test(l.name) && l.polys >= 1).map((l) => l.name);
+
+// A beam's name alone, written on or beside it (no leader, no size): "B15",
+// "B17A", "CB", "CB1", "GB-2", "FB3". Its size comes from the sheet's beam
+// sizes (set per name) or the default. A lone "B" (a grid bubble) is not one.
+const BARE_TAG_RE = /^([A-Z]{0,2}B)(?:[-\s]?(\d{1,3}[A-Z]?))?$/;
+export const bareTag = (text: string): string | null => {
+  const t = text.trim().toUpperCase();
+  const m = BARE_TAG_RE.exec(t);
+  if (!m || (m[1].length < 2 && !m[2])) return null;
+  return t.replace(/\s+/g, "");
+};
 
 // "FB-3(10"x21")", "B1 (250x450)", "GB-2 ( 12" x 24" )" ...
 const TAG_RE = /([A-Za-z]{1,4}[-\s]?\d+[A-Za-z]?)\s*\(\s*(\d+(?:\.\d+)?)\s*(?:"|''|mm|cm|in)?\s*[xX×*]\s*(\d+(?:\.\d+)?)\s*(?:"|''|mm|cm|in)?\s*\)/;
@@ -704,11 +715,46 @@ export function analyse(raw: RawDrawing, settingsIn: Partial<MsSettings> = {}): 
     const def = parseTag(t.text, ipu);
     if (def) tagTexts.push({ def, at: sc(t.at), text: t.text });
   }
-  const widthSet = new Set<number>([settings.defaultBeamWidthIn, ...tagTexts.map((t) => Math.round(t.def.widthIn * 2) / 2)]);
-  const widths = [...widthSet].filter((w) => w > 0);
-
+  // Names alone, on a beam layer (or a chosen tag layer): placed by where they sit.
+  const bareTexts: { tag: string; at: Pt }[] = [];
+  for (const t of raw.texts) {
+    const onLayer = settings.tagLayers && settings.tagLayers.length ? settings.tagLayers.includes(t.layer) : beamLayers.includes(t.layer);
+    if (!onLayer || parseTag(t.text, ipu)) continue;
+    const tag = bareTag(t.text);
+    if (!tag) continue;
+    // The middle of the text, not its insertion corner.
+    const h = t.height || 0;
+    const len = tag.length * h * 0.7;
+    const at = { x: t.at.x + (Math.cos(t.rotation || 0) * len) / 2 - (Math.sin(t.rotation || 0) * h) / 2, y: t.at.y + (Math.sin(t.rotation || 0) * len) / 2 + (Math.cos(t.rotation || 0) * h) / 2 };
+    bareTexts.push({ tag, at: sc(at) });
+  }
   const mergedH = mergeEdges(H, eps);
   const mergedV = mergeEdges(V, eps);
+  // Beam widths the drawing itself uses: how far apart parallel beam lines
+  // run side by side, for long stretches (a drawing with 12" and 10" beams
+  // and no sizes in its tags would otherwise only pair the default width).
+  const spacing = new Map<number, number>();
+  for (const E of [mergedH, mergedV]) {
+    const list = [...E].sort((p, q) => p.c - q.c);
+    for (let i = 0; i < list.length; i++) {
+      for (let j = i + 1; j < list.length; j++) {
+        const d = list[j].c - list[i].c;
+        if (d > 30.5) break;
+        if (d < 5.5) continue;
+        const ov = Math.min(list[i].b, list[j].b) - Math.max(list[i].a, list[j].a);
+        if (ov < 24) continue;
+        const w = Math.round(d * 2) / 2;
+        spacing.set(w, (spacing.get(w) || 0) + ov);
+      }
+    }
+  }
+  const topSpacing = Math.max(0, ...spacing.values());
+  const found = [...spacing.entries()].filter(([w, len]) => w >= 6 && w <= 24 && len >= 480 && len >= topSpacing * 0.15).map(([w]) => w);
+  const widthSet = new Set<number>([settings.defaultBeamWidthIn, ...tagTexts.map((t) => Math.round(t.def.widthIn * 2) / 2), ...found]);
+  const widths = [...widthSet].filter((w) => w > 0);
+  if (found.some((w) => Math.abs(w - settings.defaultBeamWidthIn) > 0.6)) {
+    notes.push(`Beam widths found in the drawing: ${[...found].sort((a, b) => b - a).map((w) => `${w}"`).join(", ")}.`);
+  }
   const ph = pairEdges(mergedH, widths, "H");
   const pv = pairEdges(mergedV, widths, "V");
   const allSegs = [...ph.segs, ...pv.segs];
@@ -797,6 +843,23 @@ export function analyse(raw: RawDrawing, settingsIn: Partial<MsSettings> = {}): 
       if (target.tag && target.tagFrom === "leader" && target.tag !== t.def.tag) warnings.push(`${target.id} is pointed at by two tags (${target.tag} and ${t.def.tag}); ${t.def.tag} kept.`);
       target.tag = t.def.tag;
       target.tagFrom = "leader";
+    }
+    // names written on / beside a beam: the nearest beam (a leader's tag wins)
+    for (const t of bareTexts.filter((x) => inBox(x.at))) {
+      let target: Beam | null = null;
+      let td = 30;
+      for (const b of beams) {
+        const d = distPtSeg(t.at, b) - b.widthIn / 2;
+        if (d < td) { td = d; target = b; }
+      }
+      if (!target) continue;
+      if (target.tagFrom === "leader") continue;
+      if (target.tag && target.tagFrom === "text" && target.tag !== t.tag) {
+        warnings.push(`${target.id} has two names beside it (${target.tag} and ${t.tag}); ${target.tag} kept.`);
+        continue;
+      }
+      target.tag = t.tag;
+      target.tagFrom = "text";
     }
     // along each beam's run: segments in line with only a column (or a crossing beam's width) between them
     const runKey = (b: Beam) => `${b.dir}:${Math.round(b.c / 2)}`;
@@ -1048,13 +1111,20 @@ export function buildSheet(plan: Plan, settingsIn: Partial<MsSettings>, ov: Over
       const list = beams.filter((b) => (b.tag ?? "(no tag)") === tg);
       const sz = sizeOf(tg === "(no tag)" ? null : tg);
       const dNet = s.deductSlabFromBeam ? Math.max(0, sz.d - s.slabThicknessIn) : sz.d;
-      rows.push({ id: `h-${tg}`, desc: tg === "(no tag)" ? `Beams without a tag — taken as ${sz.w}"x${sz.d}"` : `${tg}  (${sz.w}"x${sz.d}")${s.deductSlabFromBeam ? `  — depth below slab ${r2(dNet)}"` : ""}`, nos: 0, l: null, b: null, d: null, qty: 0, unit: "cft", kind: "head" });
+      // No size in the drawing's tag (or none set on the sheet): the width is
+      // what the drawing shows between the beam's two lines; the depth is the
+      // default until a size is set in the Beams tab.
+      const widthOf = (b: Beam) => (sz.known ? sz.w : Math.round(b.widthIn * 2) / 2 || sz.w);
+      const drawnWidths = [...new Set(list.map(widthOf))].sort((p, q) => q - p);
+      const sizeText = sz.known ? `${sz.w}"x${sz.d}"` : `${drawnWidths.map((w) => `${w}"`).join(" / ")} wide as drawn x ${sz.d}" deep (default — set the size in the Beams tab)`;
+      rows.push({ id: `h-${tg}`, desc: tg === "(no tag)" ? `Beams without a tag — ${sizeText}` : `${tg}  (${sizeText})${s.deductSlabFromBeam ? `  — depth below slab ${r2(dNet)}"` : ""}`, nos: 0, l: null, b: null, d: null, qty: 0, unit: "cft", kind: "head" });
       let qc = 0, qs = 0, ql = 0;
       for (const b of list.sort((p, q) => p.id.localeCompare(q.id, undefined, { numeric: true }))) {
         const L = b.length / 12;
-        const cft = L * (sz.w / 12) * (dNet / 12);
-        rows.push({ id: b.id, ref: b.id, desc: `${b.id}  (${b.dir === "H" ? "along X" : "along Y"})`, nos: 1, l: r3(L), b: r3(sz.w / 12), d: r3(dNet / 12), qty: r3(cft), unit: "cft", kind: "item", remark: b.tagFrom === "run" ? "tag taken from the same beam" : b.tag ? undefined : "no tag" });
-        qc += cft; qs += L * (sz.w / 12 + 2 * (dNet / 12)); ql += L;
+        const w = widthOf(b);
+        const cft = L * (w / 12) * (dNet / 12);
+        rows.push({ id: b.id, ref: b.id, desc: `${b.id}  (${b.dir === "H" ? "along X" : "along Y"})`, nos: 1, l: r3(L), b: r3(w / 12), d: r3(dNet / 12), qty: r3(cft), unit: "cft", kind: "item", remark: b.tagFrom === "run" ? "tag taken from the same beam" : b.tag ? undefined : "no tag" });
+        qc += cft; qs += L * (w / 12 + 2 * (dNet / 12)); ql += L;
       }
       rows.push({ id: `s-${tg}`, desc: `Total ${tg}`, nos: list.length, l: r3(ql), b: null, d: null, qty: r3(qc), unit: "cft", kind: "sub", remark: `Shuttering ${r2(qs)} sft` });
       totC += qc; totS += qs; totL += ql;
