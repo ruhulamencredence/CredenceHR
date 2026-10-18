@@ -14,7 +14,7 @@ Holiday Calendar, Role-based Admin Panel, এবং Capacitor দিয়ে An
 
 | জিনিস | ভার্সন / নোট |
 |---|---|
-| Node.js | **v20 বা তার উপরে** (recommend: v22 LTS) — `node -v` দিয়ে চেক করুন |
+| Node.js | **v22 বা তার উপরে** (v20 এ আর চলবে না) — `node -v` দিয়ে চেক করুন |
 | npm | Node.js এর সাথেই আসে |
 | MySQL | XAMPP (Windows) অথবা standalone MySQL 8.x — যেকোনো একটা |
 | (ঐচ্ছিক) Android Studio | শুধু APK বিল্ড করতে চাইলে লাগবে |
