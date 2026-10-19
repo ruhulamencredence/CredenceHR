@@ -35,6 +35,7 @@ import {
   X,
 } from 'lucide-react';
 import { Spinner } from './Spinner';
+import { ProgressOverlay, useLongTask } from './ProgressOverlay';
 import { useHrApi } from './HrOpsShared';
 import { confirmDialog } from '../lib/confirmDialog';
 
@@ -336,6 +337,8 @@ export const DataImport: React.FC<{ token: string; onlyKind?: string }> = ({ tok
   const [check, setCheck] = useState<RunResponse | null>(null);
   const [done, setDone] = useState<RunResponse | null>(null);
   const [busy, setBusy] = useState<'' | 'read' | 'check' | 'import'>('');
+  // The "% done" loader while a sheet is read, checked or imported.
+  const longTask = useLongTask();
   const [error, setError] = useState('');
   const [filter, setFilter] = useState<'all' | RowResult['status']>('all');
   const fileRef = useRef<HTMLInputElement>(null);
@@ -505,12 +508,17 @@ export const DataImport: React.FC<{ token: string; onlyKind?: string }> = ({ tok
     reset();
     setBusy('read');
     setFileName(file.name);
+    longTask.start(`Reading ${kind.title}`, `Reading ${file.name}…`);
+    longTask.creep(90, undefined, Math.max(1500, file.size / 200));
     try {
+      await new Promise((r) => setTimeout(r, 30)); // let the bar paint before the parse
       const p = await parseFile(file, kind);
       setMatched(p.matched);
       setIgnored(p.ignored);
       setRows(p.rows);
+      await longTask.finish();
     } catch (e: any) {
+      longTask.close();
       setError(e.message || "Couldn't read that file.");
     } finally {
       setBusy('');
@@ -568,12 +576,17 @@ export const DataImport: React.FC<{ token: string; onlyKind?: string }> = ({ tok
     if (!kind) return;
     setBusy(dry ? 'check' : 'import');
     setError('');
+    const n = `${rows.length.toLocaleString()} row${rows.length === 1 ? '' : 's'}`;
+    longTask.start(dry ? `Checking ${kind.title}` : `Importing ${kind.title}`, dry ? `Checking ${n} — nothing is saved yet…` : `Saving ${n}…`);
+    longTask.creep(95, undefined, rows.length * (dry ? 6 : 15));
     try {
       const d: RunResponse = await api.post(`/api/data-import/${kind.key}`, { rows, dry_run: dry });
       if (dry) setCheck(d);
       else setDone(d);
       setFilter(d.summary.error > 0 ? 'error' : 'all');
+      await longTask.finish();
     } catch (e: any) {
+      longTask.close();
       setError(e.message);
     } finally {
       setBusy('');
@@ -617,6 +630,7 @@ export const DataImport: React.FC<{ token: string; onlyKind?: string }> = ({ tok
 
   return (
     <div className="space-y-4">
+      <ProgressOverlay state={longTask.state} />
       {!onlyKind && (
         <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-5">
           <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">

@@ -21,6 +21,7 @@ import autoTable from 'jspdf-autotable';
 import { apiUrl } from '../lib/api';
 import { confirmDialog } from '../lib/confirmDialog';
 import { MailPopup as Popup, Tabs, inputCls, labelCls, primaryBtn, ghostBtn } from './mail/MailPopup';
+import { ProgressOverlay, useLongTask, xhrJson } from './ProgressOverlay';
 
 interface Row { id: string; desc: string; nos: number; l: number | null; b: number | null; d: number | null; qty: number; unit: string; remark?: string; kind: 'item' | 'sub' | 'head'; ref?: string }
 interface Section { key: string; title: string; rows: Row[]; totals: { label: string; qty: number; unit: string }[] }
@@ -153,21 +154,37 @@ const UploadPopup: React.FC<{ token: string; onClose: () => void; onDone: (id: n
   const [title, setTitle] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  // Upload (real progress), then the server reads the drawing (eased — it
+  // can't report back; a big DWG takes up to a minute).
+  const longTask = useLongTask();
   const go = async () => {
     if (!file) return;
     setBusy(true); setErr('');
+    longTask.start('Reading the drawing', `Opening ${file.name}…`);
     try {
       const buf = new Uint8Array(await file.arrayBuffer());
       let bin = '';
       for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
-      const r = await api<Detail>(token, '/api/measurement-sheets', { method: 'POST', body: { title: title.trim() || undefined, file_name: file.name, data_base64: btoa(bin) } });
-      onDone(r.id);
-    } catch (e: any) { setErr(e.message); setBusy(false); }
+      longTask.step(5, 'Uploading the drawing…');
+      const r = await xhrJson('/api/measurement-sheets', {
+        method: 'POST',
+        token,
+        body: { title: title.trim() || undefined, file_name: file.name, data_base64: btoa(bin) },
+        onUpload: (f) => {
+          longTask.step(5 + f * 30);
+          if (f >= 1) longTask.creep(96, 'Finding the beams, columns and slab panels…', Math.max(8000, file.size / 60));
+        }
+      });
+      if (!r.ok) throw new Error(r.data?.error || `Request failed (${r.status})`);
+      await longTask.finish();
+      onDone(r.data.id);
+    } catch (e: any) { longTask.close(); setErr(e.message); setBusy(false); }
   };
   return (
     <Popup title="Upload drawing" icon={<Upload className="w-4 h-4" />} onClose={busy ? () => {} : onClose} size="md"
       footer={<><button type="button" className={ghostBtn} onClick={onClose} disabled={busy}>Cancel</button><button type="button" className={primaryBtn} onClick={go} disabled={!file || busy}>{busy && <Loader2 className="w-4 h-4 animate-spin" />} Make measurement sheet</button></>}>
       <div className="space-y-3 pt-1">
+        <ProgressOverlay state={longTask.state} />
         <div>
           <label className={labelCls}>Structure drawing (.dwg or .dxf)</label>
           <input type="file" accept=".dwg,.dxf" className={inputCls} onChange={(e) => { const f = e.target.files?.[0] || null; setFile(f); if (f && !title) setTitle(f.name.replace(/\.[^.]+$/, '').replace(/[_]+/g, ' ')); }} />
