@@ -133,6 +133,16 @@ export const AlertsBell: React.FC<AlertsBellProps> = ({ token, onOpenLeaveApplic
       setOpen(false);
       onOpenLeaveApplication();
     }
+    // Material on its way -> Material Receive (App.tsx); a short receipt ->
+    // Purchase's Dispatch Material (Admin Panel -> Reports).
+    if (alert.type === 'mpr_dispatch') {
+      setOpen(false);
+      window.dispatchEvent(
+        alert.title === 'Material dispatched'
+          ? new CustomEvent('credence:open-self-service', { detail: 'materialReceive' })
+          : new CustomEvent('credence:open-admin-module', { detail: 'reports' })
+      );
+    }
   };
 
   return (

@@ -37,6 +37,7 @@ import { ApproveApplications } from './components/ApproveApplications';
 import { Timesheet } from './components/Timesheet';
 import { PayrollModule } from './components/PayrollModule';
 import { EmployeeDirectory } from './components/EmployeeDirectory';
+import { MaterialReceive } from './components/MaterialReceive';
 import { NoticePopup } from './components/NoticePopup';
 import { useBackButtonClose } from './lib/useBackButtonClose';
 import { closeTopmostOrReturnFalse } from './lib/backButtonStack';
@@ -92,12 +93,13 @@ export default function App() {
   // this account was actually looking at, instead of resetting to the
   // Admin/User Panel default every time.
   const selfServiceViewStorageKey = user ? `mpr_self_service_view_${user.id}` : null;
-  const [selfServiceView, setSelfServiceView] = useState<'leaveApplication' | 'leaveManagement' | 'myLeave' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | null>(() => {
+  const [selfServiceView, setSelfServiceView] = useState<'leaveApplication' | 'leaveManagement' | 'myLeave' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'materialReceive' | null>(() => {
     try {
       const saved = selfServiceViewStorageKey ? localStorage.getItem(selfServiceViewStorageKey) : null;
       if (saved === 'leaveApplication' || saved === 'leaveManagement' || saved === 'myLeave' || saved === 'leaveApprovals' || saved === 'timesheet' || saved === 'approveApplications' || saved === 'employeeDirectory') {
         return saved;
       }
+      if (saved === 'materialReceive' && (user?.role === 'superadmin' || !!user?.can_receive_material)) return saved;
     } catch {
       // ignore — falls through to the "no Self Service page open" default below
     }
@@ -403,6 +405,34 @@ export default function App() {
   const canSwitchToAdminPanel = user?.role === 'user' && (user.module_permissions || []).length > 0;
   const canSwitchPanels = canSwitchToUserPanel || canSwitchToAdminPanel;
 
+  // An alert (AlertsBell / AlertsPage) asks for a page: Material Receive, or
+  // an Admin Panel module (Dispatch Material lives under Reports).
+  useEffect(() => {
+    const openSelf = (e: Event) => {
+      if ((e as CustomEvent).detail !== 'materialReceive' || !(user?.role === 'superadmin' || user?.can_receive_material)) return;
+      setShowProfilePage(false);
+      setShowChat(false);
+      setShowAlertsPage(false);
+      setSelfServiceView('materialReceive');
+    };
+    const openAdmin = (e: Event) => {
+      const target = (e as CustomEvent).detail;
+      if (typeof target !== 'string' || !(user?.role === 'admin' || user?.role === 'superadmin' || canSwitchToAdminPanel)) return;
+      setSelfServiceView(null);
+      setShowProfilePage(false);
+      setShowChat(false);
+      setShowAlertsPage(false);
+      setViewMode('admin');
+      setAdminNavRequest({ target: target as any, ts: Date.now() });
+    };
+    window.addEventListener('credence:open-self-service', openSelf);
+    window.addEventListener('credence:open-admin-module', openAdmin);
+    return () => {
+      window.removeEventListener('credence:open-self-service', openSelf);
+      window.removeEventListener('credence:open-admin-module', openAdmin);
+    };
+  }, [user, canSwitchToAdminPanel]);
+
   useEffect(() => {
     if (!user) return;
     try {
@@ -695,7 +725,7 @@ export default function App() {
       setViewMode('admin');
       setAdminNavRequest({ target, ts: Date.now() });
     },
-    onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'myLeave' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory') => {
+    onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'myLeave' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'materialReceive') => {
       setShowProfilePage(false);
           setShowChat(false);
           setShowAlertsPage(false);
@@ -931,6 +961,8 @@ export default function App() {
           <Timesheet token={token} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'payroll' ? (
           <PayrollModule token={token} onBack={() => setSelfServiceView(null)} />
+        ) : selfServiceView === 'materialReceive' && (user.role === 'superadmin' || !!user.can_receive_material) ? (
+          <div className="w-full px-4 sm:px-6 lg:px-8 pt-3 pb-28 md:pb-8"><MaterialReceive token={token} /></div>
         ) : selfServiceView === 'employeeDirectory' ? (
           <EmployeeDirectory token={token} user={user} onBack={() => setSelfServiceView(null)} isActive />
         ) : isAdminView ? (

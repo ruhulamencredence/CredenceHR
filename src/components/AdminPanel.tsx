@@ -7,7 +7,7 @@ import credenceLogo from '../assets/credence-logo.png';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
 import { savePdfCrossPlatform } from '../lib/saveFile';
 import { Project, Branch, MprNumber, Entry, User, Budget, BudgetItem, BudgetSubmission, UserProjectPermission, EntryEditHistory, EntryPermanentDeleteLog, BulkUserRow, BulkUserResultItem, AdminModuleKey, ADMIN_MODULES, PermissionLayerKey, PERMISSION_LAYERS, PERMISSION_LAYER_MODULES, EXPLICIT_ONLY_LAYERS, layersFor, LeaveManageLayerKey, LEAVE_MANAGE_LAYERS, AttendanceRecord, ClaimsNavRequest, AdminNavRequest, Department, LeaveApplication, PendingJobEdit } from '../types';
-import { Building2, FileText, Users, Users2, BarChart3, Plus, Trash2, Edit2, Search, Filter, UserCheck, Calendar, CalendarClock, Download, Upload, FolderPlus, X, Eye, FileSpreadsheet, KeyRound, History, RotateCcw, Recycle, ListChecks, FileDown, MapPin, LayoutGrid, Navigation, LogIn, LogOut, Bell, Route, ShieldCheck, Wallet, Contact, Lock, Unlock, Mail, CheckCircle2, XCircle, Clock3, ShieldAlert, Copy, Eraser } from 'lucide-react';
+import { Building2, FileText, Users, Users2, BarChart3, Plus, Trash2, Edit2, Search, Filter, UserCheck, Calendar, CalendarClock, Download, Upload, FolderPlus, X, Eye, FileSpreadsheet, KeyRound, History, RotateCcw, Recycle, ListChecks, FileDown, MapPin, LayoutGrid, Navigation, LogIn, LogOut, Bell, Route, ShieldCheck, Wallet, Contact, Lock, Unlock, Mail, CheckCircle2, XCircle, Clock3, ShieldAlert, Copy, Eraser, Loader2, Truck } from 'lucide-react';
 import LocationMapPicker from './LocationMapPicker';
 import { NoticeManager } from './NoticeManager';
 import { EmployeesPanel } from './EmployeesPanel';
@@ -33,6 +33,8 @@ import { DocumentVaultPanel } from './DocumentVaultPanel';
 import { ServerProfilesPanel } from './ServerProfilesPanel';
 import { AdminDashboard } from './AdminDashboard';
 import { BudgetSubmissionReport } from './BudgetSubmissionReport';
+import { MprDispatchMaterial } from './MprDispatchMaterial';
+import { MdStatusChip, MdTimelinePopup, mdStatusLabel } from './MprDispatchShared';
 import { ProgressOverlay, useLongTask, xhrJson } from './ProgressOverlay';
 import { MeasurementSheet } from './MeasurementSheet';
 import { Spinner } from './Spinner';
@@ -144,7 +146,7 @@ const reportColumnText = (ent: Entry, key: ReportColumnFilterKey): string => {
 // Every column that has the menu. Values are the text shown in the cell.
 type ReportMenuKey =
   | 'job_no' | 'job_name' | 'project_name' | 'mpr_no' | 'item_name' | 'specification' | 'qty'
-  | 'delivery_date' | 'rate' | 'amount' | 'entry_date' | 'job_duration' | 'category'
+  | 'delivery_date' | 'md_status' | 'rate' | 'amount' | 'entry_date' | 'job_duration' | 'category'
   | 'sub1' | 'sub2' | 'sub3' | 'logged_by' | 'budget';
 // Columns the user can hide/show from the "Columns" button. Sub-1/2/3 start hidden
 // (the Category column already shows the path); the rest start shown.
@@ -160,9 +162,9 @@ const REPORT_HIDDEN_DEFAULT: string[] = ['sub1', 'sub2', 'sub3'];
 const REPORT_HIDDEN_STORAGE_KEY = 'credence_report_hidden_cols';
 // Relative widths of every column, in table order (shares of whatever is visible).
 const REPORT_COL_WIDTHS: { key: string; w: number }[] = [
-  { key: 'sl', w: 2.34 }, { key: 'job_no', w: 6.33 }, { key: 'job_name', w: 6.33 }, { key: 'project_name', w: 7.43 },
+  { key: 'pick', w: 1.9 }, { key: 'sl', w: 2.34 }, { key: 'job_no', w: 6.33 }, { key: 'job_name', w: 6.33 }, { key: 'project_name', w: 7.43 },
   { key: 'mpr_no', w: 6.6 }, { key: 'item_name', w: 8.94 }, { key: 'specification', w: 6.33 }, { key: 'qty', w: 4.68 },
-  { key: 'delivery_date', w: 7.7 }, { key: 'rate', w: 4.4 }, { key: 'amount', w: 5.5 }, { key: 'entry_date', w: 5.5 },
+  { key: 'delivery_date', w: 7.7 }, { key: 'md_status', w: 6.2 }, { key: 'rate', w: 4.4 }, { key: 'amount', w: 5.5 }, { key: 'entry_date', w: 5.5 },
   { key: 'job_duration', w: 4.68 }, { key: 'category', w: 6.19 }, { key: 'sub1', w: 5.5 }, { key: 'sub2', w: 5.5 },
   { key: 'sub3', w: 5.5 }, { key: 'logged_by', w: 4.81 }, { key: 'budget', w: 5.36 }, { key: 'actions', w: 6.88 }
 ];
@@ -178,6 +180,8 @@ const reportCellValue = (ent: Entry, key: ReportMenuKey, subsShown: boolean): st
     case 'specification': return ent.specification || '';
     case 'qty': return reportQty(ent);
     case 'delivery_date': return formatDate(ent.delivery_date);
+    // Dispatch / receive status (Dispatch Material, MprDispatchRoutes.ts).
+    case 'md_status': return mdStatusLabel(ent.md_status, ent.md_queued_at);
     case 'rate': return ent.matched_rate != null ? money2(Number(ent.matched_rate)) : '';
     case 'amount': return ent.matched_rate != null ? money2(Number(ent.computed_amount ?? 0)) : '';
     case 'entry_date': return formatDate(ent.entry_date);
@@ -251,19 +255,27 @@ const reportEntryPasses = (ent: Entry, c: ReportFilterCtx, except?: ReportMenuKe
 const ReportRow = React.memo(function ReportRow({
   ent,
   onOpenHistory,
+  onOpenDelivery,
   onDelete,
   onEdit,
   onPermanentDelete,
   can,
   deletingEntryId,
   sl,
-  hidden
+  hidden,
+  picked,
+  onPick
 }: {
   ent: Entry;
   sl: number;
+  // Purchase (Reports layer "Dispatch Material"): tick rows to send to Dispatch Material.
+  picked?: boolean;
+  onPick?: (entryId: number) => void;
   // Optional columns turned off with the "Columns" button.
   hidden: ReadonlySet<string>;
   onOpenHistory: (entryId: number) => void;
+  // The row's dispatch / receive timeline.
+  onOpenDelivery: (entryId: number) => void;
   onDelete: (entryId: number) => void;
   onEdit: (ent: Entry) => void;
   onPermanentDelete: (ent: Entry) => void;
@@ -276,7 +288,16 @@ const ReportRow = React.memo(function ReportRow({
   // With Sub-1/2/3 columns on, the Category cell keeps just the Head so nothing shows twice.
   const categoryPath = (subsShown ? [ent.category_head] : [ent.category_head, ent.category_sub1, ent.category_sub2, ent.category_sub3]).filter(Boolean);
   return (
-    <tr className="odd:bg-white even:bg-slate-50/70 hover:bg-blue-50/50 transition-colors">
+    <tr className={`${picked ? 'bg-sky-50' : 'odd:bg-white even:bg-slate-50/70'} hover:bg-blue-50/50 transition-colors`}>
+      {onPick && (
+        <td className="px-1 py-1.5 border border-slate-200 align-top text-center">
+          {ent.md_queued_at || ent.md_status === 'received' ? (
+            <span className="text-[9px] text-slate-400" title={ent.md_status === 'received' ? 'Received in full' : 'Already in Dispatch Material'}>✓</span>
+          ) : (
+            <input type="checkbox" checked={!!picked} onChange={() => onPick(ent.id)} aria-label={`Tick ${ent.mpr_no} ${ent.item_name}`} />
+          )}
+        </td>
+      )}
       <td className="px-1.5 py-1.5 border border-slate-200 align-top text-right text-slate-500 tabular-nums">{sl}.</td>
       <td className="px-1.5 py-1.5 border border-slate-200 align-top font-semibold text-blue-600 truncate" title={ent.job_no}>{ent.job_no}</td>
       <td className="px-1.5 py-1.5 border border-slate-200 align-top font-medium text-slate-900" title={ent.job_name}><div className="line-clamp-2 break-words">{ent.job_name}</div></td>
@@ -295,6 +316,16 @@ const ReportRow = React.memo(function ReportRow({
         )}
       </td>
       <td className="px-1.5 py-1.5 border border-slate-200 align-top whitespace-nowrap text-slate-700">{formatDate(ent.delivery_date)}</td>
+      <td className="px-1.5 py-1.5 border border-slate-200 align-top">
+        <button type="button" onClick={() => onOpenDelivery(ent.id)} className="text-left" title="Dispatch / receive history">
+          <MdStatusChip status={ent.md_status} queued={ent.md_queued_at} />
+          {ent.md_status && ent.md_status !== 'pending' && (
+            <div className="text-[10px] text-slate-500 tabular-nums mt-0.5">
+              Sent {Number(ent.md_dispatched_qty || 0)} · Got {Number(ent.md_received_qty || 0)}
+            </div>
+          )}
+        </button>
+      </td>
       <td className="px-1.5 py-1.5 border border-slate-200 align-top text-right tabular-nums whitespace-nowrap">
         {ent.matched_rate != null ? (
           <span className="text-slate-900">{Number(ent.matched_rate).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
@@ -603,6 +634,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // gates Self Service -> Timesheet / Leave Application / My Leave. Employee
   // Directory has no such toggle; every account keeps seeing it.
   const [timesheetAccessEnabled, setTimesheetAccessEnabled] = useState(false);
+  // PEPM Operation -> Material Receive (MprDispatchRoutes.ts) — off by default.
+  const [materialReceiveEnabled, setMaterialReceiveEnabled] = useState(false);
   const [leaveApplicationAccessEnabled, setLeaveApplicationAccessEnabled] = useState(false);
   const [myLeaveAccessEnabled, setMyLeaveAccessEnabled] = useState(false);
   const [savingModules, setSavingModules] = useState(false);
@@ -625,6 +658,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     setConveyanceClaimAccessEnabled(!!u.can_view_conveyance_claims);
     setBudgetModuleAccessEnabled(u.can_view_budget_module !== false);
     setTimesheetAccessEnabled(!!u.can_view_timesheet);
+    setMaterialReceiveEnabled(!!u.can_receive_material);
     setLeaveApplicationAccessEnabled(!!u.can_view_leave_application);
     setMyLeaveAccessEnabled(!!u.can_view_my_leave);
     // Permission layers — one Set per module in PERMISSION_LAYER_MODULES.
@@ -963,6 +997,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         });
         const bmaData = await bmaRes.json();
         if (!bmaRes.ok) throw new Error(bmaData.error || 'Failed to update Budget/Jobs access');
+      }
+
+      if (materialReceiveEnabled !== !!managingModulesFor.can_receive_material) {
+        const mrRes = await fetch(apiUrl(`/api/users/${managingModulesFor.id}/material-receive-access`), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ can_receive_material: materialReceiveEnabled })
+        });
+        const mrData = await mrRes.json();
+        if (!mrRes.ok) throw new Error(mrData.error || 'Failed to update Material Receive access');
       }
 
       // Also save the Timesheet / Leave Application / My Leave access toggles,
@@ -3107,6 +3151,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [reportExcluded, setReportExcluded] = useState<Partial<Record<ReportMenuKey, string[]>>>({});
   const deferredReportExcluded = React.useDeferredValue(reportExcluded);
   const [reportSort, setReportSort] = useState<{ key: ReportMenuKey; dir: 'asc' | 'desc' } | null>(null);
+  // MPR Entries report: rows still owed (default), rows received in full, or all.
+  const [reportDeliveryView, setReportDeliveryView] = useState<'open' | 'received' | 'all'>('open');
+  const [reportPicked, setReportPicked] = useState<Set<number>>(new Set());
+  const [sendingToDispatch, setSendingToDispatch] = useState(false);
+  const toggleReportPick = useStableCallback((id: number) =>
+    setReportPicked((cur) => {
+      const n = new Set(cur);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    })
+  );
   // Optional columns turned off ("Columns" button) — remembered on this device.
   const [reportHidden, setReportHidden] = useState<string[]>(() => {
     try {
@@ -3145,11 +3201,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   });
   const filteredEntries = React.useMemo(() => {
     const ctx = buildReportFilterCtx(deferredReportColFilters, deferredFilterJobNo, deferredReportExcluded);
-    const list = entries.filter((ent) => reportEntryPasses(ent, ctx));
+    // A row the project has received in full moves to "Received" (Dispatch Material).
+    const list = entries.filter(
+      (ent) =>
+        (reportDeliveryView === 'all' || (reportDeliveryView === 'received') === (ent.md_status === 'received')) && reportEntryPasses(ent, ctx)
+    );
     if (!reportSort) return list;
     return list.sort((a, b) => compareReportEntries(a, b, reportSort.key, reportSort.dir, reportSubsShown));
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entries, deferredReportColFilters, deferredReportExcluded, reportSort, reportSubsShown, deferredFilterJobNo, filterProjectId, filterStartDate, filterEndDate, filterBudgetId]);
+  }, [entries, deferredReportColFilters, deferredReportExcluded, reportSort, reportSubsShown, deferredFilterJobNo, filterProjectId, filterStartDate, filterEndDate, filterBudgetId, reportDeliveryView]);
   // What a column's menu offers: its values among the rows every OTHER filter leaves.
   const reportMenuValues = (key: ReportMenuKey): string[] => {
     const ctx = buildReportFilterCtx(reportColFilters, filterJobNo, reportExcluded);
@@ -3191,6 +3251,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   }, [filteredEntries]);
 
   const stableOpenEntryHistory = useStableCallback(openEntryHistory);
+  // Delivery Status cell -> that row's dispatch / receive timeline.
+  const [deliveryTimelineId, setDeliveryTimelineId] = useState<number | null>(null);
+  const stableOpenDelivery = useStableCallback((id: number) => setDeliveryTimelineId(id));
   const stableDeleteEntry = useStableCallback(handleDeleteEntry);
   const stableEditReportEntry = useStableCallback(openReportEdit);
   const stablePermanentDeleteReportEntry = useStableCallback(handlePermanentDeleteReportEntry);
@@ -3209,7 +3272,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       trash: reportLayer('delete_trash'),
       permanent: reportLayer('permanent_delete'),
       // Budget Submission Status — its own tick in Module Access -> Reports.
-      submission: reportLayer('submission_status')
+      submission: reportLayer('submission_status'),
+      // Dispatch Material (Purchase) — its own tick too.
+      dispatch: reportLayer('dispatch_material')
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [user.role, user.module_permission_layers]
@@ -3255,7 +3320,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // blank when there's no match, which is accurate (that import data doesn't exist).
   // Reports tab: the MPR Entries report or the per-Project Budget
   // Submission Status (BudgetSubmissionReport).
-  const [reportView, setReportView] = useState<'entries' | 'submission'>('entries');
+  const [reportViewPicked, setReportView] = useState<'entries' | 'submission' | 'dispatch'>('entries');
+  // The reports this account may open, in page order; a view it can't open
+  // falls back to the first one it can.
+  const reportViews = ([
+    ['entries', 'MPR Entries Report', reportCan.read],
+    ['submission', 'Budget Submission Status', reportCan.submission],
+    ['dispatch', 'Dispatch Material', reportCan.dispatch]
+  ] as const).filter(([, , ok]) => ok);
+  const reportView = reportViews.some(([k]) => k === reportViewPicked) ? reportViewPicked : reportViews[0]?.[0] || 'entries';
 
   // A header cell: the label plus its sort/filter menu.
   const reportHeaderCell = (key: ReportMenuKey, label: string, align: 'left' | 'right' | 'center') => (
@@ -3280,7 +3353,36 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     </th>
   );
   // Columns on screen, in order — drives the widths and the footer spans.
-  const reportVisibleCols = REPORT_COL_WIDTHS.filter((c) => !reportHiddenSet.has(c.key));
+  const reportVisibleCols = REPORT_COL_WIDTHS.filter((c) => !reportHiddenSet.has(c.key) && (c.key !== 'pick' || reportCan.dispatch));
+  // Purchase: rows ticked in the report, to send to Dispatch Material.
+  const pickCol = reportCan.dispatch ? 1 : 0;
+  const pickableIds = pagedEntries.filter((e) => !e.md_queued_at && e.md_status !== 'received').map((e) => e.id);
+  const allPagePicked = pickableIds.length > 0 && pickableIds.every((id) => reportPicked.has(id));
+  const sendToDispatch = async () => {
+    const ids = [...reportPicked];
+    if (!ids.length) return;
+    setSendingToDispatch(true);
+    try {
+      const res = await fetch(apiUrl('/api/mpr-dispatch/queue'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ entryIds: ids })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not send to Dispatch Material');
+      // Re-read so only the rows the server took show as sent.
+      void fetchAllData();
+      setReportPicked(new Set());
+      setMessage({
+        type: 'success',
+        text: `${data.added} MPR row${data.added === 1 ? '' : 's'} sent to Dispatch Material.${data.already ? ` ${data.already} already there.` : ''}${data.received ? ` ${data.received} already received.` : ''}`
+      });
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message });
+    } finally {
+      setSendingToDispatch(false);
+    }
+  };
   const reportWidthTotal = reportVisibleCols.reduce((n, c) => n + c.w, 0);
 
   const handleDownloadExcel = () => {
@@ -3293,6 +3395,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       Specification: ent.specification || '',
       Qty: reportQty(ent),
       'Delivery Date': formatDate(ent.delivery_date),
+      'Delivery Status': mdStatusLabel(ent.md_status),
+      'Qty Sent': Number(ent.md_dispatched_qty || 0),
+      'Qty Received': Number(ent.md_received_qty || 0),
+      'Received On': ent.md_received_date ? formatDate(ent.md_received_date) : '',
       Rate: ent.matched_rate != null ? Number(ent.matched_rate) : '',
       Amount: ent.matched_rate != null ? Number(ent.computed_amount ?? 0) : '',
       'Entry Date': ent.entry_date,
@@ -3397,12 +3503,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       )}
 
       {/* TAB 1: REPORTS */}
-      {activeTab === 'reports' && reportCan.read && reportCan.submission && (
-        <div className="flex items-center gap-1.5 rounded-full bg-slate-100 p-1.5 text-xs font-semibold w-fit mb-6">
-          {([
-            ['entries', 'MPR Entries Report'],
-            ['submission', 'Budget Submission Status']
-          ] as const).map(([key, label]) => (
+      {activeTab === 'reports' && reportViews.length > 1 && (
+        <div className="flex items-center gap-1.5 rounded-full bg-slate-100 p-1.5 text-xs font-semibold w-fit mb-6 max-w-full overflow-x-auto">
+          {reportViews.map(([key, label]) => (
             <button
               key={key}
               type="button"
@@ -3415,7 +3518,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         </div>
       )}
 
-      {activeTab === 'reports' && !reportCan.read && !reportCan.submission && (
+      {activeTab === 'reports' && reportViews.length === 0 && (
         <div className="bg-white border border-slate-200 rounded-2xl p-10 text-center text-sm text-slate-500 shadow-sm">
           You don't have Read access to Reports. Ask your Superadmin to tick "Read Only" for Reports in Module Access.
         </div>
@@ -3423,11 +3526,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
 
       {/* Each report shows only with its own tick: MPR Entries needs Read Only,
           Budget Submission Status needs Budget Submission Status. */}
-      {activeTab === 'reports' && reportCan.submission && (reportView === 'submission' || !reportCan.read) && (
+      {activeTab === 'reports' && reportView === 'submission' && (
         <BudgetSubmissionReport token={token} budgets={budgets} />
       )}
 
-      {activeTab === 'reports' && reportCan.read && (reportView === 'entries' || !reportCan.submission) && (
+      {activeTab === 'reports' && reportView === 'dispatch' && <MprDispatchMaterial token={token} />}
+
+      {activeTab === 'reports' && reportCan.read && reportView === 'entries' && (
         <div className="space-y-6">
           {/* Filters Bar */}
           <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
@@ -3509,12 +3614,38 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
 
           {/* Entries Report Table */}
           <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-            <div className="p-6 border-b border-slate-200 flex justify-between items-center">
+            <div className="p-6 border-b border-slate-200 flex justify-between items-center gap-3 flex-wrap">
               <div>
                 <h3 className="text-lg font-bold text-slate-900">All MPR Entries Report</h3>
                 <p className="text-xs text-slate-500">Showing {filteredEntries.length} matching records</p>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+              {/* Rows the project has received in full move out to "Received". */}
+              <div className="inline-flex rounded-xl bg-slate-100 p-1" role="group" aria-label="Delivery">
+                {([['open', 'Open'], ['received', 'Received'], ['all', 'All']] as const).map(([k, label]) => (
+                  <button
+                    key={k}
+                    type="button"
+                    onClick={() => setReportDeliveryView(k)}
+                    title={k === 'open' ? 'Rows not yet fully received by the project' : k === 'received' ? 'Rows the project has received in full' : 'Every row'}
+                    className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold ${reportDeliveryView === k ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600'}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {reportCan.dispatch && (
+                <button
+                  type="button"
+                  onClick={() => void sendToDispatch()}
+                  disabled={!reportPicked.size || sendingToDispatch}
+                  title="Tick MPR rows below (filter first), then send them to Dispatch Material"
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {sendingToDispatch ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Truck className="w-3.5 h-3.5" />}
+                  Send to Dispatch{reportPicked.size ? ` (${reportPicked.size})` : ''}
+                </button>
+              )}
               <ColumnToggleMenu plain options={REPORT_OPTIONAL_COLS} hidden={reportHidden} onChange={changeReportHidden} />
               <button
                 onClick={handleDownloadExcel}
@@ -3536,6 +3667,27 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 </colgroup>
                 <thead className="sticky top-0 z-10 bg-blue-50">
                   <tr>
+                    {pickCol > 0 && (
+                      <th className="px-1 py-2 border border-slate-200 align-bottom text-center">
+                        <input
+                          type="checkbox"
+                          checked={allPagePicked}
+                          disabled={!pickableIds.length}
+                          onChange={() =>
+                            setReportPicked((cur) => {
+                              const n = new Set(cur);
+                              for (const id of pickableIds) {
+                                if (allPagePicked) n.delete(id);
+                                else n.add(id);
+                              }
+                              return n;
+                            })
+                          }
+                          aria-label={allPagePicked ? 'Untick this page' : 'Tick every row on this page'}
+                          title={allPagePicked ? 'Untick this page' : 'Tick every row on this page'}
+                        />
+                      </th>
+                    )}
                     <th className="px-1.5 py-2 border border-slate-200 font-semibold text-slate-700 align-bottom text-right">Sl</th>
                     {reportHeaderCell('job_no', 'Job No', 'left')}
                     {reportHeaderCell('job_name', 'Job Name', 'left')}
@@ -3545,6 +3697,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                     {reportHeaderCell('specification', 'Specification', 'left')}
                     {reportHeaderCell('qty', 'Qty', 'right')}
                     {reportHeaderCell('delivery_date', 'Delivery Date', 'left')}
+                    {reportHeaderCell('md_status', 'Delivery Status', 'left')}
                     {reportHeaderCell('rate', 'Rate', 'right')}
                     {reportHeaderCell('amount', 'Amount', 'right')}
                     {reportHeaderCell('entry_date', 'Entry Date', 'left')}
@@ -3558,6 +3711,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                     <th className="px-1.5 py-2 border border-slate-200 font-semibold text-slate-700 align-bottom text-center">Actions</th>
                   </tr>
                   <tr>
+                    {pickCol > 0 && <th className="px-1 py-1 border border-slate-200 bg-white"></th>}
                     <th className="px-1.5 py-1 border border-slate-200 bg-white"></th>
                     {reportFilterInput('job_no', 'Job No')}
                     {reportFilterInput('job_name', 'Job Name')}
@@ -3579,6 +3733,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                         <input type="date" aria-label="Delivery Date to" title="To" value={reportColFilters.delivery_to} onChange={(e) => setReportColFilter('delivery_to', e.target.value)} className="w-full min-w-0 px-1.5 py-1 bg-white border border-slate-300 rounded text-slate-700 text-[10px] font-normal focus:ring-1 focus:ring-blue-600 focus:border-blue-600 focus:outline-none placeholder-slate-400" />
                       </div>
                     </th>
+                    <th className="px-1.5 py-1 border border-slate-200 bg-white text-[10px] font-normal text-slate-400">Use ⋮ to show / hide</th>
                     {reportFilterInput('rate', 'Rate')}
                     {reportFilterInput('amount', 'Amount')}
                     {reportFilterInput('entry_date', 'Entry Date')}
@@ -3612,12 +3767,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                         sl={(reportPage - 1) * reportPageSize + i + 1}
                         ent={ent}
                         onOpenHistory={stableOpenEntryHistory}
+                        onOpenDelivery={stableOpenDelivery}
                         onDelete={stableDeleteEntry}
                         onEdit={stableEditReportEntry}
                         onPermanentDelete={stablePermanentDeleteReportEntry}
                         can={reportCan}
                         deletingEntryId={deletingEntryId}
                         hidden={reportHiddenSet}
+                        picked={reportPicked.has(ent.id)}
+                        onPick={reportCan.dispatch ? toggleReportPick : undefined}
                       />
                     ))
                   )}
@@ -3625,13 +3783,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 {filteredEntries.length > 0 && (
                   <tfoot className="sticky bottom-0 bg-blue-50 font-semibold text-slate-800">
                     <tr>
-                      <td colSpan={7} className="px-2 py-2 border border-slate-200">
+                      <td colSpan={7 + pickCol} className="px-2 py-2 border border-slate-200">
                         Total <span className="font-normal text-slate-500">({filteredEntries.length} matching)</span>
                       </td>
                       <td className="px-2 py-2 border border-slate-200 text-right tabular-nums">{reportTotals.qty.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
-                      <td colSpan={2} className="px-2 py-2 border border-slate-200"></td>
+                      {/* Delivery Date, Delivery Status, Rate */}
+                      <td colSpan={3} className="px-2 py-2 border border-slate-200"></td>
                       <td className="px-2 py-2 border border-slate-200 text-right tabular-nums">{reportTotals.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                      <td colSpan={Math.max(1, reportVisibleCols.length - 11)} className="px-2 py-2 border border-slate-200"></td>
+                      <td colSpan={Math.max(1, reportVisibleCols.length - 12 - pickCol)} className="px-2 py-2 border border-slate-200"></td>
                     </tr>
                   </tfoot>
                 )}
@@ -7354,6 +7513,28 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   />
                 </button>
               </label>
+              <label className="flex items-center justify-between gap-3 p-3.5 mb-3 bg-purple-50 border border-purple-200 rounded-xl cursor-pointer">
+                <span>
+                  <span className="text-sm font-semibold text-slate-900 block">Also allow Material Receive</span>
+                  <span className="text-[11px] text-slate-500">
+                    PEPM → Material Receive: confirm material Purchase sent to the projects this account holds (Manage Projects). Off by default.
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setMaterialReceiveEnabled((v) => !v)}
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${
+                    materialReceiveEnabled ? 'bg-emerald-500' : 'bg-slate-300'
+                  }`}
+                  title={materialReceiveEnabled ? 'On — click to turn off' : 'Off — click to turn on'}
+                >
+                  <span
+                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
+                      materialReceiveEnabled ? 'translate-x-[18px]' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </label>
               <label
                 className="flex items-center justify-between gap-3 p-3.5 mb-3 bg-sky-50 border border-sky-200 rounded-xl cursor-pointer"
               >
@@ -7892,6 +8073,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       )}
 
       <ProgressOverlay state={longTask.state} />
+      {deliveryTimelineId !== null && <MdTimelinePopup token={token} entryId={deliveryTimelineId} onClose={() => setDeliveryTimelineId(null)} />}
 
       {/* Budget Submissions modal — every user who has Final Submitted this budget,
           with a manual Unlock per user. See openSubmissionsModal/handleUnlockSubmission

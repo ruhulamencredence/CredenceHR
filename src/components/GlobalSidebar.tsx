@@ -5,7 +5,7 @@ import {
   BarChart3, Upload, History, Recycle, Navigation, Bell, ShieldCheck,
   Contact, Calendar, Clock, Fingerprint, Banknote, Package, LayoutDashboard, Server, MessageSquare,
   ChevronsLeft, ChevronsRight, ShieldAlert, Search,
-  Target, UserPlus, Gavel, FolderLock, Sparkles, Activity, Ruler,
+  Target, UserPlus, Gavel, FolderLock, Sparkles, Activity, Ruler, PackageCheck,
 } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { User, AdminModuleKey } from '../types';
@@ -53,7 +53,7 @@ interface GlobalSidebarProps {
   onGoToUserClaims: (target: 'movementClaims' | 'conveyanceBill') => void;
   // Everyday employee self-service items — not Admin-gated, shown to every
   // account regardless of role/module access.
-  onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'myLeave' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory') => void;
+  onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'myLeave' | 'leaveApprovals' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'materialReceive') => void;
   // Admin Panel's own Movement Claims / Conveyance Bill Claim review tabs —
   // separate feature from onGoToUserClaims above, gated by module_permissions
   // like every other Admin Panel module.
@@ -219,6 +219,11 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     if (user.can_job_edit) {
       jobEntryGroup.push({ key: 'jobEdit', label: 'Job Edits', icon: Edit2, onClick: () => onGoToJobsTab('jobEdit') });
     }
+  }
+  // Material Receive — material Purchase sent to this account's projects
+  // (users.can_receive_material, off by default).
+  if (user.role === 'superadmin' || !!user.can_receive_material) {
+    jobEntryGroup.push({ key: 'materialReceive', label: 'Material Receive', icon: PackageCheck, onClick: () => onGoToSelfServiceTab('materialReceive') });
   }
 
   // "Self Service" — everyday employee items. Employee Directory stays

@@ -82,6 +82,15 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
     if (alert.type === 'leave_application' && onOpenLeaveApplication) {
       onOpenLeaveApplication();
     }
+    // Material on its way -> Material Receive (App.tsx); a short receipt ->
+    // Purchase's Dispatch Material (Admin Panel -> Reports).
+    if (alert.type === 'mpr_dispatch') {
+      window.dispatchEvent(
+        alert.title === 'Material dispatched'
+          ? new CustomEvent('credence:open-self-service', { detail: 'materialReceive' })
+          : new CustomEvent('credence:open-admin-module', { detail: 'reports' })
+      );
+    }
   };
 
   return (

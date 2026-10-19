@@ -163,7 +163,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
   app.get("/api/users", authenticateToken, requireAdmin, requireModule("users"), async (req: any, res) => {
     try {
       const users = await queryDB(
-        "SELECT id, name, email, username, role, created_at, last_login_lat, last_login_lng, last_login_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, can_grant_module_access, attendance_project_id FROM users ORDER BY created_at DESC"
+        "SELECT id, name, email, username, role, created_at, last_login_lat, last_login_lng, last_login_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, can_receive_material, can_grant_module_access, attendance_project_id FROM users ORDER BY created_at DESC"
       );
       // Attach each Admin's module_permissions so the Superadmin's "Module Access"
       // UI has them without a separate round trip per row. Only role='admin' rows
@@ -225,6 +225,7 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
         can_view_timesheet: u.role === "superadmin" ? true : !!Number(u.can_view_timesheet),
         can_view_leave_application: u.role === "superadmin" ? true : !!Number(u.can_view_leave_application),
         can_view_my_leave: u.role === "superadmin" ? true : !!Number(u.can_view_my_leave),
+        can_receive_material: u.role === "superadmin" ? true : !!Number(u.can_receive_material || 0),
         can_grant_module_access: u.role === "admin" ? !!Number(u.can_grant_module_access) : false,
         module_permissions: (u.role === "admin" || u.role === "user") ? (modulesByUser.get(u.id) || []) : [],
         module_permission_layers: (u.role === "admin" || u.role === "user") ? (layersByUser.get(u.id) || {}) : {}
@@ -770,6 +771,24 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
 
       await queryDB("UPDATE users SET can_view_budget_module = ? WHERE id = ?", [canView ? 1 : 0, id]);
       res.json({ success: true, can_view_budget_module: canView });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Superadmin-only: PEPM Operation -> Material Receive (MprDispatchRoutes.ts)
+  // — confirm material Purchase sent to this account's projects. OFF by default.
+  app.put("/api/users/:id/material-receive-access", authenticateToken, requireSuperAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const enabled = !!req.body?.can_receive_material;
+      const target: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);
+      if (target.length === 0) return res.status(404).json({ error: "User not found" });
+      if (target[0].role !== "admin" && target[0].role !== "user") {
+        return res.status(400).json({ error: "Material Receive access only applies to Admin and User accounts." });
+      }
+      await queryDB("UPDATE users SET can_receive_material = ? WHERE id = ?", [enabled ? 1 : 0, id]);
+      res.json({ success: true, can_receive_material: enabled });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

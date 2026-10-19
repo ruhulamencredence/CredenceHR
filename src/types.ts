@@ -76,7 +76,9 @@ export const MODULE_LAYER_OPTIONS: Partial<Record<AdminModuleKey, { key: Permiss
     { key: 'edit_add', label: 'Edit' },
     { key: 'delete_trash', label: 'Delete/Trash' },
     { key: 'permanent_delete', label: 'Permanent Delete' },
-    { key: 'submission_status', label: 'Budget Submission Status' }
+    { key: 'submission_status', label: 'Budget Submission Status' },
+    { key: 'dispatch_material', label: 'Dispatch Material (own)' },
+    { key: 'dispatch_all', label: 'Dispatch Material: see all' }
   ],
   // Employee Tracking -> Stay Report (how long at each place, day by day).
   tracking: [
@@ -525,6 +527,8 @@ export interface User {
   can_view_timesheet?: boolean;
   can_view_leave_application?: boolean;
   can_view_my_leave?: boolean;
+  // PEPM -> Material Receive (MprDispatchRoutes.ts) — off by default.
+  can_receive_material?: boolean;
 }
 
 // One custom Leave Category a Leave Manager has defined from Leave Manage ->
@@ -789,6 +793,14 @@ export interface Entry {
   // Null for older entries created before this column existed.
   requisitioned_qty?: number | string | null;
   delivery_date: string;
+  // Dispatch / receive (Dispatch Material, MprDispatchRoutes.ts): pending,
+  // partly_dispatched, dispatched, partly_received, received.
+  md_status?: string | null;
+  md_dispatched_qty?: number | string | null;
+  md_received_qty?: number | string | null;
+  md_received_date?: string | null;
+  // Sent to Dispatch Material by Purchase (null = not in it).
+  md_queued_at?: string | null;
   created_by?: number;
   project_name: string;
   job_no: string;
@@ -1349,7 +1361,7 @@ export interface Notice {
 // `type` stays a plain string on the server (not a DB enum) so more kinds can
 // be added later without a migration; 'leave_application' is the first one
 // wired up (Leave Application Approve/Reject notifies the applicant).
-export type AlertType = 'leave_application';
+export type AlertType = 'leave_application' | 'mpr_dispatch';
 
 export interface Alert {
   id: number;

@@ -37,6 +37,7 @@ import { registerDocumentVaultRoutes, ensureDocumentVaultSchema } from "./Docume
 import { Server as SocketIOServer } from "socket.io";
 import { ensureChatSchema, registerChatRoutes, setupChatSocket } from "./ChatRoutes";
 import { ensureMeasurementSchema, registerMeasurementRoutes } from "./MeasurementRoutes";
+import { ensureMprDispatchSchema, registerMprDispatchRoutes } from "./MprDispatchRoutes";
 import { memoryDb, queryMemoryDb, EMPLOYEE_BOOL_FIELDS } from "./memoryDbFallback";
 
 dotenv.config();
@@ -249,6 +250,8 @@ async function ensureSchemaMigrations() {
   await ensureDocumentVaultSchema(dbPool);
   // PEPM Management -> Measurement Sheet (MeasurementRoutes.ts).
   await ensureMeasurementSchema(dbPool);
+  // PEPM -> Dispatch Material / Material Receive (MprDispatchRoutes.ts).
+  await ensureMprDispatchSchema(dbPool);
 
   // Server Profiles (Admin Panel -> Servers, Superadmin-only) — table +
   // schema owned by ServerProfileRoutes.ts, only the call site lives here,
@@ -2126,7 +2129,10 @@ const TRACKING_DEFAULT_LAYERS = ["read", "stay_report"] as const;
 // — plus its own "Budget Submission Status" (the second report on that page),
 // which, like Permanent Delete, is never part of the no-saved-rows default:
 // only an account it's explicitly ticked for can open it.
-const REPORT_LAYER_KEYS = ["read", "edit_add", "delete_trash", "permanent_delete", "submission_status"] as const;
+// "dispatch_material" (Purchase sending material against MPR rows,
+// MprDispatchRoutes.ts) sees only the rows it sent there or dispatched;
+// "dispatch_all" sees everyone's. Both explicit-only, like submission_status.
+const REPORT_LAYER_KEYS = ["read", "edit_add", "delete_trash", "permanent_delete", "submission_status", "dispatch_material", "dispatch_all"] as const;
 // PEPM -> Measurement Sheet: "read" = open and export sheets; "edit_add" =
 // upload drawings and change sheets; "delete_trash" = delete a sheet;
 // "material_budget" = the Material Budget tab. With no saved layers an
@@ -3490,6 +3496,10 @@ async function startServer() {
   // BOQ measurement sheet (MeasurementRoutes.ts).
   registerMeasurementRoutes(app, { authenticateToken, requireAdmin, requireModuleLayer, hasModuleLayer, queryDB });
 
+  // PEPM -> Dispatch Material (Purchase) and Material Receive (the project)
+  // close the MPR cycle (MprDispatchRoutes.ts).
+  registerMprDispatchRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer, queryDB, parseQtyNumber, toDateOnlyString, todayInDhaka, createAlert });
+
   // User Management (Admin Panel -> Users) — kept in their own file
   // (UserManagement.ts), same reasoning as profileRoutes.ts/holidayRoutes.ts/
   // Alerts.ts above.
@@ -3759,6 +3769,8 @@ async function startServer() {
           can_view_timesheet: user.role === "superadmin" ? true : !!Number(user.can_view_timesheet),
           can_view_leave_application: user.role === "superadmin" ? true : !!Number(user.can_view_leave_application),
           can_view_my_leave: user.role === "superadmin" ? true : !!Number(user.can_view_my_leave),
+          // PEPM Operation -> Material Receive (MprDispatchRoutes.ts), off by default.
+          can_receive_material: user.role === "superadmin" ? true : !!Number(user.can_receive_material || 0),
           // Superadmin-granted, only ever meaningful for role='admin': can this
           // Admin ALSO set OTHER accounts' Module Access themselves (see the
           // ALTER TABLE above for the full explanation and its 'user'-target-only
@@ -3780,7 +3792,7 @@ async function startServer() {
   app.get("/api/auth/me", authenticateToken, async (req: any, res) => {
     try {
       const users = await queryDB(
-        "SELECT id, name, email, role, created_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, can_grant_module_access, attendance_project_id FROM users WHERE id = ?",
+        "SELECT id, name, email, role, created_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, can_receive_material, can_grant_module_access, attendance_project_id FROM users WHERE id = ?",
         [req.user.id]
       );
       if (users.length === 0) return res.status(404).json({ error: "User not found" });
@@ -3802,6 +3814,7 @@ async function startServer() {
         can_view_timesheet: u.role === "superadmin" ? true : !!Number(u.can_view_timesheet),
         can_view_leave_application: u.role === "superadmin" ? true : !!Number(u.can_view_leave_application),
         can_view_my_leave: u.role === "superadmin" ? true : !!Number(u.can_view_my_leave),
+        can_receive_material: u.role === "superadmin" ? true : !!Number(u.can_receive_material || 0),
         can_grant_module_access: u.role === "admin" ? !!Number(u.can_grant_module_access) : false,
         module_permissions: (u.role === "admin" || u.role === "user") ? await getAdminModules(u.id) : [],
         module_permission_layers: (u.role === "admin" || u.role === "user") ? await getAllModulePermissionLayers(u.id) : {}
