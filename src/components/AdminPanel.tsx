@@ -3331,13 +3331,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     if (!file) return;
 
     setMessage(null);
+    longTask.start('Reading the users file', `Reading ${file.name}…`);
     try {
       const buf = await file.arrayBuffer();
+      longTask.step(30, 'Opening the workbook…');
+      await new Promise((r) => setTimeout(r, 30)); // let the bar paint before the parse
       const workbook = XLSX.read(buf, { type: 'array', cellDates: true });
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
       const rawRows: any[] = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+      longTask.step(80, `Reading ${rawRows.length.toLocaleString()} rows…`);
 
       if (rawRows.length === 0) {
+        longTask.close();
         setMessage({ type: 'error', text: 'The Excel file has no data rows.' });
         return;
       }
@@ -3355,14 +3360,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       }).filter((r) => r.project_name || r.password);
 
       if (parsed.length === 0) {
+        longTask.close();
         setMessage({ type: 'error', text: 'Could not find "Project Name" / "Password" columns in that file.' });
         return;
       }
 
       setBulkRows(parsed);
       setBulkResult(null);
+      await longTask.finish();
       setMessage({ type: 'success', text: `Loaded ${parsed.length} row(s) from the Excel file — review below, then click Import Users.` });
     } catch (err: any) {
+      longTask.close();
       setMessage({ type: 'error', text: err.message || 'Failed to read the Excel file.' });
     }
   };
@@ -3380,6 +3388,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     setBulkImporting(true);
     setMessage(null);
     setBulkResult(null);
+    longTask.start('Importing users', `Adding ${rows.length.toLocaleString()} user${rows.length === 1 ? '' : 's'}…`);
+    longTask.creep(95, undefined, rows.length * 150);
     try {
       const res = await fetch(apiUrl('/api/users/bulk'), {
         method: 'POST',
@@ -3388,6 +3398,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Bulk import failed');
+      await longTask.finish();
 
       setBulkResult({ created: data.created, skipped: data.skipped });
       setMessage({
@@ -3400,6 +3411,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         fetchAllData();
       }
     } catch (err: any) {
+      longTask.close();
       setMessage({ type: 'error', text: err.message });
     } finally {
       setBulkImporting(false);
