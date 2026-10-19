@@ -59,6 +59,7 @@ export interface MdRow {
   receivedDate: string | null;
   // When Purchase sent it to Dispatch Material (MPR Entries report).
   queuedAt: string | null;
+  queuedBy: string;
   dispatches: MdDispatch[];
 }
 
