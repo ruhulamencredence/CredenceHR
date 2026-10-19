@@ -7,6 +7,8 @@
 //
 //   Project asks (an MPR row: entries)  ->  Purchase dispatches  ->  Project receives
 //
+// Purchase picks the rows to work on in the MPR Entries report (filter, tick,
+// "Send to Dispatch"); only those rows are in Dispatch Material.
 // Dispatch Material (Admin Panel -> PEPM Management -> Reports, after Budget
 // Submission Status): Purchase sends material against MPR rows, all of a row's
 // remaining Qty or part of it, with supplier / rate / P.O. / challan. Either on
@@ -97,7 +99,10 @@ export async function ensureMprDispatchSchema(dbPool: any): Promise<void> {
     ["md_dispatched_qty", "DECIMAL(14,2) NOT NULL DEFAULT 0"],
     ["md_received_qty", "DECIMAL(14,2) NOT NULL DEFAULT 0"],
     ["md_last_dispatch_date", "DATE NULL"],
-    ["md_received_date", "DATE NULL"]
+    ["md_received_date", "DATE NULL"],
+    // Sent to Dispatch Material from the MPR Entries report (when, by whom).
+    ["md_queued_at", "TIMESTAMP NULL DEFAULT NULL"],
+    ["md_queued_by", "INT NULL"]
   ];
   for (const [c, d] of cols) await run(`entries.${c}`, `ALTER TABLE entries ADD COLUMN ${c} ${d}`, ["ER_DUP_FIELDNAME"]);
   // Self Service switch: confirm material received for one's own projects.
@@ -221,7 +226,7 @@ export function registerMprDispatchRoutes(app: Express, deps: Deps) {
   // One MPR row as the Dispatch page shows it.
   const ROW_SQL = `
     SELECT e.id, e.entry_date, e.item_name, e.job_name, e.delivery_date, e.requisitioned_qty, e.project_id, e.created_by,
-      e.md_status, e.md_target_qty, e.md_dispatched_qty, e.md_received_qty, e.md_last_dispatch_date, e.md_received_date,
+      e.md_status, e.md_target_qty, e.md_dispatched_qty, e.md_received_qty, e.md_last_dispatch_date, e.md_received_date, e.md_queued_at,
       p.project_name, m.mpr_no, j.job_no, b.budget_name, u.name AS user_name,
       bi.specification, bi.unit, bi.req_qty
     FROM entries e
@@ -256,6 +261,7 @@ export function registerMprDispatchRoutes(app: Express, deps: Deps) {
       remaining: target === null ? null : Math.max(0, r2(target - covered)),
       lastDispatchDate: toDateOnlyString(r.md_last_dispatch_date),
       receivedDate: toDateOnlyString(r.md_received_date),
+      queuedAt: r.md_queued_at || null,
       dispatches
     };
   };
@@ -307,7 +313,8 @@ export function registerMprDispatchRoutes(app: Express, deps: Deps) {
     ...dispatchGate,
     handler(async (req, res) => {
       const view = ["open", "received", "all"].includes(String(req.query.view)) ? String(req.query.view) : "open";
-      let sql = ROW_SQL;
+      // Only rows Purchase sent here from the MPR Entries report.
+      let sql = `${ROW_SQL} AND e.md_queued_at IS NOT NULL`;
       if (view === "open") sql += " AND e.md_status <> 'received'";
       if (view === "received") sql += " AND e.md_status = 'received'";
       sql += " ORDER BY e.delivery_date ASC, p.project_name ASC, e.id ASC";
@@ -357,6 +364,10 @@ export function registerMprDispatchRoutes(app: Express, deps: Deps) {
         }
         if (rows[0].md_status === "received") {
           fail("This MPR row is already fully received.");
+          continue;
+        }
+        if (!rows[0].md_queued_at) {
+          fail("This MPR row isn't in Dispatch Material — send it there from the MPR Entries report first.");
           continue;
         }
         const ds = (await dispatchesFor([entryId])).get(entryId) || [];
@@ -428,6 +439,59 @@ export function registerMprDispatchRoutes(app: Express, deps: Deps) {
         }
       }
       res.status(201).json({ dispatched: clean.length });
+    })
+  );
+
+  // MPR Entries report -> "Send to Dispatch": these rows go to Dispatch Material.
+  app.post(
+    "/api/mpr-dispatch/queue",
+    ...dispatchGate,
+    handler(async (req, res) => {
+      const ids = [...new Set<number>((Array.isArray(req.body?.entryIds) ? req.body.entryIds : []).map(Number).filter((n: number) => n > 0))].slice(0, 2000);
+      if (!ids.length) throw bad("Tick at least one MPR row.");
+      const rows: any[] = (await queryDB(`${ROW_SQL} AND e.id IN (${ids.map(() => "?").join(",")})`, ids)) || [];
+      let added = 0,
+        already = 0,
+        done = 0;
+      for (const r of rows) {
+        if (r.md_status === "received") {
+          done++;
+          continue;
+        }
+        if (r.md_queued_at) {
+          already++;
+          continue;
+        }
+        await queryDB("UPDATE entries SET md_queued_at = NOW(), md_queued_by = ? WHERE id = ? AND md_queued_at IS NULL", [Number(req.user.id), Number(r.id)]);
+        await log(Number(r.id), null, "queue", null, "Sent to Dispatch Material", Number(req.user.id));
+        await refreshEntry(Number(r.id));
+        added++;
+      }
+      res.json({ added, already, received: done, missing: ids.length - rows.length });
+    })
+  );
+  // Back out of Dispatch Material — only while nothing has been sent on the row.
+  app.post(
+    "/api/mpr-dispatch/unqueue",
+    ...dispatchGate,
+    handler(async (req, res) => {
+      const ids = [...new Set<number>((Array.isArray(req.body?.entryIds) ? req.body.entryIds : []).map(Number).filter((n: number) => n > 0))].slice(0, 2000);
+      if (!ids.length) throw bad("Pick at least one MPR row.");
+      let removed = 0;
+      const kept: number[] = [];
+      for (const id of ids) {
+        const sent: any[] = (await queryDB("SELECT COUNT(*) AS n FROM mpr_dispatches WHERE entry_id = ? AND status <> 'cancelled'", [id])) || [];
+        if (Number(sent[0]?.n || 0) > 0) {
+          kept.push(id);
+          continue;
+        }
+        const r: any = await queryDB("UPDATE entries SET md_queued_at = NULL, md_queued_by = NULL WHERE id = ? AND md_queued_at IS NOT NULL", [id]);
+        if (Number(r?.affectedRows)) {
+          await log(id, null, "unqueue", null, "Taken out of Dispatch Material", Number(req.user.id));
+          removed++;
+        }
+      }
+      res.json({ removed, kept: kept.length });
     })
   );
 

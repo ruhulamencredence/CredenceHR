@@ -8,7 +8,7 @@
 // of MprDispatchRoutes.ts, the status chip and an MPR row's timeline popup.
 
 import React, { useEffect, useState } from 'react';
-import { History, Loader2, Truck, PackageCheck, XCircle, FileText } from 'lucide-react';
+import { History, Loader2, Truck, PackageCheck, XCircle, FileText, ListPlus, ListMinus } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { formatDate } from '../lib/formatDate';
 import { MailPopup as Popup } from './mail/MailPopup';
@@ -57,6 +57,8 @@ export interface MdRow {
   remaining: number | null;
   lastDispatchDate: string | null;
   receivedDate: string | null;
+  // When Purchase sent it to Dispatch Material (MPR Entries report).
+  queuedAt: string | null;
   dispatches: MdDispatch[];
 }
 
@@ -67,10 +69,13 @@ export const MD_STATUS: Record<MdStatus, { label: string; cls: string }> = {
   partly_received: { label: 'Partly received', cls: 'bg-violet-50 text-violet-700' },
   received: { label: 'Received', cls: 'bg-emerald-50 text-emerald-700' }
 };
-export const mdStatusLabel = (s: string | null | undefined) => MD_STATUS[(s || 'pending') as MdStatus]?.label || 'Not dispatched';
+// Not sent yet but already in Dispatch Material.
+const QUEUED = { label: 'In dispatch list', cls: 'bg-indigo-50 text-indigo-700' };
+export const mdStatusLabel = (s: string | null | undefined, queued?: unknown) =>
+  (s || 'pending') === 'pending' && queued ? QUEUED.label : MD_STATUS[(s || 'pending') as MdStatus]?.label || 'Not dispatched';
 
-export const MdStatusChip: React.FC<{ status: string | null | undefined }> = ({ status }) => {
-  const s = MD_STATUS[(status || 'pending') as MdStatus] || MD_STATUS.pending;
+export const MdStatusChip: React.FC<{ status: string | null | undefined; queued?: unknown }> = ({ status, queued }) => {
+  const s = (status || 'pending') === 'pending' && queued ? QUEUED : MD_STATUS[(status || 'pending') as MdStatus] || MD_STATUS.pending;
   return <span className={`inline-block whitespace-nowrap text-[10px] font-semibold px-2 py-0.5 rounded-full ${s.cls}`}>{s.label}</span>;
 };
 
@@ -91,7 +96,7 @@ export async function mdFetch<T>(token: string, path: string, method = 'GET', bo
 }
 
 interface TimelineEvent {
-  action: 'request' | 'dispatch' | 'receive' | 'cancel';
+  action: 'request' | 'queue' | 'unqueue' | 'dispatch' | 'receive' | 'cancel';
   qty: number | null;
   detail: string;
   at: string | null;
@@ -99,6 +104,8 @@ interface TimelineEvent {
 }
 const EVENT: Record<TimelineEvent['action'], { label: string; icon: React.ComponentType<{ className?: string }>; cls: string }> = {
   request: { label: 'Asked for', icon: FileText, cls: 'bg-slate-100 text-slate-600' },
+  queue: { label: 'Sent to Dispatch Material', icon: ListPlus, cls: 'bg-indigo-100 text-indigo-700' },
+  unqueue: { label: 'Taken out of Dispatch Material', icon: ListMinus, cls: 'bg-slate-100 text-slate-600' },
   dispatch: { label: 'Dispatched', icon: Truck, cls: 'bg-sky-100 text-sky-700' },
   receive: { label: 'Received', icon: PackageCheck, cls: 'bg-emerald-100 text-emerald-700' },
   cancel: { label: 'Dispatch cancelled', icon: XCircle, cls: 'bg-rose-100 text-rose-700' }
@@ -135,7 +142,7 @@ export const MdTimelinePopup: React.FC<{
               <div><div className="text-slate-500">Project</div><div className="font-semibold text-slate-800">{r.projectName}</div></div>
               <div><div className="text-slate-500">Asked for</div><div className="font-semibold text-slate-800">{qtyText(r.qty, r.unit)}</div></div>
               <div><div className="text-slate-500">Delivery date</div><div className="font-semibold text-slate-800">{r.deliveryDate ? formatDate(r.deliveryDate) : '—'}</div></div>
-              <div><div className="text-slate-500">Status</div><MdStatusChip status={r.status} /></div>
+              <div><div className="text-slate-500">Status</div><MdStatusChip status={r.status} queued={r.queuedAt} /></div>
               <div><div className="text-slate-500">Sent</div><div className="font-semibold text-slate-800">{qtyText(r.dispatchedQty, r.unit)}</div></div>
               <div><div className="text-slate-500">Received</div><div className="font-semibold text-slate-800">{qtyText(r.receivedQty, r.unit)}</div></div>
               <div><div className="text-slate-500">Left to send</div><div className="font-semibold text-slate-800">{qtyText(r.remaining, r.unit)}</div></div>

@@ -1081,6 +1081,8 @@ export interface Entry {
   md_dispatched_qty?: number | string | null;
   md_received_qty?: number | string | null;
   md_received_date?: string | null;
+  // Sent to Dispatch Material by Purchase (null = not in it).
+  md_queued_at?: string | null;
   created_by?: number;
   project_name: string;
   job_no: string;

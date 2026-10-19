@@ -9,7 +9,7 @@ import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../
 import { savePdfCrossPlatform } from '../lib/saveFile';
 import { EmailReportButton, emailReport, useCanEmailReports } from '../lib/reportEmail';
 import { Project, Branch, MprNumber, Entry, User, Budget, BudgetItem, BudgetSubmission, UserProjectPermission, EntryEditHistory, EntryPermanentDeleteLog, BulkUserRow, BulkUserResultItem, AdminModuleKey, ADMIN_MODULES, REPORTS_INSIGHTS_MODULES, DATA_IMPORT_MODULES, PermissionLayerKey, PERMISSION_LAYERS, PERMISSION_LAYER_MODULES, EXPLICIT_ONLY_LAYERS, layersFor, LeaveManageLayerKey, LEAVE_MANAGE_LAYERS, AttendanceRecord, ClaimsNavRequest, AdminNavRequest, Department, LeaveApplication, PendingJobEdit } from '../types';
-import { Building2, FileText, Users, Users2, BarChart3, Plus, Trash2, Edit2, Search, Filter, UserCheck, Calendar, CalendarClock, Download, Upload, FolderPlus, X, Eye, FileSpreadsheet, KeyRound, History, RotateCcw, Recycle, ListChecks, FileDown, MapPin, LayoutGrid, Navigation, LogIn, LogOut, Bell, Route, ShieldCheck, Wallet, Contact, Lock, Unlock, Mail, CheckCircle2, XCircle, Clock3, ShieldAlert, Copy, Eraser, LayoutTemplate } from 'lucide-react';
+import { Building2, FileText, Users, Users2, BarChart3, Plus, Trash2, Edit2, Search, Filter, UserCheck, Calendar, CalendarClock, Download, Upload, FolderPlus, X, Eye, FileSpreadsheet, KeyRound, History, RotateCcw, Recycle, ListChecks, FileDown, MapPin, LayoutGrid, Navigation, LogIn, LogOut, Bell, Route, ShieldCheck, Wallet, Contact, Lock, Unlock, Mail, CheckCircle2, XCircle, Clock3, ShieldAlert, Copy, Eraser, LayoutTemplate, Loader2, Truck } from 'lucide-react';
 import LocationMapPicker from './LocationMapPicker';
 import { NoticeManager } from './NoticeManager';
 import { EmployeesPanel } from './EmployeesPanel';
@@ -187,7 +187,7 @@ const REPORT_HIDDEN_DEFAULT: string[] = ['sub1', 'sub2', 'sub3'];
 const REPORT_HIDDEN_STORAGE_KEY = 'credence_report_hidden_cols';
 // Relative widths of every column, in table order (shares of whatever is visible).
 const REPORT_COL_WIDTHS: { key: string; w: number }[] = [
-  { key: 'sl', w: 2.34 }, { key: 'job_no', w: 6.33 }, { key: 'job_name', w: 6.33 }, { key: 'project_name', w: 7.43 },
+  { key: 'pick', w: 1.9 }, { key: 'sl', w: 2.34 }, { key: 'job_no', w: 6.33 }, { key: 'job_name', w: 6.33 }, { key: 'project_name', w: 7.43 },
   { key: 'mpr_no', w: 6.6 }, { key: 'item_name', w: 8.94 }, { key: 'specification', w: 6.33 }, { key: 'qty', w: 4.68 },
   { key: 'delivery_date', w: 7.7 }, { key: 'md_status', w: 6.2 }, { key: 'rate', w: 4.4 }, { key: 'amount', w: 5.5 }, { key: 'entry_date', w: 5.5 },
   { key: 'job_duration', w: 4.68 }, { key: 'category', w: 6.19 }, { key: 'sub1', w: 5.5 }, { key: 'sub2', w: 5.5 },
@@ -206,7 +206,7 @@ const reportCellValue = (ent: Entry, key: ReportMenuKey, subsShown: boolean): st
     case 'qty': return reportQty(ent);
     case 'delivery_date': return formatDate(ent.delivery_date);
     // Dispatch / receive status (Dispatch Material, MprDispatchRoutes.ts).
-    case 'md_status': return mdStatusLabel(ent.md_status);
+    case 'md_status': return mdStatusLabel(ent.md_status, ent.md_queued_at);
     case 'rate': return ent.matched_rate != null ? money2(Number(ent.matched_rate)) : '';
     case 'amount': return ent.matched_rate != null ? money2(Number(ent.computed_amount ?? 0)) : '';
     case 'entry_date': return formatDate(ent.entry_date);
@@ -287,10 +287,15 @@ const ReportRow = React.memo(function ReportRow({
   can,
   deletingEntryId,
   sl,
-  hidden
+  hidden,
+  picked,
+  onPick
 }: {
   ent: Entry;
   sl: number;
+  // Purchase (Reports layer "Dispatch Material"): tick rows to send to Dispatch Material.
+  picked?: boolean;
+  onPick?: (entryId: number) => void;
   // Optional columns turned off with the "Columns" button.
   hidden: ReadonlySet<string>;
   onOpenHistory: (entryId: number) => void;
@@ -308,7 +313,16 @@ const ReportRow = React.memo(function ReportRow({
   // With Sub-1/2/3 columns on, the Category cell keeps just the Head so nothing shows twice.
   const categoryPath = (subsShown ? [ent.category_head] : [ent.category_head, ent.category_sub1, ent.category_sub2, ent.category_sub3]).filter(Boolean);
   return (
-    <tr className="odd:bg-white even:bg-slate-50/70 hover:bg-blue-50/50 transition-colors">
+    <tr className={`${picked ? 'bg-sky-50' : 'odd:bg-white even:bg-slate-50/70'} hover:bg-blue-50/50 transition-colors`}>
+      {onPick && (
+        <td className="px-1 py-1.5 border border-slate-200 align-top text-center">
+          {ent.md_queued_at || ent.md_status === 'received' ? (
+            <span className="text-[9px] text-slate-400" title={ent.md_status === 'received' ? 'Received in full' : 'Already in Dispatch Material'}>✓</span>
+          ) : (
+            <input type="checkbox" checked={!!picked} onChange={() => onPick(ent.id)} aria-label={`Tick ${ent.mpr_no} ${ent.item_name}`} />
+          )}
+        </td>
+      )}
       <td className="px-1.5 py-1.5 border border-slate-200 align-top text-right text-slate-500 tabular-nums">{sl}.</td>
       <td className="px-1.5 py-1.5 border border-slate-200 align-top font-semibold text-blue-600 truncate" title={ent.job_no}>{ent.job_no}</td>
       <td className="px-1.5 py-1.5 border border-slate-200 align-top font-medium text-slate-900" title={ent.job_name}><div className="line-clamp-2 break-words">{ent.job_name}</div></td>
@@ -329,7 +343,7 @@ const ReportRow = React.memo(function ReportRow({
       <td className="px-1.5 py-1.5 border border-slate-200 align-top whitespace-nowrap text-slate-700">{formatDate(ent.delivery_date)}</td>
       <td className="px-1.5 py-1.5 border border-slate-200 align-top">
         <button type="button" onClick={() => onOpenDelivery(ent.id)} className="text-left" title="Dispatch / receive history">
-          <MdStatusChip status={ent.md_status} />
+          <MdStatusChip status={ent.md_status} queued={ent.md_queued_at} />
           {ent.md_status && ent.md_status !== 'pending' && (
             <div className="text-[10px] text-slate-500 tabular-nums mt-0.5">
               Sent {Number(ent.md_dispatched_qty || 0)} · Got {Number(ent.md_received_qty || 0)}
@@ -3698,6 +3712,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [reportSort, setReportSort] = useState<{ key: ReportMenuKey; dir: 'asc' | 'desc' } | null>(null);
   // MPR Entries report: rows still owed (default), rows received in full, or all.
   const [reportDeliveryView, setReportDeliveryView] = useState<'open' | 'received' | 'all'>('open');
+  const [reportPicked, setReportPicked] = useState<Set<number>>(new Set());
+  const [sendingToDispatch, setSendingToDispatch] = useState(false);
+  const toggleReportPick = useStableCallback((id: number) =>
+    setReportPicked((cur) => {
+      const n = new Set(cur);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    })
+  );
   // Optional columns turned off ("Columns" button) — remembered on this device.
   const [reportHidden, setReportHidden] = useState<string[]>(() => {
     try {
@@ -3888,7 +3912,37 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     </th>
   );
   // Columns on screen, in order — drives the widths and the footer spans.
-  const reportVisibleCols = REPORT_COL_WIDTHS.filter((c) => !reportHiddenSet.has(c.key));
+  const reportVisibleCols = REPORT_COL_WIDTHS.filter((c) => !reportHiddenSet.has(c.key) && (c.key !== 'pick' || reportCan.dispatch));
+  // Purchase: rows ticked in the report, to send to Dispatch Material.
+  const pickCol = reportCan.dispatch ? 1 : 0;
+  const pickableIds = pagedEntries.filter((e) => !e.md_queued_at && e.md_status !== 'received').map((e) => e.id);
+  const allPagePicked = pickableIds.length > 0 && pickableIds.every((id) => reportPicked.has(id));
+  const sendToDispatch = async () => {
+    const ids = [...reportPicked];
+    if (!ids.length) return;
+    setSendingToDispatch(true);
+    try {
+      const res = await fetch(apiUrl('/api/mpr-dispatch/queue'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ entryIds: ids })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not send to Dispatch Material');
+      const now = new Date().toISOString();
+      const sent = new Set(ids);
+      setEntries((prev) => prev.map((e) => (sent.has(e.id) && !e.md_queued_at && e.md_status !== 'received' ? { ...e, md_queued_at: now } : e)));
+      setReportPicked(new Set());
+      setMessage({
+        type: 'success',
+        text: `${data.added} MPR row${data.added === 1 ? '' : 's'} sent to Dispatch Material.${data.already ? ` ${data.already} already there.` : ''}${data.received ? ` ${data.received} already received.` : ''}`
+      });
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message });
+    } finally {
+      setSendingToDispatch(false);
+    }
+  };
   const reportWidthTotal = reportVisibleCols.reduce((n, c) => n + c.w, 0);
 
   const handleDownloadExcel = () => {
@@ -4148,6 +4202,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   </button>
                 ))}
               </div>
+              {reportCan.dispatch && (
+                <button
+                  type="button"
+                  onClick={() => void sendToDispatch()}
+                  disabled={!reportPicked.size || sendingToDispatch}
+                  title="Tick MPR rows below (filter first), then send them to Dispatch Material"
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {sendingToDispatch ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Truck className="w-3.5 h-3.5" />}
+                  Send to Dispatch{reportPicked.size ? ` (${reportPicked.size})` : ''}
+                </button>
+              )}
               <ColumnToggleMenu plain options={REPORT_OPTIONAL_COLS} hidden={reportHidden} onChange={changeReportHidden} />
               <button
                 onClick={handleDownloadExcel}
@@ -4169,6 +4235,27 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 </colgroup>
                 <thead className="sticky top-0 z-10 bg-blue-50">
                   <tr>
+                    {pickCol > 0 && (
+                      <th className="px-1 py-2 border border-slate-200 align-bottom text-center">
+                        <input
+                          type="checkbox"
+                          checked={allPagePicked}
+                          disabled={!pickableIds.length}
+                          onChange={() =>
+                            setReportPicked((cur) => {
+                              const n = new Set(cur);
+                              for (const id of pickableIds) {
+                                if (allPagePicked) n.delete(id);
+                                else n.add(id);
+                              }
+                              return n;
+                            })
+                          }
+                          aria-label={allPagePicked ? 'Untick this page' : 'Tick every row on this page'}
+                          title={allPagePicked ? 'Untick this page' : 'Tick every row on this page'}
+                        />
+                      </th>
+                    )}
                     <th className="px-1.5 py-2 border border-slate-200 font-semibold text-slate-700 align-bottom text-right">Sl</th>
                     {reportHeaderCell('job_no', 'Job No', 'left')}
                     {reportHeaderCell('job_name', 'Job Name', 'left')}
@@ -4192,6 +4279,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                     <th className="px-1.5 py-2 border border-slate-200 font-semibold text-slate-700 align-bottom text-center">Actions</th>
                   </tr>
                   <tr>
+                    {pickCol > 0 && <th className="px-1 py-1 border border-slate-200 bg-white"></th>}
                     <th className="px-1.5 py-1 border border-slate-200 bg-white"></th>
                     {reportFilterInput('job_no', 'Job No')}
                     {reportFilterInput('job_name', 'Job Name')}
@@ -4254,6 +4342,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                         can={reportCan}
                         deletingEntryId={deletingEntryId}
                         hidden={reportHiddenSet}
+                        picked={reportPicked.has(ent.id)}
+                        onPick={reportCan.dispatch ? toggleReportPick : undefined}
                       />
                     ))
                   )}
@@ -4261,13 +4351,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 {filteredEntries.length > 0 && (
                   <tfoot className="sticky bottom-0 bg-blue-50 font-semibold text-slate-800">
                     <tr>
-                      <td colSpan={7} className="px-2 py-2 border border-slate-200">
+                      <td colSpan={7 + pickCol} className="px-2 py-2 border border-slate-200">
                         Total <span className="font-normal text-slate-500">({filteredEntries.length} matching)</span>
                       </td>
                       <td className="px-2 py-2 border border-slate-200 text-right tabular-nums">{reportTotals.qty.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
-                      <td colSpan={2} className="px-2 py-2 border border-slate-200"></td>
+                      {/* Delivery Date, Delivery Status, Rate */}
+                      <td colSpan={3} className="px-2 py-2 border border-slate-200"></td>
                       <td className="px-2 py-2 border border-slate-200 text-right tabular-nums">{reportTotals.amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                      <td colSpan={Math.max(1, reportVisibleCols.length - 11)} className="px-2 py-2 border border-slate-200"></td>
+                      <td colSpan={Math.max(1, reportVisibleCols.length - 12 - pickCol)} className="px-2 py-2 border border-slate-200"></td>
                     </tr>
                   </tfoot>
                 )}
