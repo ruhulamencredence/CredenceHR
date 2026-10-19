@@ -652,7 +652,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
 
   // The Module Access page belongs to the Users page: leaving it closes it.
   useEffect(() => {
-    if (activeTab !== 'users') setManagingModulesFor(null);
+    if (activeTab !== 'users') {
+      setManagingModulesFor(null);
+      setManagingUserId(null);
+    }
   }, [activeTab]);
   const openManageModules = (u: User | User[]) => {
     const list = Array.isArray(u) ? u : [u];
@@ -687,9 +690,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [userRoleFilter, setUserRoleFilter] = useState<'all' | 'superadmin' | 'admin' | 'user'>('all');
   // Quick filter chips above the list (see USER_ACCESS_FILTERS).
   const [userAccessFilter, setUserAccessFilter] = useState<string>('all');
-  // Account open in the "Manage" side panel (UserAccessDrawer), by id so it
+  // Account open on the "Manage" page (UserAccessDrawer), by id so it
   // always shows the latest copy from `users`.
   const [managingUserId, setManagingUserId] = useState<number | null>(null);
+  const openManageUser = (id: number) => {
+    setManagingUserId(id);
+    // Opens as a page: start at its top.
+    window.scrollTo({ top: 0 });
+  };
+  // An account deleted from its Manage page: back to the Users page.
+  useEffect(() => {
+    if (managingUserId != null && users.length > 0 && !users.some((x) => x.id === managingUserId)) setManagingUserId(null);
+  }, [users, managingUserId]);
   // Ticked rows for the bulk bar (UserBulkBar), and the Access Templates list.
   const [selectedUserIds, setSelectedUserIds] = useState<Set<number>>(new Set());
   const [accessTemplates, setAccessTemplates] = useState<AccessTemplate[]>([]);
@@ -5980,12 +5992,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       )}
 
       {/* TAB 4: USERS */}
-      {/* While Module Access is open the Users page sits behind it, hidden —
-          the last drawing is reused (same element, so React skips it) and
-          each tick redraws only the popup. Drawn fresh once it closes. */}
+      {/* While an account's Manage page or Module Access is open the Users
+          page sits behind it, hidden — the last drawing is reused (same
+          element, so React skips it). Drawn fresh once they close. */}
       {activeTab === 'users' && (
-        <div className={managingModulesFor ? 'hidden' : undefined}>
-        {managingModulesFor && frozenUsersTab.current ? frozenUsersTab.current : (frozenUsersTab.current = (
+        <div className={managingModulesFor || managingUserId != null ? 'hidden' : undefined}>
+        {(managingModulesFor || managingUserId != null) && frozenUsersTab.current ? frozenUsersTab.current : (frozenUsersTab.current = (
         <div className="space-y-6">
           {/* Add New User Form */}
           <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6">
@@ -6357,7 +6369,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   {pagedUsers.map((u) => (
                     <tr
                       key={u.id}
-                      onClick={() => setManagingUserId(u.id)}
+                      onClick={() => openManageUser(u.id)}
                       className={`transition-colors cursor-pointer ${selectedUserIds.has(u.id) ? 'bg-blue-50/60' : 'hover:bg-slate-50/80'}`}
                     >
                       <td className="pl-5 pr-1 py-3" onClick={(e) => e.stopPropagation()}>
@@ -6405,7 +6417,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            setManagingUserId(u.id);
+                            openManageUser(u.id);
                           }}
                           className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 text-slate-700 hover:bg-white hover:border-blue-300 hover:text-blue-700 transition-colors"
                         >
@@ -6424,7 +6436,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                     key={u.id}
                     role="button"
                     tabIndex={0}
-                    onClick={() => setManagingUserId(u.id)}
+                    onClick={() => openManageUser(u.id)}
                     className={`w-full text-left px-4 py-3 flex items-start gap-3 active:bg-slate-50 ${selectedUserIds.has(u.id) ? 'bg-blue-50/60' : ''}`}
                   >
                     <input
@@ -7089,10 +7101,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         </div>
       )}
 
-      {/* User "Manage" popup — rendered before every popup it can open
-          (Manage Projects, Module Access, Reset Password, Change Login ID)
-          so those appear on top of it. */}
-      {managingUserId != null && (
+      {/* An account's "Manage" page, in place of the Users page — rendered
+          before every popup it can open (Manage Projects, Reset Password,
+          Change Login ID) so those appear on top of it. */}
+      {managingUserId != null && activeTab === 'users' && (
         // Frozen like the Users page — and out of sight — while the Module Access page is open.
         <div className={managingModulesFor ? 'hidden' : undefined}>
         {managingModulesFor && frozenDrawer.current ? frozenDrawer.current : (frozenDrawer.current = (() => {

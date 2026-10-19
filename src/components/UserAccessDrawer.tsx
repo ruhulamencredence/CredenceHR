@@ -3,15 +3,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// Admin Panel -> Users -> "Manage": everything about one account in one
-// popup — account actions, module/project access, and every per-user
+// Admin Panel -> Users -> "Manage": everything about one account on one
+// page — account actions, module/project access, and every per-user
 // feature switch with a plain-language description of what it does. Each
 // switch still saves on its own (same endpoints AdminPanel.tsx always used);
 // this panel just gathers them in one place instead of 16 table columns.
 
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  X, KeyRound, Lock, Mail, Trash2, LayoutGrid, ChevronRight, MapPin, Fingerprint, Navigation, CalendarDays,
+  ArrowLeft, KeyRound, Lock, Mail, Trash2, LayoutGrid, ChevronRight, MapPin, Fingerprint, Navigation, CalendarDays,
   CalendarClock, Edit2, ShieldCheck, Eye, History, LayoutTemplate, Undo2, Ban
 } from 'lucide-react';
 import { User, ADMIN_MODULES } from '../types';
@@ -190,6 +190,8 @@ function Section({ title, hint, children }: { title: string; hint?: string; chil
   );
 }
 
+type PageSection = 'account' | 'access' | 'features' | 'admin' | 'activity';
+
 interface UserAccessDrawerProps {
   u: User;
   isSuperAdmin: boolean;
@@ -249,6 +251,7 @@ export function UserAccessDrawer({
   const [templateMsg, setTemplateMsg] = useState<string | null>(null);
   const [blockReason, setBlockReason] = useState<string | null>(null);
   const [blockError, setBlockError] = useState<string | null>(null);
+  const [section, setSection] = useState<PageSection>('account');
   const blocked = !!u.is_blocked;
   const changeBlock = (next: boolean, reason: string) =>
     run('block', async () => {
@@ -364,40 +367,82 @@ export function UserAccessDrawer({
     { label: 'Budget / Jobs / MPR', on: u.can_view_budget_module ?? true }
   ];
 
-  // Centred popup, same frame as the Module Access popup. It's rendered
-  // before that popup (and the password / Login ID ones) in AdminPanel, so
-  // those still open on top of it.
+  const featureOn = [!!u.can_use_attendance, !!u.can_use_tracking, !!u.can_view_leave_summary, delivery, !!u.can_job_edit].filter(Boolean).length;
+  const tabs: { key: PageSection; label: string; icon: React.ElementType; count?: number }[] = [
+    { key: 'account', label: 'Account', icon: KeyRound },
+    { key: 'access', label: 'Access', icon: LayoutGrid, count: isTargetSuper ? undefined : modules.length + selfService.filter((x) => x.on).length },
+    ...(canEdit ? [{ key: 'features' as PageSection, label: 'Features', icon: Fingerprint, count: featureOn }] : []),
+    ...(canEdit && isSuperAdmin && u.role === 'admin' ? [{ key: 'admin' as PageSection, label: 'Admin powers', icon: ShieldCheck }] : []),
+    { key: 'activity', label: 'Activity', icon: History, count: activity?.length }
+  ];
+  const current = tabs.some((t) => t.key === section) ? section : 'account';
+
+  // A page in place of the Users page (same frame as Module Access): one
+  // section at a time, a rail on the left (a chip row on a phone). The
+  // password / Login ID / Projects popups still open on top of it.
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
-      <div
-        className="bg-white border border-slate-200 rounded-2xl w-full max-w-md md:max-w-4xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header */}
-        <div className="px-5 py-4 border-b border-slate-200 flex items-start gap-3">
+    <div className="w-full">
+      <div className="relative bg-white border border-slate-200 rounded-2xl w-full flex flex-col shadow-sm">
+        <div className="md:sticky md:top-16 z-20 bg-white rounded-t-2xl border-b border-slate-200 p-4 md:p-5 flex items-center gap-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-9 h-9 shrink-0 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+            aria-label="Back to Users"
+            title="Back to Users"
+          >
+            <ArrowLeft className="w-5 h-5" />
+          </button>
           <div className="w-11 h-11 rounded-full flex items-center justify-center text-white font-bold shrink-0" style={{ background: 'var(--g-gradient)' }}>
             {userInitials(u.name)}
           </div>
           <div className="flex-1 min-w-0">
-            <div className="text-base font-bold text-slate-900 truncate">{u.name}</div>
+            <h2 className="text-base md:text-lg font-bold text-slate-900 truncate">{u.name}</h2>
             <div className="text-xs text-slate-500 truncate">{u.email || u.username || '—'}</div>
-            <div className="mt-1.5 flex items-center gap-2 text-[11px] text-slate-400">
+            <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
               <span className={`font-semibold px-2 py-0.5 rounded-full border ${ROLE_BADGE[u.role]}`}>{ROLE_LABEL[u.role]}</span>
               {blocked && <span className="font-semibold px-2 py-0.5 rounded-full border border-rose-200 bg-rose-50 text-rose-700">Blocked</span>}
               {u.created_at && <span>Joined {formatDate(u.created_at)}</span>}
             </div>
           </div>
-          <button type="button" onClick={onClose} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600" aria-label="Close">
-            <X className="w-5 h-5" />
-          </button>
+          {canManageModules && (
+            <button
+              type="button"
+              onClick={onOpenModules}
+              className="hidden sm:inline-flex items-center gap-1.5 px-4 py-2.5 bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold rounded-xl"
+            >
+              <LayoutGrid className="w-4 h-4" /> Module Access
+            </button>
+          )}
         </div>
 
-        {/* Two columns on wider screens: who/what access + history on the
-            left, the feature switches on the right. */}
-        <div className="flex-1 overflow-y-auto md:grid md:grid-cols-2 md:items-start md:divide-x md:divide-slate-100">
-          <div>
-            {/* Account */}
-            <Section title="Account">
+        <div className="md:grid md:grid-cols-[230px_1fr] min-h-[480px]">
+          <nav className="flex md:block gap-1.5 overflow-x-auto md:overflow-visible p-2.5 md:p-3 border-b md:border-b-0 md:border-r border-slate-200 bg-slate-50/50">
+            {tabs.map((t) => {
+              const active = current === t.key;
+              const Icon = t.icon;
+              return (
+                <button
+                  key={t.key}
+                  type="button"
+                  onClick={() => setSection(t.key)}
+                  className={`shrink-0 md:w-full flex items-center gap-2 px-3 py-2 md:py-2.5 rounded-xl text-sm whitespace-nowrap border md:border-0 md:mb-0.5 ${
+                    active ? 'bg-violet-100 border-violet-300 text-violet-800 font-bold' : 'bg-white md:bg-transparent border-slate-200 text-slate-700 hover:bg-slate-100'
+                  }`}
+                >
+                  <Icon className="w-4 h-4 shrink-0" />
+                  <span className="flex-1 text-left">{t.label}</span>
+                  {t.count !== undefined && (
+                    <span className={`text-[11px] font-bold rounded-full px-2 py-0.5 ${t.count > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'}`}>{t.count}</span>
+                  )}
+                </button>
+              );
+            })}
+          </nav>
+          <div className="min-w-0 md:max-w-3xl">
+            {current === 'account' && (
+              <>
+                <Section title="Account">
               {isSuperAdmin && !isTargetSuper && (
                 <div className="flex items-center justify-between gap-3 py-2">
                   <div>
@@ -488,9 +533,31 @@ export function UserAccessDrawer({
                 </div>
               )}
             </Section>
-
-            {/* Access */}
-            <Section title="Access" hint="What this account can open.">
+                {canSeeLoginLocation && (
+              <Section title="Last login">
+                <div className="flex items-start gap-2 py-1 text-xs text-slate-600">
+                  <MapPin className="w-4 h-4 text-slate-400 shrink-0" />
+                  <div className="min-w-0">{lastLogin}</div>
+                </div>
+              </Section>
+            )}
+                {canEdit && (
+                  <section className="px-5 py-4">
+                    <h4 className="text-[11px] font-semibold uppercase tracking-wider text-rose-500">Danger zone</h4>
+                    <div className="mt-2">
+                      <button
+                  type="button"
+                  onClick={onDelete}
+                  className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border border-rose-200 text-rose-600 hover:bg-rose-50"
+                >
+                  <Trash2 className="w-3.5 h-3.5" /> Delete this user
+                </button>
+                    </div>
+                  </section>
+                )}
+              </>
+            )}
+            {current === 'access' && <Section title="Access" hint="What this account can open.">
               <button
                 type="button"
                 disabled={!canManageModules}
@@ -566,44 +633,8 @@ export function UserAccessDrawer({
                 </div>
               )}
               {templateMsg && <p className="text-[11px] text-slate-500 mt-1">{templateMsg}</p>}
-            </Section>
-            {canSeeLoginLocation && (
-              <Section title="Last login">
-                <div className="flex items-start gap-2 py-1 text-xs text-slate-600">
-                  <MapPin className="w-4 h-4 text-slate-400 shrink-0" />
-                  <div className="min-w-0">{lastLogin}</div>
-                </div>
-              </Section>
-            )}
-            <Section title="Activity" hint="Access changes to this account, newest first.">
-              {activity === null ? (
-                <div className="py-2">
-                  <Spinner size={14} />
-                </div>
-              ) : activity.length === 0 ? (
-                <p className="text-xs text-slate-400 py-1">No changes recorded yet.</p>
-              ) : (
-                <ol className="mt-1 space-y-2.5 border-l-2 border-slate-100 pl-3">
-                  {activity.slice(0, 30).map((e) => (
-                    <li key={e.id} className="text-xs">
-                      {describeAudit(e).map((line, i) => (
-                        <div key={i} className="text-slate-700">
-                          {line}
-                        </div>
-                      ))}
-                      <div className="text-[11px] text-slate-400 flex items-center gap-1">
-                        <History className="w-3 h-3" />
-                        {e.actor_name || 'Someone'} · {new Date(e.created_at).toLocaleString()}
-                      </div>
-                    </li>
-                  ))}
-                </ol>
-              )}
-            </Section>
-          </div>
-          <div>
-            {/* Features */}
-            {canEdit ? (
+            </Section>}
+            {current === 'features' && canEdit && (
               <>
                 <Section title="Attendance & location">
                   <FeatureRow
@@ -672,9 +703,9 @@ export function UserAccessDrawer({
                     onToggle={() => toggle('can_job_edit', !!u.can_job_edit)}
                   />
                 </Section>
-
-                {isSuperAdmin && u.role === 'admin' && (
-                  <Section title="Admin powers" hint="Only for Admin accounts.">
+              </>
+            )}
+            {current === 'admin' && canEdit && isSuperAdmin && u.role === 'admin' && <Section title="Admin powers" hint="Only for Admin accounts.">
                     <FeatureRow
                       icon={Eye}
                       title="See users’ last login location"
@@ -691,26 +722,37 @@ export function UserAccessDrawer({
                       busy={busy === 'can_grant_module_access'}
                       onToggle={() => toggle('can_grant_module_access', !!u.can_grant_module_access)}
                     />
-                  </Section>
-                )}
-              </>
-            ) : null}
-            {canEdit && (
-              <div className="px-5 py-5">
-                <button
-                  type="button"
-                  onClick={onDelete}
-                  className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border border-rose-200 text-rose-600 hover:bg-rose-50"
-                >
-                  <Trash2 className="w-3.5 h-3.5" /> Delete this user
-                </button>
-              </div>
-            )}
+                  </Section>}
+            {current === 'activity' && <Section title="Activity" hint="Access changes to this account, newest first.">
+              {activity === null ? (
+                <div className="py-2">
+                  <Spinner size={14} />
+                </div>
+              ) : activity.length === 0 ? (
+                <p className="text-xs text-slate-400 py-1">No changes recorded yet.</p>
+              ) : (
+                <ol className="mt-1 space-y-2.5 border-l-2 border-slate-100 pl-3">
+                  {activity.slice(0, 30).map((e) => (
+                    <li key={e.id} className="text-xs">
+                      {describeAudit(e).map((line, i) => (
+                        <div key={i} className="text-slate-700">
+                          {line}
+                        </div>
+                      ))}
+                      <div className="text-[11px] text-slate-400 flex items-center gap-1">
+                        <History className="w-3 h-3" />
+                        {e.actor_name || 'Someone'} · {new Date(e.created_at).toLocaleString()}
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </Section>}
           </div>
         </div>
 
         {lastChange && (
-          <div className="px-5 py-3 border-t border-slate-200 bg-slate-900 text-white text-xs flex items-center gap-3">
+          <div className="sticky bottom-0 z-20 rounded-b-2xl px-5 py-3 border-t border-slate-200 bg-slate-900 text-white text-xs flex items-center gap-3">
             <span className="flex-1">
               {FEATURE_NAME[lastChange.field] || lastChange.field} {lastChange.prev ? 'turned off' : 'turned on'} — saved.
             </span>
@@ -719,6 +761,7 @@ export function UserAccessDrawer({
             </button>
           </div>
         )}
+
       </div>
     </div>
   );
