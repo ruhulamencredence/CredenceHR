@@ -1,8 +1,18 @@
--- MPR Tracker Database Schema & Seed Data
--- Import this SQL file into XAMPP MySQL / phpMyAdmin
-
-CREATE DATABASE IF NOT EXISTS mpr_tracker_db;
-USE mpr_tracker_db;
+-- CredenceHR — base database schema & seed data
+--
+-- A new installation doesn't need to import this by hand: on its first start
+-- against an EMPTY database (no `users` table) the server runs this file
+-- itself (server.ts -> bootstrapBaseSchema), then adds everything newer
+-- (schemaMigrations.ts and each module's own tables).
+--
+-- To import it by hand instead (phpMyAdmin / mysql CLI), select your database
+-- first (the one in DB_NAME) — this file no longer creates or switches to a
+-- database of its own:
+--   mysql -u root -p your_db_name < schema.sql
+--
+-- Tables refer to each other in an order that doesn't always match the order
+-- they're created in, so foreign-key checks are off while it runs.
+SET FOREIGN_KEY_CHECKS = 0;
 
 -- Users Table
 -- email: NULL for bulk-created (Project Name + Password) users, which have no email.
@@ -1397,3 +1407,5 @@ CREATE TABLE IF NOT EXISTS session_policy (
 );
 -- ALTER TABLE user_sessions ADD COLUMN revoked_at DATETIME NULL, ADD COLUMN revoked_reason VARCHAR(20) NULL;
 -- ALTER TABLE users ADD COLUMN sessions_valid_after DATETIME(3) NULL;
+
+SET FOREIGN_KEY_CHECKS = 1;

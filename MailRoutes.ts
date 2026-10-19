@@ -60,6 +60,8 @@ export async function ensureMailSchema(dbPool: any): Promise<void> {
   };
   // Self Service switch, OFF until turned on per account in Module Access.
   await run("users.can_use_mail", "ALTER TABLE users ADD COLUMN can_use_mail TINYINT(1) NOT NULL DEFAULT 0", ["ER_DUP_FIELDNAME"]);
+  // Mailboxes -> Email Directory tab, its own switch (also OFF by default).
+  await run("users.can_view_mail_directory", "ALTER TABLE users ADD COLUMN can_view_mail_directory TINYINT(1) NOT NULL DEFAULT 0", ["ER_DUP_FIELDNAME"]);
   const tables: [string, string][] = [
     [
       "mail_accounts",
@@ -269,8 +271,76 @@ export async function ensureMailSchema(dbPool: any): Promise<void> {
     ]
   ];
   for (const [label, sql] of tables) await run(label, sql);
+  // Internal delivery (mail between our own mailboxes stays inside
+  // CredenceHR; see "Internal delivery" below): one row of settings for the
+  // whole system, attachments kept once however many colleagues get them.
+  await run(
+    "mail_system_settings",
+    `CREATE TABLE IF NOT EXISTS mail_system_settings (
+      id INT PRIMARY KEY,
+      internal_delivery TINYINT(1) NOT NULL DEFAULT 1,
+      internal_domains VARCHAR(1000) NOT NULL DEFAULT 'credencehousinglimited.com',
+      updated_by INT NULL,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    ) DEFAULT CHARSET=utf8mb4`
+  );
+  await run(
+    "mail_blobs",
+    `CREATE TABLE IF NOT EXISTS mail_blobs (
+      id BIGINT AUTO_INCREMENT PRIMARY KEY,
+      sha256 CHAR(64) NOT NULL,
+      size INT NOT NULL DEFAULT 0,
+      data LONGBLOB NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_mail_blob_sha (sha256)
+    ) DEFAULT CHARSET=utf8mb4`
+  );
+  await run("mail_files.blob_id", "ALTER TABLE mail_files ADD COLUMN blob_id BIGINT NULL", ["ER_DUP_FIELDNAME"]);
+  await run("mail_files.blob_id index", "ALTER TABLE mail_files ADD KEY idx_mail_files_blob (blob_id)", ["ER_DUP_KEYNAME"]);
+  // 1 = this copy came / went inside CredenceHR, not through the mail server.
+  // An inside-only mailbox held for an Employee with no login yet (user_id 0).
+  await run("mail_accounts.employee_id", "ALTER TABLE mail_accounts ADD COLUMN employee_id INT NULL", ["ER_DUP_FIELDNAME"]);
+  // Senders whose pictures always show (no "Show pictures" each time).
+  await run("mail_settings.picture_senders_json", "ALTER TABLE mail_settings ADD COLUMN picture_senders_json TEXT NULL", ["ER_DUP_FIELDNAME"]);
+  await run("mail_messages.via_internal", "ALTER TABLE mail_messages ADD COLUMN via_internal TINYINT(1) NOT NULL DEFAULT 0", ["ER_DUP_FIELDNAME"]);
   // References chain, so a reply to a reply stays in the same conversation.
   await run("mail_messages.refs", "ALTER TABLE mail_messages ADD COLUMN refs TEXT NULL AFTER in_reply_to", ["ER_DUP_FIELDNAME"]);
+  // Groups (see "Groups" below). Central: one address on our domain that
+  // reaches every member, set up in Mail Administration. Personal: a named
+  // list of addresses in someone's own Credence Mail (users.can_use_mail_groups).
+  await run(
+    "mail_groups",
+    `CREATE TABLE IF NOT EXISTS mail_groups (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      email VARCHAR(255) NOT NULL,
+      name VARCHAR(255) NOT NULL,
+      description VARCHAR(1000) NULL,
+      members_json MEDIUMTEXT NULL,
+      all_employees TINYINT(1) NOT NULL DEFAULT 0,
+      departments_json TEXT NULL,
+      send_policy VARCHAR(16) NOT NULL DEFAULT 'members',
+      senders_json TEXT NULL,
+      is_active TINYINT(1) NOT NULL DEFAULT 1,
+      created_by INT NULL,
+      updated_by INT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_mail_group_email (email)
+    ) DEFAULT CHARSET=utf8mb4`
+  );
+  await run(
+    "mail_personal_groups",
+    `CREATE TABLE IF NOT EXISTS mail_personal_groups (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NOT NULL,
+      name VARCHAR(255) NOT NULL,
+      members_json MEDIUMTEXT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      KEY idx_mail_personal_groups_user (user_id)
+    ) DEFAULT CHARSET=utf8mb4`
+  );
+  await run("users.can_use_mail_groups", "ALTER TABLE users ADD COLUMN can_use_mail_groups TINYINT(1) NOT NULL DEFAULT 0", ["ER_DUP_FIELDNAME"]);
 }
 
 // ---------------------------------------------------------------------------
@@ -511,6 +581,8 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     smtpSecure: !!Number(a.smtp_secure),
     isDefault: !!Number(a.is_default),
     isConnected: !a.last_error,
+    // Only inside CredenceHR until its owner connects it with the password.
+    internalOnly: a.provider === "internal",
     lastSyncAt: fromDb(a.last_sync_at),
     lastError: a.last_error || null
   });
@@ -551,7 +623,12 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
       return c;
     }
   }
+  // An "internal" mailbox (made for a colleague who got mail inside
+  // CredenceHR before connecting their own) has no mail server behind it.
+  const INTERNAL_ONLY = "This mailbox is only inside CredenceHR. Connect it with its mail password (Mailboxes → Add) to read and send outside mail too.";
+  const isInternalBox = (a: any) => a?.provider === "internal";
   async function withImap<T>(a: any, fn: (c: ImapFlow) => Promise<T>): Promise<T> {
+    if (isInternalBox(a)) throw bad(INTERNAL_ONLY, 409);
     await acquireImap();
     let c: ImapFlow | null = null;
     try {
@@ -575,6 +652,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     } as any);
   }
   async function sendRaw(a: any, envelope: { from: string; to: string[] }, raw: Buffer) {
+    if (isInternalBox(a)) throw bad(`Only colleagues on Credence Mail can get mail from here (${envelope.to.join(", ")} can't). ${INTERNAL_ONLY.replace(/\.$/, "")}`, 409);
     const pass = decryptSecret(a.password_enc);
     try {
       await smtpTransport(a, pass, !!Number(a.tls_insecure)).sendMail({ envelope, raw });
@@ -626,6 +704,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
       signatures: parseJson<any[]>(r.signatures_json, []),
       vacationResponder: parseJson<any>(r.vacation_json, { enabled: false, subject: "", message: "" }),
       blockedSenders: parseJson<string[]>(r.blocked_json, []),
+      pictureSenders: parseJson<string[]>(r.picture_senders_json, []),
       layout: parseJson<any>(r.layout_json, { density: "comfortable", previewPane: "right", theme: "light" }),
       language: r.language || "en",
       timezone: r.timezone || "Asia/Dhaka"
@@ -647,6 +726,42 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     const root = refs[0] || inReplyTo || messageId || crypto.randomUUID();
     return `t${crypto.createHash("sha1").update(root).digest("hex").slice(0, 24)}`;
   };
+
+  // Blocked senders and the user's own rules, for mail arriving in an Inbox
+  // (from the mail server, or from a colleague inside CredenceHR).
+  async function incomingRules(
+    userId: number,
+    m: { fromEmail: string; fromName: string; to: string[]; subject: string; text: string; hasFiles: boolean },
+    start: { labels: string[]; isRead: number; isStarred: number; category: string }
+  ) {
+    let lab = [...start.labels];
+    let { isRead, isStarred, category } = start;
+    const settings = await settingsOf(userId);
+    const blocked = (settings.blockedSenders || []).map((b: string) => String(b).toLowerCase().trim()).filter(Boolean);
+    if (blocked.some((b: string) => m.fromEmail.includes(b))) lab = ["Spam"];
+    else {
+      const rules: any[] = (await queryDB("SELECT * FROM mail_filters WHERE user_id = ? AND is_active = 1", [userId])) || [];
+      for (const r of rules) {
+        const cnd = parseJson<any>(r.conditions_json, {});
+        const act = parseJson<any>(r.actions_json, {});
+        const inc = (hay: string, needle: any) => !needle || hay.toLowerCase().includes(String(needle).toLowerCase());
+        const ok =
+          inc(m.fromEmail + " " + m.fromName, cnd.from) &&
+          inc(m.to.join(" "), cnd.to) &&
+          inc(m.subject, cnd.subjectContains) &&
+          inc(m.text, cnd.bodyContains) &&
+          (!cnd.hasAttachment || m.hasFiles);
+        if (!ok) continue;
+        if (act.archive) lab = lab.filter((l) => l !== "Inbox").concat("Archive");
+        if (act.markRead) isRead = 1;
+        if (act.star) isStarred = 1;
+        if (act.categorize) category = String(act.categorize).slice(0, 30);
+        const extra = [...(Array.isArray(act.applyLabels) ? act.applyLabels : []), ...(act.applyLabel ? [act.applyLabel] : [])];
+        for (const l of extra) if (l && !lab.includes(String(l))) lab.push(String(l).slice(0, 60));
+      }
+    }
+    return { labels: lab, isRead, isStarred, category };
+  }
 
   async function storeFetched(a: any, role: string, msg: any, fresh: boolean): Promise<any | null> {
     const env = msg.envelope || {};
@@ -694,30 +809,11 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
 
     // Incoming mail: blocked senders go to Spam; then the user's own rules.
     if (role === "inbox") {
-      const settings = await settingsOf(Number(a.user_id));
-      const blocked = (settings.blockedSenders || []).map((b: string) => String(b).toLowerCase().trim()).filter(Boolean);
-      if (blocked.some((b: string) => fromEmail.includes(b))) lab = ["Spam"];
-      else {
-        const rules: any[] = (await queryDB("SELECT * FROM mail_filters WHERE user_id = ? AND is_active = 1", [Number(a.user_id)])) || [];
-        for (const r of rules) {
-          const cnd = parseJson<any>(r.conditions_json, {});
-          const act = parseJson<any>(r.actions_json, {});
-          const inc = (hay: string, needle: any) => !needle || hay.toLowerCase().includes(String(needle).toLowerCase());
-          const ok =
-            inc(fromEmail + " " + fromName, cnd.from) &&
-            inc(to.join(" "), cnd.to) &&
-            inc(subject, cnd.subjectContains) &&
-            inc(text, cnd.bodyContains) &&
-            (!cnd.hasAttachment || files.length > 0);
-          if (!ok) continue;
-          if (act.archive) lab = lab.filter((l) => l !== "Inbox").concat("Archive");
-          if (act.markRead) isRead = 1;
-          if (act.star) isStarred = 1;
-          if (act.categorize) category = String(act.categorize).slice(0, 30);
-          const extra = [...(Array.isArray(act.applyLabels) ? act.applyLabels : []), ...(act.applyLabel ? [act.applyLabel] : [])];
-          for (const l of extra) if (l && !lab.includes(String(l))) lab.push(String(l).slice(0, 60));
-        }
-      }
+      const ruled = await incomingRules(Number(a.user_id), { fromEmail, fromName, to, subject, text, hasFiles: files.length > 0 }, { labels: lab, isRead, isStarred, category });
+      lab = ruled.labels;
+      isRead = ruled.isRead;
+      isStarred = ruled.isStarred;
+      category = ruled.category;
     }
 
     const result: any = await queryDB(
@@ -776,22 +872,29 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     );
     // affectedRows: 1 = new row, 2 = renewed after a day, 0 = already replied today.
     if (!Number(claim?.affectedRows)) return;
+    const messageId = newMessageId(a);
+    const replySubject = v.subject || `Re: ${subject}`;
+    const html = `<p>${escapeHtml(String(v.message || "")).replace(/\n/g, "<br>")}</p>`;
     const raw = await new MailComposer({
       from: { name: a.display_name || a.email, address: a.email },
       to: fromEmail,
-      subject: v.subject || `Re: ${subject}`,
-      html: `<p>${escapeHtml(String(v.message || "")).replace(/\n/g, "<br>")}</p>`,
+      subject: replySubject,
+      html,
+      messageId,
       headers: { "Auto-Submitted": "auto-replied" }
     })
       .compile()
       .build();
-    await sendRaw(a, { from: a.email, to: [fromEmail] }, raw);
+    // A colleague's mail is answered inside CredenceHR too; never answered
+    // back (opts.auto), so two away messages can't loop.
+    await sendRouted(a, [fromEmail], raw, { messageId, inReplyTo: null, refs: null, to: [fromEmail], cc: [], subject: replySubject, html, files: [] }, { auto: true });
   }
 
   // -------------------------------------------------------------------------
   // Sync: new mail by UID, folder by folder
   // -------------------------------------------------------------------------
   async function syncAccount(a: any, roles: string[] = SYNC_ROLES): Promise<{ inbox: number; sent: number; junk: number; fresh: any[] }> {
+    if (isInternalBox(a)) return { inbox: 0, sent: 0, junk: 0, fresh: [] };
     return withAccountLock(Number(a.id), () =>
       withImap(a, async (c) => {
         const out = { inbox: 0, sent: 0, junk: 0, fresh: [] as any[] };
@@ -886,29 +989,27 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
       })
     );
   }
+  // New mail in someone's Inbox: the open screen hears "mail:new", and
+  // CredenceHR's own notifications (the Alerts bell, and a push to the
+  // phone) — Credence Mail has no bell of its own.
+  function announceNew(userId: number, accountId: number, fresh: { id: number; fromName: string; fromEmail: string; subject: string }[]) {
+    if (!fresh.length) return;
+    const latest = fresh[fresh.length - 1];
+    io.to(`user:${userId}`).emit("mail:new", { accountId, count: fresh.length, from: latest.fromName || latest.fromEmail, subject: latest.subject });
+    const n = fresh.length;
+    void createAlert(queryDB, {
+      userId,
+      type: "mail",
+      title: n > 1 ? `${n} new mails` : `New mail from ${latest.fromName || latest.fromEmail}`,
+      message: n > 1 ? `Latest: ${latest.subject} — ${latest.fromName || latest.fromEmail}` : String(latest.subject || "(no subject)"),
+      relatedType: "mail_message",
+      relatedId: Number(latest.id)
+    });
+  }
   async function syncAndNotify(a: any, roles?: string[]) {
     try {
       const r = await syncAccount(a, roles);
-      if (r.fresh.length) {
-        const latest = r.fresh[r.fresh.length - 1];
-        io.to(`user:${Number(a.user_id)}`).emit("mail:new", {
-          accountId: Number(a.id),
-          count: r.fresh.length,
-          from: latest.fromName || latest.fromEmail,
-          subject: latest.subject
-        });
-        // CredenceHR's own notifications (the Alerts bell, and a push to the
-        // phone) — Credence Mail has no bell of its own.
-        const n = r.fresh.length;
-        void createAlert(queryDB, {
-          userId: Number(a.user_id),
-          type: "mail",
-          title: n > 1 ? `${n} new mails` : `New mail from ${latest.fromName || latest.fromEmail}`,
-          message: n > 1 ? `Latest: ${latest.subject} — ${latest.fromName || latest.fromEmail}` : String(latest.subject || "(no subject)"),
-          relatedType: "mail_message",
-          relatedId: Number(latest.id)
-        });
-      }
+      if (r.fresh.length) announceNew(Number(a.user_id), Number(a.id), r.fresh);
       if (r.inbox || r.sent || r.junk) io.to(`user:${Number(a.user_id)}`).emit("mail:changed", { accountId: Number(a.id) });
       return r;
     } catch (e: any) {
@@ -916,6 +1017,330 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
       await queryDB("UPDATE mail_accounts SET last_error = ? WHERE id = ?", [String(msg).slice(0, 500), Number(a.id)]).catch(() => undefined);
       throw Object.assign(new Error(msg), { status: e?.status || 502 });
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // Internal delivery
+  // -------------------------------------------------------------------------
+  // Mail from one of our own mailboxes (credencehousinglimited.com, or the
+  // domains set in Mail Administration) to a colleague whose mailbox is
+  // connected in CredenceHR never goes through the mail server (cPanel): it
+  // is put straight into the colleague's Inbox here. Only the recipients
+  // outside — another domain, or one of ours that isn't connected in
+  // CredenceHR / whose Credence Mail is off — get it through SMTP. To and Cc
+  // stay as written for everyone, so a Reply-all from outside still reaches
+  // all; Bcc is never shown to anyone.
+  // Such mail is only in CredenceHR — Outlook or a phone's mail app on the
+  // cPanel mailbox doesn't see it.
+  const DOMAIN_RE = /^(?=.{3,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
+  const DEFAULT_DOMAINS = ["credencehousinglimited.com"];
+  let systemCache: { at: number; v: { internalDelivery: boolean; domains: string[] } } | null = null;
+  async function systemSettings() {
+    if (systemCache && Date.now() - systemCache.at < 30_000) return systemCache.v;
+    const row: any = ((await queryDB("SELECT * FROM mail_system_settings WHERE id = 1").catch(() => [])) || [])[0];
+    const domains = row
+      ? String(row.internal_domains || "")
+          .split(/[\s,;]+/)
+          .map((d) => d.trim().toLowerCase())
+          .filter((d) => DOMAIN_RE.test(d))
+      : DEFAULT_DOMAINS;
+    const v = { internalDelivery: row ? !!Number(row.internal_delivery) : true, domains };
+    systemCache = { at: Date.now(), v };
+    return v;
+  }
+  const domainOf = (email: string) => (String(email).split("@")[1] || "").toLowerCase();
+
+  // Which recipients get the mail inside CredenceHR: address -> the
+  // connected mailboxes with that address (usually one).
+  async function internalTargets(a: any, recipients: string[], opts: { create?: boolean } = { create: true }): Promise<Map<string, any[]>> {
+    const out = new Map<string, any[]>();
+    const sys = await systemSettings();
+    if (!sys.internalDelivery || !sys.domains.includes(domainOf(a.email))) return out;
+    const wanted = [...new Set(recipients.map((x) => x.toLowerCase()))].filter((x) => sys.domains.includes(domainOf(x)));
+    if (!wanted.length) return out;
+    const marks = wanted.map(() => "?").join(",");
+    const add = (email: string, t: any) => {
+      const list = out.get(email) || [];
+      if (!list.some((x) => (t.id && x.id === t.id) || (!t.id && x.user_id === t.user_id && x.employee_id === t.employee_id))) list.push(t);
+      out.set(email, list);
+    };
+    // Whether the person can open Credence Mail now (then they're told).
+    const hasAccess = (r: any) => r.role === "superadmin" || (!!Number(r.can_use_mail) && !Number(r.is_onboarding));
+    // Unscoped: an address is the same mailbox whichever company is active.
+    // 1. A mailbox with that address already in CredenceHR (connected, or
+    //    made here for mail that came before).
+    const boxes: any[] =
+      (await queryDB(
+        `/*unscoped*/ SELECT m.id, m.user_id, m.employee_id, m.email, u.role, u.can_use_mail, u.is_onboarding, u.is_blocked
+         FROM mail_accounts m LEFT JOIN users u ON u.id = m.user_id
+         WHERE m.email IN (${marks})`,
+        wanted
+      ).catch(() => [])) || [];
+    for (const r of boxes) {
+      if (Number(r.user_id) && Number(r.is_blocked)) continue;
+      add(String(r.email).toLowerCase(), { id: Number(r.id), user_id: Number(r.user_id), employee_id: r.employee_id, email: r.email, notify: Number(r.user_id) > 0 && hasAccess(r) });
+    }
+    // 2. Everyone else whose address it is: a CredenceHR login email, or an
+    //    Employee's email in the Employee Directory (all_employees.email) —
+    //    the mail goes to that Employee whether or not they have a login or
+    //    Credence Mail turned on. It waits in an inside-only mailbox made now
+    //    (for the Employee's login, or — no login yet — held for the
+    //    Employee and handed over when they get one; see claimHeld).
+    const missing = wanted.filter((x) => !out.has(x));
+    if (!missing.length) return out;
+    const mm = missing.map(() => "?").join(",");
+    const people: any[] = [
+      ...((await queryDB(
+        `/*unscoped*/ SELECT u.id AS user_id, NULL AS employee_id, u.name, LOWER(TRIM(u.email)) AS email, u.role, u.can_use_mail, u.is_onboarding, u.is_blocked
+         FROM users u WHERE LOWER(TRIM(u.email)) IN (${mm})`,
+        missing
+      ).catch(() => [])) || []),
+      ...((await queryDB(
+        `/*unscoped*/ SELECT e.user_id, e.id AS employee_id, e.name, LOWER(TRIM(e.email)) AS email, u.role, u.can_use_mail, u.is_onboarding, u.is_blocked
+         FROM all_employees e LEFT JOIN users u ON u.id = e.user_id
+         WHERE COALESCE(e.is_active, 1) = 1 AND LOWER(TRIM(e.email)) IN (${mm})`,
+        missing
+      ).catch(() => [])) || [])
+    ];
+    for (const email of missing) {
+      // One per person: a login wins over its own Employee row.
+      const seen = new Set<string>();
+      for (const p of people.filter((x) => x.email === email)) {
+        const userId = Number(p.user_id) || 0;
+        if (userId && Number(p.is_blocked)) continue;
+        const key = userId ? `u${userId}` : `e${p.employee_id}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const notify = userId > 0 && hasAccess(p);
+        if (!opts.create) {
+          add(email, { id: 0, user_id: userId, employee_id: p.employee_id, email, notify });
+          continue;
+        }
+        const box = await ensureInternalBox(userId, email, p.name, userId ? null : Number(p.employee_id));
+        if (box) add(email, { ...box, notify });
+      }
+    }
+    return out;
+  }
+  async function ensureInternalBox(userId: number, email: string, name: string | null, employeeId: number | null = null): Promise<any | null> {
+    const has: any[] = userId ? (await queryDB("SELECT COUNT(*) AS n FROM mail_accounts WHERE user_id = ?", [userId])) || [] : [{ n: 1 }];
+    const r: any = await queryDB(
+      `INSERT INTO mail_accounts (user_id, employee_id, email, display_name, provider, imap_host, imap_port, imap_secure, smtp_host, smtp_port, smtp_secure, username, password_enc, tls_insecure, is_default)
+       VALUES (?, ?, ?, ?, 'internal', '', 0, 0, '', 0, 0, ?, '', 0, ?)
+       ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id)`,
+      [userId, employeeId, email, name || email.split("@")[0], email, Number(has[0]?.n || 0) ? 0 : 1]
+    );
+    const id = Number(r?.insertId);
+    if (!id) return null;
+    return { id, user_id: userId, employee_id: employeeId, email };
+  }
+
+  // Mail held for an Employee with no login (user_id 0) goes to them once
+  // they have one: into their own mailbox with that address if they have it,
+  // or the held mailbox becomes theirs.
+  const claimChecked = new Map<number, number>();
+  async function claimHeld(userId: number) {
+    if (!userId || Date.now() - (claimChecked.get(userId) || 0) < 60_000) return;
+    claimChecked.set(userId, Date.now());
+    const held: any[] =
+      (await queryDB(
+        `/*unscoped*/ SELECT m.id, m.email FROM mail_accounts m JOIN all_employees e ON e.id = m.employee_id WHERE m.user_id = 0 AND e.user_id = ?`,
+        [userId]
+      ).catch(() => [])) || [];
+    for (const h of held) {
+      const mine: any = ((await queryDB("SELECT id FROM mail_accounts WHERE user_id = ? AND email = ?", [userId, h.email])) || [])[0];
+      if (mine) {
+        await queryDB("UPDATE mail_messages SET user_id = ?, account_id = ? WHERE account_id = ?", [userId, Number(mine.id), Number(h.id)]);
+        await queryDB("DELETE FROM mail_accounts WHERE id = ?", [Number(h.id)]);
+      } else {
+        const n: any[] = (await queryDB("SELECT COUNT(*) AS n FROM mail_accounts WHERE user_id = ?", [userId])) || [];
+        await queryDB("UPDATE mail_accounts SET user_id = ?, is_default = ? WHERE id = ?", [userId, Number(n[0]?.n || 0) ? 0 : 1, Number(h.id)]);
+        await queryDB("UPDATE mail_messages SET user_id = ? WHERE account_id = ?", [userId, Number(h.id)]);
+      }
+    }
+  }
+
+  // Attachments of internal mail are kept once (mail_blobs), whichever and
+  // however many mailboxes hold them.
+  async function blobIds(files: { name: string; mime: string; data: Buffer }[]): Promise<number[]> {
+    const ids: number[] = [];
+    for (const f of files) {
+      const sha = crypto.createHash("sha256").update(f.data).digest("hex");
+      const r: any = await queryDB(
+        "INSERT INTO mail_blobs (sha256, size, data) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id), created_at = CURRENT_TIMESTAMP",
+        [sha, f.data.length, f.data]
+      );
+      ids.push(Number(r.insertId));
+    }
+    return ids;
+  }
+
+  type Outgoing = {
+    messageId: string;
+    inReplyTo: string | null;
+    refs: string | null;
+    to: string[];
+    cc: string[];
+    subject: string;
+    html: string;
+    files: { name: string; mime: string; data: Buffer }[];
+    blobs?: number[];
+  };
+  // Puts the mail into each internal recipient's Inbox, with their own
+  // blocked senders and rules applied, and tells them.
+  async function deliverInside(a: any, targets: Map<string, any[]>, m: Outgoing, opts: { auto?: boolean } = {}): Promise<number[]> {
+    const accounts = new Map<number, any>();
+    for (const list of targets.values()) for (const t of list) accounts.set(Number(t.id), t);
+    if (!accounts.size) return [];
+    const blobs = m.blobs || (m.files.length ? await blobIds(m.files) : []);
+    const meta = m.files.map((f, idx) => ({ idx, name: f.name, type: f.mime, size: f.data.length }));
+    const text = m.html.replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
+    const fromEmail = String(a.email).toLowerCase();
+    const fromName = a.display_name || a.email;
+    const subject = m.subject || "(no subject)";
+    const thread = threadOf(m.messageId, m.inReplyTo, m.refs);
+    for (const t of accounts.values()) {
+      // Already there (a retried send): once is enough.
+      const dup: any[] = await queryDB("SELECT id FROM mail_messages WHERE account_id = ? AND message_id = ? AND folder_role = 'inbox' LIMIT 1", [Number(t.id), m.messageId]);
+      if (dup.length) continue;
+      const ruled = await incomingRules(
+        Number(t.user_id),
+        { fromEmail, fromName, to: m.to, subject, text, hasFiles: m.files.length > 0 },
+        { labels: ["Inbox"], isRead: 0, isStarred: 0, category: categorize(fromEmail, subject, text) }
+      );
+      const ins: any = await queryDB(
+        `INSERT INTO mail_messages
+          (user_id, account_id, folder_role, uid, message_id, in_reply_to, refs, thread_id, from_name, from_email, to_json, cc_json, bcc_json, subject, body, snippet,
+           mail_date, is_read, is_starred, labels_json, category, attachments_json, has_attachments, via_internal)
+         VALUES (?, ?, 'inbox', NULL, ?, ?, ?, ?, ?, ?, ?, ?, '[]', ?, ?, ?, UTC_TIMESTAMP(), ?, ?, ?, ?, ?, ?, 1)`,
+        [
+          Number(t.user_id),
+          Number(t.id),
+          m.messageId,
+          m.inReplyTo,
+          m.refs,
+          thread,
+          fromName,
+          fromEmail,
+          JSON.stringify(m.to),
+          JSON.stringify(m.cc),
+          subject,
+          m.html,
+          (text || subject).slice(0, 200),
+          ruled.isRead,
+          ruled.isStarred,
+          JSON.stringify(ruled.labels),
+          ruled.category,
+          JSON.stringify(meta),
+          meta.length ? 1 : 0
+        ]
+      );
+      const id = Number(ins.insertId);
+      for (let i = 0; i < m.files.length; i++) {
+        await queryDB("INSERT INTO mail_files (message_id, idx, name, mime, size, data, blob_id) VALUES (?, ?, ?, ?, ?, NULL, ?)", [id, i, m.files[i].name, m.files[i].mime, m.files[i].data.length, blobs[i]]);
+      }
+      if (!Number(t.user_id)) continue; // held for an Employee with no login yet
+      io.to(`user:${Number(t.user_id)}`).emit("mail:changed", { accountId: Number(t.id) });
+      if (ruled.labels.includes("Inbox") && t.notify !== false) {
+        announceNew(Number(t.user_id), Number(t.id), [{ id, fromName, fromEmail, subject }]);
+        if (!opts.auto) {
+          const full: any = ((await queryDB("SELECT * FROM mail_accounts WHERE id = ?", [Number(t.id)])) || [])[0];
+          if (full) void maybeVacationReply(full, fromEmail, subject, new Date()).catch(() => undefined);
+        }
+      }
+    }
+    return blobs;
+  }
+
+  // -------------------------------------------------------------------------
+  // Groups
+  // -------------------------------------------------------------------------
+  // A central group is an address on one of our domains (e.g.
+  // accounts-team@credencehousinglimited.com) set up in Mail Administration.
+  // Mail sent to it from Credence Mail goes to every member — inside
+  // CredenceHR for colleagues, through the mail server for anyone outside.
+  // Members: addresses picked by hand, plus (optional) every active Employee
+  // or everyone in some departments, read from the Employee Directory each
+  // time, so joiners and leavers are in and out without anyone editing it.
+  // Who may write to it: anyone, only its members, or only the listed people.
+  // The group address itself never goes to the mail server; mail from
+  // outside CredenceHR to it isn't covered (that would be a cPanel forwarder).
+  const GROUP_POLICIES = ["anyone", "members", "listed"] as const;
+  const groupOut = (g: any) => ({
+    id: Number(g.id),
+    email: String(g.email),
+    name: String(g.name || ""),
+    description: g.description || "",
+    members: parseJson<string[]>(g.members_json, []),
+    allEmployees: !!Number(g.all_employees),
+    departments: parseJson<string[]>(g.departments_json, []),
+    sendPolicy: (GROUP_POLICIES as readonly string[]).includes(g.send_policy) ? g.send_policy : "members",
+    senders: parseJson<string[]>(g.senders_json, []),
+    active: !!Number(g.is_active)
+  });
+  async function groupsByEmail(emails: string[]): Promise<Map<string, ReturnType<typeof groupOut>>> {
+    const out = new Map<string, ReturnType<typeof groupOut>>();
+    const list = [...new Set(emails.map((x) => x.toLowerCase()))];
+    if (!list.length) return out;
+    const rows: any[] =
+      (await queryDB(`SELECT * FROM mail_groups WHERE is_active = 1 AND email IN (${list.map(() => "?").join(",")})`, list).catch(() => [])) || [];
+    for (const r of rows) out.set(String(r.email).toLowerCase(), groupOut(r));
+    return out;
+  }
+  // Everyone the group reaches now (lower-case addresses).
+  async function groupMembers(g: ReturnType<typeof groupOut>): Promise<string[]> {
+    const set = new Set(g.members.map((x) => x.toLowerCase()).filter(isEmail));
+    const rule = g.allEmployees ? "" : g.departments.length ? ` AND department IN (${g.departments.map(() => "?").join(",")})` : null;
+    if (rule !== null) {
+      const rows: any[] =
+        (await queryDB(
+          `/*unscoped*/ SELECT LOWER(TRIM(email)) AS email FROM all_employees WHERE is_active = 1 AND email IS NOT NULL AND email <> ''${rule}`,
+          g.allEmployees ? [] : g.departments
+        ).catch(() => [])) || [];
+      for (const r of rows) if (isEmail(r.email)) set.add(r.email);
+    }
+    set.delete(g.email.toLowerCase());
+    return [...set];
+  }
+  async function maySendToGroup(g: ReturnType<typeof groupOut>, sender: string, members: string[]): Promise<boolean> {
+    const s = sender.toLowerCase();
+    if (g.sendPolicy === "anyone") return true;
+    if (g.sendPolicy === "listed") return g.senders.map((x) => x.toLowerCase()).includes(s);
+    return members.includes(s);
+  }
+  // Splits recipients into plain addresses and groups, and opens each group
+  // into its members. A group the sender may not write to is "denied".
+  async function expandGroups(a: any, recipients: string[]) {
+    const all = [...new Set(recipients.map((x) => x.toLowerCase()))];
+    const groups = await groupsByEmail(all);
+    const sender = String(a.email || "").toLowerCase();
+    const rest = all.filter((x) => !groups.has(x));
+    const members = new Set<string>();
+    const info: { email: string; name: string; count: number; denied: boolean }[] = [];
+    for (const [email, g] of groups) {
+      const list = await groupMembers(g);
+      const ok = await maySendToGroup(g, sender, list);
+      info.push({ email, name: g.name, count: list.length, denied: !ok });
+      if (ok) for (const m of list) if (m !== sender) members.add(m);
+    }
+    return { rest, members: [...members], groups: info };
+  }
+
+  // Sends one built message: inside CredenceHR to the internal recipients,
+  // by SMTP to the rest. SMTP goes first — if it fails, nobody got it yet
+  // and the mail can simply be sent again.
+  async function sendRouted(a: any, recipients: string[], raw: Buffer, m: Outgoing, opts: { auto?: boolean } = {}) {
+    // Group addresses are opened into their members (the To / Cc lines still
+    // show the group, so a Reply all goes back to it).
+    const g = await expandGroups(a, recipients);
+    const denied = g.groups.filter((x) => x.denied);
+    if (denied.length) throw bad(`You can't write to ${denied.map((x) => `${x.name} (${x.email})`).join(", ")} — ask Mail Administration to let you`, 403);
+    const all = [...new Set([...g.rest, ...g.members])];
+    const internal = await internalTargets(a, all);
+    const external = all.filter((x) => !internal.has(x));
+    if (external.length) await sendRaw(a, { from: a.email, to: external }, raw);
+    const blobs = internal.size ? await deliverInside(a, internal, m, opts) : [];
+    return { internal: [...internal.keys()], external, blobs };
   }
 
   // -------------------------------------------------------------------------
@@ -1008,10 +1433,12 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     hasAttachments: !!Number(r.has_attachments),
     scheduledSendTime: fromDb(r.scheduled_at),
     sendError: r.send_error || null,
-    messageId: r.message_id || null
+    messageId: r.message_id || null,
+    // Came / went inside CredenceHR, not through the mail server.
+    internal: !!Number(r.via_internal)
   });
   const LIST_COLS =
-    "id, account_id, thread_id, from_name, from_email, to_json, cc_json, bcc_json, subject, snippet, mail_date, is_read, is_starred, is_important, labels_json, category, attachments_json, has_attachments, scheduled_at, send_error, message_id";
+    "id, account_id, thread_id, from_name, from_email, to_json, cc_json, bcc_json, subject, snippet, mail_date, is_read, is_starred, is_important, labels_json, category, attachments_json, has_attachments, scheduled_at, send_error, message_id, via_internal";
   async function messageOf(userId: number, id: any, withBody = true): Promise<any> {
     const rows: any[] = await queryDB(`SELECT ${withBody ? "*" : LIST_COLS + ", folder_role, uid"} FROM mail_messages WHERE id = ? AND user_id = ?`, [Number(id), userId]);
     if (!rows[0]) throw bad("Message not found.", 404);
@@ -1028,9 +1455,13 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     authenticateToken,
     handler(async (req, res) => {
       const enabled = isMySQL() && (await hasMail(req.user));
+      if (enabled) await claimHeld(uid(req)).catch(() => undefined);
       res.json({
         enabled,
         serverReady: !!mailKey(),
+        ourDomains: enabled ? (await systemSettings()).domains : [],
+        canDirectory: enabled && (await hasDirectory(req.user)),
+        canMyGroups: enabled && (await hasMyGroups(Number(req.user.id))),
         accounts: enabled ? (await accountsOf(uid(req))).map(publicAccount) : []
       });
     })
@@ -1092,8 +1523,9 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
       const row = (await adminMailboxes()).find((r) => Number(r.id) === id);
       if (!row) throw bad("Mailbox not found.", 404);
       if (row.user_role === "superadmin" && req.user.role !== "superadmin") throw bad("Only the Superadmin can see this mailbox's password.", 403);
-      const full: any = ((await queryDB("SELECT password_enc FROM mail_accounts WHERE id = ?", [id])) || [])[0];
+      const full: any = ((await queryDB("SELECT password_enc, provider FROM mail_accounts WHERE id = ?", [id])) || [])[0];
       if (!full) throw bad("Mailbox not found.", 404);
+      if (isInternalBox(full)) throw bad("This mailbox is only inside CredenceHR — it has no saved password.", 409);
       const password = decryptSecret(full.password_enc);
       await queryDB("INSERT INTO mail_admin_log (actor_user_id, target_user_id, account_id, action, ip, created_at) VALUES (?, ?, ?, 'password', ?, UTC_TIMESTAMP())", [
         Number(req.user.id),
@@ -1134,11 +1566,338 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     })
   );
 
+  // Why an address gets the mail through the mail server and not inside.
+  async function whyOutside(a: any, email: string): Promise<string> {
+    const sys = await systemSettings();
+    if (!sys.internalDelivery) return "internal delivery is turned off (Mail Administration)";
+    if (!sys.domains.includes(domainOf(a.email))) return `it's sent from ${a.email}, which isn't one of our domains`;
+    if (!sys.domains.includes(domainOf(email))) return "outside address";
+    const blocked: any[] =
+      (await queryDB(
+        `/*unscoped*/ SELECT u.name FROM users u LEFT JOIN all_employees e ON e.user_id = u.id
+         WHERE u.is_blocked = 1 AND (LOWER(TRIM(u.email)) = ? OR LOWER(TRIM(e.email)) = ?) LIMIT 1`,
+        [email, email]
+      ).catch(() => [])) || [];
+    if (blocked[0]) return `${blocked[0].name}'s CredenceHR account is blocked`;
+    const inactive: any[] = (await queryDB(`/*unscoped*/ SELECT name FROM all_employees WHERE LOWER(TRIM(email)) = ? AND is_active = 0 LIMIT 1`, [email]).catch(() => [])) || [];
+    if (inactive[0]) return `${inactive[0].name} is no longer an active Employee`;
+    return "no Employee in the Employee Directory (and no CredenceHR login) has this email";
+  }
+
+  // Admin: would mail from one address to another stay inside, and if not, why.
+  app.get(
+    "/api/mail/admin/check",
+    authenticateToken,
+    requireModuleLayer("mail_admin", "read"),
+    handler(async (req, res) => {
+      if (!isMySQL()) throw bad("Credence Mail needs the MySQL database.", 503);
+      const from = str(req.query.from).toLowerCase();
+      const to = str(req.query.to).toLowerCase();
+      if (!isEmail(from) || !isEmail(to)) throw bad("Enter both addresses.");
+      const inside = await internalTargets({ email: from }, [to], { create: false });
+      res.json({ inside: inside.has(to), reason: inside.has(to) ? "Delivered inside CredenceHR." : await whyOutside({ email: from }, to) });
+    })
+  );
+
+  // Compose: which of these recipients would get the mail inside CredenceHR
+  // and which through the mail server (nothing is created or sent).
+  app.post(
+    "/api/mail/route-preview",
+    ...gate,
+    handler(async (req, res) => {
+      const a = await accountOf(uid(req), req.body?.accountId);
+      const written = [...new Set([...splitAddresses(req.body?.to), ...splitAddresses(req.body?.cc), ...splitAddresses(req.body?.bcc)].map((x) => x.toLowerCase()))];
+      const g = await expandGroups(a, written);
+      const all = [...new Set([...g.rest, ...g.members])];
+      const inside = await internalTargets(a, all, { create: false });
+      const external = all.filter((x) => !inside.has(x));
+      res.json({
+        internal: all.filter((x) => inside.has(x)),
+        // Groups written, how many each reaches, and any the sender can't use.
+        groups: g.groups,
+        external,
+        // Why each one goes through the mail server.
+        reasons: Object.fromEntries(await Promise.all(external.map(async (x) => [x, await whyOutside(a, x)]))),
+        // So the screen can say why ours went out through the server.
+        ourDomains: (await systemSettings()).domains,
+        enabled: (await systemSettings()).internalDelivery
+      });
+    })
+  );
+
+  // Internal delivery on / off and which domains are ours. Seeing it: the
+  // module's "read"; changing it: the explicit-only "mail_settings" layer.
+  const publicSystem = async (req: any) => ({
+    ...(await systemSettings()),
+    canEdit: await hasModuleLayer(req.user, "mail_admin", "mail_settings")
+  });
+  app.get(
+    "/api/mail/admin/settings",
+    authenticateToken,
+    requireModuleLayer("mail_admin", "read"),
+    handler(async (req, res) => {
+      if (!isMySQL()) throw bad("Credence Mail needs the MySQL database.", 503);
+      res.json(await publicSystem(req));
+    })
+  );
+  app.put(
+    "/api/mail/admin/settings",
+    authenticateToken,
+    requireModuleLayer("mail_admin", "mail_settings"),
+    handler(async (req, res) => {
+      if (!isMySQL()) throw bad("Credence Mail needs the MySQL database.", 503);
+      const b = req.body || {};
+      const cur = await systemSettings();
+      const on = b.internalDelivery === undefined ? cur.internalDelivery : !!b.internalDelivery;
+      let domains = cur.domains;
+      if (b.domains !== undefined) {
+        const list = (Array.isArray(b.domains) ? b.domains : String(b.domains).split(/[\s,;]+/)).map((d: any) => String(d || "").trim().toLowerCase().replace(/^@/, "")).filter(Boolean);
+        const wrong = list.filter((d: string) => !DOMAIN_RE.test(d));
+        if (wrong.length) throw bad(`Not a domain: ${wrong.join(", ")}`);
+        domains = [...new Set<string>(list)].slice(0, 10);
+        if (!domains.length) throw bad("Keep at least one domain (e.g. credencehousinglimited.com).");
+      }
+      await queryDB(
+        `INSERT INTO mail_system_settings (id, internal_delivery, internal_domains, updated_by) VALUES (1, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE internal_delivery = VALUES(internal_delivery), internal_domains = VALUES(internal_domains), updated_by = VALUES(updated_by)`,
+        [on ? 1 : 0, domains.join(","), Number(req.user.id)]
+      );
+      systemCache = null;
+      res.json(await publicSystem(req));
+    })
+  );
+
+
+  // ---- Groups: Mail Administration -> Groups ---------------------------------
+  // Seeing them: the module's "read"; adding / changing / removing: the
+  // explicit-only "mail_groups" layer.
+  async function groupDepartments(): Promise<string[]> {
+    const rows: any[] =
+      (await queryDB("/*unscoped*/ SELECT DISTINCT department FROM all_employees WHERE is_active = 1 AND department IS NOT NULL AND department <> '' ORDER BY department").catch(() => [])) || [];
+    return rows.map((r) => String(r.department));
+  }
+  app.get(
+    "/api/mail/admin/groups",
+    authenticateToken,
+    requireModuleLayer("mail_admin", "read"),
+    handler(async (req, res) => {
+      if (!isMySQL()) throw bad("Credence Mail needs the MySQL database.", 503);
+      noStore(res);
+      const rows: any[] = (await queryDB("SELECT * FROM mail_groups ORDER BY name ASC")) || [];
+      const items = [];
+      for (const r of rows) {
+        const g = groupOut(r);
+        items.push({ ...g, memberCount: (await groupMembers(g)).length });
+      }
+      res.json({
+        items,
+        canEdit: await hasModuleLayer(req.user, "mail_admin", "mail_groups"),
+        departments: await groupDepartments(),
+        domains: (await systemSettings()).domains
+      });
+    })
+  );
+  // Who a group reaches right now, with names from the Employee Directory.
+  app.get(
+    "/api/mail/admin/groups/:id/members",
+    authenticateToken,
+    requireModuleLayer("mail_admin", "read"),
+    handler(async (req, res) => {
+      const r: any = ((await queryDB("SELECT * FROM mail_groups WHERE id = ?", [Number(req.params.id)])) || [])[0];
+      if (!r) throw bad("Group not found.", 404);
+      const list = await groupMembers(groupOut(r));
+      const names = new Map<string, any>();
+      if (list.length) {
+        const rows: any[] =
+          (await queryDB(
+            `/*unscoped*/ SELECT LOWER(TRIM(email)) AS email, name, employee_id, designation, department FROM all_employees WHERE LOWER(TRIM(email)) IN (${list.map(() => "?").join(",")})`,
+            list
+          ).catch(() => [])) || [];
+        for (const x of rows) names.set(x.email, x);
+      }
+      noStore(res);
+      res.json(
+        list
+          .map((e) => {
+            const x = names.get(e);
+            return { email: e, name: x?.name || "", employeeId: x?.employee_id || "", designation: x?.designation || "", department: x?.department || "" };
+          })
+          .sort((p, q) => (p.name || p.email).localeCompare(q.name || q.email))
+      );
+    })
+  );
+  // Checks and cleans what the editor sent.
+  async function groupInput(b: any, id: number | null) {
+    const email = str(b.email).toLowerCase();
+    const name = str(b.name);
+    if (!isEmail(email)) throw bad("Enter the group's address, e.g. accounts-team@credencehousinglimited.com.");
+    if (!name) throw bad("Give the group a name.");
+    const domains = (await systemSettings()).domains;
+    if (!domains.includes(domainOf(email))) throw bad(`The group's address must be on one of our domains (${domains.join(", ")}).`);
+    const taken: any[] = (await queryDB("SELECT id FROM mail_groups WHERE email = ? AND id <> ?", [email, id || 0])) || [];
+    if (taken.length) throw bad("Another group already has this address.");
+    // A person's own address can't be a group, or their mail would vanish into it.
+    const person: any[] =
+      (await queryDB(
+        `/*unscoped*/ SELECT name FROM users WHERE LOWER(TRIM(email)) = ? UNION SELECT name FROM all_employees WHERE LOWER(TRIM(email)) = ? LIMIT 1`,
+        [email, email]
+      ).catch(() => [])) || [];
+    if (person.length) throw bad(`${email} is ${person[0].name}'s own address — pick another one for the group.`);
+    const list = (v: any) =>
+      [...new Set<string>((Array.isArray(v) ? v : String(v || "").split(/[\s,;]+/)).map((x: any) => String(x || "").trim().toLowerCase()).filter(Boolean))];
+    const members = list(b.members);
+    const senders = list(b.senders);
+    const wrong = [...members, ...senders].filter((x) => !isEmail(x));
+    if (wrong.length) throw bad(`Not an email address: ${wrong.slice(0, 5).join(", ")}`);
+    if (members.includes(email)) throw bad("A group can't be a member of itself.");
+    const departments = [...new Set<string>((Array.isArray(b.departments) ? b.departments : []).map((x: any) => String(x || "").trim()).filter(Boolean))];
+    const allEmployees = !!b.allEmployees;
+    if (!members.length && !departments.length && !allEmployees) throw bad("Add at least one member, a department, or every employee.");
+    const sendPolicy = (GROUP_POLICIES as readonly string[]).includes(b.sendPolicy) ? b.sendPolicy : "members";
+    if (sendPolicy === "listed" && !senders.length) throw bad("Add who may write to the group, or let everyone / its members.");
+    return {
+      email,
+      name,
+      description: str(b.description, 1000) || null,
+      members: JSON.stringify(members.slice(0, 5000)),
+      allEmployees: allEmployees ? 1 : 0,
+      departments: JSON.stringify(departments.slice(0, 100)),
+      sendPolicy,
+      senders: JSON.stringify(senders.slice(0, 500)),
+      active: b.active === false ? 0 : 1
+    };
+  }
+  app.post(
+    "/api/mail/admin/groups",
+    authenticateToken,
+    requireModuleLayer("mail_admin", "mail_groups"),
+    handler(async (req, res) => {
+      const v = await groupInput(req.body || {}, null);
+      const r: any = await queryDB(
+        `INSERT INTO mail_groups (email, name, description, members_json, all_employees, departments_json, send_policy, senders_json, is_active, created_by, updated_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [v.email, v.name, v.description, v.members, v.allEmployees, v.departments, v.sendPolicy, v.senders, v.active, Number(req.user.id), Number(req.user.id)]
+      );
+      const row: any = ((await queryDB("SELECT * FROM mail_groups WHERE id = ?", [Number(r.insertId)])) || [])[0];
+      res.status(201).json(groupOut(row));
+    })
+  );
+  app.put(
+    "/api/mail/admin/groups/:id",
+    authenticateToken,
+    requireModuleLayer("mail_admin", "mail_groups"),
+    handler(async (req, res) => {
+      const id = Number(req.params.id);
+      const had: any[] = (await queryDB("SELECT id FROM mail_groups WHERE id = ?", [id])) || [];
+      if (!had.length) throw bad("Group not found.", 404);
+      const v = await groupInput(req.body || {}, id);
+      await queryDB(
+        `UPDATE mail_groups SET email = ?, name = ?, description = ?, members_json = ?, all_employees = ?, departments_json = ?, send_policy = ?, senders_json = ?, is_active = ?, updated_by = ? WHERE id = ?`,
+        [v.email, v.name, v.description, v.members, v.allEmployees, v.departments, v.sendPolicy, v.senders, v.active, Number(req.user.id), id]
+      );
+      const row: any = ((await queryDB("SELECT * FROM mail_groups WHERE id = ?", [id])) || [])[0];
+      res.json(groupOut(row));
+    })
+  );
+  app.delete(
+    "/api/mail/admin/groups/:id",
+    authenticateToken,
+    requireModuleLayer("mail_admin", "mail_groups"),
+    handler(async (req, res) => {
+      await queryDB("DELETE FROM mail_groups WHERE id = ?", [Number(req.params.id)]);
+      res.json({ success: true });
+    })
+  );
+
+  // ---- Groups in the composer ----------------------------------------------
+  // The central groups this person may write to, and — with the Self Service
+  // switch — their own groups.
+  async function hasMyGroups(userId: number): Promise<boolean> {
+    const rows: any[] = (await queryDB("SELECT role, can_use_mail_groups FROM users WHERE id = ?", [userId]).catch(() => [])) || [];
+    return rows[0]?.role === "superadmin" || !!Number(rows[0]?.can_use_mail_groups);
+  }
+  const myGroupOut = (r: any) => ({ id: Number(r.id), name: String(r.name || ""), members: parseJson<string[]>(r.members_json, []) });
+  app.get(
+    "/api/mail/groups",
+    ...gate,
+    handler(async (req, res) => {
+      noStore(res);
+      const mine = await accountsOf(uid(req));
+      const senders = mine.map((x: any) => String(x.email).toLowerCase());
+      const rows: any[] = (await queryDB("SELECT * FROM mail_groups WHERE is_active = 1 ORDER BY name ASC").catch(() => [])) || [];
+      const central = [];
+      for (const r of rows) {
+        const g = groupOut(r);
+        const members = await groupMembers(g);
+        let ok = false;
+        for (const s of senders) if (await maySendToGroup(g, s, members)) ok = true;
+        if (ok) central.push({ email: g.email, name: g.name, description: g.description, count: members.length });
+      }
+      const canMine = await hasMyGroups(uid(req));
+      const own: any[] = canMine ? (await queryDB("SELECT * FROM mail_personal_groups WHERE user_id = ? ORDER BY name ASC", [uid(req)])) || [] : [];
+      res.json({ central, mine: own.map(myGroupOut), canMine });
+    })
+  );
+
+  // ---- My groups (Self Service switch users.can_use_mail_groups) -------------
+  const requireMyGroups = async (req: any) => {
+    if (req.mailViewAs) throw bad("Read only.", 403);
+    if (!(await hasMyGroups(uid(req)))) throw bad("My groups isn't turned on for your account.", 403);
+  };
+  const myGroupInput = (b: any) => {
+    const name = str(b.name);
+    if (!name) throw bad("Give the group a name.");
+    const members = [...new Set<string>((Array.isArray(b.members) ? b.members : String(b.members || "").split(/[\s,;]+/)).map((x: any) => String(x || "").trim().toLowerCase()).filter(Boolean))];
+    const wrong = members.filter((x) => !isEmail(x));
+    if (wrong.length) throw bad(`Not an email address: ${wrong.slice(0, 5).join(", ")}`);
+    if (!members.length) throw bad("Add at least one person.");
+    return { name, members: JSON.stringify(members.slice(0, 500)) };
+  };
+  app.post(
+    "/api/mail/my-groups",
+    ...gate,
+    handler(async (req, res) => {
+      await requireMyGroups(req);
+      const n: any[] = (await queryDB("SELECT COUNT(*) AS n FROM mail_personal_groups WHERE user_id = ?", [uid(req)])) || [];
+      if (Number(n[0]?.n || 0) >= 100) throw bad("You can keep up to 100 groups.");
+      const v = myGroupInput(req.body || {});
+      const r: any = await queryDB("INSERT INTO mail_personal_groups (user_id, name, members_json) VALUES (?, ?, ?)", [uid(req), v.name, v.members]);
+      const row: any = ((await queryDB("SELECT * FROM mail_personal_groups WHERE id = ?", [Number(r.insertId)])) || [])[0];
+      res.status(201).json(myGroupOut(row));
+    })
+  );
+  app.put(
+    "/api/mail/my-groups/:id",
+    ...gate,
+    handler(async (req, res) => {
+      await requireMyGroups(req);
+      const id = Number(req.params.id);
+      const had: any[] = (await queryDB("SELECT id FROM mail_personal_groups WHERE id = ? AND user_id = ?", [id, uid(req)])) || [];
+      if (!had.length) throw bad("Group not found.", 404);
+      const v = myGroupInput(req.body || {});
+      await queryDB("UPDATE mail_personal_groups SET name = ?, members_json = ? WHERE id = ? AND user_id = ?", [v.name, v.members, id, uid(req)]);
+      const row: any = ((await queryDB("SELECT * FROM mail_personal_groups WHERE id = ?", [id])) || [])[0];
+      res.json(myGroupOut(row));
+    })
+  );
+  app.delete(
+    "/api/mail/my-groups/:id",
+    ...gate,
+    handler(async (req, res) => {
+      await requireMyGroups(req);
+      await queryDB("DELETE FROM mail_personal_groups WHERE id = ? AND user_id = ?", [Number(req.params.id), uid(req)]);
+      res.json({ success: true });
+    })
+  );
+
   // ---- Mailboxes ----------------------------------------------------------
   app.get(
     "/api/mail/accounts",
     ...gate,
-    handler(async (req, res) => res.json((await accountsOf(uid(req))).map(publicAccount)))
+    handler(async (req, res) => {
+      await claimHeld(uid(req)).catch(() => undefined);
+      res.json((await accountsOf(uid(req))).map(publicAccount));
+    })
   );
 
   // Connect a mailbox: checked against the mail server, then saved.
@@ -1336,6 +2095,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
       let added = 0;
       const errors: string[] = [];
       for (const a of list) {
+        if (isInternalBox(a)) continue;
         try {
           const work = withAccountLock(Number(a.id), () =>
             withImap(a, async (c) => {
@@ -1444,7 +2204,10 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
         res.setHeader("X-Content-Type-Options", "nosniff");
         res.send(buf);
       };
-      const local: any[] = await queryDB("SELECT name, mime, data FROM mail_files WHERE message_id = ? AND idx = ?", [Number(m.id), idx]);
+      const local: any[] = await queryDB(
+        "SELECT f.name, f.mime, COALESCE(f.data, b.data) AS data FROM mail_files f LEFT JOIN mail_blobs b ON b.id = f.blob_id WHERE f.message_id = ? AND f.idx = ?",
+        [Number(m.id), idx]
+      );
       if (local[0]?.data) return send(Buffer.isBuffer(local[0].data) ? local[0].data : Buffer.from(local[0].data), local[0].name, local[0].mime);
       if (!m.uid || !m.folder_role) throw bad("This attachment is no longer available.", 404);
       const a = await accountOf(uid(req), m.account_id);
@@ -1715,7 +2478,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     await queryDB("UPDATE mail_messages SET attachments_json = ?, has_attachments = ? WHERE id = ?", [JSON.stringify(meta), meta.length ? 1 : 0, messageId]);
   }
   async function storedFiles(messageId: number) {
-    return ((await queryDB("SELECT name, mime, data FROM mail_files WHERE message_id = ? ORDER BY idx", [messageId])) || []).map((f: any) => ({
+    return ((await queryDB("SELECT f.name, f.mime, COALESCE(f.data, b.data) AS data FROM mail_files f LEFT JOIN mail_blobs b ON b.id = f.blob_id WHERE f.message_id = ? ORDER BY f.idx", [messageId])) || []).map((f: any) => ({
       name: f.name,
       mime: f.mime,
       data: Buffer.isBuffer(f.data) ? f.data : Buffer.from(f.data || "")
@@ -1749,25 +2512,44 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     const bcc = parseJson<string[]>(row.bcc_json, []);
     const files = await storedFiles(Number(row.id));
     const { raw, messageId } = await compose(a, { messageId: row.message_id, to, cc, bcc, subject: row.subject || "", html: row.body || "", inReplyTo: row.in_reply_to, references: row.refs, files });
-    await sendRaw(a, { from: a.email, to: [...to, ...cc, ...bcc] }, raw);
-    // A copy in the server's Sent folder (other mail apps see it too).
+    const routed = await sendRouted(a, [...to, ...cc, ...bcc], raw, {
+      messageId,
+      inReplyTo: row.in_reply_to || null,
+      refs: row.refs || row.in_reply_to || null,
+      to,
+      cc,
+      subject: row.subject || "",
+      html: row.body || "",
+      files
+    });
+    // A copy in the server's Sent folder (other mail apps see it too) — only
+    // when it went out through the server; mail that stayed inside
+    // CredenceHR is kept here only.
     let sentUid: number | null = null;
-    try {
-      sentUid = await withImap(a, async (c) => {
-        const folders = await foldersOf(a, c);
-        if (!folders.sent) return null;
-        const r: any = await c.append(folders.sent, raw, ["\\Seen"]);
-        return r?.uid ? Number(r.uid) : null;
-      });
-    } catch (e: any) {
-      console.warn("⚠️ Credence Mail: couldn't save to Sent on the server:", e?.message);
+    if (routed.external.length) {
+      try {
+        sentUid = await withImap(a, async (c) => {
+          const folders = await foldersOf(a, c);
+          if (!folders.sent) return null;
+          const r: any = await c.append(folders.sent, raw, ["\\Seen"]);
+          return r?.uid ? Number(r.uid) : null;
+        });
+      } catch (e: any) {
+        console.warn("⚠️ Credence Mail: couldn't save to Sent on the server:", e?.message);
+      }
     }
     await queryDB(
-      `UPDATE mail_messages SET labels_json = ?, folder_role = 'sent', uid = ?, message_id = ?, mail_date = UTC_TIMESTAMP(), scheduled_at = NULL, send_error = NULL, is_read = 1 WHERE id = ?`,
-      [JSON.stringify(["Sent"]), sentUid, messageId, Number(row.id)]
+      `UPDATE mail_messages SET labels_json = ?, folder_role = 'sent', uid = ?, message_id = ?, mail_date = UTC_TIMESTAMP(), scheduled_at = NULL, send_error = NULL, is_read = 1, via_internal = ? WHERE id = ?`,
+      [JSON.stringify(["Sent"]), sentUid, messageId, routed.external.length ? 0 : 1, Number(row.id)]
     );
     // The server has the attachments now (Sent copy); keep ours only if it doesn't.
     if (sentUid) await queryDB("DELETE FROM mail_files WHERE message_id = ?", [Number(row.id)]);
+    else if (routed.blobs.length) {
+      // Kept here: point at the one shared copy instead of a second one.
+      const ids = routed.blobs;
+      for (let i = 0; i < ids.length; i++) await queryDB("UPDATE mail_files SET data = NULL, blob_id = ? WHERE message_id = ? AND idx = ?", [ids[i], Number(row.id), i]);
+    }
+    return { internal: routed.internal.length, external: routed.external.length };
   }
 
   // Saves the composer's content as a local row (draft / scheduled / outgoing).
@@ -1829,6 +2611,10 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
       const b = req.body || {};
       const draftId = b.draftId ? Number(b.draftId) : undefined;
       if (draftId) await messageOf(uid(req), draftId, false);
+      // A group the sender may not write to: say so before anything is saved.
+      const groupCheck = await expandGroups(await accountOf(uid(req), b.accountId), [...splitAddresses(b.to), ...splitAddresses(b.cc), ...splitAddresses(b.bcc)]);
+      const deniedGroups = groupCheck.groups.filter((x) => x.denied);
+      if (deniedGroups.length) throw bad(`You can't write to ${deniedGroups.map((x) => `${x.name} (${x.email})`).join(", ")} — ask Mail Administration to let you.`, 403);
       const later = b.scheduledAt && new Date(b.scheduledAt).getTime() > Date.now() + 30_000;
       if (b.scheduledAt && Number.isNaN(new Date(b.scheduledAt).getTime())) throw bad("Pick a valid time to send.");
       const { a, id, to, cc, bcc } = await upsertLocal(uid(req), b, later ? ["Scheduled"] : ["Outbox"], draftId);
@@ -1841,15 +2627,16 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
         res.status(201).json(toApi(await messageOf(uid(req), id), false));
         return;
       }
+      let delivery: { internal: number; external: number } | undefined;
       try {
-        await deliver(a, await messageOf(uid(req), id));
+        delivery = await deliver(a, await messageOf(uid(req), id));
       } catch (e: any) {
         const msg = `Not sent: ${e?.response || e?.message || e}`;
         await queryDB("UPDATE mail_messages SET labels_json = ?, send_error = ? WHERE id = ?", [JSON.stringify(["Drafts"]), msg.slice(0, 500), id]);
         throw bad(`${msg}. It was kept in Drafts.`, 502);
       }
       io.to(`user:${uid(req)}`).emit("mail:changed", { accountId: Number(a.id) });
-      res.status(201).json(toApi(await messageOf(uid(req), id), false));
+      res.status(201).json({ ...toApi(await messageOf(uid(req), id), false), delivery });
     })
   );
 
@@ -1917,6 +2704,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
             ? { enabled: !!b.vacationResponder.enabled, subject: str(b.vacationResponder.subject, 500), message: String(b.vacationResponder.message || "").slice(0, 10_000), startDate: str(b.vacationResponder.startDate, 40) || undefined, endDate: str(b.vacationResponder.endDate, 40) || undefined }
             : cur.vacationResponder,
         blockedSenders: Array.isArray(b.blockedSenders) ? [...new Set(b.blockedSenders.map((x: any) => str(x, 255).toLowerCase()).filter(Boolean))].slice(0, 500) : cur.blockedSenders,
+        pictureSenders: Array.isArray(b.pictureSenders) ? [...new Set(b.pictureSenders.map((x: any) => str(x, 255).toLowerCase()).filter(Boolean))].slice(0, 500) : cur.pictureSenders,
         layout:
           b.layout && typeof b.layout === "object" && !Array.isArray(b.layout)
             ? { density: b.layout.density === "compact" ? "compact" : "comfortable", previewPane: str(b.layout.previewPane, 20) || "right", theme: str(b.layout.theme, 20) || "light" }
@@ -1925,10 +2713,10 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
         timezone: str(b.timezone, 80) || cur.timezone
       };
       await queryDB(
-        `INSERT INTO mail_settings (user_id, signatures_json, vacation_json, blocked_json, layout_json, language, timezone) VALUES (?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO mail_settings (user_id, signatures_json, vacation_json, blocked_json, picture_senders_json, layout_json, language, timezone) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
          ON DUPLICATE KEY UPDATE signatures_json = VALUES(signatures_json), vacation_json = VALUES(vacation_json), blocked_json = VALUES(blocked_json),
-           layout_json = VALUES(layout_json), language = VALUES(language), timezone = VALUES(timezone)`,
-        [uid(req), JSON.stringify(next.signatures), JSON.stringify(next.vacationResponder), JSON.stringify(next.blockedSenders), JSON.stringify(next.layout), next.language, next.timezone]
+           picture_senders_json = VALUES(picture_senders_json), layout_json = VALUES(layout_json), language = VALUES(language), timezone = VALUES(timezone)`,
+        [uid(req), JSON.stringify(next.signatures), JSON.stringify(next.vacationResponder), JSON.stringify(next.blockedSenders), JSON.stringify(next.pictureSenders), JSON.stringify(next.layout), next.language, next.timezone]
       );
       res.json(next);
     })
@@ -2110,17 +2898,92 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
     handler(async (_req, res) => {
       const rows: any[] =
         (await queryDB(
-          "SELECT name, email, designation, department FROM all_employees WHERE is_active = 1 AND email IS NOT NULL AND email <> '' ORDER BY name LIMIT 10000"
+          "SELECT name, employee_id, email, designation, department FROM all_employees WHERE is_active = 1 AND email IS NOT NULL AND email <> '' ORDER BY name LIMIT 10000"
         ).catch(() => [])) || [];
       const seen = new Set<string>();
-      const out: { name: string; email: string; designation: string; department: string }[] = [];
+      const out: { name: string; email: string; employeeId: string; designation: string; department: string }[] = [];
       for (const r of rows) {
         const e = String(r.email || "").trim().toLowerCase();
         if (!isEmail(e) || seen.has(e)) continue;
         seen.add(e);
-        out.push({ name: String(r.name || "").trim() || e.split("@")[0], email: e, designation: r.designation || "", department: r.department || "" });
+        out.push({ name: String(r.name || "").trim() || e.split("@")[0], email: e, employeeId: String(r.employee_id || "").trim(), designation: r.designation || "", department: r.department || "" });
       }
       res.setHeader("Cache-Control", "private, max-age=300");
+      res.json(out);
+    })
+  );
+
+  // Avatars: which of these addresses belong to someone with a profile photo
+  // (Profile page upload, user_profile_details). Matched by login email, the
+  // Employee Directory email or a connected mailbox; returns { email: userId }
+  // only for those with a photo. The picture itself is GET /api/profile/photo/:id,
+  // which any signed-in account may already read (profileRoutes.ts).
+  app.post(
+    "/api/mail/photos",
+    ...gate,
+    handler(async (req, res) => {
+      const emails = [...new Set((Array.isArray(req.body?.emails) ? req.body.emails : []).map((e: any) => String(e || "").trim().toLowerCase()).filter(isEmail))].slice(0, 200) as string[];
+      if (!emails.length) return res.json({});
+      const marks = emails.map(() => "?").join(",");
+      const [byLogin, byDirectory, byBox]: any[] = await Promise.all([
+        queryDB(`SELECT id AS user_id, LOWER(TRIM(email)) AS email FROM users WHERE LOWER(TRIM(email)) IN (${marks})`, emails).catch(() => []),
+        queryDB(`SELECT user_id, LOWER(TRIM(email)) AS email FROM all_employees WHERE user_id IS NOT NULL AND LOWER(TRIM(email)) IN (${marks})`, emails).catch(() => []),
+        queryDB(`SELECT user_id, LOWER(TRIM(email)) AS email FROM mail_accounts WHERE user_id > 0 AND LOWER(TRIM(email)) IN (${marks})`, emails).catch(() => [])
+      ]);
+      // A login email wins, then the directory, then a mailbox.
+      const owner = new Map<string, number>();
+      for (const r of [...(byBox || []), ...(byDirectory || []), ...(byLogin || [])]) if (Number(r.user_id) > 0) owner.set(r.email, Number(r.user_id));
+      const ids = [...new Set(owner.values())];
+      const withPhoto = new Set<number>();
+      if (ids.length) {
+        const rows: any[] =
+          (await queryDB(`SELECT user_id FROM user_profile_details WHERE photo_data IS NOT NULL AND user_id IN (${ids.map(() => "?").join(",")})`, ids).catch(() => [])) || [];
+        for (const r of rows) withPhoto.add(Number(r.user_id));
+      }
+      const out: Record<string, number> = {};
+      for (const [e, id] of owner) if (withPhoto.has(id)) out[e] = id;
+      res.setHeader("Cache-Control", "private, max-age=300");
+      res.json(out);
+    })
+  );
+
+  // Mailboxes -> Email Directory: the same people, plus whether each one's
+  // mail stays inside CredenceHR. Needs users.can_view_mail_directory.
+  async function hasDirectory(user: any): Promise<boolean> {
+    if (user?.role === "superadmin") return true;
+    const rows: any[] = (await queryDB("SELECT can_view_mail_directory FROM users WHERE id = ?", [Number(user?.id)]).catch(() => [])) || [];
+    return !!Number(rows[0]?.can_view_mail_directory);
+  }
+  app.get(
+    "/api/mail/directory/browse",
+    ...gate,
+    handler(async (req, res) => {
+      noStore(res);
+      if (!(await hasDirectory(req.user))) throw bad("The Email Directory isn't turned on for your account.", 403);
+      const [rows, boxes]: any[] = await Promise.all([
+        queryDB(
+          "SELECT name, employee_id, email, designation, department FROM all_employees WHERE is_active = 1 AND email IS NOT NULL AND email <> '' ORDER BY name LIMIT 10000"
+        ).catch(() => []),
+        queryDB("/*unscoped*/ SELECT DISTINCT LOWER(TRIM(email)) AS email FROM mail_accounts").catch(() => [])
+      ]);
+      const domains = (await systemSettings()).domains;
+      const inBox = new Set<string>((boxes || []).map((b: any) => String(b.email || "")));
+      const seen = new Set<string>();
+      const out: any[] = [];
+      for (const r of rows || []) {
+        const e = String(r.email || "").trim().toLowerCase();
+        if (!isEmail(e) || seen.has(e)) continue;
+        seen.add(e);
+        out.push({
+          name: String(r.name || "").trim() || e.split("@")[0],
+          email: e,
+          employeeId: String(r.employee_id || "").trim(),
+          designation: r.designation || "",
+          department: r.department || "",
+          inCredenceMail: inBox.has(e),
+          ourDomain: domains.includes(e.split("@")[1] || "")
+        });
+      }
       res.json(out);
     })
   );
@@ -2236,7 +3099,7 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
         ids
       ).catch(() => [])) || [];
     for (const a of accts) {
-      if (idle.has(Number(a.id))) continue;
+      if (idle.has(Number(a.id)) || isInternalBox(a)) continue;
       if (idle.size < MAX_IDLE) await startIdle(a);
       else {
         // Over the cap: a plain sync every few minutes instead.
@@ -2283,5 +3146,14 @@ export function registerMailRoutes(app: Express, io: SocketIOServer, deps: MailD
       void sendScheduled();
       setInterval(() => void sendScheduled(), 60_000);
     }, 25_000);
+    // Shared attachments of internal mail that no mail points at any more.
+    const sweepBlobs = () =>
+      void queryDB(
+        "DELETE b FROM mail_blobs b LEFT JOIN mail_files f ON f.blob_id = b.id WHERE f.id IS NULL AND b.created_at < UTC_TIMESTAMP() - INTERVAL 1 DAY"
+      ).catch(() => undefined);
+    setTimeout(() => {
+      sweepBlobs();
+      setInterval(sweepBlobs, 6 * 60 * 60_000);
+    }, 10 * 60_000);
   }
 }

@@ -1,5 +1,6 @@
 import express from "express";
 import path from "path";
+import fsSync from "fs";
 import http from "http";
 import cors from "cors";
 import compression from "compression";
@@ -51,6 +52,7 @@ import { registerCallRoutes, setupCallSocket } from "./CallRoutes";
 import { ensureMailSchema, registerMailRoutes } from "./MailRoutes";
 import { ensureRosterSchema, registerRosterRoutes } from "./RosterRoutes";
 import { ensureMeasurementSchema, registerMeasurementRoutes } from "./MeasurementRoutes";
+import { ensureMprDispatchSchema, registerMprDispatchRoutes } from "./MprDispatchRoutes";
 import { ensureESignSchema, registerESignRoutes } from "./ESignRoutes";
 import { ensurePayslipSchema, registerPayslipRoutes } from "./PayslipRoutes";
 import { ensureReportEmailSchema, registerReportEmailRoutes } from "./ReportEmailRoutes";
@@ -168,6 +170,42 @@ let dbPool: mysql.Pool | null = null;
 let liveIo: SocketIOServer | null = null;
 let isMySQLConnected = false;
 
+// A brand-new, empty database (no `users` table): run schema.sql once, so a new
+// installation only needs an empty database and the .env — every newer table
+// and column is then added by ensureSchemaMigrations and the modules as usual.
+async function bootstrapBaseSchema(pool: mysql.Pool) {
+  const [rows]: any = await pool.query("SHOW TABLES LIKE 'users'");
+  if (Array.isArray(rows) && rows.length) return;
+  const candidates = [
+    path.join(process.cwd(), "schema.sql"),
+    path.join(path.dirname(process.argv[1] || ""), "schema.sql"),
+    path.join(path.dirname(process.argv[1] || ""), "..", "schema.sql")
+  ];
+  const file = candidates.find((f) => fsSync.existsSync(f));
+  if (!file) {
+    console.warn("⚠️ The database is empty and schema.sql wasn't found next to the app — import it by hand (see schema.sql).");
+    return;
+  }
+  const sql = fsSync
+    .readFileSync(file, "utf8")
+    .replace(/^\s*CREATE DATABASE[^;]*;/gim, "")
+    .replace(/^\s*USE\s+[^;]*;/gim, "");
+  const conn = await mysql.createConnection({
+    host: process.env.DB_HOST || "localhost",
+    user: process.env.DB_USER || "root",
+    password: process.env.DB_PASSWORD || "",
+    database: process.env.DB_NAME || "mpr_tracker_db",
+    port: Number(process.env.DB_PORT) || 3306,
+    multipleStatements: true
+  });
+  try {
+    await conn.query(`SET FOREIGN_KEY_CHECKS = 0;\n${sql}\nSET FOREIGN_KEY_CHECKS = 1;`);
+    console.log(`✅ Empty database: created the base tables from ${path.basename(file)}.`);
+  } finally {
+    await conn.end().catch(() => undefined);
+  }
+}
+
 async function initDB() {
   try {
     dbPool = mysql.createPool({
@@ -219,6 +257,7 @@ async function initDB() {
     console.log(" Connected to MySQL Database successfully!");
     isMySQLConnected = true;
     connection.release();
+    await bootstrapBaseSchema(dbPool);
     await ensureSchemaMigrations(dbPool, { EMPLOYEE_EXT_FIELD_DDL, getApprovalChain, queryDB });
     // Credence Mail tables (MailRoutes.ts).
     await ensureMailSchema(dbPool);
@@ -226,6 +265,8 @@ async function initDB() {
     await ensureRosterSchema(dbPool);
     // PEPM Management -> Measurement Sheet (MeasurementRoutes.ts).
     await ensureMeasurementSchema(dbPool);
+    // PEPM -> Dispatch Material / Material Receive (MprDispatchRoutes.ts).
+    await ensureMprDispatchSchema(dbPool);
     // E-Signature on Document Vault documents (ESignRoutes.ts).
     await ensureESignSchema(dbPool);
     // Self Service -> My Payslip switch (PayslipRoutes.ts).
@@ -326,7 +367,11 @@ const ATTENDANCE_REPORT_LAYER_KEYS = ["read", "late_list"] as const;
 // (read only); "mail_password" = see a mailbox's saved password. Both
 // explicit-only — the no-saved-layers default is "read" alone. Every open and
 // every password shown is written to mail_admin_log.
-const MAIL_ADMIN_LAYER_KEYS = ["read", "mail_open", "mail_password"] as const;
+// "mail_settings" = turn internal delivery (mail between our own mailboxes
+// stays inside CredenceHR) on / off and set which domains are ours.
+// "mail_groups" = add / change / remove central mail groups (everyone with
+// "read" sees them). Explicit-only as well.
+const MAIL_ADMIN_LAYER_KEYS = ["read", "mail_open", "mail_password", "mail_settings", "mail_groups"] as const;
 // Duty Roster (RosterRoutes.ts): "read" = see shifts and the roster;
 // "roster_manage" = add / edit shifts and set who works which shift when.
 // Explicit-only — the no-saved-layers default is "read" alone.
@@ -340,8 +385,12 @@ const DOCUMENT_VAULT_LAYER_KEYS = ["read", "sign_request", "esign_settings"] as 
 // PEPM Reports uses four of them: Read Only, Edit, Delete/Trash, Permanent Delete
 // — plus its own "Budget Submission Status" (the second report on that page),
 // which, like Permanent Delete, is never part of the no-saved-rows default:
-// only an account it's explicitly ticked for can open it.
-const REPORT_LAYER_KEYS = ["read", "edit_add", "delete_trash", "permanent_delete", "submission_status"] as const;
+// only an account it's explicitly ticked for can open it. "dispatch_material"
+// (Purchase sending material against MPR rows, MprDispatchRoutes.ts) is the
+// third report on that page — explicit-only as well. With it alone an account
+// sees only the rows it sent there or dispatched; "dispatch_all" (also
+// explicit-only) shows everyone's.
+const REPORT_LAYER_KEYS = ["read", "edit_add", "delete_trash", "permanent_delete", "submission_status", "dispatch_material", "dispatch_all"] as const;
 
 // Leave Manage's own operation-specific layers — mirrors LeaveManageLayerKey/
 // LEAVE_MANAGE_LAYERS in src/types.ts. Not part of PERMISSION_LAYER_MODULES/
@@ -1935,7 +1984,7 @@ async function canViewGroupDashboard(userId: number, role: string): Promise<bool
   }
 }
 
-const PEPM_API_RE = /^\/api\/(budgets|budget-items|entries|jobs|job-edits|mpr-numbers|rate-file|rate-list|delivery-date-conditions|reports\/budget-submission-status)(\/|$)/;
+const PEPM_API_RE = /^\/api\/(budgets|budget-items|entries|jobs|job-edits|mpr-numbers|rate-file|rate-list|delivery-date-conditions|reports\/budget-submission-status|mpr-dispatch|material-receive)(\/|$)/;
 
 // dbPool.execute with the same multi-company separation as queryDB.
 function scopedExecute(sql: string, params?: any[]) {
@@ -2224,7 +2273,7 @@ async function startServer() {
   // on for a module is never a silent regression; a Superadmin only actually
   // restricts anything once they explicitly save a narrower set in the
   // Module Access modal.
-  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "block_account" | "limit_history" | "link_pins" | "on_behalf" | "onboarding_create" | "onboarding_review" | "onboarding_approve" | "exit_dues" | "exit_pdf" | "reminders_receive" | "salary_bulk_upload" | "target_export" | "target_cancel" | "exit_clearance_setup" | "late_list" | "mail_open" | "mail_password" | "roster_manage" | "sign_request" | "esign_settings") =>
+  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "dispatch_material" | "dispatch_all" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "block_account" | "limit_history" | "link_pins" | "on_behalf" | "onboarding_create" | "onboarding_review" | "onboarding_approve" | "exit_dues" | "exit_pdf" | "reminders_receive" | "salary_bulk_upload" | "target_export" | "target_cancel" | "exit_clearance_setup" | "late_list" | "mail_open" | "mail_password" | "mail_settings" | "mail_groups" | "roster_manage" | "sign_request" | "esign_settings") =>
     async (req: any, res: any, next: any) => {
       if (!req.user) return res.status(401).json({ error: "Access token required" });
       if (req.user.onb) return res.status(403).json({ error: "Admin access required" });
@@ -2942,6 +2991,7 @@ async function startServer() {
   registerMailRoutes(app, io, { authenticateToken, queryDB, isMySQL: () => !!(isMySQLConnected && dbPool), requireModuleLayer, hasModuleLayer });
   // Duty Roster — shifts and who works which shift when (RosterRoutes.ts).
   registerMeasurementRoutes(app, { authenticateToken, requireAdmin, requireModuleLayer, hasModuleLayer, queryDB });
+  registerMprDispatchRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer, queryDB, parseQtyNumber, toDateOnlyString, todayInDhaka, createAlert });
   registerRosterRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer, queryDB, todayInDhaka, createAlert });
 
   if (process.env.NODE_ENV !== "production") {

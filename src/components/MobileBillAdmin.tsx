@@ -19,6 +19,7 @@ import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import { BarChart3, CheckCircle2, FileDown, FileSpreadsheet, Inbox, Pencil, Plus, Receipt, Search, Smartphone, SlidersHorizontal, Trash2, Upload } from 'lucide-react';
 import { Spinner } from './Spinner';
+import { ProgressOverlay, useLongTask } from './ProgressOverlay';
 import { finalizePdfPageNumbers } from '../lib/pdfLetterhead';
 import { drawStandardHeader, loadPdfCompany, pdfMoney, standardTable } from '../lib/pdfStandard';
 import { savePdfCrossPlatform } from '../lib/saveFile';
@@ -494,25 +495,36 @@ const ImportBillModal: React.FC<{ token: string; month: string; onClose: () => v
     }
   };
 
+  const longTask = useLongTask();
   const pick = async (f: File | undefined) => {
     if (!f) return;
     setError('');
+    longTask.start('Reading the bill sheet', `Reading ${f.name}…`);
+    longTask.creep(90, undefined, Math.max(1200, f.size / 200));
     try {
+      await new Promise((r) => setTimeout(r, 30)); // let the bar paint before the parse
       const b = await readSheet(f);
       setBook(b);
       setSheet(b.sheets[0]);
+      await longTask.finish();
     } catch {
+      longTask.close();
       setError('Could not read that file — use an Excel (.xlsx / .xls) or CSV file.');
     }
   };
   const run = async (dry: boolean) => {
     setBusy(true);
     setError('');
+    const n = `${rows.length.toLocaleString()} bill${rows.length === 1 ? '' : 's'}`;
+    longTask.start(dry ? 'Checking the bills' : 'Importing the bills', dry ? `Checking ${n} — nothing is saved yet…` : `Saving ${n}…`);
+    longTask.creep(95, undefined, rows.length * (dry ? 5 : 12));
     try {
       const r = await mbApi<CheckResult>(token, '/api/mobile-bill/bills/import', 'POST', { month, operator: operator || null, replace, rows, dry_run: dry });
+      await longTask.finish();
       if (dry) setCheck(r);
       else onDone(month);
     } catch (e: any) {
+      longTask.close();
       setError(e.message);
     } finally {
       setBusy(false);
@@ -522,6 +534,7 @@ const ImportBillModal: React.FC<{ token: string; month: string; onClose: () => v
   return (
     <Modal title="Import the operator's bill" onClose={onClose} wide>
       <div className="space-y-3">
+        <ProgressOverlay state={longTask.state} />
         <p className="text-xs text-slate-500">
           The file the operator sends — one row per number with its bill amount. Numbers must already be in the SIM list. Or download the template (every
           SIM{operator ? ` of ${operator}` : ''}, already filled in), write each number's bill in <b>Bill Amount</b> and upload it here. Rows left empty are skipped.
@@ -1085,29 +1098,43 @@ const ImportSimsModal: React.FC<{ token: string; onClose: () => void; onDone: ()
     XLSX.writeFile(wb, 'Mobile-SIM-List-Template.xlsx');
   };
 
+  const longTask = useLongTask();
   const pick = async (f: File | undefined) => {
     if (!f) return;
     setError('');
     setCheck(null);
+    longTask.start('Reading the SIM sheet', `Reading ${f.name}…`);
+    longTask.creep(90, undefined, Math.max(1200, f.size / 200));
     try {
+      await new Promise((r) => setTimeout(r, 30)); // let the bar paint before the parse
       const b = await readSheet(f);
       setBook(b);
       setSheet(b.sheets[0]);
+      await longTask.finish();
     } catch {
+      longTask.close();
       setError('Could not read that file — use an Excel (.xlsx / .xls) or CSV file.');
     }
   };
   const run = async (dry: boolean) => {
     setError('');
     setBusy(dry ? 'Checking…' : 'Adding SIMs…');
+    const n = `${rows.length.toLocaleString()} SIM${rows.length === 1 ? '' : 's'}`;
+    // Adding with past bills: the SIMs, then one step per month.
+    const steps = 1 + (!dry && withHistory ? monthCols.length : 0);
+    longTask.start(dry ? 'Checking the SIMs' : 'Adding the SIMs', dry ? `Checking ${n} — nothing is saved yet…` : `Adding ${n}…`);
+    longTask.creep(Math.round(95 / steps), undefined, rows.length * (dry ? 5 : 12));
     try {
       const r = await mbApi<CheckResult>(token, '/api/mobile-bill/sims/import', 'POST', { rows, dry_run: dry });
       if (dry) {
+        await longTask.finish();
         setCheck(r);
         return;
       }
       if (withHistory) {
-        for (const mc of monthCols) {
+        for (const [k, mc] of monthCols.entries()) {
+          longTask.step(Math.round((95 * (k + 1)) / steps), `Past bills: ${monthLabel(mc.month)}…`);
+          longTask.creep(Math.round((95 * (k + 2)) / steps), undefined, rows.length * 8);
           setBusy(`Past bills: ${monthLabel(mc.month)}…`);
           const billRows = body
             .map((row) => ({ phone_number: row[cols.phone], amount: String(row[mc.i] ?? '').replace(/[,৳\s]/g, '') }))
@@ -1115,8 +1142,10 @@ const ImportSimsModal: React.FC<{ token: string; onClose: () => void; onDone: ()
           if (billRows.length) await mbApi(token, '/api/mobile-bill/bills/import', 'POST', { month: mc.month, rows: billRows, replace: true, dry_run: false });
         }
       }
+      await longTask.finish();
       onDone();
     } catch (e: any) {
+      longTask.close();
       setError(e.message);
     } finally {
       setBusy('');
@@ -1126,6 +1155,7 @@ const ImportSimsModal: React.FC<{ token: string; onClose: () => void; onDone: ()
   return (
     <Modal title="Import SIM list" onClose={onClose} wide>
       <div className="space-y-3">
+        <ProgressOverlay state={longTask.state} />
         <p className="text-xs text-slate-500">
           Your SIM sheet — columns <b>Mobile Number</b>, <b>Emp. ID</b>, <b>Official Ceiling</b> (limit), <b>Duty location</b> and, if you have it, <b>Operator</b>. A row
           with no ceiling takes the employee type's limit. Month columns like <b>Sep-26</b> are read as that month's bill.

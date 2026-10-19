@@ -12,7 +12,7 @@ import {
   MoreVertical, ListChecks, CalendarPlus, UserPlus, Filter, Ban
 } from 'lucide-react';
 import { MailBody } from './MailBody';
-import { MailAttachment, MailMessage, SYSTEM_LABELS, fetchAttachment, formatBytes, fullMailDate, saveBlob, shortMailDate } from '../../lib/mailApi';
+import { MailAttachment, MailMessage, SYSTEM_LABELS, fetchAttachment, formatBytes, fullMailDate, mailPhotoUrl, saveBlob, shortMailDate } from '../../lib/mailApi';
 
 export type ReaderAction =
   | 'reply' | 'replyAll' | 'forward' | 'star' | 'unread' | 'trash' | 'spam' | 'notSpam' | 'archive' | 'inbox' | 'unschedule'
@@ -30,11 +30,26 @@ const initials = (s: string) =>
 const AVATAR_COLORS = ['bg-sky-500', 'bg-violet-500', 'bg-emerald-500', 'bg-amber-500', 'bg-rose-500', 'bg-indigo-500', 'bg-teal-500', 'bg-fuchsia-500'];
 export const avatarColor = (s: string) => AVATAR_COLORS[[...(s || '')].reduce((n, c) => n + c.charCodeAt(0), 0) % AVATAR_COLORS.length];
 
-export const MailAvatar: React.FC<{ name: string; email: string; size?: 'sm' | 'md' }> = ({ name, email, size = 'md' }) => (
-  <span className={`${size === 'sm' ? 'w-8 h-8 text-[11px]' : 'w-10 h-10 text-xs'} rounded-full ${avatarColor(email || name)} text-white font-semibold flex items-center justify-center shrink-0`}>
-    {initials(name || email)}
-  </span>
-);
+// The person's Employee profile photo when they have one (mailPhotoUrl),
+// otherwise their initials on a colour.
+export const MailAvatar: React.FC<{ name: string; email: string; size?: 'sm' | 'md' }> = ({ name, email, size = 'md' }) => {
+  const [photo, setPhoto] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    setPhoto(null);
+    void mailPhotoUrl(email).then((u) => live && setPhoto(u));
+    return () => {
+      live = false;
+    };
+  }, [email]);
+  const box = size === 'sm' ? 'w-8 h-8 text-[11px]' : 'w-10 h-10 text-xs';
+  if (photo) return <img src={photo} alt={name || email} className={`${box} rounded-full object-cover shrink-0 bg-slate-100`} onError={() => setPhoto(null)} />;
+  return (
+    <span className={`${box} rounded-full ${avatarColor(email || name)} text-white font-semibold flex items-center justify-center shrink-0`}>
+      {initials(name || email)}
+    </span>
+  );
+};
 
 const AttachmentChip: React.FC<{ token: string; messageId: string; a: MailAttachment }> = ({ token, messageId, a }) => {
   const [busy, setBusy] = useState(false);
@@ -67,7 +82,15 @@ const AttachmentChip: React.FC<{ token: string; messageId: string; a: MailAttach
   );
 };
 
-const OneMail: React.FC<{ token: string; m: MailMessage; open: boolean; onToggle: () => void; isLast: boolean }> = ({ token, m, open, onToggle, isLast }) => {
+const OneMail: React.FC<{
+  token: string;
+  m: MailMessage;
+  open: boolean;
+  onToggle: () => void;
+  isLast: boolean;
+  showPictures?: boolean;
+  onTrustSender?: (email: string) => void;
+}> = ({ token, m, open, onToggle, isLast, showPictures, onTrustSender }) => {
   const [details, setDetails] = useState(false);
   return (
     <div className={`rounded-2xl bg-white border border-slate-200/80 ${open ? '' : 'hover:bg-slate-50'}`}>
@@ -89,9 +112,16 @@ const OneMail: React.FC<{ token: string; m: MailMessage; open: boolean; onToggle
       </button>
       {open && (
         <div className="px-3 sm:px-4 pb-4">
-          <button type="button" onClick={() => setDetails((v) => !v)} className="text-[11px] text-slate-500 hover:text-slate-800 inline-flex items-center gap-0.5 mb-2">
-            Details {details ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-          </button>
+          <div className="flex items-center gap-2 mb-2">
+            <button type="button" onClick={() => setDetails((v) => !v)} className="text-[11px] text-slate-500 hover:text-slate-800 inline-flex items-center gap-0.5">
+              Details {details ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+            </button>
+            {m.internal && (
+              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200" title="Delivered inside CredenceHR — it didn't go through the mail server">
+                Internal
+              </span>
+            )}
+          </div>
           {details && (
             <div className="mb-3 rounded-xl bg-slate-50 px-3 py-2 text-[11px] text-slate-600 space-y-0.5">
               <div><span className="text-slate-400">From:</span> {m.from.name} &lt;{m.from.email}&gt;</div>
@@ -99,6 +129,7 @@ const OneMail: React.FC<{ token: string; m: MailMessage; open: boolean; onToggle
               {m.cc.length > 0 && <div><span className="text-slate-400">Cc:</span> {m.cc.join(', ')}</div>}
               {m.bcc.length > 0 && <div><span className="text-slate-400">Bcc:</span> {m.bcc.join(', ')}</div>}
               <div><span className="text-slate-400">Date:</span> {fullMailDate(m.date)}</div>
+              {m.internal && <div><span className="text-slate-400">Delivery:</span> inside CredenceHR (not through the mail server)</div>}
             </div>
           )}
           {m.sendError && (
@@ -106,7 +137,7 @@ const OneMail: React.FC<{ token: string; m: MailMessage; open: boolean; onToggle
               <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" /> {m.sendError}
             </div>
           )}
-          <MailBody html={m.body || ''} />
+          <MailBody html={m.body || ''} autoShowImages={showPictures} sender={m.from.email} onAlwaysShow={onTrustSender && m.from.email ? () => onTrustSender(m.from.email) : undefined} />
           {m.attachments.length > 0 && (
             <div className="mt-4 flex flex-wrap gap-2">
               {m.attachments.map((a) => (
@@ -147,7 +178,10 @@ export const MailReader: React.FC<{
   readOnly?: boolean;
   onBack?: () => void;
   onAction: (action: ReaderAction, m: MailMessage) => void;
-}> = ({ token, thread, folder, error, readOnly, onBack, onAction }) => {
+  // Pictures that show without asking (own mail, our domains, trusted senders).
+  picturesOk?: (m: MailMessage) => boolean;
+  onTrustSender?: (email: string) => void;
+}> = ({ token, thread, folder, error, readOnly, onBack, onAction, picturesOk, onTrustSender }) => {
   const [openIds, setOpenIds] = useState<Set<string>>(new Set());
   const [more, setMore] = useState(false);
   const last = thread && thread.length ? thread[thread.length - 1] : null;
@@ -260,6 +294,8 @@ export const MailReader: React.FC<{
               m={m}
               isLast={m.id === last.id}
               open={openIds.has(m.id)}
+              showPictures={picturesOk ? picturesOk(m) : false}
+              onTrustSender={readOnly ? undefined : onTrustSender}
               onToggle={() =>
                 setOpenIds((prev) => {
                   const next = new Set(prev);

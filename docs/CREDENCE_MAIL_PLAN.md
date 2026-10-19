@@ -132,6 +132,39 @@
 - **ধাপ ৩:** Chromium-এ ৪৪টা পরীক্ষা পাস — Settings (compact, timezone, blocked sender, signature আর logo, vacation reply), Template বসানো, Rule আর তার label, live mail-এ rule আর block, notification ঘণ্টা, mail থেকে Task / Event / Contact / Block, Analytics (tooltip, table), phone-এ drawer আর settings। ধাপ ১ আর ২-এর পরীক্ষা আবার চালিয়ে সব পাস।
 - Attachment একসাথে সর্বোচ্চ ১৫ MB (server-এর ২৫ MB JSON সীমার মধ্যে থাকার জন্য)।
 
+### ভেতরের mail (Internal delivery) — শেষ, পরীক্ষিত
+অফিসের একজনের mail আরেকজনের কাছে cPanel দিয়ে যায় না, CredenceHR নিজেই পৌঁছে দেয়।
+- **কে "ভেতরের":** প্রেরক আর প্রাপক দুজনের ঠিকানাই আমাদের domain-এর (ডিফল্ট `credencehousinglimited.com`)। আর প্রাপকের mailbox Credence Mail-এ যুক্ত, তার Credence Mail চালু, account block করা নেই।
+- **কে "বাইরের":** অন্য domain। অথবা আমাদের domain কিন্তু Credence Mail-এ নেই বা বন্ধ। এদের কাছে mail আগের মতো cPanel SMTP দিয়ে যায়।
+- **মিশ্র প্রাপক:** SMTP দিয়ে যায় শুধু বাইরের জনদের কাছে, আগে সেটা হয়। সফল হলে তারপর ভেতরের জনদের Inbox-এ বসে। এতে কেউ দুটো কপি পায় না।
+  - To আর Cc সবার কাছে আগের মতোই দেখায়। Bcc কারো কাছে দেখায় না।
+- **প্রাপকের দিকে যা আগের মতোই খাটে:** blocked sender, rule, category, alert আর push, vacation reply।
+  - ভেতরের vacation reply-ও ভেতরেই যায়। দুটো away reply একে অপরকে উত্তর দেয় না।
+  - Reply করলে একই conversation-এ থাকে।
+- **Sent আর attachment:**
+  - শুধু ভেতরে গেলে cPanel-এর Sent-এ কপি রাখা হয় না, CredenceHR-এ থাকে।
+  - Attachment একবারই রাখা হয় (`mail_blobs`), যতজনই পাক। কেউ না রাখলে ৬ ঘণ্টা পরপর পরিষ্কার হয়।
+- **চিহ্ন:**
+  - এমন mail-এ সবুজ **"Internal"** লেখা থাকে।
+  - পাঠানোর পর লেখা আসে "Delivered inside CredenceHR", অথবা কতজন ভেতরে আর কতজন mail server দিয়ে।
+- **Setting:** Admin Panel → MIS → Mail Administration → **Internal delivery** tab। চালু বা বন্ধ করা যায়, আর domain-এর তালিকা দেওয়া যায়। ডিফল্ট চালু।
+  - দেখতে পারে Mail Administration-এর "read" যাদের আছে।
+  - বদলাতে পারে শুধু নতুন explicit-only layer **"Internal delivery settings"** (`mail_settings`) যাদের টিক দেওয়া।
+- **Mailbox যুক্ত না থাকলেও:** প্রাপক নিজের mailbox Credence Mail-এ যুক্ত না করে থাকলেও mail ভেতরেই যায়, যদি:
+  - ঠিকানাটা তার CredenceHR account-এর login email বা Employee-র official email হয়, আর
+  - তার Credence Mail চালু থাকে।
+  - তখন তার জন্য একটা "শুধু ভেতরের" mailbox আপনা থেকে তৈরি হয়। পরে সে password দিয়ে mailbox যুক্ত করলে সেটাই আসল mailbox হয়ে যায়, আগের mail সব থেকে যায়।
+  - "শুধু ভেতরের" mailbox থেকে বাইরের ঠিকানায় mail পাঠানো যায় না, কারণ সহ এটা বলা হয়।
+- **Employee Directory থেকে মেলানো (নতুন):** প্রাপকের ঠিকানা Employee Directory-র কোনো Employee-র email-এর সাথে মিললে mail সবসময় ভেতরে যায়।
+  - তার Credence Mail বন্ধ থাকলেও যায়। mail তার জন্য জমা থাকে, তবে alert পাঠানো হয় না।
+  - Employee-র login না থাকলেও যায়। mail সেই Employee-র (employee id) নামে জমা থাকে। পরে তার login হলে সব mail তার mailbox-এ চলে যায়।
+  - cPanel দিয়ে যায় শুধু তখন, যখন ঠিকানাটা কোনো সক্রিয় Employee বা login-এর নয়, অথবা account block করা।
+  - Compose আর Mail Administration-এর "Check an address" কারণ দেখায়।
+- **Compose-এ দেখা যায়:** ঠিকানার নিচে লেখা আসে কতজন "inside CredenceHR" আর কতজন "through the mail server"। অফিসের কেউ Credence Mail-এ না থাকলে তার নামও সেখানে দেখায়।
+- **ছবি:** নিজের mail, অফিসের domain-এর mail, আর যাদের জন্য "Always from this sender" চাপা হয়েছে, তাদের mail-এর ছবি আর প্রতিবার "Show pictures" না চাপলেও দেখায়।
+- **সীমাবদ্ধতা:** ভেতরের mail শুধু Credence Mail-এ দেখা যায়। Outlook বা ফোনের mail app-এ cPanel mailbox খুললে সেখানে থাকে না।
+- **পরীক্ষা:** Dovecot আর SMTP test server দিয়ে ৩৯টা API পরীক্ষা পাস। SMTP server-এর log দিয়ে মিলিয়ে দেখা হয়েছে, ভেতরের প্রাপকের কাছে mail সত্যিই SMTP দিয়ে যায়নি।
+
 ## ৫. আপনাদের যা করতে হবে
 
 1. **Repo private করা:** `credence-mail` repo → Settings → Danger Zone → Change visibility → **Private**।
@@ -144,3 +177,28 @@
 - আসল `credencehousinglimited.com` mail server-এ login, পাঠানো আর পাওয়া।
 - cPanel-এর সংযোগের সীমায় আসল আচরণ।
 - ফোনে notification পৌঁছানো।
+
+## Groups
+
+Two kinds, both in `MailRoutes.ts` ("Groups") and `src/components/mail/MailGroups.tsx`.
+
+**Central groups** — Admin Panel → Mail Administration → Groups (`mail_groups` table).
+One address on one of our domains (e.g. `accounts-team@credencehousinglimited.com`)
+that reaches every member when written to from Credence Mail.
+
+- Members: addresses picked by hand, plus optionally every active employee or
+  everyone in some departments. The rules are read from the Employee Directory
+  at send time, so joiners and leavers need no editing.
+- Who may write: anyone on Credence Mail, only its members, or only listed people.
+  A refused sender gets a 403 before anything is saved; the compose preview says so too.
+- Delivery: `sendRouted` opens each group into its members; colleagues get it
+  inside CredenceHR, outside members through SMTP. The To / Cc lines keep the
+  group address, so Reply all goes back to the group. The group address itself
+  never goes to the mail server; mail from outside CredenceHR to it needs a cPanel
+  forwarder.
+- Permission: seeing groups = `mail_admin` "read"; adding / changing / removing =
+  the explicit-only `mail_groups` layer.
+
+**My groups** — Credence Mail → Tools → My groups (`mail_personal_groups` table).
+A person's own named list of addresses; picking it in To / Cc / Bcc adds every
+address. Self Service switch `users.can_use_mail_groups`, off by default.

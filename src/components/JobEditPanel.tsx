@@ -876,10 +876,6 @@ const JobEditRow: React.FC<JobEditRowProps> = ({ job, token, mprNumbers, isOpen,
                       </p>
                       {editingId === e.id ? (
                         renderExistingDeliveryPicker(e, 'w-full mt-1 px-2.5 py-2 rounded-lg border border-slate-300 text-sm bg-white')
-                      ) : pending && pending.action === 'update_delivery_date' ? (
-                        <p className="text-sm mt-0.5">
-                          <CurrentVsProposed current={formatDate(e.delivery_date)} proposed={formatDate(pending.payload.new_delivery_date || '')} />
-                        </p>
                       ) : (
                         <p className="text-sm text-slate-700 font-medium mt-0.5">{formatDate(e.delivery_date)}</p>
                       )}
@@ -1035,8 +1031,6 @@ const JobEditRow: React.FC<JobEditRowProps> = ({ job, token, mprNumbers, isOpen,
                     <td className="px-3 py-2 text-slate-600">
                       {editingId === e.id ? (
                         renderExistingDeliveryPicker(e, 'px-2 py-1 rounded-md border border-slate-300 text-xs bg-white')
-                      ) : pending && pending.action === 'update_delivery_date' ? (
-                        <CurrentVsProposed current={formatDate(e.delivery_date)} proposed={formatDate(pending.payload.new_delivery_date || '')} />
                       ) : (
                         formatDate(e.delivery_date)
                       )}

@@ -255,6 +255,11 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
         : alert.type === 'document_sign'
         ? // Documents to Sign, or Document Vault for a signed / declined one (App.tsx).
           () => window.dispatchEvent(new CustomEvent('credence:open-esign', { detail: { title: alert.title } }))
+        : alert.type === 'mpr_dispatch'
+        ? // Material on its way -> Material Receive; a short receipt -> Purchase's Dispatch Material.
+          alert.title === 'Material dispatched'
+          ? () => window.dispatchEvent(new CustomEvent('credence:open-self-service', { detail: 'materialReceive' }))
+          : () => window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'reports' }))
         : alert.type === 'roster'
         ? // Self Service -> My Duty Roster (App.tsx, MyRoster.tsx).
           () => window.dispatchEvent(new CustomEvent('credence:open-self-service', { detail: 'myRoster' }))

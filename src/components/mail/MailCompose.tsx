@@ -4,18 +4,23 @@
  */
 
 // Credence Mail -> write a mail (new, reply, reply all, forward, or an open
-// draft). Liquid-glass popup (CLAUDE.md -> Popup style). Saves itself as a
-// draft while you write and when closed; Send now or Send later.
+// draft). Laid out like Gmail's compose window (asked for by the users): a
+// window docked at the bottom right that can be minimised or made full size,
+// To with Cc / Bcc, a formatting bar and the blue Send button with Schedule
+// send; the whole screen on a phone. Saves itself as a draft while you write
+// and when closed.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  X, Send, Paperclip, Bold, Italic, Underline, List, ListOrdered, Link2, Quote, RemoveFormatting, Clock, Trash2, Loader2, ChevronDown, FileText, PenLine
+  X, Send, Paperclip, Bold, Italic, Underline, List, ListOrdered, Link2, Quote, RemoveFormatting, Clock, Trash2, Loader2, ChevronDown, FileText, PenLine,
+  Minus, Maximize2, Minimize2, ArrowLeft, Type, Undo2, Redo2, AlignLeft
 } from 'lucide-react';
 import { confirmDialog } from '../../lib/confirmDialog';
 import { useBackButtonClose } from '../../lib/useBackButtonClose';
 import { useKeyboardInset } from '../../lib/useKeyboardInset';
 import {
-  AddressSuggestion, MailAccount, MailAttachment, MailSignature, MailTemplate, OutgoingFile, fetchAttachment, fileToDataUrl, formatBytes, mailFetch
+  AddressSuggestion, DirectoryPerson, MailAccount, MailAttachment, MailSignature, MailTemplate, OutgoingFile, fetchAttachment, fileToDataUrl, formatBytes,
+  loadDirectory, loadMailGroups, mailFetch, type ComposeGroups
 } from '../../lib/mailApi';
 
 export interface ComposeInit {
@@ -52,36 +57,30 @@ const localDateTime = (d: Date) => {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
 };
 
-// Everyone in the Employee Directory with an email (GET /api/mail/directory),
-// fetched once per visit and shared by every To / Cc / Bcc field.
-export interface DirectoryPerson {
+
+type Suggestion = {
   name: string;
   email: string;
-  designation: string;
-  department: string;
-}
-let directoryCache: Promise<DirectoryPerson[]> | null = null;
-const loadDirectory = (token: string) => {
-  if (!directoryCache) {
-    directoryCache = mailFetch<DirectoryPerson[]>(token, '/directory').catch(() => {
-      directoryCache = null;
-      return [];
-    });
-  }
-  return directoryCache;
+  sub: string;
+  tag: string;
+  employeeId?: string;
+  designation?: string;
+  department?: string;
+  // A group: central (its one address goes in) or one's own (every member goes in).
+  key?: string;
+  members?: string[];
 };
-
-type Suggestion = { name: string; email: string; sub: string; tag: string };
 const SHOW_MAX = 150;
 
-// To / Cc / Bcc: type any address, or pick from the list — employees (all of
-// them, from the dropdown button or as you type), your contacts and people
-// you've written with. Several addresses, comma between.
+// To / Cc / Bcc: type any address, or pick from the list — groups, employees
+// (all of them, from the dropdown button or as you type), your contacts and
+// people you've written with. Several addresses, comma between.
 const AddressField: React.FC<{ token: string; label: string; value: string; onChange: (v: string) => void; autoFocus?: boolean; right?: React.ReactNode }> = ({
   token, label, value, onChange, autoFocus, right
 }) => {
   const [book, setBook] = useState<AddressSuggestion[]>([]);
   const [people, setPeople] = useState<DirectoryPerson[] | null>(null);
+  const [groups, setGroups] = useState<ComposeGroups | null>(null);
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -92,7 +91,8 @@ const AddressField: React.FC<{ token: string; label: string; value: string; onCh
 
   useEffect(() => {
     if (open && !people) void loadDirectory(token).then(setPeople);
-  }, [open, people, token]);
+    if (open && !groups) void loadMailGroups(token).then(setGroups);
+  }, [open, people, groups, token]);
 
   // Own contacts and people written with, as you type.
   useEffect(() => {
@@ -115,19 +115,40 @@ const AddressField: React.FC<{ token: string; label: string; value: string; onCh
     const q = current.toLowerCase();
     const out: Suggestion[] = [];
     const seen = new Set<string>(chosen);
+    const byEmail = new Map((people || []).map((p) => [p.email, p]));
+    // Groups first: they're what people usually look for by name.
+    for (const g of groups?.central || []) {
+      if (seen.has(g.email)) continue;
+      if (q && !`${g.name} ${g.email}`.toLowerCase().includes(q)) continue;
+      seen.add(g.email);
+      out.push({ name: g.name, email: g.email, sub: `${g.count} ${g.count === 1 ? 'person' : 'people'}`, tag: 'Group', key: `g:${g.email}` });
+    }
+    for (const g of groups?.mine || []) {
+      if (q && !g.name.toLowerCase().includes(q)) continue;
+      const left = g.members.filter((m) => !chosen.has(m.toLowerCase()));
+      if (!left.length) continue;
+      out.push({ name: g.name, email: '', sub: `${g.members.length} ${g.members.length === 1 ? 'person' : 'people'} — adds each one`, tag: 'My group', key: `m:${g.id}`, members: left });
+    }
     for (const b of book) {
       if (seen.has(b.email)) continue;
       seen.add(b.email);
-      out.push({ name: b.name, email: b.email, sub: '', tag: b.source === 'contact' ? 'Contact' : 'Recent' });
+      // A contact or recent address that is an Employee shows as one.
+      const p = byEmail.get(b.email.toLowerCase());
+      out.push(
+        p
+          ? { name: p.name, email: p.email, sub: '', tag: b.source === 'contact' ? 'Contact' : 'Recent', employeeId: p.employeeId, designation: p.designation, department: p.department }
+          : { name: b.name, email: b.email, sub: '', tag: b.source === 'contact' ? 'Contact' : 'Recent' }
+      );
     }
     for (const p of people || []) {
       if (seen.has(p.email)) continue;
-      if (q && !`${p.name} ${p.email} ${p.designation} ${p.department}`.toLowerCase().includes(q)) continue;
+      // Name, email, Employee ID, designation or department.
+      if (q && !`${p.name} ${p.email} ${p.employeeId || ''} ${p.designation} ${p.department}`.toLowerCase().includes(q)) continue;
       seen.add(p.email);
-      out.push({ name: p.name, email: p.email, sub: [p.designation, p.department].filter(Boolean).join(' · '), tag: 'Employee' });
+      out.push({ name: p.name, email: p.email, sub: '', tag: 'Employee', employeeId: p.employeeId, designation: p.designation, department: p.department });
     }
     return out;
-  }, [book, people, current, chosen]);
+  }, [book, people, groups, current, chosen]);
   const shown = list.slice(0, SHOW_MAX);
   useEffect(() => setActive(0), [current]);
   useEffect(() => {
@@ -136,15 +157,15 @@ const AddressField: React.FC<{ token: string; label: string; value: string; onCh
 
   const pick = (sug: Suggestion) => {
     const parts = value.split(/[,;]/);
-    parts[parts.length - 1] = ` ${sug.email}`;
+    parts[parts.length - 1] = ` ${sug.members ? sug.members.join(', ') : sug.email}`;
     onChange(`${parts.join(',').replace(/^\s*,?\s*/, '')}, `);
     // Stays open for the next one.
     inputRef.current?.focus();
   };
 
   return (
-    <div className="relative flex items-center gap-2 border-b border-slate-200/70 px-4">
-      <span className="text-xs text-slate-500 w-8 shrink-0">{label}</span>
+    <div className="relative flex items-center gap-2 border-b border-slate-200 mx-4">
+      <span className="text-sm text-slate-500 shrink-0">{label}</span>
       <input
         ref={inputRef}
         value={value}
@@ -177,8 +198,8 @@ const AddressField: React.FC<{ token: string; label: string; value: string; onCh
         type="text"
         inputMode="email"
         autoComplete="off"
-        placeholder={label === 'To' ? 'Type an address or pick from the list' : ''}
-        className="flex-1 min-w-0 bg-transparent py-2.5 text-sm focus:outline-none placeholder:text-slate-400"
+        placeholder={label === 'To' ? 'Recipients — name, email or Employee ID' : ''}
+        className="flex-1 min-w-0 bg-transparent py-2 text-sm focus:outline-none placeholder:text-slate-500"
       />
       <button
         type="button"
@@ -196,7 +217,7 @@ const AddressField: React.FC<{ token: string; label: string; value: string; onCh
       </button>
       {right}
       {open && (
-        <div ref={listRef} className="absolute left-12 right-4 top-full mt-1 z-20 rounded-2xl bg-white shadow-xl ring-1 ring-black/5 overflow-y-auto max-h-72" onMouseDown={(e) => e.preventDefault()}>
+        <div ref={listRef} className="absolute left-6 right-0 top-full mt-1 z-20 rounded-lg bg-white shadow-xl ring-1 ring-black/10 overflow-y-auto max-h-72" onMouseDown={(e) => e.preventDefault()}>
           {!people && !book.length ? (
             <div className="px-3 py-3 text-xs text-slate-500 flex items-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading employees…</div>
           ) : !shown.length ? (
@@ -206,23 +227,33 @@ const AddressField: React.FC<{ token: string; label: string; value: string; onCh
               {shown.map((sug, i) => (
                 <button
                   type="button"
-                  key={sug.email}
+                  key={sug.key || sug.email}
                   data-i={i}
                   onClick={() => pick(sug)}
                   onMouseEnter={() => setActive(i)}
-                  className={`w-full text-left px-3 py-2 flex items-center justify-between gap-2 ${i === active ? 'bg-sky-50' : ''}`}
+                  className={`w-full text-left px-3 py-2 flex items-center justify-between gap-2 ${i === active ? 'bg-[#e8f0fe]' : ''}`}
                 >
-                  <span className="min-w-0">
-                    <span className="block text-sm font-medium text-slate-800 truncate">{sug.name}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-baseline gap-2 min-w-0">
+                      <span className="text-sm font-medium text-slate-800 truncate">{sug.name}</span>
+                      {sug.employeeId && <span className="text-[10px] font-semibold px-1.5 py-px rounded bg-slate-100 text-slate-600 shrink-0">ID {sug.employeeId}</span>}
+                    </span>
+                    {(sug.designation || sug.department) && (
+                      <span className="block text-xs text-slate-600 truncate">
+                        {sug.designation}
+                        {sug.designation && sug.department && <span className="text-slate-400"> · </span>}
+                        {sug.department}
+                      </span>
+                    )}
                     <span className="block text-xs text-slate-500 truncate">
                       {sug.email}
-                      {sug.sub && <span className="text-slate-400"> · {sug.sub}</span>}
+                      {sug.sub && <span className="text-slate-400">{sug.email ? ' · ' : ''}{sug.sub}</span>}
                     </span>
                   </span>
-                  <span className="text-[10px] text-slate-400 shrink-0">{sug.tag}</span>
+                  <span className={`text-[10px] shrink-0 ${sug.key ? 'font-semibold px-1.5 py-px rounded bg-violet-50 text-violet-700' : 'text-slate-400'}`}>{sug.tag}</span>
                 </button>
               ))}
-              {list.length > SHOW_MAX && <div className="px-3 py-2 text-[11px] text-slate-400 border-t border-slate-100">{list.length - SHOW_MAX} more — type a name, department or designation to find them.</div>}
+              {list.length > SHOW_MAX && <div className="px-3 py-2 text-[11px] text-slate-400 border-t border-slate-100">{list.length - SHOW_MAX} more — type a name, Employee ID, department or designation to find them.</div>}
             </>
           )}
         </div>
@@ -245,7 +276,34 @@ export const MailCompose: React.FC<{
   const [to, setTo] = useState(init.to || '');
   const [cc, setCc] = useState(init.cc || '');
   const [bcc, setBcc] = useState(init.bcc || '');
-  const [showCc, setShowCc] = useState(!!(init.cc || init.bcc));
+  // Which recipients get it inside CredenceHR and which through the mail
+  // server (MailRoutes.ts "Internal delivery") — shown under the addresses.
+  const [route, setRoute] = useState<{
+    internal: string[];
+    external: string[];
+    ourOutside: string[];
+    reasons: Record<string, string>;
+    groups: { email: string; name: string; count: number; denied: boolean }[];
+  } | null>(null);
+  useEffect(() => {
+    if (!accountId || !(to + cc + bcc).trim()) return setRoute(null);
+    let gone = false;
+    const t = setTimeout(() => {
+      mailFetch<{ internal: string[]; external: string[]; ourDomains: string[]; enabled: boolean; reasons?: Record<string, string>; groups?: { email: string; name: string; count: number; denied: boolean }[] }>(token, '/route-preview', { method: 'POST', body: { accountId, to, cc, bcc } })
+        .then((r) => {
+          if (gone) return;
+          const ours = new Set(r.ourDomains.map((d) => d.toLowerCase()));
+          // Ours that still go through the server — each with its reason.
+          const reasons = r.reasons || {};
+          setRoute({ internal: r.internal, external: r.external, ourOutside: r.external.filter((x) => ours.has(x.split('@')[1] || '') || (reasons[x] && reasons[x] !== 'outside address')), reasons, groups: r.groups || [] });
+        })
+        .catch(() => !gone && setRoute(null));
+    }, 500);
+    return () => {
+      gone = true;
+      clearTimeout(t);
+    };
+  }, [token, accountId, to, cc, bcc]);
   const [subject, setSubject] = useState(init.subject || '');
   const [sigId, setSigId] = useState<string>(init.draftId ? '' : defaultSig?.id || '');
   const [files, setFiles] = useState<(OutgoingFile & { size: number })[]>([]);
@@ -398,8 +456,11 @@ export const MailCompose: React.FC<{
     setBusy(later ? 'schedule' : 'send');
     closing.current = true;
     try {
-      await mailFetch(token, '/send', { method: 'POST', body: { ...payload(), draftId, scheduledAt } });
-      onDone(later ? `Will be sent ${new Date(scheduledAt!).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}.` : 'Sent.');
+      const sent = await mailFetch<{ delivery?: { internal: number; external: number } }>(token, '/send', { method: 'POST', body: { ...payload(), draftId, scheduledAt } });
+      // How it went: inside CredenceHR (our own mailboxes) and / or through the mail server.
+      const d = sent?.delivery;
+      const how = d && d.internal ? (d.external ? ` ${d.internal} inside CredenceHR, ${d.external} through the mail server.` : ' Delivered inside CredenceHR.') : '';
+      onDone(later ? `Will be sent ${new Date(scheduledAt!).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}.` : `Sent.${how}`);
       onClose();
     } catch (e: any) {
       closing.current = false;
@@ -475,198 +536,276 @@ export const MailCompose: React.FC<{
     markDirty();
   };
 
-  const toolBtn = 'p-1.5 rounded-lg text-slate-600 hover:bg-black/5 hover:text-slate-900';
+  const toolBtn = 'p-1.5 rounded-full text-slate-600 hover:bg-slate-100 hover:text-slate-900 shrink-0';
   const account = accounts.find((a) => a.id === accountId);
+  const title = init.draftId ? 'Draft' : init.inReplyTo ? 'Reply' : init.forwardFrom ? 'Forward' : 'New Message';
+  const shownTitle = subject.trim() || title;
+  // Gmail-like window: docked at the bottom right (the mail list stays
+  // usable), minimised to its title bar, or full size over a dimmed page.
+  // On a phone it is the whole screen.
+  const [mode, setMode] = useState<'normal' | 'min' | 'max'>('normal');
+  const [formatBar, setFormatBar] = useState(true);
+  const [showBcc, setShowBcc] = useState(!!init.bcc);
+  const [showCcOnly, setShowCcOnly] = useState(!!init.cc);
+  const ccOpen = showCcOnly;
+  const bccOpen = showBcc;
 
-  return (
-    <div className="fixed inset-0 z-[90] liquid-glass-backdrop flex items-end sm:items-center justify-center p-0 sm:p-4" style={keyboardInset ? { paddingBottom: keyboardInset } : undefined}>
-      <div className="w-full sm:max-w-2xl h-[100dvh] sm:h-auto sm:max-h-[90vh] flex" onClick={(e) => e.stopPropagation()}>
-        <div className="liquid-glass liquid-glass-in rounded-t-[32px] sm:rounded-[32px] w-full flex flex-col overflow-hidden">
-          <div className="flex items-center justify-between gap-2 px-5 pt-4 pb-2">
-            <h3 className="text-base font-bold text-slate-900 truncate">{init.draftId ? 'Draft' : init.inReplyTo ? 'Reply' : init.forwardFrom ? 'Forward' : 'New mail'}</h3>
-            <div className="flex items-center gap-2">
-              {savedNote && <span className="text-[11px] text-slate-500">{savedNote}</span>}
-              <button type="button" onClick={() => void close()} className="liquid-glass-chip p-1.5 rounded-full text-slate-600 hover:text-slate-900" aria-label="Close">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
+  const headerBtn = 'p-1 rounded hover:bg-black/10 text-slate-700';
+  const fmt = (name: string, Icon: React.ComponentType<{ className?: string }>, label: string, value?: string) => (
+    <button type="button" className={toolBtn} onMouseDown={(e) => e.preventDefault()} onClick={() => cmd(name, value)} aria-label={label} title={label}>
+      <Icon className="w-4 h-4" />
+    </button>
+  );
 
-          <div className="mx-3 liquid-glass-inset rounded-[24px] flex-1 min-h-0 flex flex-col overflow-hidden">
-            {accounts.length > 1 && (
-              <div className="flex items-center gap-2 border-b border-slate-200/70 px-4">
-                <span className="text-xs text-slate-500 w-8 shrink-0">From</span>
-                <select value={accountId} onChange={(e) => setAccountId(Number(e.target.value))} className="flex-1 bg-transparent py-2.5 text-sm focus:outline-none">
-                  {accounts.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.name} &lt;{a.emailAddress}&gt;
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-            <AddressField
-              token={token}
-              label="To"
-              value={to}
-              onChange={setTo}
-              autoFocus={!init.to && !init.inReplyTo}
-              right={
-                !showCc && (
-                  <button type="button" onClick={() => setShowCc(true)} className="text-xs text-slate-500 hover:text-slate-800 shrink-0">
-                    Cc / Bcc
-                  </button>
-                )
-              }
-            />
-            {showCc && <AddressField token={token} label="Cc" value={cc} onChange={setCc} />}
-            {showCc && <AddressField token={token} label="Bcc" value={bcc} onChange={setBcc} />}
-            <div className="flex items-center gap-2 border-b border-slate-200/70 px-4">
-              <input
-                value={subject}
-                onChange={(e) => setSubject(e.target.value)}
-                placeholder="Subject"
-                className="flex-1 min-w-0 bg-transparent py-2.5 text-sm font-medium focus:outline-none"
-              />
-            </div>
-
-            <div className="flex items-center gap-0.5 px-2 py-1 border-b border-slate-200/70 overflow-x-auto">
-              <button type="button" className={toolBtn} onMouseDown={(e) => e.preventDefault()} onClick={() => cmd('bold')} aria-label="Bold"><Bold className="w-4 h-4" /></button>
-              <button type="button" className={toolBtn} onMouseDown={(e) => e.preventDefault()} onClick={() => cmd('italic')} aria-label="Italic"><Italic className="w-4 h-4" /></button>
-              <button type="button" className={toolBtn} onMouseDown={(e) => e.preventDefault()} onClick={() => cmd('underline')} aria-label="Underline"><Underline className="w-4 h-4" /></button>
-              <button type="button" className={toolBtn} onMouseDown={(e) => e.preventDefault()} onClick={() => cmd('insertUnorderedList')} aria-label="Bulleted list"><List className="w-4 h-4" /></button>
-              <button type="button" className={toolBtn} onMouseDown={(e) => e.preventDefault()} onClick={() => cmd('insertOrderedList')} aria-label="Numbered list"><ListOrdered className="w-4 h-4" /></button>
-              <button type="button" className={toolBtn} onMouseDown={(e) => e.preventDefault()} onClick={() => cmd('formatBlock', 'blockquote')} aria-label="Quote"><Quote className="w-4 h-4" /></button>
-              <button type="button" className={toolBtn} onMouseDown={(e) => e.preventDefault()} onClick={openLink} aria-label="Link"><Link2 className="w-4 h-4" /></button>
-              <button type="button" className={toolBtn} onMouseDown={(e) => e.preventDefault()} onClick={() => cmd('removeFormat')} aria-label="Clear formatting"><RemoveFormatting className="w-4 h-4" /></button>
-              <span className="w-px h-5 bg-slate-200 mx-1 shrink-0" />
-              <button type="button" className={toolBtn} onClick={() => fileRef.current?.click()} aria-label="Attach files"><Paperclip className="w-4 h-4" /></button>
-              {templates.length > 0 && (
-                <label className="ml-auto flex items-center gap-1 text-xs text-slate-500 shrink-0 pl-2">
-                  <FileText className="w-3.5 h-3.5" />
-                  <select value="" onChange={(e) => insertTemplate(e.target.value)} className="bg-transparent focus:outline-none max-w-[8rem]" aria-label="Insert a template">
-                    <option value="">Template</option>
-                    {templates.map((t) => (
-                      <option key={t.id} value={t.id}>{t.title}</option>
-                    ))}
-                  </select>
-                </label>
-              )}
-              {signatures.length > 0 && (
-                <label className={`${templates.length ? '' : 'ml-auto '}flex items-center gap-1 text-xs text-slate-500 shrink-0 pl-2`}>
-                  <PenLine className="w-3.5 h-3.5" />
-                  <select value={sigId} onChange={(e) => changeSignature(e.target.value)} className="bg-transparent focus:outline-none max-w-[9rem]">
-                    <option value="">No signature</option>
-                    {signatures.map((s) => (
-                      <option key={s.id} value={s.id}>{s.name}</option>
-                    ))}
-                  </select>
-                </label>
-              )}
-            </div>
-            {linkOpen && (
-              <div className="flex items-center gap-2 px-3 py-2 border-b border-slate-200/70">
-                <Link2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                <input
-                  autoFocus
-                  value={linkUrl}
-                  onChange={(e) => setLinkUrl(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault();
-                      applyLink();
-                    } else if (e.key === 'Escape') setLinkOpen(false);
-                  }}
-                  placeholder="https://…"
-                  className="flex-1 min-w-0 text-sm px-2 py-1 rounded-lg bg-white/80 border border-slate-200 focus:outline-none"
-                />
-                <button type="button" onClick={applyLink} className="text-xs font-semibold text-sky-700 px-2 py-1 rounded-lg hover:bg-sky-50">Add link</button>
-                <button type="button" onClick={() => setLinkOpen(false)} className="p-1 rounded-full hover:bg-black/5" aria-label="Cancel"><X className="w-3.5 h-3.5" /></button>
-              </div>
-            )}
-            <input ref={fileRef} type="file" multiple className="hidden" onChange={(e) => { void addFiles(e.target.files); e.target.value = ''; }} />
-
-            <div className="flex-1 min-h-[12rem] overflow-y-auto">
-              <div
-                ref={editorRef}
-                contentEditable
-                suppressContentEditableWarning
-                onInput={markDirty}
-                onPaste={() => setTimeout(markDirty, 0)}
-                className="mail-editor min-h-full px-4 py-3 text-sm text-slate-800 focus:outline-none [&_blockquote]:border-l-[3px] [&_blockquote]:border-slate-300 [&_blockquote]:pl-3 [&_blockquote]:text-slate-600 [&_a]:text-blue-600 [&_a]:underline [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_img]:max-w-full"
-              />
-            </div>
-
-            {(kept.length > 0 || files.length > 0 || busy === 'files') && (
-              <div className="px-3 py-2 border-t border-slate-200/70 flex flex-wrap gap-1.5">
-                {kept.map((k) => (
-                  <span key={`k${k.idx}`} className="inline-flex items-center gap-1 rounded-full bg-white/80 ring-1 ring-slate-200 pl-2.5 pr-1 py-1 text-xs text-slate-700 max-w-full">
-                    <Paperclip className="w-3 h-3 shrink-0" /> <span className="truncate max-w-[10rem]">{k.name}</span> <span className="text-slate-400">{formatBytes(k.size)}</span>
-                    <button type="button" onClick={() => setKept((p) => p.filter((x) => x.idx !== k.idx))} className="p-0.5 rounded-full hover:bg-black/5" aria-label={`Remove ${k.name}`}><X className="w-3 h-3" /></button>
-                  </span>
-                ))}
-                {files.map((f, i) => (
-                  <span key={`f${i}`} className="inline-flex items-center gap-1 rounded-full bg-white/80 ring-1 ring-slate-200 pl-2.5 pr-1 py-1 text-xs text-slate-700 max-w-full">
-                    <Paperclip className="w-3 h-3 shrink-0" /> <span className="truncate max-w-[10rem]">{f.name}</span> <span className="text-slate-400">{formatBytes(f.size)}</span>
-                    <button type="button" onClick={() => setFiles((p) => p.filter((_, j) => j !== i))} className="p-0.5 rounded-full hover:bg-black/5" aria-label={`Remove ${f.name}`}><X className="w-3 h-3" /></button>
-                  </span>
-                ))}
-                {busy === 'files' && (
-                  <span className="inline-flex items-center gap-1 text-xs text-slate-500 px-2 py-1"><Loader2 className="w-3 h-3 animate-spin" /> Adding the attachments…</span>
-                )}
-              </div>
-            )}
-          </div>
-
-          {error && <div className="mx-4 mt-2 text-xs px-3 py-2 rounded-xl bg-rose-50 text-rose-700">{error}</div>}
-          {scheduleOpen && (
-            <div className="mx-4 mt-2 rounded-2xl liquid-glass-inset p-3 flex flex-wrap items-center gap-2">
-              <span className="text-xs text-slate-600">Send on</span>
-              <input
-                type="datetime-local"
-                value={scheduleAt}
-                min={localDateTime(new Date(Date.now() + 2 * 60_000))}
-                onChange={(e) => setScheduleAt(e.target.value)}
-                className="text-sm px-2 py-1.5 rounded-xl bg-white/80 border border-slate-200 focus:outline-none"
-              />
-              <button type="button" disabled={!!busy} onClick={() => void send(true)} className="liquid-glass-button rounded-full px-4 py-1.5 text-xs font-semibold text-white bg-sky-600 disabled:opacity-60 inline-flex items-center gap-1.5">
-                {busy === 'schedule' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Clock className="w-3.5 h-3.5" />} Schedule
-              </button>
-            </div>
-          )}
-
-          <div className="flex items-center justify-between gap-2 px-4 py-3" style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>
-            <div className="flex items-center gap-1">
-              <button type="button" onClick={() => void discard()} className="p-2 rounded-full text-slate-500 hover:bg-rose-50 hover:text-rose-600" aria-label="Discard">
-                <Trash2 className="w-4 h-4" />
-              </button>
-              <button type="button" disabled={!!busy} onClick={() => void saveDraft(false)} className="text-xs font-medium text-slate-600 hover:text-slate-900 px-2 py-1.5 rounded-full hover:bg-black/5 disabled:opacity-50">
-                {busy === 'draft' ? 'Saving…' : 'Save draft'}
-              </button>
-            </div>
-            <div className="flex items-center rounded-full overflow-hidden">
-              <button
-                type="button"
-                disabled={!!busy || !account}
-                onClick={() => void send(false)}
-                className="liquid-glass-button rounded-l-full pl-5 pr-4 py-2 text-sm font-semibold text-white bg-sky-600 disabled:opacity-60 inline-flex items-center gap-2"
-              >
-                {busy === 'send' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />} Send
-              </button>
-              <button
-                type="button"
-                disabled={!!busy}
-                onClick={() => setScheduleOpen((v) => !v)}
-                className="liquid-glass-button rounded-r-full px-2.5 py-2 text-white bg-sky-700 disabled:opacity-60 border-l border-white/30"
-                aria-label="Send later"
-                title="Send later"
-              >
-                <ChevronDown className="w-4 h-4" />
-              </button>
-            </div>
-          </div>
-        </div>
+  const header = (
+    <div
+      className={`flex items-center gap-2 pl-4 pr-2 h-10 bg-[#f2f6fc] shrink-0 ${mode === 'max' ? 'rounded-t-2xl' : 'sm:rounded-t-xl'} ${mode === 'min' ? 'cursor-pointer' : ''}`}
+      onClick={mode === 'min' ? () => setMode('normal') : undefined}
+    >
+      <button type="button" onClick={() => void close()} className="sm:hidden p-1 -ml-2 rounded-full hover:bg-black/10" aria-label="Back">
+        <ArrowLeft className="w-5 h-5 text-slate-700" />
+      </button>
+      <h3 className="flex-1 min-w-0 text-sm font-medium text-slate-800 truncate">{shownTitle}</h3>
+      {savedNote && mode !== 'min' && <span className="hidden sm:inline text-[11px] text-slate-500 shrink-0">{savedNote}</span>}
+      <div className="flex items-center gap-0.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+        <button type="button" onClick={() => setMode(mode === 'min' ? 'normal' : 'min')} className={`hidden sm:block ${headerBtn}`} aria-label={mode === 'min' ? 'Open' : 'Minimise'} title={mode === 'min' ? 'Open' : 'Minimise'}>
+          <Minus className="w-4 h-4" />
+        </button>
+        <button type="button" onClick={() => setMode(mode === 'max' ? 'normal' : 'max')} className={`hidden sm:block ${headerBtn}`} aria-label={mode === 'max' ? 'Exit full screen' : 'Full screen'} title={mode === 'max' ? 'Exit full screen' : 'Full screen'}>
+          {mode === 'max' ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+        </button>
+        <button type="button" onClick={() => void close()} className={`hidden sm:block ${headerBtn}`} aria-label="Save & close" title="Save & close">
+          <X className="w-4 h-4" />
+        </button>
+        {/* Phone: attach and send live in the top bar, like the Gmail app. */}
+        <button type="button" onClick={() => fileRef.current?.click()} className="sm:hidden p-2 rounded-full hover:bg-black/10" aria-label="Attach files">
+          <Paperclip className="w-5 h-5 text-slate-700" />
+        </button>
+        <button type="button" disabled={!!busy || !account} onClick={() => void send(false)} className="sm:hidden p-2 rounded-full hover:bg-black/10 disabled:opacity-50" aria-label="Send">
+          {busy === 'send' ? <Loader2 className="w-5 h-5 animate-spin text-[#0b57d0]" /> : <Send className="w-5 h-5 text-[#0b57d0]" />}
+        </button>
       </div>
     </div>
+  );
+
+  const fieldRow = 'flex items-center gap-2 border-b border-slate-200 mx-4';
+  const body = (
+    <>
+      {accounts.length > 1 && (
+        <div className={fieldRow}>
+          <span className="text-sm text-slate-500 shrink-0">From</span>
+          <select value={accountId} onChange={(e) => setAccountId(Number(e.target.value))} className="flex-1 min-w-0 bg-transparent py-2 text-sm focus:outline-none">
+            {accounts.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.name} &lt;{a.emailAddress}&gt;
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+      <AddressField
+        token={token}
+        label="To"
+        value={to}
+        onChange={setTo}
+        autoFocus={!init.to && !init.inReplyTo}
+        right={
+          (!ccOpen || !bccOpen) && (
+            <span className="flex items-center gap-2 shrink-0 text-sm text-slate-600">
+              {!ccOpen && (
+                <button type="button" onClick={() => setShowCcOnly(true)} className="hover:underline">
+                  Cc
+                </button>
+              )}
+              {!bccOpen && (
+                <button type="button" onClick={() => setShowBcc(true)} className="hover:underline">
+                  Bcc
+                </button>
+              )}
+            </span>
+          )
+        }
+      />
+      {ccOpen && <AddressField token={token} label="Cc" value={cc} onChange={setCc} />}
+      {bccOpen && <AddressField token={token} label="Bcc" value={bcc} onChange={setBcc} />}
+      {route && (route.internal.length > 0 || route.external.length > 0 || route.groups.length > 0) && (
+        <div className="mx-4 py-1 border-b border-slate-200 text-[11px] text-slate-500 flex flex-wrap gap-x-3 gap-y-0.5" title={[...route.internal.map((x) => `${x}: inside CredenceHR`), ...route.external.map((x) => `${x}: through the mail server`)].join('\n')}>
+          {route.groups.map((g) =>
+            g.denied ? (
+              <span key={g.email} className="basis-full text-rose-700">
+                {g.name} ({g.email}): you can't write to this group — ask Mail Administration to let you.
+              </span>
+            ) : (
+              <span key={g.email} className="text-violet-700">
+                Group {g.name}: {g.count} {g.count === 1 ? 'person' : 'people'}
+              </span>
+            )
+          )}
+          {route.internal.length > 0 && <span className="text-emerald-700">{route.internal.length === 1 && !route.external.length ? 'Delivered inside CredenceHR' : `${route.internal.length} inside CredenceHR`}</span>}
+          {route.external.length > 0 && (
+            <span>
+              {route.internal.length ? `${route.external.length} through the mail server` : 'Through the mail server'}
+            </span>
+          )}
+          {route.ourOutside.map((x) => (
+            <span key={x} className="basis-full text-amber-700">
+              {x}: through the mail server — {route.reasons[x] || 'not on Credence Mail'}
+            </span>
+          ))}
+        </div>
+      )}
+      <div className={fieldRow}>
+        <input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Subject" className="flex-1 min-w-0 bg-transparent py-2 text-sm focus:outline-none placeholder:text-slate-500" />
+      </div>
+
+      <div className="flex-1 min-h-[10rem] overflow-y-auto">
+        <div
+          ref={editorRef}
+          contentEditable
+          suppressContentEditableWarning
+          onInput={markDirty}
+          onPaste={() => setTimeout(markDirty, 0)}
+          className="mail-editor min-h-full px-4 py-3 text-sm text-slate-800 focus:outline-none [&_blockquote]:border-l-[3px] [&_blockquote]:border-slate-300 [&_blockquote]:pl-3 [&_blockquote]:text-slate-600 [&_a]:text-blue-600 [&_a]:underline [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_img]:max-w-full"
+        />
+        {(kept.length > 0 || files.length > 0 || busy === 'files') && (
+          <div className="px-4 pb-3 flex flex-col gap-1.5">
+            {kept.map((k) => (
+              <span key={`k${k.idx}`} className="flex items-center gap-2 rounded bg-[#f5f5f5] px-3 py-1.5 text-sm text-slate-700 max-w-md">
+                <Paperclip className="w-3.5 h-3.5 shrink-0 text-slate-500" /> <span className="truncate flex-1 font-medium text-[#0b57d0]">{k.name}</span> <span className="text-xs text-slate-500 shrink-0">({formatBytes(k.size)})</span>
+                <button type="button" onClick={() => setKept((p) => p.filter((x) => x.idx !== k.idx))} className="p-0.5 rounded-full hover:bg-black/10 shrink-0" aria-label={`Remove ${k.name}`}><X className="w-3.5 h-3.5" /></button>
+              </span>
+            ))}
+            {files.map((f, i) => (
+              <span key={`f${i}`} className="flex items-center gap-2 rounded bg-[#f5f5f5] px-3 py-1.5 text-sm text-slate-700 max-w-md">
+                <Paperclip className="w-3.5 h-3.5 shrink-0 text-slate-500" /> <span className="truncate flex-1 font-medium text-[#0b57d0]">{f.name}</span> <span className="text-xs text-slate-500 shrink-0">({formatBytes(f.size)})</span>
+                <button type="button" onClick={() => setFiles((p) => p.filter((_, j) => j !== i))} className="p-0.5 rounded-full hover:bg-black/10 shrink-0" aria-label={`Remove ${f.name}`}><X className="w-3.5 h-3.5" /></button>
+              </span>
+            ))}
+            {busy === 'files' && <span className="inline-flex items-center gap-1 text-xs text-slate-500 py-1"><Loader2 className="w-3 h-3 animate-spin" /> Adding the attachments…</span>}
+          </div>
+        )}
+      </div>
+
+      {error && <div className="mx-4 mb-2 text-xs px-3 py-2 rounded-lg bg-rose-50 text-rose-700">{error}</div>}
+      {linkOpen && (
+        <div className="mx-4 mb-2 flex items-center gap-2 rounded-lg border border-slate-200 px-2 py-1.5 shadow-sm">
+          <Link2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+          <input
+            autoFocus
+            value={linkUrl}
+            onChange={(e) => setLinkUrl(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                applyLink();
+              } else if (e.key === 'Escape') setLinkOpen(false);
+            }}
+            placeholder="https://…"
+            className="flex-1 min-w-0 text-sm px-1 py-0.5 bg-transparent focus:outline-none"
+          />
+          <button type="button" onClick={applyLink} className="text-xs font-semibold text-[#0b57d0] px-2 py-1 rounded hover:bg-blue-50">OK</button>
+          <button type="button" onClick={() => setLinkOpen(false)} className="p-1 rounded-full hover:bg-black/5" aria-label="Cancel"><X className="w-3.5 h-3.5" /></button>
+        </div>
+      )}
+      {formatBar && (
+        <div className="mx-3 mb-1 flex items-center gap-0.5 rounded-lg bg-[#f2f6fc] px-1 py-0.5 overflow-x-auto">
+          {fmt('undo', Undo2, 'Undo')}
+          {fmt('redo', Redo2, 'Redo')}
+          <span className="w-px h-5 bg-slate-300 mx-1 shrink-0" />
+          {fmt('bold', Bold, 'Bold')}
+          {fmt('italic', Italic, 'Italic')}
+          {fmt('underline', Underline, 'Underline')}
+          <span className="w-px h-5 bg-slate-300 mx-1 shrink-0" />
+          {fmt('justifyLeft', AlignLeft, 'Align left')}
+          {fmt('insertOrderedList', ListOrdered, 'Numbered list')}
+          {fmt('insertUnorderedList', List, 'Bulleted list')}
+          {fmt('formatBlock', Quote, 'Quote', 'blockquote')}
+          {fmt('removeFormat', RemoveFormatting, 'Remove formatting')}
+        </div>
+      )}
+      {scheduleOpen && (
+        <div className="mx-4 mb-2 rounded-lg border border-slate-200 shadow-sm p-3 flex flex-wrap items-center gap-2">
+          <Clock className="w-4 h-4 text-slate-500" />
+          <span className="text-sm text-slate-700">Schedule send</span>
+          <input
+            type="datetime-local"
+            value={scheduleAt}
+            min={localDateTime(new Date(Date.now() + 2 * 60_000))}
+            onChange={(e) => setScheduleAt(e.target.value)}
+            className="text-sm px-2 py-1 rounded border border-slate-300 focus:outline-none focus:border-[#0b57d0]"
+          />
+          <button type="button" disabled={!!busy} onClick={() => void send(true)} className="rounded-full px-4 py-1.5 text-sm font-medium text-white bg-[#0b57d0] hover:bg-[#0a4ebb] disabled:opacity-60 inline-flex items-center gap-1.5">
+            {busy === 'schedule' && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Schedule send
+          </button>
+          <button type="button" onClick={() => setScheduleOpen(false)} className="text-sm text-slate-600 px-2 py-1 rounded hover:bg-slate-100">Cancel</button>
+        </div>
+      )}
+      <input ref={fileRef} type="file" multiple className="hidden" onChange={(e) => { void addFiles(e.target.files); e.target.value = ''; }} />
+
+      <div className="flex items-center gap-1 px-3 py-2.5 shrink-0" style={{ paddingBottom: 'max(0.625rem, env(safe-area-inset-bottom))' }}>
+        <div className="hidden sm:flex items-center rounded-full overflow-hidden shrink-0 mr-2">
+          <button type="button" disabled={!!busy || !account} onClick={() => void send(false)} className="pl-6 pr-4 py-2 text-sm font-medium text-white bg-[#0b57d0] hover:bg-[#0a4ebb] hover:shadow disabled:opacity-60 inline-flex items-center gap-2">
+            {busy === 'send' && <Loader2 className="w-4 h-4 animate-spin" />} Send
+          </button>
+          <button type="button" disabled={!!busy} onClick={() => setScheduleOpen((v) => !v)} className="px-2 py-2 text-white bg-[#0b57d0] hover:bg-[#0a4ebb] disabled:opacity-60 border-l border-white/30" aria-label="More send options" title="Schedule send">
+            <ChevronDown className="w-4 h-4" />
+          </button>
+        </div>
+        <button type="button" className={`${toolBtn} ${formatBar ? 'bg-slate-100' : ''}`} onClick={() => setFormatBar((v) => !v)} aria-label="Formatting options" title="Formatting options" aria-pressed={formatBar}>
+          <Type className="w-4 h-4" />
+        </button>
+        <button type="button" className={toolBtn} onClick={() => fileRef.current?.click()} aria-label="Attach files" title="Attach files"><Paperclip className="w-4 h-4" /></button>
+        <button type="button" className={toolBtn} onMouseDown={(e) => e.preventDefault()} onClick={openLink} aria-label="Insert link" title="Insert link"><Link2 className="w-4 h-4" /></button>
+        <button type="button" className={`sm:hidden ${toolBtn}`} onClick={() => setScheduleOpen((v) => !v)} aria-label="Schedule send" title="Schedule send"><Clock className="w-4 h-4" /></button>
+        {templates.length > 0 && (
+          <label className={`${toolBtn} relative flex items-center`} title="Templates">
+            <FileText className="w-4 h-4" />
+            <select value="" onChange={(e) => insertTemplate(e.target.value)} className="absolute inset-0 opacity-0 cursor-pointer" aria-label="Insert a template">
+              <option value="">Template</option>
+              {templates.map((t) => (
+                <option key={t.id} value={t.id}>{t.title}</option>
+              ))}
+            </select>
+          </label>
+        )}
+        {signatures.length > 0 && (
+          <label className={`${toolBtn} relative flex items-center`} title={`Signature: ${signatures.find((x) => x.id === sigId)?.name || 'none'}`}>
+            <PenLine className="w-4 h-4" />
+            <select value={sigId} onChange={(e) => changeSignature(e.target.value)} className="absolute inset-0 opacity-0 cursor-pointer" aria-label="Signature">
+              <option value="">No signature</option>
+              {signatures.map((x) => (
+                <option key={x.id} value={x.id}>{x.name}</option>
+              ))}
+            </select>
+          </label>
+        )}
+        <div className="flex-1" />
+        <button type="button" disabled={!!busy} onClick={() => void saveDraft(false)} className="sm:hidden text-xs font-medium text-slate-600 px-2 py-1.5 rounded-full hover:bg-slate-100 disabled:opacity-50">
+          {busy === 'draft' ? 'Saving…' : 'Save draft'}
+        </button>
+        <button type="button" onClick={() => void discard()} className={`${toolBtn} hover:text-rose-600`} aria-label="Discard draft" title="Discard draft">
+          <Trash2 className="w-4 h-4" />
+        </button>
+      </div>
+    </>
+  );
+
+  // One element tree for every mode, so the editor (and what's written in
+  // it) is never thrown away when the window is minimised or made full size.
+  return (
+    <>
+      {mode === 'max' && <div className="fixed inset-0 z-[89] liquid-glass-backdrop" onClick={() => setMode('normal')} />}
+      <div
+        className={`fixed z-[90] bg-white flex flex-col overflow-hidden ${
+          mode === 'max'
+            ? 'inset-0 sm:inset-x-8 sm:inset-y-[6vh] sm:mx-auto sm:max-w-5xl sm:rounded-2xl shadow-2xl'
+            : `inset-0 sm:inset-auto sm:right-4 sm:bottom-0 sm:rounded-t-xl shadow-[0_8px_30px_rgba(0,0,0,0.25)] ${mode === 'min' ? 'sm:w-72 sm:h-10' : 'sm:w-[560px] sm:h-[min(620px,calc(100vh-5rem))]'}`
+        }`}
+        style={keyboardInset ? { paddingBottom: keyboardInset } : undefined}
+      >
+        {header}
+        <div className={mode === 'min' ? 'hidden' : 'flex-1 min-h-0 flex flex-col'}>{body}</div>
+      </div>
+    </>
   );
 };
