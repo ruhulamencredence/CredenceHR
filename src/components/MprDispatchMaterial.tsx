@@ -8,6 +8,8 @@
 // against the projects' MPR rows, soonest delivery date first. Only the rows
 // Purchase sent here from the MPR Entries report (filter, tick, "Send to
 // Dispatch") are listed; one with nothing sent yet can be taken out again.
+// With the "dispatch_material" layer alone an account sees only its own rows
+// (sent here or dispatched by it); "dispatch_all" shows everyone's.
 //   - Dispatch on screen: tick rows, set the Qty (all that's left, or part of
 //     it), supplier, rate, P.O., challan.
 //   - Or by Excel: "Download sheet" gives the Daily Site Requirement and
@@ -185,6 +187,8 @@ const DispatchPopup: React.FC<{
 export const MprDispatchMaterial: React.FC<{ token: string }> = ({ token }) => {
   const [view, setView] = useState<View>('open');
   const [rows, setRows] = useState<MdRow[] | null>(null);
+  // Everyone's rows (layer "dispatch_all") or just this account's own.
+  const [seesAll, setSeesAll] = useState(false);
   const [error, setError] = useState('');
   const [q, setQ] = useState('');
   const [project, setProject] = useState('');
@@ -202,9 +206,10 @@ export const MprDispatchMaterial: React.FC<{ token: string }> = ({ token }) => {
 
   const load = () => {
     setError('');
-    return mdFetch<MdRow[]>(token, `/api/mpr-dispatch/rows?view=${view}`)
+    return mdFetch<{ all: boolean; rows: MdRow[] }>(token, `/api/mpr-dispatch/rows?view=${view}`)
       .then((r) => {
-        setRows(r);
+        setRows(r.rows);
+        setSeesAll(r.all);
         setPicked(new Set());
       })
       .catch((e) => setError(e.message));
@@ -223,7 +228,7 @@ export const MprDispatchMaterial: React.FC<{ token: string }> = ({ token }) => {
       if (statuses.size && !statuses.has(r.status)) return false;
       if (from && (!r.deliveryDate || r.deliveryDate < from)) return false;
       if (to && (!r.deliveryDate || r.deliveryDate > to)) return false;
-      const hay = `${r.projectName} ${r.mprNo} ${r.item} ${r.specification} ${r.jobNo} ${r.budgetName} ${r.dispatches.map((d) => `${d.supplier} ${d.poNo} ${d.challanNo}`).join(' ')}`.toLowerCase();
+      const hay = `${r.projectName} ${r.mprNo} ${r.item} ${r.specification} ${r.jobNo} ${r.budgetName} ${r.queuedBy} ${r.dispatches.map((d) => `${d.supplier} ${d.poNo} ${d.challanNo}`).join(' ')}`.toLowerCase();
       return words.every((w) => hay.includes(w));
     });
   }, [rows, q, project, statuses, from, to]);
@@ -235,8 +240,12 @@ export const MprDispatchMaterial: React.FC<{ token: string }> = ({ token }) => {
     if (!list.length) return;
     if (!(await confirmDialog(`Take ${list.length} MPR row${list.length === 1 ? '' : 's'} out of Dispatch Material? ${list.length === 1 ? 'It goes' : 'They go'} back to the MPR Entries report, to send again later.`, { confirmLabel: 'Take out' }))) return;
     try {
-      const r = await mdFetch<{ removed: number; kept: number }>(token, '/api/mpr-dispatch/unqueue', 'POST', { entryIds: list.map((x) => x.id) });
-      setNotice(`${r.removed} row${r.removed === 1 ? '' : 's'} taken out.${r.kept ? ` ${r.kept} kept — material was already sent on ${r.kept === 1 ? 'it' : 'them'}.` : ''}`);
+      const r = await mdFetch<{ removed: number; kept: number; notYours: number }>(token, '/api/mpr-dispatch/unqueue', 'POST', { entryIds: list.map((x) => x.id) });
+      setNotice(
+        `${r.removed} row${r.removed === 1 ? '' : 's'} taken out.${r.kept ? ` ${r.kept} kept — material was already sent on ${r.kept === 1 ? 'it' : 'them'}.` : ''}${
+          r.notYours ? ` ${r.notYours} kept — someone else sent ${r.notYours === 1 ? 'it' : 'them'} here.` : ''
+        }`
+      );
       void load();
     } catch (e: any) {
       setNotice(e.message);
@@ -331,7 +340,7 @@ export const MprDispatchMaterial: React.FC<{ token: string }> = ({ token }) => {
       const text = (v: any) => (v instanceof Date ? '' : String(v ?? '').trim());
       const dateText = (v: any) =>
         v instanceof Date ? `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, '0')}-${String(v.getDate()).padStart(2, '0')}` : String(v ?? '').trim();
-      const fresh = await mdFetch<MdRow[]>(token, '/api/mpr-dispatch/rows?view=open');
+      const fresh = (await mdFetch<{ rows: MdRow[] }>(token, '/api/mpr-dispatch/rows?view=open')).rows;
       const byId = new Map(fresh.map((r) => [r.id, r]));
       const lines: Line[] = [];
       const skipped: string[] = [];
@@ -342,7 +351,7 @@ export const MprDispatchMaterial: React.FC<{ token: string }> = ({ token }) => {
         if (!sup && !po && !dq) continue; // not being sent this time
         const r = byId.get(id);
         if (!r) {
-          skipped.push(`Row ID ${id}: already fully received or not found`);
+          skipped.push(`Row ID ${id}: already fully received, not found, or not in your list`);
           continue;
         }
         lines.push({
@@ -387,7 +396,7 @@ export const MprDispatchMaterial: React.FC<{ token: string }> = ({ token }) => {
           <div>
             <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2"><Truck className="w-5 h-5 text-blue-600" /> Dispatch Material</h3>
             <p className="text-xs text-slate-500 mt-0.5 max-w-3xl">
-              The MPR rows you sent here from the MPR Entries report (filter there, tick, "Send to Dispatch"), soonest delivery date first. Send all that's left or part of it — on
+              {seesAll ? "Everyone's MPR rows sent here from the MPR Entries report" : 'The MPR rows you sent here from the MPR Entries report, or dispatched yourself'} (filter there, tick, "Send to Dispatch"), soonest delivery date first. Send all that's left or part of it — on
               screen, or fill the Daily Site Requirement sheet and upload it. A row leaves the Open list once the project has received all of it.
             </p>
           </div>
@@ -506,6 +515,7 @@ export const MprDispatchMaterial: React.FC<{ token: string }> = ({ token }) => {
                     <th className="px-2 py-2 text-right">Received</th>
                     <th className="px-2 py-2 text-right">Left</th>
                     <th className="px-2 py-2">Supplier · P.O.</th>
+                    {seesAll && <th className="px-2 py-2">Sent here by</th>}
                     <th className="px-2 py-2">Status</th>
                     <th className="px-2 py-2 text-right">Actions</th>
                   </tr>
@@ -543,6 +553,7 @@ export const MprDispatchMaterial: React.FC<{ token: string }> = ({ token }) => {
                         <td className="px-2 py-2 text-right whitespace-nowrap">{qtyText(r.receivedQty)}</td>
                         <td className="px-2 py-2 text-right whitespace-nowrap font-semibold">{qtyText(r.remaining)}</td>
                         <td className="px-2 py-2 text-slate-600">{lastD ? [lastD.supplier, lastD.poNo].filter(Boolean).join(' · ') || '—' : '—'}</td>
+                        {seesAll && <td className="px-2 py-2 text-slate-600">{r.queuedBy || '—'}</td>}
                         <td className="px-2 py-2"><MdStatusChip status={r.status} queued={r.queuedAt} /></td>
                         <td className="px-2 py-2">
                           <div className="flex justify-end gap-1.5">

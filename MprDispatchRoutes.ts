@@ -14,7 +14,9 @@
 // remaining Qty or part of it, with supplier / rate / P.O. / challan. Either on
 // screen or from the "Daily Site Requirement and Delivery Status" Excel they
 // fill and upload (the page reads the sheet, this file checks and saves it).
-// Permission: the Reports layer "dispatch_material" (explicit-only).
+// Permission: the Reports layer "dispatch_material" (explicit-only) — the
+// rows this account sent to Dispatch Material or dispatched itself. With
+// "dispatch_all" too (explicit-only), everyone's rows.
 //
 // Material Receive (Self Service -> PEPM Operation): an account with the
 // switch users.can_receive_material, for the projects it holds
@@ -120,6 +122,11 @@ export const MD_STATUS_LABEL: Record<string, string> = {
 export function registerMprDispatchRoutes(app: Express, deps: Deps) {
   const { authenticateToken, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer, queryDB, parseQtyNumber, toDateOnlyString, todayInDhaka, createAlert } = deps;
   const dispatchGate = [authenticateToken, requireAdmin, requireModule("reports"), requireModuleLayer("reports", "dispatch_material")];
+  // Everyone's rows, or only this account's own (sent here or dispatched by it).
+  const seesAll = (req: any) => hasModuleLayer(req.user, "reports", "dispatch_all");
+  const OWN_SQL = " AND (e.md_queued_by = ? OR EXISTS (SELECT 1 FROM mpr_dispatches od WHERE od.entry_id = e.id AND od.created_by = ?))";
+  const isOwn = (r: any, userId: number, dispatches: { createdById?: number }[] = []) =>
+    Number(r.md_queued_by) === userId || dispatches.some((d) => d.createdById === userId);
 
   const bad = (message: string, status = 400) => Object.assign(new Error(message), { status });
   const handler = (fn: (req: any, res: any) => Promise<any>) => async (req: any, res: any) => {
@@ -226,7 +233,8 @@ export function registerMprDispatchRoutes(app: Express, deps: Deps) {
   // One MPR row as the Dispatch page shows it.
   const ROW_SQL = `
     SELECT e.id, e.entry_date, e.item_name, e.job_name, e.delivery_date, e.requisitioned_qty, e.project_id, e.created_by,
-      e.md_status, e.md_target_qty, e.md_dispatched_qty, e.md_received_qty, e.md_last_dispatch_date, e.md_received_date, e.md_queued_at,
+      e.md_status, e.md_target_qty, e.md_dispatched_qty, e.md_received_qty, e.md_last_dispatch_date, e.md_received_date, e.md_queued_at, e.md_queued_by,
+      qu.name AS queued_by_name,
       p.project_name, m.mpr_no, j.job_no, b.budget_name, u.name AS user_name,
       bi.specification, bi.unit, bi.req_qty
     FROM entries e
@@ -234,6 +242,7 @@ export function registerMprDispatchRoutes(app: Express, deps: Deps) {
     JOIN jobs j ON e.job_id = j.id
     JOIN mpr_numbers m ON e.mpr_id = m.id
     LEFT JOIN users u ON e.created_by = u.id
+    LEFT JOIN users qu ON e.md_queued_by = qu.id
     LEFT JOIN budgets b ON e.budget_id = b.id
     LEFT JOIN budget_items bi ON bi.id = e.budget_item_id
     WHERE e.deleted_at IS NULL`;
@@ -262,6 +271,7 @@ export function registerMprDispatchRoutes(app: Express, deps: Deps) {
       lastDispatchDate: toDateOnlyString(r.md_last_dispatch_date),
       receivedDate: toDateOnlyString(r.md_received_date),
       queuedAt: r.md_queued_at || null,
+      queuedBy: r.queued_by_name || "",
       dispatches
     };
   };
@@ -279,6 +289,7 @@ export function registerMprDispatchRoutes(app: Express, deps: Deps) {
     source: d.source,
     status: d.status,
     sentBy: d.sent_by_name || "",
+    createdById: Number(d.created_by) || 0,
     sentAt: d.created_at,
     receivedQty: d.received_qty === null || d.received_qty === undefined ? null : Number(d.received_qty),
     receivedDate: toDateOnlyString(d.received_date),
@@ -313,15 +324,23 @@ export function registerMprDispatchRoutes(app: Express, deps: Deps) {
     ...dispatchGate,
     handler(async (req, res) => {
       const view = ["open", "received", "all"].includes(String(req.query.view)) ? String(req.query.view) : "open";
-      // Only rows Purchase sent here from the MPR Entries report.
+      // Only rows Purchase sent here from the MPR Entries report — and,
+      // without "dispatch_all", only this account's own.
+      const all = await seesAll(req);
+      const me = Number(req.user.id);
       let sql = `${ROW_SQL} AND e.md_queued_at IS NOT NULL`;
+      const params: any[] = [];
+      if (!all) {
+        sql += OWN_SQL;
+        params.push(me, me);
+      }
       if (view === "open") sql += " AND e.md_status <> 'received'";
       if (view === "received") sql += " AND e.md_status = 'received'";
       sql += " ORDER BY e.delivery_date ASC, p.project_name ASC, e.id ASC";
-      const rows: any[] = (await queryDB(sql)) || [];
+      const rows: any[] = (await queryDB(sql, params)) || [];
       const ds = await dispatchesFor(rows.map((r) => Number(r.id)));
       res.setHeader("Cache-Control", "no-store");
-      res.json(rows.map((r) => rowOut(r, ds.get(Number(r.id)) || [])));
+      res.json({ all, rows: rows.map((r) => rowOut(r, ds.get(Number(r.id)) || [])) });
     })
   );
 
@@ -335,6 +354,8 @@ export function registerMprDispatchRoutes(app: Express, deps: Deps) {
       const source = req.body?.source === "excel" ? "excel" : "screen";
       if (!items.length) throw bad("Pick at least one MPR row to dispatch.");
       const today = todayInDhaka();
+      const all = await seesAll(req);
+      const me = Number(req.user.id);
       const errors: { index: number; entryId: number; error: string }[] = [];
       const clean: any[] = [];
       // Qty being sent in this same batch per row, so two lines can't overshoot together.
@@ -371,6 +392,10 @@ export function registerMprDispatchRoutes(app: Express, deps: Deps) {
           continue;
         }
         const ds = (await dispatchesFor([entryId])).get(entryId) || [];
+        if (!all && !isOwn(rows[0], me, ds)) {
+          fail("Someone else sent this MPR row to Dispatch Material — it isn't in your list.");
+          continue;
+        }
         const row = rowOut(rows[0], ds);
         const already = inBatch.get(entryId) || 0;
         if (row.remaining !== null && qty + already > row.remaining + EPS) {
@@ -477,9 +502,18 @@ export function registerMprDispatchRoutes(app: Express, deps: Deps) {
     handler(async (req, res) => {
       const ids = [...new Set<number>((Array.isArray(req.body?.entryIds) ? req.body.entryIds : []).map(Number).filter((n: number) => n > 0))].slice(0, 2000);
       if (!ids.length) throw bad("Pick at least one MPR row.");
-      let removed = 0;
+      let removed = 0,
+        notYours = 0;
       const kept: number[] = [];
+      const all = await seesAll(req);
       for (const id of ids) {
+        if (!all) {
+          const mine: any[] = (await queryDB("SELECT id FROM entries WHERE id = ? AND md_queued_by = ?", [id, Number(req.user.id)])) || [];
+          if (!mine.length) {
+            notYours++;
+            continue;
+          }
+        }
         const sent: any[] = (await queryDB("SELECT COUNT(*) AS n FROM mpr_dispatches WHERE entry_id = ? AND status <> 'cancelled'", [id])) || [];
         if (Number(sent[0]?.n || 0) > 0) {
           kept.push(id);
@@ -491,7 +525,7 @@ export function registerMprDispatchRoutes(app: Express, deps: Deps) {
           removed++;
         }
       }
-      res.json({ removed, kept: kept.length });
+      res.json({ removed, kept: kept.length, notYours });
     })
   );
 
@@ -505,6 +539,10 @@ export function registerMprDispatchRoutes(app: Express, deps: Deps) {
       const d: any = ((await queryDB("SELECT * FROM mpr_dispatches WHERE id = ?", [Number(req.params.id)])) || [])[0];
       if (!d) throw bad("Dispatch not found.", 404);
       if (d.status !== "sent") throw bad(d.status === "received" ? "Already received — it can't be cancelled." : "Already cancelled.");
+      if (!(await seesAll(req)) && Number(d.created_by) !== Number(req.user.id)) {
+        const mine: any[] = (await queryDB("SELECT id FROM entries WHERE id = ? AND md_queued_by = ?", [Number(d.entry_id), Number(req.user.id)])) || [];
+        if (!mine.length) throw bad("Someone else sent this — you can't cancel it.", 403);
+      }
       await queryDB("UPDATE mpr_dispatches SET status = 'cancelled', cancelled_by = ?, cancelled_at = NOW(), cancel_reason = ? WHERE id = ? AND status = 'sent'", [
         Number(req.user.id),
         reason,
