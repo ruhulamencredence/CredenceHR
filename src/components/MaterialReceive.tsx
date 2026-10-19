@@ -4,10 +4,14 @@
  */
 
 // Self Service -> PEPM Operation -> Material Receive (users.can_receive_material,
-// MprDispatchRoutes.ts): material Purchase has sent to this account's projects
-// (user_project_permissions). Confirm each dispatch when it arrives — all of it,
-// or less with a reason. When an MPR row's whole Qty has arrived, its cycle is
-// complete.
+// MprDispatchRoutes.ts).
+//   My MPR in Dispatch  the rows this account entered itself (its Job
+//                       entries) that Purchase took into Dispatch Material —
+//                       where each stands, read only.
+//   On the way          material Purchase sent to this account's projects
+//                       (user_project_permissions): confirm each dispatch when
+//                       it arrives — all of it, or less with a reason.
+// When an MPR row's whole Qty has arrived, its cycle is complete.
 
 import React, { useEffect, useState } from 'react';
 import { PackageCheck, Truck, History, Loader2, RefreshCw, AlertTriangle } from 'lucide-react';
@@ -83,7 +87,7 @@ const ReceivePopup: React.FC<{ token: string; row: MdRow; d: MdDispatch; onClose
 };
 
 export const MaterialReceive: React.FC<{ token: string }> = ({ token }) => {
-  const [view, setView] = useState<'open' | 'received'>('open');
+  const [view, setView] = useState<'mine' | 'open' | 'received'>('mine');
   const [rows, setRows] = useState<MdRow[] | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -92,7 +96,7 @@ export const MaterialReceive: React.FC<{ token: string }> = ({ token }) => {
   const today = todayDhaka();
   const load = () => {
     setError('');
-    return mdFetch<{ rows: MdRow[] }>(token, `/api/material-receive${view === 'received' ? '?view=received' : ''}`)
+    return mdFetch<{ rows: MdRow[] }>(token, view === 'mine' ? '/api/material-receive/my-mpr' : `/api/material-receive${view === 'received' ? '?view=received' : ''}`)
       .then((r) => setRows(r.rows))
       .catch((e) => setError(e.message));
   };
@@ -111,12 +115,13 @@ export const MaterialReceive: React.FC<{ token: string }> = ({ token }) => {
           <div>
             <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2"><PackageCheck className="w-5 h-5 text-emerald-600" /> Material Receive</h2>
             <p className="text-xs text-slate-500 mt-0.5 max-w-2xl">
-              Material Purchase has sent to your projects against their MPR rows. When it arrives, confirm how much came. When all of an MPR row has arrived, it is complete.
+              My MPR in Dispatch: where the MPR rows you entered stand with Purchase. On the way: material sent to your projects — when it arrives, confirm how much came.
+              When all of an MPR row has arrived, it is complete.
             </p>
           </div>
           <div className="flex items-center gap-2">
             <div className="inline-flex rounded-xl bg-slate-100 p-1">
-              {([['open', `On the way${view === 'open' && rows ? ` (${onTheWay})` : ''}`], ['received', 'Received (60 days)']] as const).map(([k, label]) => (
+              {([['mine', 'My MPR in Dispatch'], ['open', `On the way${view === 'open' && rows ? ` (${onTheWay})` : ''}`], ['received', 'Received (60 days)']] as const).map(([k, label]) => (
                 <button key={k} type="button" onClick={() => setView(k)} className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${view === k ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600'}`}>
                   {label}
                 </button>
@@ -135,13 +140,17 @@ export const MaterialReceive: React.FC<{ token: string }> = ({ token }) => {
         <LoadingBlock />
       ) : rows && !rows.length ? (
         <div className="bg-white border border-slate-200 rounded-2xl p-10 text-center text-sm text-slate-500 shadow-sm">
-          {view === 'open' ? 'Nothing on the way to your projects right now.' : 'Nothing received in the last 60 days.'}
+          {view === 'mine'
+            ? "None of your MPR rows is in Dispatch Material yet — Purchase hasn't taken them up."
+            : view === 'open'
+              ? 'Nothing on the way to your projects right now.'
+              : 'Nothing received in the last 60 days.'}
         </div>
       ) : (
         <div className="space-y-3">
           {(rows || []).map((r) => {
             const late = isOverdue(r, today);
-            const list = r.dispatches.filter((d) => (view === 'open' ? d.status === 'sent' : d.status === 'received'));
+            const list = r.dispatches.filter((d) => (view === 'mine' ? d.status !== 'cancelled' : view === 'open' ? d.status === 'sent' : d.status === 'received'));
             return (
               <div key={r.id} className="bg-white border border-slate-200 rounded-2xl shadow-sm p-4">
                 <div className="flex items-start justify-between gap-3 flex-wrap">
@@ -157,12 +166,22 @@ export const MaterialReceive: React.FC<{ token: string }> = ({ token }) => {
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    <MdStatusChip status={r.status} />
+                    <MdStatusChip status={r.status} queued={r.queuedAt} />
                     <button type="button" onClick={() => setTimeline(r.id)} className="p-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50" aria-label="History" title="History">
                       <History className="w-3.5 h-3.5" />
                     </button>
                   </div>
                 </div>
+                {view === 'mine' && (
+                  <div className="mt-2 text-xs text-slate-600">
+                    Sent {qtyText(r.dispatchedQty, r.unit)} · left to send {qtyText(r.remaining, r.unit)}
+                    {r.queuedBy ? ` · taken up by ${r.queuedBy}` : ''}
+                  </div>
+                )}
+                {!list.length && view === 'mine' && (
+                  <div className="mt-2 text-xs text-indigo-700">In Purchase's dispatch list — nothing sent yet.</div>
+                )}
+                {list.length > 0 && (
                 <div className="mt-3 divide-y divide-slate-100 border border-slate-100 rounded-xl">
                   {list.map((d) => (
                     <div key={d.id} className="px-3 py-2.5 flex items-center justify-between gap-3 flex-wrap text-xs">
@@ -181,7 +200,8 @@ export const MaterialReceive: React.FC<{ token: string }> = ({ token }) => {
                           )}
                         </div>
                       </div>
-                      {d.status === 'sent' && (
+                      {d.status === 'sent' && view === 'mine' && <span className="text-[11px] font-semibold text-sky-700">On the way</span>}
+                      {d.status === 'sent' && view !== 'mine' && (
                         <button type="button" onClick={() => setReceiving({ row: r, d })} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700">
                           <PackageCheck className="w-4 h-4" /> Received
                         </button>
@@ -189,6 +209,7 @@ export const MaterialReceive: React.FC<{ token: string }> = ({ token }) => {
                     </div>
                   ))}
                 </div>
+                )}
               </div>
             );
           })}
