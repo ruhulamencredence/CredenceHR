@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
+  PackageCheck,
   X, LogOut, Home, Wallet, Briefcase, FileText, Edit2, Route, CreditCard,
   CalendarClock, ListChecks, CheckSquare, ChevronDown, Building2, Users, Users2, Smartphone, Activity,
   BarChart3, FileSpreadsheet, Upload, History, Recycle, Navigation, Bell, ShieldCheck,
@@ -49,7 +50,7 @@ interface GlobalSidebarProps {
   onGoToUserClaims: (target: 'movementClaims' | 'conveyanceBill') => void;
   // Everyday employee self-service items — not Admin-gated, shown to every
   // account regardless of role/module access.
-  onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | 'credenceMail' | 'myRoster' | 'mySignatures' | 'myPayslips') => void;
+  onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | 'credenceMail' | 'myRoster' | 'mySignatures' | 'myPayslips' | 'materialReceive') => void;
   // Admin Panel's own Movement Claims / Conveyance Bill Claim review tabs —
   // separate feature from onGoToUserClaims above, gated by module_permissions
   // like every other Admin Panel module.
@@ -241,6 +242,11 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     if (pepmOn && user.can_job_edit) {
       jobEntryGroup.push({ key: 'jobEdit', label: 'Job Edits', icon: Edit2, onClick: () => onGoToJobsTab('jobEdit') });
     }
+  }
+  // Material Receive — material Purchase sent to this account's projects
+  // (users.can_receive_material, off by default).
+  if (pepmOn && (isSuperAdmin || !!user.can_receive_material)) {
+    jobEntryGroup.push({ key: 'materialReceive', label: 'Material Receive', icon: PackageCheck, onClick: () => onGoToSelfServiceTab('materialReceive') });
   }
 
   // "Self Service" — everyday employee items. Employee Directory stays
@@ -659,7 +665,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   const makeGroups = (list: MenuGroup[]) => list.filter((g) => g.entries.some(isItem));
   const selfGroups = makeGroups([
     { key: 'g_work', label: 'Work & Approvals', icon: ListChecks, entries: pick('myTasks', 'myTargets', 'approveApplications', 'mySignatures', 'teamAttendance') },
-    { key: 'g_pepm_op', label: 'PEPM Operation', icon: Briefcase, entries: pick('entry', 'jobs', 'entryDetails', 'jobEdit') },
+    { key: 'g_pepm_op', label: 'PEPM Operation', icon: Briefcase, entries: pick('entry', 'jobs', 'entryDetails', 'jobEdit', 'materialReceive') },
     { key: 'g_leave_att', label: 'Leave & Attendance', icon: CalendarClock, entries: pick('leaveApplication', 'timesheet', 'myRoster') },
     { key: 'g_requests', label: 'Requests & Claims', icon: Wallet, entries: pick('userMovementClaims', 'userConveyanceClaims', 'vehicleManagement', 'assetManagement', 'myPayslips', 'myMobileSim', 'myLoans', 'myLetters') },
     { key: 'g_others', label: 'Others', icon: Users2, entries: pick('credenceMail', 'chat', 'alerts', 'erp360', 'employeeDirectory', 'myCases', 'resignation') }

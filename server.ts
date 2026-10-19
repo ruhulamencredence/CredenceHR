@@ -52,6 +52,7 @@ import { registerCallRoutes, setupCallSocket } from "./CallRoutes";
 import { ensureMailSchema, registerMailRoutes } from "./MailRoutes";
 import { ensureRosterSchema, registerRosterRoutes } from "./RosterRoutes";
 import { ensureMeasurementSchema, registerMeasurementRoutes } from "./MeasurementRoutes";
+import { ensureMprDispatchSchema, registerMprDispatchRoutes } from "./MprDispatchRoutes";
 import { ensureESignSchema, registerESignRoutes } from "./ESignRoutes";
 import { ensurePayslipSchema, registerPayslipRoutes } from "./PayslipRoutes";
 import { ensureReportEmailSchema, registerReportEmailRoutes } from "./ReportEmailRoutes";
@@ -264,6 +265,8 @@ async function initDB() {
     await ensureRosterSchema(dbPool);
     // PEPM Management -> Measurement Sheet (MeasurementRoutes.ts).
     await ensureMeasurementSchema(dbPool);
+    // PEPM -> Dispatch Material / Material Receive (MprDispatchRoutes.ts).
+    await ensureMprDispatchSchema(dbPool);
     // E-Signature on Document Vault documents (ESignRoutes.ts).
     await ensureESignSchema(dbPool);
     // Self Service -> My Payslip switch (PayslipRoutes.ts).
@@ -382,8 +385,10 @@ const DOCUMENT_VAULT_LAYER_KEYS = ["read", "sign_request", "esign_settings"] as 
 // PEPM Reports uses four of them: Read Only, Edit, Delete/Trash, Permanent Delete
 // — plus its own "Budget Submission Status" (the second report on that page),
 // which, like Permanent Delete, is never part of the no-saved-rows default:
-// only an account it's explicitly ticked for can open it.
-const REPORT_LAYER_KEYS = ["read", "edit_add", "delete_trash", "permanent_delete", "submission_status"] as const;
+// only an account it's explicitly ticked for can open it. "dispatch_material"
+// (Purchase sending material against MPR rows, MprDispatchRoutes.ts) is the
+// third report on that page — explicit-only as well.
+const REPORT_LAYER_KEYS = ["read", "edit_add", "delete_trash", "permanent_delete", "submission_status", "dispatch_material"] as const;
 
 // Leave Manage's own operation-specific layers — mirrors LeaveManageLayerKey/
 // LEAVE_MANAGE_LAYERS in src/types.ts. Not part of PERMISSION_LAYER_MODULES/
@@ -1977,7 +1982,7 @@ async function canViewGroupDashboard(userId: number, role: string): Promise<bool
   }
 }
 
-const PEPM_API_RE = /^\/api\/(budgets|budget-items|entries|jobs|job-edits|mpr-numbers|rate-file|rate-list|delivery-date-conditions|reports\/budget-submission-status)(\/|$)/;
+const PEPM_API_RE = /^\/api\/(budgets|budget-items|entries|jobs|job-edits|mpr-numbers|rate-file|rate-list|delivery-date-conditions|reports\/budget-submission-status|mpr-dispatch|material-receive)(\/|$)/;
 
 // dbPool.execute with the same multi-company separation as queryDB.
 function scopedExecute(sql: string, params?: any[]) {
@@ -2266,7 +2271,7 @@ async function startServer() {
   // on for a module is never a silent regression; a Superadmin only actually
   // restricts anything once they explicitly save a narrower set in the
   // Module Access modal.
-  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "block_account" | "limit_history" | "link_pins" | "on_behalf" | "onboarding_create" | "onboarding_review" | "onboarding_approve" | "exit_dues" | "exit_pdf" | "reminders_receive" | "salary_bulk_upload" | "target_export" | "target_cancel" | "exit_clearance_setup" | "late_list" | "mail_open" | "mail_password" | "mail_settings" | "mail_groups" | "roster_manage" | "sign_request" | "esign_settings") =>
+  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "dispatch_material" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "block_account" | "limit_history" | "link_pins" | "on_behalf" | "onboarding_create" | "onboarding_review" | "onboarding_approve" | "exit_dues" | "exit_pdf" | "reminders_receive" | "salary_bulk_upload" | "target_export" | "target_cancel" | "exit_clearance_setup" | "late_list" | "mail_open" | "mail_password" | "mail_settings" | "mail_groups" | "roster_manage" | "sign_request" | "esign_settings") =>
     async (req: any, res: any, next: any) => {
       if (!req.user) return res.status(401).json({ error: "Access token required" });
       if (req.user.onb) return res.status(403).json({ error: "Admin access required" });
@@ -2984,6 +2989,7 @@ async function startServer() {
   registerMailRoutes(app, io, { authenticateToken, queryDB, isMySQL: () => !!(isMySQLConnected && dbPool), requireModuleLayer, hasModuleLayer });
   // Duty Roster — shifts and who works which shift when (RosterRoutes.ts).
   registerMeasurementRoutes(app, { authenticateToken, requireAdmin, requireModuleLayer, hasModuleLayer, queryDB });
+  registerMprDispatchRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer, queryDB, parseQtyNumber, toDateOnlyString, todayInDhaka, createAlert });
   registerRosterRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer, queryDB, todayInDhaka, createAlert });
 
   if (process.env.NODE_ENV !== "production") {

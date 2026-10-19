@@ -186,6 +186,8 @@ export const LINKED_TABLES = new Map<string, [string, string]>([
   ["jobs", ["budget_id", "budgets"]],
   ["job_edit_requests", ["requested_by", "users"]],
   ["entry_edit_history", ["entry_id", "entries"]],
+  ["mpr_dispatches", ["entry_id", "entries"]],
+  ["mpr_fulfil_log", ["entry_id", "entries"]],
   ["entry_permanent_delete_log", ["permanently_deleted_by", "users"]],
   ["job_candidates", ["posting_id", "job_postings"]],
   ["candidate_interviews", ["candidate_id", "job_candidates"]],

@@ -5,7 +5,7 @@ import type { User } from '../types';
 
 export type SelfView =
   | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation'
-  | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | 'credenceMail' | 'myRoster' | 'mySignatures' | 'myPayslips';
+  | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | 'credenceMail' | 'myRoster' | 'mySignatures' | 'myPayslips' | 'materialReceive';
 
 const SLUGS: Record<SelfView, string> = {
   leaveManagement: 'leave-management',
@@ -25,6 +25,7 @@ const SLUGS: Record<SelfView, string> = {
   myTargets: 'my-targets',
   credenceMail: 'mail',
   myRoster: 'duty-roster',
+  materialReceive: 'material-receive',
   mySignatures: 'documents-to-sign',
   myPayslips: 'payslips'
 };
@@ -59,6 +60,7 @@ export const canOpenSelfView = (view: SelfView, user: User | null): boolean => {
     case 'myRoster': return sa || !!user.can_view_roster;
     case 'mySignatures': return sa || !!user.can_sign_documents;
     case 'myPayslips': return sa || !!user.can_view_payslip;
+    case 'materialReceive': return sa || !!user.can_receive_material;
     default: return true;
   }
 };

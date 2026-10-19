@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Capacitor } from '@capacitor/core';
 import { Project, MprNumber, Entry, Budget, BudgetItem, User, MprUsage, ClaimsNavRequest, JobsNavRequest, DashboardNavRequest, LeaveNavRequest } from '../types';
-import { CalendarClock, CheckSquare, ExternalLink, Gavel, LogOut, MessageSquare, ShieldCheck, Smartphone, HandCoins, Target, Sparkles, Mail, CalendarRange, PenLine, ReceiptText } from 'lucide-react';
+import { CalendarClock, CheckSquare, ExternalLink, Gavel, LogOut, MessageSquare, ShieldCheck, Smartphone, HandCoins, Target, Sparkles, Mail, CalendarRange, PenLine, ReceiptText, PackageCheck } from 'lucide-react';
 import type { MoreItem } from './BottomNav';
 
 // Mobile Dashboard: at most this many quick access tiles; the rest go to the
@@ -90,7 +90,7 @@ interface UserPanelProps {
 
 export type SelfServiceTarget =
   | 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications'
-  | 'resignation' | 'myCases' | 'myLetters' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | 'credenceMail' | 'myRoster' | 'mySignatures' | 'myPayslips' | 'chat' | 'alerts' | 'erp360';
+  | 'resignation' | 'myCases' | 'myLetters' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | 'credenceMail' | 'myRoster' | 'mySignatures' | 'myPayslips' | 'materialReceive' | 'chat' | 'alerts' | 'erp360';
 
 // Unique id for one Item entry within an MPR row's itemNames list — see the uid field
 // on MprItemOption for why this is needed separately from budgetItemId.
@@ -1190,6 +1190,9 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
             : []),
           ...(user.role === 'superadmin' || !!user.can_sign_documents
             ? [{ key: 'mySignatures', label: 'Documents to Sign', icon: PenLine, iconBg: 'from-blue-300 to-blue-600 shadow-[0_6px_16px_-2px_rgba(37,99,235,0.35)]', onClick: () => openSelfService('mySignatures') }]
+            : []),
+          ...(user.pepm_enabled !== false && (user.role === 'superadmin' || !!user.can_receive_material)
+            ? [{ key: 'materialReceive', label: 'Material Receive', icon: PackageCheck, iconBg: 'from-emerald-300 to-emerald-600 shadow-[0_6px_16px_-2px_rgba(5,150,105,0.35)]', onClick: () => openSelfService('materialReceive') }]
             : []),
           ...(user.role === 'superadmin' || !!user.can_view_roster
             ? [{ key: 'myRoster', label: 'My Duty Roster', icon: CalendarRange, iconBg: 'from-purple-300 to-purple-600 shadow-[0_6px_16px_-2px_rgba(var(--g-accent-rgb,127,0,255),0.35)]', onClick: () => openSelfService('myRoster') }]
