@@ -94,7 +94,7 @@ export const ADMIN_MODULES: { key: AdminModuleKey; label: string }[] = [
 // combination of these per (Admin/User account, module) via Admin Panel ->
 // Users -> Module Access. Independent checkboxes, not hierarchical: having
 // 'delete_trash' does NOT imply 'edit_add' is also granted.
-export type PermissionLayerKey = 'read' | 'edit_add' | 'entry_upload' | 'delete_trash' | 'permanent_delete' | 'submission_status' | 'stay_report' | 'salary_month' | 'salary_hold' | 'block_account' | 'limit_history' | 'link_pins' | 'audit_approve' | 'accounts_pay' | 'access_log' | 'live' | 'on_behalf' | 'onboarding_create' | 'onboarding_review' | 'onboarding_approve' | 'exit_dues' | 'exit_pdf' | 'reminders_receive' | 'salary_bulk_upload' | 'target_export' | 'target_cancel' | 'exit_clearance_setup' | 'late_list' | 'mail_open' | 'mail_password' | 'mail_settings' | 'mail_groups' | 'roster_manage' | 'sign_request' | 'esign_settings' | 'material_budget';
+export type PermissionLayerKey = 'read' | 'edit_add' | 'entry_upload' | 'delete_trash' | 'permanent_delete' | 'submission_status' | 'dispatch_material' | 'stay_report' | 'salary_month' | 'salary_hold' | 'block_account' | 'limit_history' | 'link_pins' | 'audit_approve' | 'accounts_pay' | 'access_log' | 'live' | 'on_behalf' | 'onboarding_create' | 'onboarding_review' | 'onboarding_approve' | 'exit_dues' | 'exit_pdf' | 'reminders_receive' | 'salary_bulk_upload' | 'target_export' | 'target_cancel' | 'exit_clearance_setup' | 'late_list' | 'mail_open' | 'mail_password' | 'mail_settings' | 'mail_groups' | 'roster_manage' | 'sign_request' | 'esign_settings' | 'material_budget';
 
 export const PERMISSION_LAYERS: { key: PermissionLayerKey; label: string }[] = [
   { key: 'read', label: 'Read Only' },
@@ -120,7 +120,8 @@ export const MODULE_LAYER_OPTIONS: Partial<Record<AdminModuleKey, { key: Permiss
     { key: 'edit_add', label: 'Edit' },
     { key: 'delete_trash', label: 'Delete/Trash' },
     { key: 'permanent_delete', label: 'Permanent Delete' },
-    { key: 'submission_status', label: 'Budget Submission Status' }
+    { key: 'submission_status', label: 'Budget Submission Status' },
+    { key: 'dispatch_material', label: 'Dispatch Material' }
   ],
   // Employee Tracking -> Stay Report (how long at each place, day by day).
   tracking: [
@@ -226,7 +227,7 @@ export const MODULE_LAYER_OPTIONS: Partial<Record<AdminModuleKey, { key: Permiss
 };
 // Layers an account has only when explicitly ticked — never part of the
 // "module granted, no layers saved yet" default (requireModuleLayer).
-export const EXPLICIT_ONLY_LAYERS: PermissionLayerKey[] = ['permanent_delete', 'submission_status', 'salary_month', 'salary_hold', 'block_account', 'link_pins', 'audit_approve', 'accounts_pay', 'access_log', 'live', 'on_behalf', 'onboarding_create', 'onboarding_review', 'onboarding_approve', 'exit_dues', 'exit_pdf', 'reminders_receive', 'salary_bulk_upload', 'target_export', 'target_cancel', 'exit_clearance_setup', 'late_list', 'mail_open', 'mail_password', 'mail_settings', 'mail_groups', 'roster_manage', 'sign_request', 'esign_settings', 'material_budget'];
+export const EXPLICIT_ONLY_LAYERS: PermissionLayerKey[] = ['permanent_delete', 'submission_status', 'dispatch_material', 'salary_month', 'salary_hold', 'block_account', 'link_pins', 'audit_approve', 'accounts_pay', 'access_log', 'live', 'on_behalf', 'onboarding_create', 'onboarding_review', 'onboarding_approve', 'exit_dues', 'exit_pdf', 'reminders_receive', 'salary_bulk_upload', 'target_export', 'target_cancel', 'exit_clearance_setup', 'late_list', 'mail_open', 'mail_password', 'mail_settings', 'mail_groups', 'roster_manage', 'sign_request', 'esign_settings', 'material_budget'];
 export const layersFor = (moduleKey: AdminModuleKey) => MODULE_LAYER_OPTIONS[moduleKey] || PERMISSION_LAYERS;
 
 // Leave Manage's own operation-specific layers — same independent-checkbox
@@ -765,6 +766,7 @@ export interface User {
   can_use_mail?: boolean;
   can_view_mail_directory?: boolean;
   can_use_mail_groups?: boolean;
+  can_receive_material?: boolean;
   // Self Service -> My Duty Roster (RosterRoutes.ts) — off by default.
   can_view_roster?: boolean;
   // Self Service -> Documents to Sign (ESignRoutes.ts) — off by default.
@@ -1073,6 +1075,12 @@ export interface Entry {
   // Null for older entries created before this column existed.
   requisitioned_qty?: number | string | null;
   delivery_date: string;
+  // Dispatch / receive (Dispatch Material, MprDispatchRoutes.ts): pending,
+  // partly_dispatched, dispatched, partly_received, received.
+  md_status?: string | null;
+  md_dispatched_qty?: number | string | null;
+  md_received_qty?: number | string | null;
+  md_received_date?: string | null;
   created_by?: number;
   project_name: string;
   job_no: string;
@@ -1779,7 +1787,8 @@ export type AlertType =
   | 'roster'
   // A document waiting for this account's signature, or one they sent got
   // signed / declined — opens Documents to Sign (or Document Vault).
-  | 'document_sign';
+  | 'document_sign'
+  | 'mpr_dispatch';
 
 export interface Alert {
   id: number;

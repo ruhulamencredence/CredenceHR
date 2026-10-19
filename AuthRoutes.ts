@@ -206,6 +206,7 @@ export function registerAuthRoutes(app: Express, deps: RegisterAuthRoutesDeps) {
           can_view_timesheet: user.role === "superadmin" ? true : !!Number(user.can_view_timesheet),
           can_use_calls: user.role === "superadmin" ? true : !!Number(user.can_use_calls),
           can_use_mail: user.role === "superadmin" ? true : !!Number(user.can_use_mail),
+          can_receive_material: user.role === "superadmin" ? true : !!Number(user.can_receive_material || 0),
           can_view_roster: user.role === "superadmin" ? true : !!Number(user.can_view_roster),
           can_sign_documents: user.role === "superadmin" ? true : !!Number(user.can_sign_documents),
           can_view_payslip: user.role === "superadmin" ? true : !!Number(user.can_view_payslip),
@@ -239,7 +240,7 @@ export function registerAuthRoutes(app: Express, deps: RegisterAuthRoutesDeps) {
   app.get("/api/auth/me", authenticateToken, async (req: any, res) => {
     try {
       const users = await queryDB(
-        "SELECT id, name, email, role, created_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, can_use_calls, can_use_mail, can_view_roster, can_sign_documents, can_view_payslip, can_email_reports, can_view_tasks, can_view_mobile_bill, can_view_service_book, can_view_loan_request, can_view_targets, can_use_ai_assistant, can_grant_module_access, attendance_project_id, is_onboarding, must_change_password, onboarding_expires_at FROM users WHERE id = ?",
+        "SELECT id, name, email, role, created_at, can_edit_delivery_date, can_job_edit, can_use_attendance, can_view_login_location, can_access_user_panel, can_manage_leave, can_view_movement_claims, can_view_conveyance_claims, can_use_tracking, can_view_budget_module, can_view_leave_summary, can_view_timesheet, can_view_leave_application, can_view_my_leave, can_use_calls, can_use_mail, can_receive_material, can_view_roster, can_sign_documents, can_view_payslip, can_email_reports, can_view_tasks, can_view_mobile_bill, can_view_service_book, can_view_loan_request, can_view_targets, can_use_ai_assistant, can_grant_module_access, attendance_project_id, is_onboarding, must_change_password, onboarding_expires_at FROM users WHERE id = ?",
         [req.user.id]
       );
       if (users.length === 0) return res.status(404).json({ error: "User not found" });
@@ -266,6 +267,7 @@ export function registerAuthRoutes(app: Express, deps: RegisterAuthRoutesDeps) {
         can_view_timesheet: u.role === "superadmin" ? true : !!Number(u.can_view_timesheet),
         can_use_calls: u.role === "superadmin" ? true : !!Number(u.can_use_calls),
         can_use_mail: u.role === "superadmin" ? true : !!Number(u.can_use_mail),
+        can_receive_material: u.role === "superadmin" ? true : !!Number(u.can_receive_material || 0),
         can_view_roster: u.role === "superadmin" ? true : !!Number(u.can_view_roster),
         can_sign_documents: u.role === "superadmin" ? true : !!Number(u.can_sign_documents),
         can_view_payslip: u.role === "superadmin" ? true : !!Number(u.can_view_payslip),
