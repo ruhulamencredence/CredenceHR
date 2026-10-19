@@ -16,7 +16,9 @@
 // fill and upload (the page reads the sheet, this file checks and saves it).
 // Permission: the Reports layer "dispatch_material" (explicit-only) — the
 // rows this account sent to Dispatch Material or dispatched itself. With
-// "dispatch_all" too (explicit-only), everyone's rows.
+// "dispatch_all" too (explicit-only), everyone's rows. Either way only on the
+// projects the account was given (Users -> Manage Projects); the Superadmin
+// sees every project.
 //
 // Material Receive (Self Service -> PEPM Operation): an account with the
 // switch users.can_receive_material, for the projects it holds
@@ -125,6 +127,13 @@ export function registerMprDispatchRoutes(app: Express, deps: Deps) {
   // Everyone's rows, or only this account's own (sent here or dispatched by it).
   const seesAll = (req: any) => hasModuleLayer(req.user, "reports", "dispatch_all");
   const OWN_SQL = " AND (e.md_queued_by = ? OR EXISTS (SELECT 1 FROM mpr_dispatches od WHERE od.entry_id = e.id AND od.created_by = ?))";
+  // The projects this account may work on in Dispatch Material (null = all).
+  async function dispatchProjects(req: any): Promise<number[] | null> {
+    if (req.user.role === "superadmin") return null;
+    const rows: any[] = (await queryDB("SELECT project_id FROM user_project_permissions WHERE user_id = ?", [Number(req.user.id)])) || [];
+    return rows.map((r) => Number(r.project_id));
+  }
+  const inProjects = (ids: number[] | null, projectId: any) => ids === null || ids.includes(Number(projectId));
   const isOwn = (r: any, userId: number, dispatches: { createdById?: number }[] = []) =>
     Number(r.md_queued_by) === userId || dispatches.some((d) => d.createdById === userId);
 
@@ -328,8 +337,15 @@ export function registerMprDispatchRoutes(app: Express, deps: Deps) {
       // without "dispatch_all", only this account's own.
       const all = await seesAll(req);
       const me = Number(req.user.id);
+      const projects = await dispatchProjects(req);
+      res.setHeader("Cache-Control", "no-store");
+      if (projects && !projects.length) return res.json({ all, rows: [], noProjects: true });
       let sql = `${ROW_SQL} AND e.md_queued_at IS NOT NULL`;
       const params: any[] = [];
+      if (projects) {
+        sql += ` AND e.project_id IN (${projects.map(() => "?").join(",")})`;
+        params.push(...projects);
+      }
       if (!all) {
         sql += OWN_SQL;
         params.push(me, me);
@@ -356,6 +372,7 @@ export function registerMprDispatchRoutes(app: Express, deps: Deps) {
       const today = todayInDhaka();
       const all = await seesAll(req);
       const me = Number(req.user.id);
+      const projects = await dispatchProjects(req);
       const errors: { index: number; entryId: number; error: string }[] = [];
       const clean: any[] = [];
       // Qty being sent in this same batch per row, so two lines can't overshoot together.
@@ -367,6 +384,10 @@ export function registerMprDispatchRoutes(app: Express, deps: Deps) {
         const rows: any[] = entryId ? (await queryDB(`${ROW_SQL} AND e.id = ?`, [entryId])) || [] : [];
         if (!rows[0]) {
           fail("MPR row not found (deleted, or not in this company).");
+          continue;
+        }
+        if (!inProjects(projects, rows[0].project_id)) {
+          fail(`${rows[0].project_name} isn't one of your projects.`);
           continue;
         }
         const qty = num(it.qty);
@@ -477,8 +498,14 @@ export function registerMprDispatchRoutes(app: Express, deps: Deps) {
       const rows: any[] = (await queryDB(`${ROW_SQL} AND e.id IN (${ids.map(() => "?").join(",")})`, ids)) || [];
       let added = 0,
         already = 0,
-        done = 0;
+        done = 0,
+        notYourProject = 0;
+      const projects = await dispatchProjects(req);
       for (const r of rows) {
+        if (!inProjects(projects, r.project_id)) {
+          notYourProject++;
+          continue;
+        }
         if (r.md_status === "received") {
           done++;
           continue;
@@ -492,7 +519,7 @@ export function registerMprDispatchRoutes(app: Express, deps: Deps) {
         await refreshEntry(Number(r.id));
         added++;
       }
-      res.json({ added, already, received: done, missing: ids.length - rows.length });
+      res.json({ added, already, received: done, notYourProject, missing: ids.length - rows.length });
     })
   );
   // Back out of Dispatch Material — only while nothing has been sent on the row.
@@ -506,7 +533,15 @@ export function registerMprDispatchRoutes(app: Express, deps: Deps) {
         notYours = 0;
       const kept: number[] = [];
       const all = await seesAll(req);
+      const projects = await dispatchProjects(req);
       for (const id of ids) {
+        if (projects) {
+          const pr: any[] = (await queryDB("SELECT project_id FROM entries WHERE id = ?", [id])) || [];
+          if (!pr[0] || !inProjects(projects, pr[0].project_id)) {
+            notYours++;
+            continue;
+          }
+        }
         if (!all) {
           const mine: any[] = (await queryDB("SELECT id FROM entries WHERE id = ? AND md_queued_by = ?", [id, Number(req.user.id)])) || [];
           if (!mine.length) {
@@ -539,6 +574,11 @@ export function registerMprDispatchRoutes(app: Express, deps: Deps) {
       const d: any = ((await queryDB("SELECT * FROM mpr_dispatches WHERE id = ?", [Number(req.params.id)])) || [])[0];
       if (!d) throw bad("Dispatch not found.", 404);
       if (d.status !== "sent") throw bad(d.status === "received" ? "Already received — it can't be cancelled." : "Already cancelled.");
+      const projects = await dispatchProjects(req);
+      if (projects) {
+        const pr: any[] = (await queryDB("SELECT project_id FROM entries WHERE id = ?", [Number(d.entry_id)])) || [];
+        if (!pr[0] || !inProjects(projects, pr[0].project_id)) throw bad("This isn't one of your projects.", 403);
+      }
       if (!(await seesAll(req)) && Number(d.created_by) !== Number(req.user.id)) {
         const mine: any[] = (await queryDB("SELECT id FROM entries WHERE id = ? AND md_queued_by = ?", [Number(d.entry_id), Number(req.user.id)])) || [];
         if (!mine.length) throw bad("Someone else sent this — you can't cancel it.", 403);

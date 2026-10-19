@@ -3929,13 +3929,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Could not send to Dispatch Material');
-      const now = new Date().toISOString();
-      const sent = new Set(ids);
-      setEntries((prev) => prev.map((e) => (sent.has(e.id) && !e.md_queued_at && e.md_status !== 'received' ? { ...e, md_queued_at: now } : e)));
+      // Re-read so only the rows the server took show as sent.
+      void fetchAllData();
       setReportPicked(new Set());
       setMessage({
         type: 'success',
-        text: `${data.added} MPR row${data.added === 1 ? '' : 's'} sent to Dispatch Material.${data.already ? ` ${data.already} already there.` : ''}${data.received ? ` ${data.received} already received.` : ''}`
+        text: `${data.added} MPR row${data.added === 1 ? '' : 's'} sent to Dispatch Material.${data.already ? ` ${data.already} already there.` : ''}${data.received ? ` ${data.received} already received.` : ''}${
+          data.notYourProject ? ` ${data.notYourProject} left out — not one of your projects (Users -> Manage Projects).` : ''
+        }`
       });
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message });

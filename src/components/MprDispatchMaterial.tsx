@@ -9,7 +9,8 @@
 // Purchase sent here from the MPR Entries report (filter, tick, "Send to
 // Dispatch") are listed; one with nothing sent yet can be taken out again.
 // With the "dispatch_material" layer alone an account sees only its own rows
-// (sent here or dispatched by it); "dispatch_all" shows everyone's.
+// (sent here or dispatched by it); "dispatch_all" shows everyone's. Only the
+// projects the account was given (Users -> Manage Projects) either way.
 //   - Dispatch on screen: tick rows, set the Qty (all that's left, or part of
 //     it), supplier, rate, P.O., challan.
 //   - Or by Excel: "Download sheet" gives the Daily Site Requirement and
@@ -189,6 +190,8 @@ export const MprDispatchMaterial: React.FC<{ token: string }> = ({ token }) => {
   const [rows, setRows] = useState<MdRow[] | null>(null);
   // Everyone's rows (layer "dispatch_all") or just this account's own.
   const [seesAll, setSeesAll] = useState(false);
+  // No project given to this account (Users -> Manage Projects).
+  const [noProjects, setNoProjects] = useState(false);
   const [error, setError] = useState('');
   const [q, setQ] = useState('');
   const [project, setProject] = useState('');
@@ -206,10 +209,11 @@ export const MprDispatchMaterial: React.FC<{ token: string }> = ({ token }) => {
 
   const load = () => {
     setError('');
-    return mdFetch<{ all: boolean; rows: MdRow[] }>(token, `/api/mpr-dispatch/rows?view=${view}`)
+    return mdFetch<{ all: boolean; rows: MdRow[]; noProjects?: boolean }>(token, `/api/mpr-dispatch/rows?view=${view}`)
       .then((r) => {
         setRows(r.rows);
         setSeesAll(r.all);
+        setNoProjects(!!r.noProjects);
         setPicked(new Set());
       })
       .catch((e) => setError(e.message));
@@ -396,7 +400,7 @@ export const MprDispatchMaterial: React.FC<{ token: string }> = ({ token }) => {
           <div>
             <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2"><Truck className="w-5 h-5 text-blue-600" /> Dispatch Material</h3>
             <p className="text-xs text-slate-500 mt-0.5 max-w-3xl">
-              {seesAll ? "Everyone's MPR rows sent here from the MPR Entries report" : 'The MPR rows you sent here from the MPR Entries report, or dispatched yourself'} (filter there, tick, "Send to Dispatch"), soonest delivery date first. Send all that's left or part of it — on
+              {seesAll ? "Everyone's MPR rows of your projects sent here from the MPR Entries report" : 'The MPR rows of your projects you sent here from the MPR Entries report, or dispatched yourself'} (filter there, tick, "Send to Dispatch"), soonest delivery date first. Send all that's left or part of it — on
               screen, or fill the Daily Site Requirement sheet and upload it. A row leaves the Open list once the project has received all of it.
             </p>
           </div>
@@ -477,7 +481,9 @@ export const MprDispatchMaterial: React.FC<{ token: string }> = ({ token }) => {
         <LoadingBlock />
       ) : rows && !shown.length ? (
         <div className="bg-white border border-slate-200 rounded-2xl p-10 text-center text-sm text-slate-500 shadow-sm">
-          {rows.length
+          {noProjects
+            ? 'No project is given to your account yet. Ask the Admin to add your projects in Users -> Manage Projects.'
+            : rows.length
             ? 'No MPR row matches these filters.'
             : view === 'open'
               ? 'Nothing to dispatch. In Reports -> MPR Entries Report, filter and tick the rows to send, then "Send to Dispatch".'
