@@ -34,6 +34,7 @@ import { ServerProfilesPanel } from './ServerProfilesPanel';
 import { AdminDashboard } from './AdminDashboard';
 import { BudgetSubmissionReport } from './BudgetSubmissionReport';
 import { ProgressOverlay, useLongTask, xhrJson } from './ProgressOverlay';
+import { MeasurementSheet } from './MeasurementSheet';
 import { Spinner } from './Spinner';
 import { apiUrl } from '../lib/api';
 import { formatDate, todayDateOnlyString } from '../lib/formatDate';
@@ -50,7 +51,7 @@ import { useBackButtonClose } from '../lib/useBackButtonClose';
 // here since this list has no nested-group UI. Any ADMIN_MODULES key not
 // listed under one of these falls into "Other" automatically.
 const MODULE_ACCESS_GROUPS: { label: string; keys: AdminModuleKey[] }[] = [
-  { label: 'PEPM Manage', keys: ['reports', 'mprs', 'imports', 'recycle', 'editlog'] },
+  { label: 'PEPM Manage', keys: ['reports', 'mprs', 'imports', 'recycle', 'editlog', 'measurement_sheet'] },
   { label: 'HR', keys: ['approvals', 'notices', 'holidays', 'leave_applications', 'departments'] },
   { label: 'HR - Attendance', keys: ['attendance', 'attendance_reports', 'office_attendance'] },
   { label: 'HR - Claims/Bill/Disbursement', keys: ['claims', 'conveyance', 'disbursement'] },
@@ -61,7 +62,7 @@ const MODULE_ACCESS_GROUPS: { label: string; keys: AdminModuleKey[] }[] = [
     label: 'Other',
     keys: ADMIN_MODULES.map((m) => m.key).filter(
       (key) => ![
-        'reports', 'mprs', 'imports', 'recycle', 'editlog',
+        'reports', 'mprs', 'imports', 'recycle', 'editlog', 'measurement_sheet',
         'approvals', 'notices', 'holidays', 'leave_applications', 'departments',
         'attendance', 'attendance_reports', 'office_attendance',
         'claims', 'conveyance', 'disbursement',
@@ -446,7 +447,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // PUT /api/users/:id/module-permissions).
   const canGrantModuleAccess = isSuperAdmin || !!user.can_grant_module_access;
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'my_conveyance' | 'disbursement' | 'holidays' | 'asset_management' | 'servers' | 'permanent_delete_log' | 'active_users' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault'>(
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'my_conveyance' | 'disbursement' | 'holidays' | 'asset_management' | 'servers' | 'permanent_delete_log' | 'active_users' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'measurement_sheet'>(
     () => {
       // Restores whichever tab this Admin was last looking at — see the
       // "pull down to reload" note in App.tsx: since a reload now has to be
@@ -639,7 +640,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       if (saved && saved.length > 0) {
         initialLayers[moduleKey] = new Set(saved as PermissionLayerKey[]);
       } else if ((u.module_permissions || []).includes(moduleKey)) {
-        initialLayers[moduleKey] = new Set(layersFor(moduleKey).map((l) => l.key).filter((k) => !EXPLICIT_ONLY_LAYERS.includes(k)));
+        // Same default as the server (defaultLayersFor): Measurement Sheet
+        // starts with "read" alone.
+        initialLayers[moduleKey] = new Set(
+          moduleKey === 'measurement_sheet' ? ['read'] : layersFor(moduleKey).map((l) => l.key).filter((k) => !EXPLICIT_ONLY_LAYERS.includes(k))
+        );
       } else {
         initialLayers[moduleKey] = new Set();
       }
@@ -4562,6 +4567,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       {activeTab === 'grievance_disciplinary' && <GrievanceDisciplinaryPanel token={token} />}
       {activeTab === 'hr_analytics' && <HRAnalyticsDashboard token={token} />}
       {activeTab === 'document_vault' && <DocumentVaultPanel token={token} />}
+      {activeTab === 'measurement_sheet' && canSee('measurement_sheet') && <MeasurementSheet token={token} />}
 
       {/* TAB: SERVERS — Superadmin-only catalog of backend deployments
           (IP/URL) the Android app can switch between after login. Not a

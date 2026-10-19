@@ -36,6 +36,7 @@ import { registerHRAnalyticsRoutes } from "./HRAnalyticsRoutes";
 import { registerDocumentVaultRoutes, ensureDocumentVaultSchema } from "./DocumentVaultRoutes";
 import { Server as SocketIOServer } from "socket.io";
 import { ensureChatSchema, registerChatRoutes, setupChatSocket } from "./ChatRoutes";
+import { ensureMeasurementSchema, registerMeasurementRoutes } from "./MeasurementRoutes";
 import { memoryDb, queryMemoryDb, EMPLOYEE_BOOL_FIELDS } from "./memoryDbFallback";
 
 dotenv.config();
@@ -246,6 +247,8 @@ async function ensureSchemaMigrations() {
   await ensureRecruitmentSchema(dbPool);
   await ensureGrievanceSchema(dbPool);
   await ensureDocumentVaultSchema(dbPool);
+  // PEPM Management -> Measurement Sheet (MeasurementRoutes.ts).
+  await ensureMeasurementSchema(dbPool);
 
   // Server Profiles (Admin Panel -> Servers, Superadmin-only) — table +
   // schema owned by ServerProfileRoutes.ts, only the call site lives here,
@@ -2102,7 +2105,7 @@ async function ensureSchemaMigrations() {
 // of truth here and mirrored in src/types.ts (ADMIN_MODULES) for the UI.
 const USER_CLAIM_CATEGORIES = ["Transport", "Fuel", "Toll", "Parking", "Others"] as const;
 
-const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports", "users", "attendance", "attendance_reports", "leave_applications", "recycle", "editlog", "notices", "claims", "approvals", "conveyance", "disbursement", "employees", "departments", "tracking", "office_attendance", "holidays", "payroll", "asset_management", "exit_offboarding", "performance_management", "recruitment", "grievance_disciplinary", "hr_analytics", "document_vault"] as const;
+const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports", "users", "attendance", "attendance_reports", "leave_applications", "recycle", "editlog", "notices", "claims", "approvals", "conveyance", "disbursement", "employees", "departments", "tracking", "office_attendance", "holidays", "payroll", "asset_management", "exit_offboarding", "performance_management", "recruitment", "grievance_disciplinary", "hr_analytics", "document_vault", "measurement_sheet"] as const;
 
 // Granular per-module action layers — mirrors PermissionLayerKey/
 // PERMISSION_LAYERS in src/types.ts (single source of truth is duplicated
@@ -2111,7 +2114,7 @@ const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports",
 const PERMISSION_LAYER_KEYS = ["read", "edit_add", "entry_upload", "delete_trash", "permanent_delete"] as const;
 // Which modules currently enforce PERMISSION_LAYER_KEYS — mirrors
 // PERMISSION_LAYER_MODULES in src/types.ts. Rolled out module by module.
-const PERMISSION_LAYER_MODULES = ["departments", "projects", "approvals", "users", "reports", "tracking"] as const;
+const PERMISSION_LAYER_MODULES = ["departments", "projects", "approvals", "users", "reports", "tracking", "measurement_sheet"] as const;
 // Employee Tracking's layers: "read" = the live map, history and status
 // cards; "stay_report" = the Stay Report (TrackingStayReport.ts). Both are
 // reading, so an account with Employee Tracking and no saved layers has both.
@@ -2124,6 +2127,11 @@ const TRACKING_DEFAULT_LAYERS = ["read", "stay_report"] as const;
 // which, like Permanent Delete, is never part of the no-saved-rows default:
 // only an account it's explicitly ticked for can open it.
 const REPORT_LAYER_KEYS = ["read", "edit_add", "delete_trash", "permanent_delete", "submission_status"] as const;
+// PEPM -> Measurement Sheet: "read" = open and export sheets; "edit_add" =
+// upload drawings and change sheets; "delete_trash" = delete a sheet;
+// "material_budget" = the Material Budget tab. With no saved layers an
+// account has "read" alone (see defaultLayersFor below).
+const MEASUREMENT_LAYER_KEYS = ["read", "edit_add", "delete_trash", "material_budget"] as const;
 
 // Leave Manage's own operation-specific layers — mirrors LeaveManageLayerKey/
 // LEAVE_MANAGE_LAYERS in src/types.ts. Not part of PERMISSION_LAYER_MODULES/
@@ -2146,6 +2154,7 @@ const MODULE_LAYER_KEY_SETS: Record<string, readonly string[]> = {
   users: PERMISSION_LAYER_KEYS,
   reports: REPORT_LAYER_KEYS,
   tracking: TRACKING_LAYER_KEYS,
+  measurement_sheet: MEASUREMENT_LAYER_KEYS,
   leave_manage: LEAVE_MANAGE_LAYER_KEYS,
 };
 
@@ -2190,6 +2199,14 @@ function normalizeEmployeeExtValue(field: string, value: any): any {
   return s ? s : null;
 }
 type AdminModuleKey = typeof ADMIN_MODULE_KEYS[number];
+
+// What an account holding a layered module, with no layer rows saved for
+// it, may do there (requireModuleLayer / hasModuleLayer).
+function defaultLayersFor(moduleKey: string): readonly string[] {
+  if (moduleKey === "tracking") return TRACKING_DEFAULT_LAYERS;
+  if (moduleKey === "measurement_sheet") return ["read"];
+  return PERMISSION_LAYER_KEYS.filter((k) => k !== "permanent_delete");
+}
 
 async function getAdminModules(userId: number): Promise<string[]> {
   try {
@@ -3420,7 +3437,7 @@ async function startServer() {
   // on for a module is never a silent regression; a Superadmin only actually
   // restricts anything once they explicitly save a narrower set in the
   // Module Access modal.
-  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "stay_report" | "live") =>
+  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "stay_report" | "live" | "material_budget" | "dispatch_material" | "dispatch_all") =>
     async (req: any, res: any, next: any) => {
       if (!req.user) return res.status(401).json({ error: "Access token required" });
       if (req.user.role === "superadmin") return next();
@@ -3432,11 +3449,7 @@ async function startServer() {
         }
         if (!(PERMISSION_LAYER_MODULES as readonly string[]).includes(moduleKey)) return next();
         const grantedLayers = await getModulePermissionLayersForModule(req.user.id, moduleKey);
-        const effectiveLayers: string[] = grantedLayers.length > 0
-          ? grantedLayers
-          : moduleKey === "tracking"
-            ? [...TRACKING_DEFAULT_LAYERS]
-            : PERMISSION_LAYER_KEYS.filter((k) => k !== "permanent_delete");
+        const effectiveLayers: readonly string[] = grantedLayers.length > 0 ? grantedLayers : defaultLayersFor(moduleKey);
         if (!effectiveLayers.includes(layer)) {
           return res.status(403).json({ error: "You don't have permission to do this. Ask your Superadmin to grant it." });
         }
@@ -3457,9 +3470,7 @@ async function startServer() {
     if (!(PERMISSION_LAYER_MODULES as readonly string[]).includes(moduleKey)) return true;
     const granted = await getModulePermissionLayersForModule(user.id, moduleKey);
     if (granted.length > 0) return granted.includes(layer);
-    const defaults: readonly string[] =
-      moduleKey === "tracking" ? TRACKING_DEFAULT_LAYERS : PERMISSION_LAYER_KEYS.filter((k) => k !== "permanent_delete");
-    return defaults.includes(layer);
+    return defaultLayersFor(moduleKey).includes(layer);
   };
 
   // Personal Data / profile-photo routes — kept in their own file
@@ -3474,6 +3485,10 @@ async function startServer() {
   // reasoning as profileRoutes.ts/holidayRoutes.ts above. No requireModule
   // gate: on by default for every account, not a Superadmin-granted module.
   registerAlertRoutes(app, { authenticateToken, queryDB });
+
+  // PEPM Management -> Measurement Sheet: building drawing (DWG/DXF) to a
+  // BOQ measurement sheet (MeasurementRoutes.ts).
+  registerMeasurementRoutes(app, { authenticateToken, requireAdmin, requireModuleLayer, hasModuleLayer, queryDB });
 
   // User Management (Admin Panel -> Users) — kept in their own file
   // (UserManagement.ts), same reasoning as profileRoutes.ts/holidayRoutes.ts/

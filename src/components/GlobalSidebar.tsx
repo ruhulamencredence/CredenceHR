@@ -5,7 +5,7 @@ import {
   BarChart3, Upload, History, Recycle, Navigation, Bell, ShieldCheck,
   Contact, Calendar, Clock, Fingerprint, Banknote, Package, LayoutDashboard, Server, MessageSquare,
   ChevronsLeft, ChevronsRight, ShieldAlert, Search,
-  Target, UserPlus, Gavel, FolderLock, Sparkles, Activity,
+  Target, UserPlus, Gavel, FolderLock, Sparkles, Activity, Ruler,
 } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import { User, AdminModuleKey } from '../types';
@@ -323,6 +323,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     { key: 'imports', label: 'Data Import', icon: Upload, onClick: () => onGoToAdminModule('imports') },
     { key: 'recycle', label: 'Job Recycle', icon: Recycle, onClick: () => onGoToAdminModule('recycle') },
     { key: 'editlog', label: 'MPR Edit Log', icon: History, onClick: () => onGoToAdminModule('editlog') },
+    { key: 'measurement_sheet', label: 'Measurement Sheet', icon: Ruler, onClick: () => onGoToAdminModule('measurement_sheet') },
   ].filter((i) => canSeeModule(i.key as AdminModuleKey));
 
   // "Claims" — Movement Claims, Conveyance Bill Claim, Conveyance

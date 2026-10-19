@@ -5,11 +5,13 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { Loader2 } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 
-// A "% done" loader for long Data Import jobs (Excel import, Rate File import,
-// Delete budget, Remove unused rows, Approve & Calculate), so the wait doesn't
-// feel stuck. Uploads report real progress (xhrJson below); the server's own
+// A "% done" loader for long jobs — every import (Budget / Rate File Excel,
+// Bulk Add Users, HR Data Import, Mobile Bill SIMs and bills, Measurement Sheet
+// drawings) and Delete budget, Remove unused rows, Approve & Calculate — so the
+// wait doesn't feel stuck. Uploads report real progress (xhrJson below); the server's own
 // work can't report back, so that part eases toward the cap and jumps to 100%
 // the moment the server answers.
 
@@ -69,29 +71,38 @@ export function useLongTask() {
   return { state, start, step, creep, finish, close };
 }
 
+// House popup style (liquid glass, like TrackingNoticeCard.tsx); above every
+// other popup, since an import is often started from one.
 export const ProgressOverlay: React.FC<{ state: LongTaskState | null }> = ({ state }) => {
   if (!state) return null;
   const pct = Math.floor(state.pct);
   return createPortal(
-    <div className="fixed inset-0 z-[70] bg-slate-950/50 backdrop-blur-sm flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label={state.title}>
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
-        <div className="flex items-start justify-between gap-3">
-          <h3 className="text-sm font-bold text-slate-900">{state.title}</h3>
-          <span className="text-2xl font-bold text-blue-600 tabular-nums leading-none" aria-live="polite">
-            {pct}%
-          </span>
+    <div className="fixed inset-0 z-[1300] liquid-glass-backdrop flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label={state.title}>
+      <div className="w-full max-w-sm">
+        <div className="liquid-glass liquid-glass-in rounded-[32px] p-6 text-left">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <span className="liquid-glass-inset w-10 h-10 rounded-2xl flex items-center justify-center shrink-0">
+                <Loader2 className="w-5 h-5 text-blue-600 animate-spin" />
+              </span>
+              <h3 className="text-sm font-bold text-slate-900 min-w-0">{state.title}</h3>
+            </div>
+            <span className="text-2xl font-bold text-blue-600 tabular-nums leading-none" aria-live="polite">
+              {pct}%
+            </span>
+          </div>
+          <div
+            className="mt-4 h-2.5 w-full rounded-full liquid-glass-inset overflow-hidden"
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={pct}
+          >
+            <div className="h-full rounded-full bg-blue-600 transition-[width] duration-300 ease-out" style={{ width: `${pct}%` }} />
+          </div>
+          <p className="mt-3 text-xs text-slate-600">{state.stage}</p>
+          <p className="mt-1 text-[11px] text-slate-500">Please keep this page open until it finishes.</p>
         </div>
-        <div
-          className="mt-4 h-2.5 w-full rounded-full bg-slate-100 overflow-hidden"
-          role="progressbar"
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-valuenow={pct}
-        >
-          <div className="h-full rounded-full bg-blue-600 transition-[width] duration-300 ease-out" style={{ width: `${pct}%` }} />
-        </div>
-        <p className="mt-3 text-xs text-slate-600">{state.stage}</p>
-        <p className="mt-1 text-[11px] text-slate-400">Please keep this page open until it finishes.</p>
       </div>
     </div>,
     document.body
