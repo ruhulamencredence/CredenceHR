@@ -3934,9 +3934,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       setReportPicked(new Set());
       setMessage({
         type: 'success',
-        text: `${data.added} MPR row${data.added === 1 ? '' : 's'} sent to Dispatch Material.${data.already ? ` ${data.already} already there.` : ''}${data.received ? ` ${data.received} already received.` : ''}${
-          data.notYourProject ? ` ${data.notYourProject} left out — not one of your projects (Users -> Manage Projects).` : ''
-        }`
+        text: `${data.added} MPR row${data.added === 1 ? '' : 's'} sent to Dispatch Material.${data.already ? ` ${data.already} already there.` : ''}${data.received ? ` ${data.received} already received.` : ''}`
       });
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message });
