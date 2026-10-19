@@ -9,7 +9,7 @@ import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../
 import { savePdfCrossPlatform } from '../lib/saveFile';
 import { EmailReportButton, emailReport, useCanEmailReports } from '../lib/reportEmail';
 import { Project, Branch, MprNumber, Entry, User, Budget, BudgetItem, BudgetSubmission, UserProjectPermission, EntryEditHistory, EntryPermanentDeleteLog, BulkUserRow, BulkUserResultItem, AdminModuleKey, ADMIN_MODULES, REPORTS_INSIGHTS_MODULES, DATA_IMPORT_MODULES, PermissionLayerKey, PERMISSION_LAYERS, PERMISSION_LAYER_MODULES, EXPLICIT_ONLY_LAYERS, layersFor, LeaveManageLayerKey, LEAVE_MANAGE_LAYERS, AttendanceRecord, ClaimsNavRequest, AdminNavRequest, Department, LeaveApplication, PendingJobEdit } from '../types';
-import { Building2, FileText, Users, Users2, BarChart3, Plus, Trash2, Edit2, Search, Filter, UserCheck, Calendar, CalendarClock, Download, Upload, FolderPlus, X, Eye, FileSpreadsheet, KeyRound, History, RotateCcw, Recycle, ListChecks, FileDown, MapPin, LayoutGrid, Navigation, LogIn, LogOut, Bell, Route, ShieldCheck, Wallet, Contact, Lock, Unlock, Mail, CheckCircle2, XCircle, Clock3, ShieldAlert, Copy, Eraser, LayoutTemplate, Loader2, Truck } from 'lucide-react';
+import { Building2, FileText, Users, Users2, BarChart3, Plus, Trash2, Edit2, Search, Filter, UserCheck, Calendar, CalendarClock, Download, Upload, FolderPlus, X, Eye, FileSpreadsheet, KeyRound, History, RotateCcw, Recycle, ListChecks, FileDown, MapPin, LayoutGrid, Navigation, LogIn, LogOut, Bell, Route, ShieldCheck, Wallet, Contact, Lock, Unlock, Mail, CheckCircle2, XCircle, Clock3, ShieldAlert, Copy, Eraser, LayoutTemplate, Loader2, Truck, ArrowLeft } from 'lucide-react';
 import LocationMapPicker from './LocationMapPicker';
 import { NoticeManager } from './NoticeManager';
 import { EmployeesPanel } from './EmployeesPanel';
@@ -919,11 +919,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       .finally(() => setLoadingRosterDepts(false));
   };
 
+  // The Module Access page belongs to the Users page: leaving it closes it.
+  useEffect(() => {
+    if (activeTab !== 'users') setManagingModulesFor(null);
+  }, [activeTab]);
   const openManageModules = (u: User) => {
     applyUserAccessToForm(u);
     setModuleSearchQuery('');
     setCopyAccessNotice('');
     setManagingModulesFor(u);
+    // Opens as a page: start at its top.
+    window.scrollTo({ top: 0 });
   };
 
   // "Copy access from" (Module Access -> header dropdown) — copies every
@@ -6723,7 +6729,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       {/* While Module Access is open the Users page sits behind it, hidden —
           the last drawing is reused (same element, so React skips it) and
           each tick redraws only the popup. Drawn fresh once it closes. */}
-      {activeTab === 'users' && (managingModulesFor && frozenUsersTab.current ? frozenUsersTab.current : (frozenUsersTab.current = (
+      {activeTab === 'users' && (
+        <div className={managingModulesFor ? 'hidden' : undefined}>
+        {managingModulesFor && frozenUsersTab.current ? frozenUsersTab.current : (frozenUsersTab.current = (
         <div className="space-y-6">
           {/* Add New User Form */}
           <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6">
@@ -7199,7 +7207,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           )}
           </div>
         </div>
-      )))}
+        ))}
+        </div>
+      )}
 
       {/* TAB: EMPLOYEES — the company-wide employee directory (Employee ID,
           Name, Designation, Department, Email, Phone). Plain hand-entered
@@ -7827,9 +7837,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       {/* User "Manage" popup — rendered before every popup it can open
           (Manage Projects, Module Access, Reset Password, Change Login ID)
           so those appear on top of it. */}
-      {managingUserId != null &&
-        // Frozen like the Users page while Module Access is open over it.
-        (managingModulesFor && frozenDrawer.current ? frozenDrawer.current : (frozenDrawer.current = (() => {
+      {managingUserId != null && (
+        // Frozen like the Users page — and out of sight — while the Module Access page is open.
+        <div className={managingModulesFor ? 'hidden' : undefined}>
+        {managingModulesFor && frozenDrawer.current ? frozenDrawer.current : (frozenDrawer.current = (() => {
           const mu = users.find((x) => x.id === managingUserId);
           if (!mu) return null;
           return (
@@ -7890,7 +7901,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
               }}
             />
           );
-        })()))}
+        })())}
+        </div>
+      )}
 
       {/* Manage Projects modal — Admin sets which Projects a User can access */}
       {managingUser && (
@@ -7987,27 +8000,34 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         />
       )}
 
-      {managingModulesFor && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setManagingModulesFor(null)}>
-          {/* The dim + blur is its own layer behind the card, not the card's
-              parent: as the parent, every tick inside the card made the
-              browser redo the whole-screen blur (≈90 ms a click). */}
-          <div className="absolute inset-0 bg-slate-950/60 backdrop-blur-sm pointer-events-none" aria-hidden="true" />
-          <div
-            className="relative bg-white border border-slate-200 rounded-2xl max-w-md md:max-w-5xl xl:max-w-6xl w-full max-h-[92vh] flex flex-col shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="p-5 md:p-6 border-b border-slate-200">
-              <div className="flex justify-between items-center mb-3">
-                <div>
-                  <h3 className="text-base md:text-lg font-bold text-slate-900">Module Access</h3>
-                  <p className="text-xs md:text-sm text-slate-500">{managingModulesFor.name} • {managingModulesFor.email}</p>
+      {/* Module Access — a full page in place of the Users page (Users ->
+          Manage -> Module Access), Back returns to it. */}
+      {managingModulesFor && activeTab === 'users' && (
+        <div className="w-full">
+          <div className="relative bg-white border border-slate-200 rounded-2xl w-full flex flex-col shadow-sm">
+            <div className="sticky top-16 z-20 bg-white rounded-t-2xl p-5 md:p-6 border-b border-slate-200">
+              <div className="flex justify-between items-center gap-3 mb-3">
+                <div className="flex items-center gap-3 min-w-0">
+                  <button
+                    type="button"
+                    onClick={() => setManagingModulesFor(null)}
+                    className="w-9 h-9 shrink-0 rounded-full flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+                    aria-label="Back to Users"
+                    title="Back to Users"
+                  >
+                    <ArrowLeft className="w-5 h-5" />
+                  </button>
+                  <div className="min-w-0">
+                    <h3 className="text-base md:text-lg font-bold text-slate-900">Module Access</h3>
+                    <p className="text-xs md:text-sm text-slate-500 truncate">{managingModulesFor.name} • {managingModulesFor.email}</p>
+                  </div>
                 </div>
                 <button
-                  onClick={() => setManagingModulesFor(null)}
-                  className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-colors"
+                  onClick={handleSaveModulePermissions}
+                  disabled={savingModules}
+                  className="hidden sm:inline-flex px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl transition-all disabled:opacity-50"
                 >
-                  <X className="w-5 h-5" />
+                  {savingModules ? 'Saving...' : 'Save Access'}
                 </button>
               </div>
               {/* Search (filters the Admin Module checklist below) + Copy
@@ -8064,7 +8084,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 view has real breathing room instead of reading like a phone
                 layout just stretched wide. Mobile keeps the original single
                 stacked column, unchanged. */}
-            <div className="p-5 md:p-8 overflow-y-auto flex-1 md:grid md:grid-cols-2 md:gap-x-10 xl:gap-x-16 md:items-start">
+            <div className="p-5 md:p-8 flex-1 md:grid md:grid-cols-2 md:gap-x-10 xl:gap-x-16 md:items-start">
             <div className="space-y-3">
               <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">User Module</p>
               {managingModulesFor.role === 'admin' && (
@@ -8908,7 +8928,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
             </div>
             </div>
 
-            <div className="p-5 border-t border-slate-200 flex justify-end gap-2">
+            <div className="sticky bottom-0 z-20 bg-white rounded-b-2xl p-5 border-t border-slate-200 flex justify-end gap-2">
               <button
                 onClick={() => setManagingModulesFor(null)}
                 className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition-all"
