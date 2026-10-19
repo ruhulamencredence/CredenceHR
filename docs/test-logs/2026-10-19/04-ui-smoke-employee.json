@@ -1,0 +1,374 @@
+[
+ {
+  "label": "employee-desktop",
+  "url": "/",
+  "ms": 3498,
+  "errors": [
+   "console: Failed to load resource: the server responded with a status of 403 (Forbidden)"
+  ],
+  "api4xx5xx": [
+   "403 /api/claims/status",
+   "403 /api/claims/mine",
+   "403 /api/user-claims/mine"
+  ],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/leave-management",
+  "ms": 2930,
+  "errors": [
+   "console: Failed to load resource: the server responded with a status of 403 (Forbidden)"
+  ],
+  "api4xx5xx": [
+   "403 /api/claims/status",
+   "403 /api/claims/mine",
+   "403 /api/user-claims/mine"
+  ],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/timesheet",
+  "ms": 2595,
+  "errors": [
+   "console: Failed to load resource: the server responded with a status of 403 (Forbidden)"
+  ],
+  "api4xx5xx": [
+   "403 /api/claims/status",
+   "403 /api/claims/mine",
+   "403 /api/user-claims/mine"
+  ],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/approve-applications",
+  "ms": 2580,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/payroll",
+  "ms": 2503,
+  "errors": [
+   "console: Failed to load resource: the server responded with a status of 403 (Forbidden)"
+  ],
+  "api4xx5xx": [
+   "403 /api/claims/mine",
+   "403 /api/claims/status",
+   "403 /api/user-claims/mine"
+  ],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/employee-directory",
+  "ms": 2643,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/resignation",
+  "ms": 2519,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/asset-management",
+  "ms": 2509,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/vehicle-management",
+  "ms": 2475,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/my-cases",
+  "ms": 2546,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/my-letters",
+  "ms": 2546,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/team-attendance",
+  "ms": 2521,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/my-tasks",
+  "ms": 2527,
+  "errors": [
+   "console: Failed to load resource: the server responded with a status of 403 (Forbidden)"
+  ],
+  "api4xx5xx": [
+   "403 /api/claims/status",
+   "403 /api/claims/mine",
+   "403 /api/user-claims/mine"
+  ],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/my-mobile-sim",
+  "ms": 2642,
+  "errors": [
+   "console: Failed to load resource: the server responded with a status of 403 (Forbidden)"
+  ],
+  "api4xx5xx": [
+   "403 /api/claims/mine",
+   "403 /api/claims/status",
+   "403 /api/user-claims/mine"
+  ],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/my-loans",
+  "ms": 2550,
+  "errors": [
+   "console: Failed to load resource: the server responded with a status of 403 (Forbidden)"
+  ],
+  "api4xx5xx": [
+   "403 /api/claims/status",
+   "403 /api/claims/mine",
+   "403 /api/user-claims/mine"
+  ],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/my-targets",
+  "ms": 2818,
+  "errors": [
+   "console: Failed to load resource: the server responded with a status of 403 (Forbidden)"
+  ],
+  "api4xx5xx": [
+   "403 /api/claims/status",
+   "403 /api/claims/mine",
+   "403 /api/user-claims/mine"
+  ],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/mail",
+  "ms": 2693,
+  "errors": [
+   "console: Failed to load resource: the server responded with a status of 403 (Forbidden)"
+  ],
+  "api4xx5xx": [
+   "403 /api/claims/status",
+   "403 /api/claims/mine",
+   "403 /api/user-claims/mine"
+  ],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/duty-roster",
+  "ms": 2539,
+  "errors": [
+   "console: Failed to load resource: the server responded with a status of 403 (Forbidden)"
+  ],
+  "api4xx5xx": [
+   "403 /api/claims/status",
+   "403 /api/claims/mine",
+   "403 /api/user-claims/mine"
+  ],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/material-receive",
+  "ms": 2793,
+  "errors": [
+   "console: Failed to load resource: the server responded with a status of 403 (Forbidden)"
+  ],
+  "api4xx5xx": [
+   "403 /api/claims/mine",
+   "403 /api/claims/status",
+   "403 /api/user-claims/mine"
+  ],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/documents-to-sign",
+  "ms": 2713,
+  "errors": [
+   "console: Failed to load resource: the server responded with a status of 403 (Forbidden)"
+  ],
+  "api4xx5xx": [
+   "403 /api/claims/status",
+   "403 /api/claims/mine",
+   "403 /api/user-claims/mine"
+  ],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/payslips",
+  "ms": 2579,
+  "errors": [
+   "console: Failed to load resource: the server responded with a status of 403 (Forbidden)"
+  ],
+  "api4xx5xx": [
+   "403 /api/claims/mine",
+   "403 /api/user-claims/mine",
+   "403 /api/claims/status"
+  ],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-mobile",
+  "url": "/",
+  "ms": 3334,
+  "errors": [
+   "console: Failed to load resource: the server responded with a status of 403 (Forbidden)"
+  ],
+  "api4xx5xx": [
+   "403 /api/claims/status",
+   "403 /api/claims/mine",
+   "403 /api/user-claims/mine"
+  ],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-mobile",
+  "url": "/self/leave-management",
+  "ms": 2657,
+  "errors": [
+   "console: Failed to load resource: the server responded with a status of 403 (Forbidden)"
+  ],
+  "api4xx5xx": [
+   "403 /api/claims/status",
+   "403 /api/claims/mine",
+   "403 /api/user-claims/mine"
+  ],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-mobile",
+  "url": "/self/timesheet",
+  "ms": 2680,
+  "errors": [
+   "console: Failed to load resource: the server responded with a status of 403 (Forbidden)"
+  ],
+  "api4xx5xx": [
+   "403 /api/claims/status",
+   "403 /api/claims/mine",
+   "403 /api/user-claims/mine"
+  ],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-mobile",
+  "url": "/self/approve-applications",
+  "ms": 2690,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-mobile",
+  "url": "/self/payroll",
+  "ms": 2504,
+  "errors": [
+   "console: Failed to load resource: the server responded with a status of 403 (Forbidden)"
+  ],
+  "api4xx5xx": [
+   "403 /api/claims/status",
+   "403 /api/claims/mine",
+   "403 /api/user-claims/mine"
+  ],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-mobile",
+  "url": "/self/employee-directory",
+  "ms": 2709,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-mobile",
+  "url": "/self/resignation",
+  "ms": 2439,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-mobile",
+  "url": "/self/asset-management",
+  "ms": 2490,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-mobile",
+  "url": "/self/vehicle-management",
+  "ms": 2492,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ }
+]
