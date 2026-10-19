@@ -33,9 +33,11 @@ interface UserBulkBarProps {
   onClear: () => void;
   onDone: () => void;
   onOpenTemplates: () => void;
+  // Opens Module Access for the ticked accounts it may change, together.
+  onOpenModuleAccess?: (users: User[]) => void;
 }
 
-export function UserBulkBar({ token, selected, templates, viewer, onClear, onDone, onOpenTemplates }: UserBulkBarProps) {
+export function UserBulkBar({ token, selected, templates, viewer, onClear, onDone, onOpenTemplates, onOpenModuleAccess }: UserBulkBarProps) {
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [result, setResult] = useState<{ title: string; r: BulkResult } | null>(null);
 
@@ -107,6 +109,15 @@ export function UserBulkBar({ token, selected, templates, viewer, onClear, onDon
               ))}
               <option value="__manage">{templates.length === 0 ? '+ Create a template…' : 'Manage templates…'}</option>
             </select>
+            {onOpenModuleAccess && selected.some((u) => canEditUserModules(u, viewer)) && (
+              <button
+                type="button"
+                onClick={() => onOpenModuleAccess(selected.filter((u) => canEditUserModules(u, viewer)))}
+                className="text-xs font-semibold px-2.5 py-1.5 bg-violet-600 hover:bg-violet-700 text-white rounded-lg"
+              >
+                Module Access…
+              </button>
+            )}
           </>
         )}
         <button
