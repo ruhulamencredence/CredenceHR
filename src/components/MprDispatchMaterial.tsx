@@ -5,7 +5,9 @@
 
 // Admin Panel -> PEPM Management -> Reports -> "Dispatch Material" (Reports
 // layer "dispatch_material", MprDispatchRoutes.ts): Purchase sends material
-// against the projects' MPR rows, soonest delivery date first.
+// against the projects' MPR rows, soonest delivery date first. Only the rows
+// Purchase sent here from the MPR Entries report (filter, tick, "Send to
+// Dispatch") are listed; one with nothing sent yet can be taken out again.
 //   - Dispatch on screen: tick rows, set the Qty (all that's left, or part of
 //     it), supplier, rate, P.O., challan.
 //   - Or by Excel: "Download sheet" gives the Daily Site Requirement and
@@ -16,7 +18,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
-import { Truck, Download, Upload, Search, RefreshCw, History, Loader2, AlertTriangle, CheckSquare, Square } from 'lucide-react';
+import { Truck, Download, Upload, Search, RefreshCw, History, Loader2, AlertTriangle, CheckSquare, Square, ListMinus } from 'lucide-react';
 import { formatDate } from '../lib/formatDate';
 import { confirmDialog } from '../lib/confirmDialog';
 import { MailPopup as Popup, inputCls, labelCls, primaryBtn, ghostBtn } from './mail/MailPopup';
@@ -227,6 +229,19 @@ export const MprDispatchMaterial: React.FC<{ token: string }> = ({ token }) => {
   }, [rows, q, project, statuses, from, to]);
   // Rows that can still be sent.
   const sendable = (r: MdRow) => r.status !== 'received' && (r.remaining === null || r.remaining > 0);
+  // Nothing sent on it yet (cancelled ones don't count): can go back out of the list.
+  const removable = (r: MdRow) => !r.dispatches.some((d) => d.status !== 'cancelled');
+  const takeOut = async (list: MdRow[]) => {
+    if (!list.length) return;
+    if (!(await confirmDialog(`Take ${list.length} MPR row${list.length === 1 ? '' : 's'} out of Dispatch Material? ${list.length === 1 ? 'It goes' : 'They go'} back to the MPR Entries report, to send again later.`, { confirmLabel: 'Take out' }))) return;
+    try {
+      const r = await mdFetch<{ removed: number; kept: number }>(token, '/api/mpr-dispatch/unqueue', 'POST', { entryIds: list.map((x) => x.id) });
+      setNotice(`${r.removed} row${r.removed === 1 ? '' : 's'} taken out.${r.kept ? ` ${r.kept} kept — material was already sent on ${r.kept === 1 ? 'it' : 'them'}.` : ''}`);
+      void load();
+    } catch (e: any) {
+      setNotice(e.message);
+    }
+  };
   const pickedRows = shown.filter((r) => picked.has(r.id));
   const allPicked = shown.filter(sendable).length > 0 && shown.filter(sendable).every((r) => picked.has(r.id));
   const counts = useMemo(() => {
@@ -372,8 +387,8 @@ export const MprDispatchMaterial: React.FC<{ token: string }> = ({ token }) => {
           <div>
             <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2"><Truck className="w-5 h-5 text-blue-600" /> Dispatch Material</h3>
             <p className="text-xs text-slate-500 mt-0.5 max-w-3xl">
-              Every MPR row the projects asked for, soonest delivery date first. Send all that's left or part of it — on screen, or fill the Daily Site Requirement sheet and upload it.
-              A row leaves this list once the project has received all of it.
+              The MPR rows you sent here from the MPR Entries report (filter there, tick, "Send to Dispatch"), soonest delivery date first. Send all that's left or part of it — on
+              screen, or fill the Daily Site Requirement sheet and upload it. A row leaves the Open list once the project has received all of it.
             </p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
@@ -391,6 +406,16 @@ export const MprDispatchMaterial: React.FC<{ token: string }> = ({ token }) => {
             >
               <Truck className="w-4 h-4" /> Dispatch{pickedRows.length ? ` ${pickedRows.length}` : ''}
             </button>
+            {pickedRows.some(removable) && (
+              <button
+                type="button"
+                onClick={() => void takeOut(pickedRows.filter(removable))}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50"
+                title="Back to the MPR Entries report (only rows with nothing sent yet)"
+              >
+                <ListMinus className="w-4 h-4" /> Take out ({pickedRows.filter(removable).length})
+              </button>
+            )}
             <button type="button" onClick={() => void load()} className="p-2 rounded-xl bg-white border border-slate-200 hover:bg-slate-50" aria-label="Refresh" title="Refresh">
               <RefreshCw className="w-4 h-4 text-slate-600" />
             </button>
@@ -415,7 +440,7 @@ export const MprDispatchMaterial: React.FC<{ token: string }> = ({ token }) => {
                 className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${statuses.has(s) ? 'border-slate-800 bg-slate-800 text-white' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}
                 title={statuses.has(s) ? 'Showing only the ticked statuses — click to hide this one again' : 'Show only this status (with any other ticked ones)'}
               >
-                {MD_STATUS[s].label} {counts[s] ? `(${counts[s]})` : ''}
+                {s === 'pending' ? 'In dispatch list' : MD_STATUS[s].label} {counts[s] ? `(${counts[s]})` : ''}
               </button>
             ))}
           {statuses.size > 0 && (
@@ -443,7 +468,11 @@ export const MprDispatchMaterial: React.FC<{ token: string }> = ({ token }) => {
         <LoadingBlock />
       ) : rows && !shown.length ? (
         <div className="bg-white border border-slate-200 rounded-2xl p-10 text-center text-sm text-slate-500 shadow-sm">
-          {rows.length ? 'No MPR row matches these filters.' : view === 'open' ? 'Nothing left to dispatch — every MPR row is received.' : 'No MPR rows here.'}
+          {rows.length
+            ? 'No MPR row matches these filters.'
+            : view === 'open'
+              ? 'Nothing to dispatch. In Reports -> MPR Entries Report, filter and tick the rows to send, then "Send to Dispatch".'
+              : 'No MPR rows here.'}
         </div>
       ) : (
         rows && (
@@ -514,7 +543,7 @@ export const MprDispatchMaterial: React.FC<{ token: string }> = ({ token }) => {
                         <td className="px-2 py-2 text-right whitespace-nowrap">{qtyText(r.receivedQty)}</td>
                         <td className="px-2 py-2 text-right whitespace-nowrap font-semibold">{qtyText(r.remaining)}</td>
                         <td className="px-2 py-2 text-slate-600">{lastD ? [lastD.supplier, lastD.poNo].filter(Boolean).join(' · ') || '—' : '—'}</td>
-                        <td className="px-2 py-2"><MdStatusChip status={r.status} /></td>
+                        <td className="px-2 py-2"><MdStatusChip status={r.status} queued={r.queuedAt} /></td>
                         <td className="px-2 py-2">
                           <div className="flex justify-end gap-1.5">
                             {sendable(r) && (
