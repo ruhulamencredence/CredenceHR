@@ -23,6 +23,9 @@ export interface MailAccount {
   isConnected: boolean;
   lastSyncAt: string | null;
   lastError: string | null;
+  // Only inside CredenceHR (made when a colleague's mail arrived before this
+  // mailbox was connected) — connecting it with its password makes it whole.
+  internalOnly?: boolean;
 }
 
 export interface MailAttachment {
@@ -55,6 +58,8 @@ export interface MailMessage {
   scheduledSendTime: string | null;
   sendError: string | null;
   messageId: string | null;
+  // Came / went inside CredenceHR, not through the mail server.
+  internal?: boolean;
 }
 
 export interface MailList {
@@ -77,6 +82,13 @@ export interface MailStatus {
   enabled: boolean;
   serverReady: boolean;
   accounts: MailAccount[];
+  // Our own domains (Mail Administration -> Internal delivery): their
+  // pictures show without asking.
+  ourDomains?: string[];
+  // Email Directory search (users.can_view_mail_directory).
+  canDirectory?: boolean;
+  // Tools -> My groups (users.can_use_mail_groups).
+  canMyGroups?: boolean;
 }
 
 export interface SignatureFields {
@@ -154,6 +166,8 @@ export interface MailSettings {
   signatures: MailSignature[];
   vacationResponder: { enabled: boolean; subject: string; message: string; startDate?: string; endDate?: string };
   blockedSenders: string[];
+  // Senders whose pictures always show.
+  pictureSenders?: string[];
   layout: any;
   language: string;
   timezone: string;
@@ -197,6 +211,109 @@ export async function mailFetch<T = any>(token: string, path: string, init: { me
   if (!res.ok) throw new MailApiError(data?.error || `Request failed (${res.status})`, res.status);
   return data as T;
 }
+
+// Avatars: a person's Employee profile photo, looked up by email address.
+// Addresses asked for in the same moment go to the server in one call
+// (POST /api/mail/photos -> { email: userId }), then each photo comes from
+// GET /api/profile/photo/:userId. Both are remembered for the visit; null
+// means "no photo, show the initials".
+let photoToken = '';
+export function setMailPhotoToken(token: string) {
+  photoToken = token;
+}
+const photoUrls = new Map<string, Promise<string | null>>();
+const photoByUser = new Map<number, Promise<string | null>>();
+let pendingPhotos = new Map<string, (userId: number | null) => void>();
+let photoTimer: ReturnType<typeof setTimeout> | null = null;
+function flushPhotos() {
+  photoTimer = null;
+  const batch = pendingPhotos;
+  pendingPhotos = new Map();
+  const emails = [...batch.keys()];
+  for (let i = 0; i < emails.length; i += 200) {
+    const part = emails.slice(i, i + 200);
+    mailFetch<Record<string, number>>(photoToken, '/photos', { method: 'POST', body: { emails: part } })
+      .then((ids) => part.forEach((e) => batch.get(e)!(Number(ids?.[e]) || null)))
+      .catch(() => part.forEach((e) => batch.get(e)!(null)));
+  }
+}
+const photoOfUser = (userId: number) => {
+  let p = photoByUser.get(userId);
+  if (!p) {
+    p = fetch(apiUrl(`/api/profile/photo/${userId}`), { headers: { Authorization: `Bearer ${photoToken}` } })
+      .then(async (r) => (r.ok && r.status !== 204 ? URL.createObjectURL(await r.blob()) : null))
+      .catch(() => null);
+    photoByUser.set(userId, p);
+  }
+  return p;
+};
+export function mailPhotoUrl(email: string): Promise<string | null> {
+  const e = (email || '').trim().toLowerCase();
+  if (!photoToken || !e.includes('@')) return Promise.resolve(null);
+  let p = photoUrls.get(e);
+  if (!p) {
+    p = new Promise<number | null>((resolve) => {
+      pendingPhotos.set(e, resolve);
+      if (!photoTimer) photoTimer = setTimeout(flushPhotos, 30);
+    }).then((userId) => (userId ? photoOfUser(userId) : null));
+    photoUrls.set(e, p);
+  }
+  return p;
+}
+
+// Everyone in the Employee Directory with an email (GET /api/mail/directory),
+// fetched once per visit and shared by every To / Cc / Bcc field.
+export interface DirectoryPerson {
+  name: string;
+  email: string;
+  employeeId?: string;
+  designation: string;
+  department: string;
+}
+let directoryCache: Promise<DirectoryPerson[]> | null = null;
+export const loadDirectory = (token: string) => {
+  if (!directoryCache) {
+    directoryCache = mailFetch<DirectoryPerson[]>(token, '/directory').catch(() => {
+      directoryCache = null;
+      return [];
+    });
+  }
+  return directoryCache;
+};
+
+// Groups for the composer (GET /api/mail/groups): the central groups this
+// person may write to (one address reaches everyone in it) and their own
+// groups (a saved list of addresses, put in one by one).
+export interface CentralGroup {
+  email: string;
+  name: string;
+  description: string;
+  count: number;
+}
+export interface MyGroup {
+  id: number;
+  name: string;
+  members: string[];
+}
+export interface ComposeGroups {
+  central: CentralGroup[];
+  mine: MyGroup[];
+  canMine: boolean;
+}
+let groupsCache: Promise<ComposeGroups> | null = null;
+export const loadMailGroups = (token: string) => {
+  if (!groupsCache) {
+    groupsCache = mailFetch<ComposeGroups>(token, '/groups').catch(() => {
+      groupsCache = null;
+      return { central: [], mine: [], canMine: false };
+    });
+  }
+  return groupsCache;
+};
+// After My groups changes (or another mailbox is opened).
+export const forgetMailGroups = () => {
+  groupsCache = null;
+};
 
 // Attachments are fetched with the token (they're not public links).
 export async function fetchAttachment(token: string, messageId: string, idx: number): Promise<Blob> {

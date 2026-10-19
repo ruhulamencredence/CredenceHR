@@ -27,12 +27,13 @@
 // so every push sender (Chat, Alerts, ...) reuses the same table/registration
 // rather than each needing its own.
 
-import admin from "firebase-admin";
+import { initializeApp, cert, type App } from "firebase-admin/app";
+import { getMessaging } from "firebase-admin/messaging";
 import { sendWebPushToUserIds } from "./WebPushService";
 
-let firebaseApp: admin.app.App | null | undefined;
+let firebaseApp: App | null | undefined;
 
-export function getFirebaseApp(): admin.app.App | null {
+export function getFirebaseApp(): App | null {
   if (firebaseApp !== undefined) return firebaseApp;
   const json = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
   if (!json) {
@@ -41,7 +42,7 @@ export function getFirebaseApp(): admin.app.App | null {
     return null;
   }
   try {
-    firebaseApp = admin.initializeApp({ credential: admin.credential.cert(JSON.parse(json)) });
+    firebaseApp = initializeApp({ credential: cert(JSON.parse(json)) });
   } catch (err: any) {
     console.warn("⚠️ Could not initialize Firebase (check FIREBASE_SERVICE_ACCOUNT_JSON) — push notifications disabled: " + err.message);
     firebaseApp = null;
@@ -67,7 +68,7 @@ export async function sendSilentPushToUserIds(
       userIds
     );
     if (rows.length === 0) return 0;
-    const result = await admin.messaging(app).sendEachForMulticast({
+    const result = await getMessaging(app).sendEachForMulticast({
       tokens: rows.map((r: any) => r.token),
       data,
       android: { priority: "high", ttl: ttlMs }
@@ -103,7 +104,7 @@ export async function sendPushToUserIds(
       targetIds
     );
     if (rows.length === 0) return;
-    const result = await admin.messaging(app).sendEachForMulticast({
+    const result = await getMessaging(app).sendEachForMulticast({
       tokens: rows.map((r: any) => r.token),
       notification: { title, body },
       data,
@@ -154,7 +155,7 @@ export async function sendPushToRoomMembers(
       [roomId, excludeUserId]
     );
     if (rows.length === 0) return;
-    const result = await admin.messaging(app).sendEachForMulticast({
+    const result = await getMessaging(app).sendEachForMulticast({
       tokens: rows.map((r: any) => r.token),
       notification: { title, body },
       data,

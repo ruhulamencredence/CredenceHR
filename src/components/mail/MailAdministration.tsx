@@ -8,15 +8,20 @@
 //   read          the list, and the log below
 //   mail_open     open someone's mailbox, read only (explicit-only layer)
 //   mail_password see a mailbox's saved password (explicit-only layer)
+//   mail_settings turn internal delivery on / off, set our domains
+//                 (explicit-only layer; everyone with "read" sees the setting)
+//   mail_groups   add / change / remove central mail groups (explicit-only
+//                 layer; everyone with "read" sees the groups) — MailGroups.tsx
 // Every mailbox opened and every password shown is written to the log.
 // The Superadmin's own mailbox only the Superadmin can open.
 
 import React, { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Mail, Search, Eye, KeyRound, Copy, Check, EyeOff, AlertCircle, Lock, History, Loader2, RefreshCw } from 'lucide-react';
+import { Mail, Search, Eye, KeyRound, Copy, Check, EyeOff, AlertCircle, Lock, History, Loader2, RefreshCw, Building2 } from 'lucide-react';
 import type { User } from '../../types';
 import { apiUrl } from '../../lib/api';
 import { confirmDialog } from '../../lib/confirmDialog';
 import { shortMailDate, fullMailDate } from '../../lib/mailApi';
+import { CentralGroupsAdmin } from './MailGroups';
 
 const CredenceMail = lazy(() => import('./CredenceMail').then((m) => ({ default: m.CredenceMail })));
 
@@ -50,9 +55,19 @@ interface LogRow {
   mailbox: string | null;
 }
 
+interface SystemSettings {
+  internalDelivery: boolean;
+  domains: string[];
+  canEdit: boolean;
+}
+
 // Not mailFetch: these calls must never carry X-Mail-View-As.
-async function adminFetch<T>(token: string, path: string, method = 'GET'): Promise<T> {
-  const res = await fetch(apiUrl(`/api/mail/admin${path}`), { method, headers: { Authorization: `Bearer ${token}` } });
+async function adminFetch<T>(token: string, path: string, method = 'GET', body?: any): Promise<T> {
+  const res = await fetch(apiUrl(`/api/mail/admin${path}`), {
+    method,
+    headers: { Authorization: `Bearer ${token}`, ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}) },
+    body: body !== undefined ? JSON.stringify(body) : undefined
+  });
   const data = await res.json().catch(() => null);
   if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
   return data as T;
@@ -119,8 +134,145 @@ const PasswordCell: React.FC<{ token: string; box: AdminMailbox }> = ({ token, b
   );
 };
 
+// Mail between our own mailboxes stays inside CredenceHR (MailRoutes.ts,
+// "Internal delivery"); only mail to someone outside goes through cPanel.
+const InternalDelivery: React.FC<{ token: string }> = ({ token }) => {
+  const [s, setS] = useState<SystemSettings | null>(null);
+  const [domains, setDomains] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [saved, setSaved] = useState(false);
+  useEffect(() => {
+    adminFetch<SystemSettings>(token, '/settings')
+      .then((r) => {
+        setS(r);
+        setDomains(r.domains.join(', '));
+      })
+      .catch((e) => setError(e.message));
+  }, [token]);
+  const save = async (patch: Partial<Pick<SystemSettings, 'internalDelivery'>> & { domains?: string }) => {
+    if (patch.internalDelivery === false && !(await confirmDialog('Turn internal delivery off? Mail between colleagues will go through the mail server (cPanel) again.', { confirmLabel: 'Turn off', tone: 'danger' }))) return;
+    setBusy(true);
+    setError('');
+    setSaved(false);
+    try {
+      const r = await adminFetch<SystemSettings>(token, '/settings', 'PUT', patch);
+      setS(r);
+      setDomains(r.domains.join(', '));
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (!s) {
+    return error ? (
+      <div className="text-xs px-3 py-2 rounded-xl bg-rose-50 text-rose-700">{error}</div>
+    ) : (
+      <div className="rounded-2xl bg-white border border-slate-200 p-5 space-y-3" style={{ animation: 'skeleton-in .2s ease both' }}>
+        <div className="h-4 w-48 rounded bg-slate-200/80" />
+        <div className="h-3 w-full max-w-lg rounded bg-slate-100" />
+        <div className="h-9 w-full max-w-md rounded-xl bg-slate-100" />
+      </div>
+    );
+  }
+  const changed = domains.split(/[\s,;]+/).filter(Boolean).join(',') !== s.domains.join(',');
+  return (
+    <div className="rounded-2xl bg-white border border-slate-200 p-4 sm:p-5 space-y-4 max-w-2xl">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <div className="text-sm font-semibold text-slate-900 flex items-center gap-2"><Building2 className="w-4 h-4 text-emerald-600" /> Internal delivery</div>
+          <p className="text-xs text-slate-600 mt-1">
+            Mail from one of our mailboxes to a colleague whose mailbox is connected in Credence Mail is delivered inside CredenceHR, at once — it never goes through the
+            mail server (cPanel). Only recipients outside (another domain, or a colleague not on Credence Mail) get it through the mail server. With a mix, each side
+            gets one copy, To / Cc stay as written and Bcc stays hidden.
+          </p>
+        </div>
+        <button
+          type="button"
+          disabled={!s.canEdit || busy}
+          onClick={() => void save({ internalDelivery: !s.internalDelivery })}
+          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors shrink-0 disabled:opacity-50 ${s.internalDelivery ? 'bg-emerald-500' : 'bg-slate-300'}`}
+          title={s.canEdit ? (s.internalDelivery ? 'On — click to turn off' : 'Off — click to turn on') : 'You can see this setting but not change it'}
+          aria-label="Internal delivery"
+        >
+          <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${s.internalDelivery ? 'translate-x-6' : 'translate-x-1'}`} />
+        </button>
+      </div>
+      <div>
+        <label className="text-xs font-semibold text-slate-700">Our domains</label>
+        <div className="mt-1 flex gap-2 flex-wrap">
+          <input
+            value={domains}
+            onChange={(e) => setDomains(e.target.value)}
+            disabled={!s.canEdit || busy}
+            placeholder="credencehousinglimited.com"
+            className="flex-1 min-w-[14rem] text-sm px-3 py-2 rounded-xl bg-white border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-200 disabled:bg-slate-50"
+          />
+          {s.canEdit && (
+            <button type="button" disabled={!changed || busy} onClick={() => void save({ domains })} className="px-3 py-2 rounded-xl text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-40">
+              {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Save'}
+            </button>
+          )}
+        </div>
+        <p className="text-[11px] text-slate-500 mt-1">Comma separated. Only mail sent from and to these domains can stay inside CredenceHR.</p>
+      </div>
+      <div className="text-[11px] text-amber-800 bg-amber-50 rounded-xl px-3 py-2">
+        Internal mail is only in Credence Mail: Outlook or a phone's mail app on the cPanel mailbox doesn't show it.
+      </div>
+      <CheckAddress token={token} domain={s.domains[0] || 'credencehousinglimited.com'} />
+      {error && <div className="text-xs px-3 py-2 rounded-xl bg-rose-50 text-rose-700">{error}</div>}
+      {saved && <div className="text-xs text-emerald-700 flex items-center gap-1"><Check className="w-3.5 h-3.5" /> Saved.</div>}
+      {!s.canEdit && <div className="text-[11px] text-slate-500 flex items-center gap-1"><Lock className="w-3.5 h-3.5" /> Changing this needs the "Internal delivery settings" permission.</div>}
+    </div>
+  );
+};
+
+// Would a mail from one address to another stay inside — and if not, why.
+const CheckAddress: React.FC<{ token: string; domain: string }> = ({ token, domain }) => {
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [res, setRes] = useState<{ inside: boolean; reason: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const check = async () => {
+    setBusy(true);
+    setErr('');
+    setRes(null);
+    try {
+      setRes(await adminFetch(token, `/check?from=${encodeURIComponent(from.trim())}&to=${encodeURIComponent(to.trim())}`));
+    } catch (e: any) {
+      setErr(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const input = 'flex-1 min-w-[12rem] text-sm px-3 py-2 rounded-xl bg-white border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-200';
+  return (
+    <div className="border-t border-slate-100 pt-4">
+      <div className="text-xs font-semibold text-slate-700">Check an address</div>
+      <p className="text-[11px] text-slate-500 mt-0.5">Does mail from one of our addresses to another stay inside CredenceHR — and if not, why.</p>
+      <div className="mt-2 flex flex-wrap gap-2">
+        <input value={from} onChange={(e) => setFrom(e.target.value)} placeholder={`From, e.g. you@${domain}`} className={input} />
+        <input value={to} onChange={(e) => setTo(e.target.value)} placeholder={`To, e.g. colleague@${domain}`} className={input} onKeyDown={(e) => e.key === 'Enter' && void check()} />
+        <button type="button" disabled={busy || !from.trim() || !to.trim()} onClick={() => void check()} className="px-3 py-2 rounded-xl text-xs font-semibold bg-slate-900 text-white disabled:opacity-40">
+          {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Check'}
+        </button>
+      </div>
+      {err && <div className="mt-2 text-xs text-rose-600">{err}</div>}
+      {res && (
+        <div className={`mt-2 text-xs px-3 py-2 rounded-xl ${res.inside ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'}`}>
+          {res.inside ? res.reason : `Goes through the mail server: ${res.reason}.`}
+        </div>
+      )}
+    </div>
+  );
+};
+
 export const MailAdministration: React.FC<{ token: string; user: User }> = ({ token, user }) => {
-  const [tab, setTab] = useState<'boxes' | 'log'>('boxes');
+  const [tab, setTab] = useState<'boxes' | 'delivery' | 'groups' | 'log'>('boxes');
   const [data, setData] = useState<AdminList | null>(null);
   const [log, setLog] = useState<LogRow[] | null>(null);
   const [error, setError] = useState('');
@@ -183,6 +335,8 @@ export const MailAdministration: React.FC<{ token: string; user: User }> = ({ to
             {(
               [
                 ['boxes', 'Mailboxes'],
+                ['delivery', 'Internal delivery'],
+                ['groups', 'Groups'],
                 ['log', 'Log']
               ] as const
             ).map(([k, label]) => (
@@ -199,7 +353,11 @@ export const MailAdministration: React.FC<{ token: string; user: User }> = ({ to
 
       {error && <div className="text-xs px-3 py-2 rounded-xl bg-rose-50 text-rose-700">{error}</div>}
 
-      {tab === 'boxes' ? (
+      {tab === 'delivery' ? (
+        <InternalDelivery token={token} />
+      ) : tab === 'groups' ? (
+        <CentralGroupsAdmin token={token} />
+      ) : tab === 'boxes' ? (
         <>
           <p className="text-xs text-slate-600">
             Every Credence Mail mailbox connected in this company.

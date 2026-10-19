@@ -21,11 +21,12 @@ import autoTable from 'jspdf-autotable';
 import { apiUrl } from '../lib/api';
 import { confirmDialog } from '../lib/confirmDialog';
 import { MailPopup as Popup, Tabs, inputCls, labelCls, primaryBtn, ghostBtn } from './mail/MailPopup';
+import { ProgressOverlay, useLongTask, xhrJson } from './ProgressOverlay';
 
 interface Row { id: string; desc: string; nos: number; l: number | null; b: number | null; d: number | null; qty: number; unit: string; remark?: string; kind: 'item' | 'sub' | 'head'; ref?: string }
 interface Section { key: string; title: string; rows: Row[]; totals: { label: string; qty: number; unit: string }[] }
 interface SheetT { plan: { id: string; title: string }; repeats: number; assumptions: string[]; sections: Section[] }
-interface Beam { id: string; dir: 'H' | 'V'; c: number; a: number; b: number; widthIn: number; length: number; tag: string | null; tagFrom: 'leader' | 'run' | null }
+interface Beam { id: string; dir: 'H' | 'V'; c: number; a: number; b: number; widthIn: number; length: number; tag: string | null; tagFrom: 'leader' | 'text' | 'run' | null }
 interface Column { id: string; x0: number; y0: number; x1: number; y1: number; w: number; d: number; kind: 'column' | 'wall' }
 interface Panel { id: string; areaSqIn: number; x0: number; y0: number; x1: number; y1: number; kind: string; note: string | null }
 interface Plan { id: string; title: string; bbox: { x0: number; y0: number; x1: number; y1: number }; beams: Beam[]; columns: Column[]; panels: Panel[]; tags: { tag: string; widthIn: number; depthIn: number }[]; warnings: string[] }
@@ -153,21 +154,37 @@ const UploadPopup: React.FC<{ token: string; onClose: () => void; onDone: (id: n
   const [title, setTitle] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  // Upload (real progress), then the server reads the drawing (eased — it
+  // can't report back; a big DWG takes up to a minute).
+  const longTask = useLongTask();
   const go = async () => {
     if (!file) return;
     setBusy(true); setErr('');
+    longTask.start('Reading the drawing', `Opening ${file.name}…`);
     try {
       const buf = new Uint8Array(await file.arrayBuffer());
       let bin = '';
       for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
-      const r = await api<Detail>(token, '/api/measurement-sheets', { method: 'POST', body: { title: title.trim() || undefined, file_name: file.name, data_base64: btoa(bin) } });
-      onDone(r.id);
-    } catch (e: any) { setErr(e.message); setBusy(false); }
+      longTask.step(5, 'Uploading the drawing…');
+      const r = await xhrJson('/api/measurement-sheets', {
+        method: 'POST',
+        token,
+        body: { title: title.trim() || undefined, file_name: file.name, data_base64: btoa(bin) },
+        onUpload: (f) => {
+          longTask.step(5 + f * 30);
+          if (f >= 1) longTask.creep(96, 'Finding the beams, columns and slab panels…', Math.max(8000, file.size / 60));
+        }
+      });
+      if (!r.ok) throw new Error(r.data?.error || `Request failed (${r.status})`);
+      await longTask.finish();
+      onDone(r.data.id);
+    } catch (e: any) { longTask.close(); setErr(e.message); setBusy(false); }
   };
   return (
     <Popup title="Upload drawing" icon={<Upload className="w-4 h-4" />} onClose={busy ? () => {} : onClose} size="md"
       footer={<><button type="button" className={ghostBtn} onClick={onClose} disabled={busy}>Cancel</button><button type="button" className={primaryBtn} onClick={go} disabled={!file || busy}>{busy && <Loader2 className="w-4 h-4 animate-spin" />} Make measurement sheet</button></>}>
       <div className="space-y-3 pt-1">
+        <ProgressOverlay state={longTask.state} />
         <div>
           <label className={labelCls}>Structure drawing (.dwg or .dxf)</label>
           <input type="file" accept=".dwg,.dxf" className={inputCls} onChange={(e) => { const f = e.target.files?.[0] || null; setFile(f); if (f && !title) setTitle(f.name.replace(/\.[^.]+$/, '').replace(/[_]+/g, ' ')); }} />
@@ -455,7 +472,14 @@ const BeamsTab: React.FC<{ plan: Plan; edit: boolean; ov: Overrides; setO: (fn: 
     for (const b of plan.beams) { const t = tagOf(b); if (t) set.add(t); }
     return [...set].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
   }, [plan, ov]);
-  const sizeOf = (t: string) => ov.tagSizes?.[t] || plan.tags.find((x) => x.tag === t) || { widthIn: settings.defaultBeamWidthIn, depthIn: settings.defaultBeamDepthIn };
+  // A name with no size in the drawing starts from the width drawn (the
+  // commonest one among its beams) and the default depth.
+  const drawnWidth = (t: string) => {
+    const n = new Map<number, number>();
+    for (const b of plan.beams) if (tagOf(b) === t) { const w = Math.round(b.widthIn * 2) / 2; n.set(w, (n.get(w) || 0) + b.length); }
+    return [...n.entries()].sort((p, q) => q[1] - p[1])[0]?.[0];
+  };
+  const sizeOf = (t: string) => ov.tagSizes?.[t] || plan.tags.find((x) => x.tag === t) || { widthIn: drawnWidth(t) || settings.defaultBeamWidthIn, depthIn: settings.defaultBeamDepthIn };
   const setSize = (t: string, k: 'widthIn' | 'depthIn', v: number) => setO((x) => ({ ...x, tagSizes: { ...(x.tagSizes || {}), [t]: { ...sizeOf(t), [k]: v } } }));
   const skipped = new Set(ov.skipBeams || []);
   return (
@@ -484,7 +508,7 @@ const BeamsTab: React.FC<{ plan: Plan; edit: boolean; ov: Overrides; setO: (fn: 
                 <td className="tabular-nums">{n2(b.length / 12)}</td>
                 <td className="tabular-nums">{b.widthIn}"</td>
                 <td><input list="ms-tags" disabled={!edit} className={`${inputCls} !py-1 !w-44 ${!tagOf(b) ? 'border-red-300' : ''}`} value={tagOf(b) || ''} placeholder="no tag" aria-label={`${b.id} tag`} onChange={(e) => setO((x) => ({ ...x, beamTags: { ...(x.beamTags || {}), [b.id]: e.target.value } }))} /></td>
-                <td className="text-xs text-slate-500">{ov.beamTags && b.id in ov.beamTags ? 'you' : b.tagFrom === 'leader' ? 'drawing' : b.tagFrom === 'run' ? 'beam in line' : ''}</td>
+                <td className="text-xs text-slate-500">{ov.beamTags && b.id in ov.beamTags ? 'you' : b.tagFrom === 'leader' || b.tagFrom === 'text' ? 'drawing' : b.tagFrom === 'run' ? 'beam in line' : ''}</td>
                 <td className="text-right"><input type="checkbox" disabled={!edit} checked={skipped.has(b.id)} aria-label={`Leave out ${b.id}`} onChange={(e) => setO((x) => ({ ...x, skipBeams: e.target.checked ? [...(x.skipBeams || []), b.id] : (x.skipBeams || []).filter((i) => i !== b.id) }))} /></td>
               </tr>
             ))}

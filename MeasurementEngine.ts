@@ -8,8 +8,9 @@
 //
 //   readDrawing()   DWG / DXF  ->  RawDrawing: the lines, polylines, texts and
 //                   leaders by layer, the drawing unit and per-layer counts.
-//                   (@mlightcad/libredwg-web — LibreDWG built for WebAssembly,
-//                   so the server needs nothing installed besides npm packages.)
+//                   (DWG: @mlightcad/libredwg-web — LibreDWG built for
+//                   WebAssembly; DXF: dxf-parser, plain JavaScript — so the
+//                   server needs nothing installed besides npm packages.)
 //   analyse()       RawDrawing + settings -> Model: for each plan (a cluster of
 //                   beam lines — a DWG often holds several floors), its beams,
 //                   columns / walls and slab panels, all in inches.
@@ -82,15 +83,22 @@ export const unitFromName = (n: string): [string, number] | null => {
   return null;
 };
 
+// The DWG reader is pinned to @mlightcad/libredwg-web 0.7.17 (package.json):
+// 0.8.0 / 0.8.1 crash ("memory access out of bounds") on AutoCAD R14 / 2000
+// drawings that 0.7.17 reads.
+const notInstalled = () =>
+  Object.assign(new Error("The drawing reader is not installed on this server. Run `npm install` in the project folder, restart the server, and try again."), { statusCode: 500 });
 let libP: Promise<any> | null = null;
+let libUses = 0;
 async function lib() {
   if (!libP) {
+    libUses = 0;
     libP = (async () => {
       let mod: any;
       try {
         mod = await import("@mlightcad/libredwg-web");
       } catch {
-        throw Object.assign(new Error("The drawing reader is not installed on this server. Run `npm install` in the project folder, restart the server, and try again."), { statusCode: 500 });
+        throw notInstalled();
       }
       const dir = process.env.MS_LIBREDWG_WASM || path.join(process.cwd(), "node_modules", "@mlightcad", "libredwg-web", "wasm") + path.sep;
       return { LibreDwg: mod.LibreDwg, Dwg_File_Type: mod.Dwg_File_Type, instance: await mod.LibreDwg.create(dir) };
@@ -98,6 +106,207 @@ async function lib() {
     libP.catch(() => (libP = null));
   }
   return libP;
+}
+// A drawing that crashes the reader leaves its WebAssembly memory broken, and
+// every later drawing would fail with it until the server restarted — so after
+// any failure (and every 20 drawings, as its memory only grows) the next
+// drawing gets a fresh reader.
+const freshReader = () => {
+  libP = null;
+};
+
+// A block: its base point and the entities it is drawn with.
+type BlockDef = { base: Pt; entities: any[] };
+type Read = { entities: any[]; insUnits: number; blocks: Map<string, BlockDef>; warning?: number; insertRadians: boolean };
+
+const dwgEntities = async (file: Buffer): Promise<Read> => {
+  const { instance, Dwg_File_Type } = await lib();
+  if (++libUses >= 20) freshReader();
+  const ab = file.buffer.slice(file.byteOffset, file.byteOffset + file.byteLength);
+  // LibreDWG reports objects it skipped as "Open dwg file with error code: N"
+  // on the console (4 = an object type it doesn't know, 64 = a value out of
+  // range, 68 = both…). The drawing is still read; the code goes on the
+  // sheet's notes instead of the server console.
+  let warning: number | undefined;
+  const warn = console.warn;
+  console.warn = (...args: any[]) => {
+    if (String(args[0]).startsWith("Open dwg file with error code")) warning = Number(args[1]) || warning;
+    else warn(...args);
+  };
+  let dwg: any;
+  try {
+    dwg = instance.dwg_read_data(ab, Dwg_File_Type.DWG);
+  } finally {
+    console.warn = warn;
+  }
+  if (!dwg) throw new Error("The drawing could not be read");
+  const db: any = instance.convert(dwg);
+  try {
+    instance.dwg_free(dwg);
+  } catch {
+    // freed with the module
+  }
+  const blocks = new Map<string, BlockDef>();
+  for (const b of db?.tables?.BLOCK_RECORD?.entries || []) {
+    if (!b?.name || /^\*(model|paper)_space/i.test(String(b.name))) continue;
+    blocks.set(String(b.name), { base: pt(b.basePoint), entities: b.entities || [] });
+  }
+  return { entities: db?.entities || [], insUnits: num(db?.header?.INSUNITS, 0), blocks, warning, insertRadians: true };
+};
+
+// DXF: dxf-parser's entities in the shape LibreDWG gives them, so one loop
+// below reads both. dxf-parser has no LEADER, so it gets one here.
+class LeaderHandler {
+  ForEntityName = "LEADER";
+  parseEntity(scanner: any, curr: any) {
+    const entity: any = { type: curr.value, vertices: [] as Pt[] };
+    curr = scanner.next();
+    while (!scanner.isEOF()) {
+      if (curr.code === 0) break;
+      if (curr.code === 8) entity.layer = curr.value;
+      else if (curr.code === 10) entity.vertices.push({ x: Number(curr.value), y: 0 });
+      else if (curr.code === 20 && entity.vertices.length) entity.vertices[entity.vertices.length - 1].y = Number(curr.value);
+      curr = scanner.next();
+    }
+    return entity;
+  }
+}
+const dxfShape = (e: any) => {
+  switch (e.type) {
+    case "LINE":
+      return { type: "LINE", layer: e.layer, startPoint: e.vertices?.[0], endPoint: e.vertices?.[1] };
+    case "LWPOLYLINE":
+    case "POLYLINE":
+      return { type: e.type, layer: e.layer, vertices: e.vertices || [], flag: e.shape ? 1 : 0 };
+    case "MTEXT":
+      return { type: "MTEXT", layer: e.layer, text: e.text, insertionPoint: e.position, height: e.height, rotation: e.rotation };
+    case "INSERT":
+      return { ...e, insertionPoint: e.position };
+    default:
+      return e;
+  }
+};
+const dxfEntities = async (file: Buffer): Promise<Read> => {
+  let DxfParser: any;
+  try {
+    const m: any = await import("dxf-parser");
+    // ESM, tsx and the esbuild CommonJS bundle each wrap it differently.
+    DxfParser = m.default?.default || m.default || m;
+  } catch {
+    throw notInstalled();
+  }
+  const parser = new DxfParser();
+  parser.registerEntityHandler(LeaderHandler);
+  // Binary DXF isn't supported by the parser.
+  if (file.subarray(0, 22).toString("latin1").startsWith("AutoCAD Binary DXF")) throw new Error("This is a binary DXF — save it as an ASCII DXF");
+  const text = file.toString("utf8").includes("\uFFFD") ? file.toString("latin1") : file.toString("utf8");
+  const d: any = parser.parseSync(text);
+  if (!d) throw new Error("The drawing could not be read");
+  const entities = (d.entities || []).map(dxfShape);
+  const blocks = new Map<string, BlockDef>();
+  for (const [name, b] of Object.entries<any>(d.blocks || {})) {
+    if (/^\*(model|paper)_space/i.test(name)) continue;
+    blocks.set(name, { base: pt(b?.position), entities: (b?.entities || []).map(dxfShape) });
+  }
+  // DXF gives an INSERT's rotation in degrees, LibreDWG in radians.
+  return { entities, insUnits: num(d.header?.$INSUNITS, 0), blocks, insertRadians: false };
+};
+
+// Blocks opened up: every INSERT becomes the block's own lines, polylines,
+// texts, leaders, circles and arcs, moved, scaled and turned to where the
+// block is placed (and repeated for an array insert), nested blocks too.
+// An entity on layer "0" inside a block takes the INSERT's layer, as in
+// AutoCAD.
+const MAX_DEPTH = 6;
+const MAX_EXPLODED = 400_000;
+function explode(read: Read): { entities: any[]; inserts: number; opened: number; missing: number } {
+  const out: any[] = [];
+  let inserts = 0;
+  let opened = 0;
+  let missing = 0;
+  type Xf = (p: any) => Pt;
+  const walk = (list: any[], xf: Xf | null, scale: number, rot: number, layer0: string | null, depth: number) => {
+    for (const e of list) {
+      if (out.length >= MAX_EXPLODED) return;
+      const layer = layer0 && (e.layer == null || String(e.layer) === "0") ? layer0 : e.layer;
+      if (e.type === "INSERT") {
+        if (depth === 0) inserts++;
+        const b = read.blocks.get(String(e.name));
+        if (!b || depth >= MAX_DEPTH) {
+          if (!b) missing++;
+          continue;
+        }
+        if (depth === 0) opened++;
+        const sx = num(e.xScale, 1) || 1;
+        const sy = num(e.yScale, 1) || 1;
+        const r0 = num(e.rotation);
+        const r = read.insertRadians ? r0 : (r0 * Math.PI) / 180;
+        const cols = Math.max(1, Math.min(100, num(e.columnCount, 1) || 1));
+        const rows = Math.max(1, Math.min(100, num(e.rowCount, 1) || 1));
+        const ip = pt(e.insertionPoint ?? e.position);
+        for (let ci = 0; ci < cols; ci++) {
+          for (let ri = 0; ri < rows; ri++) {
+            // Array inserts step along the block's own (turned) axes.
+            const ox = ci * num(e.columnSpacing);
+            const oy = ri * num(e.rowSpacing);
+            const local: Xf = (p) => {
+              const x = (num(p?.x) - b.base.x) * sx + ox;
+              const y = (num(p?.y) - b.base.y) * sy + oy;
+              return { x: ip.x + x * Math.cos(r) - y * Math.sin(r), y: ip.y + x * Math.sin(r) + y * Math.cos(r) };
+            };
+            const chain: Xf = xf ? (p) => xf(local(p)) : local;
+            walk(b.entities, chain, scale * Math.abs(sx), rot + r, String(layer ?? "0"), depth + 1);
+          }
+        }
+        continue;
+      }
+      if (!xf) {
+        out.push(e);
+        continue;
+      }
+      const T = (p: any) => (p ? xf(p) : p);
+      switch (e.type) {
+        case "LINE":
+          out.push({ ...e, layer, startPoint: T(e.startPoint), endPoint: T(e.endPoint) });
+          break;
+        case "LWPOLYLINE":
+        case "POLYLINE":
+        case "LEADER":
+          out.push({ ...e, layer, vertices: (e.vertices || []).map(T) });
+          break;
+        case "TEXT":
+        case "MTEXT":
+          out.push({
+            ...e,
+            layer,
+            startPoint: T(e.startPoint),
+            insertionPoint: T(e.insertionPoint),
+            textHeight: e.textHeight != null ? num(e.textHeight) * scale : e.textHeight,
+            height: e.height != null ? num(e.height) * scale : e.height
+          });
+          break;
+        case "CIRCLE":
+          out.push({ ...e, layer, center: T(e.center), radius: num(e.radius) * scale });
+          break;
+        case "ARC": {
+          let a0 = num(e.startAngle);
+          let a1 = num(e.endAngle);
+          if (Math.abs(a0) > 6.4 || Math.abs(a1) > 6.4) {
+            a0 = (a0 * Math.PI) / 180;
+            a1 = (a1 * Math.PI) / 180;
+          }
+          // Kept within 0..2π, so it's never mistaken for degrees below.
+          const wrap = (a: number) => ((a % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+          out.push({ ...e, layer, center: T(e.center), radius: num(e.radius) * scale, startAngle: wrap(a0 + rot), endAngle: wrap(a1 + rot) });
+          break;
+        }
+        default:
+          break;
+      }
+    }
+  };
+  walk(read.entities, null, 1, 0, null, 0);
+  return { entities: out, inserts, opened, missing };
 }
 
 const num = (v: any, d = 0) => (typeof v === "number" && Number.isFinite(v) ? v : typeof v === "bigint" ? Number(v) : d);
@@ -115,17 +324,32 @@ export const cleanText = (s: any) =>
     .trim();
 
 export async function readDrawing(file: Buffer, kind: "dwg" | "dxf" = "dwg"): Promise<RawDrawing> {
-  const { instance, Dwg_File_Type } = await lib();
-  const ab = file.buffer.slice(file.byteOffset, file.byteOffset + file.byteLength);
-  const dwg = instance.dwg_read_data(ab, kind === "dxf" ? Dwg_File_Type.DXF : Dwg_File_Type.DWG);
-  if (!dwg) throw new Error("The drawing could not be read. Save it again from AutoCAD (File → Save As → AutoCAD 2018 DWG, or DXF) and upload that.");
-  const db: any = instance.convert(dwg);
-  try {
-    instance.dwg_free(dwg);
-  } catch {
-    // freed with the module
+  let read: Read;
+  if (kind === "dxf") read = await dxfEntities(file);
+  else {
+    try {
+      read = await dwgEntities(file);
+    } catch (e: any) {
+      if (e?.statusCode === 500) throw e;
+      // Once more with a fresh reader: the one used may have been broken by
+      // an earlier drawing.
+      freshReader();
+      try {
+        read = await dwgEntities(file);
+      } catch (e2: any) {
+        freshReader();
+        if (e2?.statusCode === 500) throw e2;
+        throw new Error(
+          /memory access|out of bounds|unreachable|RuntimeError/i.test(String(e2?.message || e2))
+            ? "The drawing reader couldn't open this DWG (its AutoCAD version or one of its objects isn't supported)"
+            : String(e2?.message || e2)
+        );
+      }
+    }
   }
-  const insUnits = num(db?.header?.INSUNITS, 0);
+  const { insUnits } = read;
+  const exploded = explode(read);
+  const entities = exploded.entities;
   const notes: string[] = [];
   let unit = UNITS[insUnits];
   if (!unit) {
@@ -138,8 +362,7 @@ export async function readDrawing(file: Buffer, kind: "dwg" | "dxf" = "dwg"): Pr
     if (!stats.has(l)) stats.set(l, { name: l, lines: 0, polys: 0, texts: 0, leaders: 0 });
     return stats.get(l)!;
   };
-  let blocks = 0;
-  for (const e of db?.entities || []) {
+  for (const e of entities) {
     const layer = String(e.layer ?? "0");
     switch (e.type) {
       case "LINE":
@@ -191,14 +414,13 @@ export async function readDrawing(file: Buffer, kind: "dwg" | "dxf" = "dwg"): Pr
         }
         break;
       }
-      case "INSERT":
-        blocks++;
-        break;
       default:
         break;
     }
   }
-  if (blocks) notes.push(`${blocks} block insert${blocks === 1 ? "" : "s"} in the drawing were not opened — beams or columns drawn inside blocks are not measured.`);
+  if (exploded.opened) notes.push(`${exploded.opened} block${exploded.opened === 1 ? "" : "s"} in the drawing ${exploded.opened === 1 ? "was" : "were"} opened up and measured with the rest.`);
+  if (exploded.missing) notes.push(`${exploded.missing} block insert${exploded.missing === 1 ? "" : "s"} point${exploded.missing === 1 ? "s" : ""} at a block that isn't in the file (an external reference?) — not measured.`);
+  if (read.warning) notes.push(`The drawing reader skipped some objects it doesn't know (LibreDWG code ${read.warning}). Lines, polylines, texts and leaders were read; check the sheet against the drawing.`);
   raw.layers = [...stats.values()].sort((a, b) => b.lines + b.polys - (a.lines + a.polys));
   return raw;
 }
@@ -269,8 +491,8 @@ export interface Beam {
   widthIn: number;
   length: number;
   tag: string | null;
-  /** Where the tag came from. */
-  tagFrom: "leader" | "run" | null;
+  /** Where the tag came from: a leader, the name written on / beside the beam, or the beam in line. */
+  tagFrom: "leader" | "text" | "run" | null;
 }
 export interface Column {
   id: string;
@@ -331,6 +553,17 @@ export const guessBeamLayers = (layers: RawDrawing["layers"]) =>
   layers.filter((l) => /beam/i.test(l.name) && !DIM_WORDS.test(l.name) && l.lines + l.polys >= 4).map((l) => l.name);
 export const guessColumnLayers = (layers: RawDrawing["layers"]) =>
   layers.filter((l) => /(^|[^a-z])(col|column)/i.test(l.name) && !/(dim|text|txt|grid|hatch|tie|rod)/i.test(l.name) && l.polys >= 1).map((l) => l.name);
+
+// A beam's name alone, written on or beside it (no leader, no size): "B15",
+// "B17A", "CB", "CB1", "GB-2", "FB3". Its size comes from the sheet's beam
+// sizes (set per name) or the default. A lone "B" (a grid bubble) is not one.
+const BARE_TAG_RE = /^([A-Z]{0,2}B)(?:[-\s]?(\d{1,3}[A-Z]?))?$/;
+export const bareTag = (text: string): string | null => {
+  const t = text.trim().toUpperCase();
+  const m = BARE_TAG_RE.exec(t);
+  if (!m || (m[1].length < 2 && !m[2])) return null;
+  return t.replace(/\s+/g, "");
+};
 
 // "FB-3(10"x21")", "B1 (250x450)", "GB-2 ( 12" x 24" )" ...
 const TAG_RE = /([A-Za-z]{1,4}[-\s]?\d+[A-Za-z]?)\s*\(\s*(\d+(?:\.\d+)?)\s*(?:"|''|mm|cm|in)?\s*[xX×*]\s*(\d+(?:\.\d+)?)\s*(?:"|''|mm|cm|in)?\s*\)/;
@@ -482,11 +715,46 @@ export function analyse(raw: RawDrawing, settingsIn: Partial<MsSettings> = {}): 
     const def = parseTag(t.text, ipu);
     if (def) tagTexts.push({ def, at: sc(t.at), text: t.text });
   }
-  const widthSet = new Set<number>([settings.defaultBeamWidthIn, ...tagTexts.map((t) => Math.round(t.def.widthIn * 2) / 2)]);
-  const widths = [...widthSet].filter((w) => w > 0);
-
+  // Names alone, on a beam layer (or a chosen tag layer): placed by where they sit.
+  const bareTexts: { tag: string; at: Pt }[] = [];
+  for (const t of raw.texts) {
+    const onLayer = settings.tagLayers && settings.tagLayers.length ? settings.tagLayers.includes(t.layer) : beamLayers.includes(t.layer);
+    if (!onLayer || parseTag(t.text, ipu)) continue;
+    const tag = bareTag(t.text);
+    if (!tag) continue;
+    // The middle of the text, not its insertion corner.
+    const h = t.height || 0;
+    const len = tag.length * h * 0.7;
+    const at = { x: t.at.x + (Math.cos(t.rotation || 0) * len) / 2 - (Math.sin(t.rotation || 0) * h) / 2, y: t.at.y + (Math.sin(t.rotation || 0) * len) / 2 + (Math.cos(t.rotation || 0) * h) / 2 };
+    bareTexts.push({ tag, at: sc(at) });
+  }
   const mergedH = mergeEdges(H, eps);
   const mergedV = mergeEdges(V, eps);
+  // Beam widths the drawing itself uses: how far apart parallel beam lines
+  // run side by side, for long stretches (a drawing with 12" and 10" beams
+  // and no sizes in its tags would otherwise only pair the default width).
+  const spacing = new Map<number, number>();
+  for (const E of [mergedH, mergedV]) {
+    const list = [...E].sort((p, q) => p.c - q.c);
+    for (let i = 0; i < list.length; i++) {
+      for (let j = i + 1; j < list.length; j++) {
+        const d = list[j].c - list[i].c;
+        if (d > 30.5) break;
+        if (d < 5.5) continue;
+        const ov = Math.min(list[i].b, list[j].b) - Math.max(list[i].a, list[j].a);
+        if (ov < 24) continue;
+        const w = Math.round(d * 2) / 2;
+        spacing.set(w, (spacing.get(w) || 0) + ov);
+      }
+    }
+  }
+  const topSpacing = Math.max(0, ...spacing.values());
+  const found = [...spacing.entries()].filter(([w, len]) => w >= 6 && w <= 24 && len >= 480 && len >= topSpacing * 0.15).map(([w]) => w);
+  const widthSet = new Set<number>([settings.defaultBeamWidthIn, ...tagTexts.map((t) => Math.round(t.def.widthIn * 2) / 2), ...found]);
+  const widths = [...widthSet].filter((w) => w > 0);
+  if (found.some((w) => Math.abs(w - settings.defaultBeamWidthIn) > 0.6)) {
+    notes.push(`Beam widths found in the drawing: ${[...found].sort((a, b) => b - a).map((w) => `${w}"`).join(", ")}.`);
+  }
   const ph = pairEdges(mergedH, widths, "H");
   const pv = pairEdges(mergedV, widths, "V");
   const allSegs = [...ph.segs, ...pv.segs];
@@ -575,6 +843,23 @@ export function analyse(raw: RawDrawing, settingsIn: Partial<MsSettings> = {}): 
       if (target.tag && target.tagFrom === "leader" && target.tag !== t.def.tag) warnings.push(`${target.id} is pointed at by two tags (${target.tag} and ${t.def.tag}); ${t.def.tag} kept.`);
       target.tag = t.def.tag;
       target.tagFrom = "leader";
+    }
+    // names written on / beside a beam: the nearest beam (a leader's tag wins)
+    for (const t of bareTexts.filter((x) => inBox(x.at))) {
+      let target: Beam | null = null;
+      let td = 30;
+      for (const b of beams) {
+        const d = distPtSeg(t.at, b) - b.widthIn / 2;
+        if (d < td) { td = d; target = b; }
+      }
+      if (!target) continue;
+      if (target.tagFrom === "leader") continue;
+      if (target.tag && target.tagFrom === "text" && target.tag !== t.tag) {
+        warnings.push(`${target.id} has two names beside it (${target.tag} and ${t.tag}); ${target.tag} kept.`);
+        continue;
+      }
+      target.tag = t.tag;
+      target.tagFrom = "text";
     }
     // along each beam's run: segments in line with only a column (or a crossing beam's width) between them
     const runKey = (b: Beam) => `${b.dir}:${Math.round(b.c / 2)}`;
@@ -826,13 +1111,20 @@ export function buildSheet(plan: Plan, settingsIn: Partial<MsSettings>, ov: Over
       const list = beams.filter((b) => (b.tag ?? "(no tag)") === tg);
       const sz = sizeOf(tg === "(no tag)" ? null : tg);
       const dNet = s.deductSlabFromBeam ? Math.max(0, sz.d - s.slabThicknessIn) : sz.d;
-      rows.push({ id: `h-${tg}`, desc: tg === "(no tag)" ? `Beams without a tag — taken as ${sz.w}"x${sz.d}"` : `${tg}  (${sz.w}"x${sz.d}")${s.deductSlabFromBeam ? `  — depth below slab ${r2(dNet)}"` : ""}`, nos: 0, l: null, b: null, d: null, qty: 0, unit: "cft", kind: "head" });
+      // No size in the drawing's tag (or none set on the sheet): the width is
+      // what the drawing shows between the beam's two lines; the depth is the
+      // default until a size is set in the Beams tab.
+      const widthOf = (b: Beam) => (sz.known ? sz.w : Math.round(b.widthIn * 2) / 2 || sz.w);
+      const drawnWidths = [...new Set(list.map(widthOf))].sort((p, q) => q - p);
+      const sizeText = sz.known ? `${sz.w}"x${sz.d}"` : `${drawnWidths.map((w) => `${w}"`).join(" / ")} wide as drawn x ${sz.d}" deep (default — set the size in the Beams tab)`;
+      rows.push({ id: `h-${tg}`, desc: tg === "(no tag)" ? `Beams without a tag — ${sizeText}` : `${tg}  (${sizeText})${s.deductSlabFromBeam ? `  — depth below slab ${r2(dNet)}"` : ""}`, nos: 0, l: null, b: null, d: null, qty: 0, unit: "cft", kind: "head" });
       let qc = 0, qs = 0, ql = 0;
       for (const b of list.sort((p, q) => p.id.localeCompare(q.id, undefined, { numeric: true }))) {
         const L = b.length / 12;
-        const cft = L * (sz.w / 12) * (dNet / 12);
-        rows.push({ id: b.id, ref: b.id, desc: `${b.id}  (${b.dir === "H" ? "along X" : "along Y"})`, nos: 1, l: r3(L), b: r3(sz.w / 12), d: r3(dNet / 12), qty: r3(cft), unit: "cft", kind: "item", remark: b.tagFrom === "run" ? "tag taken from the same beam" : b.tag ? undefined : "no tag" });
-        qc += cft; qs += L * (sz.w / 12 + 2 * (dNet / 12)); ql += L;
+        const w = widthOf(b);
+        const cft = L * (w / 12) * (dNet / 12);
+        rows.push({ id: b.id, ref: b.id, desc: `${b.id}  (${b.dir === "H" ? "along X" : "along Y"})`, nos: 1, l: r3(L), b: r3(w / 12), d: r3(dNet / 12), qty: r3(cft), unit: "cft", kind: "item", remark: b.tagFrom === "run" ? "tag taken from the same beam" : b.tag ? undefined : "no tag" });
+        qc += cft; qs += L * (w / 12 + 2 * (dNet / 12)); ql += L;
       }
       rows.push({ id: `s-${tg}`, desc: `Total ${tg}`, nos: list.length, l: r3(ql), b: null, d: null, qty: r3(qc), unit: "cft", kind: "sub", remark: `Shuttering ${r2(qs)} sft` });
       totC += qc; totS += qs; totL += ql;

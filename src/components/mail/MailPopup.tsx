@@ -8,6 +8,7 @@
 // card (CLAUDE.md -> Popup style), a sheet from the bottom on a phone.
 
 import React from 'react';
+import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { useBackButtonClose } from '../../lib/useBackButtonClose';
 import { useKeyboardInset, scrollFocusedFieldIntoView } from '../../lib/useKeyboardInset';
@@ -25,8 +26,11 @@ export const MailPopup: React.FC<{
   const keyboardInset = useKeyboardInset();
   useBackButtonClose(true, onClose);
   const width = size === 'md' ? 'sm:max-w-md' : size === 'xl' ? 'sm:max-w-4xl' : 'sm:max-w-2xl';
-  return (
-    <div className="fixed inset-0 z-[90] liquid-glass-backdrop flex items-end sm:items-center justify-center p-0 sm:p-4" style={keyboardInset ? { paddingBottom: keyboardInset } : undefined} onClick={onClose}>
+  // Drawn at the top of the page (a portal), so a popup opened from inside a
+  // table cell (e.g. HR Letters -> Signatures) doesn't take on the cell's
+  // right-aligned, no-wrap text or get cut by its scrolling.
+  const popup = (
+    <div className="fixed inset-0 z-[90] liquid-glass-backdrop flex items-end sm:items-center justify-center p-0 sm:p-4 text-left whitespace-normal" style={keyboardInset ? { paddingBottom: keyboardInset } : undefined} onClick={onClose}>
       <div className={`w-full ${width} max-h-[92dvh] sm:max-h-[90vh] flex`} onClick={(e) => e.stopPropagation()}>
         <div className="liquid-glass liquid-glass-in rounded-t-[32px] sm:rounded-[32px] w-full flex flex-col overflow-hidden">
           <div className="flex items-center justify-between gap-2 px-5 pt-4 pb-3">
@@ -51,6 +55,7 @@ export const MailPopup: React.FC<{
       </div>
     </div>
   );
+  return typeof document !== 'undefined' ? createPortal(popup, document.body) : popup;
 };
 
 export const inputCls = 'w-full text-sm px-3 py-2.5 bg-white/80 border border-slate-200 rounded-xl focus:ring-2 focus:ring-sky-200 focus:outline-none';

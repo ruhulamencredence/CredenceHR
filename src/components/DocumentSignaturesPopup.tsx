@@ -9,12 +9,100 @@
 // download the signed PDF and share its verification link.
 
 import React, { useEffect, useState } from 'react';
-import { PenLine, ArrowUp, ArrowDown, X, Plus, Send, Loader2, Download, ShieldCheck, Copy, Check, ExternalLink, CheckCircle2, Clock, XCircle, History, ShieldAlert, BadgeCheck } from 'lucide-react';
-import { MailPopup as Popup, inputCls, labelCls, ghostBtn } from './mail/MailPopup';
+import { PenLine, ArrowUp, ArrowDown, X, Send, Loader2, Download, ShieldCheck, Copy, Check, ExternalLink, CheckCircle2, Clock, XCircle, History, ShieldAlert, BadgeCheck, Search } from 'lucide-react';
+import { MailPopup as Popup, inputCls, ghostBtn } from './mail/MailPopup';
 import { confirmDialog } from '../lib/confirmDialog';
 import { esignFetch, openProtectedFile, dhakaTime, verifyLink, STATUS_LABEL, STATUS_CLS, type ESignDoc } from '../lib/esign';
 
-interface Person { id: number; name: string; can_sign: boolean }
+interface Person { id: number; name: string; can_sign: boolean; employee_id?: string | null; designation?: string | null; department?: string | null; email?: string | null }
+
+// Add a signer: type a name, Employee ID, designation, department or email;
+// click (or Enter) adds them. People with Documents to Sign off are listed but
+// can't be picked.
+const SignerSearch: React.FC<{ people: Person[]; taken: Set<number>; full: boolean; onPick: (id: number) => void }> = ({ people, taken, full, onPick }) => {
+  const [q, setQ] = useState('');
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(0);
+  const shown = React.useMemo(() => {
+    const t = q.trim().toLowerCase();
+    return people
+      .filter((p) => !taken.has(p.id))
+      .filter((p) => !t || `${p.name} ${p.employee_id || ''} ${p.designation || ''} ${p.department || ''} ${p.email || ''}`.toLowerCase().includes(t))
+      .sort((a, b) => Number(b.can_sign) - Number(a.can_sign))
+      .slice(0, 60);
+  }, [people, taken, q]);
+  useEffect(() => setActive(0), [q]);
+  const pick = (p: Person | undefined) => {
+    if (!p || !p.can_sign || full) return;
+    onPick(p.id);
+    setQ('');
+  };
+  return (
+    <div>
+      <div className="relative">
+        <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+        <input
+          className={`${inputCls} py-2 pl-9`}
+          value={q}
+          disabled={full}
+          placeholder={full ? 'At most 10 signers' : 'Add a signer — name, Employee ID, designation or department'}
+          onChange={(e) => {
+            setQ(e.target.value);
+            setOpen(true);
+          }}
+          onFocus={() => setOpen(true)}
+          onBlur={() => setTimeout(() => setOpen(false), 150)}
+          onKeyDown={(e) => {
+            if (e.key === 'ArrowDown') {
+              e.preventDefault();
+              setOpen(true);
+              setActive((a) => Math.min(a + 1, shown.length - 1));
+            } else if (e.key === 'ArrowUp') {
+              e.preventDefault();
+              setActive((a) => Math.max(a - 1, 0));
+            } else if (e.key === 'Enter') {
+              e.preventDefault();
+              pick(shown[active]);
+            } else if (e.key === 'Escape') setOpen(false);
+          }}
+          aria-label="Add a signer"
+        />
+      </div>
+      {open && !full && (
+        <div className="mt-1 rounded-2xl bg-white shadow-lg ring-1 ring-black/5 max-h-60 overflow-y-auto" onMouseDown={(e) => e.preventDefault()}>
+          {!shown.length ? (
+            <div className="px-3 py-3 text-xs text-slate-500">{q ? `No one matches “${q}”.` : 'Everyone is added already.'}</div>
+          ) : (
+            shown.map((p, i) => (
+              <button
+                key={p.id}
+                type="button"
+                disabled={!p.can_sign}
+                onClick={() => pick(p)}
+                onMouseEnter={() => setActive(i)}
+                className={`w-full text-left px-3 py-2 flex items-start gap-2 disabled:cursor-not-allowed ${i === active && p.can_sign ? 'bg-blue-50' : ''} ${p.can_sign ? '' : 'opacity-60'}`}
+              >
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-baseline gap-2 min-w-0">
+                    <span className="text-sm font-medium text-slate-800 truncate">{p.name}</span>
+                    {p.employee_id && <span className="text-[10px] font-semibold px-1.5 py-px rounded bg-slate-100 text-slate-600 shrink-0">ID {p.employee_id}</span>}
+                  </span>
+                  {(p.designation || p.department) && (
+                    <span className="block text-xs text-slate-600 truncate">
+                      {[p.designation, p.department].filter(Boolean).join(' · ')}
+                    </span>
+                  )}
+                  {p.email && <span className="block text-[11px] text-slate-500 truncate">{p.email}</span>}
+                </span>
+                {!p.can_sign && <span className="text-[10px] text-rose-600 shrink-0 mt-0.5">Documents to Sign off</span>}
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
 const sendBtn = 'liquid-glass-button rounded-full px-5 py-2 text-sm font-semibold text-white bg-blue-600 disabled:opacity-60 inline-flex items-center gap-2';
 
 export const DocumentSignaturesPopup: React.FC<{
@@ -34,7 +122,6 @@ export const DocumentSignaturesPopup: React.FC<{
     initialSigners?.length ? initialSigners : [{ user_id: ownerId, label: 'Employee' }]
   );
   const [placement, setPlacement] = useState<'page' | 'last_page'>('page');
-  const [pick, setPick] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
@@ -155,92 +242,111 @@ export const DocumentSignaturesPopup: React.FC<{
                 </p>
               )}
               <div>
-                <div className={labelCls}>Signers, in order</div>
+                <div className="text-xs font-semibold text-slate-700">1. Who signs, in this order</div>
+                <p className="text-[11px] text-slate-500 mb-1.5">
+                  Each person gets it in Self Service → Documents to Sign when it is their turn (signer 2 after signer 1 has signed, and so on).
+                </p>
                 <ul className="liquid-glass-inset rounded-2xl divide-y divide-white/70">
-                  {list.map((s, i) => (
-                    <li key={s.user_id} className="flex items-center gap-2 px-3 py-2">
-                      <span className="w-5 text-sm font-bold text-blue-600">{i + 1}</span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block text-sm font-semibold text-slate-800 truncate">{nameOf(s.user_id)}</span>
-                        {!canSignOf(s.user_id) && <span className="block text-[10px] text-rose-600">Documents to Sign is off for them — turn it on in Module Access.</span>}
-                        <input
-                        className={`${inputCls} py-1 mt-1 text-xs`}
-                        value={s.label}
-                        placeholder="Role (e.g. HR Manager)"
-                        onChange={(e) => setList((l) => l.map((x, k) => (k === i ? { ...x, label: e.target.value } : x)))}
-                        aria-label={`Role of ${nameOf(s.user_id)}`}
-                        />
-                        {doc?.has_sign_box && (
-                          <button
-                            type="button"
-                            onClick={() => setList((l) => l.map((x, k) => ({ ...x, on_line: k === i ? !x.on_line : false })))}
-                            aria-pressed={!!s.on_line}
-                            className={`mt-1 text-[10px] font-semibold rounded-full px-2 py-0.5 border inline-flex items-center gap-1 ${s.on_line ? 'bg-blue-600 text-white border-blue-600' : 'bg-white/70 text-slate-500 border-slate-200'}`}
-                          >
-                            <PenLine className="w-3 h-3" /> {s.on_line ? "Signs on the letter's signature line" : "Sign on the letter's signature line"}
-                          </button>
+                  {list.map((s, i) => {
+                    const p = people.find((x) => x.id === s.user_id);
+                    const sub = [p?.employee_id ? `ID ${p.employee_id}` : '', p?.designation, p?.department].filter(Boolean).join(' · ');
+                    return (
+                      <li key={s.user_id} className="px-3 py-2.5 space-y-1.5">
+                        <div className="flex items-start gap-2">
+                          <span className="w-6 h-6 shrink-0 rounded-full bg-blue-600 text-white text-xs font-bold flex items-center justify-center mt-0.5">{i + 1}</span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-sm font-semibold text-slate-800 truncate">{nameOf(s.user_id)}</span>
+                            {sub && <span className="block text-[11px] text-slate-500 truncate">{sub}</span>}
+                          </span>
+                          {canOthers && (
+                            <span className="flex items-center shrink-0">
+                              <button type="button" onClick={() => move(i, -1)} disabled={i === 0} className="p-1 rounded-lg hover:bg-black/5 disabled:opacity-30" aria-label="Sign earlier" title="Sign earlier (move up)">
+                                <ArrowUp className="w-3.5 h-3.5" />
+                              </button>
+                              <button type="button" onClick={() => move(i, 1)} disabled={i === list.length - 1} className="p-1 rounded-lg hover:bg-black/5 disabled:opacity-30" aria-label="Sign later" title="Sign later (move down)">
+                                <ArrowDown className="w-3.5 h-3.5" />
+                              </button>
+                              <button type="button" onClick={() => setList((l) => l.filter((_, k) => k !== i))} className="p-1 rounded-lg hover:bg-rose-50 text-rose-600" aria-label={`Remove ${nameOf(s.user_id)}`} title="Remove this signer">
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            </span>
+                          )}
+                        </div>
+                        {!canSignOf(s.user_id) && (
+                          <p className="text-[11px] text-rose-600 bg-rose-50 rounded-lg px-2 py-1">
+                            Can't sign yet: "Documents to Sign" is off for {nameOf(s.user_id)}. Turn it on in Admin Panel → Users → Module Access, then send.
+                          </p>
                         )}
-                      </span>
-                      {canOthers && (
-                        <>
-                          <button type="button" onClick={() => move(i, -1)} disabled={i === 0} className="p-1 rounded-lg hover:bg-black/5 disabled:opacity-30" aria-label="Move up">
-                            <ArrowUp className="w-3.5 h-3.5" />
-                          </button>
-                          <button type="button" onClick={() => move(i, 1)} disabled={i === list.length - 1} className="p-1 rounded-lg hover:bg-black/5 disabled:opacity-30" aria-label="Move down">
-                            <ArrowDown className="w-3.5 h-3.5" />
-                          </button>
-                          <button type="button" onClick={() => setList((l) => l.filter((_, k) => k !== i))} className="p-1 rounded-lg hover:bg-rose-50 text-rose-600" aria-label={`Remove ${nameOf(s.user_id)}`}>
-                            <X className="w-3.5 h-3.5" />
-                          </button>
-                        </>
-                      )}
-                    </li>
-                  ))}
+                        <label className="block">
+                          <span className="block text-[10px] font-medium text-slate-500 mb-0.5">Signs as (printed under the signature)</span>
+                          <input
+                            className={`${inputCls} py-1.5 text-xs`}
+                            value={s.label}
+                            placeholder="e.g. Employee, HR Manager, Managing Director"
+                            onChange={(e) => setList((l) => l.map((x, k) => (k === i ? { ...x, label: e.target.value } : x)))}
+                            aria-label={`Role of ${nameOf(s.user_id)}`}
+                          />
+                        </label>
+                        {doc?.has_sign_box && (
+                          <label className="flex items-start gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              className="mt-0.5"
+                              checked={!!s.on_line}
+                              onChange={() => setList((l) => l.map((x, k) => ({ ...x, on_line: k === i ? !x.on_line : false })))}
+                            />
+                            <span className="text-[11px] text-slate-600">
+                              <span className="font-semibold text-slate-700">Sign on the letter's own signature line</span> — their signature goes on the letter itself (above the
+                              signatory's name), like a signed paper letter. Only one signer can. The others sign on the certificate page.
+                            </span>
+                          </label>
+                        )}
+                      </li>
+                    );
+                  })}
                 </ul>
               </div>
-              {canOthers ? (
-                <div className="flex gap-2">
-                  <select className={`${inputCls} py-2`} value={pick} onChange={(e) => setPick(e.target.value)} aria-label="Add a signer">
-                    <option value="">Add a signer…</option>
-                    {people
-                      .filter((p) => !list.some((s) => s.user_id === p.id))
-                      .map((p) => (
-                        <option key={p.id} value={p.id} disabled={!p.can_sign}>
-                          {p.name}
-                          {p.can_sign ? '' : ' (Documents to Sign off)'}
-                        </option>
-                      ))}
-                  </select>
-                  <button
-                    type="button"
-                    disabled={!pick || list.length >= 10}
-                    onClick={() => {
-                      setList((l) => [...l, { user_id: Number(pick), label: '' }]);
-                      setPick('');
-                    }}
-                    className="liquid-glass-chip rounded-full px-3 text-xs font-semibold text-slate-700 inline-flex items-center gap-1 disabled:opacity-40"
-                  >
-                    <Plus className="w-3.5 h-3.5" /> Add
-                  </button>
-                </div>
-              ) : (
-                <p className="text-[11px] text-slate-500">Adding other HR / management signers needs the "Request signatures from others" permission (the employee and the letter signatory set in HR Operations → Settings don't).</p>
-              )}
               <div>
-                <div className={labelCls}>Where the signatures go</div>
-                <div className="flex gap-2">
+                <div className="text-xs font-semibold text-slate-700">2. Add another signer</div>
+                {canOthers ? (
+                  <>
+                    <p className="text-[11px] text-slate-500 mb-1.5">Search by name, Employee ID, designation or department; the new person signs after the ones above.</p>
+                    <SignerSearch
+                      people={people}
+                      taken={new Set(list.map((s) => s.user_id))}
+                      full={list.length >= 10}
+                      onPick={(id) => setList((l) => [...l, { user_id: id, label: people.find((p) => p.id === id)?.designation || '' }])}
+                    />
+                  </>
+                ) : (
+                  <p className="text-[11px] text-slate-500">Adding other HR / management signers needs the "Request signatures from others" permission (the employee and the letter signatory set in HR Operations → Settings don't).</p>
+                )}
+              </div>
+              <div>
+                <div className="text-xs font-semibold text-slate-700">3. Where the signatures are printed on the PDF</div>
+                <div className="mt-1.5 grid sm:grid-cols-2 gap-2">
                   {(
                     [
-                      ['page', 'Signature Certificate page at the end'],
-                      ['last_page', 'Also along the bottom of the last page']
+                      ['page', 'Certificate page at the end', 'A page added after the document lists every signature, name, role and time, with a QR code to verify it.'],
+                      ['last_page', 'Also at the bottom of the last page', 'Same certificate page, and the signatures are also printed along the foot of the document\'s last page.']
                     ] as const
-                  ).map(([k, label]) => (
-                    <button key={k} type="button" onClick={() => setPlacement(k)} className={`flex-1 text-xs font-semibold rounded-2xl px-3 py-2 border text-left ${placement === k ? 'bg-slate-900 text-white border-slate-900' : 'bg-white/70 text-slate-600 border-slate-200'}`}>
-                      {label}
+                  ).map(([k, label, help]) => (
+                    <button
+                      key={k}
+                      type="button"
+                      onClick={() => setPlacement(k)}
+                      aria-pressed={placement === k}
+                      className={`text-left rounded-2xl px-3 py-2 border ${placement === k ? 'bg-slate-900 text-white border-slate-900' : 'bg-white/70 text-slate-700 border-slate-200'}`}
+                    >
+                      <span className="block text-xs font-semibold">{label}</span>
+                      <span className={`block text-[10px] mt-0.5 ${placement === k ? 'text-white/75' : 'text-slate-500'}`}>{help}</span>
                     </button>
                   ))}
                 </div>
               </div>
+              {blocked.length > 0 && (
+                <p className="text-[11px] text-rose-600">"Send for signing" is off until every signer can sign (see the red note above).</p>
+              )}
             </>
           ) : (
             doc && (

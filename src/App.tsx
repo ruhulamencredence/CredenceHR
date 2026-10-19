@@ -29,6 +29,8 @@ const AlertsPage = lazy(retryImport(() => import('./components/AlertsPage').then
 const CredenceMail = lazy(retryImport(() => import('./components/mail/CredenceMail').then(m => ({ default: m.CredenceMail }))));
 // My Duty Roster (Self Service, users.can_view_roster).
 const MyRoster = lazy(retryImport(() => import('./components/MyRoster').then(m => ({ default: m.MyRoster }))));
+// PEPM Operation -> Material Receive (users.can_receive_material, MprDispatchRoutes.ts).
+const MaterialReceive = lazy(retryImport(() => import('./components/MaterialReceive').then(m => ({ default: m.MaterialReceive }))));
 // Documents to Sign (Self Service, users.can_sign_documents).
 const MySignatures = lazy(retryImport(() => import('./components/MySignatures').then(m => ({ default: m.MySignatures }))));
 // My Payslip (Self Service, users.can_view_payslip).
@@ -128,7 +130,7 @@ export default function App() {
   // this account was actually looking at, instead of resetting to the
   // Admin/User Panel default every time.
   const selfServiceViewStorageKey = user ? `mpr_self_service_view_${user.id}` : null;
-  const [selfServiceView, setSelfServiceView] = useState<'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | 'credenceMail' | 'myRoster' | 'mySignatures' | 'myPayslips' | null>(() => {
+  const [selfServiceView, setSelfServiceView] = useState<'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | 'credenceMail' | 'myRoster' | 'mySignatures' | 'myPayslips' | 'materialReceive' | null>(() => {
     try {
       // A link straight to an Admin Panel page (/admin/departments) opens that page.
       if (openedOnAdminUrl()) return null;
@@ -147,6 +149,7 @@ export default function App() {
       if (saved === 'myRoster' && canOpenSelfView('myRoster', user)) return 'myRoster';
       if (saved === 'mySignatures' && canOpenSelfView('mySignatures', user)) return 'mySignatures';
       if (saved === 'myPayslips' && canOpenSelfView('myPayslips', user)) return 'myPayslips';
+      if (saved === 'materialReceive' && canOpenSelfView('materialReceive', user)) return 'materialReceive';
     } catch {
       // ignore — falls through to the "no Self Service page open" default below
     }
@@ -894,7 +897,7 @@ export default function App() {
     const onOpen = (e: Event) => {
       const target = (e as CustomEvent).detail;
       // Credence Mail only for an account that has it (a mail alert).
-      if (target !== 'teamAttendance' && !((target === 'credenceMail' || target === 'myRoster' || target === 'mySignatures' || target === 'myPayslips') && canOpenSelfView(target, user))) return;
+      if (target !== 'teamAttendance' && !((target === 'credenceMail' || target === 'myRoster' || target === 'mySignatures' || target === 'myPayslips' || target === 'materialReceive') && canOpenSelfView(target, user))) return;
       setShowProfilePage(false);
       setShowChat(false);
       setShowAlertsPage(false);
@@ -1164,7 +1167,7 @@ export default function App() {
       setViewMode('admin');
       setAdminNavRequest({ target, ts: Date.now() });
     },
-    onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | 'credenceMail' | 'myRoster' | 'mySignatures' | 'myPayslips') => {
+    onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | 'credenceMail' | 'myRoster' | 'mySignatures' | 'myPayslips' | 'materialReceive') => {
       setShowProfilePage(false);
           setShowChat(false);
           setShowAlertsPage(false);
@@ -1524,6 +1527,8 @@ export default function App() {
           <MyRoster token={token} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'mySignatures' && canOpenSelfView('mySignatures', user) ? (
           <MySignatures token={token} user={user} onBack={() => setSelfServiceView(null)} />
+        ) : selfServiceView === 'materialReceive' && canOpenSelfView('materialReceive', user) ? (
+          <div className="w-full px-4 sm:px-6 lg:px-8 pt-3 pb-28 md:pb-8"><MaterialReceive token={token} /></div>
         ) : selfServiceView === 'myPayslips' && canOpenSelfView('myPayslips', user) ? (
           <MyPayslips token={token} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'myTargets' ? (
@@ -1564,13 +1569,6 @@ export default function App() {
             claimsNavRequest={claimsNavRequest}
             adminNavRequest={adminNavRequest}
             onActiveTabChange={setAdminActiveTab}
-            // AdminPanel's own mobile drawer (navigating BETWEEN admin tabs
-            // while already inside the Admin Panel) is now superseded by the
-            // single GlobalSidebar above — same tabs are reachable from
-            // there, so this drawer is permanently closed rather than
-            // wired to a second mobile hamburger.
-            mobileSidebarOpen={false}
-            onCloseMobileSidebar={() => {}}
           />
         ) : (
           <>

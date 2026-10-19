@@ -6,7 +6,9 @@
 // One mail's HTML, made safe: DOMPurify removes scripts, forms, frames and
 // event handlers; it is then shown in a sandboxed iframe (no scripts at all,
 // and the mail's own styles can't touch the app). Pictures from the internet
-// stay off until "Show pictures" — they tell the sender the mail was opened.
+// stay off until "Show pictures" — they tell the sender the mail was opened —
+// except in mail from oneself, from our own domains, or from a sender the
+// person chose "Always show pictures" for (autoShowImages).
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import DOMPurify from 'dompurify';
@@ -78,8 +80,14 @@ const FRAME_CSS = `
   a { color: #2563eb; }
 `;
 
-export const MailBody: React.FC<{ html: string; className?: string }> = ({ html, className }) => {
-  const [showImages, setShowImages] = useState(false);
+export const MailBody: React.FC<{ html: string; className?: string; autoShowImages?: boolean; sender?: string; onAlwaysShow?: () => void }> = ({
+  html,
+  className,
+  autoShowImages,
+  sender,
+  onAlwaysShow
+}) => {
+  const [showImages, setShowImages] = useState(!!autoShowImages);
   const frameRef = useRef<HTMLIFrameElement>(null);
   const [height, setHeight] = useState(60);
   const { html: clean, blocked } = useMemo(() => sanitizeMailHtml(html, showImages), [html, showImages]);
@@ -88,7 +96,7 @@ export const MailBody: React.FC<{ html: string; className?: string }> = ({ html,
     [clean]
   );
 
-  useEffect(() => setShowImages(false), [html]);
+  useEffect(() => setShowImages(!!autoShowImages), [html, autoShowImages]);
 
   useEffect(() => {
     const frame = frameRef.current;
@@ -124,9 +132,24 @@ export const MailBody: React.FC<{ html: string; className?: string }> = ({ html,
           <span className="flex items-center gap-1.5">
             <ImageOff className="w-3.5 h-3.5 shrink-0" /> Pictures in this mail are hidden.
           </span>
-          <button type="button" onClick={() => setShowImages(true)} className="font-semibold underline underline-offset-2 shrink-0">
-            Show pictures
-          </button>
+          <span className="flex items-center gap-3 shrink-0">
+            <button type="button" onClick={() => setShowImages(true)} className="font-semibold underline underline-offset-2">
+              Show pictures
+            </button>
+            {onAlwaysShow && sender && (
+              <button
+                type="button"
+                onClick={() => {
+                  setShowImages(true);
+                  onAlwaysShow();
+                }}
+                className="font-semibold underline underline-offset-2 hidden sm:inline"
+                title={`Always show pictures in mail from ${sender}`}
+              >
+                Always from this sender
+              </button>
+            )}
+          </span>
         </div>
       )}
       <iframe

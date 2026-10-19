@@ -776,10 +776,26 @@ export function registerESignRoutes(app: Express, deps: RegisterESignRoutesDeps)
   // People who can be asked to sign (Documents to Sign turned on).
   app.get("/api/esign/signers", ...adminGate, async (_req: any, res) => {
     try {
-      const rows: any[] = (await queryDB("SELECT id, name, role, can_sign_documents FROM users")) || [];
+      // With the Employee's ID, designation and department, so a signer can
+      // be found by any of them.
+      const rows: any[] =
+        (await queryDB(
+          `SELECT u.id, u.name, u.email, u.role, u.can_sign_documents, e.employee_id AS employee_code, e.designation, e.department, e.email AS work_email
+           FROM users u LEFT JOIN all_employees e ON e.user_id = u.id`
+        )) || [];
+      const byId = new Map<number, any>();
+      for (const u of rows) if (!byId.has(Number(u.id)) || (!byId.get(Number(u.id)).employee_code && u.employee_code)) byId.set(Number(u.id), u);
       res.json(
-        rows
-          .map((u) => ({ id: Number(u.id), name: u.name, can_sign: u.role === "superadmin" || Number(u.can_sign_documents) === 1 }))
+        [...byId.values()]
+          .map((u) => ({
+            id: Number(u.id),
+            name: u.name,
+            can_sign: u.role === "superadmin" || Number(u.can_sign_documents) === 1,
+            employee_id: u.employee_code || null,
+            designation: u.designation || null,
+            department: u.department || null,
+            email: String(u.work_email || u.email || "").trim().toLowerCase() || null
+          }))
           .sort((a, b) => String(a.name).localeCompare(String(b.name)))
       );
     } catch (err) {

@@ -13,7 +13,7 @@ import { Capacitor } from '@capacitor/core';
 import {
   ArrowLeft, Mail, Inbox, Star, Send, FileText, Clock, Archive, ShieldAlert, Trash2, AlertCircle, Pencil, RefreshCw, Search, X, Menu, Paperclip,
   CheckSquare, Square, MailOpen, Plus, Loader2, Server, ChevronDown, Bookmark, LogOut, Check,
-  Users, ListChecks, Filter, BarChart3, Settings, Tag, Eye
+  Users, UsersRound, ListChecks, Filter, BarChart3, Settings, Tag, Eye, Copy
 } from 'lucide-react';
 import { ModulePath } from '../ModulePath';
 import { confirmDialog } from '../../lib/confirmDialog';
@@ -23,7 +23,7 @@ import { useKeyboardInset, scrollFocusedFieldIntoView } from '../../lib/useKeybo
 import type { User } from '../../types';
 import {
   MAIL_CATEGORIES, MAIL_FOLDERS, MailAccount, MailContact, MailCounts, MailFilter, MailList, MailMessage, MailSettings, MailStatus, MailTemplate, SYSTEM_LABELS, mailFetch,
-  setMailTimeZone, setMailViewAs, shortMailDate, fullMailDate
+  forgetMailGroups, setMailPhotoToken, setMailTimeZone, setMailViewAs, shortMailDate, fullMailDate
 } from '../../lib/mailApi';
 import { MailReader, ReaderAction, MailAvatar } from './MailReader';
 import { MailCompose, ComposeInit } from './MailCompose';
@@ -31,6 +31,7 @@ import { sanitizeMailHtml } from './MailBody';
 import { MailSettingsPopup } from './MailSettings';
 import { MailRulesPopup, MailTemplatesPopup, MailContactsPopup, MailPlannerPopup, FromMail } from './MailTools';
 import { MailAnalyticsPopup } from './MailAnalytics';
+import { MyGroupsPopup } from './MailGroups';
 
 type Tool =
   | { kind: 'settings'; tab?: string }
@@ -38,7 +39,8 @@ type Tool =
   | { kind: 'templates' }
   | { kind: 'contacts'; prefill?: Partial<MailContact> }
   | { kind: 'planner'; tab: 'tasks' | 'calendar'; fromMail?: FromMail }
-  | { kind: 'analytics' };
+  | { kind: 'analytics' }
+  | { kind: 'groups' };
 
 const FOLDER_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   Inbox, Starred: Star, Important: Bookmark, Sent: Send, Drafts: FileText, Scheduled: Clock, Archive, Spam: ShieldAlert, Trash: Trash2
@@ -202,6 +204,196 @@ const ConnectMailbox: React.FC<{ token: string; userName: string; onConnected: (
   );
 };
 
+// Header -> Email Directory search (GET /api/mail/directory/browse, only with
+// users.can_view_mail_directory): every employee with an email, searchable
+// by name, email, ID, designation or department. Results drop down under
+// the box; the list is fetched the first time the box is used. Phone: the
+// same search in its own sheet (inline — the list sits under the box).
+interface DirectoryEntry {
+  name: string;
+  email: string;
+  employeeId: string;
+  designation: string;
+  department: string;
+  inCredenceMail: boolean;
+  ourDomain: boolean;
+}
+const DIRECTORY_SHOW = 200;
+const DirectorySearch: React.FC<{ token: string; onWrite: (email: string) => void; inline?: boolean }> = ({ token, onWrite, inline }) => {
+  const [people, setPeople] = useState<DirectoryEntry[] | null>(null);
+  const [error, setError] = useState('');
+  const [q, setQ] = useState('');
+  const [dept, setDept] = useState('');
+  const [open, setOpen] = useState(!!inline);
+  const [copied, setCopied] = useState('');
+  const boxRef = useRef<HTMLDivElement>(null);
+  const loading = useRef(false);
+  const load = () => {
+    if (people || loading.current) return;
+    loading.current = true;
+    mailFetch<DirectoryEntry[]>(token, '/directory/browse')
+      .then(setPeople)
+      .catch((e) => {
+        setError(e.message);
+        setPeople([]);
+      })
+      .finally(() => {
+        loading.current = false;
+      });
+  };
+  useEffect(() => {
+    if (inline) load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inline]);
+  // Click / tap outside closes the list.
+  useEffect(() => {
+    if (!open || inline) return;
+    const away = (e: PointerEvent) => {
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('pointerdown', away);
+    return () => document.removeEventListener('pointerdown', away);
+  }, [open]);
+  useBackButtonClose(open && !inline, () => setOpen(false));
+  const departments = useMemo(() => [...new Set((people || []).map((p) => p.department).filter(Boolean))].sort(), [people]);
+  const found = useMemo(() => {
+    const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    return (people || []).filter((p) => {
+      if (dept && p.department !== dept) return false;
+      const hay = `${p.name} ${p.email} ${p.employeeId} ${p.designation} ${p.department}`.toLowerCase();
+      return words.every((w) => hay.includes(w));
+    });
+  }, [people, q, dept]);
+  const copy = async (email: string) => {
+    try {
+      await navigator.clipboard.writeText(email);
+      setCopied(email);
+      setTimeout(() => setCopied((c) => (c === email ? '' : c)), 1500);
+    } catch {
+      /* clipboard blocked — the address is on screen anyway */
+    }
+  };
+  return (
+    <div ref={boxRef} className="relative w-full">
+      <div className="relative">
+        <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+        <input
+          value={q}
+          onChange={(e) => {
+            setQ(e.target.value);
+            setOpen(true);
+          }}
+          onFocus={() => {
+            load();
+            setOpen(true);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape' && !inline) {
+              setOpen(false);
+              (e.target as HTMLInputElement).blur();
+            }
+          }}
+          placeholder="Search Email Directory — name, email, ID, designation…"
+          aria-label="Search the Email Directory"
+          autoFocus={inline}
+          className="w-full text-sm pl-9 pr-8 py-1.5 rounded-xl bg-white/80 border border-slate-200 focus:bg-white focus:ring-2 focus:ring-sky-200 focus:outline-none"
+        />
+        {q && (
+          <button type="button" onClick={() => setQ('')} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-full text-slate-400 hover:text-slate-700" aria-label="Clear search">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        )}
+      </div>
+      {open && (
+        <div className={inline ? 'mt-3' : 'absolute left-0 right-0 top-full mt-2 z-[60]'}>
+          <div className={inline ? '' : 'liquid-glass liquid-glass-in rounded-[24px] p-3 shadow-xl'}>
+            <div className="flex items-center justify-between gap-2 mb-2 px-1">
+              <span className="text-[11px] text-slate-500">
+                {people === null
+                  ? 'Loading the Email Directory…'
+                  : `${found.length} of ${people.length} ${people.length === 1 ? 'person' : 'people'}${found.length > DIRECTORY_SHOW ? ` — first ${DIRECTORY_SHOW}, type to narrow` : ''}`}
+              </span>
+              {departments.length > 1 && (
+                <select value={dept} onChange={(e) => setDept(e.target.value)} aria-label="Department" className="text-xs px-2 py-1 rounded-lg bg-white/80 border border-slate-200 max-w-[11rem]">
+                  <option value="">All departments</option>
+                  {departments.map((d) => <option key={d} value={d}>{d}</option>)}
+                </select>
+              )}
+            </div>
+            {error && <div className="mb-2 text-xs px-3 py-2 rounded-xl bg-rose-50 text-rose-700">{error}</div>}
+            {people === null ? (
+              <div className="py-8 flex justify-center"><Loader2 className="w-5 h-5 animate-spin text-slate-400" /></div>
+            ) : (
+              <div className="liquid-glass-inset rounded-[18px] divide-y divide-slate-200/60 max-h-[60vh] overflow-y-auto">
+                {found.length === 0 && <div className="px-4 py-6 text-center text-sm text-slate-500">No one matches.</div>}
+                {found.slice(0, DIRECTORY_SHOW).map((p) => (
+                  <div key={p.email} className="flex items-center gap-3 px-3 py-2.5">
+                    <MailAvatar name={p.name} email={p.email} size="sm" />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className="text-sm font-medium text-slate-800 truncate">{p.name}</span>
+                        {p.employeeId && <span className="text-[10px] font-semibold px-1.5 py-px rounded bg-slate-100 text-slate-600 shrink-0">ID {p.employeeId}</span>}
+                      </div>
+                      {(p.designation || p.department) && (
+                        <div className="text-[11px] text-slate-500 truncate">{[p.designation, p.department].filter(Boolean).join(' · ')}</div>
+                      )}
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className="text-[11px] text-sky-700 truncate">{p.email}</span>
+                        {p.ourDomain && (
+                          <span
+                            className="text-[9px] font-semibold px-1.5 py-px rounded-full bg-emerald-50 text-emerald-700 shrink-0"
+                            title={p.inCredenceMail ? 'Has a mailbox in Credence Mail — mail to them stays inside CredenceHR' : 'Our domain — mail to them stays inside CredenceHR'}
+                          >
+                            Internal
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <button type="button" onClick={() => void copy(p.email)} className="p-1.5 rounded-full text-slate-400 hover:text-slate-800 hover:bg-black/5" aria-label={`Copy ${p.email}`} title="Copy address">
+                      {copied === p.email ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!inline) setOpen(false);
+                        onWrite(p.email);
+                      }}
+                      className="p-1.5 rounded-full text-sky-600 hover:bg-sky-50"
+                      aria-label={`Write to ${p.name}`}
+                      title="Write mail"
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Phone: the Email Directory search in a sheet of its own.
+const DirectorySheet: React.FC<{ token: string; onWrite: (email: string) => void; onClose: () => void }> = ({ token, onWrite, onClose }) => {
+  const keyboardInset = useKeyboardInset();
+  useBackButtonClose(true, onClose);
+  return (
+    <div className="fixed inset-0 z-[90] liquid-glass-backdrop flex items-end sm:items-center justify-center p-3 sm:p-4" style={keyboardInset ? { paddingBottom: keyboardInset + 8 } : undefined} onClick={onClose}>
+      <div className="w-full max-w-xl max-h-[92vh] flex" onClick={(e) => e.stopPropagation()}>
+        <div className="liquid-glass liquid-glass-in rounded-[32px] w-full p-5 overflow-y-auto">
+          <div className="flex items-center justify-between gap-2 mb-4">
+            <h3 className="text-base font-bold text-slate-900">Email Directory</h3>
+            <button type="button" onClick={onClose} className="liquid-glass-chip p-1.5 rounded-full text-slate-600 hover:text-slate-900" aria-label="Close"><X className="w-4 h-4" /></button>
+          </div>
+          <DirectorySearch token={token} onWrite={onWrite} inline />
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // Mailboxes popup: switch default, remove, add another.
 const MailboxesPopup: React.FC<{ token: string; userName: string; accounts: MailAccount[]; onChanged: () => void; onClose: () => void }> = ({ token, userName, accounts, onChanged, onClose }) => {
   const [adding, setAdding] = useState(false);
@@ -244,7 +436,9 @@ const MailboxesPopup: React.FC<{ token: string; userName: string; accounts: Mail
                     <div className="flex-1 min-w-0">
                       <div className="text-sm font-medium text-slate-800 truncate">{a.emailAddress}</div>
                       <div className={`text-[11px] truncate ${a.lastError ? 'text-rose-600' : 'text-slate-500'}`}>
-                        {a.lastError || (a.lastSyncAt ? `Checked ${shortMailDate(a.lastSyncAt)}` : 'Connected')}
+                        {a.internalOnly
+                          ? 'Only inside CredenceHR — add it again with its password for outside mail'
+                          : a.lastError || (a.lastSyncAt ? `Checked ${shortMailDate(a.lastSyncAt)}` : 'Connected')}
                       </div>
                     </div>
                     {a.isDefault ? (
@@ -407,6 +601,9 @@ export const CredenceMail: React.FC<{
   const ro = !!viewAs;
   // Every call from here on carries whose mailbox it is (set before the first fetch).
   setMailViewAs(viewAs ? viewAs.userId : null);
+  setMailPhotoToken(token);
+  // Groups belong to whoever's mailbox this is.
+  useEffect(() => forgetMailGroups(), [viewAs?.userId]);
   useEffect(() => () => setMailViewAs(null), []);
   const [status, setStatus] = useState<MailStatus | null>(null);
   const [statusError, setStatusError] = useState('');
@@ -427,6 +624,7 @@ export const CredenceMail: React.FC<{
   const [settings, setSettings] = useState<MailSettings | null>(null);
   const [drawer, setDrawer] = useState(false);
   const [mailboxes, setMailboxes] = useState(false);
+  const [directorySheet, setDirectorySheet] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [toast, setToast] = useState<{ text: string; tone: 'ok' | 'error' } | null>(null);
   const [tool, setTool] = useState<Tool | null>(null);
@@ -435,6 +633,27 @@ export const CredenceMail: React.FC<{
   const listReq = useRef(0);
   const accounts = status?.accounts || [];
   const ownEmails = useMemo(() => new Set(accounts.map((a) => a.emailAddress.toLowerCase())), [accounts]);
+  // Pictures show without asking in one's own mail, mail from our own
+  // domains, and from senders chosen with "Always from this sender".
+  const ourDomains = useMemo(() => new Set((status?.ourDomains || []).map((d) => d.toLowerCase())), [status]);
+  const pictureSenders = useMemo(() => new Set((settings?.pictureSenders || []).map((d) => d.toLowerCase())), [settings]);
+  const picturesOk = useCallback(
+    (m: MailMessage) => {
+      const from = (m.from.email || '').toLowerCase();
+      return ownEmails.has(from) || ourDomains.has(from.split('@')[1] || '') || pictureSenders.has(from);
+    },
+    [ownEmails, ourDomains, pictureSenders]
+  );
+  const trustSender = async (email: string) => {
+    try {
+      const cur = settings || (await mailFetch<MailSettings>(token, '/settings'));
+      const next = await mailFetch<MailSettings>(token, '/settings', { method: 'PUT', body: { pictureSenders: [...new Set([...(cur.pictureSenders || []), email.toLowerCase()])] } });
+      setSettings(next);
+      say(`Pictures from ${email} will always show.`);
+    } catch (e: any) {
+      say(e.message, 'error');
+    }
+  };
 
   useBackButtonClose(drawer, () => setDrawer(false));
   useBackButtonClose(!!selectedId, () => setSelectedId(null));
@@ -775,10 +994,17 @@ export const CredenceMail: React.FC<{
         if (forGood && !(await confirmDialog('Delete this mail for good? This cannot be undone.', { tone: 'danger', confirmLabel: 'Delete' }))) return;
         // The whole conversation goes, like in other mail apps.
         const ids = forGood ? [m.id] : (thread || [m]).filter((x) => !x.labels.includes('Trash')).map((x) => x.id);
-        await mailFetch(token, '/messages/batch', { method: 'POST', body: { ids, action: 'delete' } });
+        // Gone from the screen at once; the mail server (which can take a few
+        // seconds) catches up behind it — if it fails, the list comes back.
         patchLocal(ids, {}, true);
         setSelectedId(null);
         say(forGood ? 'Deleted.' : 'Moved to Trash.');
+        try {
+          await mailFetch(token, '/messages/batch', { method: 'POST', body: { ids, action: 'delete' } });
+        } catch (e: any) {
+          say(e.message, 'error');
+          refreshRef.current();
+        }
         void loadCounts();
         return;
       }
@@ -865,6 +1091,11 @@ export const CredenceMail: React.FC<{
           <Mail className="w-5 h-5 text-sky-600 shrink-0" /> <span className="truncate">{viewAs ? `${viewAs.name}'s mailbox` : 'Credence Mail'}</span>
         </h1>
       </div>
+      {accounts.length > 0 && !ro && status?.canDirectory && (
+        <div className="hidden md:block flex-1 max-w-xl ml-auto">
+          <DirectorySearch token={token} onWrite={(email) => setCompose({ accountId: accountFilter || undefined, to: email })} />
+        </div>
+      )}
       {accounts.length > 0 && !ro && (
         <div className="flex items-center gap-1.5">
           {accounts.length > 1 && (
@@ -975,6 +1206,7 @@ export const CredenceMail: React.FC<{
       {(
         [
           ['Contacts', Users, () => openTool({ kind: 'contacts' })],
+          ...(status?.canMyGroups ? [['My groups', UsersRound, () => openTool({ kind: 'groups' })]] : []),
           ['Tasks & Calendar', ListChecks, () => openTool({ kind: 'planner', tab: 'tasks' })],
           ['Rules', Filter, () => openTool({ kind: 'rules' })],
           ['Templates', FileText, () => openTool({ kind: 'templates' })],
@@ -1120,7 +1352,17 @@ export const CredenceMail: React.FC<{
   );
 
   const reader = selectedId ? (
-    <MailReader token={token} thread={thread} folder={folder} error={threadError} readOnly={ro} onBack={() => setSelectedId(null)} onAction={(a, m) => void act(a, m)} />
+    <MailReader
+      token={token}
+      thread={thread}
+      folder={folder}
+      error={threadError}
+      readOnly={ro}
+      onBack={() => setSelectedId(null)}
+      onAction={(a, m) => void act(a, m)}
+      picturesOk={picturesOk}
+      onTrustSender={(email) => void trustSender(email)}
+    />
   ) : (
     <div className="hidden md:flex h-full items-center justify-center text-center p-8">
       <div>
@@ -1193,6 +1435,11 @@ export const CredenceMail: React.FC<{
                   <Server className="w-4 h-4" /> Mailboxes
                 </button>
               )}
+              {!ro && status?.canDirectory && (
+                <button type="button" onClick={() => { setDrawer(false); setDirectorySheet(true); }} className="text-sm px-3 py-2 rounded-xl text-slate-700 hover:bg-black/5 inline-flex items-center gap-2">
+                  <Users className="w-4 h-4" /> Email Directory
+                </button>
+              )}
               {onBack && (
                 <button type="button" onClick={onBack} className="mt-auto text-sm px-3 py-2 rounded-xl text-slate-700 hover:bg-black/5 inline-flex items-center gap-2">
                   <ArrowLeft className="w-4 h-4" /> {ro ? 'Close this mailbox' : 'Back to CredenceHR'}
@@ -1201,6 +1448,17 @@ export const CredenceMail: React.FC<{
             </div>
           </div>
         </div>
+      )}
+
+      {directorySheet && (
+        <DirectorySheet
+          token={token}
+          onClose={() => setDirectorySheet(false)}
+          onWrite={(email) => {
+            setDirectorySheet(false);
+            setCompose({ accountId: accountFilter || undefined, to: email });
+          }}
+        />
       )}
 
       {mailboxes && (
@@ -1275,6 +1533,7 @@ export const CredenceMail: React.FC<{
         />
       )}
       {tool?.kind === 'analytics' && <MailAnalyticsPopup token={token} onClose={() => setTool(null)} />}
+      {tool?.kind === 'groups' && <MyGroupsPopup token={token} onClose={() => setTool(null)} />}
 
       {toast && (
         <div className="fixed left-1/2 -translate-x-1/2 z-[95] px-4 w-full max-w-sm pointer-events-none" style={{ bottom: 'calc(6rem + env(safe-area-inset-bottom))' }}>
