@@ -73,6 +73,8 @@ export async function ensureSessionSecuritySchema(queryDB: QueryDB) {
   for (const [table, col, ddl] of [
     ["user_sessions", "revoked_at", "DATETIME NULL"],
     ["user_sessions", "revoked_reason", "VARCHAR(20) NULL"],
+    // The sign-in a password was changed from keeps working (endAllSessions).
+    ["user_sessions", "kept_after", "DATETIME(3) NULL"],
     ["users", "sessions_valid_after", "DATETIME(3) NULL"]
   ]) {
     try {
@@ -112,8 +114,19 @@ export async function sessionLifetimeSeconds(queryDB: QueryDB, app: boolean): Pr
 
 // session key -> what is known about that sign-in, so most requests never
 // read the database. lastSeen is kept here; touchSession (ActiveUsersRoutes)
-// writes it to user_sessions once a minute.
-const sessions = new Map<string, { userId: number; lastSeen: number; ended: SessionEnd | null }>();
+// writes it to user_sessions once a minute. Re-read from user_sessions every
+// RECHECK_MS, so a sign-in ended on another PM2 worker ends here too.
+// keptAfter: the sessions_valid_after this sign-in survives (it is the one
+// the password was changed from).
+interface SessionEntry {
+  userId: number;
+  lastSeen: number;
+  ended: SessionEnd | null;
+  keptAfter: number;
+  checkedAt: number;
+}
+const sessions = new Map<string, SessionEntry>();
+const RECHECK_MS = 30_000;
 // user id -> users.sessions_valid_after (ms, 0 = none), re-read every 30 s.
 const validAfter = new Map<number, { at: number; value: number }>();
 
@@ -145,30 +158,43 @@ export async function checkSession(queryDB: QueryDB, token: string, user: any, r
   const maxMs = app ? policy.app_days * 86400000 : policy.web_hours * 3600000;
   if (now - issued > maxMs) return "expired";
 
-  const after = await validAfterOf(queryDB, userId);
-  if (after && issued < after) return "password";
-
   const key = sessionKeyOf(token);
   let s = sessions.get(key);
-  if (!s) {
-    const rows: any[] | null = await queryDB("/*unscoped*/ SELECT revoked_at, revoked_reason, last_seen_at FROM user_sessions WHERE session_key = ?", [key]).catch(
-      () => null
-    );
-    const row = rows?.[0];
-    const seen = row?.last_seen_at ? new Date(row.last_seen_at).getTime() : NaN;
-    s = {
-      userId,
-      // Never used yet: counted from when it was signed in. (Unknown because
-      // the database didn't answer: from now.)
-      lastSeen: Number.isFinite(seen) ? seen : rows ? issued : now,
-      ended: row?.revoked_at ? ((["idle", "signed_out", "password", "expired"].includes(row.revoked_reason) ? row.revoked_reason : "signed_out") as SessionEnd) : null
-    };
+  if (!s || now - s.checkedAt > RECHECK_MS) {
+    const rows: any[] | null = await queryDB(
+      "/*unscoped*/ SELECT revoked_at, revoked_reason, last_seen_at, kept_after FROM user_sessions WHERE session_key = ?",
+      [key]
+    ).catch(() => null);
+    if (rows) {
+      const row = rows[0];
+      const seen = row?.last_seen_at ? new Date(row.last_seen_at).getTime() : NaN;
+      const kept = row?.kept_after ? new Date(row.kept_after).getTime() : 0;
+      const fresh: SessionEntry = {
+        userId,
+        // Never used yet: counted from when it was signed in.
+        lastSeen: Math.max(s?.lastSeen || 0, Number.isFinite(seen) ? seen : issued),
+        ended:
+          s?.ended ||
+          (row?.revoked_at ? ((["idle", "signed_out", "password", "expired"].includes(row.revoked_reason) ? row.revoked_reason : "signed_out") as SessionEnd) : null),
+        keptAfter: Math.max(s?.keptAfter || 0, Number.isFinite(kept) ? kept : 0),
+        checkedAt: now
+      };
+      s = fresh;
+    } else if (!s) {
+      // The database didn't answer: counted from now, asked again next time.
+      s = { userId, lastSeen: now, ended: null, keptAfter: 0, checkedAt: 0 };
+    }
     sessions.set(key, s);
     if (sessions.size > 50000) {
       for (const [k, v] of sessions) if (now - v.lastSeen > 31 * 86400000) sessions.delete(k);
     }
   }
   if (s.ended) return s.ended;
+
+  // A password changed or reset after this sign-in began ends it, used or
+  // not — except the sign-in it was changed from.
+  const after = await validAfterOf(queryDB, userId);
+  if (after && issued < after && s.keptAfter < after) return "password";
 
   const idleMs = app ? policy.app_idle_days * 86400000 : policy.web_idle_minutes * 60000;
   if (idleMs > 0 && now - s.lastSeen > idleMs) {
@@ -183,7 +209,7 @@ export async function checkSession(queryDB: QueryDB, token: string, user: any, r
 export async function endSession(queryDB: QueryDB, key: string, userId: number, why: SessionEnd) {
   const s = sessions.get(key);
   if (s) s.ended = why;
-  else sessions.set(key, { userId, lastSeen: Date.now(), ended: why });
+  else sessions.set(key, { userId, lastSeen: Date.now(), ended: why, keptAfter: 0, checkedAt: Date.now() });
   const at = new Date();
   await queryDB(
     `/*unscoped*/ INSERT INTO user_sessions (session_key, user_id, revoked_at, revoked_reason, first_seen_at, last_seen_at)
@@ -199,18 +225,26 @@ export async function endSession(queryDB: QueryDB, key: string, userId: number, 
  */
 export async function endAllSessions(queryDB: QueryDB, userId: number, why: SessionEnd, keepKey?: string) {
   for (const [k, s] of sessions) if (s.userId === userId && k !== keepKey && !s.ended) s.ended = why;
+  const at = new Date();
   if (keepKey) {
+    // Marked first, so the sign-in in use never sees itself ended.
+    const kept = sessions.get(keepKey);
+    if (kept) kept.keptAfter = at.getTime();
     await queryDB(
-      "/*unscoped*/ UPDATE user_sessions SET revoked_at = NOW(), revoked_reason = ? WHERE user_id = ? AND session_key <> ? AND revoked_at IS NULL",
-      [why, userId, keepKey]
+      `/*unscoped*/ INSERT INTO user_sessions (session_key, user_id, kept_after, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE kept_after = VALUES(kept_after)`,
+      [keepKey, userId, at, at, at]
     ).catch(() => {});
-  } else {
-    await queryDB("/*unscoped*/ UPDATE users SET sessions_valid_after = ? WHERE id = ?", [new Date(), userId]).catch(() => {});
-    validAfter.delete(userId);
-    await queryDB("/*unscoped*/ UPDATE user_sessions SET revoked_at = NOW(), revoked_reason = ? WHERE user_id = ? AND revoked_at IS NULL", [why, userId]).catch(
-      () => {}
-    );
   }
+  // Every token issued before now stops working, used or not and on every
+  // worker (validAfterOf re-reads it) — sign-ins that were never used have
+  // no user_sessions row to revoke.
+  await queryDB("/*unscoped*/ UPDATE users SET sessions_valid_after = ? WHERE id = ?", [at, userId]).catch(() => {});
+  validAfter.delete(userId);
+  await queryDB(
+    "/*unscoped*/ UPDATE user_sessions SET revoked_at = NOW(), revoked_reason = ? WHERE user_id = ? AND session_key <> ? AND revoked_at IS NULL",
+    [why, userId, keepKey || ""]
+  ).catch(() => {});
 }
 
 interface SessionSecurityDeps {
