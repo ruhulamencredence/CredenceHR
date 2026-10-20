@@ -9,6 +9,7 @@ import {
   ChevronsLeft, ChevronsRight, ShieldAlert, Search, PieChart, FileUp,
   Target, UserPlus, Gavel, FolderLock, Sparkles, ExternalLink, Car, HandCoins,
   ClipboardList, BookOpen, ClipboardCheck, TrendingUp, Settings, Pencil, Check, Mail, CalendarRange, Ruler, PenLine, ReceiptText,
+  Coffee,
 } from 'lucide-react';
 import { User, AdminModuleKey, chatAllowed, REPORTS_INSIGHTS_MODULES, DATA_IMPORT_MODULES } from '../types';
 import credenceLogo from '../assets/credence-logo.png';
@@ -50,7 +51,7 @@ interface GlobalSidebarProps {
   onGoToUserClaims: (target: 'movementClaims' | 'conveyanceBill') => void;
   // Everyday employee self-service items — not Admin-gated, shown to every
   // account regardless of role/module access.
-  onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | 'credenceMail' | 'myRoster' | 'mySignatures' | 'myPayslips' | 'materialReceive') => void;
+  onGoToSelfServiceTab: (target: 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation' | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | 'credenceMail' | 'myRoster' | 'myBreak' | 'mySignatures' | 'myPayslips' | 'materialReceive') => void;
   // Admin Panel's own Movement Claims / Conveyance Bill Claim review tabs —
   // separate feature from onGoToUserClaims above, gated by module_permissions
   // like every other Admin Panel module.
@@ -376,6 +377,11 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   if (isSuperAdmin || !!user.can_view_roster) {
     selfServiceItems.push({ key: 'myRoster', label: 'My Duty Roster', icon: CalendarRange, onClick: () => onGoToSelfServiceTab('myRoster') });
   }
+  // Break Time (MyBreak.tsx) — start / end a break. users.can_take_break,
+  // off until turned on in Module Access.
+  if (isSuperAdmin || !!user.can_take_break) {
+    selfServiceItems.push({ key: 'myBreak', label: 'Break Time', icon: Coffee, onClick: () => onGoToSelfServiceTab('myBreak') });
+  }
   // Documents to Sign (MySignatures.tsx) — documents HR sent this account
   // to sign. users.can_sign_documents, off until turned on in Module Access.
   if (isSuperAdmin || !!user.can_sign_documents) {
@@ -457,6 +463,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     { key: 'attendance_reports', label: 'Monthly Attendance Report', icon: Calendar, onClick: () => onGoToAdminModule('attendance_reports') },
     { key: 'office_attendance', label: 'Office Attendance', icon: Fingerprint, onClick: () => onGoToAdminModule('office_attendance') },
     { key: 'duty_roster', label: 'Duty Roster', icon: CalendarRange, onClick: () => onGoToAdminModule('duty_roster') },
+    { key: 'break_time', label: 'Break Time', icon: Coffee, onClick: () => onGoToAdminModule('break_time') },
   ].filter((i) => canSeeModule(i.key as AdminModuleKey));
   // Site Attendance (supervisor muster roll) lives inside Office Attendance
   // (SiteAttendanceAdmin.tsx) — same module grant, its own entry here.
@@ -666,7 +673,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   const selfGroups = makeGroups([
     { key: 'g_work', label: 'Work & Approvals', icon: ListChecks, entries: pick('myTasks', 'myTargets', 'approveApplications', 'mySignatures', 'teamAttendance') },
     { key: 'g_pepm_op', label: 'PEPM Operation', icon: Briefcase, entries: pick('entry', 'jobs', 'entryDetails', 'jobEdit', 'materialReceive') },
-    { key: 'g_leave_att', label: 'Leave & Attendance', icon: CalendarClock, entries: pick('leaveApplication', 'timesheet', 'myRoster') },
+    { key: 'g_leave_att', label: 'Leave & Attendance', icon: CalendarClock, entries: pick('leaveApplication', 'timesheet', 'myRoster', 'myBreak') },
     { key: 'g_requests', label: 'Requests & Claims', icon: Wallet, entries: pick('userMovementClaims', 'userConveyanceClaims', 'vehicleManagement', 'assetManagement', 'myPayslips', 'myMobileSim', 'myLoans', 'myLetters') },
     { key: 'g_others', label: 'Others', icon: Users2, entries: pick('credenceMail', 'chat', 'alerts', 'erp360', 'employeeDirectory', 'myCases', 'resignation') }
   ]);
@@ -683,7 +690,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
       key: 'g_attendance',
       label: 'Attendance & Leave',
       icon: Fingerprint,
-      entries: pick('attendance', 'office_attendance', 'site_attendance', 'duty_roster', 'attendance_reports', 'leave_applications', 'leaveManagement', 'holidays')
+      entries: pick('attendance', 'office_attendance', 'site_attendance', 'duty_roster', 'break_time', 'attendance_reports', 'leave_applications', 'leaveManagement', 'holidays')
     },
     { key: 'g_payroll', label: 'Payroll & Claims', icon: Banknote, entries: pick('payroll', 'claims', 'conveyance', 'disbursement', 'bill_claim_policy') },
     {

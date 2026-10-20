@@ -5,7 +5,7 @@ import type { User } from '../types';
 
 export type SelfView =
   | 'leaveManagement' | 'timesheet' | 'approveApplications' | 'payroll' | 'employeeDirectory' | 'resignation'
-  | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | 'credenceMail' | 'myRoster' | 'mySignatures' | 'myPayslips' | 'materialReceive';
+  | 'assetManagement' | 'vehicleManagement' | 'myCases' | 'myLetters' | 'teamAttendance' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | 'credenceMail' | 'myRoster' | 'myBreak' | 'mySignatures' | 'myPayslips' | 'materialReceive';
 
 const SLUGS: Record<SelfView, string> = {
   leaveManagement: 'leave-management',
@@ -25,6 +25,7 @@ const SLUGS: Record<SelfView, string> = {
   myTargets: 'my-targets',
   credenceMail: 'mail',
   myRoster: 'duty-roster',
+  myBreak: 'break-time',
   materialReceive: 'material-receive',
   mySignatures: 'documents-to-sign',
   myPayslips: 'payslips'
@@ -58,6 +59,7 @@ export const canOpenSelfView = (view: SelfView, user: User | null): boolean => {
     case 'myTargets': return sa || !!user.can_view_targets;
     case 'credenceMail': return sa || !!user.can_use_mail;
     case 'myRoster': return sa || !!user.can_view_roster;
+    case 'myBreak': return sa || !!user.can_take_break;
     case 'mySignatures': return sa || !!user.can_sign_documents;
     case 'myPayslips': return sa || !!user.can_view_payslip;
     case 'materialReceive': return sa || !!user.can_receive_material;
