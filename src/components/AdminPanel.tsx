@@ -42,6 +42,7 @@ import { TaskManagement } from './TaskManagement';
 import { TargetReports } from './TargetReports';
 import { MailAdministration } from './mail/MailAdministration';
 import { DutyRoster } from './DutyRoster';
+import { BreakTimeAdmin } from './BreakTimeAdmin';
 import { MeasurementSheet } from './MeasurementSheet';
 import { MobileBillAdmin } from './MobileBillAdmin';
 import { AdminDashboard } from './AdminDashboard';
@@ -497,7 +498,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     tab === 'permanent_delete_log' || tab === 'companies' || tab === 'devices' || tab === 'active_users' ? isSuperAdmin :
     isSuperAdmin || visibleModules.includes(tab as AdminModuleKey);
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'reports_insights' | 'data_import' | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'bill_claim_policy' | 'disbursement' | 'holidays' | 'asset_management' | 'vehicle_management' | 'permanent_delete_log' | 'companies' | 'devices' | 'active_users' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'hr_operations' | 'task_management' | 'mobile_bill' | 'target_reports' | 'mail_admin' | 'duty_roster' | 'measurement_sheet'>(
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'reports_insights' | 'data_import' | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'bill_claim_policy' | 'disbursement' | 'holidays' | 'asset_management' | 'vehicle_management' | 'permanent_delete_log' | 'companies' | 'devices' | 'active_users' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'hr_operations' | 'task_management' | 'mobile_bill' | 'target_reports' | 'mail_admin' | 'duty_roster' | 'break_time' | 'measurement_sheet'>(
     () => {
       // Restores whichever tab this Admin was last looking at — see the
       // "pull down to reload" note in App.tsx: since a reload now has to be
@@ -1577,7 +1578,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // Tabs that read none of the shared lists.
   const SELF_CONTAINED_TABS = new Set<string>([
     'dashboard', 'reports_insights', 'data_import', 'hr_analytics', 'exit_offboarding', 'performance_management',
-    'recruitment', 'grievance_disciplinary', 'document_vault', 'hr_operations', 'task_management', 'mobile_bill', 'target_reports', 'mail_admin', 'duty_roster', 'measurement_sheet',
+    'recruitment', 'grievance_disciplinary', 'document_vault', 'hr_operations', 'task_management', 'mobile_bill', 'target_reports', 'mail_admin', 'duty_roster', 'break_time', 'measurement_sheet',
     'devices', 'active_users', 'companies'
   ]);
   const ALL_SHARED: SharedKey[] = ['projects', 'branches', 'mprNumbers', 'entries', 'users', 'people', 'budgets', 'permissions', 'departments'];
@@ -4660,6 +4661,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       {activeTab === 'mobile_bill' && <MobileBillAdmin token={token} />}
       {activeTab === 'mail_admin' && canSee('mail_admin') && <MailAdministration token={token} user={user} />}
       {activeTab === 'duty_roster' && canSee('duty_roster') && <DutyRoster token={token} user={user} />}
+      {activeTab === 'break_time' && canSee('break_time') && <BreakTimeAdmin token={token} />}
       {activeTab === 'measurement_sheet' && canSee('measurement_sheet') && <MeasurementSheet token={token} />}
 
       {/* TAB: PERMANENT DELETE LOG — Superadmin-only (see GET

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Capacitor } from '@capacitor/core';
 import { Project, MprNumber, Entry, Budget, BudgetItem, User, MprUsage, ClaimsNavRequest, JobsNavRequest, DashboardNavRequest, LeaveNavRequest, chatAllowed } from '../types';
-import { CalendarClock, CheckSquare, ExternalLink, Gavel, LogOut, MessageSquare, ShieldCheck, Smartphone, HandCoins, Target, Sparkles, Mail, CalendarRange, PenLine, ReceiptText, PackageCheck } from 'lucide-react';
+import { CalendarClock, CheckSquare, ExternalLink, Gavel, LogOut, MessageSquare, ShieldCheck, Smartphone, HandCoins, Target, Sparkles, Mail, CalendarRange, PenLine, ReceiptText, PackageCheck, Coffee } from 'lucide-react';
 import type { MoreItem } from './BottomNav';
 
 // Mobile Dashboard: at most this many quick access tiles; the rest go to the
@@ -90,7 +90,7 @@ interface UserPanelProps {
 
 export type SelfServiceTarget =
   | 'leaveApplication' | 'leaveManagement' | 'timesheet' | 'approveApplications'
-  | 'resignation' | 'myCases' | 'myLetters' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | 'credenceMail' | 'myRoster' | 'mySignatures' | 'myPayslips' | 'materialReceive' | 'chat' | 'alerts' | 'erp360';
+  | 'resignation' | 'myCases' | 'myLetters' | 'myTasks' | 'myMobileSim' | 'myLoans' | 'myTargets' | 'credenceMail' | 'myRoster' | 'myBreak' | 'mySignatures' | 'myPayslips' | 'materialReceive' | 'chat' | 'alerts' | 'erp360';
 
 // Unique id for one Item entry within an MPR row's itemNames list — see the uid field
 // on MprItemOption for why this is needed separately from budgetItemId.
@@ -1196,6 +1196,9 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
             : []),
           ...(user.role === 'superadmin' || !!user.can_view_roster
             ? [{ key: 'myRoster', label: 'My Duty Roster', icon: CalendarRange, iconBg: 'from-purple-300 to-purple-600 shadow-[0_6px_16px_-2px_rgba(var(--g-accent-rgb,127,0,255),0.35)]', onClick: () => openSelfService('myRoster') }]
+            : []),
+          ...(user.role === 'superadmin' || !!user.can_take_break
+            ? [{ key: 'myBreak', label: 'Break Time', icon: Coffee, iconBg: 'from-amber-300 to-amber-500 shadow-[0_6px_16px_-2px_rgba(217,119,6,0.35)]', onClick: () => openSelfService('myBreak') }]
             : []),
           ...(user.role === 'superadmin' || !!user.can_view_targets
             ? [{ key: 'myTargets', label: 'My Targets', icon: Target, iconBg: 'from-fuchsia-300 to-fuchsia-500 shadow-[0_6px_16px_-2px_rgba(192,38,211,0.35)]', onClick: () => openSelfService('myTargets') }]

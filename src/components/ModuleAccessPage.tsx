@@ -77,6 +77,7 @@ type FlagKey =
   | 'can_use_mail_groups'
   | 'can_receive_material'
   | 'can_view_roster'
+  | 'can_take_break'
   | 'can_sign_documents'
   | 'can_view_payslip'
   | 'can_email_reports';
@@ -118,6 +119,7 @@ const FLAGS: FlagDef[] = [
   { key: 'can_view_leave_application', label: 'Leave Application', desc: 'Apply for leave and see their own balance.', section: 'attendance', endpoint: 'leave-application-access' },
   { key: 'can_view_leave_summary', label: 'Leave Summary on Dashboard', desc: 'Their leave balance card on the dashboard.', section: 'attendance', endpoint: null },
   { key: 'can_view_roster', label: 'My Duty Roster', desc: 'Their own shifts and Off days.', section: 'attendance', endpoint: 'roster-access' },
+  { key: 'can_take_break', label: 'Break Time', desc: 'Start and end their breaks in the app.', section: 'attendance', endpoint: 'break-access' },
 
   { key: 'can_view_movement_claims', label: 'Movement Claim', desc: 'GPS check in / out claims.', section: 'claims', endpoint: 'movement-claim-access' },
   { key: 'can_view_conveyance_claims', label: 'Conveyance Bill Claim', desc: 'Submit conveyance bills.', section: 'claims', endpoint: 'conveyance-claim-access' },
@@ -144,7 +146,7 @@ const INLINE_FLAGS: FlagKey[] = ['can_view_group_dashboard', 'can_manage_leave']
 const MODULE_SECTION: Partial<Record<AdminModuleKey, SectionKey>> = {
   reports: 'pepm', mprs: 'pepm', imports: 'pepm', recycle: 'pepm', editlog: 'pepm', measurement_sheet: 'pepm',
   admin_dashboard: 'hr', approvals: 'hr', notices: 'hr', holidays: 'hr', departments: 'hr', task_management: 'hr', target_reports: 'hr',
-  attendance: 'attendance', attendance_reports: 'attendance', office_attendance: 'attendance', duty_roster: 'attendance', leave_applications: 'attendance',
+  attendance: 'attendance', attendance_reports: 'attendance', office_attendance: 'attendance', duty_roster: 'attendance', break_time: 'attendance', leave_applications: 'attendance',
   claims: 'claims', conveyance: 'claims', disbursement: 'claims', mobile_bill: 'claims',
   employees: 'employees', tracking: 'employees', asset_management: 'employees', vehicle_management: 'employees', vehicle_maintainer: 'employees',
   hr_operations: 'hrops', exit_offboarding: 'hrops', performance_management: 'hrops', recruitment: 'hrops', grievance_disciplinary: 'hrops', hr_analytics: 'hrops', document_vault: 'hrops',
@@ -166,6 +168,7 @@ const MODULE_DESC: Partial<Record<AdminModuleKey, string>> = {
   attendance_reports: 'Monthly attendance by department.',
   leave_applications: 'Who applied for leave, by month.',
   duty_roster: 'Shifts and who works when.',
+  break_time: 'Who is on a break, daily totals, over-limit.',
   conveyance: 'Review conveyance bills.',
   disbursement: 'Pay out approved conveyance bills.',
   mobile_bill: 'Company SIMs, limits and operator bills.',

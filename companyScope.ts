@@ -85,7 +85,8 @@ const USER_TABLES = new Set([
   "disciplinary_actions",
   "employee_documents",
   "location_pings",
-  "tracking_notice_recipients"
+  "tracking_notice_recipients",
+  "employee_breaks"
 ]);
 
 // Company settings a sister company may use from its mother company instead
@@ -133,6 +134,7 @@ export const OWN_TABLES = new Set([
   "payroll_batch_events",
   "payroll_access_log",
   "duty_shifts",
+  "break_settings",
   "esign_settings",
   "esign_certificates"
 ]);
