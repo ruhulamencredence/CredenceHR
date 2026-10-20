@@ -933,6 +933,10 @@ export default function App() {
             onBack={() => setShowChat(false)}
             initialRoomId={pendingChatRoomId}
             onInitialRoomHandled={() => setPendingChatRoomId(null)}
+            onOpenProfile={() => {
+              setShowChat(false);
+              setShowProfilePage(true);
+            }}
           />
         ) : showAlertsPage ? (
           <AlertsPage

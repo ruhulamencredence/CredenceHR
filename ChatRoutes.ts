@@ -553,8 +553,11 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
          LEFT JOIN chat_messages rt ON rt.id = cm.reply_to_id
          LEFT JOIN users rtu ON rtu.id = rt.sender_id
          WHERE cm.room_id = ? AND cm.deleted_at IS NULL ${beforeId ? "AND cm.id < ?" : ""}
-         ORDER BY cm.id DESC LIMIT ?`,
-        beforeId ? [roomId, beforeId, limit] : [roomId, limit]
+         ORDER BY cm.id DESC LIMIT ${limit}`,
+        // LIMIT is written in (an integer clamped above) rather than bound:
+        // MySQL 8.0.22+ refuses a bound LIMIT that the driver sends as a
+        // double ("Incorrect arguments to mysqld_stmt_execute").
+        beforeId ? [roomId, beforeId] : [roomId]
       );
       res.json(rows.reverse()); // oldest-first, ready to append/prepend in the UI
     } catch (err: any) {
@@ -710,10 +713,18 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
 // shared httpServer is created.
 export function setupChatSocket(io: SocketIOServer, deps: ChatSocketDeps) {
   const { queryDB, jwtSecret } = deps;
-  // userId -> live socket ids for that account (more than one tab/device can
-  // be connected at once) — presence only flips to "online"/"offline" on the
-  // first connect / last disconnect for that user, not every socket.
-  const onlineSockets = new Map<number, Set<string>>();
+  // Presence is read from Socket.IO itself (fetchSockets), not a list kept
+  // in this process: with several PM2 workers + the Redis adapter it asks
+  // every worker, so someone connected to another worker still shows as
+  // online. "online"/"offline" only flips on a user's first connect / last
+  // disconnect (several tabs/devices can be connected at once).
+  const socketsOfUser = async (userId: number) => {
+    try {
+      return (await io.in(`user:${userId}`).fetchSockets()).length;
+    } catch {
+      return 0;
+    }
+  };
 
   io.use((socket, next) => {
     try {
@@ -732,13 +743,7 @@ export function setupChatSocket(io: SocketIOServer, deps: ChatSocketDeps) {
     const userId = Number(user.id);
     socket.join(`user:${userId}`);
 
-    let sockets = onlineSockets.get(userId);
-    if (!sockets) {
-      sockets = new Set();
-      onlineSockets.set(userId, sockets);
-    }
-    sockets.add(socket.id);
-    if (sockets.size === 1) io.emit("presence_change", { userId, online: true });
+    if ((await socketsOfUser(userId)) === 1) io.emit("presence_change", { userId, online: true });
 
     // Auto-join every room this account belongs to so 'receive_message' /
     // 'user_typing' / 'message_read' reach it without a 'join_room' round
@@ -750,6 +755,15 @@ export function setupChatSocket(io: SocketIOServer, deps: ChatSocketDeps) {
       // Best-effort — a room missed here still gets joined the next time
       // GET /api/chat/rooms is called and the UI opens it (join_room below).
     }
+
+    // Everyone online right now (ChatPanel asks when it opens, since
+    // presence_change only reports changes).
+    socket.on("presence_list", (ack?: (ids: number[]) => void) => {
+      if (typeof ack !== "function") return;
+      io.fetchSockets()
+        .then((all) => ack(Array.from(new Set(all.map((x) => Number((x.data as any)?.user?.id)).filter((id) => id > 0)))))
+        .catch(() => ack([]));
+    });
 
     socket.on("join_room", async (roomId: number) => {
       try {
@@ -804,14 +818,9 @@ export function setupChatSocket(io: SocketIOServer, deps: ChatSocketDeps) {
       }
     });
 
-    socket.on("disconnect", () => {
-      const set = onlineSockets.get(userId);
-      if (!set) return;
-      set.delete(socket.id);
-      if (set.size === 0) {
-        onlineSockets.delete(userId);
-        io.emit("presence_change", { userId, online: false });
-      }
+    socket.on("disconnect", async () => {
+      // This socket has already left its rooms here.
+      if ((await socketsOfUser(userId)) === 0) io.emit("presence_change", { userId, online: false });
     });
   });
 }

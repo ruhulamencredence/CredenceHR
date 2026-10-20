@@ -40,7 +40,12 @@ export function connectChatSocket(token: string): Socket {
     // rest of the session.
     reconnection: true,
     reconnectionDelay: 2000,
-    reconnectionDelayMax: 15000
+    reconnectionDelayMax: 15000,
+    // WebSocket straight away: one connection that stays on one server
+    // process (PM2 cluster mode); long-polling remains the fallback for a
+    // network that blocks WebSockets.
+    transports: ['websocket', 'polling'],
+    tryAllTransports: true
   });
   // Employee Tracking -> Live Follow: an Admin opened this person (or a ride
   // started) — report location every few seconds until the given time.

@@ -14,16 +14,23 @@
 // see profileRoutes.ts). Either path ends up broadcasting the same
 // 'receive_message' socket event to every member's open ChatPanel.
 
+import { UserAvatar } from './UserAvatar';
+import { CHAT_CONVERSATION_BACKGROUND } from '../lib/backgroundTheme';
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Capacitor } from '@capacitor/core';
+import { VoiceRecorder } from 'capacitor-voice-recorder';
+// The app's own microphone recorder, when this app build has it; an older
+// app (and the website) records through the WebView's MediaRecorder.
+const nativeMic = () => Capacitor.isNativePlatform() && Capacitor.isPluginAvailable('VoiceRecorder');
 import {
   ArrowLeft, Search, Plus, X, Send, Paperclip, Check, CheckCheck,
-  Users, UserPlus, Shield, LogOut, Trash2, MessageSquare, Link as LinkIcon, Mic
+  Users, UserPlus, Shield, LogOut, Trash2, MessageSquare, Link as LinkIcon, Mic, Phone, Video
 } from 'lucide-react';
 import { User, ChatRoom, ChatMessage, ChatRoomMember, ChatDirectoryUser, ChatReadReceipt } from '../types';
 import { apiUrl } from '../lib/api';
 import { connectChatSocket, getChatSocket } from '../lib/chatSocket';
 import { useBackButtonClose } from '../lib/useBackButtonClose';
+import { confirmDialog } from '../lib/confirmDialog';
 
 interface ChatPanelProps {
   token: string;
@@ -43,7 +50,15 @@ interface ChatPanelProps {
   // whole screen, so the fixed positioning/visualViewport tracking below is
   // skipped entirely in this mode.
   variant?: 'fullscreen' | 'modal';
+  // Phone bottom bar's avatar -> the Profile page (App.tsx).
+  onOpenProfile?: () => void;
 }
+
+// Phone bottom bar: the signed-in account's own photo (initials until /
+// unless one loads).
+const MyAvatar: React.FC<{ token: string; user: User }> = ({ token, user }) => (
+  <UserAvatar userId={user.id} name={user.name} token={token} className="w-8 h-8 text-[11px] ring-2 ring-white" />
+);
 
 function timeOnly(iso: string): string {
   const d = new Date(iso);
@@ -72,7 +87,7 @@ function initialsOf(name: string): string {
   return (parts[0][0] + (parts[1]?.[0] || '')).toUpperCase();
 }
 
-const AVATAR_PALETTE = ['#7F00FF', '#059669', '#0891b2', '#d97706', '#dc2626', '#4f46e5', '#be185d', '#0d9488'];
+const AVATAR_PALETTE = ['var(--g-avatar-1, #7F00FF)', '#059669', '#0891b2', '#d97706', '#dc2626', '#4f46e5', '#be185d', '#0d9488'];
 function avatarColor(seed: string): string {
   let hash = 0;
   for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
@@ -169,11 +184,16 @@ const AudioAttachment: React.FC<{ token: string; messageId: number }> = ({ token
   return <audio controls src={url} className="w-56 max-w-full h-9" />;
 };
 
-export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initialRoomId, onInitialRoomHandled, variant = 'fullscreen' }) => {
+export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initialRoomId, onInitialRoomHandled, variant = 'fullscreen', onOpenProfile }) => {
   const [rooms, setRooms] = useState<ChatRoom[]>([]);
   const [activeRoomId, setActiveRoomId] = useState<number | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [roomSearch, setRoomSearch] = useState('');
+  // Phone bottom bar: which list the room column shows, and the "+" menu.
+  const [listTab, setListTab] = useState<'chats' | 'groups' | 'calls'>('chats');
+  const [newMenuOpen, setNewMenuOpen] = useState(false);
+  // Audio / video calls are not part of this deployment.
+  const canCall = false;
   const [messageInput, setMessageInput] = useState('');
   const [sending, setSending] = useState(false);
   const [typingByRoom, setTypingByRoom] = useState<Record<number, Set<number>>>({});
@@ -190,11 +210,19 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
   // the most recent unclosed "@" before the cursor, or null when not
   // currently mid-mention. See handleTyping/insertMention below.
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
-  // Voice message recording — MediaRecorder over getUserMedia({audio:true}).
-  // Requires RECORD_AUDIO in AndroidManifest.xml (Capacitor's default
-  // WebChromeClient then handles the runtime permission prompt itself, no
-  // custom native code needed). Falls back to a plain alert() if denied/
-  // unavailable — text/image/file messages are unaffected either way.
+  // Voice message recording. On the native Android app this goes through
+  // the capacitor-voice-recorder plugin (native mic APIs) rather than the
+  // browser's getUserMedia — the WebView here loads the app over plain
+  // http:// (see capacitor.config.ts's server.url), and getUserMedia is
+  // gated behind a secure-context check (https:// or localhost) that a
+  // plain LAN/IP http:// origin never satisfies, so it always failed with a
+  // generic "no permission" error regardless of what AndroidManifest.xml
+  // declared. The native plugin talks to Android's mic APIs directly and
+  // isn't subject to that browser restriction. getUserMedia + MediaRecorder
+  // is kept as the path for the web build (desktop/mobile browsers, usually
+  // served over a real https:// domain where the secure-context check
+  // passes fine). Falls back to a plain alert() if denied/unavailable
+  // either way — text/image/file messages are unaffected.
   const [isRecording, setIsRecording] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -358,7 +386,13 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
     socket.on('message_read', onRead);
     socket.on('presence_change', onPresence);
     socket.on('members_changed', onMembersChanged);
+    // Who is online right now — presence_change only reports changes, and
+    // the socket is usually connected (for calls) before Chat opens.
+    const askPresence = () => socket.emit('presence_list', (ids: number[]) => Array.isArray(ids) && setOnlineUserIds(new Set(ids.map(Number))));
+    askPresence();
+    socket.on('connect', askPresence);
     return () => {
+      socket.off('connect', askPresence);
       socket.off('receive_message', onReceive);
       socket.off('user_typing', onTyping);
       socket.off('message_read', onRead);
@@ -652,7 +686,11 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
         });
         if (res.ok) {
           const message: ChatMessage = await res.json();
-          setMessages((prev) => [...prev, message]);
+          // The server also broadcasts this new message over the socket's
+          // 'receive_message' event (see the onReceive handler above) to
+          // every room member, sender included — whichever of the two
+          // arrives second needs to no-op instead of adding a duplicate.
+          setMessages((prev) => (prev.some((m) => m.id === message.id) ? prev : [...prev, message]));
         }
       } catch {
         alert('Could not send — check your connection and try again.');
@@ -673,17 +711,51 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
   );
 
   const sendAudioMessage = useCallback(
-    (blob: Blob) =>
-      uploadAttachmentMessage({
+    (blob: Blob) => {
+      // Native recordings come back as audio/aac; web recordings as
+      // audio/webm — match the filename extension to whichever this is so
+      // it at least previews sensibly if ever downloaded/opened directly.
+      const ext = blob.type.includes('aac') ? 'aac' : 'webm';
+      return uploadAttachmentMessage({
         blob,
         messageType: 'audio',
-        filename: 'voice-message.webm',
+        filename: `voice-message.${ext}`,
         mimetype: blob.type || 'audio/webm'
-      }),
+      });
+    },
     [uploadAttachmentMessage]
   );
 
+  // Converts the plugin's base64 recording (no data: prefix) into a Blob,
+  // the same shape sendAudioMessage/uploadAttachmentMessage already expect
+  // from the web MediaRecorder path.
+  function base64ToBlob(base64: string, mimeType: string): Blob {
+    const byteChars = atob(base64);
+    const bytes = new Uint8Array(byteChars.length);
+    for (let i = 0; i < byteChars.length; i++) bytes[i] = byteChars.charCodeAt(i);
+    return new Blob([bytes], { type: mimeType });
+  }
+
   const startRecording = useCallback(async () => {
+    if (nativeMic()) {
+      try {
+        const { value: canRecord } = await VoiceRecorder.canDeviceVoiceRecord();
+        if (!canRecord) throw new Error('Device cannot record audio');
+        let { value: hasPermission } = await VoiceRecorder.hasAudioRecordingPermission();
+        if (!hasPermission) {
+          ({ value: hasPermission } = await VoiceRecorder.requestAudioRecordingPermission());
+        }
+        if (!hasPermission) throw new Error('Microphone permission denied');
+        await VoiceRecorder.startRecording();
+        setIsRecording(true);
+        setRecordingSeconds(0);
+        recordingTimerRef.current = setInterval(() => setRecordingSeconds((s) => s + 1), 1000);
+      } catch {
+        alert('Could not access the microphone — check that this app has microphone permission.');
+      }
+      return;
+    }
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       recordingStreamRef.current = stream;
@@ -706,6 +778,27 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
   // send=false discards the recording (mic X button); send=true uploads it.
   const stopRecording = useCallback(
     (send: boolean) => {
+      if (nativeMic()) {
+        if (recordingTimerRef.current) {
+          clearInterval(recordingTimerRef.current);
+          recordingTimerRef.current = null;
+        }
+        setIsRecording(false);
+        void (async () => {
+          try {
+            const result = await VoiceRecorder.stopRecording();
+            if (send && result.value?.recordDataBase64) {
+              const blob = base64ToBlob(result.value.recordDataBase64, result.value.mimeType || 'audio/aac');
+              void sendAudioMessage(blob);
+            }
+          } catch {
+            // Discarded (send=false) or nothing was actually recorded —
+            // nothing to send either way.
+          }
+        })();
+        return;
+      }
+
       const recorder = mediaRecorderRef.current;
       if (!recorder) return;
       recorder.onstop = () => {
@@ -734,6 +827,11 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
     return () => {
       recordingStreamRef.current?.getTracks().forEach((t) => t.stop());
       if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+      if (nativeMic()) {
+        VoiceRecorder.stopRecording().catch(() => {
+          // Nothing was recording — expected the vast majority of the time.
+        });
+      }
     };
   }, []);
 
@@ -760,9 +858,20 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
 
   const filteredRooms = useMemo(() => {
     const q = roomSearch.trim().toLowerCase();
-    if (!q) return rooms;
-    return rooms.filter((r) => roomDisplayName(r, user.id).toLowerCase().includes(q));
-  }, [rooms, roomSearch, user.id]);
+    // Groups: groups and communities; Calls: one-to-one chats (each with
+    // call buttons). Chats shows everything.
+    const byTab = rooms.filter((r) =>
+      listTab === 'groups' ? r.type !== 'direct' : listTab === 'calls' ? r.type === 'direct' && !!r.other_participant : true
+    );
+    if (!q) return byTab;
+    return byTab.filter((r) => roomDisplayName(r, user.id).toLowerCase().includes(q));
+  }, [rooms, roomSearch, user.id, listTab]);
+  const startCall = (room: ChatRoom, kind: 'audio' | 'video') =>
+    window.dispatchEvent(
+      new CustomEvent('credence:start-call', {
+        detail: { roomId: room.id, peer: { id: room.other_participant!.id, name: roomDisplayName(room, user.id) }, kind }
+      })
+    );
 
   const isRoomAdmin = activeRoom?.my_role === 'admin';
   const typingNamesInActiveRoom = activeRoomId ? [...(typingByRoom[activeRoomId] || [])] : [];
@@ -781,13 +890,13 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
       }
     >
       {/* Sidebar: room list */}
-      <div className={`w-full md:w-[360px] border-r border-slate-200 flex flex-col ${activeRoomId ? 'hidden md:flex' : 'flex'}`}>
+      <div className={`relative w-full md:w-[360px] border-r border-slate-200 flex flex-col ${activeRoomId ? 'hidden md:flex' : 'flex'}`}>
         <div className="p-4 border-b border-slate-200 flex items-center justify-between gap-2">
           <button type="button" onClick={onBack} className="p-1.5 -ml-1.5 text-slate-500 hover:bg-slate-100 rounded-lg md:hidden">
             <ArrowLeft className="w-5 h-5" />
           </button>
-          <h2 className="font-bold text-slate-900 text-lg flex-1">Chats</h2>
-          <div className="relative group">
+          <h2 className="font-bold text-slate-900 text-lg flex-1">{listTab === 'groups' ? 'Groups' : listTab === 'calls' ? 'Calls' : 'Chats'}</h2>
+          <div className={`relative group ${variant === 'fullscreen' ? 'max-md:hidden' : ''}`}>
             <button type="button" className="p-2 text-slate-600 hover:bg-slate-100 rounded-full">
               <Plus className="w-5 h-5" />
             </button>
@@ -816,9 +925,11 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
             />
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto">
+        <div className={`flex-1 overflow-y-auto ${variant === 'fullscreen' ? 'max-md:pb-28' : ''}`}>
           {filteredRooms.length === 0 && (
-            <div className="p-8 text-center text-sm text-slate-400">No chats yet — tap + to start one.</div>
+            <div className="p-8 text-center text-sm text-slate-400">
+              {listTab === 'groups' ? 'No groups yet.' : listTab === 'calls' ? 'No one-to-one chats to call yet.' : 'No chats yet — tap + to start one.'}
+            </div>
           )}
           {filteredRooms.map((room) => {
             const name = roomDisplayName(room, user.id);
@@ -842,14 +953,38 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                 }`}
               >
                 <div className="relative shrink-0">
-                  <div
-                    className="w-11 h-11 rounded-full flex items-center justify-center text-white font-semibold text-sm"
-                    style={{ background: avatarColor(name) }}
-                  >
-                    {room.type === 'community' ? <Shield className="w-5 h-5" /> : room.type === 'group' ? <Users className="w-5 h-5" /> : initialsOf(name)}
-                  </div>
+                  <UserAvatar
+                    userId={room.type === 'direct' ? room.other_participant?.id : null}
+                    name={name}
+                    token={token}
+                    className="w-11 h-11 text-sm"
+                    fallback={room.type === 'community' ? <Shield className="w-5 h-5" /> : room.type === 'group' ? <Users className="w-5 h-5" /> : undefined}
+                  />
                   {isOnline && <span className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-500 border-2 border-white rounded-full" />}
                 </div>
+                {listTab === 'calls' && canCall ? (
+                  <>
+                    <div className="flex-1 min-w-0">
+                      <span className="block font-semibold text-sm text-slate-900 truncate">{name}</span>
+                      <span className="text-xs text-slate-500">{isOnline ? 'Online' : 'Offline'}</span>
+                    </div>
+                    {(['audio', 'video'] as const).map((k) => (
+                      <span
+                        key={k}
+                        role="button"
+                        tabIndex={0}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          startCall(room, k);
+                        }}
+                        className="p-2 rounded-full text-violet-600 bg-violet-50 active:bg-violet-100"
+                        aria-label={k === 'audio' ? `Audio call ${name}` : `Video call ${name}`}
+                      >
+                        {k === 'audio' ? <Phone className="w-4 h-4" /> : <Video className="w-4 h-4" />}
+                      </span>
+                    ))}
+                  </>
+                ) : (
                 <div className="flex-1 min-w-0">
                   <div className="flex justify-between items-baseline gap-2">
                     <span className="font-semibold text-sm text-slate-900 truncate">{name}</span>
@@ -864,10 +999,92 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                     )}
                   </div>
                 </div>
+                )}
               </button>
             );
           })}
         </div>
+
+        {/* Phone bottom bar (full-screen Chat only): a floating glass pill
+            with Chats / Groups / Calls / your photo — the active one widens
+            into a labelled pill — and a round "+" beside it for a new chat,
+            group or community. */}
+        {variant === 'fullscreen' && (
+          <div className="md:hidden absolute left-0 right-0 bottom-0 px-4 pb-[calc(1rem+var(--native-safe-area-inset-bottom,env(safe-area-inset-bottom,0px)))] pt-2 flex items-center gap-3 pointer-events-none">
+            <div className="pointer-events-auto flex-1 flex items-center justify-between gap-1 p-1.5 rounded-full bg-white/75 backdrop-blur-xl border border-white shadow-[0_10px_30px_-10px_rgba(15,23,42,0.35),inset_0_1px_0_rgba(255,255,255,0.9)]">
+              {([
+                ['chats', 'Chats', MessageSquare],
+                ['groups', 'Groups', Users],
+                ...(canCall ? [['calls', 'Calls', Phone]] : [])
+              ] as [typeof listTab, string, React.ComponentType<{ className?: string }>][]).map(([k, label, Icon]) => {
+                const on = listTab === k;
+                return (
+                  <button
+                    key={k}
+                    type="button"
+                    onClick={() => setListTab(k)}
+                    aria-label={label}
+                    aria-pressed={on}
+                    className={`flex items-center justify-center gap-2 h-11 rounded-full transition-all ${
+                      on ? 'px-4 bg-slate-900/[0.06] text-slate-900 font-semibold text-sm' : 'w-12 text-slate-400'
+                    }`}
+                  >
+                    <Icon className={`w-5 h-5 ${on ? 'text-slate-900' : ''}`} />
+                    {on && <span>{label}</span>}
+                  </button>
+                );
+              })}
+              {onOpenProfile && (
+                <button
+                  type="button"
+                  onClick={onOpenProfile}
+                  aria-label="My profile"
+                  className="w-12 h-11 flex items-center justify-center rounded-full"
+                >
+                  <MyAvatar token={token} user={user} />
+                </button>
+              )}
+            </div>
+            <div className="pointer-events-auto relative shrink-0">
+              {newMenuOpen && (
+                <>
+                  <div className="fixed inset-0" onClick={() => setNewMenuOpen(false)} />
+                  {/* .liquid-glass sets position: relative, so a wrapper places it. */}
+                  <div className="absolute right-0 bottom-full mb-3 w-48">
+                  <div className="liquid-glass liquid-glass-in rounded-3xl p-1.5">
+                    {([
+                      ['direct', 'New Chat', MessageSquare],
+                      ['group', 'New Group', Users],
+                      ['community', 'New Community', Shield]
+                    ] as ['direct' | 'group' | 'community', string, React.ComponentType<{ className?: string }>][]).map(([k, label, Icon]) => (
+                      <button
+                        key={k}
+                        type="button"
+                        onClick={() => {
+                          setNewMenuOpen(false);
+                          setShowNewChatModal(k);
+                        }}
+                        className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-2xl text-sm font-medium text-slate-800 active:bg-white/70"
+                      >
+                        <Icon className="w-4 h-4 text-violet-600" /> {label}
+                      </button>
+                    ))}
+                  </div>
+                  </div>
+                </>
+              )}
+              <button
+                type="button"
+                onClick={() => setNewMenuOpen((v) => !v)}
+                aria-label="New chat"
+                aria-expanded={newMenuOpen}
+                className="liquid-glass-button w-14 h-14 rounded-full flex items-center justify-center"
+              >
+                <Plus className={`w-6 h-6 transition-transform ${newMenuOpen ? 'rotate-45' : ''}`} />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Main chat window */}
@@ -879,7 +1096,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
           </div>
         ) : (
           <>
-            <div className="p-3 bg-white border-b border-slate-200 flex items-center gap-3">
+            {/* In the docked popup (variant 'modal') its own close button sits
+                over the top-right corner, so the header keeps clear of it. */}
+            <div className={`p-3 bg-white/85 border-b border-violet-100/70 flex items-center gap-3 ${variant === 'modal' ? 'pr-12' : ''}`}>
               <button type="button" onClick={() => setActiveRoomId(null)} className="p-1.5 -ml-1 text-slate-500 hover:bg-slate-100 rounded-lg md:hidden">
                 <ArrowLeft className="w-5 h-5" />
               </button>
@@ -893,12 +1112,13 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                 }}
                 className="flex items-center gap-3 flex-1 min-w-0 text-left"
               >
-                <div
-                  className="w-10 h-10 rounded-full flex items-center justify-center text-white font-semibold text-sm shrink-0"
-                  style={{ background: avatarColor(roomDisplayName(activeRoom, user.id)) }}
-                >
-                  {activeRoom.type === 'community' ? <Shield className="w-5 h-5" /> : activeRoom.type === 'group' ? <Users className="w-5 h-5" /> : initialsOf(roomDisplayName(activeRoom, user.id))}
-                </div>
+                <UserAvatar
+                  userId={activeRoom.type === 'direct' ? activeRoom.other_participant?.id : null}
+                  name={roomDisplayName(activeRoom, user.id)}
+                  token={token}
+                  className="w-10 h-10 text-sm"
+                  fallback={activeRoom.type === 'community' ? <Shield className="w-5 h-5" /> : activeRoom.type === 'group' ? <Users className="w-5 h-5" /> : undefined}
+                />
                 <div className="min-w-0">
                   <h3 className="font-semibold text-sm text-slate-900 truncate">{roomDisplayName(activeRoom, user.id)}</h3>
                   <span className="text-xs text-slate-500">
@@ -912,9 +1132,46 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                   </span>
                 </div>
               </button>
+              {/* Audio / video call (CallLayer.tsx) — one-to-one chats, for
+                  accounts with Calls access. */}
+              {canCall && activeRoom.type === 'direct' && activeRoom.other_participant && (
+                <div className="flex items-center gap-1 shrink-0">
+                  {(['audio', 'video'] as const).map((k) => (
+                    <button
+                      key={k}
+                      type="button"
+                      onClick={() =>
+                        window.dispatchEvent(
+                          new CustomEvent('credence:start-call', {
+                            detail: {
+                              roomId: activeRoom.id,
+                              peer: { id: activeRoom.other_participant!.id, name: roomDisplayName(activeRoom, user.id) },
+                              kind: k,
+                            },
+                          })
+                        )
+                      }
+                      className="p-2 rounded-full text-violet-600 hover:bg-violet-50"
+                      aria-label={k === 'audio' ? 'Audio call' : 'Video call'}
+                      title={k === 'audio' ? 'Audio call' : 'Video call'}
+                    >
+                      {k === 'audio' ? <Phone className="w-5 h-5" /> : <Video className="w-5 h-5" />}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
-            <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-4 space-y-2">
+            {/* Frosted Glass kept, but faint: a soft lavender wash (the app's own
+                light background) over it, so the strips barely show and the
+                messages carry the page. */}
+            <div
+              ref={messagesContainerRef}
+              className="flex-1 overflow-y-auto p-4 space-y-2"
+              style={{
+                background: `radial-gradient(ellipse 60% 50% at 0% 0%, rgba(196,170,255,0.22), transparent 65%), radial-gradient(ellipse 60% 45% at 100% 100%, rgba(232,206,255,0.3), transparent 65%), linear-gradient(180deg, rgba(253,252,255,0.86), rgba(245,240,255,0.86)), ${CHAT_CONVERSATION_BACKGROUND}`
+              }}
+            >
               {loadingMessages && <div className="text-center text-xs text-slate-400 py-4">Loading...</div>}
               {messages.map((msg) => {
                 const isMe = msg.sender_id === user.id;
@@ -926,8 +1183,10 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                         <div className="text-[11px] font-semibold text-slate-500 ml-1 mb-0.5">{msg.sender_name}</div>
                       )}
                       <div
-                        className={`px-3 py-2 rounded-2xl text-sm shadow-sm ${
-                          isMe ? 'bg-[#D9FDD3] text-slate-800 rounded-br-sm' : 'bg-white text-slate-800 rounded-bl-sm'
+                        className={`px-3 py-2 rounded-[18px] text-sm text-slate-800 border ${
+                          isMe
+                            ? 'bg-[rgba(var(--g-accent-rgb,127,0,255),0.10)] border-[rgba(var(--g-accent-rgb,127,0,255),0.10)] rounded-br-[4px]'
+                            : 'bg-white/75 border-white shadow-[0_2px_8px_-4px_rgba(31,38,135,0.15)] rounded-bl-[4px]'
                         }`}
                       >
                         {msg.reply_to_id && (
@@ -966,7 +1225,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                             Reply
                           </button>
                           <span>{timeOnly(msg.created_at)}</span>
-                          {isMe && (isRead ? <CheckCheck size={14} className="text-blue-500" /> : <Check size={14} />)}
+                          {isMe && (isRead ? <CheckCheck size={14} className="text-violet-500" /> : <Check size={14} />)}
                         </div>
                       </div>
                       {isMe && activeRoom.type !== 'direct' && msg.id === lastOwnMessageId && seenByLastOwnMessage.length > 0 && (
@@ -992,7 +1251,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
               </div>
             )}
 
-            <div className="relative p-3 bg-white border-t border-slate-200 flex items-center gap-2">
+            <div className="relative p-3 bg-white/85 border-t border-violet-100/70 flex items-center gap-2">
               {mentionQuery !== null && activeRoom.type !== 'direct' && mentionCandidates.length > 0 && (
                 <div className="absolute bottom-full left-3 right-3 mb-1 bg-white border border-slate-200 rounded-xl shadow-lg max-h-48 overflow-y-auto z-10">
                   {mentionCandidates.map((m) => (
@@ -1002,12 +1261,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                       onClick={() => insertMention(m.name)}
                       className="w-full flex items-center gap-2 px-3 py-2 hover:bg-slate-50 text-left text-sm"
                     >
-                      <div
-                        className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-semibold shrink-0"
-                        style={{ background: avatarColor(m.name) }}
-                      >
-                        {initialsOf(m.name)}
-                      </div>
+                      <UserAvatar userId={m.user_id} name={m.name} token={token} className="w-6 h-6 text-[10px]" />
                       {m.name}
                     </button>
                   ))}
@@ -1030,7 +1284,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                   <button
                     type="button"
                     onClick={() => stopRecording(true)}
-                    className="p-2.5 bg-emerald-600 text-white rounded-full hover:bg-emerald-700 shrink-0"
+                    className="p-2.5 bg-violet-600 text-white rounded-full hover:bg-violet-700 shrink-0"
                     title="Send voice message"
                   >
                     <Send className="w-4 h-4" />
@@ -1070,14 +1324,14 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                     }}
                     placeholder={activeRoom.type !== 'direct' ? 'Type a message, @ to mention' : 'Type a message'}
                     rows={1}
-                    className="flex-1 py-2.5 px-4 bg-slate-100 rounded-2xl border-none resize-none leading-5 max-h-32 overflow-y-auto focus:outline-none focus:ring-2 focus:ring-blue-600 text-sm"
+                    className="flex-1 py-2.5 px-4 bg-white/90 border border-violet-100 rounded-2xl resize-none leading-5 max-h-32 overflow-y-auto focus:outline-none focus:ring-2 focus:ring-violet-400 text-sm"
                   />
                   {messageInput.trim() ? (
                     <button
                       type="button"
                       onClick={sendTextMessage}
                       disabled={sending}
-                      className="p-2.5 bg-emerald-600 text-white rounded-full hover:bg-emerald-700 disabled:opacity-40 shrink-0"
+                      className="p-2.5 bg-violet-600 text-white rounded-full hover:bg-violet-700 disabled:opacity-40 shrink-0"
                     >
                       <Send className="w-4 h-4" />
                     </button>
@@ -1085,7 +1339,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                     <button
                       type="button"
                       onClick={startRecording}
-                      className="p-2.5 bg-emerald-600 text-white rounded-full hover:bg-emerald-700 shrink-0"
+                      className="p-2.5 bg-violet-600 text-white rounded-full hover:bg-violet-700 shrink-0"
                       title="Record a voice message"
                     >
                       <Mic className="w-4 h-4" />
@@ -1128,9 +1382,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
             </div>
             {members.map((m) => (
               <div key={m.user_id} className="px-4 py-2 flex items-center gap-3">
-                <div className="w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-semibold shrink-0" style={{ background: avatarColor(m.name) }}>
-                  {initialsOf(m.name)}
-                </div>
+                <UserAvatar userId={m.user_id} name={m.name} token={token} className="w-9 h-9 text-xs" />
                 <div className="flex-1 min-w-0">
                   <div className="text-sm text-slate-900 truncate">{m.name}{m.user_id === user.id ? ' (You)' : ''}</div>
                   {m.role === 'admin' && <div className="text-[11px] text-emerald-600 font-medium">Admin</div>}
@@ -1183,7 +1435,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
           <button
             type="button"
             onClick={async () => {
-              if (!confirm('Leave this chat?')) return;
+              if (!(await confirmDialog('Leave this chat?'))) return;
               await fetch(apiUrl(`/api/chat/rooms/${activeRoom.id}/members/${user.id}`), {
                 method: 'DELETE',
                 headers: { Authorization: `Bearer ${token}` }
@@ -1300,9 +1552,7 @@ const MemberPickerModal: React.FC<{
                 }
                 className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50"
               >
-                <div className="w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-semibold shrink-0" style={{ background: avatarColor(d.name) }}>
-                  {initialsOf(d.name)}
-                </div>
+                <UserAvatar userId={d.id} name={d.name} className="w-9 h-9 text-xs" />
                 <span className="flex-1 text-left text-sm text-slate-900 truncate">{d.name}</span>
                 <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${isSelected ? 'bg-emerald-500 border-emerald-500' : 'border-slate-300'}`}>
                   {isSelected && <Check className="w-3.5 h-3.5 text-white" />}
