@@ -1687,32 +1687,29 @@ async function getLeaveTypeBalance(userId: number, leaveType: string): Promise<n
 // same way regardless of which kind of Leave Type it's for.
 async function adjustLeaveTypeBalance(userId: number, leaveType: string, delta: number): Promise<void> {
   await ensureDefaultLeaveBalances([userId]);
+  // One UPDATE that adds to what is stored, so two moves at once (two
+  // submissions, a refund during a submission) never overwrite each other.
   if (isFixedLeaveType(leaveType)) {
     const balanceColumn = leaveType === "casual" ? "casual_leave" : leaveType === "sick" ? "sick_leave" : "leave_without_pay";
+    const r: any = await queryDB(`UPDATE leave_balances SET ${balanceColumn} = ${balanceColumn} + ? WHERE user_id = ?`, [delta, userId]);
+    if (typeof r?.affectedRows === "number" && r.affectedRows > 0) return;
     const rows = await queryDB("SELECT * FROM leave_balances WHERE user_id = ?", [userId]);
     const casual = Number(rows[0]?.casual_leave || 0) + (balanceColumn === "casual_leave" ? delta : 0);
     const sick = Number(rows[0]?.sick_leave || 0) + (balanceColumn === "sick_leave" ? delta : 0);
     const lwp = Number(rows[0]?.leave_without_pay || 0) + (balanceColumn === "leave_without_pay" ? delta : 0);
     if (rows.length > 0) {
-      await queryDB("UPDATE leave_balances SET casual_leave = ?, sick_leave = ?, leave_without_pay = ? WHERE user_id = ?", [
-        casual,
-        sick,
-        lwp,
-        userId
-      ]);
+      // The in-memory preview database (no affectedRows).
+      await queryDB("UPDATE leave_balances SET casual_leave = ?, sick_leave = ?, leave_without_pay = ? WHERE user_id = ?", [casual, sick, lwp, userId]);
     } else {
-      await queryDB("INSERT INTO leave_balances (user_id, casual_leave, sick_leave, leave_without_pay) VALUES (?, ?, ?, ?)", [
-        userId,
-        casual,
-        sick,
-        lwp
-      ]);
+      await queryDB("INSERT INTO leave_balances (user_id, casual_leave, sick_leave, leave_without_pay) VALUES (?, ?, ?, ?)", [userId, casual, sick, lwp]);
     }
     return;
   }
   const catRows = await queryDB("SELECT id, category_key, label FROM leave_categories WHERE category_key = ?", [leaveType]);
   if (catRows.length === 0) return; // Shouldn't happen — isValidLeaveType already checked at submission time.
   const categoryId = Number(catRows[0].id);
+  const r: any = await queryDB("UPDATE leave_category_balances SET balance = balance + ? WHERE user_id = ? AND category_id = ?", [delta, userId, categoryId]);
+  if (typeof r?.affectedRows === "number" && r.affectedRows > 0) return;
   const balRows = await queryDB("SELECT * FROM leave_category_balances WHERE user_id = ?", [userId]);
   const existing = balRows.find((b: any) => Number(b.category_id) === categoryId);
   const next = Number(existing?.balance || 0) + delta;
@@ -1720,6 +1717,32 @@ async function adjustLeaveTypeBalance(userId: number, leaveType: string, delta: 
     "INSERT INTO leave_category_balances (user_id, category_id, balance) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE balance = VALUES(balance)",
     [userId, categoryId, next]
   );
+}
+
+// Takes `days` off a Leave Type balance only if at least that much is left —
+// checked and taken in one UPDATE, so several applications sent at once can
+// never take the balance below zero. False when there isn't enough.
+async function deductLeaveTypeBalance(userId: number, leaveType: string, days: number): Promise<boolean> {
+  await ensureDefaultLeaveBalances([userId]);
+  let r: any;
+  if (isFixedLeaveType(leaveType)) {
+    const balanceColumn = leaveType === "casual" ? "casual_leave" : leaveType === "sick" ? "sick_leave" : "leave_without_pay";
+    r = await queryDB(`UPDATE leave_balances SET ${balanceColumn} = ${balanceColumn} - ? WHERE user_id = ? AND ${balanceColumn} >= ?`, [days, userId, days]);
+  } else {
+    const catRows = await queryDB("SELECT id FROM leave_categories WHERE category_key = ?", [leaveType]);
+    if (catRows.length === 0) return false;
+    r = await queryDB("UPDATE leave_category_balances SET balance = balance - ? WHERE user_id = ? AND category_id = ? AND balance >= ?", [
+      days,
+      userId,
+      Number(catRows[0].id),
+      days
+    ]);
+  }
+  if (typeof r?.affectedRows === "number") return r.affectedRows > 0;
+  // The in-memory preview database.
+  if ((await getLeaveTypeBalance(userId, leaveType)) < days) return false;
+  await adjustLeaveTypeBalance(userId, leaveType, -days);
+  return true;
 }
 
 async function finalizeLeaveApplicationApproval(leaveId: number, approvedBy: number | null, remarks: string | null) {
@@ -2866,6 +2889,7 @@ async function startServer() {
     getLeaveTypeLabel,
     getLeaveTypeBalance,
     adjustLeaveTypeBalance,
+    deductLeaveTypeBalance,
     createTemplateApprovalRequest,
     finalizeLeaveApplicationApproval,
     notifyLeaveFirstApprovers

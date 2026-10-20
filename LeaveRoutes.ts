@@ -58,6 +58,8 @@ interface LeaveRouteDeps {
   getLeaveTypeLabel: (leaveType: string) => Promise<string>;
   getLeaveTypeBalance: (userId: number, leaveType: string) => Promise<number>;
   adjustLeaveTypeBalance: (userId: number, leaveType: string, delta: number) => Promise<void>;
+  // Takes days off only if that much is left, in one step (false if not).
+  deductLeaveTypeBalance: (userId: number, leaveType: string, days: number) => Promise<boolean>;
   // Per-Leave-Category Policy (Leave Manage -> "Leave Policies") — used by
   // POST /api/leave-applications below to decide whether a Reliever is
   // required for this submission, and if not, to hand the application
@@ -91,6 +93,7 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
     getLeaveTypeLabel,
     getLeaveTypeBalance,
     adjustLeaveTypeBalance,
+    deductLeaveTypeBalance,
     createTemplateApprovalRequest,
     finalizeLeaveApplicationApproval,
     notifyLeaveFirstApprovers
@@ -988,6 +991,25 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
   // neither exists. Old, already-pending applications from before this change
   // (which DO have an approver_id) are untouched and keep working exactly as
   // before via POST /api/leave-applications/:id/decision below.
+  // Another application of this account (waiting or approved) covering any
+  // of start..end. Two single-day half days may share a date (morning and
+  // afternoon). With beforeId, only applications made before that one.
+  const overlappingLeave = async (userId: number, start: string, end: string, halfDay: boolean, beforeId?: number) => {
+    const rows: any[] = await queryDB(
+      `SELECT id, start_date, end_date, is_half_day FROM leave_applications
+        WHERE user_id = ? AND status IN ('pending', 'approved') AND start_date <= ? AND end_date >= ?${beforeId ? " AND id < ?" : ""}
+        ORDER BY id`,
+      beforeId ? [userId, end, start, beforeId] : [userId, end, start]
+    );
+    const day = (v: any) => (v instanceof Date ? v.toLocaleDateString("en-CA") : String(v).slice(0, 10));
+    const singleHalf = halfDay && start === end;
+    const halves = rows.filter((r) => !!Number(r.is_half_day) && day(r.start_date) === day(r.end_date) && day(r.start_date) === start);
+    if (singleHalf && halves.length === rows.length && halves.length < 2) return null;
+    return rows[0] ? { start: day(rows[0].start_date), end: day(rows[0].end_date) } : null;
+  };
+  const overlapMessage = (c: { start: string; end: string }) =>
+    `You already have a leave application for ${c.start === c.end ? c.start : `${c.start} to ${c.end}`} that is waiting or approved. Choose other dates, or cancel that one first.`;
+
   app.post("/api/leave-applications", authenticateToken, requireLeaveApplicationAccess, async (req: any, res) => {
     try {
       const {
@@ -1071,11 +1093,24 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
         }
       }
 
+      // Not on a day already covered by another application that is waiting
+      // or approved.
+      const clash = await overlappingLeave(req.user.id, String(start_date), String(end_date), !!is_half_day);
+      if (clash) return res.status(409).json({ error: overlapMessage(clash) });
+
       const currentBalance = await getLeaveTypeBalance(req.user.id, leave_type);
       if (dayCount > currentBalance) {
         return res.status(400).json({ error: `Day Count (${dayCount}) exceeds your remaining balance (${currentBalance}) for this Leave Type.` });
       }
-      await adjustLeaveTypeBalance(req.user.id, leave_type, -dayCount);
+      // Checked and taken in one step: of several applications sent at once,
+      // only as many as the balance covers get through.
+      if (!(await deductLeaveTypeBalance(req.user.id, leave_type, dayCount))) {
+        // Taken by an application for the same days sent at the same moment?
+        const sameDays = await overlappingLeave(req.user.id, String(start_date), String(end_date), !!is_half_day);
+        if (sameDays) return res.status(409).json({ error: overlapMessage(sameDays) });
+        const left = await getLeaveTypeBalance(req.user.id, leave_type);
+        return res.status(400).json({ error: `Day Count (${dayCount}) exceeds your remaining balance (${left}) for this Leave Type.` });
+      }
 
       const result: any = await queryDB(
         `INSERT INTO leave_applications
@@ -1087,6 +1122,14 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
           trimmedPurpose, relieverUserId, relieverUserId ? "pending" : null
         ]
       );
+      // Two applications for the same days sent at the same moment both pass
+      // the check above; the later one is taken back here.
+      const raced = await overlappingLeave(req.user.id, String(start_date), String(end_date), !!is_half_day, Number(result.insertId));
+      if (raced) {
+        await queryDB("DELETE FROM leave_applications WHERE id = ?", [result.insertId]);
+        await adjustLeaveTypeBalance(req.user.id, leave_type, dayCount);
+        return res.status(409).json({ error: overlapMessage(raced) });
+      }
 
       if (relieverUserId) {
         // Reliever workflow — the request sits waiting on the picked Reliever
