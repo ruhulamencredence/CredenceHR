@@ -43,6 +43,7 @@ import { ensureUserAccessSchema, registerUserAccessExtras, accountState } from "
 import { registerAiAssistantRoutes } from "./AiAssistantRoutes";
 import { registerAssistantSupportRoutes } from "./AssistantSupportRoutes";
 import { memoryDb, queryMemoryDb, EMPLOYEE_BOOL_FIELDS } from "./memoryDbFallback";
+import { sanitizeNoticeHtml, safeLottieJson, safeLottieUrl } from "./NoticeSafety";
 
 dotenv.config();
 
@@ -4794,9 +4795,9 @@ async function startServer() {
           return {
             id: n.id,
             title: n.title,
-            content_html: n.content_html,
-            lottie_json: n.lottie_json || null,
-            lottie_url: n.lottie_url || null,
+            content_html: sanitizeNoticeHtml(n.content_html),
+            lottie_json: n.lottie_json ? safeLottieJson(n.lottie_json) : null,
+            lottie_url: safeLottieUrl(n.lottie_url),
             target_type: n.target_type,
             source: n.source || null,
             is_active: !!Number(n.is_active),
@@ -4827,13 +4828,19 @@ async function startServer() {
       if (lottie_json && String(lottie_json).trim()) {
         const parsed = parseJsonBody(lottie_json);
         if (!parsed) return res.status(400).json({ error: "The pasted Lottie animation isn't valid JSON." });
-        lottieJsonStr = JSON.stringify(parsed);
+        lottieJsonStr = safeLottieJson(parsed);
       }
-      const lottieUrlStr = lottie_url && String(lottie_url).trim() ? String(lottie_url).trim() : null;
+      if (lottie_url && String(lottie_url).trim() && !safeLottieUrl(lottie_url)) {
+        return res.status(400).json({ error: "The Lottie animation link must be an http(s) address." });
+      }
+      const lottieUrlStr = safeLottieUrl(lottie_url);
+      // Only plain formatting is kept (NoticeSafety.ts).
+      const safeHtml = sanitizeNoticeHtml(content_html);
+      if (!safeHtml.trim()) return res.status(400).json({ error: "Notice content is required" });
 
       const result = await queryDB(
         "INSERT INTO notices (title, content_html, lottie_json, lottie_url, target_type, is_active, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        [String(title).trim(), String(content_html), lottieJsonStr, lottieUrlStr, resolvedTargetType, is_active === false ? 0 : 1, req.user.id]
+        [String(title).trim(), safeHtml, lottieJsonStr, lottieUrlStr, resolvedTargetType, is_active === false ? 0 : 1, req.user.id]
       );
       const noticeId = result.insertId;
 
@@ -4866,13 +4873,19 @@ async function startServer() {
       if (lottie_json && String(lottie_json).trim()) {
         const parsed = parseJsonBody(lottie_json);
         if (!parsed) return res.status(400).json({ error: "The pasted Lottie animation isn't valid JSON." });
-        lottieJsonStr = JSON.stringify(parsed);
+        lottieJsonStr = safeLottieJson(parsed);
       }
-      const lottieUrlStr = lottie_url && String(lottie_url).trim() ? String(lottie_url).trim() : null;
+      if (lottie_url && String(lottie_url).trim() && !safeLottieUrl(lottie_url)) {
+        return res.status(400).json({ error: "The Lottie animation link must be an http(s) address." });
+      }
+      const lottieUrlStr = safeLottieUrl(lottie_url);
+      // Only plain formatting is kept (NoticeSafety.ts).
+      const safeHtml = sanitizeNoticeHtml(content_html);
+      if (!safeHtml.trim()) return res.status(400).json({ error: "Notice content is required" });
 
       await queryDB(
         "UPDATE notices SET title = ?, content_html = ?, lottie_json = ?, lottie_url = ?, target_type = ? WHERE id = ?",
-        [String(title).trim(), String(content_html), lottieJsonStr, lottieUrlStr, resolvedTargetType, id]
+        [String(title).trim(), safeHtml, lottieJsonStr, lottieUrlStr, resolvedTargetType, id]
       );
 
       // Replace the target list wholesale rather than diffing — simplest correct
@@ -5392,9 +5405,9 @@ async function startServer() {
         visible.map((n: any) => ({
           id: n.id,
           title: n.title,
-          content_html: n.content_html,
-          lottie_json: n.lottie_json || null,
-          lottie_url: n.lottie_url || null,
+          content_html: sanitizeNoticeHtml(n.content_html),
+          lottie_json: n.lottie_json ? safeLottieJson(n.lottie_json) : null,
+          lottie_url: safeLottieUrl(n.lottie_url),
           source: n.source || null,
           created_at: n.created_at
         }))
@@ -5433,9 +5446,9 @@ async function startServer() {
         visible.map((n: any) => ({
           id: n.id,
           title: n.title,
-          content_html: n.content_html,
-          lottie_json: n.lottie_json || null,
-          lottie_url: n.lottie_url || null,
+          content_html: sanitizeNoticeHtml(n.content_html),
+          lottie_json: n.lottie_json ? safeLottieJson(n.lottie_json) : null,
+          lottie_url: safeLottieUrl(n.lottie_url),
           created_at: n.created_at
         }))
       );

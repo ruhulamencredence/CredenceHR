@@ -5,6 +5,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
+import { sanitizeNoticeHtml } from '../lib/noticeHtml';
 import { Bell, ChevronLeft } from 'lucide-react';
 import { ActiveNotice } from '../types';
 import { apiUrl } from '../lib/api';
@@ -118,7 +119,7 @@ export const NoticeBoard: React.FC<NoticeBoardProps> = ({ token, onBack }) => {
                 </div>
                 <div
                   className="text-sm text-slate-700 leading-relaxed mt-2 [&_a]:text-blue-600 [&_a]:underline [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5"
-                  dangerouslySetInnerHTML={{ __html: n.content_html }}
+                  dangerouslySetInnerHTML={{ __html: sanitizeNoticeHtml(n.content_html) }}
                 />
               </div>
             ))}

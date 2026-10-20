@@ -1,5 +1,6 @@
 import React, { Suspense, lazy, useEffect, useState } from 'react';
-import { Lottie } from 'lottie-react';
+import { LottieLight } from 'lottie-react';
+import { sanitizeNoticeHtml } from '../lib/noticeHtml';
 import { Bell, X } from 'lucide-react';
 import { ActiveNotice, User } from '../types';
 import { apiUrl } from '../lib/api';
@@ -103,7 +104,8 @@ export const NoticePopup: React.FC<NoticePopupProps> = ({ token, user }) => {
         <div className="px-6 pt-8 pb-2 flex flex-col items-center text-center">
           {lottieSrc ? (
             <div className="w-32 h-32 mb-3 pointer-events-none">
-              <Lottie src={lottieSrc} autoplay loop className="w-full h-full" />
+              {/* The light player: it never runs a Lottie file's expressions (JavaScript). */}
+              <LottieLight src={lottieSrc} autoplay loop className="w-full h-full" />
             </div>
           ) : (
             <div className="liquid-glass-inset w-16 h-16 mb-3 rounded-[22px] text-[color:var(--g-accent,#7F00FF)] flex items-center justify-center">
@@ -116,7 +118,7 @@ export const NoticePopup: React.FC<NoticePopupProps> = ({ token, user }) => {
         <div className="px-6 pb-6 pt-2">
           <div
             className="text-sm text-slate-800 leading-relaxed [&_a]:text-blue-700 [&_a]:underline [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5"
-            dangerouslySetInnerHTML={{ __html: current.content_html }}
+            dangerouslySetInnerHTML={{ __html: sanitizeNoticeHtml(current.content_html) }}
           />
 
           <button

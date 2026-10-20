@@ -14,6 +14,7 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { Capacitor } from '@capacitor/core';
+import { sanitizeNoticeHtml } from '../lib/noticeHtml';
 import { App } from '@capacitor/app';
 import { BatteryCharging, Check, CheckCircle2, ChevronDown, ChevronUp, Circle, LocateFixed, MapPin, Smartphone, X } from 'lucide-react';
 import { Lottie } from 'lottie-react';
@@ -204,7 +205,7 @@ export const TrackingNoticeCard: React.FC<Props> = ({ notice, remaining, busy, o
             <h3 className="text-lg font-bold text-slate-900 leading-snug">{notice.title}</h3>
             <div
               className="mt-2 text-sm text-slate-700 leading-relaxed [&_p+p]:mt-2"
-              dangerouslySetInnerHTML={{ __html: notice.content_html }}
+              dangerouslySetInnerHTML={{ __html: sanitizeNoticeHtml(notice.content_html) }}
             />
           </div>
 
