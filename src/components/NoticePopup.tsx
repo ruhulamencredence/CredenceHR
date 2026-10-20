@@ -1,5 +1,6 @@
 import React, { Suspense, lazy, useEffect, useRef, useState } from 'react';
-import { Lottie } from 'lottie-react';
+import { LottieLight } from 'lottie-react';
+import { sanitizeNoticeHtml } from '../lib/noticeHtml';
 import { Bell, X } from 'lucide-react';
 import { ActiveNotice, User } from '../types';
 import { apiUrl } from '../lib/api';
@@ -152,7 +153,8 @@ export const NoticePopup: React.FC<NoticePopupProps> = ({ token, user }) => {
         <div className="px-4">
           {lottieSrc && (
             <div className="w-full max-h-[40vh] rounded-[20px] overflow-hidden pointer-events-none" style={{ aspectRatio: lottieAspect }}>
-              <Lottie src={lottieSrc} autoplay loop className="w-full h-full" />
+              {/* The light player: it never runs a Lottie file's expressions (JavaScript). */}
+              <LottieLight src={lottieSrc} autoplay loop className="w-full h-full" />
             </div>
           )}
 
@@ -166,7 +168,7 @@ export const NoticePopup: React.FC<NoticePopupProps> = ({ token, user }) => {
 
             <div
               className="mt-1.5 text-sm text-slate-700 leading-relaxed text-left [&_a]:text-blue-700 [&_a]:underline [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5"
-              dangerouslySetInnerHTML={{ __html: current.content_html }}
+              dangerouslySetInnerHTML={{ __html: sanitizeNoticeHtml(current.content_html) }}
             />
           </div>
 

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Lottie } from 'lottie-react';
+import { LottieLight } from 'lottie-react';
+import { sanitizeNoticeHtml } from '../lib/noticeHtml';
 import {
   Bell, Plus, Trash2, Edit2, X, Eye, EyeOff, Sparkles,
   Users as UsersIcon, Globe, AlertCircle
@@ -373,7 +374,7 @@ export const NoticeManager: React.FC<NoticeManagerProps> = ({ token, user }) => 
                     <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-1.5">Preview</p>
                     <div
                       className="text-sm text-slate-800 prose-sm max-w-none [&_a]:text-blue-600 [&_a]:underline"
-                      dangerouslySetInnerHTML={{ __html: form.content_html }}
+                      dangerouslySetInnerHTML={{ __html: sanitizeNoticeHtml(form.content_html) }}
                     />
                   </div>
                 )}
@@ -414,7 +415,7 @@ export const NoticeManager: React.FC<NoticeManagerProps> = ({ token, user }) => 
                   </p>
                   {(previewLottieData || form.lottie_url.trim()) && (
                     <div className="mt-2 w-24 h-24 mx-auto bg-slate-50 border border-slate-200 rounded-xl p-2">
-                      <Lottie src={previewLottieData || form.lottie_url.trim()} autoplay loop className="w-full h-full" />
+                      <LottieLight src={previewLottieData || form.lottie_url.trim()} autoplay loop className="w-full h-full" />
                     </div>
                   )}
                 </div>
