@@ -10,7 +10,7 @@ import {
   Target, UserPlus, Gavel, FolderLock, Sparkles, ExternalLink, Car, HandCoins,
   ClipboardList, BookOpen, ClipboardCheck, TrendingUp, Settings, Pencil, Check, Mail, CalendarRange, Ruler, PenLine, ReceiptText,
 } from 'lucide-react';
-import { User, AdminModuleKey, REPORTS_INSIGHTS_MODULES, DATA_IMPORT_MODULES } from '../types';
+import { User, AdminModuleKey, chatAllowed, REPORTS_INSIGHTS_MODULES, DATA_IMPORT_MODULES } from '../types';
 import credenceLogo from '../assets/credence-logo.png';
 import { useProfilePhoto } from '../lib/useProfilePhoto';
 import { useSiteSupervisor } from './TeamAttendance';
@@ -303,9 +303,9 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   ].filter((g) => g.items.length > 0);
 
   const selfServiceItems: NavItem[] = [];
-  // Chat (Direct/Group/Community messaging, ChatPanel.tsx) — NOT gated,
-  // every signed-in account gets it, same as Employee Directory just below.
-  selfServiceItems.push({ key: 'chat', label: 'Chat', icon: MessageSquare, onClick: onOpenChat });
+  // Chat (Direct/Group/Community messaging, ChatPanel.tsx) — Module Access ->
+  // Chat (on unless turned off for this account).
+  if (chatAllowed(user)) selfServiceItems.push({ key: 'chat', label: 'Chat', icon: MessageSquare, onClick: onOpenChat });
   // Alerts (AlertsPage.tsx) — same visibility as Chat above: every
   // signed-in account, not gated behind any module grant.
   selfServiceItems.push({ key: 'alerts', label: 'Alerts', icon: Bell, onClick: onOpenAlerts });

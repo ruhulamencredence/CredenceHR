@@ -288,16 +288,45 @@ async function upsertRead(queryDB: ChatRouteDeps["queryDB"], roomId: number, use
   );
 }
 
+// Chat access per account (users.can_use_chat, Module Access -> Chat; on
+// unless turned off), cached briefly. A Superadmin always has it.
+const chatAccessCache = new Map<number, { ok: boolean; at: number }>();
+export async function canUseChat(queryDB: (sql: string, params?: any[]) => Promise<any>, userId: number): Promise<boolean> {
+  const hit = chatAccessCache.get(userId);
+  if (hit && Date.now() - hit.at < 30 * 1000) return hit.ok;
+  const rows: any[] | null = await queryDB("SELECT role, can_use_chat FROM users WHERE id = ?", [userId]).catch(() => null);
+  if (!rows) return hit?.ok ?? false;
+  const u = rows[0];
+  const ok = !!u && (u.role === "superadmin" || Number(u.can_use_chat ?? 1) !== 0);
+  chatAccessCache.set(userId, { ok, at: Date.now() });
+  return ok;
+}
+// SQL condition: the account in `alias` has Chat.
+const CHAT_ON_SQL = (alias: string) => `(${alias}.role = 'superadmin' OR COALESCE(${alias}.can_use_chat, 1) <> 0)`;
+
 export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatRouteDeps) {
   const { authenticateToken, queryDB } = deps;
+
+  // Every Chat route below needs Chat access (the push-token routes don't:
+  // the app's push registration carries every other notification too).
+  const requireChat = async (req: any, res: any, next: any) => {
+    if (await canUseChat(queryDB, Number(req.user?.id))) return next();
+    res.status(403).json({ error: "Chat is not turned on for your account. Ask your Superadmin.", code: "CHAT_OFF" });
+  };
+  // Of these accounts, the ones that have Chat.
+  const withChat = async (ids: number[]): Promise<number[]> => {
+    if (ids.length === 0) return [];
+    const rows: any[] = await queryDB(`SELECT id FROM users u WHERE id IN (${ids.map(() => "?").join(",")}) AND ${CHAT_ON_SQL("u")}`, ids);
+    return rows.map((r: any) => Number(r.id));
+  };
 
   // GET /api/chat/directory — every other account, for "start a new chat" /
   // "add members" pickers. Same company-wide visibility EmployeeDirectoryRoutes.ts
   // already grants every signed-in account (chat is internal, org-wide).
-  app.get("/api/chat/directory", authenticateToken, async (req: any, res) => {
+  app.get("/api/chat/directory", authenticateToken, requireChat, async (req: any, res) => {
     try {
       const rows = await queryDB(
-        "SELECT id, name, email, username, role FROM users WHERE id != ? ORDER BY name ASC",
+        `SELECT id, name, email, username, role FROM users u WHERE id != ? AND ${CHAT_ON_SQL("u")} ORDER BY name ASC`,
         [req.user.id]
       );
       res.json(rows);
@@ -308,7 +337,7 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
 
   // GET /api/chat/rooms — every room this account belongs to, with a last-message
   // preview and unread count, newest activity first.
-  app.get("/api/chat/rooms", authenticateToken, async (req: any, res) => {
+  app.get("/api/chat/rooms", authenticateToken, requireChat, async (req: any, res) => {
     try {
       const userId = req.user.id;
       const rooms = await queryDB(
@@ -368,7 +397,7 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
 
   // GET /api/chat/unread-count — total unread across every room, for the
   // Navbar chat bell badge (same idea as AlertsBell's /api/alerts/unread-count).
-  app.get("/api/chat/unread-count", authenticateToken, async (req: any, res) => {
+  app.get("/api/chat/unread-count", authenticateToken, requireChat, async (req: any, res) => {
     try {
       const userId = req.user.id;
       const rows = await queryDB(
@@ -388,14 +417,17 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
 
   // POST /api/chat/rooms — create (or, for 'direct', reuse) a room.
   // Body: { type: 'direct'|'group'|'community', title?, memberIds: number[] }
-  app.post("/api/chat/rooms", authenticateToken, async (req: any, res) => {
+  app.post("/api/chat/rooms", authenticateToken, requireChat, async (req: any, res) => {
     try {
       const userId = req.user.id;
       const { type, title, memberIds } = req.body || {};
       if (!["direct", "group", "community"].includes(type)) {
         return res.status(400).json({ error: "type must be 'direct', 'group', or 'community'." });
       }
-      const ids: number[] = Array.isArray(memberIds) ? memberIds.map(Number).filter((n) => Number.isFinite(n) && n !== userId) : [];
+      const asked: number[] = Array.isArray(memberIds) ? memberIds.map(Number).filter((n) => Number.isFinite(n) && n !== userId) : [];
+      // Only accounts that have Chat can be chatted with or added.
+      const ids = await withChat(asked);
+      if (ids.length < asked.length && type === "direct") return res.status(400).json({ error: "Chat is not turned on for that account." });
 
       if (type === "direct") {
         if (ids.length !== 1) return res.status(400).json({ error: "Direct chat needs exactly one other member." });
@@ -428,7 +460,7 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
   // POST /api/chat/rooms/:id/subgroups — attach an existing 'group' room as
   // a sub-group of this 'community' room (WhatsApp Community). Community
   // admin only. Body: { groupRoomId }
-  app.post("/api/chat/rooms/:id/subgroups", authenticateToken, async (req: any, res) => {
+  app.post("/api/chat/rooms/:id/subgroups", authenticateToken, requireChat, async (req: any, res) => {
     try {
       const communityId = Number(req.params.id);
       const groupRoomId = Number(req.body?.groupRoomId);
@@ -456,7 +488,7 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
   });
 
   // GET /api/chat/rooms/:id/members
-  app.get("/api/chat/rooms/:id/members", authenticateToken, async (req: any, res) => {
+  app.get("/api/chat/rooms/:id/members", authenticateToken, requireChat, async (req: any, res) => {
     try {
       const roomId = Number(req.params.id);
       if (!(await isMember(queryDB, roomId, req.user.id))) {
@@ -476,7 +508,7 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
 
   // POST /api/chat/rooms/:id/members — add members (group/community admin only).
   // Body: { userIds: number[] }
-  app.post("/api/chat/rooms/:id/members", authenticateToken, async (req: any, res) => {
+  app.post("/api/chat/rooms/:id/members", authenticateToken, requireChat, async (req: any, res) => {
     try {
       const roomId = Number(req.params.id);
       const room = await queryDB("SELECT type FROM chat_rooms WHERE id = ?", [roomId]);
@@ -485,7 +517,8 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
       if (!(await isRoomAdmin(queryDB, roomId, req.user))) {
         return res.status(403).json({ error: "Only an admin of this room can add members." });
       }
-      const ids: number[] = Array.isArray(req.body?.userIds) ? req.body.userIds.map(Number).filter(Number.isFinite) : [];
+      // Only accounts that have Chat can be added.
+      const ids = await withChat(Array.isArray(req.body?.userIds) ? req.body.userIds.map(Number).filter(Number.isFinite) : []);
       for (const memberId of ids) {
         await queryDB("INSERT IGNORE INTO chat_room_members (room_id, user_id, role) VALUES (?, ?, 'member')", [
           roomId,
@@ -501,7 +534,7 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
 
   // DELETE /api/chat/rooms/:id/members/:userId — remove a member (room admin),
   // or leave the room yourself (target === requester).
-  app.delete("/api/chat/rooms/:id/members/:userId", authenticateToken, async (req: any, res) => {
+  app.delete("/api/chat/rooms/:id/members/:userId", authenticateToken, requireChat, async (req: any, res) => {
     try {
       const roomId = Number(req.params.id);
       const targetUserId = Number(req.params.userId);
@@ -518,7 +551,7 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
   });
 
   // PATCH /api/chat/rooms/:id/members/:userId — promote/demote. Body: { role: 'admin'|'member' }
-  app.patch("/api/chat/rooms/:id/members/:userId", authenticateToken, async (req: any, res) => {
+  app.patch("/api/chat/rooms/:id/members/:userId", authenticateToken, requireChat, async (req: any, res) => {
     try {
       const roomId = Number(req.params.id);
       const targetUserId = Number(req.params.userId);
@@ -537,7 +570,7 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
 
   // GET /api/chat/rooms/:id/messages?beforeId=&limit= — newest-first page;
   // pass the oldest id already loaded as beforeId to load the next page back.
-  app.get("/api/chat/rooms/:id/messages", authenticateToken, async (req: any, res) => {
+  app.get("/api/chat/rooms/:id/messages", authenticateToken, requireChat, async (req: any, res) => {
     try {
       const roomId = Number(req.params.id);
       if (!(await isMember(queryDB, roomId, req.user.id))) {
@@ -571,7 +604,7 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
   // messages (base64 body) and as a fallback when the socket isn't connected.
   // Body: { content?, messageType, attachment_base64?, attachment_mimetype?,
   //          attachment_filename?, replyToId? }
-  app.post("/api/chat/rooms/:id/messages", authenticateToken, async (req: any, res) => {
+  app.post("/api/chat/rooms/:id/messages", authenticateToken, requireChat, async (req: any, res) => {
     try {
       const roomId = Number(req.params.id);
       if (!(await isMember(queryDB, roomId, req.user.id))) {
@@ -608,7 +641,7 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
 
   // GET /api/chat/messages/:id/attachment — stream the blob, same
   // Content-Type/Cache-Control convention as profileRoutes.ts's photo GET.
-  app.get("/api/chat/messages/:id/attachment", authenticateToken, async (req: any, res) => {
+  app.get("/api/chat/messages/:id/attachment", authenticateToken, requireChat, async (req: any, res) => {
     try {
       const messageId = Number(req.params.id);
       const rows = await queryDB(
@@ -633,7 +666,7 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
   });
 
   // POST /api/chat/rooms/:id/read — mark everything up to messageId read.
-  app.post("/api/chat/rooms/:id/read", authenticateToken, async (req: any, res) => {
+  app.post("/api/chat/rooms/:id/read", authenticateToken, requireChat, async (req: any, res) => {
     try {
       const roomId = Number(req.params.id);
       const messageId = Number(req.body?.messageId);
@@ -655,7 +688,7 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
   // message — WhatsApp shows this per-message via long-press; this app shows
   // it inline for just the sender's own most recent message, which is what
   // the ChatPanel UI actually renders (see the module comment there).
-  app.get("/api/chat/messages/:id/reads", authenticateToken, async (req: any, res) => {
+  app.get("/api/chat/messages/:id/reads", authenticateToken, requireChat, async (req: any, res) => {
     try {
       const messageId = Number(req.params.id);
       const msgRows = await queryDB("SELECT room_id, sender_id FROM chat_messages WHERE id = ?", [messageId]);
@@ -755,8 +788,11 @@ export function setupChatSocket(io: SocketIOServer, deps: ChatSocketDeps) {
     // Auto-join every room this account belongs to so 'receive_message' /
     // 'user_typing' / 'message_read' reach it without a 'join_room' round
     // trip per room on every reconnect.
+    // An account without Chat joins no room (this socket still carries its
+    // alerts, mail and notices).
+    const chatOn = () => canUseChat(queryDB, userId);
     try {
-      const rooms = await queryDB("SELECT room_id FROM chat_room_members WHERE user_id = ?", [userId]);
+      const rooms = (await chatOn()) ? await queryDB("SELECT room_id FROM chat_room_members WHERE user_id = ?", [userId]) : [];
       for (const r of rooms) socket.join(`room:${r.room_id}`);
     } catch {
       // Best-effort — a room missed here still gets joined the next time
@@ -765,8 +801,9 @@ export function setupChatSocket(io: SocketIOServer, deps: ChatSocketDeps) {
 
     // Everyone online right now (ChatPanel asks when it opens, since
     // presence_change only reports changes).
-    socket.on("presence_list", (ack?: (ids: number[]) => void) => {
+    socket.on("presence_list", async (ack?: (ids: number[]) => void) => {
       if (typeof ack !== "function") return;
+      if (!(await chatOn())) return ack([]);
       io.fetchSockets()
         .then((all) => ack(Array.from(new Set(all.map((x) => Number((x.data as any)?.user?.id)).filter((id) => id > 0)))))
         .catch(() => ack([]));
@@ -774,6 +811,7 @@ export function setupChatSocket(io: SocketIOServer, deps: ChatSocketDeps) {
 
     socket.on("join_room", async (roomId: number) => {
       try {
+        if (!(await chatOn())) return;
         const member = await queryDB("SELECT id FROM chat_room_members WHERE room_id = ? AND user_id = ?", [roomId, userId]);
         if (member.length > 0) socket.join(`room:${roomId}`);
       } catch {
@@ -781,9 +819,10 @@ export function setupChatSocket(io: SocketIOServer, deps: ChatSocketDeps) {
       }
     });
 
-    socket.on("typing", (data: { roomId: number; isTyping: boolean }) => {
+    socket.on("typing", async (data: { roomId: number; isTyping: boolean }) => {
       const roomId = Number(data?.roomId);
-      if (!Number.isFinite(roomId)) return;
+      // Only into a room this socket joined as a member.
+      if (!Number.isFinite(roomId) || !socket.rooms.has(`room:${roomId}`) || !(await chatOn())) return;
       socket.to(`room:${roomId}`).emit("user_typing", { roomId, userId, isTyping: !!data.isTyping });
     });
 
@@ -793,6 +832,7 @@ export function setupChatSocket(io: SocketIOServer, deps: ChatSocketDeps) {
       async (data: { roomId: number; content: string; replyToId?: number | null }, ack?: (res: any) => void) => {
         try {
           const roomId = Number(data?.roomId);
+          if (!(await chatOn())) throw new Error("Chat is not turned on for your account.");
           const member = await queryDB("SELECT id FROM chat_room_members WHERE room_id = ? AND user_id = ?", [roomId, userId]);
           if (member.length === 0) throw new Error("Not a member of this room.");
           const content = String(data?.content || "").trim();
@@ -818,6 +858,7 @@ export function setupChatSocket(io: SocketIOServer, deps: ChatSocketDeps) {
         const roomId = Number(data?.roomId);
         const messageId = Number(data?.messageId);
         if (!Number.isFinite(roomId) || !Number.isFinite(messageId)) return;
+        if (!socket.rooms.has(`room:${roomId}`) || !(await chatOn())) return;
         await upsertRead(queryDB, roomId, userId, messageId);
         io.to(`room:${roomId}`).emit("message_read", { roomId, userId, messageId });
       } catch {

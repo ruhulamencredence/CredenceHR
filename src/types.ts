@@ -770,6 +770,8 @@ export interface User {
   can_view_timesheet?: boolean;
   // Chat audio/video calls (CallLayer.tsx) — Self Service switch, off by default.
   can_use_calls?: boolean;
+  // Chat (ChatPanel.tsx) — Module Access switch, on unless turned off.
+  can_use_chat?: boolean;
   can_use_mail?: boolean;
   can_view_mail_directory?: boolean;
   can_use_mail_groups?: boolean;
@@ -2048,3 +2050,8 @@ export interface ChatMessage {
   reply_to_sender_name: string | null;
   created_at: string;
 }
+// Chat (and Calls, which start from a Chat) for this account: a Superadmin
+// always; anyone else unless Module Access -> Chat is turned off. The API
+// checks the same switch (ChatRoutes.ts canUseChat).
+export const chatAllowed = (u?: Pick<User, 'role' | 'can_use_chat' | 'is_onboarding'> | null): boolean =>
+  !!u && !u.is_onboarding && (u.role === 'superadmin' || u.can_use_chat !== false);

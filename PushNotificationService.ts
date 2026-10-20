@@ -133,7 +133,11 @@ export async function sendPushToRoomMembers(
   data: Record<string, string>
 ): Promise<void> {
   // Browsers too (desktop notifications) — with or without Firebase.
-  void queryDB("SELECT user_id FROM chat_room_members WHERE room_id = ?", [roomId])
+  // Only members who still have Chat (users.can_use_chat).
+  void queryDB(
+    "SELECT m.user_id FROM chat_room_members m JOIN users u ON u.id = m.user_id WHERE m.room_id = ? AND (u.role = 'superadmin' OR COALESCE(u.can_use_chat, 1) <> 0)",
+    [roomId]
+  )
     .then((members: any[]) =>
       sendWebPushToUserIds(
         queryDB,
@@ -151,7 +155,8 @@ export async function sendPushToRoomMembers(
     const rows = await queryDB(
       `SELECT t.token FROM chat_push_tokens t
        JOIN chat_room_members m ON m.user_id = t.user_id AND m.room_id = ?
-       WHERE t.user_id != ?`,
+       JOIN users u ON u.id = t.user_id
+       WHERE t.user_id != ? AND (u.role = 'superadmin' OR COALESCE(u.can_use_chat, 1) <> 0)`,
       [roomId, excludeUserId]
     );
     if (rows.length === 0) return;
