@@ -4,6 +4,10 @@ import App from './App.tsx';
 import ChatStandalone from './ChatStandalone.tsx';
 import PrivacyPolicy from './components/PrivacyPolicy.tsx';
 import './index.css';
+import { installDeviceWatch } from './lib/device';
+
+// Device Access: sign out a phone the Superadmin removed (App.tsx).
+installDeviceWatch();
 
 // /chat is Chat's own standalone tab (see App.tsx's openChat, which
 // window.open()s this exact path on the web instead of showing Chat inside

@@ -38,6 +38,7 @@ import { Timesheet } from './components/Timesheet';
 import { PayrollModule } from './components/PayrollModule';
 import { EmployeeDirectory } from './components/EmployeeDirectory';
 import { MaterialReceive } from './components/MaterialReceive';
+import { DEVICE_REVOKED_EVENT, setSignedOutReason } from './lib/device';
 import { NoticePopup } from './components/NoticePopup';
 import { useBackButtonClose } from './lib/useBackButtonClose';
 import { closeTopmostOrReturnFalse } from './lib/backButtonStack';
@@ -308,6 +309,19 @@ export default function App() {
     stopBackgroundTracking();
     disconnectChatSocket();
   };
+
+  // A phone the Superadmin removed from this account (Device Access) is
+  // signed out; the sign-in screen says why.
+  useEffect(() => {
+    if (!token) return;
+    const onRevoked = () => {
+      setSignedOutReason('This phone was removed from your account. Sign in again to ask your Superadmin to allow it.');
+      handleLogout();
+    };
+    window.addEventListener(DEVICE_REVOKED_EVENT, onRevoked);
+    return () => window.removeEventListener(DEVICE_REVOKED_EVENT, onRevoked);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, user]);
 
   // Employee Tracking (Admin Panel -> Employee Tracking): starts/stops the
   // APK's background location watcher whenever can_use_tracking changes for
@@ -717,7 +731,7 @@ export default function App() {
       setViewMode('admin');
       setClaimsNavRequest({ target: target === 'claims' ? 'movementClaims' : 'conveyanceBill', ts: Date.now() });
     },
-    onGoToAdminModule: (target: Exclude<AdminModuleKey, 'claims' | 'conveyance'> | 'my_conveyance' | 'dashboard' | 'servers' | 'permanent_delete_log' | 'active_users') => {
+    onGoToAdminModule: (target: Exclude<AdminModuleKey, 'claims' | 'conveyance'> | 'my_conveyance' | 'dashboard' | 'servers' | 'permanent_delete_log' | 'active_users' | 'devices') => {
       setSelfServiceView(null);
       setShowProfilePage(false);
           setShowChat(false);

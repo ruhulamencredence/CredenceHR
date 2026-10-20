@@ -3,6 +3,7 @@ import { Lock, ArrowUp, MapPin, Download } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import credenceLogo from '../assets/credence-logo.png';
 import { apiUrl } from '../lib/api';
+import { appDeviceInfo, takeSignedOutReason } from '../lib/device';
 import { PrivacyPolicy } from './PrivacyPolicy';
 
 // Lazy-loaded: keeps lottie-react (a fairly heavy animation library) out of
@@ -25,7 +26,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
   // server as a single "identifier" field.
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
+  const [error, setError] = useState(() => takeSignedOutReason());
   const [loading, setLoading] = useState(false);
   const [showPrivacy, setShowPrivacy] = useState(false);
   // Shown while we're specifically waiting on the location permission prompt /
@@ -89,12 +90,14 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
         }
       }
 
+      // Which phone this is (Device Access, DeviceRoutes.ts).
+      const device = await appDeviceInfo();
       const res = await fetch(apiUrl('/api/auth/login'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(
           coords
-            ? { identifier, password, latitude: coords.latitude, longitude: coords.longitude, platform: 'app' }
+            ? { identifier, password, latitude: coords.latitude, longitude: coords.longitude, platform: 'app', ...(device || {}) }
             : { identifier, password }
         ),
       });

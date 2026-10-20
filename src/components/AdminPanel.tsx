@@ -37,6 +37,7 @@ import { MprDispatchMaterial } from './MprDispatchMaterial';
 import { MdStatusChip, MdTimelinePopup, mdStatusLabel } from './MprDispatchShared';
 import { ProgressOverlay, useLongTask, xhrJson } from './ProgressOverlay';
 import { MeasurementSheet } from './MeasurementSheet';
+import { DeviceAccess } from './DeviceAccess';
 import { Spinner } from './Spinner';
 import { apiUrl } from '../lib/api';
 import { formatDate, todayDateOnlyString } from '../lib/formatDate';
@@ -478,7 +479,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // PUT /api/users/:id/module-permissions).
   const canGrantModuleAccess = isSuperAdmin || !!user.can_grant_module_access;
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'my_conveyance' | 'disbursement' | 'holidays' | 'asset_management' | 'servers' | 'permanent_delete_log' | 'active_users' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'measurement_sheet'>(
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'my_conveyance' | 'disbursement' | 'holidays' | 'asset_management' | 'servers' | 'permanent_delete_log' | 'active_users' | 'devices' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'measurement_sheet'>(
     () => {
       // Restores whichever tab this Admin was last looking at — see the
       // "pull down to reload" note in App.tsx: since a reload now has to be
@@ -494,7 +495,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         const savedVisible =
           saved === 'dashboard' ? isAdminRole :
           saved === 'my_conveyance' ? isSuperAdmin || visibleModules.includes('conveyance') :
-          saved === 'servers' || saved === 'permanent_delete_log' || saved === 'active_users' ? isSuperAdmin :
+          saved === 'servers' || saved === 'permanent_delete_log' || saved === 'active_users' || saved === 'devices' ? isSuperAdmin :
           isSuperAdmin || visibleModules.includes(saved as AdminModuleKey);
         if (saved && savedVisible) return saved as any;
       } catch {
@@ -542,7 +543,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
     // 'servers'/'permanent_delete_log' aren't AdminModuleKey/module_permissions
     // entries either — both Superadmin-only, same reasoning as 'my_conveyance'
     // below.
-    if (adminNavRequest.target === 'servers' || adminNavRequest.target === 'permanent_delete_log' || adminNavRequest.target === 'active_users') {
+    if (adminNavRequest.target === 'servers' || adminNavRequest.target === 'permanent_delete_log' || adminNavRequest.target === 'active_users' || adminNavRequest.target === 'devices') {
       if (isSuperAdmin) setActiveTab(adminNavRequest.target);
       return;
     }
@@ -559,7 +560,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   useEffect(() => {
     const activeTabStillVisible =
       activeTab === 'dashboard' ? isAdminRole :
-      activeTab === 'servers' || activeTab === 'permanent_delete_log' || activeTab === 'active_users' ? isSuperAdmin :
+      activeTab === 'servers' || activeTab === 'permanent_delete_log' || activeTab === 'active_users' || activeTab === 'devices' ? isSuperAdmin :
       activeTab === 'my_conveyance' ? canSee('conveyance') : canSee(activeTab);
     if (!activeTabStillVisible && visibleModules.length > 0) {
       setActiveTab(visibleModules[0] as any);
@@ -4738,6 +4739,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           <ServerProfilesPanel token={token} />
         </div>
       )}
+
+      {/* TAB: DEVICE ACCESS — which phones each account may use the app on, Superadmin only (DeviceAccess.tsx). */}
+      {activeTab === 'devices' && isSuperAdmin && <DeviceAccess token={token} />}
 
       {/* TAB: ACTIVE USERS — who is signed in right now, with IP and device, Superadmin only (ActiveUsers.tsx). */}
       {activeTab === 'active_users' && isSuperAdmin && (
