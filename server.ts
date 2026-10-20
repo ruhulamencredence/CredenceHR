@@ -2,7 +2,6 @@ import express from "express";
 import path from "path";
 import fsSync from "fs";
 import http from "http";
-import cors from "cors";
 import compression from "compression";
 import dotenv from "dotenv";
 import bcrypt from "bcryptjs";
@@ -88,6 +87,7 @@ import { ensureChatSchema, registerChatRoutes, setupChatSocket } from "./ChatRou
 import { memoryDb, queryMemoryDb, EMPLOYEE_BOOL_FIELDS } from "./memoryDbFallback";
 import { runsBackgroundJobs } from "./jobRunner";
 import { resolveJwtSecret } from "./JwtSecret";
+import { installWebSecurity, socketCorsOrigin } from "./WebSecurity";
 
 dotenv.config();
 
@@ -2099,7 +2099,8 @@ async function startServer() {
   // ever comes to depend on it (rate limiting, audit logging, etc.). A
   // no-op when there's no reverse proxy in front (e.g. local `npm run dev`).
   app.set("trust proxy", 1);
-  app.use(cors());
+  // CORS (CORS_ORIGINS) and security headers (WebSecurity.ts).
+  installWebSecurity(app);
   // Gzips every response this server sends — HTML, JSON API responses, and
   // (most importantly for how long the APK/browser takes to first load) the
   // built JS/CSS bundle. Without this, the ~3MB main JS chunk was being sent
@@ -2913,7 +2914,7 @@ async function startServer() {
   // over a LAN IP). REST endpoints (room/message history, attachments,
   // member management) come from registerChatRoutes; setupChatSocket wires
   // the live 'send_message'/'typing'/'presence_change' events on top of it.
-  const io = new SocketIOServer(httpServer, { cors: { origin: "*" } });
+  const io = new SocketIOServer(httpServer, { cors: { origin: socketCorsOrigin() } });
   liveIo = io;
   setAlertsIo(io);
 
