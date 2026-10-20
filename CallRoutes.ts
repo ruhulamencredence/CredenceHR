@@ -47,9 +47,14 @@ const accessCache = new Map<number, { ok: boolean; name: string; at: number }>()
 async function callAccess(queryDB: QueryDB, userId: number) {
   const hit = accessCache.get(userId);
   if (hit && Date.now() - hit.at < 30 * 1000) return hit;
-  const rows: any[] = (await queryDB("SELECT id, name, role, can_use_calls FROM users WHERE id = ?", [userId]).catch(() => [])) || [];
+  const rows: any[] = (await queryDB("SELECT id, name, role, can_use_calls, can_use_chat FROM users WHERE id = ?", [userId]).catch(() => [])) || [];
   const u = rows.find((r) => Number(r.id) === userId);
-  const v = { ok: !!u && (u.role === "superadmin" || !!Number(u.can_use_calls)), name: u?.name || "Someone", at: Date.now() };
+  // Calls start from a one-to-one Chat, so they need Chat too.
+  const v = {
+    ok: !!u && (u.role === "superadmin" || (!!Number(u.can_use_calls) && Number(u.can_use_chat ?? 1) !== 0)),
+    name: u?.name || "Someone",
+    at: Date.now()
+  };
   accessCache.set(userId, v);
   return v;
 }

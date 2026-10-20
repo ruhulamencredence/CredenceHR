@@ -71,6 +71,7 @@ type FlagKey =
   | 'can_export_assistant_reports'
   | 'can_handle_assistant_support'
   | 'can_use_calls'
+  | 'can_use_chat'
   | 'can_use_mail'
   | 'can_view_mail_directory'
   | 'can_use_mail_groups'
@@ -96,7 +97,8 @@ interface FlagDef {
 
 const FLAGS: FlagDef[] = [
   { key: 'can_access_user_panel', label: 'User Panel access', desc: 'This Admin also gets the User Panel (attendance, claims, job entry).', section: 'general', endpoint: 'user-panel-access', adminOnly: true },
-  { key: 'can_use_calls', label: 'Audio / Video Calls', desc: 'Call, and be called by, other accounts from a one-to-one Chat.', section: 'general', endpoint: 'calls-access' },
+  { key: 'can_use_chat', label: 'Chat', desc: 'Messages with other accounts (one-to-one, groups). On by default.', section: 'general', endpoint: 'chat-access', defaultOn: true },
+  { key: 'can_use_calls', label: 'Audio / Video Calls', desc: 'Call, and be called by, other accounts from a one-to-one Chat (needs Chat).', section: 'general', endpoint: 'calls-access' },
   { key: 'can_email_reports', label: 'Email reports', desc: 'An Email button next to PDF on the reports they can open.', section: 'general', endpoint: 'report-email-access' },
   { key: 'can_use_ai_assistant', label: 'AI Assistant', desc: 'The floating Assistant. On by default.', section: 'general', endpoint: 'ai-assistant-access', defaultOn: true },
   { key: 'can_export_assistant_reports', label: 'Assistant: PDF / Excel download', desc: 'Download the Assistant’s list answers (only figures they can see).', section: 'general', endpoint: 'assistant-report-access' },

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Capacitor } from '@capacitor/core';
-import { Project, MprNumber, Entry, Budget, BudgetItem, User, MprUsage, ClaimsNavRequest, JobsNavRequest, DashboardNavRequest, LeaveNavRequest } from '../types';
+import { Project, MprNumber, Entry, Budget, BudgetItem, User, MprUsage, ClaimsNavRequest, JobsNavRequest, DashboardNavRequest, LeaveNavRequest, chatAllowed } from '../types';
 import { CalendarClock, CheckSquare, ExternalLink, Gavel, LogOut, MessageSquare, ShieldCheck, Smartphone, HandCoins, Target, Sparkles, Mail, CalendarRange, PenLine, ReceiptText, PackageCheck } from 'lucide-react';
 import type { MoreItem } from './BottomNav';
 
@@ -1206,7 +1206,9 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           ...(user.role === 'superadmin' || !!user.can_use_mail
             ? [{ key: 'credenceMail', label: 'Credence Mail', icon: Mail, iconBg: 'from-sky-300 to-sky-600 shadow-[0_6px_16px_-2px_rgba(2,132,199,0.35)]', onClick: () => openSelfService('credenceMail') }]
             : []),
-          { key: 'chat', label: 'Chat', icon: MessageSquare, iconBg: 'from-cyan-300 to-cyan-500 shadow-[0_6px_16px_-2px_rgba(8,145,178,0.35)]', onClick: () => openSelfService('chat') },
+          ...(chatAllowed(user)
+            ? [{ key: 'chat', label: 'Chat', icon: MessageSquare, iconBg: 'from-cyan-300 to-cyan-500 shadow-[0_6px_16px_-2px_rgba(8,145,178,0.35)]', onClick: () => openSelfService('chat') }]
+            : []),
           { key: 'alerts', label: 'Alerts', icon: Bell, iconBg: 'from-red-300 to-red-500 shadow-[0_6px_16px_-2px_rgba(220,38,38,0.35)]', onClick: () => openSelfService('alerts') },
           { key: 'erp360', label: '360 ERP', icon: ExternalLink, iconBg: 'from-slate-400 to-slate-600 shadow-[0_6px_16px_-2px_rgba(71,85,105,0.35)]', onClick: () => openSelfService('erp360') }
         ] as MoreItem[])
