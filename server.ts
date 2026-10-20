@@ -87,16 +87,13 @@ import { Server as SocketIOServer } from "socket.io";
 import { ensureChatSchema, registerChatRoutes, setupChatSocket } from "./ChatRoutes";
 import { memoryDb, queryMemoryDb, EMPLOYEE_BOOL_FIELDS } from "./memoryDbFallback";
 import { runsBackgroundJobs } from "./jobRunner";
+import { resolveJwtSecret } from "./JwtSecret";
 
 dotenv.config();
 
-const JWT_SECRET = process.env.JWT_SECRET || "mpr_tracker_secret_key_2026";
-// Anyone who knows the signing key can make a token for any account, so a
-// key that is missing or the one written in .env.example must be replaced
-// with a long random one on a live server.
-if (!process.env.JWT_SECRET || ["super_secret_jwt_key_mpr_tracker_2026", "mpr_tracker_secret_key_2026"].includes(process.env.JWT_SECRET) || process.env.JWT_SECRET.length < 32) {
-  console.warn("⚠️ JWT_SECRET is missing, a published default or too short — set a long random value (e.g. `openssl rand -hex 48`) in .env.");
-}
+// Never a key written in the code: a weak or missing JWT_SECRET is replaced
+// by a random one kept in .jwt-secret (JwtSecret.ts).
+const JWT_SECRET = resolveJwtSecret();
 const PORT = Number(process.env.PORT) || 3000;
 
 // Normalizes a MySQL DATE value (which mysql2 may return as a JS Date object or as a
