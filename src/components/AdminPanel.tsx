@@ -7,7 +7,7 @@ import credenceLogo from '../assets/credence-logo.png';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
 import { savePdfCrossPlatform } from '../lib/saveFile';
 import { Project, Branch, MprNumber, Entry, User, Budget, BudgetItem, BudgetSubmission, UserProjectPermission, EntryEditHistory, EntryPermanentDeleteLog, BulkUserRow, BulkUserResultItem, AdminModuleKey, ADMIN_MODULES, PermissionLayerKey, PERMISSION_LAYERS, PERMISSION_LAYER_MODULES, EXPLICIT_ONLY_LAYERS, layersFor, LeaveManageLayerKey, LEAVE_MANAGE_LAYERS, AttendanceRecord, ClaimsNavRequest, AdminNavRequest, Department, LeaveApplication, PendingJobEdit } from '../types';
-import { Building2, FileText, Users, Users2, BarChart3, Plus, Trash2, Edit2, Search, Filter, UserCheck, Calendar, CalendarClock, Download, Upload, FolderPlus, X, Eye, FileSpreadsheet, KeyRound, History, RotateCcw, Recycle, ListChecks, FileDown, MapPin, LayoutGrid, Navigation, LogIn, LogOut, Bell, Route, ShieldCheck, Wallet, Contact, Lock, Unlock, Mail, CheckCircle2, XCircle, Clock3, ShieldAlert, Copy, Eraser, Loader2, Truck } from 'lucide-react';
+import { Building2, FileText, Users, Users2, BarChart3, Plus, Trash2, Edit2, Search, Filter, UserCheck, Calendar, CalendarClock, Download, Upload, FolderPlus, X, Eye, FileSpreadsheet, KeyRound, History, RotateCcw, Recycle, ListChecks, FileDown, MapPin, LayoutGrid, Navigation, LogIn, LogOut, Bell, Route, ShieldCheck, Wallet, Contact, Lock, Unlock, Mail, CheckCircle2, XCircle, Clock3, ShieldAlert, Copy, Eraser, Loader2, Truck, LayoutTemplate } from 'lucide-react';
 import LocationMapPicker from './LocationMapPicker';
 import { NoticeManager } from './NoticeManager';
 import { EmployeesPanel } from './EmployeesPanel';
@@ -38,6 +38,12 @@ import { MdStatusChip, MdTimelinePopup, mdStatusLabel } from './MprDispatchShare
 import { ProgressOverlay, useLongTask, xhrJson } from './ProgressOverlay';
 import { MeasurementSheet } from './MeasurementSheet';
 import { DeviceAccess } from './DeviceAccess';
+import { UserAccessDrawer, UserAccessChips, userInitials, ROLE_BADGE, ROLE_LABEL } from './UserAccessDrawer';
+import { UserBulkBar } from './UserBulkBar';
+import { AccessTemplatesModal } from './AccessTemplatesModal';
+import { ModuleAccessPage } from './ModuleAccessPage';
+import { PagerBar } from './PagerBar';
+import { AccessTemplate, applyTemplateToUser, canEditUserFeatures } from '../lib/accessTemplates';
 import { Spinner } from './Spinner';
 import { apiUrl } from '../lib/api';
 import { formatDate, todayDateOnlyString } from '../lib/formatDate';
@@ -425,6 +431,16 @@ const ReportRow = React.memo(function ReportRow({
 // what's actually rendered, and re-lookups are free — reverseGeocode's own
 // cache (keyed by rounded coordinate) already dedupes accounts sharing a
 // login spot, like an office Wi-Fi gate.
+const USER_ACCESS_FILTERS: { key: string; label: string; match: (u: User) => boolean }[] = [
+  { key: 'admins', label: 'Admins', match: (u) => u.role === 'admin' },
+  { key: 'no_modules', label: 'No modules', match: (u) => u.role !== 'superadmin' && (u.module_permissions || []).length === 0 },
+  { key: 'attendance', label: 'Attendance on', match: (u) => u.role !== 'superadmin' && !!u.can_use_attendance },
+  { key: 'tracking', label: 'Tracking on', match: (u) => u.role !== 'superadmin' && !!u.can_use_tracking },
+  { key: 'leave_summary', label: 'Leave Summary on', match: (u) => u.role !== 'superadmin' && !!u.can_view_leave_summary },
+  { key: 'job_edit', label: 'Job Edit on', match: (u) => u.role !== 'superadmin' && !!u.can_job_edit },
+  { key: 'never_logged_in', label: 'Never logged in', match: (u) => u.last_login_at == null }
+];
+
 const LastLoginAddress: React.FC<{ lat: number; lng: number; asOf?: string }> = ({ lat, lng, asOf }) => {
   const [address, setAddress] = useState<string | null>(null);
   useEffect(() => {
@@ -582,473 +598,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [changingEmailFor, setChangingEmailFor] = useState<User | null>(null);
   const [newEmailInput, setNewEmailInput] = useState('');
   const [changingEmail, setChangingEmail] = useState(false);
-  const [selectedModules, setSelectedModules] = useState<Set<AdminModuleKey>>(new Set());
-  // Filters the "Admin Module" checkbox list below by label as the
-  // Superadmin types — cleared whenever a fresh Module Access modal opens
-  // (see setManagingModulesFor(...) call sites).
-  const [moduleSearchQuery, setModuleSearchQuery] = useState('');
-  // Transient confirmation shown under the "Copy access from" picker after a
-  // copy — cleared whenever a fresh Module Access modal opens.
-  const [copyAccessNotice, setCopyAccessNotice] = useState('');
-  // Granular per-module action layers (Read Only/Edit-Add/Entry-Upload/
-  // Delete-Trash/Permanent Delete) — only meaningful for modules listed in
-  // PERMISSION_LAYER_MODULES (currently just 'departments'), shown as an
-  // extra checkbox row once that module's own checkbox above is ticked. One
-  // Set per module key, keyed by AdminModuleKey. Initialized in
-  // openManageModules below.
-  const [moduleLayers, setModuleLayers] = useState<Record<string, Set<PermissionLayerKey>>>({});
-  // Leave Manage's own operation-specific layers (Edit Balance/Set Balance in
-  // Bulk/Add Category/Leave Policy) — same idea as moduleLayers above but for
-  // the "Also allow editing Leave balances" toggle below (can_manage_leave),
-  // not an Admin Module checkbox, since Leave Manage isn't part of the
-  // AdminModuleKey/module_permissions system at all. Initialized in
-  // openManageModules below.
-  const [leaveManageLayers, setLeaveManageLayers] = useState<Set<LeaveManageLayerKey>>(new Set());
-  // Department-wise scope for the 'attendance_reports' module only — layered
-  // on top of the checkbox above (see PUT /api/users/:id/attendance-report-
-  // departments). Empty set = unrestricted (every Department visible), same
-  // as before this existed; only meaningful while 'attendance_reports' is
-  // checked in selectedModules, but kept even if unchecked mid-edit so
-  // re-checking it doesn't lose what was picked in this same modal session.
-  const [attendanceReportDepts, setAttendanceReportDepts] = useState<Set<string>>(new Set());
-  const [loadingAttendanceReportDepts, setLoadingAttendanceReportDepts] = useState(false);
-  // Department-wise scope for the 'leave_applications' module — same idea as
-  // attendanceReportDepts above, backed by PUT /api/users/:id/leave-
-  // application-departments instead. Empty set = unrestricted.
-  const [leaveApplicationDepts, setLeaveApplicationDepts] = useState<Set<string>>(new Set());
-  const [loadingLeaveApplicationDepts, setLoadingLeaveApplicationDepts] = useState(false);
-  // Department-wise scope for the 'conveyance' module — same idea as
-  // attendanceReportDepts/leaveApplicationDepts above, backed by PUT
-  // /api/users/:id/conveyance-claim-departments instead. Empty set =
-  // unrestricted.
-  const [conveyanceClaimDepts, setConveyanceClaimDepts] = useState<Set<string>>(new Set());
-  const [loadingConveyanceClaimDepts, setLoadingConveyanceClaimDepts] = useState(false);
-  const [userPanelAccessEnabled, setUserPanelAccessEnabled] = useState(false);
-  const [leaveManagementAccessEnabled, setLeaveManagementAccessEnabled] = useState(false);
-  const [movementClaimAccessEnabled, setMovementClaimAccessEnabled] = useState(false);
-  const [conveyanceClaimAccessEnabled, setConveyanceClaimAccessEnabled] = useState(false);
-  // ON by default (mirrors can_view_budget_module defaulting to true server-side)
-  // — Select a Budget / Jobs / Job Entry Details are on for every account until
-  // a Superadmin explicitly turns this off for one.
-  const [budgetModuleAccessEnabled, setBudgetModuleAccessEnabled] = useState(true);
-  // OFF by default, same pattern as movement/conveyance claim access above —
-  // gates Self Service -> Timesheet / Leave Application / My Leave. Employee
-  // Directory has no such toggle; every account keeps seeing it.
-  const [timesheetAccessEnabled, setTimesheetAccessEnabled] = useState(false);
-  // PEPM Operation -> Material Receive (MprDispatchRoutes.ts) — off by default.
-  const [materialReceiveEnabled, setMaterialReceiveEnabled] = useState(false);
-  const [leaveApplicationAccessEnabled, setLeaveApplicationAccessEnabled] = useState(false);
-  const [myLeaveAccessEnabled, setMyLeaveAccessEnabled] = useState(false);
-  const [savingModules, setSavingModules] = useState(false);
-
-  // Populates every Module Access form field (User Module toggles, Admin
-  // Module checkboxes + their permission layers, Leave Manage layers, and
-  // Department scopes) from a given account `u` — shared by openManageModules
-  // below (u = the account actually being edited) AND copyAccessFrom further
-  // down (u = a DIFFERENT account whose access is being copied onto whoever
-  // is currently open in the modal). Deliberately does NOT touch
-  // managingModulesFor or moduleSearchQuery — those identify/filter the
-  // modal itself, not the access being edited, so copyAccessFrom must leave
-  // them alone (the modal stays open on the account being edited; only the
-  // form fields change, and nothing is saved until "Save Access" is clicked).
-  const applyUserAccessToForm = (u: User) => {
-    setSelectedModules(new Set(u.module_permissions || []));
-    setUserPanelAccessEnabled(!!u.can_access_user_panel);
-    setLeaveManagementAccessEnabled(!!u.can_manage_leave);
-    setMovementClaimAccessEnabled(!!u.can_view_movement_claims);
-    setConveyanceClaimAccessEnabled(!!u.can_view_conveyance_claims);
-    setBudgetModuleAccessEnabled(u.can_view_budget_module !== false);
-    setTimesheetAccessEnabled(!!u.can_view_timesheet);
-    setMaterialReceiveEnabled(!!u.can_receive_material);
-    setLeaveApplicationAccessEnabled(!!u.can_view_leave_application);
-    setMyLeaveAccessEnabled(!!u.can_view_my_leave);
-    // Permission layers — one Set per module in PERMISSION_LAYER_MODULES.
-    // Explicit saved rows win; a module this account already has granted
-    // (u.module_permissions) but with NO saved layer rows yet falls back to
-    // "every layer except Permanent Delete" (mirrors requireModuleLayer()'s
-    // server-side default, so the checkboxes shown here always match what's
-    // actually enforced) — a module not yet granted starts with nothing
-    // checked.
-    const initialLayers: Record<string, Set<PermissionLayerKey>> = {};
-    for (const moduleKey of PERMISSION_LAYER_MODULES) {
-      const saved = u.module_permission_layers?.[moduleKey];
-      if (saved && saved.length > 0) {
-        initialLayers[moduleKey] = new Set(saved as PermissionLayerKey[]);
-      } else if ((u.module_permissions || []).includes(moduleKey)) {
-        // Same default as the server (defaultLayersFor): Measurement Sheet
-        // starts with "read" alone.
-        initialLayers[moduleKey] = new Set(
-          moduleKey === 'measurement_sheet' ? ['read'] : layersFor(moduleKey).map((l) => l.key).filter((k) => !EXPLICIT_ONLY_LAYERS.includes(k))
-        );
-      } else {
-        initialLayers[moduleKey] = new Set();
-      }
-    }
-    setModuleLayers(initialLayers);
-    // Leave Manage layers — same "explicit rows win, else full access if
-    // already granted, else nothing" default as above, keyed off
-    // can_manage_leave (the toggle) instead of module_permissions.
-    const savedLeaveLayers = u.module_permission_layers?.leave_manage;
-    if (savedLeaveLayers && savedLeaveLayers.length > 0) {
-      setLeaveManageLayers(new Set(savedLeaveLayers as LeaveManageLayerKey[]));
-    } else if (u.can_manage_leave) {
-      setLeaveManageLayers(new Set(LEAVE_MANAGE_LAYERS.map((l) => l.key)));
-    } else {
-      setLeaveManageLayers(new Set());
-    }
-
-    // Attendance Report Department scope — fetched fresh every time this
-    // modal opens (never trust stale state from a previously-managed user).
-    // Departments this account already supervises (departments.
-    // supervisor_user_id) are pre-ticked ONLY the first time a Superadmin
-    // ever sets this up (no saved scope rows yet) — a sensible starting
-    // point, not a rule: an already-saved scope (even an empty/cleared one)
-    // is trusted as-is and never has the Supervisor default re-applied over
-    // it, and the pre-tick itself can simply be unticked before Save either way.
-    setAttendanceReportDepts(new Set());
-    setLoadingAttendanceReportDepts(true);
-    fetch(apiUrl(`/api/users/${u.id}/attendance-report-departments`), {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-      .then((res) => (res.ok ? res.json() : { departments: [] }))
-      .then((data) => {
-        const saved: string[] = Array.isArray(data?.departments) ? data.departments : [];
-        if (saved.length > 0) {
-          setAttendanceReportDepts(new Set(saved));
-        } else {
-          const supervised = departments.filter((d) => d.supervisor_user_id === u.id).map((d) => d.name);
-          setAttendanceReportDepts(new Set(supervised));
-        }
-      })
-      .catch(() => {})
-      .finally(() => setLoadingAttendanceReportDepts(false));
-
-    // Leave Application Department scope — same fetch-fresh-on-open and
-    // Supervisor-pre-tick-only-if-nothing-saved-yet rules as above, just
-    // against the 'leave_applications' module's own endpoint.
-    setLeaveApplicationDepts(new Set());
-    setLoadingLeaveApplicationDepts(true);
-    fetch(apiUrl(`/api/users/${u.id}/leave-application-departments`), {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-      .then((res) => (res.ok ? res.json() : { departments: [] }))
-      .then((data) => {
-        const saved: string[] = Array.isArray(data?.departments) ? data.departments : [];
-        if (saved.length > 0) {
-          setLeaveApplicationDepts(new Set(saved));
-        } else {
-          const supervised = departments.filter((d) => d.supervisor_user_id === u.id).map((d) => d.name);
-          setLeaveApplicationDepts(new Set(supervised));
-        }
-      })
-      .catch(() => {})
-      .finally(() => setLoadingLeaveApplicationDepts(false));
-
-    // Conveyance Claim Department scope — same fetch-fresh-on-open and
-    // Supervisor-pre-tick-only-if-nothing-saved-yet rules as above, just
-    // against the 'conveyance' module's own endpoint.
-    setConveyanceClaimDepts(new Set());
-    setLoadingConveyanceClaimDepts(true);
-    fetch(apiUrl(`/api/users/${u.id}/conveyance-claim-departments`), {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-      .then((res) => (res.ok ? res.json() : { departments: [] }))
-      .then((data) => {
-        const saved: string[] = Array.isArray(data?.departments) ? data.departments : [];
-        if (saved.length > 0) {
-          setConveyanceClaimDepts(new Set(saved));
-        } else {
-          const supervised = departments.filter((d) => d.supervisor_user_id === u.id).map((d) => d.name);
-          setConveyanceClaimDepts(new Set(supervised));
-        }
-      })
-      .catch(() => {})
-      .finally(() => setLoadingConveyanceClaimDepts(false));
-  };
-
-  const openManageModules = (u: User) => {
-    applyUserAccessToForm(u);
-    setModuleSearchQuery('');
-    setCopyAccessNotice('');
-    setManagingModulesFor(u);
-  };
-
-  // "Copy access from" (Module Access -> header dropdown) — copies every
-  // field applyUserAccessToForm sets from `sourceUser` onto the form for
-  // whoever is CURRENTLY open in the modal (managingModulesFor stays
-  // unchanged). Nothing is persisted until the Superadmin reviews the
-  // now-updated checkboxes/toggles and clicks "Save Access" — this only
-  // pre-fills the form, exactly like opening the modal fresh would, just
-  // sourced from a different account's saved access instead of the target's
-  // own.
-  const copyAccessFrom = (sourceUserId: number) => {
-    const source = users.find((usr) => usr.id === sourceUserId);
-    if (!source) return;
-    applyUserAccessToForm(source);
-    // "User Panel Access" is Admin-only server-side (PUT .../user-panel-
-    // access 400s for a 'user' role target) and the toggle itself is only
-    // ever rendered for an Admin target — copying from an Admin source onto
-    // a 'user' role target would otherwise leave this checked-but-hidden,
-    // which then fires (and 400s) the save call below since it no longer
-    // matches the target's own (always-false) can_access_user_panel.
-    if (managingModulesFor?.role !== 'admin') {
-      setUserPanelAccessEnabled(false);
-    }
-    setCopyAccessNotice(`Copied access from ${source.name} — review below, then click "Save Access" to apply it.`);
-  };
-
-  const toggleAttendanceReportDept = (name: string) => {
-    setAttendanceReportDepts((prev) => {
-      const next = new Set(prev);
-      if (next.has(name)) next.delete(name);
-      else next.add(name);
-      return next;
-    });
-  };
-
-  const toggleLeaveApplicationDept = (name: string) => {
-    setLeaveApplicationDepts((prev) => {
-      const next = new Set(prev);
-      if (next.has(name)) next.delete(name);
-      else next.add(name);
-      return next;
-    });
-  };
-
-  const toggleConveyanceClaimDept = (name: string) => {
-    setConveyanceClaimDepts((prev) => {
-      const next = new Set(prev);
-      if (next.has(name)) next.delete(name);
-      else next.add(name);
-      return next;
-    });
-  };
-
-  const toggleSelectedModule = (key: AdminModuleKey) => {
-    setSelectedModules((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  };
-
-  const toggleModuleLayer = (moduleKey: AdminModuleKey, layer: PermissionLayerKey) => {
-    setModuleLayers((prev) => {
-      const current = new Set(prev[moduleKey] || []);
-      if (current.has(layer)) current.delete(layer);
-      else current.add(layer);
-      return { ...prev, [moduleKey]: current };
-    });
-  };
-
-  const toggleLeaveManageLayer = (layer: LeaveManageLayerKey) => {
-    setLeaveManageLayers((prev) => {
-      const next = new Set(prev);
-      if (next.has(layer)) next.delete(layer);
-      else next.add(layer);
-      return next;
-    });
-  };
-
-  const handleSaveModulePermissions = async () => {
-    if (!managingModulesFor) return;
-    setSavingModules(true);
-    try {
-      const res = await fetch(apiUrl(`/api/users/${managingModulesFor.id}/module-permissions`), {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ modules: Array.from(selectedModules) })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to update module access');
-
-      // Permission layers (Read Only/Edit-Add/Entry-Upload/Delete-Trash/
-      // Permanent Delete) for each module that supports them — same "only
-      // meaningful/only saved while the module checkbox is ticked" rule as
-      // the Department-scope blocks just below.
-      for (const moduleKey of PERMISSION_LAYER_MODULES) {
-        if (!selectedModules.has(moduleKey)) continue;
-        const layerRes = await fetch(apiUrl(`/api/users/${managingModulesFor.id}/module-permission-layers`), {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ module: moduleKey, layers: Array.from(moduleLayers[moduleKey] || []) })
-        });
-        const layerData = await layerRes.json();
-        if (!layerRes.ok) throw new Error(layerData.error || `Failed to update permission layers for ${moduleKey}`);
-      }
-
-      // Department-wise scope for the 'attendance_reports' module — only
-      // meaningful (and only saved) while that module is actually checked
-      // above; leaving it unchecked here means the account loses
-      // 'attendance_reports' access entirely regardless of any scope rows,
-      // so there's nothing useful to persist.
-      if (selectedModules.has('attendance_reports')) {
-        const deptRes = await fetch(apiUrl(`/api/users/${managingModulesFor.id}/attendance-report-departments`), {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ departments: Array.from(attendanceReportDepts) })
-        });
-        const deptData = await deptRes.json();
-        if (!deptRes.ok) throw new Error(deptData.error || 'Failed to update Attendance Report Department access');
-      }
-
-      // Department-wise scope for the 'leave_applications' module — same
-      // "only save while the module checkbox is actually ticked" rule as
-      // attendance_reports above.
-      if (selectedModules.has('leave_applications')) {
-        const leaveDeptRes = await fetch(apiUrl(`/api/users/${managingModulesFor.id}/leave-application-departments`), {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ departments: Array.from(leaveApplicationDepts) })
-        });
-        const leaveDeptData = await leaveDeptRes.json();
-        if (!leaveDeptRes.ok) throw new Error(leaveDeptData.error || 'Failed to update Leave Application Department access');
-      }
-
-      // Department-wise scope for the 'conveyance' module — same
-      // "only save while the module checkbox is actually ticked" rule as
-      // attendance_reports/leave_applications above.
-      if (selectedModules.has('conveyance')) {
-        const conveyanceDeptRes = await fetch(apiUrl(`/api/users/${managingModulesFor.id}/conveyance-claim-departments`), {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ departments: Array.from(conveyanceClaimDepts) })
-        });
-        const conveyanceDeptData = await conveyanceDeptRes.json();
-        if (!conveyanceDeptRes.ok) throw new Error(conveyanceDeptData.error || 'Failed to update Conveyance Claim Department access');
-      }
-
-      // Also save the "User Panel Access" toggle, only if it actually changed —
-      // this is a separate Superadmin-only switch from the tab checkboxes
-      // above. Admin-only server-side (PUT .../user-panel-access 400s for a
-      // 'user' role target) — also gated here, not just by the toggle being
-      // hidden in the UI for non-Admin targets, since "Copy access from…"
-      // can otherwise leave userPanelAccessEnabled mismatched against a
-      // 'user' role target's own (always-false) can_access_user_panel after
-      // copying from an Admin source, which would otherwise fire this PUT
-      // and 400.
-      if (managingModulesFor.role === 'admin' && userPanelAccessEnabled !== !!managingModulesFor.can_access_user_panel) {
-        const upaRes = await fetch(apiUrl(`/api/users/${managingModulesFor.id}/user-panel-access`), {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ can_access_user_panel: userPanelAccessEnabled })
-        });
-        const upaData = await upaRes.json();
-        if (!upaRes.ok) throw new Error(upaData.error || 'Failed to update User Panel access');
-      }
-
-      // Also save the "Leave Management Access" toggle, only if it changed —
-      // another separate Superadmin-only switch, applies to Admin AND User rows
-      // (unlike User Panel Access above, which is Admin-only).
-      if (leaveManagementAccessEnabled !== !!managingModulesFor.can_manage_leave) {
-        const lmaRes = await fetch(apiUrl(`/api/users/${managingModulesFor.id}/leave-management-access`), {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ can_manage_leave: leaveManagementAccessEnabled })
-        });
-        const lmaData = await lmaRes.json();
-        if (!lmaRes.ok) throw new Error(lmaData.error || 'Failed to update Leave Management access');
-      }
-
-      // Leave Manage's own operation-specific layers — only meaningful (and
-      // only saved) while the toggle above is actually on, same "only save
-      // while the master switch is ticked" rule as the module layer saves
-      // further up.
-      if (leaveManagementAccessEnabled) {
-        const leaveLayerRes = await fetch(apiUrl(`/api/users/${managingModulesFor.id}/module-permission-layers`), {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ module: 'leave_manage', layers: Array.from(leaveManageLayers) })
-        });
-        const leaveLayerData = await leaveLayerRes.json();
-        if (!leaveLayerRes.ok) throw new Error(leaveLayerData.error || 'Failed to update Leave Manage permission layers');
-      }
-
-      // Also save the "Movement Claim" and "Conveyance Bill Claim" access
-      // toggles, only if each changed — two more separate Superadmin-only
-      // switches, applying to Admin AND User rows same as Leave Management above.
-      if (movementClaimAccessEnabled !== !!managingModulesFor.can_view_movement_claims) {
-        const mcaRes = await fetch(apiUrl(`/api/users/${managingModulesFor.id}/movement-claim-access`), {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ can_view_movement_claims: movementClaimAccessEnabled })
-        });
-        const mcaData = await mcaRes.json();
-        if (!mcaRes.ok) throw new Error(mcaData.error || 'Failed to update Movement Claim access');
-      }
-      if (conveyanceClaimAccessEnabled !== !!managingModulesFor.can_view_conveyance_claims) {
-        const ccaRes = await fetch(apiUrl(`/api/users/${managingModulesFor.id}/conveyance-claim-access`), {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ can_view_conveyance_claims: conveyanceClaimAccessEnabled })
-        });
-        const ccaData = await ccaRes.json();
-        if (!ccaRes.ok) throw new Error(ccaData.error || 'Failed to update Conveyance Bill Claim access');
-      }
-
-      // Also save the "Budget/Jobs/Job Entry Details" access toggle, only if it
-      // changed — ON by default (see budgetModuleAccessEnabled's initial state),
-      // so this most commonly fires when a Superadmin turns it OFF for someone.
-      if (budgetModuleAccessEnabled !== (managingModulesFor.can_view_budget_module !== false)) {
-        const bmaRes = await fetch(apiUrl(`/api/users/${managingModulesFor.id}/budget-module-access`), {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ can_view_budget_module: budgetModuleAccessEnabled })
-        });
-        const bmaData = await bmaRes.json();
-        if (!bmaRes.ok) throw new Error(bmaData.error || 'Failed to update Budget/Jobs access');
-      }
-
-      if (materialReceiveEnabled !== !!managingModulesFor.can_receive_material) {
-        const mrRes = await fetch(apiUrl(`/api/users/${managingModulesFor.id}/material-receive-access`), {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ can_receive_material: materialReceiveEnabled })
-        });
-        const mrData = await mrRes.json();
-        if (!mrRes.ok) throw new Error(mrData.error || 'Failed to update Material Receive access');
-      }
-
-      // Also save the Timesheet / Leave Application / My Leave access toggles,
-      // only if each changed — same "Superadmin-only, off by default" pattern
-      // as Movement Claim/Conveyance Bill Claim above.
-      if (timesheetAccessEnabled !== !!managingModulesFor.can_view_timesheet) {
-        const tsaRes = await fetch(apiUrl(`/api/users/${managingModulesFor.id}/timesheet-access`), {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ can_view_timesheet: timesheetAccessEnabled })
-        });
-        const tsaData = await tsaRes.json();
-        if (!tsaRes.ok) throw new Error(tsaData.error || 'Failed to update Timesheet access');
-      }
-      if (leaveApplicationAccessEnabled !== !!managingModulesFor.can_view_leave_application) {
-        const laaRes = await fetch(apiUrl(`/api/users/${managingModulesFor.id}/leave-application-access`), {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ can_view_leave_application: leaveApplicationAccessEnabled })
-        });
-        const laaData = await laaRes.json();
-        if (!laaRes.ok) throw new Error(laaData.error || 'Failed to update Leave Application access');
-      }
-      if (myLeaveAccessEnabled !== !!managingModulesFor.can_view_my_leave) {
-        const mlaRes = await fetch(apiUrl(`/api/users/${managingModulesFor.id}/my-leave-access`), {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ can_view_my_leave: myLeaveAccessEnabled })
-        });
-        const mlaData = await mlaRes.json();
-        if (!mlaRes.ok) throw new Error(mlaData.error || 'Failed to update My Leave access');
-      }
-
-      setManagingModulesFor(null);
-      fetchAllData();
-      setMessage({ type: 'success', text: 'Module access updated.' });
-    } catch (err: any) {
-      setMessage({ type: 'error', text: err.message });
-    } finally {
-      setSavingModules(false);
-    }
+  // Accounts the Module Access page opened with (ModuleAccessPage.tsx).
+  const [moduleAccessIds, setModuleAccessIds] = useState<number[]>([]);
+  const openManageModules = (u: User | User[]) => {
+    const list = Array.isArray(u) ? u : [u];
+    if (list.length === 0) return;
+    setModuleAccessIds(list.map((x) => x.id));
+    setManagingModulesFor(list[0]);
+    // Opens as a page: start at its top.
+    window.scrollTo({ top: 0 });
   };
 
   const [projects, setProjects] = useState<Project[]>([]);
@@ -1071,10 +629,40 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // dropdown, etc.) still sees the full list.
   const [userSearchText, setUserSearchText] = useState('');
   const [userRoleFilter, setUserRoleFilter] = useState<'all' | 'superadmin' | 'admin' | 'user'>('all');
+  // Quick filter chips above the list (see USER_ACCESS_FILTERS).
+  const [userAccessFilter, setUserAccessFilter] = useState<string>('all');
+  // Account open on the "Manage" page (UserAccessDrawer), by id so it always
+  // shows the latest copy from `users`.
+  const [managingUserId, setManagingUserId] = useState<number | null>(null);
+  const openManageUser = (id: number) => {
+    setManagingUserId(id);
+    // Opens as a page: start at its top.
+    window.scrollTo({ top: 0 });
+  };
+  // An account deleted from its Manage page: back to the Users page.
+  useEffect(() => {
+    if (managingUserId != null && users.length > 0 && !users.some((x) => x.id === managingUserId)) setManagingUserId(null);
+  }, [users, managingUserId]);
+  // The Users page's own pages close when another tab is opened.
+  useEffect(() => {
+    if (activeTab !== 'users') {
+      setManagingModulesFor(null);
+      setManagingUserId(null);
+    }
+  }, [activeTab]);
+  // While Manage / Module Access is open the Users page is kept as drawn.
+  const frozenUsersTab = useRef<React.ReactNode>(null);
+  const frozenDrawer = useRef<React.ReactNode>(null);
+  // Ticked rows for the bulk bar (UserBulkBar), and the Access Templates list.
+  const [selectedUserIds, setSelectedUserIds] = useState<Set<number>>(new Set());
+  const [accessTemplates, setAccessTemplates] = useState<AccessTemplate[]>([]);
+  const [showAccessTemplates, setShowAccessTemplates] = useState(false);
   const filteredUsers = useMemo(() => {
     const q = userSearchText.trim().toLowerCase();
+    const accessFilter = USER_ACCESS_FILTERS.find((f) => f.key === userAccessFilter);
     return users.filter((u) => {
       if (userRoleFilter !== 'all' && u.role !== userRoleFilter) return false;
+      if (accessFilter && !accessFilter.match(u)) return false;
       if (!q) return true;
       return (
         u.name.toLowerCase().includes(q) ||
@@ -1082,7 +670,42 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         (u.username || '').toLowerCase().includes(q)
       );
     });
-  }, [users, userSearchText, userRoleFilter]);
+  }, [users, userSearchText, userRoleFilter, userAccessFilter]);
+  // Only one page of the (filtered) accounts is drawn at a time.
+  const [userPage, setUserPage] = useState(1);
+  const [userPageSize, setUserPageSize] = useState(50);
+  useEffect(() => {
+    setUserPage(1);
+  }, [userSearchText, userRoleFilter, userAccessFilter]);
+  const pagedUsers = useMemo(
+    () => filteredUsers.slice((userPage - 1) * userPageSize, userPage * userPageSize),
+    [filteredUsers, userPage, userPageSize]
+  );
+  const loadAccessTemplates = async () => {
+    try {
+      const res = await fetch(apiUrl('/api/access-templates'), { headers: { Authorization: `Bearer ${token}` } });
+      if (res.ok) setAccessTemplates(await res.json());
+    } catch {
+      // Templates are optional — the list just stays empty.
+    }
+  };
+  useEffect(() => {
+    if (activeTab === 'users') loadAccessTemplates();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+  const toggleUserSelected = (id: number) =>
+    setSelectedUserIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  // Users module layers for this account: Block login is explicit-only.
+  const usersLayer = (key: PermissionLayerKey) => {
+    if (user.role === 'superadmin') return true;
+    const saved = user.module_permission_layers?.users;
+    return saved && saved.length > 0 ? saved.includes(key) : !EXPLICIT_ONLY_LAYERS.includes(key);
+  };
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [permissions, setPermissions] = useState<UserProjectPermission[]>([]);
 
@@ -5950,7 +5573,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       )}
 
       {/* TAB 4: USERS */}
+      {/* While an account's Manage page or Module Access is open the Users
+          page sits behind it, hidden — the last drawing is reused (same
+          element, so React skips it). Drawn fresh once they close. */}
       {activeTab === 'users' && (
+        <div className={managingModulesFor || managingUserId != null ? 'hidden' : undefined}>
+        {(managingModulesFor || managingUserId != null) && frozenUsersTab.current ? frozenUsersTab.current : (frozenUsersTab.current = (
         <div className="space-y-6">
           {/* Add New User Form */}
           <div className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6">
@@ -6232,394 +5860,202 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   <option value="user">User</option>
                 </select>
               </div>
+              <button
+                type="button"
+                onClick={() => setShowAccessTemplates(true)}
+                className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-xl text-slate-700 text-xs font-semibold hover:bg-slate-50 whitespace-nowrap"
+              >
+                <LayoutTemplate className="w-3.5 h-3.5" /> Access Templates
+              </button>
             </div>
           </div>
-          {(userSearchText || userRoleFilter !== 'all') && (
-            <div className="px-6 py-2 border-b border-slate-100 text-[11px] text-slate-500">
-              Showing {filteredUsers.length} of {users.length} users
-            </div>
+          {/* Quick filters — one tap narrows the list to accounts with a given
+              switch on (counts are for the whole list, not the current search). */}
+          <div className="px-6 py-3 border-b border-slate-100 flex flex-wrap items-center gap-1.5">
+            {USER_ACCESS_FILTERS.map((f) => {
+              const count = users.filter(f.match).length;
+              const active = userAccessFilter === f.key;
+              return (
+                <button
+                  key={f.key}
+                  type="button"
+                  onClick={() => setUserAccessFilter(active ? 'all' : f.key)}
+                  className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border transition-colors ${
+                    active ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                  }`}
+                >
+                  {f.label} <span className={active ? 'text-white/80' : 'text-slate-400'}>{count}</span>
+                </button>
+              );
+            })}
+            {(userSearchText || userRoleFilter !== 'all' || userAccessFilter !== 'all') && (
+              <span className="ml-auto text-[11px] text-slate-500">
+                Showing {filteredUsers.length} of {users.length} users
+              </span>
+            )}
+          </div>
+
+          {selectedUserIds.size > 0 && (
+            <UserBulkBar
+              token={token}
+              selected={users.filter((x) => selectedUserIds.has(x.id))}
+              templates={accessTemplates}
+              viewer={{ isSuperAdmin, canGrantModuleAccess }}
+              onClear={() => setSelectedUserIds(new Set())}
+              onDone={() => fetchAllData()}
+              onOpenTemplates={() => setShowAccessTemplates(true)}
+              onOpenModuleAccess={canGrantModuleAccess ? (list) => openManageModules(list) : undefined}
+            />
           )}
-          <div className="overflow-x-auto">
-            <table className="w-full divide-y divide-slate-200">
-              {/* Was `sticky top-16 z-10` (to keep column headers visible
-                  while scrolling a long User list, under Navbar's own
-                  sticky top-0 h-16) — removed: `position: sticky` on a
-                  <thead> inside a plain (non-scrolling-container) table
-                  doesn't reliably reserve its own space against the
-                  <tbody> that follows it, so once stuck it painted directly
-                  on top of the table's very first row, hiding it entirely
-                  behind this opaque background (most visible with a
-                  search narrowed to exactly one result — the row was still
-                  there, just invisible underneath the header). A plain
-                  static header has no such conflict. */}
-              <thead className="bg-slate-50 text-slate-500 text-[11px] uppercase tracking-wider">
-                <tr>
-                  <th className="w-24 px-2.5 py-2 text-left">Name</th>
-                  <th className="w-28 px-2.5 py-2 text-left">Login ID</th>
-                  <th className="w-20 px-2.5 py-2 text-left">Role</th>
-                  {canGrantModuleAccess && <th className="w-24 px-2.5 py-2 text-left">Modules</th>}
-                  <th className="w-24 px-2.5 py-2 text-left">Projects</th>
-                  <th className="px-2.5 py-2 text-left">Joined</th>
-                  {canSeeLoginLocation && <th className="w-48 px-2.5 py-2 text-left">Last Login</th>}
-                  {isSuperAdmin && <th className="px-2.5 py-2 text-left">Location</th>}
-                  {isSuperAdmin && <th className="w-24 px-2.5 py-2 text-left">Grants Modules</th>}
-                  <th className="px-2.5 py-2 text-left">Delivery</th>
-                  <th className="px-2.5 py-2 text-left">Job Edit</th>
-                  <th className="px-2.5 py-2 text-left">Attend.</th>
-                  <th className="w-28 px-2.5 py-2 text-left">Attend. Project</th>
-                  <th className="px-2.5 py-2 text-left">Tracking</th>
-                  <th className="px-2.5 py-2 text-left">Leave</th>
-                  <th className="px-2.5 py-2 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-200 text-sm">
-                {filteredUsers.length === 0 ? (
+
+          {/* Simple list: who, role, what they can access at a glance, last
+              login. Every switch lives in the "Manage" side panel
+              (UserAccessDrawer) with a plain-language description. */}
+          {filteredUsers.length === 0 ? (
+            <div className="px-4 py-10 text-center text-sm text-slate-400">No users match your search.</div>
+          ) : (
+            <>
+              <table className="hidden md:table w-full divide-y divide-slate-200">
+                <thead className="bg-slate-50 text-slate-500 text-[11px] uppercase tracking-wider">
                   <tr>
-                    <td
-                      colSpan={
-                        3 + (canGrantModuleAccess ? 1 : 0) + 1 + 1 + (canSeeLoginLocation ? 1 : 0) +
-                        (isSuperAdmin ? 1 : 0) + (isSuperAdmin ? 1 : 0) + 1 + 1 + 1 + 1 + 1 + 1 + 1
-                      }
-                      className="px-4 py-8 text-center text-sm text-slate-400"
+                    <th className="pl-5 pr-1 py-2.5 w-8">
+                      {(() => {
+                        const selectable = filteredUsers.filter((x) => canEditUserFeatures(x, { isSuperAdmin, canGrantModuleAccess }));
+                        const all = selectable.length > 0 && selectable.every((x) => selectedUserIds.has(x.id));
+                        return (
+                          <input
+                            type="checkbox"
+                            aria-label="Select all"
+                            checked={all}
+                            disabled={selectable.length === 0}
+                            onChange={() =>
+                              setSelectedUserIds((prev) => {
+                                const next = new Set(prev);
+                                selectable.forEach((x) => (all ? next.delete(x.id) : next.add(x.id)));
+                                return next;
+                              })
+                            }
+                          />
+                        );
+                      })()}
+                    </th>
+                    <th className="px-3 py-2.5 text-left">User</th>
+                    <th className="px-3 py-2.5 text-left w-28">Role</th>
+                    <th className="px-3 py-2.5 text-left">Access</th>
+                    {canSeeLoginLocation && <th className="px-3 py-2.5 text-left w-56">Last Login</th>}
+                    <th className="px-5 py-2.5 text-right w-28"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-sm">
+                  {pagedUsers.map((u) => (
+                    <tr
+                      key={u.id}
+                      onClick={() => openManageUser(u.id)}
+                      className={`transition-colors cursor-pointer ${selectedUserIds.has(u.id) ? 'bg-blue-50/60' : 'hover:bg-slate-50/80'}`}
                     >
-                      No users match your search.
-                    </td>
-                  </tr>
-                ) : filteredUsers.map((u) => {
-                  const grantedCount = projectIdsForUser(u.id).size;
-                  const grantedModuleCount = (u.module_permissions || []).length;
-                  // Same rule the Actions column (Change Login ID/Reset Password/
-                  // Delete) already applies: a delegated (non-superadmin) Admin
-                  // can only touch a role='user' row, never another 'admin' —
-                  // reused here for the Delivery/Job Edit/Attend./Attend.
-                  // Project/Tracking/Leave toggle cells below, which previously
-                  // had no such gate at all (server-enforced now too, see PUT
-                  // /api/users/:id/feature-permissions in UserManagement.ts).
-                  const canEditFeaturesFor = u.role !== 'superadmin' && (u.role !== 'admin' || isSuperAdmin);
-                  return (
-                  <tr key={u.id} className="hover:bg-slate-50/80 transition-colors">
-                    <td className="px-3 py-3 font-medium text-slate-900 text-xs truncate" title={u.name}>{u.name}</td>
-                    <td className="px-3 py-3 text-slate-600 text-xs truncate" title={u.email || u.username || undefined}>
-                      {u.email || (u.username ? <span className="font-mono">{u.username}</span> : '—')}
-                    </td>
-                    <td className="px-3 py-3">
-                      {u.role === 'superadmin' ? (
-                        <span className="inline-block text-[11px] font-semibold px-2 py-1 rounded-full border bg-rose-50 text-rose-800 border-rose-200 truncate max-w-full">
-                          Superadmin
-                        </span>
-                      ) : isSuperAdmin ? (
-                        <select
-                          value={u.role}
-                          onChange={(e) => handleRoleChange(u.id, e.target.value as 'admin' | 'user')}
-                          className={`text-[11px] font-semibold px-2 py-1 rounded-full border cursor-pointer max-w-full ${
-                            u.role === 'admin'
-                              ? 'bg-amber-50 text-amber-800 border-amber-200'
-                              : 'bg-blue-50 text-blue-800 border-blue-200'
-                          }`}
-                        >
-                          <option value="admin" className="bg-white text-slate-900">Admin</option>
-                          <option value="user" className="bg-white text-slate-900">User</option>
-                        </select>
-                      ) : (
-                        <span className={`inline-block text-[11px] font-semibold px-2 py-1 rounded-full border truncate max-w-full ${
-                          u.role === 'admin'
-                            ? 'bg-amber-50 text-amber-800 border-amber-200'
-                            : 'bg-blue-50 text-blue-800 border-blue-200'
-                        }`}>
-                          {u.role === 'admin' ? 'Admin' : 'User'}
-                        </span>
-                      )}
-                    </td>
-                    {canGrantModuleAccess && (
-                      <td className="px-3 py-3 text-xs">
-                        {u.role === 'superadmin' ? (
-                          <span className="text-slate-400 truncate block">All (Super)</span>
-                        ) : /* A delegated (non-superadmin) Admin with can_grant_module_access can only
-                               ever reach a role='user' target here — an 'admin' row falls through to
-                               the "—" case below for them, same restriction the server enforces on
-                               PUT /api/users/:id/module-permissions. */
-                        u.role === 'user' || (u.role === 'admin' && isSuperAdmin) ? (
-                          <button
-                            type="button"
-                            onClick={() => openManageModules(u)}
-                            className={`flex items-center gap-1 px-2 py-1 rounded-full border font-semibold transition-colors max-w-full truncate ${
-                              grantedModuleCount > 0
-                                ? 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
-                                : 'bg-slate-100 text-slate-500 border-slate-200 hover:bg-slate-200'
-                            }`}
-                          >
-                            <LayoutGrid className="w-3.5 h-3.5 shrink-0" />
-                            <span className="truncate">{grantedModuleCount > 0 ? `${grantedModuleCount} Mod.` : 'Set Access'}</span>
-                          </button>
-                        ) : (
-                          <span className="text-slate-300">—</span>
+                      <td className="pl-5 pr-1 py-3" onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          aria-label={`Select ${u.name}`}
+                          checked={selectedUserIds.has(u.id)}
+                          disabled={!canEditUserFeatures(u, { isSuperAdmin, canGrantModuleAccess })}
+                          onChange={() => toggleUserSelected(u.id)}
+                        />
+                      </td>
+                      <td className="px-3 py-3">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0" style={{ background: 'var(--g-gradient)' }}>
+                            {userInitials(u.name)}
+                          </div>
+                          <div className="min-w-0">
+                            <div className="font-semibold text-slate-900 truncate">{u.name}</div>
+                            <div className="text-xs text-slate-500 truncate">{u.email || (u.username ? <span className="font-mono">{u.username}</span> : '—')}</div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-3 py-3">
+                        <span className={`inline-block text-[11px] font-semibold px-2 py-0.5 rounded-full border ${ROLE_BADGE[u.role]}`}>{ROLE_LABEL[u.role]}</span>
+                        {!!u.is_blocked && (
+                          <span className="ml-1 inline-block text-[11px] font-semibold px-2 py-0.5 rounded-full border border-rose-200 bg-rose-50 text-rose-700" title={u.blocked_reason || undefined}>
+                            Blocked
+                          </span>
                         )}
                       </td>
-                    )}
-                    <td className="px-3 py-3 text-xs">
-                      {u.role === 'admin' || u.role === 'superadmin' ? (
-                        <span className="text-slate-400 truncate block">All (Admin)</span>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => openManageProjects(u)}
-                          className={`flex items-center gap-1 px-2 py-1 rounded-full border font-semibold transition-colors max-w-full truncate ${
-                            grantedCount > 0
-                              ? 'bg-emerald-50 text-emerald-800 border-emerald-200 hover:bg-emerald-100'
-                              : 'bg-slate-100 text-slate-500 border-slate-200 hover:bg-slate-200'
-                          }`}
-                        >
-                          <KeyRound className="w-3.5 h-3.5 shrink-0" />
-                          <span className="truncate">{grantedCount > 0 ? `${grantedCount} Proj.` : 'Set Access'}</span>
-                        </button>
-                      )}
-                    </td>
-                    <td className="px-3 py-3 whitespace-nowrap text-slate-500 text-xs">
-                      {u.created_at ? formatDate(u.created_at) : 'N/A'}
-                    </td>
-                    {canSeeLoginLocation && (
-                      <td className="px-3 py-3 text-xs">
-                        {u.last_login_lat != null && u.last_login_lng != null ? (
-                          <LastLoginAddress
-                            lat={Number(u.last_login_lat)}
-                            lng={Number(u.last_login_lng)}
-                            asOf={u.last_login_at || undefined}
-                          />
-                        ) : (
-                          <span className="text-slate-400">No login yet</span>
-                        )}
+                      <td className="px-3 py-3">
+                        <UserAccessChips u={u} projectCount={projectIdsForUser(u.id).size} />
                       </td>
-                    )}
-                    {isSuperAdmin && (
-                      <td className="px-3 py-3 whitespace-nowrap text-xs">
-                        {u.role === 'admin' ? (
-                          <button
-                            type="button"
-                            onClick={() => handleLoginLocationAccessToggle(u.id, !u.can_view_login_location)}
-                            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                              u.can_view_login_location ? 'bg-emerald-500' : 'bg-slate-300'
-                            }`}
-                            title={
-                              u.can_view_login_location
-                                ? 'Can see Last Login Location — click to revoke'
-                                : 'Cannot see Last Login Location — click to grant'
-                            }
-                          >
-                            <span
-                              className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                                u.can_view_login_location ? 'translate-x-[18px]' : 'translate-x-1'
-                              }`}
-                            />
-                          </button>
-                        ) : (
-                          <span className="text-slate-300">—</span>
-                        )}
-                      </td>
-                    )}
-                    {isSuperAdmin && (
-                      <td className="px-3 py-3 whitespace-nowrap text-xs">
-                        {u.role === 'admin' ? (
-                          <button
-                            type="button"
-                            onClick={() => handleFeaturePermissionToggle(u.id, 'can_grant_module_access', !u.can_grant_module_access)}
-                            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                              u.can_grant_module_access ? 'bg-emerald-500' : 'bg-slate-300'
-                            }`}
-                            title={
-                              u.can_grant_module_access
-                                ? "Can set OTHER Users' Module Access (never another Admin's) — click to revoke"
-                                : "Can't set Module Access for anyone — click to grant"
-                            }
-                          >
-                            <span
-                              className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                                u.can_grant_module_access ? 'translate-x-[18px]' : 'translate-x-1'
-                              }`}
-                            />
-                          </button>
-                        ) : (
-                          <span className="text-slate-300">—</span>
-                        )}
-                      </td>
-                    )}
-                    <td className="px-3 py-3 whitespace-nowrap text-xs">
-                      {canEditFeaturesFor ? (
+                      {canSeeLoginLocation && (
+                        <td className="px-3 py-3 text-xs" onClick={(e) => e.stopPropagation()}>
+                          {u.last_login_lat != null && u.last_login_lng != null ? (
+                            <LastLoginAddress lat={Number(u.last_login_lat)} lng={Number(u.last_login_lng)} asOf={u.last_login_at || undefined} />
+                          ) : (
+                            <span className="text-slate-400">No login yet</span>
+                          )}
+                        </td>
+                      )}
+                      <td className="px-5 py-3 text-right">
                         <button
                           type="button"
-                          onClick={() => handleFeaturePermissionToggle(u.id, 'can_edit_delivery_date', !(u.can_edit_delivery_date ?? true))}
-                          className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                            (u.can_edit_delivery_date ?? true) ? 'bg-emerald-500' : 'bg-slate-300'
-                          }`}
-                          title={(u.can_edit_delivery_date ?? true) ? 'On — click to turn off' : 'Off — click to turn on'}
-                        >
-                          <span
-                            className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                              (u.can_edit_delivery_date ?? true) ? 'translate-x-[18px]' : 'translate-x-1'
-                            }`}
-                          />
-                        </button>
-                      ) : (
-                        <span className="text-slate-300">—</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-3 whitespace-nowrap text-xs">
-                      {canEditFeaturesFor ? (
-                        <button
-                          type="button"
-                          onClick={() => handleFeaturePermissionToggle(u.id, 'can_job_edit', !u.can_job_edit)}
-                          className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                            u.can_job_edit ? 'bg-emerald-500' : 'bg-slate-300'
-                          }`}
-                          title={u.can_job_edit ? 'On — click to turn off' : 'Off — click to turn on'}
-                        >
-                          <span
-                            className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                              u.can_job_edit ? 'translate-x-[18px]' : 'translate-x-1'
-                            }`}
-                          />
-                        </button>
-                      ) : (
-                        <span className="text-slate-300">—</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-3 whitespace-nowrap text-xs">
-                      {!canEditFeaturesFor ? (
-                        <span className="text-slate-300">—</span>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => handleFeaturePermissionToggle(u.id, 'can_use_attendance', !u.can_use_attendance)}
-                          className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                            u.can_use_attendance ? 'bg-emerald-500' : 'bg-slate-300'
-                          }`}
-                          title={
-                            u.can_use_attendance
-                              ? 'Sees Remote Attendance on their Dashboard — click to revoke'
-                              : "Doesn't see Remote Attendance on their Dashboard — click to grant"
-                          }
-                        >
-                          <span
-                            className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                              u.can_use_attendance ? 'translate-x-[18px]' : 'translate-x-1'
-                            }`}
-                          />
-                        </button>
-                      )}
-                    </td>
-                    <td className="px-3 py-3 whitespace-nowrap text-xs">
-                      {!canEditFeaturesFor ? (
-                        <span className="text-slate-300">—</span>
-                      ) : (
-                        <select
-                          value={u.attendance_project_id ?? ''}
-                          onChange={(e) =>
-                            handleAttendanceProjectChange(u.id, e.target.value ? Number(e.target.value) : null)
-                          }
-                          disabled={!u.can_use_attendance}
-                          title={
-                            u.can_use_attendance
-                              ? 'Locks this account to one Project for Remote Attendance — leave unset for no restriction. Budget/Jobs/MPR project selection is unaffected.'
-                              : 'Grant Remote Attendance first to pin a Project.'
-                          }
-                          className="w-full text-xs px-2 py-1.5 bg-white border border-slate-200 rounded-lg disabled:bg-slate-50 disabled:text-slate-300 focus:ring-2 focus:ring-blue-600 focus:outline-none"
-                        >
-                          <option value="">Unrestricted</option>
-                          {projects.map((p) => (
-                            <option key={p.id} value={p.id}>{p.project_name}</option>
-                          ))}
-                        </select>
-                      )}
-                    </td>
-                    <td className="px-3 py-3 whitespace-nowrap text-xs">
-                      {!canEditFeaturesFor ? (
-                        <span className="text-slate-300">—</span>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => handleFeaturePermissionToggle(u.id, 'can_use_tracking', !u.can_use_tracking)}
-                          className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                            u.can_use_tracking ? 'bg-emerald-500' : 'bg-slate-300'
-                          }`}
-                          title={
-                            u.can_use_tracking
-                              ? "Their APK reports live location — click to revoke"
-                              : "Their APK doesn't report location — click to grant"
-                          }
-                        >
-                          <span
-                            className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                              u.can_use_tracking ? 'translate-x-[18px]' : 'translate-x-1'
-                            }`}
-                          />
-                        </button>
-                      )}
-                    </td>
-                    <td className="px-3 py-3 whitespace-nowrap text-xs">
-                      {!canEditFeaturesFor ? (
-                        <span className="text-slate-300">—</span>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => handleFeaturePermissionToggle(u.id, 'can_view_leave_summary', !u.can_view_leave_summary)}
-                          className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-                            u.can_view_leave_summary ? 'bg-emerald-500' : 'bg-slate-300'
-                          }`}
-                          title={
-                            u.can_view_leave_summary
-                              ? 'Sees Leave Summary on their Dashboard — click to revoke'
-                              : "Doesn't see Leave Summary on their Dashboard — click to grant"
-                          }
-                        >
-                          <span
-                            className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                              u.can_view_leave_summary ? 'translate-x-[18px]' : 'translate-x-1'
-                            }`}
-                          />
-                        </button>
-                      )}
-                    </td>
-                    <td className="px-3 py-3 whitespace-nowrap text-right text-xs">
-                      {u.role !== 'superadmin' && (u.role !== 'admin' || isSuperAdmin) && (
-                        <button
-                          onClick={() => {
-                            setNewEmailInput(u.email || '');
-                            setChangingEmailFor(u);
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openManageUser(u.id);
                           }}
-                          className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                          title="Change Login ID (email)"
+                          className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 text-slate-700 hover:bg-white hover:border-blue-300 hover:text-blue-700 transition-colors"
                         >
-                          <Mail className="w-4 h-4" />
+                          Manage
                         </button>
-                      )}
-                      {u.role !== 'superadmin' && (u.role !== 'admin' || isSuperAdmin) && (
-                        <button
-                          onClick={() => {
-                            setNewPasswordInput('');
-                            setResettingPasswordFor(u);
-                          }}
-                          className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                          title="Reset password"
-                        >
-                          <Lock className="w-4 h-4" />
-                        </button>
-                      )}
-                      {u.role !== 'superadmin' && (u.role !== 'admin' || isSuperAdmin) && (
-                        <button
-                          onClick={() => handleDeleteUser(u.id)}
-                          className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
-                          title="Delete user"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              {/* Phone: one card per user instead of a wide table. */}
+              <div className="md:hidden divide-y divide-slate-100">
+                {pagedUsers.map((u) => (
+                  <div
+                    key={u.id}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => openManageUser(u.id)}
+                    className={`w-full text-left px-4 py-3 flex items-start gap-3 active:bg-slate-50 ${selectedUserIds.has(u.id) ? 'bg-blue-50/60' : ''}`}
+                  >
+                    <input
+                      type="checkbox"
+                      aria-label={`Select ${u.name}`}
+                      className="mt-2.5"
+                      checked={selectedUserIds.has(u.id)}
+                      disabled={!canEditUserFeatures(u, { isSuperAdmin, canGrantModuleAccess })}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={() => toggleUserSelected(u.id)}
+                    />
+                    <div className="w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0" style={{ background: 'var(--g-gradient)' }}>
+                      {userInitials(u.name)}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-semibold text-sm text-slate-900 truncate">{u.name}</span>
+                        <span className="flex items-center gap-1 shrink-0">
+                          {!!u.is_blocked && (
+                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full border border-rose-200 bg-rose-50 text-rose-700">Blocked</span>
+                          )}
+                          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${ROLE_BADGE[u.role]}`}>{ROLE_LABEL[u.role]}</span>
+                        </span>
+                      </div>
+                      <div className="text-xs text-slate-500 truncate">{u.email || u.username || '—'}</div>
+                      <div className="mt-1.5">
+                        <UserAccessChips u={u} projectCount={projectIdsForUser(u.id).size} />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <PagerBar page={userPage} pageSize={userPageSize} total={filteredUsers.length} onPage={setUserPage} onPageSize={(n) => { setUserPageSize(n); setUserPage(1); }} />
+            </>
+          )}
           </div>
-          </div>
+        </div>
+        ))}
         </div>
       )}
 
@@ -7250,6 +6686,77 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         </div>
       )}
 
+      {/* An account's "Manage" page, in place of the Users page — rendered
+          before every popup it can open (Manage Projects, Reset Password,
+          Change Login ID) so those appear on top of it. */}
+      {managingUserId != null && activeTab === 'users' && (
+        // Frozen like the Users page — and out of sight — while the Module Access page is open.
+        <div className={managingModulesFor ? 'hidden' : undefined}>
+        {managingModulesFor && frozenDrawer.current ? frozenDrawer.current : (frozenDrawer.current = (() => {
+          const mu = users.find((x) => x.id === managingUserId);
+          if (!mu) return null;
+          return (
+            <UserAccessDrawer
+              u={mu}
+              isSuperAdmin={isSuperAdmin}
+              canGrantModuleAccess={canGrantModuleAccess}
+              canSeeLoginLocation={canSeeLoginLocation}
+              projectCount={projectIdsForUser(mu.id).size}
+              projects={projects}
+              lastLogin={
+                mu.last_login_lat != null && mu.last_login_lng != null ? (
+                  <LastLoginAddress lat={Number(mu.last_login_lat)} lng={Number(mu.last_login_lng)} asOf={mu.last_login_at || undefined} />
+                ) : (
+                  <span className="text-slate-400">No login yet</span>
+                )
+              }
+              onClose={() => setManagingUserId(null)}
+              onToggleFeature={(field, value) => handleFeaturePermissionToggle(mu.id, field, value)}
+              onToggleLoginLocation={(value) => handleLoginLocationAccessToggle(mu.id, value)}
+              onAttendanceProject={(projectId) => handleAttendanceProjectChange(mu.id, projectId)}
+              onRoleChange={(role) => handleRoleChange(mu.id, role)}
+              onOpenModules={() => openManageModules(mu)}
+              onOpenProjects={() => openManageProjects(mu)}
+              onChangeLoginId={() => {
+                setNewEmailInput(mu.email || '');
+                setChangingEmailFor(mu);
+              }}
+              onResetPassword={() => {
+                setNewPasswordInput('');
+                setResettingPasswordFor(mu);
+              }}
+              onDelete={async () => {
+                await handleDeleteUser(mu.id);
+              }}
+              canBlock={usersLayer('block_account')}
+              onBlock={async (blocked, reason) => {
+                const res = await fetch(apiUrl(`/api/users/${mu.id}/block`), {
+                  method: 'PUT',
+                  headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                  body: JSON.stringify({ blocked, reason })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.error || 'Could not change the block.');
+                setUsers((prev) =>
+                  prev.map((x) =>
+                    x.id === mu.id
+                      ? { ...x, is_blocked: blocked, blocked_reason: blocked ? reason : null, blocked_at: blocked ? new Date().toISOString() : null }
+                      : x
+                  )
+                );
+              }}
+              token={token}
+              templates={accessTemplates}
+              onApplyTemplate={async (t) => {
+                await applyTemplateToUser(token, t, mu, { isSuperAdmin, canGrantModuleAccess });
+                fetchAllData();
+              }}
+            />
+          );
+        })())}
+        </div>
+      )}
+
       {/* Manage Projects modal — Admin sets which Projects a User can access */}
       {managingUser && (
         <div
@@ -7335,550 +6842,32 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
 
       {/* Module Access modal — Superadmin sets which Admin Panel tabs a given Admin
           may open (projects, mprs, imports, reports, users, recycle, editlog). */}
-      {managingModulesFor && (
-        <div
-          className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4"
-          onClick={() => setManagingModulesFor(null)}
-        >
-          <div
-            className="bg-white border border-slate-200 rounded-2xl max-w-md md:max-w-5xl xl:max-w-6xl w-full max-h-[92vh] flex flex-col shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="p-5 md:p-6 border-b border-slate-200">
-              <div className="flex justify-between items-center mb-3">
-                <div>
-                  <h3 className="text-base md:text-lg font-bold text-slate-900">Module Access</h3>
-                  <p className="text-xs md:text-sm text-slate-500">{managingModulesFor.name} • {managingModulesFor.email}</p>
-                </div>
-                <button
-                  onClick={() => setManagingModulesFor(null)}
-                  className="p-2 text-slate-400 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-colors"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-              {/* Search (filters the Admin Module checklist below) + Copy
-                  Access (pre-fills every field on this form — toggles, Admin
-                  Module checkboxes, permission layers, Department scopes —
-                  from another account's saved access, so a Superadmin can
-                  set up one account and reuse it for the next instead of
-                  re-ticking everything by hand; nothing is saved until "Save
-                  Access" is clicked) both live in the header now — no room
-                  for them once the two columns below start, and they apply
-                  to the whole form, not just one column. */}
-              <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
-                <div className="relative flex-1">
-                  <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="text"
-                    value={moduleSearchQuery}
-                    onChange={(e) => setModuleSearchQuery(e.target.value)}
-                    placeholder="Search modules…"
-                    className="w-full pl-10 pr-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-blue-600"
-                  />
-                </div>
-                <div className="relative flex-1 sm:max-w-[220px]">
-                  <Copy className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                  <select
-                    value=""
-                    onChange={(e) => {
-                      if (e.target.value) copyAccessFrom(Number(e.target.value));
-                    }}
-                    className="w-full pl-10 pr-3 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-blue-600 cursor-pointer appearance-none"
-                  >
-                    <option value="">Copy access from…</option>
-                    {users
-                      .filter((u) => u.id !== managingModulesFor.id && u.role !== 'superadmin')
-                      .map((u) => (
-                        <option key={u.id} value={u.id}>{u.name} ({u.role === 'admin' ? 'Admin' : 'User'})</option>
-                      ))}
-                  </select>
-                </div>
-              </div>
-              {copyAccessNotice && (
-                <p className="mt-2 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
-                  {copyAccessNotice}
-                </p>
-              )}
-            </div>
+      {showAccessTemplates && (
+        <AccessTemplatesModal
+          token={token}
+          canGrantModuleAccess={canGrantModuleAccess}
+          templates={accessTemplates}
+          onChanged={loadAccessTemplates}
+          onClose={() => setShowAccessTemplates(false)}
+        />
+      )}
 
-            {/* Two columns on desktop (User Module toggles on the left, Admin
-                Module tab checkboxes on the right) instead of one long
-                cramped-looking vertical list stretched across a narrow
-                fixed-width card — the modal itself is much wider on md+/xl+
-                too (see max-w-md md:max-w-5xl xl:max-w-6xl above), with more
-                generous padding/gaps than a mobile-first default so the web
-                view has real breathing room instead of reading like a phone
-                layout just stretched wide. Mobile keeps the original single
-                stacked column, unchanged. */}
-            <div className="p-5 md:p-8 overflow-y-auto flex-1 md:grid md:grid-cols-2 md:gap-x-10 xl:gap-x-16 md:items-start">
-            <div className="space-y-3">
-              <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">User Module</p>
-              {managingModulesFor.role === 'admin' && (
-                <label
-                  className="flex items-center justify-between gap-3 p-3.5 mb-3 bg-blue-50 border border-blue-200 rounded-xl cursor-pointer"
-                >
-                  <span>
-                    <span className="text-sm font-semibold text-slate-900 block">Also allow User Panel access</span>
-                    <span className="text-[11px] text-slate-500">
-                      Lets this Admin use the User Panel too — mark Remote Attendance, submit Claims/Conveyance Bills,
-                      and enter Job/MPR data — on top of their Admin Panel.
-                    </span>
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setUserPanelAccessEnabled((v) => !v)}
-                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${
-                      userPanelAccessEnabled ? 'bg-emerald-500' : 'bg-slate-300'
-                    }`}
-                    title={userPanelAccessEnabled ? 'On — click to turn off' : 'Off — click to turn on'}
-                  >
-                    <span
-                      className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                        userPanelAccessEnabled ? 'translate-x-[18px]' : 'translate-x-1'
-                      }`}
-                    />
-                  </button>
-                </label>
-              )}
-              <label
-                className="flex items-center justify-between gap-3 p-3.5 mb-3 bg-indigo-50 border border-indigo-200 rounded-xl cursor-pointer"
-              >
-                <span>
-                  <span className="text-sm font-semibold text-slate-900 block">Allow Budget / Jobs / Job Entry Details</span>
-                  <span className="text-[11px] text-slate-500">
-                    Lets this {managingModulesFor.role === 'user' ? 'User' : 'Admin'} see and use "Select a Budget", "Jobs" and
-                    "Job Entry Details" on their own User Panel. On by default for everyone — turn this off to hide all three
-                    (mobile tiles, bottom nav tabs, and the desktop "Jobs" menu) for just this account.
-                  </span>
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setBudgetModuleAccessEnabled((v) => !v)}
-                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${
-                    budgetModuleAccessEnabled ? 'bg-emerald-500' : 'bg-slate-300'
-                  }`}
-                  title={budgetModuleAccessEnabled ? 'On — click to turn off' : 'Off — click to turn on'}
-                >
-                  <span
-                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                      budgetModuleAccessEnabled ? 'translate-x-[18px]' : 'translate-x-1'
-                    }`}
-                  />
-                </button>
-              </label>
-              <label
-                className="flex items-center justify-between gap-3 p-3.5 mb-3 bg-sky-50 border border-sky-200 rounded-xl cursor-pointer"
-              >
-                <span>
-                  <span className="text-sm font-semibold text-slate-900 block">Also allow Movement Claim</span>
-                  <span className="text-[11px] text-slate-500">
-                    Lets this {managingModulesFor.role === 'user' ? 'User' : 'Admin'} see and use the Movement Claim (GPS
-                    Check In/Out) section on their own User Panel. Off by default, like every other module here.
-                  </span>
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setMovementClaimAccessEnabled((v) => !v)}
-                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${
-                    movementClaimAccessEnabled ? 'bg-emerald-500' : 'bg-slate-300'
-                  }`}
-                  title={movementClaimAccessEnabled ? 'On — click to turn off' : 'Off — click to turn on'}
-                >
-                  <span
-                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                      movementClaimAccessEnabled ? 'translate-x-[18px]' : 'translate-x-1'
-                    }`}
-                  />
-                </button>
-              </label>
-              <label
-                className="flex items-center justify-between gap-3 p-3.5 mb-3 bg-sky-50 border border-sky-200 rounded-xl cursor-pointer"
-              >
-                <span>
-                  <span className="text-sm font-semibold text-slate-900 block">Also allow Conveyance Bill Claim</span>
-                  <span className="text-[11px] text-slate-500">
-                    Lets this {managingModulesFor.role === 'user' ? 'User' : 'Admin'} see and use the Conveyance Bill Claim
-                    section on their own User Panel. Off by default, like every other module here.
-                  </span>
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setConveyanceClaimAccessEnabled((v) => !v)}
-                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${
-                    conveyanceClaimAccessEnabled ? 'bg-emerald-500' : 'bg-slate-300'
-                  }`}
-                  title={conveyanceClaimAccessEnabled ? 'On — click to turn off' : 'Off — click to turn on'}
-                >
-                  <span
-                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                      conveyanceClaimAccessEnabled ? 'translate-x-[18px]' : 'translate-x-1'
-                    }`}
-                  />
-                </button>
-              </label>
-              <label className="flex items-center justify-between gap-3 p-3.5 mb-3 bg-purple-50 border border-purple-200 rounded-xl cursor-pointer">
-                <span>
-                  <span className="text-sm font-semibold text-slate-900 block">Also allow Material Receive</span>
-                  <span className="text-[11px] text-slate-500">
-                    PEPM → Material Receive: confirm material Purchase sent to the projects this account holds (Manage Projects). Off by default.
-                  </span>
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setMaterialReceiveEnabled((v) => !v)}
-                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${
-                    materialReceiveEnabled ? 'bg-emerald-500' : 'bg-slate-300'
-                  }`}
-                  title={materialReceiveEnabled ? 'On — click to turn off' : 'Off — click to turn on'}
-                >
-                  <span
-                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                      materialReceiveEnabled ? 'translate-x-[18px]' : 'translate-x-1'
-                    }`}
-                  />
-                </button>
-              </label>
-              <label
-                className="flex items-center justify-between gap-3 p-3.5 mb-3 bg-sky-50 border border-sky-200 rounded-xl cursor-pointer"
-              >
-                <span>
-                  <span className="text-sm font-semibold text-slate-900 block">Also allow Timesheet</span>
-                  <span className="text-[11px] text-slate-500">
-                    Lets this {managingModulesFor.role === 'user' ? 'User' : 'Admin'} see and use Self Service → Timesheet
-                    (own Attendance history, Correct Attendance). Off by default, like every other module here.
-                  </span>
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setTimesheetAccessEnabled((v) => !v)}
-                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${
-                    timesheetAccessEnabled ? 'bg-emerald-500' : 'bg-slate-300'
-                  }`}
-                  title={timesheetAccessEnabled ? 'On — click to turn off' : 'Off — click to turn on'}
-                >
-                  <span
-                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                      timesheetAccessEnabled ? 'translate-x-[18px]' : 'translate-x-1'
-                    }`}
-                  />
-                </button>
-              </label>
-              <label
-                className="flex items-center justify-between gap-3 p-3.5 mb-3 bg-sky-50 border border-sky-200 rounded-xl cursor-pointer"
-              >
-                <span>
-                  <span className="text-sm font-semibold text-slate-900 block">Also allow Leave Application</span>
-                  <span className="text-[11px] text-slate-500">
-                    Lets this {managingModulesFor.role === 'user' ? 'User' : 'Admin'} see and use Self Service → Leave
-                    Application (submit a new Leave request). Off by default, like every other module here.
-                  </span>
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setLeaveApplicationAccessEnabled((v) => !v)}
-                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${
-                    leaveApplicationAccessEnabled ? 'bg-emerald-500' : 'bg-slate-300'
-                  }`}
-                  title={leaveApplicationAccessEnabled ? 'On — click to turn off' : 'Off — click to turn on'}
-                >
-                  <span
-                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                      leaveApplicationAccessEnabled ? 'translate-x-[18px]' : 'translate-x-1'
-                    }`}
-                  />
-                </button>
-              </label>
-              <label
-                className="flex items-center justify-between gap-3 p-3.5 mb-3 bg-sky-50 border border-sky-200 rounded-xl cursor-pointer"
-              >
-                <span>
-                  <span className="text-sm font-semibold text-slate-900 block">Also allow My Leave</span>
-                  <span className="text-[11px] text-slate-500">
-                    Lets this {managingModulesFor.role === 'user' ? 'User' : 'Admin'} see Self Service → My Leave (own
-                    Casual/Sick/Leave-without-Pay balance, read-only). Off by default, like every other module here.
-                  </span>
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setMyLeaveAccessEnabled((v) => !v)}
-                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${
-                    myLeaveAccessEnabled ? 'bg-emerald-500' : 'bg-slate-300'
-                  }`}
-                  title={myLeaveAccessEnabled ? 'On — click to turn off' : 'Off — click to turn on'}
-                >
-                  <span
-                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                      myLeaveAccessEnabled ? 'translate-x-[18px]' : 'translate-x-1'
-                    }`}
-                  />
-                </button>
-              </label>
-            </div>
-
-            <div className="space-y-3 mt-6 md:mt-0 pt-6 md:pt-0 border-t md:border-t-0 md:border-l border-slate-100 md:pl-10 xl:pl-16">
-              <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-1">Admin Module</p>
-              <p className="text-xs md:text-sm text-slate-500 mb-2">
-                Choose which Admin Panel tabs this {managingModulesFor.role === 'user' ? 'User' : 'Admin'} can open.
-                {managingModulesFor.role === 'user' && ' They\'ll keep their normal User Panel too, with a switcher to open these tabs.'}
-                {' '}Unchecked tabs are hidden for them, and the matching API routes are blocked server-side too.
-              </p>
-              {/* "Also allow editing Leave balances" — this is an Admin Panel
-                  module toggle (Leave Manage), not a User-Panel-facing grant
-                  like the switches on the left, even though it isn't part of
-                  the ADMIN_MODULES/module_permissions checklist below (it's
-                  gated by the separate can_manage_leave flag) — so it lives
-                  here in the Admin Module column instead. */}
-              <label
-                className="flex items-center justify-between gap-3 p-3.5 mb-3 bg-emerald-50 border border-emerald-200 rounded-xl cursor-pointer"
-              >
-                <span>
-                  <span className="text-sm font-semibold text-slate-900 block">Also allow editing Leave balances</span>
-                  <span className="text-[11px] text-slate-500">
-                    Lets this {managingModulesFor.role === 'user' ? 'User' : 'Admin'} edit everyone's Casual/Sick/Leave-without-Pay
-                    balance on Self Service → Leave Management, the same as the Superadmin can.
-                  </span>
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setLeaveManagementAccessEnabled((v) => !v)}
-                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors shrink-0 ${
-                    leaveManagementAccessEnabled ? 'bg-emerald-500' : 'bg-slate-300'
-                  }`}
-                  title={leaveManagementAccessEnabled ? 'On — click to turn off' : 'Off — click to turn on'}
-                >
-                  <span
-                    className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white transition-transform ${
-                      leaveManagementAccessEnabled ? 'translate-x-[18px]' : 'translate-x-1'
-                    }`}
-                  />
-                </button>
-              </label>
-              {leaveManagementAccessEnabled && (
-                <div className="mb-3 p-3 bg-violet-50 border border-violet-200 rounded-xl">
-                  <p className="text-[11px] font-semibold text-slate-700 flex items-center gap-1.5 mb-1">
-                    <ShieldCheck className="w-3.5 h-3.5 text-violet-600" />
-                    Permission Layers for Leave Manage
-                  </p>
-                  <p className="text-[11px] text-slate-500 mb-2">
-                    Choose exactly what {managingModulesFor.role === 'user' ? 'this User' : 'this Admin'} may do inside
-                    Leave Manage — any combination. Leaving all of these unchecked (while the toggle above stays on)
-                    blocks every action here.
-                  </p>
-                  <div className="grid grid-cols-2 xl:grid-cols-3 gap-2">
-                    {LEAVE_MANAGE_LAYERS.map((layer) => (
-                      <label
-                        key={layer.key}
-                        className="flex items-center gap-2 px-2.5 py-1.5 bg-white border border-violet-100 rounded-lg cursor-pointer hover:bg-violet-100/40"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={leaveManageLayers.has(layer.key)}
-                          onChange={() => toggleLeaveManageLayer(layer.key)}
-                          className="w-3.5 h-3.5 rounded border-slate-300 text-violet-600 focus:ring-violet-600 cursor-pointer"
-                        />
-                        <span className="text-xs text-slate-800">{layer.label}</span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {MODULE_ACCESS_GROUPS.map((group) => {
-                const moduleQuery = moduleSearchQuery.trim().toLowerCase();
-                const groupModules = ADMIN_MODULES.filter((m) => group.keys.includes(m.key) && m.label.toLowerCase().includes(moduleQuery));
-                if (groupModules.length === 0) return null;
-                return (
-                  <div key={group.label} className="mb-4">
-                    <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 mb-2">{group.label}</p>
-                    <div className="space-y-2">
-                      {groupModules.map((m) => (
-                        <React.Fragment key={m.key}>
-                          <label
-                            className="flex items-center gap-3 p-3.5 bg-slate-50 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-100 transition-colors"
-                          >
-                            <input
-                              type="checkbox"
-                              checked={selectedModules.has(m.key)}
-                              onChange={() => toggleSelectedModule(m.key)}
-                              className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-600 cursor-pointer"
-                            />
-                            <span className="text-sm font-medium text-slate-900">{m.label}</span>
-                          </label>
-                          {(PERMISSION_LAYER_MODULES as readonly AdminModuleKey[]).includes(m.key) && selectedModules.has(m.key) && (
-                            <div className="ml-2 mt-1 mb-1 p-3 bg-violet-50 border border-violet-200 rounded-xl">
-                              <p className="text-[11px] font-semibold text-slate-700 flex items-center gap-1.5 mb-1">
-                                <ShieldCheck className="w-3.5 h-3.5 text-violet-600" />
-                                Permission Layers for {m.label}
-                              </p>
-                              <p className="text-[11px] text-slate-500 mb-2">
-                                Choose exactly what {managingModulesFor?.role === 'user' ? 'this User' : 'this Admin'} may
-                                do inside {m.label} — any combination. Leaving all of these unchecked (while the module
-                                itself stays checked above) blocks every action here.
-                              </p>
-                              <div className="grid grid-cols-2 xl:grid-cols-3 gap-2">
-                                {layersFor(m.key).map((layer) => (
-                                  <label
-                                    key={layer.key}
-                                    className="flex items-center gap-2 px-2.5 py-1.5 bg-white border border-violet-100 rounded-lg cursor-pointer hover:bg-violet-100/40"
-                                  >
-                                    <input
-                                      type="checkbox"
-                                      checked={(moduleLayers[m.key] || new Set()).has(layer.key)}
-                                      onChange={() => toggleModuleLayer(m.key, layer.key)}
-                                      className="w-3.5 h-3.5 rounded border-slate-300 text-violet-600 focus:ring-violet-600 cursor-pointer"
-                                    />
-                                    <span className="text-xs text-slate-800">{layer.label}</span>
-                                  </label>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                          {m.key === 'attendance_reports' && selectedModules.has('attendance_reports') && (
-                            <div className="ml-2 mt-1 mb-1 p-3 bg-amber-50 border border-amber-200 rounded-xl">
-                              <p className="text-[11px] font-semibold text-slate-700 flex items-center gap-1.5 mb-1">
-                                <Building2 className="w-3.5 h-3.5 text-amber-600" />
-                                Department Access for this Report
-                              </p>
-                              <p className="text-[11px] text-slate-500 mb-2">
-                                Leave every Department unchecked to keep seeing all of them (default). Tick one or
-                                more to restrict {managingModulesFor?.role === 'user' ? 'this User' : 'this Admin'} to
-                                only those Department(s) on the Monthly Attendance Report — a Department they
-                                supervise is pre-ticked here the first time this is set up, but that can be
-                                unticked, and this can be set for any account either way.
-                              </p>
-                              {loadingAttendanceReportDepts ? (
-                                <p className="text-[11px] text-slate-400">Loading…</p>
-                              ) : departments.length === 0 ? (
-                                <p className="text-[11px] text-slate-400">No Departments set up yet (Admin Panel -&gt; Departments).</p>
-                              ) : (
-                                <div className="space-y-1 max-h-40 overflow-y-auto pr-1">
-                                  {departments.map((d) => (
-                                    <label
-                                      key={d.id}
-                                      className="flex items-center gap-2 px-2 py-1.5 bg-white border border-amber-100 rounded-lg cursor-pointer hover:bg-amber-100/40"
-                                    >
-                                      <input
-                                        type="checkbox"
-                                        checked={attendanceReportDepts.has(d.name)}
-                                        onChange={() => toggleAttendanceReportDept(d.name)}
-                                        className="w-3.5 h-3.5 rounded border-slate-300 text-amber-600 focus:ring-amber-600 cursor-pointer"
-                                      />
-                                      <span className="text-xs text-slate-800">{d.name}</span>
-                                      {d.supervisor_user_id === managingModulesFor?.id && (
-                                        <span className="text-[10px] text-amber-700 font-semibold">Supervisor</span>
-                                      )}
-                                    </label>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          )}
-                          {m.key === 'leave_applications' && selectedModules.has('leave_applications') && (
-                            <div className="ml-2 mt-1 mb-1 p-3 bg-amber-50 border border-amber-200 rounded-xl">
-                              <p className="text-[11px] font-semibold text-slate-700 flex items-center gap-1.5 mb-1">
-                                <Building2 className="w-3.5 h-3.5 text-amber-600" />
-                                Department Access for this Report
-                              </p>
-                              <p className="text-[11px] text-slate-500 mb-2">
-                                Leave every Department unchecked to keep seeing all of them (default). Tick one or
-                                more to restrict {managingModulesFor?.role === 'user' ? 'this User' : 'this Admin'} to
-                                only those Department(s) on the Monthly Leave Application report — a Department they
-                                supervise is pre-ticked here the first time this is set up, but that can be
-                                unticked, and this can be set for any account either way.
-                              </p>
-                              {loadingLeaveApplicationDepts ? (
-                                <p className="text-[11px] text-slate-400">Loading…</p>
-                              ) : departments.length === 0 ? (
-                                <p className="text-[11px] text-slate-400">No Departments set up yet (Admin Panel -&gt; Departments).</p>
-                              ) : (
-                                <div className="space-y-1 max-h-40 overflow-y-auto pr-1">
-                                  {departments.map((d) => (
-                                    <label
-                                      key={d.id}
-                                      className="flex items-center gap-2 px-2 py-1.5 bg-white border border-amber-100 rounded-lg cursor-pointer hover:bg-amber-100/40"
-                                    >
-                                      <input
-                                        type="checkbox"
-                                        checked={leaveApplicationDepts.has(d.name)}
-                                        onChange={() => toggleLeaveApplicationDept(d.name)}
-                                        className="w-3.5 h-3.5 rounded border-slate-300 text-amber-600 focus:ring-amber-600 cursor-pointer"
-                                      />
-                                      <span className="text-xs text-slate-800">{d.name}</span>
-                                      {d.supervisor_user_id === managingModulesFor?.id && (
-                                        <span className="text-[10px] text-amber-700 font-semibold">Supervisor</span>
-                                      )}
-                                    </label>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          )}
-                          {m.key === 'conveyance' && selectedModules.has('conveyance') && (
-                            <div className="ml-2 mt-1 mb-1 p-3 bg-amber-50 border border-amber-200 rounded-xl">
-                              <p className="text-[11px] font-semibold text-slate-700 flex items-center gap-1.5 mb-1">
-                                <Building2 className="w-3.5 h-3.5 text-amber-600" />
-                                Department Access for this Report
-                              </p>
-                              <p className="text-[11px] text-slate-500 mb-2">
-                                Leave every Department unchecked to keep seeing all of them (default). Tick one or
-                                more to restrict {managingModulesFor?.role === 'user' ? 'this User' : 'this Admin'} to
-                                only those Department(s) on the Conveyance Bill Claim tab — a Department they
-                                supervise is pre-ticked here the first time this is set up, but that can be
-                                unticked, and this can be set for any account either way.
-                              </p>
-                              {loadingConveyanceClaimDepts ? (
-                                <p className="text-[11px] text-slate-400">Loading…</p>
-                              ) : departments.length === 0 ? (
-                                <p className="text-[11px] text-slate-400">No Departments set up yet (Admin Panel -&gt; Departments).</p>
-                              ) : (
-                                <div className="space-y-1 max-h-40 overflow-y-auto pr-1">
-                                  {departments.map((d) => (
-                                    <label
-                                      key={d.id}
-                                      className="flex items-center gap-2 px-2 py-1.5 bg-white border border-amber-100 rounded-lg cursor-pointer hover:bg-amber-100/40"
-                                    >
-                                      <input
-                                        type="checkbox"
-                                        checked={conveyanceClaimDepts.has(d.name)}
-                                        onChange={() => toggleConveyanceClaimDept(d.name)}
-                                        className="w-3.5 h-3.5 rounded border-slate-300 text-amber-600 focus:ring-amber-600 cursor-pointer"
-                                      />
-                                      <span className="text-xs text-slate-800">{d.name}</span>
-                                      {d.supervisor_user_id === managingModulesFor?.id && (
-                                        <span className="text-[10px] text-amber-700 font-semibold">Supervisor</span>
-                                      )}
-                                    </label>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </React.Fragment>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-            </div>
-
-            <div className="p-5 border-t border-slate-200 flex justify-end gap-2">
-              <button
-                onClick={() => setManagingModulesFor(null)}
-                className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition-all"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSaveModulePermissions}
-                disabled={savingModules}
-                className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-xl transition-all disabled:opacity-50"
-              >
-                {savingModules ? 'Saving...' : 'Save Access'}
-              </button>
-            </div>
-          </div>
-        </div>
+      {/* Module Access — a full page in place of the Users page (Users ->
+          Manage -> Module Access, or several ticked accounts from the bulk
+          bar), Back returns to it. */}
+      {managingModulesFor && activeTab === 'users' && (
+        <ModuleAccessPage
+          token={token}
+          users={users}
+          initialIds={moduleAccessIds}
+          departments={departments}
+          viewer={{ isSuperAdmin, canGrantModuleAccess }}
+          onClose={() => setManagingModulesFor(null)}
+          onSaved={(text, ok) => {
+            fetchAllData();
+            setMessage({ type: ok ? 'success' : 'error', text });
+          }}
+        />
       )}
 
       {/* Reset Password modal — Admin/Superadmin sets a brand new password for a

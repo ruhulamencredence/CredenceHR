@@ -50,7 +50,7 @@ export const ADMIN_MODULES: { key: AdminModuleKey; label: string }[] = [
 // combination of these per (Admin/User account, module) via Admin Panel ->
 // Users -> Module Access. Independent checkboxes, not hierarchical: having
 // 'delete_trash' does NOT imply 'edit_add' is also granted.
-export type PermissionLayerKey = 'read' | 'edit_add' | 'entry_upload' | 'delete_trash' | 'permanent_delete' | 'submission_status' | 'dispatch_material' | 'dispatch_all' | 'stay_report' | 'live' | 'material_budget';
+export type PermissionLayerKey = 'read' | 'edit_add' | 'entry_upload' | 'delete_trash' | 'permanent_delete' | 'submission_status' | 'dispatch_material' | 'dispatch_all' | 'stay_report' | 'live' | 'material_budget' | 'block_account';
 
 export const PERMISSION_LAYERS: { key: PermissionLayerKey; label: string }[] = [
   { key: 'read', label: 'Read Only' },
@@ -80,6 +80,15 @@ export const MODULE_LAYER_OPTIONS: Partial<Record<AdminModuleKey, { key: Permiss
     { key: 'dispatch_material', label: 'Dispatch Material (own)' },
     { key: 'dispatch_all', label: 'Dispatch Material: see all' }
   ],
+  // Users: the usual layers plus Block login (explicit only).
+  users: [
+    { key: 'read', label: 'Read Only' },
+    { key: 'edit_add', label: 'Edit/Add' },
+    { key: 'entry_upload', label: 'Entry/Upload' },
+    { key: 'delete_trash', label: 'Delete/Trash' },
+    { key: 'permanent_delete', label: 'Permanent Delete' },
+    { key: 'block_account', label: 'Block login' }
+  ],
   // Employee Tracking -> Stay Report (how long at each place, day by day).
   tracking: [
     { key: 'read', label: 'Live Map & History' },
@@ -99,7 +108,7 @@ export const MODULE_LAYER_OPTIONS: Partial<Record<AdminModuleKey, { key: Permiss
 };
 // Layers an account has only when explicitly ticked — never part of the
 // "module granted, no layers saved yet" default (requireModuleLayer).
-export const EXPLICIT_ONLY_LAYERS: PermissionLayerKey[] = ['permanent_delete', 'submission_status', 'dispatch_material', 'dispatch_all', 'live', 'material_budget'];
+export const EXPLICIT_ONLY_LAYERS: PermissionLayerKey[] = ['permanent_delete', 'submission_status', 'dispatch_material', 'dispatch_all', 'live', 'material_budget', 'block_account'];
 export const layersFor = (moduleKey: AdminModuleKey) => MODULE_LAYER_OPTIONS[moduleKey] || PERMISSION_LAYERS;
 
 // Leave Manage's own operation-specific layers — same independent-checkbox
@@ -529,6 +538,10 @@ export interface User {
   can_view_my_leave?: boolean;
   // PEPM -> Material Receive (MprDispatchRoutes.ts) — off by default.
   can_receive_material?: boolean;
+  // Admin Panel -> Users -> Block login (UserAccessExtras.ts).
+  is_blocked?: boolean;
+  blocked_reason?: string | null;
+  blocked_at?: string | null;
 }
 
 // One custom Leave Category a Leave Manager has defined from Leave Manage ->

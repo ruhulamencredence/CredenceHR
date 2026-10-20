@@ -39,6 +39,7 @@ import { ensureChatSchema, registerChatRoutes, setupChatSocket } from "./ChatRou
 import { ensureMeasurementSchema, registerMeasurementRoutes } from "./MeasurementRoutes";
 import { ensureMprDispatchSchema, registerMprDispatchRoutes } from "./MprDispatchRoutes";
 import { registerDeviceRoutes, ensureDeviceSchema, checkAppDevice, deviceStillAllowed } from "./DeviceRoutes";
+import { ensureUserAccessSchema, registerUserAccessExtras, accountState } from "./UserAccessExtras";
 import { memoryDb, queryMemoryDb, EMPLOYEE_BOOL_FIELDS } from "./memoryDbFallback";
 
 dotenv.config();
@@ -253,6 +254,8 @@ async function ensureSchemaMigrations() {
   await ensureMeasurementSchema(dbPool);
   // PEPM -> Dispatch Material / Material Receive (MprDispatchRoutes.ts).
   await ensureMprDispatchSchema(dbPool);
+  // Admin Panel -> Users: access audit, Access Templates, Block login (UserAccessExtras.ts).
+  await ensureUserAccessSchema(dbPool);
 
   // Server Profiles (Admin Panel -> Servers, Superadmin-only) — table +
   // schema owned by ServerProfileRoutes.ts, only the call site lives here,
@@ -2158,7 +2161,8 @@ const MODULE_LAYER_KEY_SETS: Record<string, readonly string[]> = {
   departments: PERMISSION_LAYER_KEYS,
   projects: PERMISSION_LAYER_KEYS,
   approvals: PERMISSION_LAYER_KEYS,
-  users: PERMISSION_LAYER_KEYS,
+  // Users adds "block_account" (Block login) — explicit-only.
+  users: [...PERMISSION_LAYER_KEYS, "block_account"],
   reports: REPORT_LAYER_KEYS,
   tracking: TRACKING_LAYER_KEYS,
   measurement_sheet: MEASUREMENT_LAYER_KEYS,
@@ -3332,6 +3336,17 @@ async function startServer() {
         res.setHeader("X-Device-Revoked", "1");
         return res.status(401).json({ error: "This phone was removed from your account. Sign in again.", code: "DEVICE_REVOKED" });
       }
+      // A blocked account (Admin Panel -> Users -> Block login) is signed out
+      // of every session it still has — and so is a deleted one.
+      const state = user?.id ? await accountState(queryDB, Number(user.id)) : "ok";
+      if (state === "blocked") {
+        res.setHeader("X-Account-Blocked", "1");
+        return res.status(401).json({ error: "This account has been blocked. Contact HR.", code: "ACCOUNT_BLOCKED" });
+      }
+      if (state === "removed") {
+        res.setHeader("X-Account-Blocked", "removed");
+        return res.status(401).json({ error: "This account no longer exists.", code: "ACCOUNT_REMOVED" });
+      }
       req.user = user;
       // Admin Panel -> Active Users: this sign-in's IP, device and last use.
       touchSession(queryDB, req, token, user);
@@ -3450,7 +3465,7 @@ async function startServer() {
   // on for a module is never a silent regression; a Superadmin only actually
   // restricts anything once they explicitly save a narrower set in the
   // Module Access modal.
-  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "stay_report" | "live" | "material_budget" | "dispatch_material" | "dispatch_all") =>
+  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "stay_report" | "live" | "material_budget" | "dispatch_material" | "dispatch_all" | "block_account") =>
     async (req: any, res: any, next: any) => {
       if (!req.user) return res.status(401).json({ error: "Access token required" });
       if (req.user.role === "superadmin") return next();
@@ -3515,6 +3530,7 @@ async function startServer() {
   // User Management (Admin Panel -> Users) — kept in their own file
   // (UserManagement.ts), same reasoning as profileRoutes.ts/holidayRoutes.ts/
   // Alerts.ts above.
+  registerUserAccessExtras(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, queryDB, adminModuleKeys: ADMIN_MODULE_KEYS });
   registerUserManagementRoutes(app, { authenticateToken, requireAdmin, requireSuperAdmin, requireModuleGrantAccess, requireModule, requireModuleLayer, queryDB, adminModuleKeys: ADMIN_MODULE_KEYS, moduleLayerKeySets: MODULE_LAYER_KEY_SETS });
 
   // Departments (Admin Panel -> Departments) + Branches (Admin Panel ->
@@ -3694,6 +3710,11 @@ async function startServer() {
       const validPassword = await bcrypt.compare(password, user.password_hash);
       if (!validPassword) {
         return res.status(400).json({ error: "Invalid login ID or password" });
+      }
+
+      // Admin Panel -> Users -> Block login.
+      if (Number(user.is_blocked || 0) === 1 && user.role !== "superadmin") {
+        return res.status(403).json({ error: "This account has been blocked. Contact HR.", code: "ACCOUNT_BLOCKED" });
       }
 
       // The app signs in on one phone per account unless a Superadmin allows
