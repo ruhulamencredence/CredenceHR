@@ -5,6 +5,11 @@ import ChatStandalone from './ChatStandalone.tsx';
 import PrivacyPolicy from './components/PrivacyPolicy.tsx';
 import './index.css';
 import { installDeviceWatch } from './lib/device';
+import { applyBackgroundTheme, getSavedBackgroundTheme } from './lib/backgroundTheme';
+
+// Appearance (Profile -> Appearance): applied before the first paint so the
+// default background doesn't flash first.
+applyBackgroundTheme(getSavedBackgroundTheme());
 
 // Device Access: sign out a phone the Superadmin removed (App.tsx).
 installDeviceWatch();

@@ -101,7 +101,7 @@ export function BottomNav({ active, onChange, canViewMovementClaim = true, canVi
         <svg
           viewBox={`0 0 ${BAR_W} ${BAR_H}`}
           preserveAspectRatio="none"
-          className="absolute inset-0 w-full h-full drop-shadow-[0_-8px_24px_rgba(127,0,255,0.25)]"
+          className="absolute inset-0 w-full h-full drop-shadow-[0_-8px_24px_rgba(var(--g-accent-rgb,127,0,255),0.25)]"
         >
           <path d={pathD} fill="var(--g-accent)" />
         </svg>

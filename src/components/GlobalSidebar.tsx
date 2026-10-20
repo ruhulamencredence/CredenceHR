@@ -166,9 +166,9 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     .join('') || '?';
 
   const roleAvatarColors: Record<string, string> = {
-    superadmin: '#7F00FF',
-    admin: '#B36AFF',
-    user: '#D2A8FF',
+    superadmin: 'var(--g-avatar-1, #7F00FF)',
+    admin: 'var(--g-avatar-2, #B36AFF)',
+    user: 'var(--g-avatar-3, #D2A8FF)',
   };
 
   // Whether this account has a User Panel at all — a plain User always does;
@@ -719,15 +719,16 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
       <aside
         className={
           isPersistent
-            ? `hidden md:flex sticky top-16 z-10 flex-col shrink-0 self-start h-[calc(100vh-4rem)] transition-[width] duration-200 ${
+            ? `gsidebar hidden md:flex sticky top-16 z-10 flex-col shrink-0 self-start h-[calc(100vh-4rem)] transition-[width] duration-200 ${
                 collapsed ? 'w-[64px]' : 'w-[264px]'
               }`
-            : `fixed left-0 top-0 bottom-0 z-[1200] flex flex-col w-[264px] max-w-[85vw] transition-transform duration-300 ease-out ${
+            : `gsidebar fixed left-0 top-0 bottom-0 z-[1200] flex flex-col w-[264px] max-w-[85vw] transition-transform duration-300 ease-out ${
                 open ? 'translate-x-0' : '-translate-x-[110%]'
               }`
         }
         style={{
-          background: 'linear-gradient(165deg, rgba(127,0,255,0.94) 0%, rgba(99,0,198,0.94) 55%, rgba(71,0,142,0.96) 100%)',
+          // --g-sidebar-bg: set by a whole-app theme (Minimal Mono, index.css).
+          background: 'var(--g-sidebar-bg, linear-gradient(165deg, rgba(var(--g-accent-rgb,127,0,255),0.94) 0%, rgba(99,0,198,0.94) 55%, rgba(71,0,142,0.96) 100%))',
           boxShadow: isPersistent ? 'none' : '12px 0 40px rgba(47,0,94,0.35)',
           borderRight: isPersistent ? '1px solid rgba(255,255,255,0.08)' : undefined,
           paddingTop: isPersistent ? undefined : 'var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px))',
@@ -765,7 +766,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
             >
               <div
                 className="w-11 h-11 rounded-full flex items-center justify-center text-sm font-bold text-white ring-2 ring-white/30 overflow-hidden"
-                style={{ background: roleAvatarColors[user.role] || '#B36AFF' }}
+                style={{ background: roleAvatarColors[user.role] || 'var(--g-avatar-2, #B36AFF)' }}
               >
                 {photoUrl ? <img src={photoUrl} alt={user.name} className="w-full h-full object-cover" /> : initials}
               </div>
@@ -816,7 +817,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
                 </div>
 
                 {searchQuery && (
-                  <div className="absolute left-0 right-0 mt-1 max-h-72 overflow-y-auto rounded-xl bg-[#3a0d70] border border-white/15 shadow-xl z-20 py-1">
+                  <div className="gsidebar-pop absolute left-0 right-0 mt-1 max-h-72 overflow-y-auto rounded-xl bg-[#3a0d70] border border-white/15 shadow-xl z-20 py-1">
                     {searchResults.length > 0 ? (
                       searchResults.map((item) => (
                         <button

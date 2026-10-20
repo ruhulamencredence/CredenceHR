@@ -84,7 +84,8 @@ function initialsOf(name: string): string {
   return name.split(' ').filter(Boolean).slice(0, 2).map((p) => p[0]?.toUpperCase()).join('') || '?';
 }
 
-const AVATAR_COLORS = ['#7F00FF', '#B36AFF', '#D2A8FF', '#6300C6', '#9B4DFF'];
+// CSS variables so a whole-app theme (Minimal Mono) can recolour them.
+const AVATAR_COLORS = ['var(--g-avatar-1, #7F00FF)', 'var(--g-avatar-2, #B36AFF)', 'var(--g-avatar-3, #D2A8FF)', 'var(--g-avatar-4, #6300C6)', 'var(--g-avatar-5, #9B4DFF)'];
 function avatarColorFor(seed: number): string {
   return AVATAR_COLORS[Math.abs(seed) % AVATAR_COLORS.length];
 }

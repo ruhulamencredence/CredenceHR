@@ -104,7 +104,7 @@ export const MyApprovalsBell: React.FC<MyApprovalsBellProps> = ({ token }) => {
         {count > 0 && (
           <span
             className="absolute top-0.5 right-0.5 min-w-[16px] h-4 px-1 rounded-full flex items-center justify-center text-[10px] font-semibold text-white"
-            style={{ background: '#2563eb' }}
+            style={{ background: 'var(--g-info, #2563eb)' }}
           >
             {count > 9 ? '9+' : count}
           </span>

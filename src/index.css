@@ -6,6 +6,13 @@
    than a CSS module since a matching copy of this same animation is also
    defined inline in index.html for the very first paint, before this
    stylesheet has loaded at all. */
+/* Loading placeholders (HrOpsSkeleton.tsx): wait a moment, then fade in,
+   so a fast load never flashes one. */
+@keyframes skeleton-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
 @keyframes mpr-spin {
   to { transform: rotate(360deg); }
 }
@@ -58,6 +65,37 @@
   }
 }
 
+/* Real bug, found the hard way across two Dashboard cards (AttendanceCard,
+   LeaveSummaryCard): an element that combines rounded corners
+   (border-radius) with a translucent or gradient background — especially
+   once it's promoted to its own GPU layer via `transform: translateZ(0)`,
+   which several of the Dashboard's "glass" cards use to try to help
+   backdrop-filter — can rasterize wrong on a cold reload in the Android
+   system WebView: it paints as a flat opaque color (usually plain white)
+   instead of correctly blending its own alpha/gradient with what's behind
+   it, and nothing short of a fresh reload fixes it (interacting with the
+   page doesn't help). This is a long-documented Chromium/WebKit compositor
+   issue, not something specific to this app — the same failure mode shows
+   up for plain background colors on tall rounded Views in Android WebViews
+   generally (e.g. facebook/react-native#15826) and for
+   border-radius + overflow:hidden specifically on WebKit
+   (bugs.webkit.org #30475). Trying to force a GPU layer with `transform`
+   alone doesn't reliably prevent it — this app's cards already had that and
+   still lost their background on reload.
+   The fix that's actually held up across these bug reports: take the
+   rounded-rect clip off Skia's normal raster path and put it on the CSS
+   mask raster path instead, which doesn't share the same bug. A mask that's
+   fully opaque white end-to-end (a radial gradient from white to white)
+   does this with zero visible effect of its own — it's not actually
+   masking anything out, just changing which renderer draws the corners.
+   Apply this class to any card that pairs rounded corners with a
+   translucent/gradient fill, alongside its existing rounded-*/overflow
+   classes. */
+.glass-mask-fix {
+  -webkit-mask-image: -webkit-radial-gradient(white, white);
+  mask-image: radial-gradient(white, white);
+}
+
 /*
   Design system - modeled on the Gemini app's visual language:
   a quiet, near-white surface; a single colorful brand gradient reserved for the
@@ -85,6 +123,8 @@
     the exact supplied hex values.
   */
   --g-accent: #7F00FF;
+  /* The accent as r,g,b — for rgba(var(--g-accent-rgb), a) glows and shadows. */
+  --g-accent-rgb: 127, 0, 255;
   --g-accent-hover: #6300C6;
   --g-accent-soft: #F3E8FF;
   --g-accent-100: #EFE0FF;
@@ -114,9 +154,24 @@ body {
      handled on the sticky Navbar itself instead (see Navbar.tsx), since only the
      header needs to push down — the rest of the page already starts below it. */
   padding-bottom: var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
-  background: var(--g-bg-gradient);
-  background-attachment: fixed;
+  background: var(--g-bg);
   color: var(--g-text);
+}
+
+/* The app background (--g-bg-gradient, picked in Profile -> Appearance) sits
+   on its own window-sized layer instead of body + background-attachment:
+   fixed. A fixed background on the body (Apple Glow is six gradients) makes
+   the browser repaint the whole screen on every scroll frame, which made long
+   pages like Admin -> Employees stutter; a position: fixed layer is composited
+   once and just stays put. Page wrappers leave their own background
+   transparent so this layer shows through. */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: var(--g-bg-gradient);
 }
 
 .gemini-gradient-text {
@@ -248,9 +303,9 @@ body {
    bright rim and a soft highlight across the top, over a lightly dimmed page
    so the dashboard shows through. */
 .liquid-glass-backdrop {
-  background: rgba(15, 23, 42, 0.22);
-  -webkit-backdrop-filter: blur(3px);
-  backdrop-filter: blur(3px);
+  background: rgba(15, 23, 42, 0.25);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  backdrop-filter: blur(14px) saturate(140%);
 }
 .liquid-glass {
   position: relative;
@@ -327,3 +382,205 @@ body {
   100% { transform: scale(1); }
 }
 .liquid-glass-pop { animation: liquid-glass-pop 0.5s cubic-bezier(0.2, 0.9, 0.3, 1.2) both; }
+
+/* Sign-in page: a spotlight shining down from the logo onto the hero
+   illustration (AuthScreen.tsx, HeroSpotlight). */
+.hero-spot { position: absolute; left: 50%; pointer-events: none; transform: translateX(-50%); }
+.hero-spot-source {
+  width: 46px; height: 14px; border-radius: 9999px;
+  background: radial-gradient(ellipse at center, rgba(255, 255, 255, 1) 0%, rgba(255, 247, 214, 0.85) 35%, rgba(255, 220, 150, 0) 75%);
+  filter: blur(2px);
+  animation: hero-spot-breathe 5s ease-in-out infinite;
+}
+.hero-spot-beam {
+  clip-path: polygon(45% 0, 55% 0, 100% 100%, 0 100%);
+  background: linear-gradient(180deg, rgba(255, 236, 170, 0.75) 0%, rgba(255, 232, 170, 0.45) 40%, rgba(255, 236, 190, 0.28) 75%, rgba(255, 240, 200, 0.05) 100%);
+  filter: blur(5px);
+  animation: hero-spot-breathe 5s ease-in-out infinite;
+}
+.hero-spot-pool {
+  border-radius: 50%;
+  background: radial-gradient(ellipse at center, rgba(255, 226, 150, 0.7) 0%, rgba(255, 232, 170, 0.35) 45%, rgba(255, 255, 255, 0) 72%);
+  filter: blur(4px);
+  animation: hero-spot-breathe 5s ease-in-out infinite;
+}
+@keyframes hero-spot-breathe {
+  0%, 100% { opacity: 0.75; }
+  50% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero-spot-source, .hero-spot-beam, .hero-spot-pool { animation: none; }
+}
+
+/* Credence Assistant's floating button (AiAssistant.tsx): on phones, while the
+   bottom bar's More button is showing (BottomNav.tsx sets data-more-menu), the
+   Assistant opens from the More menu instead, so the button steps aside. */
+@media (max-width: 767px) {
+  body[data-more-menu] .assistant-fab {
+    display: none;
+  }
+}
+
+/*
+  Minimal Mono theme (Profile -> Appearance -> "Minimal Mono";
+  lib/backgroundTheme.ts sets <html data-ui="mono">): a light-grey
+  workspace, white cards and a white sidebar, black for the main actions,
+  neutral greys in place of violet. Tailwind v4 colours are CSS variables, so
+  remapping the violet / indigo / purple / fuchsia / blue scales here turns
+  every bg-/text-/border-/gradient utility of those colours grey at once;
+  green / amber / red status colours are left as they are.
+*/
+html[data-ui="mono"] {
+  --g-bg: #f2f2f3;
+  --g-surface: #ffffff;
+  --g-surface-muted: #f6f6f7;
+  --g-border: #e7e7ea;
+  --g-text: #18181b;
+  --g-text-muted: #71717a;
+
+  --g-accent: #18181b;
+  --g-accent-rgb: 24, 24, 27;
+  --g-accent-hover: #000000;
+  --g-accent-soft: #f4f4f5;
+  --g-accent-100: #f4f4f5;
+  --g-accent-200: #e4e4e7;
+  --g-accent-300: #d4d4d8;
+  --g-accent-400: #a1a1aa;
+  --g-accent-500: #27272a;
+  --g-accent-600: #18181b;
+  --g-accent-700: #18181b;
+  --g-accent-800: #09090b;
+  --g-accent-900: #09090b;
+  --g-accent-950: #09090b;
+  --g-accent-975: #09090b;
+  --g-gradient: linear-gradient(90deg, #3f3f46 0%, #27272a 50%, #18181b 100%);
+
+  --g-sidebar-bg: #ffffff;
+  /* The app header on the phone app and the welcome banner under it stay
+     one dark card (they carry white text). */
+  --g-header-gradient: linear-gradient(90deg, #3f3f46 0%, #27272a 50%, #18181b 100%);
+  --g-banner-1: #3f3f46;
+  --g-banner-2: #27272a;
+  --g-banner-3: #18181b;
+
+  --mono-50: #fafafa;
+  --mono-100: #f4f4f5;
+  --mono-200: #e4e4e7;
+  --mono-300: #d4d4d8;
+  --mono-400: #a1a1aa;
+  --mono-500: #52525b;
+  --mono-600: #27272a;
+  --mono-700: #18181b;
+  --mono-800: #18181b;
+  --mono-900: #09090b;
+  --mono-950: #09090b;
+}
+html[data-ui="mono"] {
+  --color-violet-50: var(--mono-50); --color-violet-100: var(--mono-100); --color-violet-200: var(--mono-200); --color-violet-300: var(--mono-300); --color-violet-400: var(--mono-400); --color-violet-500: var(--mono-500); --color-violet-600: var(--mono-600); --color-violet-700: var(--mono-700); --color-violet-800: var(--mono-800); --color-violet-900: var(--mono-900); --color-violet-950: var(--mono-950);
+  --color-purple-50: var(--mono-50); --color-purple-100: var(--mono-100); --color-purple-200: var(--mono-200); --color-purple-300: var(--mono-300); --color-purple-400: var(--mono-400); --color-purple-500: var(--mono-500); --color-purple-600: var(--mono-600); --color-purple-700: var(--mono-700); --color-purple-800: var(--mono-800); --color-purple-900: var(--mono-900); --color-purple-950: var(--mono-950);
+  --color-indigo-50: var(--mono-50); --color-indigo-100: var(--mono-100); --color-indigo-200: var(--mono-200); --color-indigo-300: var(--mono-300); --color-indigo-400: var(--mono-400); --color-indigo-500: var(--mono-500); --color-indigo-600: var(--mono-600); --color-indigo-700: var(--mono-700); --color-indigo-800: var(--mono-800); --color-indigo-900: var(--mono-900); --color-indigo-950: var(--mono-950);
+  --color-fuchsia-50: var(--mono-50); --color-fuchsia-100: var(--mono-100); --color-fuchsia-200: var(--mono-200); --color-fuchsia-300: var(--mono-300); --color-fuchsia-400: var(--mono-400); --color-fuchsia-500: var(--mono-500); --color-fuchsia-600: var(--mono-600); --color-fuchsia-700: var(--mono-700); --color-fuchsia-800: var(--mono-800); --color-fuchsia-900: var(--mono-900); --color-fuchsia-950: var(--mono-950);
+  --color-blue-50: var(--mono-50); --color-blue-100: var(--mono-100); --color-blue-200: var(--mono-200); --color-blue-300: var(--mono-300); --color-blue-400: var(--mono-400); --color-blue-500: var(--mono-500); --color-blue-600: var(--mono-600); --color-blue-700: var(--mono-700); --color-blue-800: var(--mono-800); --color-blue-900: var(--mono-900); --color-blue-950: var(--mono-950);
+}
+/* Cards: white with a hairline border and a barely-there shadow. */
+html[data-ui="mono"] .gemini-card {
+  border-radius: 16px;
+  box-shadow: 0 1px 2px rgba(24, 24, 27, 0.04);
+}
+html[data-ui="mono"] .shadow-sm { box-shadow: 0 1px 2px rgba(24, 24, 27, 0.04) !important; }
+/* Popups stay liquid glass, in neutral tones. */
+html[data-ui="mono"] .liquid-glass::before {
+  background: radial-gradient(120% 60% at 15% -10%, rgba(255, 255, 255, 0.85), transparent 55%);
+}
+html[data-ui="mono"] .liquid-glass-button {
+  background: #18181b;
+  border-color: #18181b;
+  box-shadow: 0 6px 16px -8px rgba(0, 0, 0, 0.45);
+}
+html[data-ui="mono"] .liquid-glass-button::after { display: none; }
+
+/* Sidebar (GlobalSidebar.tsx, .gsidebar): white, dark text, the open item a
+   light grey pill — its utilities are written for the violet sidebar
+   (text-white/…, bg-white/…), so they are mapped here. */
+html[data-ui="mono"] .gsidebar {
+  border-right: 1px solid var(--g-border) !important;
+  box-shadow: none !important;
+}
+html[data-ui="mono"] .gsidebar [class*="text-white"] { color: #52525b !important; }
+html[data-ui="mono"] .gsidebar [class*="text-white/4"],
+html[data-ui="mono"] .gsidebar [class*="text-white/5"] { color: #a1a1aa !important; }
+html[data-ui="mono"] .gsidebar [class*="hover:text-white"]:hover { color: #18181b !important; }
+html[data-ui="mono"] .gsidebar [class*="bg-white/15"] { background-color: #f1f1f2 !important; color: #18181b !important; }
+html[data-ui="mono"] .gsidebar [class*="bg-white/15"] [class*="text-white"] { color: #18181b !important; }
+html[data-ui="mono"] .gsidebar .h-px[class*="bg-white/15"] { background-color: var(--g-border) !important; }
+/* Menu rows and favourite tiles sit flat on the white (the open one gets
+   the grey pill above); the search box keeps a light grey well. */
+html[data-ui="mono"] .gsidebar [class*="bg-white/10"]:not(input),
+html[data-ui="mono"] .gsidebar [class*="bg-white/5"]:not(input) { background-color: transparent !important; }
+html[data-ui="mono"] .gsidebar input[class*="bg-white/10"],
+html[data-ui="mono"] .gsidebar [class*="bg-black/15"] { background-color: #f4f4f5 !important; }
+html[data-ui="mono"] .gsidebar [class*="hover:bg-white/10"]:hover,
+html[data-ui="mono"] .gsidebar [class*="hover:bg-white/5"]:hover { background-color: #f4f4f5 !important; }
+html[data-ui="mono"] .gsidebar input { color: #18181b !important; }
+html[data-ui="mono"] .gsidebar input::placeholder { color: #a1a1aa !important; }
+html[data-ui="mono"] .gsidebar [class*="ring-white"] { --tw-ring-color: #e4e4e7 !important; }
+html[data-ui="mono"] .gsidebar [class*="border-white"] { border-color: var(--g-border) !important; }
+/* The Logout pill: black, like the reference's main action. */
+html[data-ui="mono"] .gsidebar button.bg-white { background-color: #18181b !important; color: #ffffff !important; }
+/* Search results / collapsed flyout menus: white cards. */
+html[data-ui="mono"] .gsidebar-pop,
+html[data-ui="mono"] [data-gsidebar-flyout] {
+  background: #ffffff !important;
+  border: 1px solid var(--g-border) !important;
+  box-shadow: 0 12px 32px -12px rgba(24, 24, 27, 0.25) !important;
+}
+html[data-ui="mono"] [data-gsidebar-flyout] [class*="text-white"] { color: #52525b !important; }
+html[data-ui="mono"] [data-gsidebar-flyout] [class*="bg-white/15"] { background-color: #f1f1f2 !important; color: #18181b !important; }
+html[data-ui="mono"] [data-gsidebar-flyout] [class*="hover:bg-white/10"]:hover { background-color: #f4f4f5 !important; }
+/* Page wrappers that paint their own pastel background: let the theme's
+   grey through; the violet ones go neutral. */
+html[data-ui="mono"] .bg-\[\#dceeff\] { background-color: transparent !important; }
+html[data-ui="mono"] .bg-\[\#e4d4ff\] { background-color: #f4f4f5 !important; }
+html[data-ui="mono"] .bg-\[\#7F00FF\] { background-color: #18181b !important; }
+
+/* Minimal Mono — the rest: avatars, charts, dashboard icons, maps. */
+html[data-ui="mono"] {
+  --g-avatar-1: #3f3f46;
+  --g-avatar-2: #52525b;
+  --g-avatar-3: #71717a;
+  --g-avatar-4: #27272a;
+  --g-avatar-5: #52525b;
+  --g-badge-check: #d4d4d8;
+  --g-boot-bg: #18181b;
+  --g-info: #18181b;
+  /* Charts: one dark bar colour, and a grey ramp (dark to light) for
+     slices / series so neighbours still read apart. */
+  --g-chart-1: #18181b;
+  --g-chart-2: #52525b;
+  --g-chart-3: #a1a1aa;
+  --g-chart-4: #3f3f46;
+  --g-chart-5: #71717a;
+  --g-chart-6: #d4d4d8;
+  --g-chart-7: #27272a;
+  --g-chart-8: #8a8a93;
+  --g-chart-9: #60606a;
+  --g-chart-10: #bdbdc4;
+}
+/* Admin Dashboard stat tiles: a quiet grey well with a dark icon. */
+html[data-ui="mono"] .kpi-icon {
+  background: #f4f4f5 !important;
+  color: #18181b !important;
+  box-shadow: inset 0 0 0 1px #e7e7ea;
+}
+html[data-ui="mono"] .kpi-icon svg { color: #18181b !important; }
+/* Maps: grey map tiles; violet routes / pins / circles in near-black. */
+html[data-ui="mono"] .leaflet-tile-pane { filter: grayscale(1) contrast(1.02) brightness(1.03); }
+html[data-ui="mono"] .leaflet-container path[stroke="#7F00FF" i] { stroke: #18181b; }
+html[data-ui="mono"] .leaflet-container path[fill="#7F00FF" i] { fill: #18181b; }
+html[data-ui="mono"] .leaflet-container [fill="#7F00FF" i] { fill: #18181b; }
+/* Home / More menu app tiles: black tiles with white icons. */
+html[data-ui="mono"] .app-tile-icon {
+  background-image: none !important;
+  background-color: #18181b !important;
+  box-shadow: 0 4px 10px -6px rgba(0, 0, 0, 0.45) !important;
+}
