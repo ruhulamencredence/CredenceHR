@@ -238,11 +238,11 @@ export const MprDispatchMaterial: React.FC<{ token: string }> = ({ token }) => {
   const removable = (r: MdRow) => !r.dispatches.some((d) => d.status !== 'cancelled');
   const takeOut = async (list: MdRow[]) => {
     if (!list.length) return;
-    if (!(await confirmDialog(`Take ${list.length} MPR row${list.length === 1 ? '' : 's'} out of Dispatch Material? ${list.length === 1 ? 'It goes' : 'They go'} back to the MPR Entries report, to send again later.`, { confirmLabel: 'Take out' }))) return;
+    if (!(await confirmDialog(`Send ${list.length} MPR row${list.length === 1 ? '' : 's'} back to the MPR Entries report? ${list.length === 1 ? 'It leaves' : 'They leave'} Dispatch Material and can be sent here again later.`, { confirmLabel: 'Send back' }))) return;
     try {
       const r = await mdFetch<{ removed: number; kept: number; notYours: number }>(token, '/api/mpr-dispatch/unqueue', 'POST', { entryIds: list.map((x) => x.id) });
       setNotice(
-        `${r.removed} row${r.removed === 1 ? '' : 's'} taken out.${r.kept ? ` ${r.kept} kept — material was already sent on ${r.kept === 1 ? 'it' : 'them'}.` : ''}${
+        `${r.removed} row${r.removed === 1 ? '' : 's'} sent back to the MPR Entries report.${r.kept ? ` ${r.kept} kept — material was already sent on ${r.kept === 1 ? 'it' : 'them'}.` : ''}${
           r.notYours ? ` ${r.notYours} kept — someone else sent ${r.notYours === 1 ? 'it' : 'them'} here.` : ''
         }`
       );
@@ -415,16 +415,15 @@ export const MprDispatchMaterial: React.FC<{ token: string }> = ({ token }) => {
             >
               <Truck className="w-4 h-4" /> Dispatch{pickedRows.length ? ` ${pickedRows.length}` : ''}
             </button>
-            {pickedRows.some(removable) && (
-              <button
-                type="button"
-                onClick={() => void takeOut(pickedRows.filter(removable))}
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50"
-                title="Back to the MPR Entries report (only rows with nothing sent yet)"
-              >
-                <ListMinus className="w-4 h-4" /> Take out ({pickedRows.filter(removable).length})
-              </button>
-            )}
+            <button
+              type="button"
+              disabled={!pickedRows.some(removable)}
+              onClick={() => void takeOut(pickedRows.filter(removable))}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+              title="Tick rows, then send them back to the MPR Entries report (only rows with nothing sent yet)"
+            >
+              <ListMinus className="w-4 h-4" /> Back to MPR Entries{pickedRows.some(removable) ? ` (${pickedRows.filter(removable).length})` : ''}
+            </button>
             <button type="button" onClick={() => void load()} className="p-2 rounded-xl bg-white border border-slate-200 hover:bg-slate-50" aria-label="Refresh" title="Refresh">
               <RefreshCw className="w-4 h-4 text-slate-600" />
             </button>
@@ -560,6 +559,17 @@ export const MprDispatchMaterial: React.FC<{ token: string }> = ({ token }) => {
                             {sendable(r) && (
                               <button type="button" onClick={() => setDispatching({ lines: [lineFor(r)] })} className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold bg-blue-600 text-white hover:bg-blue-700">
                                 <Truck className="w-3.5 h-3.5" /> Dispatch
+                              </button>
+                            )}
+                            {removable(r) && (
+                              <button
+                                type="button"
+                                onClick={() => void takeOut([r])}
+                                className="p-1 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"
+                                aria-label="Back to MPR Entries"
+                                title="Back to the MPR Entries report"
+                              >
+                                <ListMinus className="w-3.5 h-3.5" />
                               </button>
                             )}
                             <button type="button" onClick={() => setTimeline(r.id)} className="p-1 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50" aria-label="History" title="History">
