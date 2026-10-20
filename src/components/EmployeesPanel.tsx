@@ -945,8 +945,12 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
     }
   };
 
+  // Deleting is its own explicit tick (Employees -> "Delete employee
+  // records"), and only an Employee with no pay or service records can go —
+  // anyone else is set to Resigned / Terminated (EmployeeRecordsGuard.ts).
+  const canDeleteEmployee = user.role === 'superadmin' || !!user.module_permission_layers?.employees?.includes('employee_delete');
   const handleDelete = async (id: number) => {
-    if (!(await confirmDialog('Delete this employee record? This cannot be undone.'))) return;
+    if (!(await confirmDialog('Delete this employee record? Only an employee added by mistake (no salary, advance, letter or other kept records) can be deleted. This cannot be undone.'))) return;
     setDeletingId(id);
     try {
       const res = await fetch(apiUrl(`/api/employees/${id}`), { method: 'DELETE', headers: authHeaders });
@@ -1374,6 +1378,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                         >
                           <Edit2 className="w-4 h-4" />
                         </button>
+                        {canDeleteEmployee && (
                         <button
                           type="button"
                           onClick={() => handleDelete(emp.id)}
@@ -1383,6 +1388,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
+                        )}
                       </div>
                     </td>
                   </tr>
