@@ -52,6 +52,7 @@ import { registerCallRoutes, setupCallSocket } from "./CallRoutes";
 import { ensureMailSchema, registerMailRoutes } from "./MailRoutes";
 import { ensureRosterSchema, registerRosterRoutes } from "./RosterRoutes";
 import { ensureMeasurementSchema, registerMeasurementRoutes } from "./MeasurementRoutes";
+import { ensureEmployeeRecordsGuard } from "./EmployeeRecordsGuard";
 import { ensureMprDispatchSchema, registerMprDispatchRoutes } from "./MprDispatchRoutes";
 import { ensureESignSchema, registerESignRoutes } from "./ESignRoutes";
 import { ensurePayslipSchema, registerPayslipRoutes } from "./PayslipRoutes";
@@ -274,6 +275,9 @@ async function initDB() {
     // "Email" next to every report's PDF button (ReportEmailRoutes.ts).
     await ensureReportEmailSchema(dbPool);
     await ensureZkSchema(dbPool);
+    // Pay and service records keep their Employee from being deleted
+    // (EmployeeRecordsGuard.ts) — after every table above exists.
+    await ensureEmployeeRecordsGuard(dbPool);
     // ZKTeco polling + daily pulls: one process only (jobRunner.ts).
     if (runsBackgroundJobs()) startZkSyncSchedule(dbPool);
   } catch (err: any) {
@@ -305,7 +309,7 @@ const PERMISSION_LAYER_KEYS = ["read", "edit_add", "entry_upload", "delete_trash
 const USERS_LAYER_KEYS = [...PERMISSION_LAYER_KEYS, "block_account"] as const;
 // Which modules currently enforce PERMISSION_LAYER_KEYS — mirrors
 // PERMISSION_LAYER_MODULES in src/types.ts. Rolled out module by module.
-const PERMISSION_LAYER_MODULES = ["departments", "projects", "approvals", "users", "reports", "tracking", "payroll", "mobile_bill", "office_attendance", "conveyance", "hr_operations", "exit_offboarding", "target_reports", "attendance_reports", "mail_admin", "duty_roster", "document_vault", "measurement_sheet"] as const;
+const PERMISSION_LAYER_MODULES = ["departments", "projects", "approvals", "users", "reports", "tracking", "payroll", "mobile_bill", "office_attendance", "conveyance", "hr_operations", "exit_offboarding", "target_reports", "attendance_reports", "mail_admin", "duty_roster", "document_vault", "measurement_sheet", "employees"] as const;
 // Employee Tracking's layers: "read" = the live map, history and status
 // cards; "stay_report" = the Stay Report (TrackingStayReport.ts). Both are
 // reading, so an account with Employee Tracking and no saved layers has both.
@@ -377,6 +381,10 @@ const MAIL_ADMIN_LAYER_KEYS = ["read", "mail_open", "mail_password", "mail_setti
 // Explicit-only — the no-saved-layers default is "read" alone.
 const DUTY_ROSTER_LAYER_KEYS = ["read", "roster_manage"] as const;
 const MEASUREMENT_LAYER_KEYS = ["read", "edit_add", "delete_trash", "material_budget"] as const;
+// Employees: "read" = everything the module did before; "employee_delete" =
+// delete an Employee record (only one with no pay / service records,
+// EmployeeRecordsGuard.ts). Explicit-only.
+const EMPLOYEE_LAYER_KEYS = ["read", "employee_delete"] as const;
 // Document Vault: "read" = everything it did before (upload, view, send a
 // document for its own employee's signature); "sign_request" = ask anyone
 // else / several people in order to sign (ESignRoutes.ts). Explicit-only.
@@ -424,6 +432,7 @@ const MODULE_LAYER_KEY_SETS: Record<string, readonly string[]> = {
   mail_admin: MAIL_ADMIN_LAYER_KEYS,
   duty_roster: DUTY_ROSTER_LAYER_KEYS,
   measurement_sheet: MEASUREMENT_LAYER_KEYS,
+  employees: EMPLOYEE_LAYER_KEYS,
   document_vault: DOCUMENT_VAULT_LAYER_KEYS,
   leave_manage: LEAVE_MANAGE_LAYER_KEYS,
 };
@@ -2273,7 +2282,7 @@ async function startServer() {
   // on for a module is never a silent regression; a Superadmin only actually
   // restricts anything once they explicitly save a narrower set in the
   // Module Access modal.
-  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "dispatch_material" | "dispatch_all" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "block_account" | "limit_history" | "link_pins" | "on_behalf" | "onboarding_create" | "onboarding_review" | "onboarding_approve" | "exit_dues" | "exit_pdf" | "reminders_receive" | "salary_bulk_upload" | "target_export" | "target_cancel" | "exit_clearance_setup" | "late_list" | "mail_open" | "mail_password" | "mail_settings" | "mail_groups" | "roster_manage" | "sign_request" | "esign_settings") =>
+  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "dispatch_material" | "dispatch_all" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "block_account" | "limit_history" | "link_pins" | "on_behalf" | "onboarding_create" | "onboarding_review" | "onboarding_approve" | "exit_dues" | "exit_pdf" | "reminders_receive" | "salary_bulk_upload" | "target_export" | "target_cancel" | "exit_clearance_setup" | "late_list" | "mail_open" | "mail_password" | "mail_settings" | "mail_groups" | "roster_manage" | "sign_request" | "esign_settings" | "employee_delete") =>
     async (req: any, res: any, next: any) => {
       if (!req.user) return res.status(401).json({ error: "Access token required" });
       if (req.user.onb) return res.status(403).json({ error: "Admin access required" });
@@ -2813,7 +2822,7 @@ async function startServer() {
   registerDebugRoutes(app, { authenticateToken, queryDB, requireSuperAdmin, resolveSupervisorApprover });
 
   // Employee Directory routes (Admin Panel -> Employees) live in EmployeeRoutes.ts.
-  registerEmployeeRoutes(app, { ADMIN_MODULE_KEYS, EMPLOYEE_EXT_FIELDS, authenticateToken, normalizeEmployeeExtValue, queryDB, requireAdmin, requireModule, todayInDhaka });
+  registerEmployeeRoutes(app, { ADMIN_MODULE_KEYS, EMPLOYEE_EXT_FIELDS, authenticateToken, normalizeEmployeeExtValue, queryDB, requireAdmin, requireModule, requireModuleLayer, todayInDhaka });
 
   // Notices routes live in NoticeRoutes.ts.
   registerNoticeRoutes(app, { announceNotice, authenticateToken, queryDB, requireAdmin, requireModule });

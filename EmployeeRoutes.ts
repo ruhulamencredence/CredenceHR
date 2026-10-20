@@ -7,6 +7,7 @@
 // The shared helpers they use are passed in by startServer().
 
 import { applyDueEmployeeTransfers } from "./EmployeeTransferRoutes";
+import { keptRecordsOf } from "./EmployeeRecordsGuard";
 import { recordEmployeeEditHistory } from "./EmployeeTransferRoutes";
 import { applyDueHrActions } from "./HROperationsRoutes";
 import { activeCompanyId } from "./companyContext";
@@ -23,11 +24,12 @@ export interface RegisterEmployeeRoutesDeps {
   queryDB: any;
   requireAdmin: any;
   requireModule: any;
+  requireModuleLayer: any;
   todayInDhaka: any;
 }
 
 export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoutesDeps) {
-  const { ADMIN_MODULE_KEYS, EMPLOYEE_EXT_FIELDS, authenticateToken, normalizeEmployeeExtValue, queryDB, requireAdmin, requireModule, todayInDhaka } = deps;
+  const { ADMIN_MODULE_KEYS, EMPLOYEE_EXT_FIELDS, authenticateToken, normalizeEmployeeExtValue, queryDB, requireAdmin, requireModule, requireModuleLayer, todayInDhaka } = deps;
 
   // Employee Directory (Admin Panel -> Employees) — plain hand-entered company
   // roster, gated behind the "employees" AdminModuleKey like every other tab
@@ -396,14 +398,31 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
     }
   });
 
-  app.delete("/api/employees/:id", authenticateToken, requireAdmin, requireModule("employees"), async (req, res) => {
+  // Only an Employee with no pay or service records can be deleted (one
+  // added by mistake); anyone else is marked Resigned / Terminated, which
+  // keeps their salary runs, advances, letters… (EmployeeRecordsGuard.ts).
+  // Needs the explicit Employees layer "Delete employee records".
+  app.delete("/api/employees/:id", authenticateToken, requireAdmin, requireModule("employees"), requireModuleLayer("employees", "employee_delete"), async (req, res) => {
     try {
       const id = Number(req.params.id);
       const existing = await queryDB("SELECT * FROM all_employees WHERE id = ?", [id]);
       if (existing.length === 0) return res.status(404).json({ error: "Employee not found" });
+      const kept = await keptRecordsOf(queryDB, id);
+      if (kept.length) {
+        const list = kept.map((k) => `${k.count} ${k.label}${k.count === 1 ? "" : "s"}`).join(", ");
+        return res.status(409).json({
+          error: `${existing[0].name || "This employee"} has ${list}, which must be kept. Set their Job Status to Resigned or Terminated instead of deleting.`,
+          kept
+        });
+      }
       await queryDB("DELETE FROM all_employees WHERE id = ?", [id]);
       res.json({ success: true });
     } catch (err: any) {
+      // The database's own guard (ON DELETE RESTRICT) caught a record we
+      // didn't count.
+      if (err?.code === "ER_ROW_IS_REFERENCED_2" || err?.errno === 1451) {
+        return res.status(409).json({ error: "This employee has records that must be kept. Set their Job Status to Resigned or Terminated instead of deleting." });
+      }
       res.status(500).json({ error: err.message });
     }
   });
