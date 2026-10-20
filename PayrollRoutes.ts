@@ -442,6 +442,26 @@ function money(v: number): number {
   return Math.round((v + Number.EPSILON) * 100) / 100;
 }
 
+// The attendance a payroll run may be saved with: no more days than the
+// month has working days, counted together, and no more unpaid days
+// (Absent + LWP + Late-policy) than that either — otherwise the run showed
+// e.g. 40 present out of 26 and could cut more pay than the month's salary.
+function payDaysProblem(d: { workingDays: number; present: number; absent: number; leave: number; lwp: number; lateDeductionDays: number }): string | null {
+  if (d.workingDays > 31) return `Working days (${d.workingDays}) can't be more than 31.`;
+  const total = d.present + d.absent + d.leave + d.lwp;
+  if (total > d.workingDays) {
+    return `Present ${d.present} + Absent ${d.absent} + Leave ${d.leave} + LWP ${d.lwp} = ${total} days, more than the ${d.workingDays} working days.`;
+  }
+  const unpaid = d.absent + d.lwp + d.lateDeductionDays;
+  if (unpaid > d.workingDays) {
+    return `Unpaid days (Absent ${d.absent} + LWP ${d.lwp} + Late-policy ${d.lateDeductionDays} = ${unpaid}) are more than the ${d.workingDays} working days.`;
+  }
+  return null;
+}
+
+const negativeNetMessage = (net: number) =>
+  `Deductions are more than the earnings (Net Salary would be ${net}). Check the attendance, advance and deduction figures.`;
+
 // Currency string for the Email Payslip HTML body — same ৳/en-BD formatting
 // PayrollModule.tsx and its panels use on the client.
 function fmtMoney(v: number): string {
@@ -2753,10 +2773,12 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         const siteLeaveDays = [...(siteLeaveByEmployee.get(Number(e.id)) || [])].filter((d) => !presentDates.has(d)).length;
         const hasAttendanceData = presentDates.size > 0 || siteTracked.has(Number(e.id));
         const upcomingDays = upcomingDaysOf(e);
-        const present = hasAttendanceData ? Math.min(workingDays, presentDates.size + upcomingDays) : workingDays;
         const hol = holidaysOf(e);
         const appLeaveDays = [...(e.user_id ? leaveDatesByUser.get(Number(e.user_id)) || [] : [])].filter((d) => !hol.has(d) && !presentDates.has(d) && !siteLeaveByEmployee.get(Number(e.id))?.has(d)).length;
         const leave = Math.min(workingDays, appLeaveDays + siteLeaveDays);
+        // A leave day still to come was also counted among the upcoming
+        // "expected present" days: present + leave never pass the working days.
+        const present = Math.min(workingDays - leave, hasAttendanceData ? presentDates.size + upcomingDays : workingDays);
         const absent = Math.max(0, workingDays - present - leave);
         const lateCount = lateDatesByEmployee.get(e.id)?.length || 0;
         const lateDeductionDays = Math.floor(lateCount / latesPerDay);
@@ -2769,7 +2791,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
           department: e.department,
           designation: e.designation,
           total_working_days: workingDays,
-          present_days: hasAttendanceData ? present : workingDays,
+          present_days: present,
           absent_days: hasAttendanceData ? absent : 0,
           leave_days: leave,
           lwp_days: 0,
@@ -2849,6 +2871,11 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         const otAmount = money(num(row.overtime_amount));
         const bonus = money(num(row.bonus_amount));
         const otherDed = money(num(row.other_deduction));
+        const daysProblem = payDaysProblem({ workingDays, present, absent, leave: Math.max(0, Math.round(num(row.leave_days))), lwp, lateDeductionDays });
+        if (daysProblem) {
+          results.push({ employee_id: employeeId, error: daysProblem });
+          continue;
+        }
 
         const grossSalary = Number(structure.gross_salary);
         const basicSalary = Number(structure.basic_salary);
@@ -2888,6 +2915,10 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         const grossWithItems = money(grossEarned + pay.earnings);
         const totalDeduction = money(absentDeduction + taxDeduction + pfDeduction + advanceDeduction + otherDed + pay.deductions);
         const netSalary = money(grossWithItems - totalDeduction);
+        if (netSalary < 0) {
+          results.push({ employee_id: employeeId, error: negativeNetMessage(netSalary) });
+          continue;
+        }
         const paymentSplit = await buildPaymentSplit(employeeId, netSalary);
 
         results.push({
@@ -2978,6 +3009,11 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
           const otAmount = money(num(row.overtime_amount));
           const bonus = money(num(row.bonus_amount));
           const otherDed = money(num(row.other_deduction));
+          const daysProblem = payDaysProblem({ workingDays, present, absent, leave, lwp, lateDeductionDays });
+          if (daysProblem) {
+            results.push({ employee_id: employeeId, success: false, error: daysProblem });
+            continue;
+          }
           const note = typeof row.remarks === "string" ? row.remarks.trim().slice(0, 1000) : null;
 
           const grossSalary = Number(structure.gross_salary);
@@ -3014,6 +3050,10 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
           const grossWithItems = money(grossEarned + pay.earnings);
           const totalDeduction = money(absentDeduction + taxDeduction + pfDeduction + advanceDeduction + otherDed + pay.deductions);
           const netSalary = money(grossWithItems - totalDeduction);
+          if (netSalary < 0) {
+            results.push({ employee_id: employeeId, success: false, error: negativeNetMessage(netSalary) });
+            continue;
+          }
           const paymentSplit = await buildPaymentSplit(employeeId, netSalary);
           // An employee with a configured Bank/MFS split is paid out that
           // way regardless of the run's single global Payment Method
@@ -3129,6 +3169,8 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       const otAmount = money(num(overtime_amount));
       const bonus = money(num(bonus_amount));
       const otherDed = money(num(other_deduction));
+      const daysProblem = payDaysProblem({ workingDays, present, absent, leave, lwp, lateDeductionDays });
+      if (daysProblem) return res.status(400).json({ error: daysProblem });
       const method = typeof payment_method === "string" && payment_method.trim() ? payment_method.trim().slice(0, 50) : "Bank Transfer";
       const note = typeof remarks === "string" ? remarks.trim().slice(0, 1000) : null;
 
@@ -3174,6 +3216,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       const grossWithItems = money(grossEarned + pay.earnings);
       const totalDeduction = money(absentDeduction + taxDeduction + pfDeduction + advanceDeduction + otherDed + pay.deductions);
       const netSalary = money(grossWithItems - totalDeduction);
+      if (netSalary < 0) return res.status(400).json({ error: negativeNetMessage(netSalary) });
 
       const result = await queryDB(
         `INSERT INTO payrolls
@@ -3225,6 +3268,8 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       const absent = Math.max(0, Math.round(num(req.body?.absent_days, existing.absent_days)));
       const leave = Math.max(0, Math.round(num(req.body?.leave_days, existing.leave_days)));
       const lwp = Math.max(0, Math.round(num(req.body?.lwp_days, existing.lwp_days)));
+      const daysProblem = payDaysProblem({ workingDays, present, absent, leave, lwp, lateDeductionDays: Math.max(0, Math.round(num(existing.late_deduction_days))) });
+      if (daysProblem) return res.status(400).json({ error: daysProblem });
       const otHours = num(req.body?.overtime_hours, existing.overtime_hours);
       const otAmount = money(num(req.body?.overtime_amount, existing.overtime_amount));
       const bonus = money(num(req.body?.bonus_amount, existing.bonus_amount));
@@ -3278,6 +3323,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       const grossWithItems = money(grossEarned + pay.earnings);
       const totalDeduction = money(absentDeduction + taxDeduction + pfDeduction + advanceDeduction + otherDed + pay.deductions);
       const netSalary = money(grossWithItems - totalDeduction);
+      if (netSalary < 0) return res.status(400).json({ error: negativeNetMessage(netSalary) });
 
       await queryDB(
         `UPDATE payrolls SET
