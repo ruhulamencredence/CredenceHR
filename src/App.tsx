@@ -38,6 +38,7 @@ import { Timesheet } from './components/Timesheet';
 import { PayrollModule } from './components/PayrollModule';
 import { EmployeeDirectory } from './components/EmployeeDirectory';
 import { MaterialReceive } from './components/MaterialReceive';
+import { AiAssistant } from './components/AiAssistant';
 import { DEVICE_REVOKED_EVENT, setSignedOutReason } from './lib/device';
 import { NoticePopup } from './components/NoticePopup';
 import { useBackButtonClose } from './lib/useBackButtonClose';
@@ -1040,6 +1041,25 @@ export default function App() {
           Hidden while the native in-app Chat page or this button's own popup
           is already open. */}
       <FloatingChatButton token={token || ''} onOpenChat={openChatPopup} hidden={showChat || showChatPopup} />
+
+      {/* Credence Assistant (AiAssistant.tsx) — every account unless switched
+          off in Module Access; its buttons open the page an answer is about. */}
+      <AiAssistant
+        token={token || ''}
+        user={user}
+        hidden={showChat || showChatPopup}
+        onNavigate={(nav) => {
+          const [kind, target] = nav.split(':');
+          if (nav === 'home') return sidebarNavProps.onGoToDashboard();
+          if (nav === 'profile') return sidebarNavProps.onOpenProfile();
+          if (kind === 'self') return sidebarNavProps.onGoToSelfServiceTab(target as Parameters<typeof sidebarNavProps.onGoToSelfServiceTab>[0]);
+          if (kind === 'claims') return sidebarNavProps.onGoToUserClaims(target as 'movementClaims' | 'conveyanceBill');
+          if (kind === 'admin') {
+            if (target === 'claims' || target === 'conveyance') return sidebarNavProps.onGoToAdminClaims(target);
+            return sidebarNavProps.onGoToAdminModule(target as Parameters<typeof sidebarNavProps.onGoToAdminModule>[0]);
+          }
+        }}
+      />
 
       {/* FloatingChatButton's popup — a centered card sized like
           NewLeaveApplicationModal (max-w-3xl, rounded-2xl, its own backdrop)

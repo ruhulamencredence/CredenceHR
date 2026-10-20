@@ -34,7 +34,7 @@ import { ModuleAccessChecklist } from './ModuleAccessChecklist';
 type SectionKey = 'general' | 'pepm' | 'hr' | 'attendance' | 'claims' | 'employees' | 'hrops' | 'payroll' | 'mail' | 'mis' | 'other';
 
 const SECTIONS: { key: SectionKey; label: string; hint: string }[] = [
-  { key: 'general', label: 'General', hint: 'Panels, calls, emailing reports and the AI Assistant.' },
+  { key: 'general', label: 'General', hint: 'Panels and the AI Assistant.' },
   { key: 'pepm', label: 'PEPM', hint: 'Budgets, MPR entries, reports and material dispatch.' },
   { key: 'hr', label: 'HR', hint: 'Dashboard, approvals, notices, departments, tasks and targets.' },
   { key: 'attendance', label: 'Attendance & Leave', hint: 'Attendance, roster, leave applications and leave balances.' },
@@ -62,7 +62,10 @@ type FlagKey =
   | 'can_view_timesheet'
   | 'can_view_leave_application'
   | 'can_view_my_leave'
-  | 'can_receive_material';
+  | 'can_receive_material'
+  | 'can_use_ai_assistant'
+  | 'can_export_assistant_reports'
+  | 'can_handle_assistant_support';
 
 interface FlagDef {
   key: FlagKey;
@@ -80,6 +83,9 @@ interface FlagDef {
 
 const FLAGS: FlagDef[] = [
   { key: 'can_access_user_panel', label: 'User Panel access', desc: 'This Admin also gets the User Panel (attendance, claims, job entry).', section: 'general', endpoint: 'user-panel-access', adminOnly: true },
+  { key: 'can_use_ai_assistant', label: 'AI Assistant', desc: 'The floating Assistant. On by default.', section: 'general', endpoint: 'ai-assistant-access', defaultOn: true },
+  { key: 'can_export_assistant_reports', label: 'Assistant: PDF / Excel download', desc: 'Download the Assistant’s list answers (only figures they can see).', section: 'general', endpoint: 'assistant-report-access' },
+  { key: 'can_handle_assistant_support', label: 'Assistant live support', desc: 'Answer people who ask the Assistant for a human.', section: 'general', endpoint: 'assistant-support-access' },
 
   { key: 'can_view_budget_module', label: 'Budget / Jobs / Job Entry Details', desc: 'Enter MPRs for their projects. On by default.', section: 'pepm', endpoint: 'budget-module-access', defaultOn: true },
   { key: 'can_job_edit', label: 'Job Edit', desc: 'Change MPRs after Final Submit.', section: 'pepm', endpoint: null },

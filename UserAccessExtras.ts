@@ -68,7 +68,11 @@ export async function ensureUserAccessSchema(dbPool: any) {
     ["is_blocked", "TINYINT(1) NOT NULL DEFAULT 0"],
     ["blocked_reason", "VARCHAR(255) NULL"],
     ["blocked_at", "DATETIME NULL"],
-    ["blocked_by", "INT NULL"]
+    ["blocked_by", "INT NULL"],
+    // Credence Assistant switches (Module Access).
+    ["can_use_ai_assistant", "TINYINT(1) NOT NULL DEFAULT 1"],
+    ["can_export_assistant_reports", "TINYINT(1) NOT NULL DEFAULT 0"],
+    ["can_handle_assistant_support", "TINYINT(1) NOT NULL DEFAULT 0"]
   ]) {
     await run(`users.${name}`, `ALTER TABLE users ADD COLUMN ${name} ${def}`, ["ER_DUP_FIELDNAME"]);
   }

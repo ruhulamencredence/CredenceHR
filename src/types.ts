@@ -538,6 +538,11 @@ export interface User {
   can_view_my_leave?: boolean;
   // PEPM -> Material Receive (MprDispatchRoutes.ts) — off by default.
   can_receive_material?: boolean;
+  // Credence Assistant (AiAssistantRoutes.ts): on unless switched off; its
+  // report download and live support are off by default.
+  can_use_ai_assistant?: boolean;
+  can_export_assistant_reports?: boolean;
+  can_handle_assistant_support?: boolean;
   // Admin Panel -> Users -> Block login (UserAccessExtras.ts).
   is_blocked?: boolean;
   blocked_reason?: string | null;

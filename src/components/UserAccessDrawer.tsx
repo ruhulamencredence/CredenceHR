@@ -351,7 +351,8 @@ export function UserAccessDrawer({
     { label: 'Material Receive', on: !!u.can_receive_material },
     { label: 'Movement Claim', on: !!u.can_view_movement_claims },
     { label: 'Conveyance Claim', on: !!u.can_view_conveyance_claims },
-    { label: 'Budget / Jobs / MPR', on: u.can_view_budget_module ?? true }
+    { label: 'Budget / Jobs / MPR', on: u.can_view_budget_module ?? true },
+    { label: 'AI Assistant', on: u.can_use_ai_assistant !== false }
   ];
 
   const featureOn = [!!u.can_use_attendance, !!u.can_use_tracking, !!u.can_view_leave_summary, delivery, !!u.can_job_edit].filter(Boolean).length;
