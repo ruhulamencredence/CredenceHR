@@ -44,6 +44,7 @@ import { registerAiAssistantRoutes } from "./AiAssistantRoutes";
 import { registerAssistantSupportRoutes } from "./AssistantSupportRoutes";
 import { memoryDb, queryMemoryDb, EMPLOYEE_BOOL_FIELDS } from "./memoryDbFallback";
 import { sanitizeNoticeHtml, safeLottieJson, safeLottieUrl } from "./NoticeSafety";
+import { ensureEmployeeRecordsGuard, keptRecordsOf } from "./EmployeeRecordsGuard";
 
 dotenv.config();
 
@@ -269,6 +270,10 @@ async function ensureSchemaMigrations() {
   // ChatRoutes.ts, only the call site lives here, same as every other
   // self-healing migration in this function.
   await ensureChatSchema(dbPool);
+
+  // Pay and service records keep their Employee from being deleted
+  // (EmployeeRecordsGuard.ts) — after every table above exists.
+  await ensureEmployeeRecordsGuard(dbPool);
 
   // Personal Data (ProfilePage.tsx -> PersonalDataForm.tsx) — one row per user,
   // created on first save. Position/Department are deliberately NOT columns
@@ -2124,7 +2129,7 @@ const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports",
 const PERMISSION_LAYER_KEYS = ["read", "edit_add", "entry_upload", "delete_trash", "permanent_delete"] as const;
 // Which modules currently enforce PERMISSION_LAYER_KEYS — mirrors
 // PERMISSION_LAYER_MODULES in src/types.ts. Rolled out module by module.
-const PERMISSION_LAYER_MODULES = ["departments", "projects", "approvals", "users", "reports", "tracking", "measurement_sheet"] as const;
+const PERMISSION_LAYER_MODULES = ["departments", "projects", "approvals", "users", "reports", "tracking", "measurement_sheet", "employees"] as const;
 // Employee Tracking's layers: "read" = the live map, history and status
 // cards; "stay_report" = the Stay Report (TrackingStayReport.ts). Both are
 // reading, so an account with Employee Tracking and no saved layers has both.
@@ -2145,6 +2150,10 @@ const REPORT_LAYER_KEYS = ["read", "edit_add", "delete_trash", "permanent_delete
 // "material_budget" = the Material Budget tab. With no saved layers an
 // account has "read" alone (see defaultLayersFor below).
 const MEASUREMENT_LAYER_KEYS = ["read", "edit_add", "delete_trash", "material_budget"] as const;
+// Employees: "read" = everything the module did before; "employee_delete" =
+// delete an Employee record (only one with no pay / service records,
+// EmployeeRecordsGuard.ts). Explicit-only.
+const EMPLOYEE_LAYER_KEYS = ["read", "employee_delete"] as const;
 
 // Leave Manage's own operation-specific layers — mirrors LeaveManageLayerKey/
 // LEAVE_MANAGE_LAYERS in src/types.ts. Not part of PERMISSION_LAYER_MODULES/
@@ -2169,6 +2178,7 @@ const MODULE_LAYER_KEY_SETS: Record<string, readonly string[]> = {
   reports: REPORT_LAYER_KEYS,
   tracking: TRACKING_LAYER_KEYS,
   measurement_sheet: MEASUREMENT_LAYER_KEYS,
+  employees: EMPLOYEE_LAYER_KEYS,
   leave_manage: LEAVE_MANAGE_LAYER_KEYS,
 };
 
@@ -2218,7 +2228,7 @@ type AdminModuleKey = typeof ADMIN_MODULE_KEYS[number];
 // it, may do there (requireModuleLayer / hasModuleLayer).
 function defaultLayersFor(moduleKey: string): readonly string[] {
   if (moduleKey === "tracking") return TRACKING_DEFAULT_LAYERS;
-  if (moduleKey === "measurement_sheet") return ["read"];
+  if (moduleKey === "measurement_sheet" || moduleKey === "employees") return ["read"];
   return PERMISSION_LAYER_KEYS.filter((k) => k !== "permanent_delete");
 }
 
@@ -3468,7 +3478,7 @@ async function startServer() {
   // on for a module is never a silent regression; a Superadmin only actually
   // restricts anything once they explicitly save a narrower set in the
   // Module Access modal.
-  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "stay_report" | "live" | "material_budget" | "dispatch_material" | "dispatch_all" | "block_account") =>
+  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "stay_report" | "live" | "material_budget" | "dispatch_material" | "dispatch_all" | "block_account" | "employee_delete") =>
     async (req: any, res: any, next: any) => {
       if (!req.user) return res.status(401).json({ error: "Access token required" });
       if (req.user.role === "superadmin") return next();
@@ -5157,14 +5167,28 @@ async function startServer() {
     }
   });
 
-  app.delete("/api/employees/:id", authenticateToken, requireAdmin, requireModule("employees"), async (req, res) => {
+  // Only with the "Delete employee records" layer, and only an Employee with no
+  // pay / service records (EmployeeRecordsGuard.ts): someone who left is marked
+  // Resigned / Terminated instead, which keeps them.
+  app.delete("/api/employees/:id", authenticateToken, requireAdmin, requireModuleLayer("employees", "employee_delete"), async (req, res) => {
     try {
       const id = Number(req.params.id);
       const existing = await queryDB("SELECT * FROM all_employees WHERE id = ?", [id]);
       if (existing.length === 0) return res.status(404).json({ error: "Employee not found" });
+      const kept = await keptRecordsOf(queryDB, id);
+      if (kept.length > 0) {
+        const list = kept.map((k) => `${k.count} ${k.label}${k.count === 1 ? "" : "s"}`).join(", ");
+        return res.status(409).json({
+          error: `${existing[0].name || "This employee"} has ${list}, which must be kept. Set their Job Status to Resigned or Terminated instead of deleting.`,
+          kept
+        });
+      }
       await queryDB("DELETE FROM all_employees WHERE id = ?", [id]);
       res.json({ success: true });
     } catch (err: any) {
+      if (err?.errno === 1451 || err?.code === "ER_ROW_IS_REFERENCED_2") {
+        return res.status(409).json({ error: "This employee has pay or service records that must be kept. Set their Job Status to Resigned or Terminated instead of deleting." });
+      }
       res.status(500).json({ error: err.message });
     }
   });

@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { Employee, EmployeeSupervisor, EmployeeTransfer, User, Project, Department, AdminModuleKey, ADMIN_MODULES } from '../types';
 import { apiUrl } from '../lib/api';
+import { confirmDialog } from '../lib/confirmDialog';
 import { Spinner } from './Spinner';
 
 // Add/Edit Employee modal tabs — Basic + Employee Info fields live under
@@ -475,7 +476,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
 
   const handleDeleteSupervisor = async (rowId: number) => {
     if (!editingId) return;
-    if (!confirm('Remove this supervisor assignment?')) return;
+    if (!(await confirmDialog('Remove this supervisor assignment?'))) return;
     try {
       const res = await fetch(apiUrl(`/api/employees/${editingId}/supervisors/${rowId}`), { method: 'DELETE', headers: authHeaders });
       if (!res.ok) throw new Error((await res.json()).error || 'Failed to remove');
@@ -582,8 +583,12 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
     }
   };
 
+  // Deleting is its own explicit tick (Employees -> "Delete employee
+  // records"), and only an Employee with no pay or service records can go —
+  // anyone else is set to Resigned / Terminated (EmployeeRecordsGuard.ts).
+  const canDeleteEmployee = user.role === 'superadmin' || !!user.module_permission_layers?.employees?.includes('employee_delete');
   const handleDelete = async (id: number) => {
-    if (!confirm('Delete this employee record? This cannot be undone.')) return;
+    if (!(await confirmDialog('Delete this employee record? Only an employee added by mistake (no salary, advance, letter or other kept records) can be deleted. This cannot be undone.', { tone: 'danger' }))) return;
     setDeletingId(id);
     try {
       const res = await fetch(apiUrl(`/api/employees/${id}`), { method: 'DELETE', headers: authHeaders });
@@ -775,7 +780,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
   // wrong account got linked. Employee goes back to showing "Create Login" /
   // "Link Existing" afterward.
   const handleUnlinkUser = async (emp: Employee) => {
-    if (!window.confirm(`Unlink ${emp.name}'s login account? This only removes the link — the user account itself (if it still exists) is not deleted.`)) return;
+    if (!(await confirmDialog(`Unlink ${emp.name}'s login account? This only removes the link — the user account itself (if it still exists) is not deleted.`))) return;
     setUnlinkingId(emp.id);
     try {
       const res = await fetch(apiUrl(`/api/employees/${emp.id}/link-user`), { method: 'DELETE', headers: authHeaders });
@@ -969,6 +974,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                         >
                           <Edit2 className="w-4 h-4" />
                         </button>
+                        {canDeleteEmployee && (
                         <button
                           type="button"
                           onClick={() => handleDelete(emp.id)}
@@ -978,6 +984,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
+                        )}
                       </div>
                     </td>
                   </tr>
