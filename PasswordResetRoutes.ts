@@ -126,6 +126,12 @@ export function registerPasswordResetRoutes(app: Express, deps: Deps) {
   const canHandle = [authenticateToken, requireAdmin, requireModuleLayer("users", "password_requests")];
   const hashCode = (userId: number, code: string) => crypto.createHmac("sha256", secret).update(`${userId}:${code}`).digest("hex");
 
+  // The last code email's outcome, for the Superadmin's settings card.
+  let lastMail: { at: string; to: string | null; error: string | null } | null = null;
+  const noteMailResult = (to: string | null, error: string | null) => {
+    lastMail = { at: new Date().toISOString(), to: to ? to.replace(/^(.).*?(@.*)$/, "$1…$2") : null, error };
+  };
+
   async function settings() {
     const rows: any[] = (await queryDB("/*unscoped*/ SELECT email_code_enabled, hr_request_enabled FROM password_reset_settings WHERE id = 1").catch(() => [])) || [];
     // Nothing saved yet: "Ask HR" on, email codes off.
@@ -135,16 +141,26 @@ export function registerPasswordResetRoutes(app: Express, deps: Deps) {
 
   // The account a Login ID names (same lookup as sign-in), or null.
   async function findAccount(identifierRaw: unknown) {
+    return (await lookupAccount(identifierRaw)).u;
+  }
+  // …and why not, for the server log (the person is never told).
+  async function lookupAccount(identifierRaw: unknown): Promise<{ u: any; why: string }> {
     const identifier = String(identifierRaw ?? "").trim().slice(0, 190);
-    if (!identifier) return null;
+    if (!identifier) return { u: null, why: "no Login ID was given" };
     const rows: any[] =
       (await queryDB("/*unscoped*/ SELECT id, name, email, username, role, is_blocked FROM users WHERE email = ? OR username = ? LIMIT 1", [
         identifier,
         identifier.replace(/\s+/g, "").toLowerCase()
       ])) || [];
     const u = rows[0];
-    if (!u || u.role === "superadmin" || Number(u.is_blocked || 0) === 1) return null;
-    return u;
+    const why = !u
+      ? "no account has this Login ID"
+      : u.role === "superadmin"
+        ? "it is the Superadmin (that password comes from ADMIN_PASSWORD in .env)"
+        : Number(u.is_blocked || 0) === 1
+          ? "the account is blocked"
+          : "";
+    return { u: why ? null : u, why };
   }
 
   // true while this IP / account is under the limit; the attempt is logged.
@@ -174,10 +190,16 @@ export function registerPasswordResetRoutes(app: Express, deps: Deps) {
       const s = await settings();
       if (!s.email_code_enabled || !isMailerConfigured()) return res.status(403).json({ error: "Resetting by email isn't turned on. Ask HR." });
       const ip = clientIp(req);
-      const u = await findAccount(req.body?.identifier);
+      const { u, why: skipped } = await lookupAccount(req.body?.identifier);
       if (!(await allowed("email", ip, u?.id ?? null))) return tooMany(res);
       const email = String(u?.email || "").trim();
-      if (u && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      const hasEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+      if (!u || !hasEmail) {
+        const why = skipped || "the account has no email address (ask HR instead)";
+        console.log(`ℹ️ Forgot password: no code sent for "${String(req.body?.identifier || "").slice(0, 80)}" — ${why}.`);
+        noteMailResult(null, why);
+      }
+      if (u && hasEmail) {
         const code = String(crypto.randomInt(0, 1000000)).padStart(6, "0");
         // Only the newest code works.
         await queryDB("/*unscoped*/ UPDATE password_reset_codes SET used_at = NOW() WHERE user_id = ? AND used_at IS NULL", [u.id]);
@@ -196,7 +218,9 @@ export function registerPasswordResetRoutes(app: Express, deps: Deps) {
             <p style="color:#64748b">আপনার CredenceHR পাসওয়ার্ড রিসেট কোড: <b>${code}</b> (${CODE_MINUTES} মিনিট কাজ করবে)।</p>
           </div>`
         });
-        if (!sent.success) console.warn(`⚠️ Password reset email to user ${u.id} failed: ${sent.error}`);
+        if (!sent.success) console.warn(`⚠️ Password reset email to user ${u.id} (${email}) failed: ${sent.error}`);
+        else console.log(`✉️ Password reset code sent to user ${u.id} (${email}).`);
+        noteMailResult(email, sent.success ? null : sent.error || "failed");
       }
       res.json({ success: true, message: SENT_EMAIL });
     } catch (err: any) {
@@ -304,7 +328,7 @@ export function registerPasswordResetRoutes(app: Express, deps: Deps) {
             ORDER BY r.created_at ${view === "pending" ? "ASC" : "DESC"} LIMIT 200`,
           [req.user.id]
         )) || [];
-      res.json({ view, rows, can_settings: req.user.role === "superadmin", settings: req.user.role === "superadmin" ? { ...(await settings()), mailer: isMailerConfigured() } : null });
+      res.json({ view, rows, can_settings: req.user.role === "superadmin", settings: req.user.role === "superadmin" ? { ...(await settings()), mailer: isMailerConfigured(), last_mail: lastMail } : null });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -384,7 +408,26 @@ export function registerPasswordResetRoutes(app: Express, deps: Deps) {
          ON DUPLICATE KEY UPDATE email_code_enabled = VALUES(email_code_enabled), hr_request_enabled = VALUES(hr_request_enabled), updated_by = VALUES(updated_by)`,
         [email, hr, req.user.id]
       );
-      res.json({ ...(await settings()), mailer: isMailerConfigured() });
+      res.json({ ...(await settings()), mailer: isMailerConfigured(), last_mail: lastMail });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Superadmin: send a test email and see the server's real answer (wrong
+  // password, port, blocked by the provider…).
+  app.post("/api/password-reset-settings/test-email", authenticateToken, requireSuperAdmin, async (req: any, res) => {
+    try {
+      const to = String(req.body?.to || "").trim();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) return res.status(400).json({ error: "Give an email address to send the test to." });
+      if (!isMailerConfigured()) return res.status(400).json({ error: "SMTP isn't set up: put SMTP_HOST, SMTP_PORT, SMTP_USER and SMTP_PASS (and SMTP_FROM) in .env, then restart the server." });
+      const sent = await sendMail({
+        to,
+        subject: "CredenceHR test email",
+        html: `<p style="font-family:Arial,sans-serif">This is a test from CredenceHR. Password reset codes will reach this mailbox the same way.</p>`
+      });
+      if (!sent.success) return res.status(502).json({ error: `The mail server refused: ${sent.error}` });
+      res.json({ success: true, message: `Sent to ${to}. If it isn't in the inbox, look in Spam.` });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

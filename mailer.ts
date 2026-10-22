@@ -32,7 +32,9 @@ async function getTransporter(): Promise<any> {
     cachedTransporter = factory.createTransport({
       host: process.env.SMTP_HOST,
       port: Number(process.env.SMTP_PORT) || 587,
-      secure: String(process.env.SMTP_SECURE || "").toLowerCase() === "true",
+      // Port 465 is SSL from the first byte (Gmail, most hosts); with
+      // SMTP_SECURE left unset it would hang and fail, so it is turned on.
+      secure: process.env.SMTP_SECURE ? String(process.env.SMTP_SECURE).toLowerCase() === "true" : Number(process.env.SMTP_PORT) === 465,
       auth: {
         user: process.env.SMTP_USER,
         pass: process.env.SMTP_PASS
