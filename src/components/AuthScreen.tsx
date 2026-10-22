@@ -92,8 +92,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
   }, []);
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
-  // "Forgot password?" — shown only when a Superadmin turned a way on
-  // (PasswordResetRoutes.ts).
+  // "Forgot password?" — always offered; the popup shows the ways a
+  // Superadmin left on (PasswordResetRoutes.ts).
   const [forgotOptions, setForgotOptions] = useState<ForgotOptions>({ email: false, request: false });
   const [forgotOpen, setForgotOpen] = useState(false);
   useEffect(() => {
@@ -437,7 +437,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
                 />
                 <Lock className="w-4 h-4 absolute right-4 top-1/2 -translate-y-1/2" style={{ color: 'var(--g-text-muted)' }} />
               </div>
-              {!ownerMode && (forgotOptions.email || forgotOptions.request) && (
+              {!ownerMode && (
                 <div className="flex justify-end mt-1.5 mr-1">
                   <button type="button" onClick={() => setForgotOpen(true)} className="text-xs font-semibold" style={{ color: 'var(--g-accent)' }}>
                     Forgot password?
