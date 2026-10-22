@@ -1753,6 +1753,52 @@ const TOOLS: Tool[] = [
     }
   },
   {
+    name: "employee_breakdown",
+    description:
+      "HR: active employees counted by religion, gender, blood group or marital status (from their Employee records). " +
+      "field = religion | gender | blood_group | marital_status. value = count only that one (e.g. Hindu, Muslim, Female, B+, Married); " +
+      "leave it out for the whole breakdown. Optional department name filter.",
+    params: {
+      field: { type: "string", description: "religion | gender | blood_group | marital_status" },
+      value: { type: "string", description: "Optional: the one value to count, e.g. Hindu, Female, B+, Married." },
+      department: { type: "string", description: "Optional department name to filter by." }
+    },
+    available: (c) => hasMod(c, "employees"),
+    run: async (c, args) => {
+      const f = BREAKDOWN_FIELDS.find((x) => x.key === String(args?.field || "").toLowerCase()) || BREAKDOWN_FIELDS[0];
+      const dept = String(args?.department || "").trim().toLowerCase();
+      const r = await callApi(c.req, "/api/employees");
+      if (!r.ok) return fail(r.status);
+      const all: any[] = (Array.isArray(r.body) ? r.body : []).filter((e: any) => e.is_active);
+      const scoped = dept ? all.filter((e) => String(e.department || "").toLowerCase().includes(dept)) : all;
+      // Free-text values are folded into one name each ("Hinduism" / "hindu" / "হিন্দু").
+      const groups = new Map<string, number>();
+      let blank = 0;
+      for (const e of scoped) {
+        const k = breakdownKey(f, e[f.key]);
+        if (!k) blank++;
+        else groups.set(k, (groups.get(k) || 0) + 1);
+      }
+      const list = [...groups.entries()].sort((a, b) => b[1] - a[1]);
+      const want = args?.value ? breakdownKey(f, args.value) : null;
+      const where = dept ? ` (${args.department} বিভাগে)` : "";
+      const lines = list.map(([k, n]) => `• ${breakdownLabel(f, k)}: ${bn(n)} জন`).join("\n");
+      const blankNote = blank ? `\n${f.bn} লেখা নেই: ${bn(blank)} জন — তাঁদের এখানে গোনা হয়নি।` : "";
+      const text = want
+        ? `${breakdownLabel(f, want)} কর্মী${where}: **${bn(groups.get(want) || 0)} জন** — মোট ${bn(scoped.length)} জন active কর্মীর মধ্যে।` +
+          (list.length ? `\n\n${f.bn} অনুযায়ী সবাই:\n${lines}` : "") + blankNote
+        : `${f.bn} অনুযায়ী active কর্মী${where} (মোট ${bn(scoped.length)} জন):\n${lines || "• কারো রেকর্ডে লেখা নেই"}${blankNote}`;
+      return {
+        ok: true,
+        text,
+        data: { field: f.key, value: want, count: want ? groups.get(want) || 0 : undefined, total: scoped.length, blank, groups: Object.fromEntries(list) },
+        actions: [{ label: "Employees খুলুন", nav: "admin:employees" }],
+        report: report(`Employees by ${f.en}`, `Employees-by-${f.key}-${c.today}`, [f.en, "Employees"], [...list.map(([k, n]) => [k, n]), ...(blank ? [["(not recorded)", blank]] : [])],
+          [["As of", enDate(c.today)], ["Active employees", String(scoped.length)], ...(dept ? [["Department", String(args.department)]] as [string, string][] : [])])
+      };
+    }
+  },
+  {
     name: "service_length",
     description:
       "HR: active employees by length of service, from their joining date. years = the number of years (default 10). " +
@@ -1865,6 +1911,59 @@ const DAILY_PARTS: { tool: string; title: string; en: string; args: (date: strin
 // ---------------------------------------------------------------------------
 const norm = (s: string) => ` ${String(s || "").toLowerCase().replace(/[?!.,।]+/g, " ").replace(/\s+/g, " ").trim()} `;
 const hasAny = (t: string, keys: string[]) => keys.some((k) => t.includes(k));
+
+// Employee fields the Assistant counts by (employee_breakdown). Each is free
+// text on the Employee record, so the usual spellings fold into one name.
+interface BreakdownField { key: string; bn: string; en: string; values: { name: string; bn: string; words: string[] }[] }
+const BREAKDOWN_FIELDS: BreakdownField[] = [
+  { key: "religion", bn: "ধর্ম", en: "Religion", values: [
+    { name: "Islam", bn: "মুসলিম", words: ["islam", "muslim", "মুসলিম", "মুসলমান", "ইসলাম"] },
+    { name: "Hinduism", bn: "হিন্দু", words: ["hindu", "hinduism", "sanatan", "sanatan dharma", "হিন্দু", "সনাতন"] },
+    { name: "Buddhism", bn: "বৌদ্ধ", words: ["buddhist", "buddhism", "buddha", "বৌদ্ধ"] },
+    { name: "Christianity", bn: "খ্রিস্টান", words: ["christian", "christianity", "খ্রিস্টান", "খ্রিষ্টান"] }
+  ] },
+  { key: "gender", bn: "লিঙ্গ", en: "Gender", values: [
+    { name: "Male", bn: "পুরুষ", words: ["male", "man", "m", "পুরুষ"] },
+    { name: "Female", bn: "নারী", words: ["female", "woman", "f", "মহিলা", "নারী"] }
+  ] },
+  { key: "blood_group", bn: "রক্তের গ্রুপ", en: "Blood Group", values: [] },
+  { key: "marital_status", bn: "বৈবাহিক অবস্থা", en: "Marital Status", values: [
+    { name: "Married", bn: "বিবাহিত", words: ["married", "বিবাহিত"] },
+    { name: "Unmarried", bn: "অবিবাহিত", words: ["unmarried", "single", "অবিবাহিত"] }
+  ] }
+];
+// "b positive" / "B (+ve)" / "b+" -> "B+".
+const bloodKey = (v: string) => {
+  const m = /^(ab|a|b|o)\s*\(?\s*(\+|-|pos\w*|neg\w*|\+ve|-ve)?/i.exec(v.trim());
+  if (!m) return null;
+  const sign = !m[2] ? "" : /^(\+|pos)/i.test(m[2]) ? "+" : "-";
+  return m[1].toUpperCase() + sign;
+};
+function breakdownKey(f: BreakdownField, raw: unknown): string | null {
+  const v = String(raw ?? "").trim();
+  if (!v) return null;
+  if (f.key === "blood_group") return bloodKey(v) || v.toUpperCase();
+  const low = v.toLowerCase();
+  const hit = f.values.find((x) => x.words.includes(low) || x.name.toLowerCase() === low);
+  return hit ? hit.name : v.replace(/\b\w/g, (ch) => ch.toUpperCase());
+}
+const breakdownLabel = (f: BreakdownField, key: string) => {
+  const hit = f.values.find((x) => x.name === key);
+  return hit ? `${hit.bn} (${key})` : key;
+};
+// Which field and value a question is about ("hindu employee koto jon").
+function breakdownArgs(t: string) {
+  for (const f of BREAKDOWN_FIELDS) {
+    for (const v of f.values) if (v.words.some((w) => w.length > 2 && new RegExp(`(^|[^a-zঀ-৿])${w}`).test(t))) return { field: f.key, value: v.name };
+  }
+  if (hasAny(t, ["blood", "রক্ত"])) {
+    const b = /\b(ab|a|b|o)\s*(\+|-|positive|negative|pos|neg)/i.exec(t);
+    return { field: "blood_group", value: b ? bloodKey(b[0]) : undefined };
+  }
+  if (hasAny(t, ["gender", "লিঙ্গ"])) return { field: "gender" };
+  if (hasAny(t, ["marital", "বৈবাহিক", "বিয়ে"])) return { field: "marital_status" };
+  return { field: "religion" };
+}
 
 // How well a how-to entry matches: a key found as written counts in full; a
 // key of several words that are all there with other words between them
@@ -1986,6 +2085,10 @@ const INTENTS: Intent[] = [
   { tool: "vehicle_overview", keys: ["vehicle", "ভেহিকেল", "gari koyta", "কয়টা গাড়ি", "gari khali", "খালি গাড়ি", "kon gari", "কোন গাড়ি", "ride request", "ajker ride", "আজকের ride", "fleet", "driver koi", "গাড়ি কোথায়", "gari kothay", "sobar ride", "ride pending"] },
   { tool: "daily_hr_report", keys: ["hr report", "hr রিপোর্ট", "এইচআর রিপোর্ট", "hr-এর রিপোর্ট", "daily report", "daily hr", "dainik report", "দৈনিক রিপোর্ট", "ajker report", "আজকের রিপোর্ট", "ajker hr", "আজকের hr", "আজকের এইচআর", "today's report", "todays report", "today report", "today's hr", "din er report", "দিনের রিপোর্ট", "ajker summary", "আজকের সারসংক্ষেপ", "ajker update", "আজকের আপডেট"],
     args: (t, c) => { const d = /(\d{4}-\d{2}-\d{2})/.exec(t)?.[1]; return d ? { date: d } : hasAny(t, ["gotokal", "গতকাল", "yesterday", "kalker", "কালকের"]) ? { date: addDays(c.today, -1) } : {}; } },
+  { tool: "employee_breakdown", keys: ["religion", "ধর্ম", "dhormo", "hindu", "হিন্দু", "muslim", "মুসলিম", "মুসলমান", "buddhist", "বৌদ্ধ", "christian", "খ্রিস্টান", "খ্রিষ্টান",
+      "hindu employee", "muslim employee", "হিন্দু কর্মী", "মুসলিম কর্মী", "female employee", "male employee", "মহিলা কর্মী", "নারী কর্মী", "পুরুষ কর্মী", "gender wise", "লিঙ্গ",
+      "blood group", "রক্তের গ্রুপ", "married employee", "unmarried employee", "বিবাহিত", "অবিবাহিত", "marital"],
+    args: (t) => breakdownArgs(t) },
   { tool: "headcount", keys: ["headcount", "হেডকাউন্ট", "মোট কর্মী", "কতজন কর্মী", "koto jon employee", "kotojon employee", "total employee", "how many employee", "কর্মী সংখ্যা"] }
 ];
 
