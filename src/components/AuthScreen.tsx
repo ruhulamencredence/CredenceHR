@@ -6,6 +6,7 @@ import { apiUrl } from '../lib/api';
 import { setActiveCompanyId } from '../lib/company';
 import { appDeviceInfo, takeSignedOutReason } from '../lib/device';
 import { PrivacyPolicy } from './PrivacyPolicy';
+import { ForgotPasswordPopup, type ForgotOptions } from './ForgotPasswordPopup';
 
 // Lazy-loaded: keeps lottie-react (a fairly heavy animation library) out of
 // the very first JS chunk the app has to download+parse before anything
@@ -91,6 +92,16 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
   }, []);
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
+  // "Forgot password?" — shown only when a Superadmin turned a way on
+  // (PasswordResetRoutes.ts).
+  const [forgotOptions, setForgotOptions] = useState<ForgotOptions>({ email: false, request: false });
+  const [forgotOpen, setForgotOpen] = useState(false);
+  useEffect(() => {
+    fetch(apiUrl('/api/auth/forgot/options'))
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => j && setForgotOptions({ email: !!j.email, request: !!j.request }))
+      .catch(() => {});
+  }, []);
   // A phone removed by the Superadmin lands here with the reason shown.
   const [error, setError] = useState(() => takeSignedOutReason());
   const [loading, setLoading] = useState(false);
@@ -426,6 +437,13 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
                 />
                 <Lock className="w-4 h-4 absolute right-4 top-1/2 -translate-y-1/2" style={{ color: 'var(--g-text-muted)' }} />
               </div>
+              {!ownerMode && (forgotOptions.email || forgotOptions.request) && (
+                <div className="flex justify-end mt-1.5 mr-1">
+                  <button type="button" onClick={() => setForgotOpen(true)} className="text-xs font-semibold" style={{ color: 'var(--g-accent)' }}>
+                    Forgot password?
+                  </button>
+                </div>
+              )}
             </div>
 
             <button
@@ -440,6 +458,19 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
               {!loading && <ArrowUp className="w-4 h-4 rotate-45" />}
             </button>
           </form>
+
+          {forgotOpen && (
+            <ForgotPasswordPopup
+              options={forgotOptions}
+              initialIdentifier={identifier}
+              onClose={() => setForgotOpen(false)}
+              onReset={(id) => {
+                setForgotOpen(false);
+                setIdentifier(id);
+                setPassword('');
+              }}
+            />
+          )}
 
           {isNativeApp && (
             <p className="mt-4 flex items-center justify-center gap-1.5 text-center text-[11px]" style={{ color: 'var(--g-text-muted)' }}>

@@ -51,6 +51,7 @@ import { registerCallRoutes, setupCallSocket } from "./CallRoutes";
 import { ensureMailSchema, registerMailRoutes } from "./MailRoutes";
 import { ensureRosterSchema, registerRosterRoutes } from "./RosterRoutes";
 import { ensureBreakSchema, registerBreakRoutes } from "./BreakRoutes";
+import { ensurePasswordResetSchema, registerPasswordResetRoutes } from "./PasswordResetRoutes";
 import { ensureMeasurementSchema, registerMeasurementRoutes } from "./MeasurementRoutes";
 import { ensureEmployeeRecordsGuard } from "./EmployeeRecordsGuard";
 import { ensureMprDispatchSchema, registerMprDispatchRoutes } from "./MprDispatchRoutes";
@@ -264,6 +265,8 @@ async function initDB() {
     await ensureRosterSchema(dbPool);
     // Break Time tables (BreakRoutes.ts).
     await ensureBreakSchema(dbPool);
+    // Forgot password (PasswordResetRoutes.ts).
+    await ensurePasswordResetSchema(dbPool);
     // PEPM Management -> Measurement Sheet (MeasurementRoutes.ts).
     await ensureMeasurementSchema(dbPool);
     // PEPM -> Dispatch Material / Material Receive (MprDispatchRoutes.ts).
@@ -305,8 +308,9 @@ const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports",
 // above — this file has no import of the frontend's types.ts).
 const PERMISSION_LAYER_KEYS = ["read", "edit_add", "entry_upload", "delete_trash", "permanent_delete"] as const;
 // Users: the generic layers plus "block_account" (Block / Unblock a login,
-// AccountBlock.ts) — never part of the no-saved-layers default.
-const USERS_LAYER_KEYS = [...PERMISSION_LAYER_KEYS, "block_account"] as const;
+// AccountBlock.ts) and "password_requests" (Forgot password requests,
+// PasswordResetRoutes.ts) — neither part of the no-saved-layers default.
+const USERS_LAYER_KEYS = [...PERMISSION_LAYER_KEYS, "block_account", "password_requests"] as const;
 // Which modules currently enforce PERMISSION_LAYER_KEYS — mirrors
 // PERMISSION_LAYER_MODULES in src/types.ts. Rolled out module by module.
 const PERMISSION_LAYER_MODULES = ["departments", "projects", "approvals", "users", "reports", "tracking", "payroll", "mobile_bill", "office_attendance", "conveyance", "hr_operations", "exit_offboarding", "target_reports", "attendance_reports", "mail_admin", "duty_roster", "break_time", "document_vault", "measurement_sheet", "employees"] as const;
@@ -2311,7 +2315,7 @@ async function startServer() {
   // on for a module is never a silent regression; a Superadmin only actually
   // restricts anything once they explicitly save a narrower set in the
   // Module Access modal.
-  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "dispatch_material" | "dispatch_all" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "block_account" | "limit_history" | "link_pins" | "on_behalf" | "onboarding_create" | "onboarding_review" | "onboarding_approve" | "exit_dues" | "exit_pdf" | "reminders_receive" | "salary_bulk_upload" | "target_export" | "target_cancel" | "exit_clearance_setup" | "late_list" | "mail_open" | "mail_password" | "mail_settings" | "mail_groups" | "roster_manage" | "break_manage" | "sign_request" | "esign_settings" | "employee_delete") =>
+  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "dispatch_material" | "dispatch_all" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "block_account" | "limit_history" | "link_pins" | "on_behalf" | "onboarding_create" | "onboarding_review" | "onboarding_approve" | "exit_dues" | "exit_pdf" | "reminders_receive" | "salary_bulk_upload" | "target_export" | "target_cancel" | "exit_clearance_setup" | "late_list" | "mail_open" | "mail_password" | "mail_settings" | "mail_groups" | "roster_manage" | "break_manage" | "password_requests" | "sign_request" | "esign_settings" | "employee_delete") =>
     async (req: any, res: any, next: any) => {
       if (!req.user) return res.status(401).json({ error: "Access token required" });
       if (req.user.onb) return res.status(403).json({ error: "Admin access required" });
@@ -2789,6 +2793,8 @@ async function startServer() {
   registerDeviceRoutes(app, { authenticateToken, requireSuperAdmin, queryDB });
   registerActiveUsersRoutes(app, { authenticateToken, requireSuperAdmin, queryDB });
   registerSessionSecurityRoutes(app, { authenticateToken, requireSuperAdmin, queryDB });
+  // Forgot password: email code / ask HR (Users layer "password_requests").
+  registerPasswordResetRoutes(app, { authenticateToken, requireAdmin, requireSuperAdmin, requireModuleLayer, queryDB, secret: JWT_SECRET, createAlert });
   registerWebPushRoutes(app, { authenticateToken, queryDB });
   registerEmployeeDirectoryRoutes(app, {
     authenticateToken,

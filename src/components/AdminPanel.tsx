@@ -49,6 +49,7 @@ import { AdminDashboard } from './AdminDashboard';
 import { UserAccessDrawer, UserAccessChips, userInitials, ROLE_BADGE, ROLE_LABEL } from './UserAccessDrawer';
 import { UserBulkBar } from './UserBulkBar';
 import { ModuleAccessPage } from './ModuleAccessPage';
+import { PasswordRequestsPopup } from './PasswordRequestsPopup';
 import { AccessTemplatesModal } from './AccessTemplatesModal';
 import { BudgetSubmissionReport } from './BudgetSubmissionReport';
 import { MprDispatchMaterial } from './MprDispatchMaterial';
@@ -707,6 +708,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   const [selectedUserIds, setSelectedUserIds] = useState<Set<number>>(new Set());
   const [accessTemplates, setAccessTemplates] = useState<AccessTemplate[]>([]);
   const [showAccessTemplates, setShowAccessTemplates] = useState(false);
+  // Users -> Password requests (Forgot password, layer "password_requests");
+  // a "Password reset request" alert opens it too.
+  const [showPasswordRequests, setShowPasswordRequests] = useState(false);
+  useEffect(() => {
+    const open = () => setShowPasswordRequests(true);
+    window.addEventListener('credence:password-requests', open);
+    return () => window.removeEventListener('credence:password-requests', open);
+  }, []);
   const filteredUsers = useMemo(() => {
     const q = userSearchText.trim().toLowerCase();
     const accessFilter = USER_ACCESS_FILTERS.find((f) => f.key === userAccessFilter);
@@ -6288,6 +6297,15 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
               >
                 <LayoutTemplate className="w-3.5 h-3.5" /> Access Templates
               </button>
+              {usersLayer('password_requests') && (
+                <button
+                  type="button"
+                  onClick={() => setShowPasswordRequests(true)}
+                  className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 rounded-xl text-slate-700 text-xs font-semibold hover:bg-slate-50 whitespace-nowrap"
+                >
+                  <KeyRound className="w-3.5 h-3.5" /> Password requests
+                </button>
+              )}
             </div>
           </div>
           {/* Quick filters — one tap narrows the list to accounts with a given
@@ -7267,6 +7285,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           onChanged={loadAccessTemplates}
           onClose={() => setShowAccessTemplates(false)}
         />
+      )}
+
+      {showPasswordRequests && usersLayer('password_requests') && (
+        <PasswordRequestsPopup token={token} onClose={() => setShowPasswordRequests(false)} onChanged={() => fetchAllData()} />
       )}
 
       {/* Module Access — a full page in place of the Users page (Users ->
