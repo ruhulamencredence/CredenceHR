@@ -2315,7 +2315,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         type: 'success',
         text: `Imported ${data.items_inserted} new row(s)${
           data.items_replaced > 0 ? `, replaced ${data.items_replaced} existing row(s) matched by Project/MRF No/Description/Specification` : ''
-        }. MPR No added: ${data.mpr_added} (already existed: ${data.mpr_already_existing}). Projects added: ${data.projects_added} (already existed: ${data.projects_already_existing}).`
+        }. MPR No added: ${data.mpr_added} (already existed: ${data.mpr_already_existing}). Projects added: ${data.projects_added} (already existed: ${data.projects_already_existing}).${
+          data.notice_draft
+            ? ` A draft notice about it was ${data.notice_draft.created ? 'written' : 'updated'} — check and publish it in Admin Panel -> Notices (nobody sees it before that).`
+            : ''
+        }`
       });
       fetchAllData();
     } catch (err: any) {

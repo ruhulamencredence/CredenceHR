@@ -180,6 +180,9 @@ export function registerNoticeRoutes(app: Express, deps: RegisterNoticeRoutesDep
         "UPDATE notices SET title = ?, content_html = ?, lottie_json = ?, lottie_url = ?, target_type = ? WHERE id = ?",
         [String(title).trim(), safeHtml, lottieJsonStr, lottieUrlStr, resolvedTargetType, id]
       );
+      // Edited by a person: a later Budget import writes a new draft instead
+      // of overwriting these edits (BudgetNoticeDraft.ts).
+      await queryDB("UPDATE notices SET source_ref = NULL WHERE id = ? AND source = 'budget_import'", [id]).catch(() => {});
 
       // Replace the target list wholesale rather than diffing — simplest correct
       // behaviour for a form that always submits the full intended audience.
@@ -207,6 +210,9 @@ export function registerNoticeRoutes(app: Express, deps: RegisterNoticeRoutesDep
       const existing = await queryDB("SELECT * FROM notices WHERE id = ?", [id]);
       if (existing.length === 0) return res.status(404).json({ error: "Notice not found" });
       await queryDB("UPDATE notices SET is_active = ? WHERE id = ?", [req.body.is_active ? 1 : 0, id]);
+      // A Budget-import draft that is published is no longer the draft the
+      // next import rewrites (BudgetNoticeDraft.ts).
+      if (req.body.is_active) await queryDB("UPDATE notices SET source_ref = NULL WHERE id = ? AND source = 'budget_import'", [id]).catch(() => {});
       // Published again: show it live and push it, like a new one.
       if (req.body.is_active && !Number(existing[0].is_active)) {
         const targets: any[] = existing[0].target_type === "specific" ? (await queryDB("SELECT user_id FROM notice_targets WHERE notice_id = ?", [id])) || [] : [];

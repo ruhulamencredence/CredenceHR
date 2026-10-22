@@ -1725,7 +1725,8 @@ export interface Notice {
   lottie_json?: string | null;
   lottie_url?: string | null;
   target_type: 'all' | 'specific';
-  // 'tracking' = sent from Employee Tracking -> Currently Not Tracked.
+  // 'tracking' = sent from Employee Tracking -> Currently Not Tracked;
+  // 'budget_import' = drafted from a PEPM Budget import (BudgetNoticeDraft.ts).
   source?: string | null;
   is_active: boolean;
   created_by?: number | null;
@@ -1810,7 +1811,9 @@ export type AlertType =
   | 'document_sign'
   | 'mpr_dispatch'
   // Someone asked HR for a new password (login page) — opens Users -> Password requests.
-  | 'password_request';
+  | 'password_request'
+  // A notice drafted from a Budget import, waiting to be checked and published — opens Notices.
+  | 'notice_draft';
 
 export interface Alert {
   id: number;

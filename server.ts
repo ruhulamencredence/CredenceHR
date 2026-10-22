@@ -52,6 +52,7 @@ import { ensureMailSchema, registerMailRoutes } from "./MailRoutes";
 import { ensureRosterSchema, registerRosterRoutes } from "./RosterRoutes";
 import { ensureBreakSchema, registerBreakRoutes } from "./BreakRoutes";
 import { ensurePasswordResetSchema, registerPasswordResetRoutes } from "./PasswordResetRoutes";
+import { ensureBudgetNoticeSchema } from "./BudgetNoticeDraft";
 import { ensureMeasurementSchema, registerMeasurementRoutes } from "./MeasurementRoutes";
 import { ensureEmployeeRecordsGuard } from "./EmployeeRecordsGuard";
 import { ensureMprDispatchSchema, registerMprDispatchRoutes } from "./MprDispatchRoutes";
@@ -267,6 +268,8 @@ async function initDB() {
     await ensureBreakSchema(dbPool);
     // Forgot password (PasswordResetRoutes.ts).
     await ensurePasswordResetSchema(dbPool);
+    // Budget import -> draft notice (BudgetNoticeDraft.ts).
+    await ensureBudgetNoticeSchema(dbPool);
     // PEPM Management -> Measurement Sheet (MeasurementRoutes.ts).
     await ensureMeasurementSchema(dbPool);
     // PEPM -> Dispatch Material / Material Receive (MprDispatchRoutes.ts).
@@ -2863,7 +2866,7 @@ async function startServer() {
   registerNoticeRoutes(app, { announceNotice, authenticateToken, queryDB, requireAdmin, requireModule });
 
   // MPR Numbers, Budgets, Rate File, Delivery Date conditions and Jobs routes live in BudgetImportRoutes.ts.
-  registerBudgetImportRoutes(app, { authenticateToken, bulkInsert, dbPool, findOrCreateMpr, findOrCreateProject, isMySQLConnected, queryDB, requireAdmin, requireBudgetModuleAccess, requireModule, scopedExecute, toDateOnlyString, todayInDhaka });
+  registerBudgetImportRoutes(app, { authenticateToken, bulkInsert, dbPool, findOrCreateMpr, findOrCreateProject, isMySQLConnected, queryDB, requireAdmin, requireBudgetModuleAccess, requireModule, scopedExecute, toDateOnlyString, todayInDhaka, createAlert });
 
   // MPR Entries — kept in its own file (EntriesRoutes.ts), same reasoning as
   // profileRoutes.ts/holidayRoutes.ts/Alerts.ts/UserManagement.ts/
