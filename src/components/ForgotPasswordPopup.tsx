@@ -20,7 +20,7 @@ export interface ForgotOptions {
   request: boolean;
 }
 
-type Step = 'choose' | 'email' | 'code' | 'request' | 'done';
+type Step = 'none' | 'choose' | 'email' | 'code' | 'request' | 'done';
 
 async function post(path: string, body: unknown) {
   const r = await fetch(apiUrl(path), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -36,8 +36,9 @@ export const ForgotPasswordPopup: React.FC<{
   // The password was changed by email code: sign in with it.
   onReset: (identifier: string) => void;
 }> = ({ options, initialIdentifier, onClose, onReset }) => {
+  const none = !options.email && !options.request;
   const only = options.email && !options.request ? 'email' : !options.email && options.request ? 'request' : null;
-  const [step, setStep] = useState<Step>(only || 'choose');
+  const [step, setStep] = useState<Step>(none ? 'none' : only || 'choose');
   const [identifier, setIdentifier] = useState(initialIdentifier);
   const [code, setCode] = useState('');
   const [pw, setPw] = useState('');
@@ -96,7 +97,18 @@ export const ForgotPasswordPopup: React.FC<{
 
   let body: React.ReactNode = null;
   let footer: React.ReactNode = null;
-  if (step === 'choose') {
+  if (step === 'none') {
+    // Both ways turned off by a Superadmin.
+    body = (
+      <div className="text-center py-2">
+        <div className="liquid-glass-inset w-16 h-16 mx-auto rounded-[22px] flex items-center justify-center text-violet-700 mb-3">
+          <KeyRound className="w-8 h-8" />
+        </div>
+        <p className="text-sm text-slate-700">Contact HR or your Admin — they can set a new password for you.</p>
+      </div>
+    );
+    footer = <button type="button" className={primaryBtn} onClick={onClose}>OK</button>;
+  } else if (step === 'choose') {
     body = (
       <div className="space-y-2">
         <p className="text-sm text-slate-600">How would you like to get back in?</p>

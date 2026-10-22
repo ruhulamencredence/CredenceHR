@@ -3,8 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// Forgot password — two ways back in for someone who can't sign in, both off
-// until a Superadmin turns them on (password_reset_settings):
+// Forgot password — "Forgot password?" is always on the login page, with the
+// ways back in a Superadmin leaves on (password_reset_settings; until one is
+// saved, "Ask HR" is on and "Email code" off — it needs SMTP):
 //
 //   Email code   "Forgot password?" on the login page -> Login ID -> a 6-digit
 //                code goes to the account's email (15 minutes, 5 tries) ->
@@ -57,7 +58,7 @@ export async function ensurePasswordResetSchema(dbPool: any): Promise<void> {
     `CREATE TABLE IF NOT EXISTS password_reset_settings (
       id INT PRIMARY KEY,
       email_code_enabled TINYINT(1) NOT NULL DEFAULT 0,
-      hr_request_enabled TINYINT(1) NOT NULL DEFAULT 0,
+      hr_request_enabled TINYINT(1) NOT NULL DEFAULT 1,
       updated_by INT NULL,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     )`
@@ -127,7 +128,9 @@ export function registerPasswordResetRoutes(app: Express, deps: Deps) {
 
   async function settings() {
     const rows: any[] = (await queryDB("/*unscoped*/ SELECT email_code_enabled, hr_request_enabled FROM password_reset_settings WHERE id = 1").catch(() => [])) || [];
-    return { email_code_enabled: !!Number(rows[0]?.email_code_enabled || 0), hr_request_enabled: !!Number(rows[0]?.hr_request_enabled || 0) };
+    // Nothing saved yet: "Ask HR" on, email codes off.
+    if (!rows[0]) return { email_code_enabled: false, hr_request_enabled: true };
+    return { email_code_enabled: !!Number(rows[0].email_code_enabled), hr_request_enabled: !!Number(rows[0].hr_request_enabled) };
   }
 
   // The account a Login ID names (same lookup as sign-in), or null.
