@@ -255,6 +255,9 @@ export const AlertsPage: React.FC<AlertsPageProps> = ({ token, onBack, onOpenLea
         : alert.type === 'document_sign'
         ? // Documents to Sign, or Document Vault for a signed / declined one (App.tsx).
           () => window.dispatchEvent(new CustomEvent('credence:open-esign', { detail: { title: alert.title } }))
+        : alert.type === 'notice_draft'
+        ? // Admin Panel -> Notices, where the draft waits to be published.
+          () => window.dispatchEvent(new CustomEvent('credence:open-admin-module', { detail: 'notices' }))
         : alert.type === 'password_request'
         ? // Admin Panel -> Users -> Password requests (AdminPanel.tsx listens).
           () => {

@@ -268,13 +268,18 @@ export const NoticeManager: React.FC<NoticeManagerProps> = ({ token, user }) => 
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <h4 className="font-semibold text-slate-900 text-sm truncate">{n.title}</h4>
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${n.is_active ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-slate-100 text-slate-500 border border-slate-200'}`}>
-                        {n.is_active ? 'Active' : 'Paused'}
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${n.is_active ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : n.source === 'budget_import' ? 'bg-amber-50 text-amber-800 border border-amber-200' : 'bg-slate-100 text-slate-500 border border-slate-200'}`}>
+                        {n.is_active ? 'Active' : n.source === 'budget_import' ? 'Draft — review & publish' : 'Paused'}
                       </span>
                       <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-50 text-slate-600 border border-slate-200 flex items-center gap-1">
                         {n.target_type === 'all' ? <Globe className="w-2.5 h-2.5" /> : <UsersIcon className="w-2.5 h-2.5" />}
                         {n.target_type === 'all' ? 'All Users' : `${n.target_users?.length || 0} selected user${(n.target_users?.length || 0) === 1 ? '' : 's'}`}
                       </span>
+                      {n.source === 'budget_import' && (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+                          From Budget import
+                        </span>
+                      )}
                       {n.source === 'tracking' && (
                         <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
                           Employee Tracking

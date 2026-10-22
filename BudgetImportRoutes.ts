@@ -12,6 +12,7 @@ import { addDaysToDateStr } from "./deliveryDateConditions";
 import { resolveMinLeadDays } from "./deliveryDateConditions";
 import { memoryDb } from "./memoryDbFallback";
 import type { Express } from "express";
+import { draftBudgetNotice } from "./BudgetNoticeDraft";
 
 export interface RegisterBudgetImportRoutesDeps {
   authenticateToken: any;
@@ -27,10 +28,11 @@ export interface RegisterBudgetImportRoutesDeps {
   scopedExecute: any;
   toDateOnlyString: any;
   todayInDhaka: any;
+  createAlert: any;
 }
 
 export function registerBudgetImportRoutes(app: Express, deps: RegisterBudgetImportRoutesDeps) {
-  const { authenticateToken, bulkInsert, dbPool, findOrCreateMpr, findOrCreateProject, isMySQLConnected, queryDB, requireAdmin, requireBudgetModuleAccess, requireModule, scopedExecute, toDateOnlyString, todayInDhaka } = deps;
+  const { authenticateToken, bulkInsert, dbPool, findOrCreateMpr, findOrCreateProject, isMySQLConnected, queryDB, requireAdmin, requireBudgetModuleAccess, requireModule, scopedExecute, toDateOnlyString, todayInDhaka, createAlert } = deps;
   // 3. MPR Numbers CRUD
   app.get("/api/mpr-numbers", authenticateToken, async (req, res) => {
     try {
@@ -997,6 +999,10 @@ export function registerBudgetImportRoutes(app: Express, deps: RegisterBudgetImp
       const matchKey = (project_name: string, mrf_no: string, description: string, specification: string) =>
         `${project_name.toLowerCase()}|${mrf_no.toLowerCase()}|${description.toLowerCase()}|${specification.toLowerCase()}`;
       const existingItems = await queryDB("SELECT * FROM budget_items WHERE budget_id = ?", [budgetId]);
+      // For the draft notice: a Budget with no rows yet is a new one; rows
+      // added from here on are this import's new items.
+      const isNewBudget = existingItems.length === 0;
+      const firstNewId = Number(((await queryDB("SELECT COALESCE(MAX(id), 0) + 1 AS n FROM budget_items")) || [])[0]?.n || 1);
       const existingByKey = new Map<string, any>(
         existingItems.map((it: any) => [
           matchKey(String(it.project_name || ""), String(it.mrf_no || ""), String(it.description || ""), String(it.specification || "")),
@@ -1072,8 +1078,16 @@ export function registerBudgetImportRoutes(app: Express, deps: RegisterBudgetImp
         }
       }
 
+      // A draft notice for review (BudgetNoticeDraft.ts) — never fails the import.
+      const noticeDraft = itemsInserted
+        ? await draftBudgetNotice(queryDB, createAlert, { budgetId, isNew: isNewBudget, actorId: Number(req.user.id), fromId: firstNewId }).catch((err: any) => {
+            console.warn("⚠️ Budget draft notice: " + err.message);
+            return null;
+          })
+        : null;
       res.json({
         success: true,
+        notice_draft: noticeDraft,
         items_inserted: itemsInserted,
         items_replaced: itemsReplaced,
         mpr_added: mprAdded,
