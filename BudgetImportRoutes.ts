@@ -999,10 +999,6 @@ export function registerBudgetImportRoutes(app: Express, deps: RegisterBudgetImp
       const matchKey = (project_name: string, mrf_no: string, description: string, specification: string) =>
         `${project_name.toLowerCase()}|${mrf_no.toLowerCase()}|${description.toLowerCase()}|${specification.toLowerCase()}`;
       const existingItems = await queryDB("SELECT * FROM budget_items WHERE budget_id = ?", [budgetId]);
-      // For the draft notice: a Budget with no rows yet is a new one; rows
-      // added from here on are this import's new items.
-      const isNewBudget = existingItems.length === 0;
-      const firstNewId = Number(((await queryDB("SELECT COALESCE(MAX(id), 0) + 1 AS n FROM budget_items")) || [])[0]?.n || 1);
       const existingByKey = new Map<string, any>(
         existingItems.map((it: any) => [
           matchKey(String(it.project_name || ""), String(it.mrf_no || ""), String(it.description || ""), String(it.specification || "")),
@@ -1078,9 +1074,10 @@ export function registerBudgetImportRoutes(app: Express, deps: RegisterBudgetImp
         }
       }
 
-      // A draft notice for review (BudgetNoticeDraft.ts) — never fails the import.
-      const noticeDraft = itemsInserted
-        ? await draftBudgetNotice(queryDB, createAlert, { budgetId, isNew: isNewBudget, actorId: Number(req.user.id), fromId: firstNewId }).catch((err: any) => {
+      // "<Budget> - MPR Updated up to <date>" as a draft notice, opened for
+      // editing on the import page (BudgetNoticeDraft.ts) — never fails the import.
+      const noticeDraft = itemsInserted + itemsReplaced
+        ? await draftBudgetNotice(queryDB, createAlert, { budgetId, actorId: Number(req.user.id), today: todayInDhaka() }).catch((err: any) => {
             console.warn("⚠️ Budget draft notice: " + err.message);
             return null;
           })

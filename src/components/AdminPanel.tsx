@@ -50,6 +50,7 @@ import { UserAccessDrawer, UserAccessChips, userInitials, ROLE_BADGE, ROLE_LABEL
 import { UserBulkBar } from './UserBulkBar';
 import { ModuleAccessPage } from './ModuleAccessPage';
 import { PasswordRequestsPopup } from './PasswordRequestsPopup';
+import { BudgetNoticePopup, type BudgetNoticeDraftInfo } from './BudgetNoticePopup';
 import { AccessTemplatesModal } from './AccessTemplatesModal';
 import { BudgetSubmissionReport } from './BudgetSubmissionReport';
 import { MprDispatchMaterial } from './MprDispatchMaterial';
@@ -711,6 +712,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // Users -> Password requests (Forgot password, layer "password_requests");
   // a "Password reset request" alert opens it too.
   const [showPasswordRequests, setShowPasswordRequests] = useState(false);
+  // The draft notice a Budget import just wrote, opened for editing (BudgetNoticePopup.tsx).
+  const [budgetNotice, setBudgetNotice] = useState<BudgetNoticeDraftInfo | null>(null);
   useEffect(() => {
     const open = () => setShowPasswordRequests(true);
     window.addEventListener('credence:password-requests', open);
@@ -2316,11 +2319,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
         text: `Imported ${data.items_inserted} new row(s)${
           data.items_replaced > 0 ? `, replaced ${data.items_replaced} existing row(s) matched by Project/MRF No/Description/Specification` : ''
         }. MPR No added: ${data.mpr_added} (already existed: ${data.mpr_already_existing}). Projects added: ${data.projects_added} (already existed: ${data.projects_already_existing}).${
-          data.notice_draft
-            ? ` A draft notice about it was ${data.notice_draft.created ? 'written' : 'updated'} — check and publish it in Admin Panel -> Notices (nobody sees it before that).`
-            : ''
+          data.notice_draft && !canSee('notices') ? ' A draft notice about it is waiting in Notices for someone to publish.' : ''
         }`
       });
+      // "<Budget> - MPR Updated up to <date>": check and publish it now.
+      if (data.notice_draft && canSee('notices')) setBudgetNotice(data.notice_draft);
       fetchAllData();
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message || 'Failed to import the Excel file.' });
@@ -7288,6 +7291,18 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
           templates={accessTemplates}
           onChanged={loadAccessTemplates}
           onClose={() => setShowAccessTemplates(false)}
+        />
+      )}
+
+      {budgetNotice && (
+        <BudgetNoticePopup
+          token={token}
+          draft={budgetNotice}
+          onClose={() => setBudgetNotice(null)}
+          onDone={(text) => {
+            setBudgetNotice(null);
+            setMessage({ type: 'success', text });
+          }}
         />
       )}
 
