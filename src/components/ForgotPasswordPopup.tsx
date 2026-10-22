@@ -13,6 +13,7 @@
 import React, { useState } from 'react';
 import { KeyRound, Mail, UserRound, Loader2, CheckCircle2, ArrowLeft } from 'lucide-react';
 import { apiUrl } from '../lib/api';
+import { PasswordInput } from './PasswordInput';
 import { MailPopup as Popup, inputCls, labelCls, primaryBtn, ghostBtn } from './mail/MailPopup';
 
 export interface ForgotOptions {
@@ -148,11 +149,11 @@ export const ForgotPasswordPopup: React.FC<{
         <div className="grid grid-cols-2 gap-2">
           <div>
             <label className={labelCls}>New password</label>
-            <input className={inputCls} type="password" value={pw} onChange={(e) => setPw(e.target.value)} autoComplete="new-password" />
+            <PasswordInput className={inputCls} value={pw} onChange={(e) => setPw(e.target.value)} autoComplete="new-password" />
           </div>
           <div>
             <label className={labelCls}>Type it again</label>
-            <input className={inputCls} type="password" value={pw2} onChange={(e) => setPw2(e.target.value)} autoComplete="new-password" />
+            <PasswordInput className={inputCls} value={pw2} onChange={(e) => setPw2(e.target.value)} autoComplete="new-password" />
           </div>
         </div>
         <button type="button" className="text-xs underline text-slate-500" onClick={sendCode} disabled={busy}>

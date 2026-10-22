@@ -1,5 +1,5 @@
 import React, { useState, useEffect, lazy, Suspense } from 'react';
-import { Lock, ArrowUp, MapPin, Download, Building2 } from 'lucide-react';
+import { ArrowUp, MapPin, Download, Building2 } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import credenceLogo from '../assets/credence-logo.png';
 import { apiUrl } from '../lib/api';
@@ -7,6 +7,7 @@ import { setActiveCompanyId } from '../lib/company';
 import { appDeviceInfo, takeSignedOutReason } from '../lib/device';
 import { PrivacyPolicy } from './PrivacyPolicy';
 import { ForgotPasswordPopup, type ForgotOptions } from './ForgotPasswordPopup';
+import { PasswordInput } from './PasswordInput';
 
 // Lazy-loaded: keeps lottie-react (a fairly heavy animation library) out of
 // the very first JS chunk the app has to download+parse before anything
@@ -420,10 +421,10 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
               <label className="block text-xs font-medium mb-1.5 ml-1" style={{ color: 'var(--g-text-muted)' }}>
                 Password
               </label>
-              <div className="relative">
-                <input
-                  type="password"
+              <div>
+                <PasswordInput
                   required
+                  iconColor="var(--g-text-muted)"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
@@ -435,7 +436,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
                   }}
                   onBlur={(e) => (e.currentTarget.style.boxShadow = 'none')}
                 />
-                <Lock className="w-4 h-4 absolute right-4 top-1/2 -translate-y-1/2" style={{ color: 'var(--g-text-muted)' }} />
               </div>
               {!ownerMode && (
                 <div className="flex justify-end mt-1.5 mr-1">

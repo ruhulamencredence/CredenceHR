@@ -7,6 +7,7 @@ import React, { useState } from 'react';
 import { ChevronLeft, Lock, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
+import { PasswordInput } from './PasswordInput';
 
 interface ChangePasswordFormProps {
   token: string;
@@ -102,8 +103,7 @@ export const ChangePasswordForm: React.FC<ChangePasswordFormProps> = ({ token, o
 
             <div className="space-y-3">
               <Field label="Current Password">
-                <input
-                  type="password"
+                <PasswordInput
                   value={currentPassword}
                   onChange={(e) => setCurrentPassword(e.target.value)}
                   required
@@ -113,8 +113,7 @@ export const ChangePasswordForm: React.FC<ChangePasswordFormProps> = ({ token, o
                 />
               </Field>
               <Field label="New Password">
-                <input
-                  type="password"
+                <PasswordInput
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
                   required
@@ -125,8 +124,7 @@ export const ChangePasswordForm: React.FC<ChangePasswordFormProps> = ({ token, o
                 />
               </Field>
               <Field label="Confirm New Password">
-                <input
-                  type="password"
+                <PasswordInput
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   required
