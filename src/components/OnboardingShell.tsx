@@ -13,6 +13,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { ClipboardCheck, Lock, LogOut, Clock, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { apiUrl } from '../lib/api';
+import { PasswordInput } from './PasswordInput';
 import type { User } from '../types';
 import { OnboardingForm, type OnboardingFormState } from './OnboardingForm';
 
@@ -116,9 +117,9 @@ export const ChangeTempPassword: React.FC<{ token: string; onDone: () => void; i
         <Lock className="w-4 h-4 text-blue-600" /> Set your own password
       </div>
       <p className="text-xs text-slate-500">{intro}</p>
-      <input type="password" autoComplete="current-password" placeholder={currentLabel} value={current} onChange={(e) => setCurrent(e.target.value)} className={inputCls} />
-      <input type="password" autoComplete="new-password" placeholder="New password (at least 6 characters)" value={next} onChange={(e) => setNext(e.target.value)} className={inputCls} />
-      <input type="password" autoComplete="new-password" placeholder="Confirm new password" value={confirm} onChange={(e) => setConfirm(e.target.value)} className={inputCls} />
+      <PasswordInput autoComplete="current-password" placeholder={currentLabel} value={current} onChange={(e) => setCurrent(e.target.value)} className={inputCls} />
+      <PasswordInput autoComplete="new-password" placeholder="New password (at least 6 characters)" value={next} onChange={(e) => setNext(e.target.value)} className={inputCls} />
+      <PasswordInput autoComplete="new-password" placeholder="Confirm new password" value={confirm} onChange={(e) => setConfirm(e.target.value)} className={inputCls} />
       {error && <div className="text-xs text-rose-600">{error}</div>}
       <button type="submit" disabled={saving || !current || !next} className="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold disabled:opacity-50">
         {saving ? 'Saving…' : 'Save password'}
