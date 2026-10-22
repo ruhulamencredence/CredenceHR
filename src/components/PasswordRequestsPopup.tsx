@@ -36,6 +36,8 @@ interface Settings {
   email_code_enabled: boolean;
   hr_request_enabled: boolean;
   mailer: boolean;
+  // The last reset-code email: where it went (masked) and the error, if any.
+  last_mail?: { at: string; to: string | null; error: string | null } | null;
 }
 
 const timeOf = (v: string | null) => (v ? `${formatDate(v)} ${String(v).slice(11, 16)}` : '');
@@ -107,6 +109,20 @@ export const PasswordRequestsPopup: React.FC<{ token: string; onClose: () => voi
       setBusy(null);
     }
   };
+  const [testTo, setTestTo] = useState('');
+  const [testing, setTesting] = useState(false);
+  const [testMsg, setTestMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const sendTest = async () => {
+    setTesting(true);
+    setTestMsg(null);
+    try {
+      const r = await fetch(apiUrl('/api/password-reset-settings/test-email'), { method: 'POST', headers: { ...auth, 'Content-Type': 'application/json' }, body: JSON.stringify({ to: testTo.trim() }) });
+      const j = await r.json().catch(() => ({}));
+      setTestMsg(r.ok ? { ok: true, text: j.message } : { ok: false, text: j.error || 'Could not send' });
+    } finally {
+      setTesting(false);
+    }
+  };
   const saveSettings = async (next: Partial<Settings>) => {
     if (!settings) return;
     const s = { ...settings, ...next };
@@ -155,6 +171,26 @@ export const PasswordRequestsPopup: React.FC<{ token: string; onClose: () => voi
                 label="Ask HR"
                 hint="The request comes here; you give a temporary password."
               />
+              {settings.mailer && (
+                <div className="pt-1 space-y-1.5">
+                  <div className="text-xs font-semibold text-slate-600">Check the email set-up</div>
+                  <div className="flex gap-2">
+                    <input className={inputCls} value={testTo} onChange={(e) => setTestTo(e.target.value)} placeholder="Send a test email to…" />
+                    <button type="button" className={`${primaryBtn} shrink-0`} onClick={() => void sendTest()} disabled={testing || !testTo.trim()}>
+                      {testing && <Loader2 className="w-4 h-4 animate-spin" />} Send test
+                    </button>
+                  </div>
+                  {testMsg && <div className={`text-xs px-3 py-2 rounded-xl ${testMsg.ok ? 'bg-emerald-50 text-emerald-800' : 'bg-rose-50 text-rose-700'}`}>{testMsg.text}</div>}
+                  {settings.last_mail && (
+                    <div className="text-[11px] text-slate-500">
+                      Last code request ({new Date(settings.last_mail.at).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}):{' '}
+                      {settings.last_mail.error
+                        ? <span className="text-rose-700">{settings.last_mail.to ? `not delivered to ${settings.last_mail.to} — ${settings.last_mail.error}` : `no code sent — ${settings.last_mail.error}`}</span>
+                        : <span className="text-emerald-700">sent to {settings.last_mail.to}</span>}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
           {error && <div className="text-xs px-3 py-2 rounded-xl bg-rose-50 text-rose-700">{error}</div>}
