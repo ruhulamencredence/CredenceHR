@@ -95,7 +95,7 @@ export const ADMIN_MODULES: { key: AdminModuleKey; label: string }[] = [
 // combination of these per (Admin/User account, module) via Admin Panel ->
 // Users -> Module Access. Independent checkboxes, not hierarchical: having
 // 'delete_trash' does NOT imply 'edit_add' is also granted.
-export type PermissionLayerKey = 'read' | 'edit_add' | 'entry_upload' | 'delete_trash' | 'permanent_delete' | 'submission_status' | 'dispatch_material' | 'dispatch_all' | 'stay_report' | 'salary_month' | 'salary_hold' | 'block_account' | 'limit_history' | 'link_pins' | 'audit_approve' | 'accounts_pay' | 'access_log' | 'live' | 'on_behalf' | 'onboarding_create' | 'onboarding_review' | 'onboarding_approve' | 'exit_dues' | 'exit_pdf' | 'reminders_receive' | 'salary_bulk_upload' | 'target_export' | 'target_cancel' | 'exit_clearance_setup' | 'late_list' | 'mail_open' | 'mail_password' | 'mail_settings' | 'mail_groups' | 'roster_manage' | 'break_manage' | 'sign_request' | 'esign_settings' | 'material_budget' | 'employee_delete';
+export type PermissionLayerKey = 'read' | 'edit_add' | 'entry_upload' | 'delete_trash' | 'permanent_delete' | 'submission_status' | 'dispatch_material' | 'dispatch_all' | 'stay_report' | 'salary_month' | 'salary_hold' | 'block_account' | 'limit_history' | 'link_pins' | 'audit_approve' | 'accounts_pay' | 'access_log' | 'live' | 'on_behalf' | 'onboarding_create' | 'onboarding_review' | 'onboarding_approve' | 'exit_dues' | 'exit_pdf' | 'reminders_receive' | 'salary_bulk_upload' | 'target_export' | 'target_cancel' | 'exit_clearance_setup' | 'late_list' | 'mail_open' | 'mail_password' | 'mail_settings' | 'mail_groups' | 'roster_manage' | 'break_manage' | 'password_requests' | 'sign_request' | 'esign_settings' | 'material_budget' | 'employee_delete';
 
 export const PERMISSION_LAYERS: { key: PermissionLayerKey; label: string }[] = [
   { key: 'read', label: 'Read Only' },
@@ -237,11 +237,11 @@ export const MODULE_LAYER_OPTIONS: Partial<Record<AdminModuleKey, { key: Permiss
     { key: 'esign_settings', label: 'E-Signature settings (OTP, read to the end)' }
   ],
   // Users -> Block / Unblock a login (only for accounts it is ticked for).
-  users: [...PERMISSION_LAYERS, { key: 'block_account', label: 'Block Account' }]
+  users: [...PERMISSION_LAYERS, { key: 'block_account', label: 'Block Account' }, { key: 'password_requests', label: 'Password requests (Forgot password)' }]
 };
 // Layers an account has only when explicitly ticked — never part of the
 // "module granted, no layers saved yet" default (requireModuleLayer).
-export const EXPLICIT_ONLY_LAYERS: PermissionLayerKey[] = ['permanent_delete', 'submission_status', 'dispatch_material', 'dispatch_all', 'salary_month', 'salary_hold', 'block_account', 'link_pins', 'audit_approve', 'accounts_pay', 'access_log', 'live', 'on_behalf', 'onboarding_create', 'onboarding_review', 'onboarding_approve', 'exit_dues', 'exit_pdf', 'reminders_receive', 'salary_bulk_upload', 'target_export', 'target_cancel', 'exit_clearance_setup', 'late_list', 'mail_open', 'mail_password', 'mail_settings', 'mail_groups', 'roster_manage', 'break_manage', 'sign_request', 'esign_settings', 'material_budget', 'employee_delete'];
+export const EXPLICIT_ONLY_LAYERS: PermissionLayerKey[] = ['permanent_delete', 'submission_status', 'dispatch_material', 'dispatch_all', 'salary_month', 'salary_hold', 'block_account', 'link_pins', 'audit_approve', 'accounts_pay', 'access_log', 'live', 'on_behalf', 'onboarding_create', 'onboarding_review', 'onboarding_approve', 'exit_dues', 'exit_pdf', 'reminders_receive', 'salary_bulk_upload', 'target_export', 'target_cancel', 'exit_clearance_setup', 'late_list', 'mail_open', 'mail_password', 'mail_settings', 'mail_groups', 'roster_manage', 'break_manage', 'password_requests', 'sign_request', 'esign_settings', 'material_budget', 'employee_delete'];
 export const layersFor = (moduleKey: AdminModuleKey) => MODULE_LAYER_OPTIONS[moduleKey] || PERMISSION_LAYERS;
 
 // Leave Manage's own operation-specific layers — same independent-checkbox
@@ -1808,7 +1808,9 @@ export type AlertType =
   // A document waiting for this account's signature, or one they sent got
   // signed / declined — opens Documents to Sign (or Document Vault).
   | 'document_sign'
-  | 'mpr_dispatch';
+  | 'mpr_dispatch'
+  // Someone asked HR for a new password (login page) — opens Users -> Password requests.
+  | 'password_request';
 
 export interface Alert {
   id: number;
