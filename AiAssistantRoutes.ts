@@ -20,8 +20,12 @@
 //     with fixed Bangla answers. Needs no key, sends nothing outside.
 //   - gemini (when GEMINI_API_KEY is set): free-form questions; Gemini picks
 //     which of the same read-only tools to call. Falls back to local on any
-//     error. Note: in this mode the question and the tool results are sent to
-//     Google.
+//     error, and when its quota is used up it is left alone for a while
+//     (pauseGemini) so local answers straight away. Note: in this mode the
+//     question and the tool results are sent to Google.
+//   The local engine also learns from Gemini (assistant_learned) and has
+//   built-in example questions (TRAINING), corrects misspellings and reads a
+//   short follow-up with the previous question — see "Learning" below.
 
 import type { Express } from "express";
 import { GoogleGenAI, type Content, type FunctionDeclaration } from "@google/genai";
@@ -87,7 +91,15 @@ export interface AssistantReport {
   rows: (string | number | null)[][];
 }
 
-interface Answer { reply: string; actions: AssistantAction[]; draft?: LeaveDraft; report?: AssistantReport }
+interface Answer {
+  reply: string;
+  actions: AssistantAction[];
+  draft?: LeaveDraft;
+  report?: AssistantReport;
+  // Gemini only: which tool / how-to entry answered, kept so the local engine
+  // can answer the same question itself later (see "Learning" below).
+  learn?: { tool?: string; help?: string; args?: Record<string, any> };
+}
 
 const SELF_FLAGS = [
   "can_view_movement_claims", "can_view_conveyance_claims", "can_view_timesheet", "can_view_leave_application",
@@ -516,7 +528,8 @@ export function parseLeaveRequest(text: string, today: string) {
 const NOT_NAMES = new Set(["amar", "আমার", "ei", "এই", "e", "এ", "ajker", "maser", "masher", "মাসের", "gotomaser", "গত", "tomar", "তোমার", "apnar", "আপনার", "kar", "কার", "sobar", "সবার", "team", "office", "company"]);
 const nameBefore = (t: string) => {
   const m = /([a-z.]{2,}(?:\s+[a-z.]{2,})?)\s+er\s/.exec(t) || /([\u0980-\u09ff]{2,}(?:\s+[\u0980-\u09ff]{2,})?)(?:-এর|\s+এর)\s/.exec(t);
-  const words = (m?.[1] || "").split(/\s+/).filter((w) => w && !NOT_NAMES.has(w));
+  // "attendance er obostha": a word the assistant knows as a topic isn't a name.
+  const words = (m?.[1] || "").split(/\s+/).filter((w) => w && !NOT_NAMES.has(w) && !topicWords().has(w));
   return words.slice(-1)[0] || "";
 };
 
@@ -2114,7 +2127,8 @@ const LEAVE_WORDS = ["leave", "ছুটি", "chuti", "chhuti", "ছুটি�
 const APPLY_WORDS = ["kore dao", "kore den", "করে দাও", "করে দিন", "দিয়ে দাও", "diye dao", "apply", "অ্যাপ্লাই", "এপ্লাই", "lagbe", "লাগবে", "chai", "চাই", "nibo", "নেব", "নিব", "nite chai", "dao", "দাও"];
 const HOLIDAY_WORDS = ["ছুটির দিন", "holiday", "সরকারি ছুটি", "chutir din"];
 
-async function localAnswer(c: Ctx, message: string): Promise<Answer> {
+// The keyword engine: an answer when the question matches something, else null.
+async function matchLocal(c: Ctx, message: string): Promise<Answer | null> {
   const t = norm(message);
   const asksHow = hasAny(t, HOW);
 
@@ -2190,10 +2204,83 @@ async function localAnswer(c: Ctx, message: string): Promise<Answer> {
   if (help.length) {
     return { reply: help.map((h) => `**${h.title}:** ${h.steps}`).join("\n\n"), actions: help.flatMap(helpAction) };
   }
-  if (blockedHelp.length) {
-    return { reply: `"${blockedHelp[0].title}" আপনার account-এ চালু নেই। দরকার হলে HR / Superadmin-কে বলুন — তাঁরা Module Access থেকে চালু করে দিতে পারবেন।`, actions: [] };
+  if (blockedHelp.length) return blockedHelpAnswer(blockedHelp[0]);
+  return null;
+}
+
+const blockedHelpAnswer = (h: HelpEntry): Answer => ({
+  reply: `"${h.title}" আপনার account-এ চালু নেই। দরকার হলে HR / Superadmin-কে বলুন — তাঁরা Module Access থেকে চালু করে দিতে পারবেন।`,
+  actions: []
+});
+
+// Keyword match, then the same with misspelt words corrected.
+async function matchWithSpelling(c: Ctx, message: string): Promise<Answer | null> {
+  const fixed = fixSpelling(message);
+  if (fixed !== norm(message)) {
+    const r = await matchLocal(c, fixed);
+    if (r) return r;
   }
+  return matchLocal(c, message);
+}
+
+// Runs what a learned / similar question was answered with — through the
+// same access checks as everything else: a tool this account can't use is
+// "no access", a page it can't open is "not turned on for your account".
+const learnedUsable = (c: Ctx, l: LearnedRow) => {
+  if (l.help_id) {
+    const h = HELP.find((x) => x.id === l.help_id);
+    return !!h && (!h.can || h.can(c));
+  }
+  const tool = TOOLS.find((x) => x.name === l.tool);
+  return !!tool && toolAvailable(tool, c);
+};
+
+async function answerLearned(c: Ctx, message: string, hit: LearnedRow): Promise<Answer> {
+  const t = norm(message);
+  if (hit.help_id) {
+    const h = HELP.find((x) => x.id === hit.help_id);
+    if (!h) return { reply: "", actions: [] };
+    if (h.can && !h.can(c)) return blockedHelpAnswer(h);
+    return { reply: `**${h.title}:** ${h.steps}`, actions: helpAction(h) };
+  }
+  const tool = TOOLS.find((x) => x.name === hit.tool);
+  if (!tool) return { reply: "", actions: [] };
+  if (!toolAvailable(tool, c)) return { reply: NO_ACCESS.text, actions: [] };
+  const intent = INTENTS.find((i) => i.tool === tool.name);
+  const r = await tool.run(c, { ...(intent?.args ? intent.args(t, c) : {}), ...(hit.args || {}) });
+  return { reply: r.text, actions: allowedActions(c, r.actions || []), report: r.report };
+}
+
+async function localAnswer(c: Ctx, message: string, history: { role: string; text: string }[] = []): Promise<Answer> {
+  const t = norm(message);
+  // A question that is (nearly) one Gemini answered, or a built-in example,
+  // goes the way it went then — when this account may use that answer.
+  const strong = closestLearned(message, 0.7) || closestLearned(fixSpelling(message), 0.7);
+  if (strong && learnedUsable(c, strong)) {
+    const r = await answerLearned(c, message, strong);
+    if (r.reply) return r;
+  }
+  const matched = await matchWithSpelling(c, message);
+  if (matched) return matched;
   if (hasAny(t, THANKS)) return { reply: "আপনাকেও ধন্যবাদ! আর কিছু লাগলে জিজ্ঞেস করুন। 🙂", actions: [] };
+  if (hasAny(t, GREET) && t.trim().split(" ").length <= 4) {
+    return { reply: `আসসালামু আলাইকুম, ${c.name.split(" ")[0]}! আমি Credence Assistant। আপনার ছুটি, হাজিরা, claim, loan বা app-এর কোন কাজ কোথায় — জিজ্ঞেস করুন।`, actions: [] };
+  }
+  // A question Gemini answered before (this or a close wording of it).
+  const hit = closestLearned(message) || closestLearned(fixSpelling(message));
+  if (hit) {
+    const r = await answerLearned(c, message, hit);
+    if (r.reply) return r;
+  }
+  // A short follow-up ("ar gotomaser?", "rahim er?") read together with the
+  // previous question.
+  const prev = [...history].reverse().find((m) => m.role !== "assistant")?.text;
+  const known = fixSpelling(message).trim().split(" ").some((w) => knownWords().has(w)) || /\s(er|এর)\s|-এর/.test(t);
+  if (prev && known && t.trim().split(" ").length <= 4) {
+    // The new words first, so a new name ("ar karim er?") wins over the old one.
+    const both = await matchWithSpelling(c, `${message} ${prev}`);
+    if (both) return both;
+  }
   if (hasAny(t, GREET)) {
     return { reply: `আসসালামু আলাইকুম, ${c.name.split(" ")[0]}! আমি Credence Assistant। আপনার ছুটি, হাজিরা, claim, loan বা app-এর কোন কাজ কোথায় — জিজ্ঞেস করুন।`, actions: [] };
   }
@@ -2201,6 +2288,214 @@ async function localAnswer(c: Ctx, message: string): Promise<Answer> {
     reply: "দুঃখিত, প্রশ্নটা বুঝতে পারিনি। এভাবে জিজ্ঞেস করে দেখুন:\n" + suggestionsFor(c).map((s) => `• ${s}`).join("\n") + "\n\nঅথবা একজন মানুষের সাথে সরাসরি কথা বলুন।",
     actions: [{ label: "মানুষের সাথে কথা বলুন", nav: "support:request" }]
   };
+}
+
+// ---------------------------------------------------------------------------
+// Learning — so the local engine keeps answering when Gemini can't (its free
+// quota used up, no key, Google unreachable).
+//   - Every question Gemini answers with ONE tool or ONE how-to entry is kept
+//     (assistant_learned: the question and which tool / entry — never the
+//     answer itself, which belongs to the asker). Later the local engine runs
+//     that same tool for whoever asks a similar question, with that person's
+//     own access — so nothing is ever shown that the asker couldn't open.
+//   - Misspellings ("atendance", "balence", "hajra") are corrected against
+//     every word the engine knows before giving up.
+// ---------------------------------------------------------------------------
+const LEARNABLE = new Set(INTENTS.map((i) => i.tool));
+const LEARN_ARG_KEYS = new Set(["section", "field", "mode"]);
+interface LearnedRow { question: string; tool: string | null; help_id: string | null; args: Record<string, any> | null; grams: Set<string> }
+// Built-in examples: questions worded the way people actually ask, each
+// with what answers it ("help:<id>" = a how-to entry). Known from the start,
+// before Gemini has taught anything; what Gemini teaches is added on top.
+const TRAINING: [string, string, Record<string, any>?][] = [
+  ["amar koydin chuti ache", "my_leave_balance"], ["ar koto din leave nite parbo", "my_leave_balance"], ["আমি আর কয়দিন ছুটি নিতে পারব", "my_leave_balance"],
+  ["casual leave koyta ache", "my_leave_balance"], ["sick leave baki ache koto", "my_leave_balance"], ["how many days off do i have", "my_leave_balance"],
+  ["amar dorkhaster ki obostha", "my_leave_applications"], ["chutir abedon approve hoyeche ki", "my_leave_applications"], ["আমার ছুটি মঞ্জুর হয়েছে কি", "my_leave_applications"],
+  ["is my leave approved", "my_leave_applications"], ["leave reject hoise keno", "my_leave_applications"],
+  ["ei mase koydin office e aschi", "my_attendance_summary"], ["এই মাসে কয়দিন অফিসে এসেছি", "my_attendance_summary"], ["amar in time out time", "my_attendance_summary"],
+  ["koydin deri te aschi", "my_attendance_summary"], ["how many days was i late this month", "my_attendance_summary"], ["amar absent koto din", "my_attendance_summary"],
+  ["kon kon din late hoyeche", "my_late_days"], ["কোন দিনগুলোতে দেরি হয়েছে", "my_late_days"], ["which dates was i late", "my_late_days"],
+  ["amar taka kobe pabo bill er", "my_claims"], ["আমার বিলের টাকা কবে পাব", "my_claims"], ["claim er taka paid hoise", "my_claims"], ["my claim status", "my_claims"],
+  ["amar loan koto baki", "my_loans"], ["আমার লোনের কিস্তি কত", "my_loans"], ["advance er taka koto kete nibe", "my_loans"], ["how much loan is left", "my_loans"],
+  ["amar kaj ki ki baki ache", "my_tasks"], ["আমাকে কী কী কাজ দেওয়া হয়েছে", "my_tasks"], ["what tasks are assigned to me", "my_tasks"],
+  ["samne kobe chuti", "upcoming_holidays"], ["eid er chuti kobe theke", "upcoming_holidays"], ["সামনে সরকারি ছুটি কবে", "upcoming_holidays"], ["next public holiday", "upcoming_holidays"],
+  ["amar kache koyta file approve er jonno ache", "my_pending_approvals"], ["আমাকে কী কী অনুমোদন করতে হবে", "my_pending_approvals"], ["what is waiting for my approval", "my_pending_approvals"],
+  ["amar boss ke", "my_profile"], ["আমার রিপোর্টিং কে", "my_profile"], ["ami kobe join korechi", "my_profile"], ["who is my reporting manager", "my_profile"], ["amar id number koto", "my_profile"],
+  ["amar nam e ki ki jinish ache", "my_assets"], ["আমার নামে কী কী জিনিস আছে", "my_assets"], ["what assets do i have", "my_assets"],
+  ["gari booking dewa ache ki", "my_rides"], ["আমার গাড়ির রিকুইজিশন", "my_rides"], ["is my car booked", "my_rides"],
+  ["salary certificate er request ki holo", "my_letters"], ["আমার চিঠি এসেছে কি", "my_letters"],
+  ["amar target koto hoise", "my_targets_progress"], ["আমার লক্ষ্য কতদূর", "my_targets_progress"], ["how far is my target", "my_targets_progress"],
+  ["amar sim er limit koto", "my_mobile_sim"], ["এই মাসের ফোন বিল কত", "my_mobile_sim"],
+  ["amar chakri chharar abedon er ki obostha", "my_resignation"], ["আমার পদত্যাগের অবস্থা", "my_resignation"],
+  ["amar dewa obhijog er ki holo", "my_cases"], ["আমার অভিযোগের কী হলো", "my_cases"],
+  ["ajke office e ke ke ase nai", "attendance_on_date"], ["আজ কারা আসেনি", "attendance_on_date"], ["who did not come today", "attendance_on_date"], ["ajke kotojon present", "attendance_on_date"],
+  ["ajke kara deri kore aise", "late_on_date"], ["আজ কারা দেরি করে এসেছে", "late_on_date"], ["who came late today", "late_on_date"],
+  ["ajke ke ke chutite", "on_leave"], ["আজ কে কে ছুটিতে আছে", "on_leave"], ["who is on leave today", "on_leave"],
+  ["samne kar kar chuti ache", "upcoming_leaves"], ["সামনে কার কার ছুটি", "upcoming_leaves"], ["upcoming leave list", "upcoming_leaves"],
+  ["kon leave kar kache atke ache", "leave_pending_layers"], ["ছুটির আবেদন কার কাছে আটকে আছে", "leave_pending_layers"],
+  ["onek din dhore pending ache ki ki", "stuck_applications"], ["অনেকদিন ধরে কী কী পড়ে আছে", "stuck_applications"],
+  ["mot koto jon kaj kore", "headcount"], ["কোম্পানিতে মোট কতজন কাজ করে", "headcount"], ["total staff koto", "headcount"], ["how many people work here", "headcount"],
+  ["meye staff koto jon", "employee_breakdown", { field: "gender" }], ["কতজন মহিলা কর্মী", "employee_breakdown", { field: "gender" }],
+  ["kar kar blood group o positive", "employee_breakdown", { field: "blood_group" }],
+  ["ajker hr er update dao", "daily_hr_report"], ["আজকের এইচআর আপডেট", "daily_hr_report"], ["give me today's hr summary", "daily_hr_report"],
+  ["ei mase kar jonmodin", "hr_dashboard", { section: "birthdays" }], ["এই মাসে কার জন্মদিন", "hr_dashboard", { section: "birthdays" }], ["whose birthday is this month", "hr_dashboard", { section: "birthdays" }],
+  ["kar probation sesh hocche", "hr_dashboard", { section: "probation" }], ["কার প্রবেশন শেষ হচ্ছে", "hr_dashboard", { section: "probation" }],
+  ["kar contract er meyad sesh", "hr_dashboard", { section: "contract" }], ["কার চুক্তির মেয়াদ শেষ", "hr_dashboard", { section: "contract" }],
+  ["kon kon document er meyad sesh hobe", "hr_dashboard", { section: "documents_expiry" }],
+  ["salary ki deya hoise ei mase", "payroll_status"], ["এই মাসের বেতন দেওয়া হয়েছে কি", "payroll_status"], ["is this month's salary paid", "payroll_status"],
+  ["ke ke chakri chere dicche", "exits_overview"], ["কারা চাকরি ছেড়ে যাচ্ছে", "exits_overview"],
+  ["koyta pod khali ache", "recruitment_overview"], ["কয়টা পদে লোক নেওয়া হচ্ছে", "recruitment_overview"], ["how many open positions", "recruitment_overview"],
+  ["notun joiner der ki baki", "onboarding_overview"], ["নতুন যোগদানকারীদের কী বাকি", "onboarding_overview"],
+  ["ki ki notice ache", "active_notices"], ["নতুন কোনো নোটিশ আছে", "active_notices"], ["any new announcement", "active_notices"],
+  ["10 bochor dhore ke ke kaj korche", "service_length"], ["কে কে ৫ বছর পূর্ণ করেছে", "service_length"],
+  ["kon gari khali ache", "vehicle_overview"], ["কোন গাড়ি ফাঁকা", "vehicle_overview"],
+  ["sobar target er obostha", "target_progress"], ["department er target koto hoise", "target_progress"],
+  ["kar kaj deadline par hoye geche", "task_overview"], ["কার কাজ সময় পেরিয়ে গেছে", "task_overview"],
+  ["appraisal er obostha", "performance_overview"], ["মূল্যায়ন কতদূর", "performance_overview"],
+  ["ki ki kaj pending ache admin er", "admin_pending_work"], ["আমার টেবিলে কী কী বাকি", "admin_pending_work"],
+  ["chuti nite chaile ki korte hobe", "help:leave_apply"], ["ছুটি নিতে হলে কী করব", "help:leave_apply"], ["how can i take leave", "help:leave_apply"],
+  ["bill kemne jomadibo", "help:conveyance"], ["যাতায়াতের খরচ কীভাবে দাবি করব", "help:conveyance"], ["how to claim travel cost", "help:conveyance"],
+  ["field e jaoar somoy ki korbo", "help:movement_claim"], ["বাইরে কাজে গেলে চেক ইন কীভাবে", "help:movement_claim"],
+  ["laptop lagbe ki korbo", "help:asset"], ["নতুন ল্যাপটপ চাইব কীভাবে", "help:asset"], ["how do i request a laptop", "help:asset"],
+  ["gari lagbe kivabe chaibo", "help:vehicle"], ["অফিসের গাড়ি কীভাবে নেব", "help:vehicle"],
+  ["chakri charte chai ki korte hobe", "help:resignation"], ["চাকরি ছাড়তে চাইলে কী করব", "help:resignation"], ["how do i resign", "help:resignation"],
+  ["experience certificate kivabe pabo", "help:letters"], ["অভিজ্ঞতার সনদ কীভাবে পাব", "help:letters"],
+  ["taka dhar nite chai", "help:loan"], ["অগ্রিম টাকা নিতে চাই", "help:loan"], ["how to apply for salary advance", "help:loan"],
+  ["password bhule gechi ki korbo", "help:password"], ["পাসওয়ার্ড বদলাব কীভাবে", "help:password"], ["how to change my photo", "help:password"],
+  ["kono somossa nalish dibo kivabe", "help:grievance"], ["অভিযোগ জানাব কীভাবে", "help:grievance"],
+  ["karo number kivabe pabo", "help:directory"], ["সহকর্মীর ফোন নম্বর কোথায় পাব", "help:directory"],
+  ["onnoder abedon approve kothay kori", "help:approve"], ["অন্যের আবেদন কোথায় অনুমোদন করব", "help:approve"],
+  ["payslip kothay pabo", "help:payslip"], ["বেতনের স্লিপ কোথায়", "help:payslip"],
+  ["notun staff kivabe add korbo", "help:add_employee"], ["নতুন কর্মী যোগ করব কীভাবে", "help:add_employee"], ["how to add a new employee", "help:add_employee"],
+  ["kauke permission dibo kivabe", "help:module_access"], ["কাউকে অনুমতি দেব কীভাবে", "help:module_access"],
+  ["notun login khulbo kivabe", "help:users_admin"], ["নতুন লগইন কীভাবে খুলব", "help:users_admin"],
+  ["salary toiri kivabe kori", "help:payroll"], ["বেতন শিট কীভাবে বানাব", "help:payroll"],
+  ["chutir din add korbo kivabe", "help:holidays"], ["নতুন ছুটির দিন কীভাবে যোগ করব", "help:holidays"],
+  ["notice kivabe dibo", "help:notice"], ["নোটিশ কীভাবে দেব", "help:notice"],
+  ["promotion kivabe dibo", "help:hr_actions"], ["পদোন্নতি কীভাবে দেব", "help:hr_actions"], ["how to transfer an employee", "help:hr_actions"],
+  ["manush er sathe kotha bolbo", "request_human_support"]
+];
+let learned: LearnedRow[] = [];
+let learnedLoadedAt = 0;
+let learnedQuery: QueryDB | null = null;
+
+const gramsOf = (s: string) => {
+  const x = norm(s).replace(/\s+/g, "");
+  const g = new Set<string>();
+  for (let i = 0; i + 3 <= x.length; i++) g.add(x.slice(i, i + 3));
+  return g;
+};
+const similarity = (a: Set<string>, b: Set<string>) => {
+  if (!a.size || !b.size) return 0;
+  let both = 0;
+  for (const g of a) if (b.has(g)) both++;
+  return both / (a.size + b.size - both);
+};
+
+async function loadLearned(force = false) {
+  if (!learnedQuery || (!force && Date.now() - learnedLoadedAt < 10 * 60_000)) return;
+  learnedLoadedAt = Date.now();
+  const rows: any[] = (await learnedQuery("/*unscoped*/ SELECT question, tool, help_id, args FROM assistant_learned ORDER BY hits DESC, id DESC LIMIT 5000").catch(() => [])) || [];
+  learned = [
+    ...rows.map((r) => {
+      let args: any = null;
+      try { args = r.args ? JSON.parse(r.args) : null; } catch { args = null; }
+      return { question: String(r.question), tool: r.tool || null, help_id: r.help_id || null, args, grams: gramsOf(String(r.question)) };
+    }),
+    ...TRAINED
+  ];
+}
+const TRAINED: LearnedRow[] = TRAINING.map(([q, to, args]) => ({
+  question: norm(q).trim(),
+  tool: to.startsWith("help:") ? null : to,
+  help_id: to.startsWith("help:") ? to.slice(5) : null,
+  args: args || null,
+  grams: gramsOf(q)
+}));
+
+function closestLearned(message: string, min = 0.55): LearnedRow | null {
+  const q = norm(message).trim();
+  if (q.length < 4) return null;
+  const exact = learned.find((l) => l.question === q);
+  if (exact) return exact;
+  const g = gramsOf(message);
+  let best: LearnedRow | null = null;
+  let score = 0;
+  for (const l of learned) {
+    const s = similarity(g, l.grams);
+    if (s > score) [best, score] = [l, s];
+  }
+  return score >= min ? best : null;
+}
+
+async function remember(message: string, learn: NonNullable<Answer["learn"]>) {
+  const q = norm(message).trim();
+  if (!learnedQuery || q.length < 4 || q.length > 300) return;
+  await learnedQuery(
+    `/*unscoped*/ INSERT INTO assistant_learned (question, tool, help_id, args) VALUES (?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE tool = VALUES(tool), help_id = VALUES(help_id), args = VALUES(args), hits = hits + 1`,
+    [q, learn.tool || null, learn.help || null, learn.args ? JSON.stringify(learn.args) : null]
+  ).catch(() => {});
+  const known = learned.find((l) => l.question === q);
+  const row = { question: q, tool: learn.tool || null, help_id: learn.help || null, args: learn.args || null, grams: gramsOf(q) };
+  if (known) Object.assign(known, row);
+  else learned.unshift(row);
+}
+
+// Spelling: each unknown word (4+ letters) becomes the closest known word,
+// one letter off for short words, two for long ones.
+let vocab: Set<string> | null = null;
+let topics: Set<string> | null = null;
+const wordsOf = (keys: string[], into: Set<string>) => keys.forEach((k) => norm(k).trim().split(" ").forEach((w) => w.length >= 4 && !/^[a-z]{1,3}$/.test(w) && into.add(w)));
+// Words of the topics themselves (attendance, balance, হাজিরা…) — never a person's name.
+function topicWords() {
+  if (topics) return topics;
+  topics = new Set<string>();
+  for (const i of INTENTS) wordsOf(i.keys, topics);
+  for (const h of HELP) wordsOf(h.keys, topics);
+  for (const w of ["kaj", "koto", "kobe", "dibo", "korbo", "pabo", "chuti", "leave", "ache", "nai"]) topics.delete(w);
+  for (const w of [...NOT_NAMES, ...ORG_WORDS]) topics.add(w);
+  return topics;
+}
+function knownWords() {
+  if (vocab) return vocab;
+  vocab = new Set<string>();
+  for (const i of INTENTS) wordsOf(i.keys, vocab);
+  for (const h of HELP) wordsOf(h.keys, vocab);
+  for (const [q] of TRAINING) wordsOf([q], vocab);
+  wordsOf([...HOW, ...LAST_MONTH, ...LEAVE_WORDS, ...APPLY_WORDS, ...HOLIDAY_WORDS, ...HUMAN_WORDS, ...THANKS, ...GREET], vocab);
+  return vocab;
+}
+function editDistance(a: string, b: string, max: number) {
+  if (Math.abs(a.length - b.length) > max) return max + 1;
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    let rowMin = i;
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      rowMin = Math.min(rowMin, cur[j]);
+    }
+    if (rowMin > max) return max + 1;
+    prev = cur;
+  }
+  return prev[b.length];
+}
+function fixSpelling(message: string): string {
+  const words = knownWords();
+  const out = norm(message).trim().split(" ").map((w) => {
+    if (w.length < 4 || words.has(w) || /\d/.test(w)) return w;
+    const max = w.length >= 7 ? 2 : 1;
+    let best = w;
+    let bestD = max + 1;
+    for (const k of words) {
+      if (Math.abs(k.length - w.length) > max) continue;
+      const d = editDistance(w, k, max);
+      if (d < bestD) [best, bestD] = [k, d];
+    }
+    return best;
+  });
+  return norm(out.join(" "));
 }
 
 // ---------------------------------------------------------------------------
@@ -2221,8 +2516,27 @@ const geminiClient = () => {
   return gemini;
 };
 
+// Every model said "quota used up" (429 / RESOURCE_EXHAUSTED): Gemini is not
+// asked again for a while and the local engine answers on its own (no 20 s
+// wait per question). 15 minutes at first, doubling up to 6 hours while it
+// stays used up; one good answer resets it.
+const QUOTA = /\b429\b|RESOURCE_EXHAUSTED|quota|rate limit/i;
+let geminiPausedUntil = 0;
+let geminiPauseMs = 0;
+const geminiPaused = () => Date.now() < geminiPausedUntil;
+function pauseGemini() {
+  geminiPauseMs = Math.min(6 * 60 * 60_000, geminiPauseMs ? geminiPauseMs * 2 : 15 * 60_000);
+  geminiPausedUntil = Date.now() + geminiPauseMs;
+  console.warn(`AI Assistant: Gemini quota used up — answering locally for ${Math.round(geminiPauseMs / 60_000)} min`);
+}
+function geminiWorked() {
+  geminiPauseMs = 0;
+  geminiPausedUntil = 0;
+}
+
 async function generateWithFallback(ai: GoogleGenAI, req: { contents: Content[]; config: Record<string, any> }) {
   let lastErr: any = null;
+  let allQuota = true;
   for (let i = 0; i < GEMINI_MODELS.length; i++) {
     const idx = (preferredModel + i) % GEMINI_MODELS.length;
     try {
@@ -2236,12 +2550,15 @@ async function generateWithFallback(ai: GoogleGenAI, req: { contents: Content[];
     } catch (err: any) {
       lastErr = err;
       const msg = String(err?.message || err);
+      if (!QUOTA.test(msg)) allQuota = false;
       // A bad key or a malformed request won't get better on another model.
       if (/API_KEY|PERMISSION_DENIED|INVALID_ARGUMENT|\b40[013]\b/.test(msg) && !/\b(404|429|503)\b/.test(msg)) throw err;
       console.warn(`AI Assistant: ${GEMINI_MODELS[idx]} unavailable (${msg.slice(0, 120)}), trying the next model`);
     }
   }
-  throw lastErr || new Error("no Gemini model available");
+  const e: any = lastErr || new Error("no Gemini model available");
+  if (allQuota && lastErr) e.quotaExhausted = true;
+  throw e;
 }
 
 async function geminiAnswer(c: Ctx, history: { role: string; text: string }[], message: string): Promise<Answer> {
@@ -2281,6 +2598,20 @@ async function geminiAnswer(c: Ctx, history: { role: string; text: string }[], m
   // used, its best entries are the reply.
   let helpOnly = true;
   let helpSteps: { title: string; steps: string }[] = [];
+  const usedTools = new Set<string>();
+  const toolArgs: Record<string, any> = {};
+  let toolFailed = false;
+  const learnOf = (): Answer["learn"] => {
+    if (helpOnly && helpSteps.length) {
+      const h = HELP.find((x) => x.title === helpSteps[0].title);
+      return h ? { help: h.id } : undefined;
+    }
+    const names = [...usedTools].filter((n) => n !== "app_help");
+    if (names.length !== 1 || toolFailed || !LEARNABLE.has(names[0])) return undefined;
+    // Only the kind of answer is kept (a section, a field), never a name or a date.
+    const args = Object.fromEntries(Object.entries(toolArgs[names[0]] || {}).filter(([k, v]) => LEARN_ARG_KEYS.has(k) && typeof v === "string" && v.length <= 40));
+    return { tool: names[0], ...(Object.keys(args).length ? { args } : {}) };
+  };
   for (let round = 0; round < 4; round++) {
     const resp = await generateWithFallback(ai, {
       contents,
@@ -2289,15 +2620,18 @@ async function geminiAnswer(c: Ctx, history: { role: string; text: string }[], m
     const calls = resp.functionCalls || [];
     if (!calls.length) {
       const text = (resp.text || "").trim();
-      if (helpOnly && helpSteps.length) return { reply: helpSteps.slice(0, 3).map((h) => `**${h.title}:** ${h.steps}`).join("\n\n"), actions, draft, report: rep };
+      if (helpOnly && helpSteps.length) return { reply: helpSteps.slice(0, 3).map((h) => `**${h.title}:** ${h.steps}`).join("\n\n"), actions, draft, report: rep, learn: learnOf() };
       if (!text) throw new Error("empty reply");
-      return { reply: text, actions, draft, report: rep };
+      return { reply: text, actions, draft, report: rep, learn: learnOf() };
     }
     contents.push(resp.candidates?.[0]?.content || { role: "model", parts: calls.map((fc) => ({ functionCall: fc })) });
     const parts = [];
     for (const fc of calls) {
       const tool = tools.find((t) => t.name === fc.name);
       const out: ToolResult = tool ? await tool.run(c, fc.args || {}) : { ok: false, text: "", data: { error: "unknown_tool" } };
+      usedTools.add(String(fc.name));
+      toolArgs[String(fc.name)] = fc.args || {};
+      if (!out.ok) toolFailed = true;
       for (const a of out.actions || []) actions.push(a);
       if (out.draft) draft = out.draft;
       if (out.report) rep = out.report;
@@ -2317,6 +2651,20 @@ async function geminiAnswer(c: Ctx, history: { role: string; text: string }[], m
 // ---------------------------------------------------------------------------
 export function registerAiAssistantRoutes(app: Express, deps: AiAssistantDeps) {
   const { authenticateToken, queryDB, getAdminModules, todayInDhaka } = deps;
+  learnedQuery = queryDB;
+  void queryDB(`/*unscoped*/ CREATE TABLE IF NOT EXISTS assistant_learned (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      question VARCHAR(300) NOT NULL,
+      tool VARCHAR(64) NULL,
+      help_id VARCHAR(64) NULL,
+      args VARCHAR(255) NULL,
+      hits INT NOT NULL DEFAULT 1,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_assistant_learned_q (question(190))
+    )`)
+    .then(() => loadLearned(true))
+    .catch((err: any) => console.warn("⚠️ assistant_learned: " + (err?.message || err)));
 
   // Per-account switch (Module Access -> "AI Assistant"), ON by default.
   const loadCtx = async (req: any): Promise<Ctx | null> => {
@@ -2347,7 +2695,7 @@ export function registerAiAssistantRoutes(app: Express, deps: AiAssistantDeps) {
   app.get("/api/assistant/status", authenticateToken, async (req: any, res: any) => {
     const c = await loadCtx(req);
     if (!c) return res.status(403).json({ error: "AI Assistant isn't turned on for your account." });
-    res.json({ enabled: true, engine: geminiClient() ? "gemini" : "local", suggestions: suggestionsFor(c) });
+    res.json({ enabled: true, engine: geminiClient() && !geminiPaused() ? "gemini" : "local", suggestions: suggestionsFor(c) });
   });
 
   app.post("/api/assistant/chat", authenticateToken, async (req: any, res: any) => {
@@ -2359,19 +2707,23 @@ export function registerAiAssistantRoutes(app: Express, deps: AiAssistantDeps) {
     const history = Array.isArray(req.body?.history) ? req.body.history.filter((m: any) => m && typeof m.text === "string") : [];
     let engine: "gemini" | "local" = "local";
     let out: Answer;
+    void loadLearned();
     try {
-      if (geminiClient()) {
+      if (geminiClient() && !geminiPaused()) {
         out = await Promise.race([
           geminiAnswer(c, history, message),
           new Promise<never>((_, rej) => setTimeout(() => rej(new Error("timeout")), 45000))
         ]);
         engine = "gemini";
+        geminiWorked();
+        if (out.learn) void remember(message, out.learn);
       } else {
-        out = await localAnswer(c, message);
+        out = await localAnswer(c, message, history);
       }
     } catch (err: any) {
-      console.warn("AI Assistant: Gemini failed, using local answer:", err?.message || err);
-      out = await localAnswer(c, message);
+      if (err?.quotaExhausted) pauseGemini();
+      else console.warn("AI Assistant: Gemini failed, using local answer:", err?.message || err);
+      out = await localAnswer(c, message, history);
     }
     const seen = new Set<string>();
     const actions = allowedActions(c, out.actions).filter((a) => (seen.has(a.nav) ? false : (seen.add(a.nav), true))).slice(0, 3);
