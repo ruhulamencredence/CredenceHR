@@ -36,7 +36,6 @@ import { registerHRAnalyticsRoutes } from "./HRAnalyticsRoutes";
 import { registerDocumentVaultRoutes, ensureDocumentVaultSchema } from "./DocumentVaultRoutes";
 import { Server as SocketIOServer } from "socket.io";
 import { ensureChatSchema, registerChatRoutes, setupChatSocket } from "./ChatRoutes";
-import { ensureMeasurementSchema, registerMeasurementRoutes } from "./MeasurementRoutes";
 import { ensureMprDispatchSchema, registerMprDispatchRoutes } from "./MprDispatchRoutes";
 import { registerDeviceRoutes, ensureDeviceSchema, checkAppDevice, deviceStillAllowed } from "./DeviceRoutes";
 import { ensureUserAccessSchema, registerUserAccessExtras, accountState } from "./UserAccessExtras";
@@ -254,8 +253,6 @@ async function ensureSchemaMigrations() {
   await ensureRecruitmentSchema(dbPool);
   await ensureGrievanceSchema(dbPool);
   await ensureDocumentVaultSchema(dbPool);
-  // PEPM Management -> Measurement Sheet (MeasurementRoutes.ts).
-  await ensureMeasurementSchema(dbPool);
   // PEPM -> Dispatch Material / Material Receive (MprDispatchRoutes.ts).
   await ensureMprDispatchSchema(dbPool);
   // Admin Panel -> Users: access audit, Access Templates, Block login (UserAccessExtras.ts).
@@ -2120,7 +2117,7 @@ async function ensureSchemaMigrations() {
 // of truth here and mirrored in src/types.ts (ADMIN_MODULES) for the UI.
 const USER_CLAIM_CATEGORIES = ["Transport", "Fuel", "Toll", "Parking", "Others"] as const;
 
-const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports", "users", "attendance", "attendance_reports", "leave_applications", "recycle", "editlog", "notices", "claims", "approvals", "conveyance", "disbursement", "employees", "departments", "tracking", "office_attendance", "holidays", "payroll", "asset_management", "exit_offboarding", "performance_management", "recruitment", "grievance_disciplinary", "hr_analytics", "document_vault", "measurement_sheet"] as const;
+const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports", "users", "attendance", "attendance_reports", "leave_applications", "recycle", "editlog", "notices", "claims", "approvals", "conveyance", "disbursement", "employees", "departments", "tracking", "office_attendance", "holidays", "payroll", "asset_management", "exit_offboarding", "performance_management", "recruitment", "grievance_disciplinary", "hr_analytics", "document_vault"] as const;
 
 // Granular per-module action layers — mirrors PermissionLayerKey/
 // PERMISSION_LAYERS in src/types.ts (single source of truth is duplicated
@@ -2129,7 +2126,7 @@ const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports",
 const PERMISSION_LAYER_KEYS = ["read", "edit_add", "entry_upload", "delete_trash", "permanent_delete"] as const;
 // Which modules currently enforce PERMISSION_LAYER_KEYS — mirrors
 // PERMISSION_LAYER_MODULES in src/types.ts. Rolled out module by module.
-const PERMISSION_LAYER_MODULES = ["departments", "projects", "approvals", "users", "reports", "tracking", "measurement_sheet", "employees"] as const;
+const PERMISSION_LAYER_MODULES = ["departments", "projects", "approvals", "users", "reports", "tracking", "employees"] as const;
 // Employee Tracking's layers: "read" = the live map, history and status
 // cards; "stay_report" = the Stay Report (TrackingStayReport.ts). Both are
 // reading, so an account with Employee Tracking and no saved layers has both.
@@ -2145,11 +2142,6 @@ const TRACKING_DEFAULT_LAYERS = ["read", "stay_report"] as const;
 // MprDispatchRoutes.ts) sees only the rows it sent there or dispatched;
 // "dispatch_all" sees everyone's. Both explicit-only, like submission_status.
 const REPORT_LAYER_KEYS = ["read", "edit_add", "delete_trash", "permanent_delete", "submission_status", "dispatch_material", "dispatch_all"] as const;
-// PEPM -> Measurement Sheet: "read" = open and export sheets; "edit_add" =
-// upload drawings and change sheets; "delete_trash" = delete a sheet;
-// "material_budget" = the Material Budget tab. With no saved layers an
-// account has "read" alone (see defaultLayersFor below).
-const MEASUREMENT_LAYER_KEYS = ["read", "edit_add", "delete_trash", "material_budget"] as const;
 // Employees: "read" = everything the module did before; "employee_delete" =
 // delete an Employee record (only one with no pay / service records,
 // EmployeeRecordsGuard.ts). Explicit-only.
@@ -2177,7 +2169,6 @@ const MODULE_LAYER_KEY_SETS: Record<string, readonly string[]> = {
   users: [...PERMISSION_LAYER_KEYS, "block_account"],
   reports: REPORT_LAYER_KEYS,
   tracking: TRACKING_LAYER_KEYS,
-  measurement_sheet: MEASUREMENT_LAYER_KEYS,
   employees: EMPLOYEE_LAYER_KEYS,
   leave_manage: LEAVE_MANAGE_LAYER_KEYS,
 };
@@ -2228,7 +2219,7 @@ type AdminModuleKey = typeof ADMIN_MODULE_KEYS[number];
 // it, may do there (requireModuleLayer / hasModuleLayer).
 function defaultLayersFor(moduleKey: string): readonly string[] {
   if (moduleKey === "tracking") return TRACKING_DEFAULT_LAYERS;
-  if (moduleKey === "measurement_sheet" || moduleKey === "employees") return ["read"];
+  if (moduleKey === "employees") return ["read"];
   return PERMISSION_LAYER_KEYS.filter((k) => k !== "permanent_delete");
 }
 
@@ -3478,7 +3469,7 @@ async function startServer() {
   // on for a module is never a silent regression; a Superadmin only actually
   // restricts anything once they explicitly save a narrower set in the
   // Module Access modal.
-  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "stay_report" | "live" | "material_budget" | "dispatch_material" | "dispatch_all" | "block_account" | "employee_delete") =>
+  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "stay_report" | "live" | "dispatch_material" | "dispatch_all" | "block_account" | "employee_delete") =>
     async (req: any, res: any, next: any) => {
       if (!req.user) return res.status(401).json({ error: "Access token required" });
       if (req.user.role === "superadmin") return next();
@@ -3531,10 +3522,6 @@ async function startServer() {
   // use the app on (DeviceRoutes.ts).
   await ensureDeviceSchema(queryDB).catch((err: any) => console.warn("⚠️ Device Access (schema): " + err.message));
   registerDeviceRoutes(app, { authenticateToken, requireSuperAdmin, queryDB });
-
-  // PEPM Management -> Measurement Sheet: building drawing (DWG/DXF) to a
-  // BOQ measurement sheet (MeasurementRoutes.ts).
-  registerMeasurementRoutes(app, { authenticateToken, requireAdmin, requireModuleLayer, hasModuleLayer, queryDB });
 
   // PEPM -> Dispatch Material (Purchase) and Material Receive (the project)
   // close the MPR cycle (MprDispatchRoutes.ts).

@@ -33,3 +33,20 @@ New npm packages (already in package.json / package-lock.json):
 - Deleting needs the new layer **Employees -> Delete employee records** in
   Users -> Module Access. Nobody has it until ticked (Superadmin always
   does); without it the delete button is hidden.
+
+## Removed: PEPM Management -> Measurement Sheet
+The software no longer has the Measurement Sheet module (page, API, drawing
+engine, Module Access row, its permission layers incl. `material_budget`, and
+its Credence Assistant topic).
+
+Copying files over does not delete old ones — on the live server also
+**delete** these three files before `npm run build`:
+
+    MeasurementRoutes.ts
+    MeasurementEngine.ts
+    src/components/MeasurementSheet.tsx
+
+The `measurement_sheets` table and its rows are left in the database as they
+are (nothing reads them any more); drop it later only if that data is no
+longer wanted. The npm packages `@mlightcad/libredwg-web` and `dxf-parser`
+are now unused and can be removed with `npm uninstall` when convenient.

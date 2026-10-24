@@ -3,7 +3,7 @@ export type UserRole = 'superadmin' | 'admin' | 'user';
 // Every Admin Panel tab. A Superadmin implicitly has all of these; a plain Admin
 // only sees/uses the ones the Superadmin has explicitly granted via
 // PUT /api/users/:id/module-permissions. Mirrors ADMIN_MODULE_KEYS in server.ts.
-export type AdminModuleKey = 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'recycle' | 'editlog' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'disbursement' | 'employees' | 'departments' | 'tracking' | 'office_attendance' | 'holidays' | 'payroll' | 'asset_management' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'measurement_sheet';
+export type AdminModuleKey = 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'recycle' | 'editlog' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'disbursement' | 'employees' | 'departments' | 'tracking' | 'office_attendance' | 'holidays' | 'payroll' | 'asset_management' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault';
 
 export const ADMIN_MODULES: { key: AdminModuleKey; label: string }[] = [
   { key: 'reports', label: 'Reports' },
@@ -41,8 +41,7 @@ export const ADMIN_MODULES: { key: AdminModuleKey; label: string }[] = [
   { key: 'recruitment', label: 'Recruitment (ATS)' },
   { key: 'grievance_disciplinary', label: 'Grievance & Disciplinary' },
   { key: 'hr_analytics', label: 'HR Analytics' },
-  { key: 'document_vault', label: 'Document Vault' },
-  { key: 'measurement_sheet', label: 'Measurement Sheet' }
+  { key: 'document_vault', label: 'Document Vault' }
 ];
 
 // Granular per-module action layers, layered on top of the coarse module
@@ -50,7 +49,7 @@ export const ADMIN_MODULES: { key: AdminModuleKey; label: string }[] = [
 // combination of these per (Admin/User account, module) via Admin Panel ->
 // Users -> Module Access. Independent checkboxes, not hierarchical: having
 // 'delete_trash' does NOT imply 'edit_add' is also granted.
-export type PermissionLayerKey = 'read' | 'edit_add' | 'entry_upload' | 'delete_trash' | 'permanent_delete' | 'submission_status' | 'dispatch_material' | 'dispatch_all' | 'stay_report' | 'live' | 'material_budget' | 'block_account' | 'employee_delete';
+export type PermissionLayerKey = 'read' | 'edit_add' | 'entry_upload' | 'delete_trash' | 'permanent_delete' | 'submission_status' | 'dispatch_material' | 'dispatch_all' | 'stay_report' | 'live' | 'block_account' | 'employee_delete';
 
 export const PERMISSION_LAYERS: { key: PermissionLayerKey; label: string }[] = [
   { key: 'read', label: 'Read Only' },
@@ -64,7 +63,7 @@ export const PERMISSION_LAYERS: { key: PermissionLayerKey; label: string }[] = [
 // being rolled out one module at a time. A module not listed here still only
 // has the old coarse on/off grant (module_permissions), unaffected by any of
 // this. Start: 'departments', then 'projects', then 'approvals', then 'users'.
-export const PERMISSION_LAYER_MODULES: AdminModuleKey[] = ['departments', 'projects', 'approvals', 'users', 'reports', 'tracking', 'measurement_sheet', 'employees'];
+export const PERMISSION_LAYER_MODULES: AdminModuleKey[] = ['departments', 'projects', 'approvals', 'users', 'reports', 'tracking', 'employees'];
 
 // A module that uses only some of the layers, with its own labels. PEPM
 // Reports: Read Only, Edit, Delete/Trash, Permanent Delete, and Budget
@@ -101,20 +100,11 @@ export const MODULE_LAYER_OPTIONS: Partial<Record<AdminModuleKey, { key: Permiss
   employees: [
     { key: 'read', label: 'Employees (view, add, edit)' },
     { key: 'employee_delete', label: 'Delete employee records' }
-  ],
-  // PEPM -> Measurement Sheet: open and export sheets; upload a drawing and
-  // change a sheet; delete one; the Material Budget tab. With no saved
-  // layers an account has "See and export" alone (server: defaultLayersFor).
-  measurement_sheet: [
-    { key: 'read', label: 'See and export sheets' },
-    { key: 'edit_add', label: 'Upload drawings, edit sheets' },
-    { key: 'delete_trash', label: 'Delete sheets' },
-    { key: 'material_budget', label: 'Material Budget (quantities, rates, cost)' }
   ]
 };
 // Layers an account has only when explicitly ticked — never part of the
 // "module granted, no layers saved yet" default (requireModuleLayer).
-export const EXPLICIT_ONLY_LAYERS: PermissionLayerKey[] = ['permanent_delete', 'submission_status', 'dispatch_material', 'dispatch_all', 'live', 'material_budget', 'block_account', 'employee_delete'];
+export const EXPLICIT_ONLY_LAYERS: PermissionLayerKey[] = ['permanent_delete', 'submission_status', 'dispatch_material', 'dispatch_all', 'live', 'block_account', 'employee_delete'];
 export const layersFor = (moduleKey: AdminModuleKey) => MODULE_LAYER_OPTIONS[moduleKey] || PERMISSION_LAYERS;
 
 // Leave Manage's own operation-specific layers — same independent-checkbox
@@ -1529,7 +1519,7 @@ export interface AdminNavRequest {
   // never grantable to an Admin/User the way every other Admin Panel module is.
   // 'permanent_delete_log' is the same — Superadmin-only, see
   // GET /api/entries/permanent-delete-log in EntriesRoutes.ts.
-  target: 'dashboard' | 'reports' | 'mprs' | 'imports' | 'editlog' | 'recycle' | 'projects' | 'branches' | 'users' | 'notices' | 'approvals' | 'attendance' | 'attendance_reports' | 'employees' | 'departments' | 'tracking' | 'holidays' | 'disbursement' | 'my_conveyance' | 'asset_management' | 'servers' | 'permanent_delete_log' | 'active_users' | 'devices' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'measurement_sheet';
+  target: 'dashboard' | 'reports' | 'mprs' | 'imports' | 'editlog' | 'recycle' | 'projects' | 'branches' | 'users' | 'notices' | 'approvals' | 'attendance' | 'attendance_reports' | 'employees' | 'departments' | 'tracking' | 'holidays' | 'disbursement' | 'my_conveyance' | 'asset_management' | 'servers' | 'permanent_delete_log' | 'active_users' | 'devices' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault';
   ts: number;
 }
 

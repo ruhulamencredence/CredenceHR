@@ -36,7 +36,6 @@ import { BudgetSubmissionReport } from './BudgetSubmissionReport';
 import { MprDispatchMaterial } from './MprDispatchMaterial';
 import { MdStatusChip, MdTimelinePopup, mdStatusLabel } from './MprDispatchShared';
 import { ProgressOverlay, useLongTask, xhrJson } from './ProgressOverlay';
-import { MeasurementSheet } from './MeasurementSheet';
 import { DeviceAccess } from './DeviceAccess';
 import { UserAccessDrawer, UserAccessChips, userInitials, ROLE_BADGE, ROLE_LABEL } from './UserAccessDrawer';
 import { UserBulkBar } from './UserBulkBar';
@@ -60,7 +59,7 @@ import { useBackButtonClose } from '../lib/useBackButtonClose';
 // here since this list has no nested-group UI. Any ADMIN_MODULES key not
 // listed under one of these falls into "Other" automatically.
 const MODULE_ACCESS_GROUPS: { label: string; keys: AdminModuleKey[] }[] = [
-  { label: 'PEPM Manage', keys: ['reports', 'mprs', 'imports', 'recycle', 'editlog', 'measurement_sheet'] },
+  { label: 'PEPM Manage', keys: ['reports', 'mprs', 'imports', 'recycle', 'editlog'] },
   { label: 'HR', keys: ['approvals', 'notices', 'holidays', 'leave_applications', 'departments'] },
   { label: 'HR - Attendance', keys: ['attendance', 'attendance_reports', 'office_attendance'] },
   { label: 'HR - Claims/Bill/Disbursement', keys: ['claims', 'conveyance', 'disbursement'] },
@@ -71,8 +70,7 @@ const MODULE_ACCESS_GROUPS: { label: string; keys: AdminModuleKey[] }[] = [
     label: 'Other',
     keys: ADMIN_MODULES.map((m) => m.key).filter(
       (key) => ![
-        'reports', 'mprs', 'imports', 'recycle', 'editlog', 'measurement_sheet',
-        'approvals', 'notices', 'holidays', 'leave_applications', 'departments',
+        'reports', 'mprs', 'imports', 'recycle', 'editlog', 'approvals', 'notices', 'holidays', 'leave_applications', 'departments',
         'attendance', 'attendance_reports', 'office_attendance',
         'claims', 'conveyance', 'disbursement',
         'employees', 'tracking', 'asset_management',
@@ -495,7 +493,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // PUT /api/users/:id/module-permissions).
   const canGrantModuleAccess = isSuperAdmin || !!user.can_grant_module_access;
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'my_conveyance' | 'disbursement' | 'holidays' | 'asset_management' | 'servers' | 'permanent_delete_log' | 'active_users' | 'devices' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'measurement_sheet'>(
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'employees' | 'departments' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'office_attendance' | 'tracking' | 'recycle' | 'editlog' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'my_conveyance' | 'disbursement' | 'holidays' | 'asset_management' | 'servers' | 'permanent_delete_log' | 'active_users' | 'devices' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault'>(
     () => {
       // Restores whichever tab this Admin was last looking at — see the
       // "pull down to reload" note in App.tsx: since a reload now has to be
@@ -4350,7 +4348,6 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       {activeTab === 'grievance_disciplinary' && <GrievanceDisciplinaryPanel token={token} />}
       {activeTab === 'hr_analytics' && <HRAnalyticsDashboard token={token} />}
       {activeTab === 'document_vault' && <DocumentVaultPanel token={token} />}
-      {activeTab === 'measurement_sheet' && canSee('measurement_sheet') && <MeasurementSheet token={token} />}
 
       {/* TAB: SERVERS — Superadmin-only catalog of backend deployments
           (IP/URL) the Android app can switch between after login. Not a
