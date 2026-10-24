@@ -22,6 +22,8 @@ import { MailPopup as Popup, inputCls, labelCls, primaryBtn, ghostBtn } from './
 import { LoadingBlock } from './LoadingBlock';
 import { MdDispatch, MdRow, MdStatusChip, MdTimelinePopup, PO_STATUSES, isOverdue, mdFetch, qtyText, receiptText, todayDhaka } from './MprDispatchShared';
 
+// 16px text on phones so iOS doesn't zoom in when a field is tapped.
+const fieldCls = inputCls.replace('text-sm', 'text-base sm:text-sm');
 // Truck No: numbers, with single dashes between them (11-2345).
 const truckDigits = (v: string) => v.replace(/[^0-9-]/g, '').replace(/-+/g, '-').replace(/^-/, '');
 const nowTimeDhaka = () => new Date().toLocaleTimeString('en-GB', { timeZone: 'Asia/Dhaka', hour: '2-digit', minute: '2-digit', hour12: false });
@@ -62,12 +64,6 @@ const ReceivePopup: React.FC<{ token: string; row: MdRow; d: MdDispatch; onClose
       setBusy(false);
     }
   };
-  const fixed = (label: string, value: React.ReactNode) => (
-    <div>
-      <div className={labelCls}>{label}</div>
-      <div className="liquid-glass-inset rounded-2xl px-3 py-2 text-sm text-slate-800 min-h-[38px]">{value || '—'}</div>
-    </div>
-  );
   return (
     <Popup
       title="Material received"
@@ -84,50 +80,62 @@ const ReceivePopup: React.FC<{ token: string; row: MdRow; d: MdDispatch; onClose
       }
     >
       <div className="space-y-3 text-left">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          {fixed('Project', row.projectName)}
-          {fixed('MPR No', row.mprNo)}
-          {fixed('Materials Name', `${row.item}${row.specification ? ` (${row.specification})` : ''}`)}
-          {fixed('Quantity sent', `${qtyText(d.qty, row.unit)} on ${d.dispatchDate ? formatDate(d.dispatchDate) : '—'}${d.poNo ? ` · P.O. ${d.poNo}` : ''}`)}
+        {/* Project, MPR No, material, Qty (and Supplier when Purchase gave one) come from the dispatch. */}
+        <div className="liquid-glass-inset rounded-[24px] p-3 text-xs space-y-0.5">
+          <div className="font-semibold text-slate-800">{row.projectName} · MPR {row.mprNo}</div>
+          <div className="text-sm font-semibold text-slate-900">{row.item}{row.specification ? <span className="font-normal text-slate-600"> ({row.specification})</span> : null}</div>
+          <div className="text-slate-600">
+            Sent <b>{qtyText(d.qty, row.unit)}</b> on {d.dispatchDate ? formatDate(d.dispatchDate) : '—'}
+            {d.poNo ? ` · P.O. ${d.poNo}` : ''}
+          </div>
+          {d.supplier && <div className="text-slate-600">Supplier: <b>{d.supplier}</b></div>}
+        </div>
+        <div className="grid grid-cols-2 gap-2">
           <div>
             <label className={labelCls}>Receiving Date</label>
-            <input type="date" className={inputCls} value={date} max={todayDhaka()} min={d.dispatchDate || undefined} onChange={(e) => setDate(e.target.value)} />
+            <input type="date" className={fieldCls} value={date} max={todayDhaka()} min={d.dispatchDate || undefined} onChange={(e) => setDate(e.target.value)} />
           </div>
           <div>
             <label className={labelCls}>Receiving Time</label>
-            <input type="time" className={inputCls} value={time} onChange={(e) => setTime(e.target.value)} />
+            <input type="time" className={fieldCls} value={time} onChange={(e) => setTime(e.target.value)} />
           </div>
-          {d.supplier ? (
-            fixed('Supplier Name', d.supplier)
-          ) : (
-            <div>
+          {!d.supplier && (
+            <div className="col-span-2">
               <label className={labelCls}>Supplier Name</label>
-              <input className={inputCls} value={supplier} onChange={(e) => setSupplier(e.target.value)} placeholder="Purchase didn't give one — type it" />
+              <input className={fieldCls} value={supplier} onChange={(e) => setSupplier(e.target.value)} placeholder="Purchase didn't give one — type it" />
             </div>
           )}
           <div>
-            <label className={labelCls}>Quantity received{row.unit ? ` (${row.unit})` : ''}</label>
-            <input className={inputCls} inputMode="decimal" value={qty} onChange={(e) => setQty(e.target.value)} />
+            <label className={labelCls}>Qty received{row.unit ? ` (${row.unit})` : ''}</label>
+            <input className={fieldCls} inputMode="decimal" value={qty} onChange={(e) => setQty(e.target.value)} />
           </div>
           <div>
             <label className={labelCls}>Truck No</label>
-            <input className={inputCls} inputMode="numeric" value={truckNo} onChange={(e) => setTruckNo(truckDigits(e.target.value))} placeholder="e.g. 11-2345" />
+            <input className={fieldCls} inputMode="numeric" value={truckNo} onChange={(e) => setTruckNo(truckDigits(e.target.value))} placeholder="e.g. 11-2345" />
           </div>
-          <div>
+          <div className="col-span-2">
             <label className={labelCls}>PO Status</label>
-            <select className={inputCls} value={poStatus} onChange={(e) => setPoStatus(e.target.value)}>
-              <option value="">Pick…</option>
-              {PO_STATUSES.map((p) => <option key={p} value={p}>{p}</option>)}
-            </select>
+            <div className="grid grid-cols-3 gap-1.5">
+              {PO_STATUSES.map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => setPoStatus(p)}
+                  className={`px-2 py-2.5 rounded-xl text-xs font-semibold border ${poStatus === p ? 'bg-violet-600 border-violet-600 text-white' : 'bg-white/80 border-slate-200 text-slate-700'}`}
+                >
+                  {p}
+                </button>
+              ))}
+            </div>
           </div>
-          <div className="sm:col-span-2">
+          <div className="col-span-2">
             <label className={labelCls}>Received By</label>
-            <input className={inputCls} value={receivedBy} onChange={(e) => setReceivedBy(e.target.value)} placeholder="Name of the person who took the material" />
+            <input className={fieldCls} value={receivedBy} onChange={(e) => setReceivedBy(e.target.value)} placeholder="Name of the person who took the material" />
           </div>
         </div>
         <div>
           <label className={labelCls}>{short ? 'Why less? (needed)' : 'Note (optional)'}</label>
-          <input className={inputCls} value={note} onChange={(e) => setNote(e.target.value)} placeholder={short ? 'e.g. 20 cft short on the truck, 5 bags damaged' : ''} />
+          <input className={fieldCls} value={note} onChange={(e) => setNote(e.target.value)} placeholder={short ? 'e.g. 20 cft short on the truck, 5 bags damaged' : ''} />
           {short && <p className="mt-1 text-[11px] text-amber-700">Purchase is told; what didn't arrive can be sent again.</p>}
         </div>
         {error && <div className="text-xs px-3 py-2 rounded-xl bg-rose-50 text-rose-700">{error}</div>}
@@ -214,16 +222,16 @@ export const MaterialReceive: React.FC<{ token: string; canTakeBack?: boolean }>
         <div className="flex items-start justify-between gap-3 flex-wrap">
           <div>
             <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2"><PackageCheck className="w-5 h-5 text-emerald-600" /> Material Receive</h2>
-            <p className="text-xs text-slate-500 mt-0.5 max-w-2xl">
+            <p className="hidden sm:block text-xs text-slate-500 mt-0.5 max-w-2xl">
               My MPR in Dispatch: where the MPR rows you entered stand with Purchase. On the way: material sent to your projects — when it arrives, confirm how much came.
               When all of an MPR row has arrived, it is complete.
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="inline-flex rounded-xl bg-slate-100 p-1">
-              {([['mine', 'My MPR in Dispatch'], ['open', `On the way${view === 'open' && rows ? ` (${onTheWay})` : ''}`], ['received', 'Received (60 days)']] as const).map(([k, label]) => (
-                <button key={k} type="button" onClick={() => setView(k)} className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${view === k ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600'}`}>
-                  {label}
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <div className="flex-1 sm:flex-none flex rounded-xl bg-slate-100 p-1">
+              {([['mine', 'My MPR', ' in Dispatch'], ['open', `On the way${view === 'open' && rows ? ` (${onTheWay})` : ''}`, ''], ['received', 'Received', ' (60 days)']] as const).map(([k, label, more]) => (
+                <button key={k} type="button" onClick={() => setView(k)} className={`flex-1 sm:flex-none px-1.5 sm:px-3 py-2 sm:py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap ${view === k ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600'}`}>
+                  {label}<span className="hidden sm:inline">{more}</span>
                 </button>
               ))}
             </div>
@@ -306,8 +314,8 @@ export const MaterialReceive: React.FC<{ token: string; canTakeBack?: boolean }>
                       </div>
                       {d.status === 'sent' && view === 'mine' && <span className="text-[11px] font-semibold text-sky-700">On the way</span>}
                       {d.status === 'sent' && view !== 'mine' && (
-                        <button type="button" onClick={() => setReceiving({ row: r, d })} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700">
-                          <PackageCheck className="w-4 h-4" /> Received
+                        <button type="button" onClick={() => setReceiving({ row: r, d })} className="w-full sm:w-auto justify-center inline-flex items-center gap-1.5 px-3 py-2.5 sm:py-1.5 rounded-xl text-sm sm:text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700">
+                          <PackageCheck className="w-4 h-4" /> Receive
                         </button>
                       )}
                     </div>
