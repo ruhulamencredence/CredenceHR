@@ -46,7 +46,7 @@ Copying files over does not delete old ones — on the live server also
     MeasurementEngine.ts
     src/components/MeasurementSheet.tsx
 
-The `measurement_sheets` table and its rows are left in the database as they
-are (nothing reads them any more); drop it later only if that data is no
-longer wanted. The npm packages `@mlightcad/libredwg-web` and `dxf-parser`
+When the server starts it **drops the `measurement_sheets` table** (all saved
+sheets are deleted for good) and removes the module's saved permissions.
+Take a database backup first if that data may ever be wanted. The npm packages `@mlightcad/libredwg-web` and `dxf-parser`
 are now unused and can be removed with `npm uninstall` when convenient.
