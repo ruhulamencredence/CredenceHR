@@ -269,6 +269,15 @@ async function initDB() {
     await ensurePasswordResetSchema(dbPool);
     // Budget import -> draft notice (BudgetNoticeDraft.ts).
     await ensureBudgetNoticeSchema(dbPool);
+    // Measurement Sheet was taken out of the software: drop its table and the
+    // module's saved permissions (no-ops once they are gone).
+    for (const sql of [
+      "DROP TABLE IF EXISTS measurement_sheets",
+      "DELETE FROM admin_module_permission_layers WHERE module_key = 'measurement_sheet'",
+      "DELETE FROM admin_module_permissions WHERE module_key = 'measurement_sheet'"
+    ]) {
+      await dbPool.query(sql).catch((err: any) => console.warn("⚠️ Measurement Sheet removal: " + err.message));
+    }
     // PEPM -> Dispatch Material / Material Receive (MprDispatchRoutes.ts).
     await ensureMprDispatchSchema(dbPool);
     // E-Signature on Document Vault documents (ESignRoutes.ts).
