@@ -8,13 +8,14 @@
 // actions").
 //   - Conversation wallpapers (per chat, or a default for every chat).
 //   - The message menu (long-press on a phone, the ⌄ button on a computer):
-//     quick reactions, Reply, Copy, Delete for me, Delete for everyone.
+//     quick reactions, Reply, Edit (own text, 15 minutes), Copy, Delete for
+//     me, Delete for everyone.
 //   - Reaction chips under a bubble, and who reacted.
 //   - Chat profile sections: About, work details, shared media, common
 //     groups, the wallpaper picker; and editing one's own About.
 
 import React, { useEffect, useState } from 'react';
-import { Reply, Copy, Trash2, Ban, Smile, Loader2, Image as ImageIcon, FileText, Mic, Users, Shield, Mail, Phone, Briefcase, Building2, IdCard, Pencil } from 'lucide-react';
+import { Reply, Copy, Trash2, Ban, Pencil as EditIcon, Smile, Loader2, Image as ImageIcon, FileText, Mic, Users, Shield, Mail, Phone, Briefcase, Building2, IdCard, Pencil } from 'lucide-react';
 import { MailPopup as Popup, inputCls, labelCls, primaryBtn, ghostBtn } from '../mail/MailPopup';
 import { apiUrl } from '../../lib/api';
 import { formatDate } from '../../lib/formatDate';
@@ -92,6 +93,7 @@ export const WallpaperPicker: React.FC<{ token: string; roomId: number; current?
 // ---- Message menu ---------------------------------------------------------------
 export const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
 const UNSEND_WINDOW_MS = 48 * 60 * 60 * 1000;
+const EDIT_WINDOW_MS = 15 * 60 * 1000;
 
 export const MessageMenu: React.FC<{
   token: string;
@@ -100,17 +102,20 @@ export const MessageMenu: React.FC<{
   // Group / community admin: may delete anyone's message for everyone.
   isRoomAdmin: boolean;
   onReply: () => void;
+  // Own text messages, within 15 minutes of sending.
+  onEdit: () => void;
   onClose: () => void;
   onReacted: (reactions: ChatReaction[]) => void;
   onHidden: () => void;
   onUnsent: () => void;
   confirm: (message: string) => Promise<boolean>;
-}> = ({ token, msg, meId, isRoomAdmin, onReply, onClose, onReacted, onHidden, onUnsent, confirm }) => {
+}> = ({ token, msg, meId, isRoomAdmin, onReply, onEdit, onClose, onReacted, onHidden, onUnsent, confirm }) => {
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const mine = msg.sender_id === meId;
   const unsent = !!msg.unsent_at;
   const canUnsend = !unsent && ((mine && Date.now() - new Date(msg.created_at).getTime() < UNSEND_WINDOW_MS) || isRoomAdmin);
+  const canEdit = mine && !unsent && msg.message_type === 'text' && Date.now() - new Date(msg.created_at).getTime() < EDIT_WINDOW_MS;
   const myReaction = (msg.reactions || []).find((r) => r.user_id === meId)?.emoji;
   const call = async (key: string, path: string, body?: any) => {
     setBusy(key);
@@ -178,6 +183,11 @@ export const MessageMenu: React.FC<{
               onReply();
               onClose();
             })}
+          {canEdit &&
+            item('edit', <EditIcon className="w-4 h-4" />, 'Edit', () => {
+              onEdit();
+              onClose();
+            })}
           {!unsent &&
             !!msg.content &&
             item('copy', <Copy className="w-4 h-4" />, 'Copy', () => {
@@ -200,7 +210,12 @@ export const MessageMenu: React.FC<{
               }
             }, true)}
         </div>
-        {mine && !unsent && !canUnsend && <p className="text-[11px] text-slate-500">Delete for everyone is only possible within 48 hours of sending.</p>}
+        {mine && !unsent && (!canEdit || !canUnsend) && (
+          <p className="text-[11px] text-slate-500">
+            {msg.message_type === 'text' && !canEdit ? 'A message can be edited within 15 minutes of sending. ' : ''}
+            {!canUnsend ? 'Delete for everyone is only possible within 48 hours.' : ''}
+          </p>
+        )}
         {error && <div className="text-xs px-3 py-2 rounded-xl bg-rose-50 text-rose-700">{error}</div>}
       </div>
     </Popup>

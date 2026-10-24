@@ -228,6 +228,10 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
   const [replyTo, setReplyTo] = useState<ChatMessage | null>(null);
   // WhatsApp-style message menu / who reacted / own About (chat/ChatExtras.tsx).
   const [menuMsg, setMenuMsg] = useState<ChatMessage | null>(null);
+  // Editing one of your own text messages (menu -> Edit): the box below
+  // holds its text and Send saves the change instead of sending a new one.
+  const [editing, setEditing] = useState<ChatMessage | null>(null);
+  const [editError, setEditError] = useState('');
   const [whoMsg, setWhoMsg] = useState<ChatMessage | null>(null);
   const [showMyAbout, setShowMyAbout] = useState(false);
   const [profileTick, setProfileTick] = useState(0);
@@ -409,7 +413,12 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
       setRooms((prev) => prev.map((r) => (r.id === roomId && r.last_message_id === messageId ? { ...r, last_message_content: 'This message was deleted', last_message_type: 'text' } : r)));
     };
     socket.on('receive_message', onReceive);
+    const onEdited = ({ roomId, messageId, content, edited_at }: { roomId: number; messageId: number; content: string; edited_at: string }) => {
+      if (roomId === activeRoomIdRef.current) patchMessage(messageId, { content, edited_at });
+      setRooms((prev) => prev.map((r) => (r.id === roomId && r.last_message_id === messageId ? { ...r, last_message_content: content } : r)));
+    };
     socket.on('message_reactions', onReactions);
+    socket.on('message_edited', onEdited);
     socket.on('message_unsent', onUnsent);
     socket.on('user_typing', onTyping);
     socket.on('message_read', onRead);
@@ -424,6 +433,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
       socket.off('connect', askPresence);
       socket.off('receive_message', onReceive);
       socket.off('message_reactions', onReactions);
+      socket.off('message_edited', onEdited);
       socket.off('message_unsent', onUnsent);
       socket.off('user_typing', onTyping);
       socket.off('message_read', onRead);
@@ -438,6 +448,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
       setActiveRoomId(roomId);
       setShowInfoPanel(false);
       setReplyTo(null);
+      setEditing(null);
       setOtherReadMessageId(null);
       setMentionQuery(null);
       setLoadingMessages(true);
@@ -645,6 +656,24 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
     const content = messageInput.trim();
     if (!content || !activeRoomId || sending) return;
     setSending(true);
+    if (editing) {
+      setEditError('');
+      fetch(apiUrl(`/api/chat/messages/${editing.id}/edit`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ content })
+      })
+        .then(async (res) => {
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || 'Could not edit the message');
+          if (!data.unchanged) setMessages((prev) => prev.map((m) => (m.id === editing.id ? { ...m, content: data.content, edited_at: data.edited_at } : m)));
+          setEditing(null);
+          setMessageInput('');
+        })
+        .catch((e) => setEditError(e.message))
+        .finally(() => setSending(false));
+      return;
+    }
     const socket = getChatSocket();
     const payload = { roomId: activeRoomId, content, replyToId: replyTo?.id || null };
     const finish = () => {
@@ -673,7 +702,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
         })
         .catch(() => finish());
     }
-  }, [messageInput, activeRoomId, sending, replyTo, token]);
+  }, [messageInput, activeRoomId, sending, replyTo, token, editing]);
 
   // Message box grows with its content (now a <textarea>, so Enter can make
   // a new line instead of always sending — see the onKeyDown below) up to a
@@ -1287,6 +1316,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                           </>
                         )}
                         <div className="flex justify-end items-center gap-1 mt-1 text-[10px] text-slate-400">
+                          {msg.edited_at && !unsent && <span className="italic">Edited</span>}
                           <span>{timeOnly(msg.created_at)}</span>
                           {isMe && !unsent && (isRead ? <CheckCheck size={14} className="text-violet-500" /> : <Check size={14} />)}
                         </div>
@@ -1304,7 +1334,28 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
               })}
             </div>
 
-            {replyTo && (
+            {editing && (
+              <div className="px-4 py-2 bg-amber-50 border-t border-amber-200 flex items-center justify-between gap-2">
+                <div className="text-xs text-slate-600 min-w-0">
+                  <span className="font-semibold text-amber-800">Editing message</span>
+                  <span className="block truncate">{editing.content}</span>
+                  {editError && <span className="block text-rose-700">{editError}</span>}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditing(null);
+                    setEditError('');
+                    setMessageInput('');
+                  }}
+                  className="p-1 text-slate-400 hover:text-slate-700"
+                  aria-label="Cancel editing"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+            {replyTo && !editing && (
               <div className="px-4 py-2 bg-slate-100 border-t border-slate-200 flex items-center justify-between">
                 <div className="text-xs text-slate-600 truncate">
                   Replying to <span className="font-semibold">{replyTo.sender_id === user.id ? 'yourself' : replyTo.sender_name}</span>:{' '}
@@ -1397,8 +1448,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                       onClick={sendTextMessage}
                       disabled={sending}
                       className="p-2.5 bg-violet-600 text-white rounded-full hover:bg-violet-700 disabled:opacity-40 shrink-0"
+                      aria-label={editing ? 'Save edit' : 'Send'}
                     >
-                      <Send className="w-4 h-4" />
+                      {editing ? <Check className="w-4 h-4" /> : <Send className="w-4 h-4" />}
                     </button>
                   ) : (
                     <button
@@ -1569,8 +1621,16 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
           confirm={(m) => confirmDialog(m, { tone: 'danger' })}
           onClose={() => setMenuMsg(null)}
           onReply={() => {
+            setEditing(null);
             setReplyTo(menuMsg);
             messageInputRef.current?.focus();
+          }}
+          onEdit={() => {
+            setReplyTo(null);
+            setEditError('');
+            setEditing(menuMsg);
+            setMessageInput(menuMsg.content || '');
+            setTimeout(() => messageInputRef.current?.focus(), 50);
           }}
           onReacted={(reactions) => patchMessage(menuMsg.id, { reactions })}
           onHidden={() => setMessages((prev) => prev.filter((m) => m.id !== menuMsg.id))}

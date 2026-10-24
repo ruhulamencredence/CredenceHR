@@ -204,6 +204,8 @@ export async function ensureChatSchema(dbPool: any): Promise<void> {
     for (const [sql, ignore] of [
       ["ALTER TABLE chat_messages ADD COLUMN unsent_at TIMESTAMP NULL DEFAULT NULL", "ER_DUP_FIELDNAME"],
       ["ALTER TABLE chat_messages ADD COLUMN unsent_by INT NULL", "ER_DUP_FIELDNAME"],
+      // "Edit": the sender changes a text message within 15 minutes; it then shows "Edited".
+      ["ALTER TABLE chat_messages ADD COLUMN edited_at TIMESTAMP NULL DEFAULT NULL", "ER_DUP_FIELDNAME"],
       ["ALTER TABLE users ADD COLUMN chat_about VARCHAR(140) NULL", "ER_DUP_FIELDNAME"]
     ] as [string, string][]) {
       await dbPool.query(sql).catch((err: any) => {
@@ -321,7 +323,7 @@ export async function insertChatMessage(
 const MESSAGE_SELECT = `
   SELECT cm.id, cm.room_id, cm.sender_id, u.name AS sender_name, cm.message_type, cm.content,
          cm.attachment_filename, cm.attachment_mimetype, (cm.attachment_data IS NOT NULL) AS has_attachment,
-         cm.reply_to_id, cm.created_at, cm.unsent_at,
+         cm.reply_to_id, cm.created_at, cm.unsent_at, cm.edited_at,
          CASE WHEN rt.unsent_at IS NOT NULL THEN 'This message was deleted'
               WHEN rt.content IS NOT NULL AND rt.content <> '' THEN rt.content
               WHEN rt.message_type = 'image' THEN '📷 Photo'
@@ -785,7 +787,31 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
 
   // ---- WhatsApp-style message actions -------------------------------------
   const UNSEND_WINDOW_MS = 48 * 60 * 60 * 1000;
-  const messageRow = async (id: number) => ((await queryDB("SELECT id, room_id, sender_id, created_at, unsent_at FROM chat_messages WHERE id = ?", [id])) || [])[0];
+  const messageRow = async (id: number) => ((await queryDB("SELECT id, room_id, sender_id, message_type, content, created_at, unsent_at FROM chat_messages WHERE id = ?", [id])) || [])[0];
+  const EDIT_WINDOW_MS = 15 * 60 * 1000;
+
+  // POST /api/chat/messages/:id/edit — { content }: the sender changes a text
+  // message within 15 minutes of sending (like WhatsApp); it shows "Edited".
+  app.post("/api/chat/messages/:id/edit", authenticateToken, requireChat, async (req: any, res) => {
+    try {
+      const msg = await messageRow(Number(req.params.id));
+      if (!msg) return res.status(404).json({ error: "Message not found." });
+      if (!(await isMember(queryDB, msg.room_id, req.user.id))) return res.status(403).json({ error: "Not a member of this room." });
+      if (Number(msg.sender_id) !== Number(req.user.id)) return res.status(403).json({ error: "You can only edit your own messages." });
+      if (msg.unsent_at) return res.status(400).json({ error: "This message was deleted." });
+      if (msg.message_type !== "text") return res.status(400).json({ error: "Only text messages can be edited." });
+      if (Date.now() - new Date(msg.created_at).getTime() > EDIT_WINDOW_MS) return res.status(400).json({ error: "Too late to edit — a message can be edited within 15 minutes of sending." });
+      const content = String(req.body?.content ?? "").trim();
+      if (!content) return res.status(400).json({ error: "The message can't be empty." });
+      if (content === String(msg.content || "")) return res.json({ unchanged: true });
+      await queryDB("UPDATE chat_messages SET content = ?, edited_at = NOW() WHERE id = ?", [content, msg.id]);
+      const [updated] = await loadMessages(queryDB, "cm.id = ?", [msg.id]);
+      io.to(`room:${msg.room_id}`).emit("message_edited", { roomId: msg.room_id, messageId: msg.id, content: updated.content, edited_at: updated.edited_at });
+      res.json(updated);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
 
   // POST /api/chat/messages/:id/react — { emoji } sets this account's one
   // reaction (the same emoji again, or emoji null, takes it off).

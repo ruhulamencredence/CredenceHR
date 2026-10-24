@@ -2063,6 +2063,8 @@ export interface ChatMessage {
   created_at: string;
   // "Delete for everyone": set once unsent (content and attachment are gone).
   unsent_at?: string | null;
+  // Set when the sender edited the text (shows "Edited").
+  edited_at?: string | null;
   // One per account that reacted (ChatRoutes.ts loadMessages).
   reactions?: ChatReaction[];
 }
