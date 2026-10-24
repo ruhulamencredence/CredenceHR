@@ -7,7 +7,7 @@ import { ChangeUsernameForm } from './ChangeUsernameForm';
 import { AssetManagement } from './AssetManagement';
 import { ModulePath } from './ModulePath';
 import { useProfilePhoto } from '../lib/useProfilePhoto';
-import { BACKGROUND_THEMES, BackgroundThemeId, applyBackgroundTheme, getSavedBackgroundTheme } from '../lib/backgroundTheme';
+import { BACKGROUND_THEMES, BackgroundThemeId, applyBackgroundTheme, getSavedBackgroundTheme, MONO_ACCENTS, MonoAccentId, applyMonoAccent, getSavedMonoAccent } from '../lib/backgroundTheme';
 
 interface ProfilePageProps {
   user: User;
@@ -54,6 +54,11 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
   const handlePickBackgroundTheme = (id: BackgroundThemeId) => {
     applyBackgroundTheme(id, true);
     setBgTheme(id);
+  };
+  const [monoAccent, setMonoAccent] = useState<MonoAccentId>(getSavedMonoAccent());
+  const handlePickMonoAccent = (id: MonoAccentId) => {
+    applyMonoAccent(id, true);
+    setMonoAccent(id);
   };
   const initial = (user.name || user.username || '?').trim().charAt(0).toUpperCase();
   const roleLabel = user.role.charAt(0).toUpperCase() + user.role.slice(1);
@@ -188,7 +193,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
               Appearance
             </p>
             <section className="gemini-card overflow-hidden">
-              <BackgroundThemePicker selected={bgTheme} onPick={handlePickBackgroundTheme} />
+              <BackgroundThemePicker selected={bgTheme} onPick={handlePickBackgroundTheme} accent={monoAccent} onPickAccent={handlePickMonoAccent} />
             </section>
           </div>
 
@@ -302,7 +307,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
               Appearance
             </p>
             <div className="border-b" style={{ borderColor: 'var(--g-border)' }}>
-              <BackgroundThemePicker selected={bgTheme} onPick={handlePickBackgroundTheme} padded />
+              <BackgroundThemePicker selected={bgTheme} onPick={handlePickBackgroundTheme} accent={monoAccent} onPickAccent={handlePickMonoAccent} padded />
             </div>
             <p className="text-[11px] font-medium uppercase tracking-wide px-5 pt-4 pb-1" style={{ color: 'var(--g-text-muted)' }}>
               Settings
@@ -382,8 +387,11 @@ const ProfileRow: React.FC<{
 const BackgroundThemePicker: React.FC<{
   selected: BackgroundThemeId;
   onPick: (id: BackgroundThemeId) => void;
+  // Minimal Mono's colour touch, shown under the swatches while it's picked.
+  accent: MonoAccentId;
+  onPickAccent: (id: MonoAccentId) => void;
   padded?: boolean;
-}> = ({ selected, onPick, padded }) => (
+}> = ({ selected, onPick, accent, onPickAccent, padded }) => (
   <div className={`${padded ? 'px-5' : 'px-4'} py-3.5`}>
     <div className="flex items-center gap-3">
       {BACKGROUND_THEMES.map((theme) => {
@@ -413,5 +421,31 @@ const BackgroundThemePicker: React.FC<{
         );
       })}
     </div>
+    {selected === 'mono' && (
+      <div className="mt-3 pt-3 border-t" style={{ borderColor: 'var(--g-border)' }}>
+        <p className="text-[11px] mb-2" style={{ color: 'var(--g-text-muted)' }}>
+          Colour touch — a light colour on the pale parts; text and main buttons stay black.
+        </p>
+        <div className="flex items-center gap-3 flex-wrap">
+          {MONO_ACCENTS.map((a) => {
+            const on = a.id === accent;
+            return (
+              <button key={a.id} type="button" onClick={() => onPickAccent(a.id)} aria-label={`${a.label} colour touch`} className="flex flex-col items-center gap-1">
+                <span
+                  className="w-7 h-7 rounded-full flex items-center justify-center"
+                  style={{
+                    background: a.id === 'none' ? 'repeating-linear-gradient(45deg, #f4f4f5 0 4px, #e4e4e7 4px 8px)' : a.swatch,
+                    boxShadow: on ? `0 0 0 2px var(--g-surface), 0 0 0 3.5px #18181b` : 'inset 0 0 0 1px rgba(0,0,0,0.06)'
+                  }}
+                >
+                  {on && <BadgeCheck className="w-3.5 h-3.5 text-zinc-900" />}
+                </span>
+                <span className="text-[10px]" style={{ color: on ? 'var(--g-text)' : 'var(--g-text-muted)' }}>{a.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    )}
   </div>
 );

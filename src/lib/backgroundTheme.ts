@@ -116,15 +116,59 @@ export function getSavedBackgroundTheme(): BackgroundThemeId {
   return DEFAULT_THEME;
 }
 
+// Minimal Mono's colour touch: the pale shades (light backgrounds, chips,
+// the open sidebar item, dashboard icon wells, a faint glow on the page)
+// take a soft colour; text and main buttons stay black. "None" is pure mono.
+// Per device, like the background (<html data-accent="...">, index.css).
+export type MonoAccentId = 'none' | 'sky' | 'teal' | 'violet' | 'rose';
+export const MONO_ACCENTS: { id: MonoAccentId; label: string; swatch: string; glow: string }[] = [
+  { id: 'none', label: 'None', swatch: '#d4d4d8', glow: '' },
+  { id: 'sky', label: 'Sky', swatch: '#7dd3fc', glow: '186,230,253' },
+  { id: 'teal', label: 'Teal', swatch: '#5eead4', glow: '153,246,228' },
+  { id: 'violet', label: 'Violet', swatch: '#c4b5fd', glow: '221,214,254' },
+  { id: 'rose', label: 'Rose', swatch: '#fda4af', glow: '254,205,211' }
+];
+const ACCENT_KEY = 'mpr_mono_accent';
+const DEFAULT_ACCENT: MonoAccentId = 'sky';
+export function getSavedMonoAccent(): MonoAccentId {
+  try {
+    const v = localStorage.getItem(ACCENT_KEY);
+    if (MONO_ACCENTS.some((a) => a.id === v)) return v as MonoAccentId;
+  } catch {
+    // localStorage unavailable — the default.
+  }
+  return DEFAULT_ACCENT;
+}
+// Mono's page background, with the touch's faint glow in two corners.
+const monoGradient = (accent: MonoAccentId) => {
+  const glow = MONO_ACCENTS.find((a) => a.id === accent)?.glow;
+  const base = BACKGROUND_THEMES.find((t) => t.id === 'mono')!.gradient;
+  return glow
+    ? [`radial-gradient(ellipse 60% 45% at 0% 0%, rgba(${glow},0.35) 0%, rgba(${glow},0) 70%)`, `radial-gradient(ellipse 55% 40% at 100% 100%, rgba(${glow},0.28) 0%, rgba(${glow},0) 70%)`, base].join(', ')
+    : base;
+};
+export function applyMonoAccent(id: MonoAccentId, remember = false): void {
+  if (id === 'none') delete document.documentElement.dataset.accent;
+  else document.documentElement.dataset.accent = id;
+  if (document.documentElement.dataset.ui === 'mono') document.documentElement.style.setProperty('--g-bg-gradient', monoGradient(id));
+  if (!remember) return;
+  try {
+    localStorage.setItem(ACCENT_KEY, id);
+  } catch {
+    // The choice just won't survive a reload.
+  }
+}
+
 // Applies the theme's gradient to the document root. Called once at boot
 // (see main.tsx, before the first paint so there's no flash of the old
 // default) and again — with remember — whenever the account picks a
 // different one from ProfilePage.tsx.
 export function applyBackgroundTheme(id: BackgroundThemeId, remember = false): void {
   const theme = BACKGROUND_THEMES.find((t) => t.id === id) || BACKGROUND_THEMES[0];
-  document.documentElement.style.setProperty('--g-bg-gradient', theme.gradient);
   if (theme.ui) document.documentElement.dataset.ui = theme.ui;
   else delete document.documentElement.dataset.ui;
+  document.documentElement.style.setProperty('--g-bg-gradient', theme.ui === 'mono' ? monoGradient(getSavedMonoAccent()) : theme.gradient);
+  if (theme.ui === 'mono') applyMonoAccent(getSavedMonoAccent());
   if (!remember) return;
   try {
     localStorage.setItem(STORAGE_KEY, theme.id);
