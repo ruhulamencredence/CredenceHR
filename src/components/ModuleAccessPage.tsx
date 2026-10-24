@@ -77,6 +77,7 @@ type FlagKey =
   | 'can_use_mail_groups'
   | 'can_receive_material'
   | 'can_return_dispatch'
+  | 'can_give_feedback'
   | 'can_view_roster'
   | 'can_take_break'
   | 'can_sign_documents'
@@ -122,6 +123,7 @@ const FLAGS: FlagDef[] = [
   { key: 'can_view_leave_summary', label: 'Leave Summary on Dashboard', desc: 'Their leave balance card on the dashboard.', section: 'attendance', endpoint: null },
   { key: 'can_view_roster', label: 'My Duty Roster', desc: 'Their own shifts and Off days.', section: 'attendance', endpoint: 'roster-access' },
   { key: 'can_take_break', label: 'Break Time', desc: 'Start and end their breaks in the app.', section: 'attendance', endpoint: 'break-access' },
+  { key: 'can_give_feedback', label: 'Give feedback', desc: 'Rate the app and send problems or ideas (and the 7-day "How do you like the app?").', section: 'general', endpoint: 'feedback-access' },
 
   { key: 'can_view_movement_claims', label: 'Movement Claim', desc: 'GPS check in / out claims.', section: 'claims', endpoint: 'movement-claim-access' },
   { key: 'can_view_conveyance_claims', label: 'Conveyance Bill Claim', desc: 'Submit conveyance bills.', section: 'claims', endpoint: 'conveyance-claim-access' },
@@ -154,7 +156,7 @@ const MODULE_SECTION: Partial<Record<AdminModuleKey, SectionKey>> = {
   hr_operations: 'hrops', exit_offboarding: 'hrops', performance_management: 'hrops', recruitment: 'hrops', grievance_disciplinary: 'hrops', hr_analytics: 'hrops', document_vault: 'hrops',
   payroll: 'payroll',
   mail_admin: 'mail',
-  users: 'mis', projects: 'mis', branches: 'mis'
+  users: 'mis', projects: 'mis', branches: 'mis', user_feedback: 'mis'
 };
 const sectionOfModule = (k: AdminModuleKey): SectionKey => MODULE_SECTION[k] || 'other';
 
@@ -170,6 +172,7 @@ const MODULE_DESC: Partial<Record<AdminModuleKey, string>> = {
   leave_applications: 'Who applied for leave, by month.',
   duty_roster: 'Shifts and who works when.',
   break_time: 'Who is on a break, daily totals, over-limit.',
+  user_feedback: 'Ratings, problems and ideas people send about the app.',
   conveyance: 'Review conveyance bills.',
   disbursement: 'Pay out approved conveyance bills.',
   mobile_bill: 'Company SIMs, limits and operator bills.',

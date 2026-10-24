@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { User } from '../types';
-import { ChevronLeft, Mail, ShieldCheck, User as UserIcon, Lock, Info, LogOut, BadgeCheck, Building2, UserCircle2, Package } from 'lucide-react';
+import { ChevronLeft, Mail, ShieldCheck, User as UserIcon, Lock, Info, LogOut, BadgeCheck, Building2, UserCircle2, Package, MessageSquareHeart } from 'lucide-react';
+import { FeedbackPopup, canGiveFeedback } from './feedback/FeedbackPopup';
 import { PersonalDataForm } from './PersonalDataForm';
 import { ChangePasswordForm } from './ChangePasswordForm';
 import { ChangeUsernameForm } from './ChangeUsernameForm';
@@ -49,6 +50,8 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [showChangeUsername, setShowChangeUsername] = useState(false);
   const [showAssetManagement, setShowAssetManagement] = useState(false);
+  const [showFeedback, setShowFeedback] = useState(false);
+  const appVersion = `web ${typeof __APP_BUILD__ !== 'undefined' ? __APP_BUILD__ : ''}`.trim();
   const [username, setUsername] = useState(user.username || '');
   const [bgTheme, setBgTheme] = useState<BackgroundThemeId>(getSavedBackgroundTheme());
   const handlePickBackgroundTheme = (id: BackgroundThemeId) => {
@@ -103,6 +106,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
 
   return (
     <div className="w-full">
+      {showFeedback && <FeedbackPopup token={token} onClose={() => setShowFeedback(false)} />}
 
       {/* ---------------- Mobile layout ---------------- */}
       <div className="md:hidden">
@@ -206,7 +210,10 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
               {!!username && (
                 <ProfileRow icon={<UserCircle2 className="w-4 h-4" />} label="Change Username" onClick={() => setShowChangeUsername(true)} />
               )}
-              <ProfileRow icon={<Info className="w-4 h-4" />} label="Version Info" muted />
+              {canGiveFeedback(user) && (
+                <ProfileRow icon={<MessageSquareHeart className="w-4 h-4" />} label="Give feedback" onClick={() => setShowFeedback(true)} />
+              )}
+              <ProfileRow icon={<Info className="w-4 h-4" />} label="Version Info" value={appVersion} muted />
               <ProfileRow
                 icon={<LogOut className="w-4 h-4" style={{ color: '#B3261E' }} />}
                 label="Logout"
@@ -316,6 +323,9 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
             <ProfileRow icon={<Lock className="w-4 h-4" />} label="Change Password" onClick={() => setShowChangePassword(true)} padded />
             {!!username && (
               <ProfileRow icon={<UserCircle2 className="w-4 h-4" />} label="Change Username" onClick={() => setShowChangeUsername(true)} padded />
+            )}
+            {canGiveFeedback(user) && (
+              <ProfileRow icon={<MessageSquareHeart className="w-4 h-4" />} label="Give feedback" onClick={() => setShowFeedback(true)} padded />
             )}
             <ProfileRow
               icon={<LogOut className="w-4 h-4" style={{ color: '#B3261E' }} />}

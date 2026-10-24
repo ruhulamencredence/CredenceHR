@@ -61,6 +61,7 @@ export const ADMIN_TAB_PATH: Record<string, string[]> = {
   permanent_delete_log: ['Admin Panel', 'Permanent Delete Log'],
   companies: ['Admin Panel', 'Companies'],
   devices: ['Admin Panel', 'Device Access'],
+  user_feedback: ['Admin Panel', 'MIS', 'User Feedback'],
   active_users: ['Admin Panel', 'Active Users'],
   servers: ['Admin Panel', 'Servers']
 };

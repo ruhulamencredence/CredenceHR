@@ -6,6 +6,8 @@ import {defineConfig} from 'vite';
 export default defineConfig(() => {
   return {
     plugins: [react(), tailwindcss()],
+    // The build date, shown as the website's version (feedback, Version Info).
+    define: { __APP_BUILD__: JSON.stringify(new Date().toISOString().slice(0, 10)) },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

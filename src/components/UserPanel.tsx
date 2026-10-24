@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Capacitor } from '@capacitor/core';
 import { Project, MprNumber, Entry, Budget, BudgetItem, User, MprUsage, ClaimsNavRequest, JobsNavRequest, DashboardNavRequest, LeaveNavRequest, chatAllowed } from '../types';
-import { CalendarClock, CheckSquare, ExternalLink, Gavel, LogOut, MessageSquare, ShieldCheck, Smartphone, HandCoins, Target, Sparkles, Mail, CalendarRange, PenLine, ReceiptText, PackageCheck, Coffee } from 'lucide-react';
+import { CalendarClock, CheckSquare, ExternalLink, Gavel, LogOut, MessageSquare, ShieldCheck, Smartphone, HandCoins, Target, Sparkles, Mail, CalendarRange, PenLine, ReceiptText, PackageCheck, Coffee, MessageSquareHeart } from 'lucide-react';
+import { canGiveFeedback } from './feedback/FeedbackPopup';
 import type { MoreItem } from './BottomNav';
 
 // Mobile Dashboard: at most this many quick access tiles; the rest go to the
@@ -1213,6 +1214,9 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
             ? [{ key: 'chat', label: 'Chat', icon: MessageSquare, iconBg: 'from-cyan-300 to-cyan-500 shadow-[0_6px_16px_-2px_rgba(8,145,178,0.35)]', onClick: () => openSelfService('chat') }]
             : []),
           { key: 'alerts', label: 'Alerts', icon: Bell, iconBg: 'from-red-300 to-red-500 shadow-[0_6px_16px_-2px_rgba(220,38,38,0.35)]', onClick: () => openSelfService('alerts') },
+          ...(canGiveFeedback(user)
+            ? [{ key: 'feedback', label: 'Give feedback', icon: MessageSquareHeart, iconBg: 'from-pink-300 to-rose-500 shadow-[0_6px_16px_-2px_rgba(225,29,72,0.35)]', onClick: () => window.dispatchEvent(new CustomEvent('credence:open-feedback')) }]
+            : []),
           { key: 'erp360', label: '360 ERP', icon: ExternalLink, iconBg: 'from-slate-400 to-slate-600 shadow-[0_6px_16px_-2px_rgba(71,85,105,0.35)]', onClick: () => openSelfService('erp360') }
         ] as MoreItem[])
       : [])
