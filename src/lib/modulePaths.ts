@@ -19,7 +19,6 @@ export const ADMIN_TAB_PATH: Record<string, string[]> = {
   imports: ['Admin Panel', 'PEPM Management', 'Data Import'],
   recycle: ['Admin Panel', 'PEPM Management', 'Job Recycle'],
   editlog: ['Admin Panel', 'PEPM Management', 'MPR Edit Log'],
-  measurement_sheet: ['Admin Panel', 'PEPM Management', 'Measurement Sheet'],
 
   approvals: [...HRM, 'Approval Chain'],
   notices: [...HRM, 'Notices'],
