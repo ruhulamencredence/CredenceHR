@@ -617,3 +617,18 @@ html[data-ui="mono"] .app-tile-icon {
 
 /* Chat: a quoted message flashes when its reply's quote is tapped (ChatPanel.tsx). */
 .chat-flash { background-color: rgba(var(--g-accent-rgb, 127, 0, 255), 0.12); }
+
+/* GlobalSidebar.tsx: a minimized sidebar icon's name, beside it on hover. */
+.gsidebar-tip {
+  animation: gsidebar-tip-in 120ms ease-out;
+}
+@keyframes gsidebar-tip-in {
+  from {
+    opacity: 0;
+    margin-left: -4px;
+  }
+  to {
+    opacity: 1;
+    margin-left: 0;
+  }
+}
