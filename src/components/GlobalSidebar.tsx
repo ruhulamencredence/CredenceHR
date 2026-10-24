@@ -769,9 +769,41 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   const allSearchableItems: NavItem[] = [dashboardSearchItem, ...adminTopItems, ...allGroups.flatMap((g) => g.entries.filter(isItem))];
   const searchQuery = sidebarSearch.trim().toLowerCase();
   const searchResults = searchQuery ? allSearchableItems.filter((i) => i.label.toLowerCase().includes(searchQuery)) : [];
+  // The search box's results (the full column's dropdown and the minimized
+  // column's popup).
+  const renderSearchResults = () => (
+    <>
+    {searchResults.length > 0 ? (
+      searchResults.map((item, idx) => (
+        <button
+          key={item.key}
+          type="button"
+          ref={idx === searchActiveIndex ? searchActiveItemRef : undefined}
+          onClick={() => selectSearchResult(item.onClick)}
+          onMouseEnter={() => setSearchActiveIndex(idx)}
+          className={`w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors ${
+            idx === searchActiveIndex ? 'bg-white/15 text-white' : 'text-white/85 hover:bg-white/10'
+          }`}
+        >
+          <item.icon className="w-4 h-4 shrink-0" />
+          <span className="text-[13px] truncate">{item.label}</span>
+          {groupLabelOf.get(item.key) && (
+            <span className="ml-auto pl-2 text-[10px] text-white/45 whitespace-nowrap">{groupLabelOf.get(item.key)}</span>
+          )}
+        </button>
+      ))
+    ) : (
+      <p className="px-3 py-2.5 text-xs text-white/50">No matching menu.</p>
+    )}
+    </>
+  );
+
+  // Minimized column: search opens as a popup beside the rail.
+  const [searchFly, setSearchFly] = useState<{ top: number; left: number } | null>(null);
   const selectSearchResult = (fn: () => void) => {
     setSidebarSearch('');
     setSearchActiveIndex(-1);
+    setSearchFly(null);
     selectAndClose(fn);
   };
 
@@ -954,7 +986,20 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
   }, [flyout]);
   useEffect(() => {
     if (!collapsed) setFlyout(null);
+    setSearchFly(null);
   }, [collapsed]);
+  useEffect(() => {
+    if (!searchFly) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as HTMLElement;
+      if (!t.closest('[data-gsidebar-searchfly]') && !t.closest('[data-gsidebar-search]')) {
+        setSearchFly(null);
+        setSidebarSearch('');
+      }
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [searchFly]);
   // Another page opened (from anywhere): the popup goes away.
   useEffect(() => {
     setFlyout(null);
@@ -1057,7 +1102,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
             Service, and every Admin Panel group), regardless of whether its
             group is currently expanded — selecting a result navigates
             straight there, same as clicking that item directly. */}
-        <div className={`flex items-center gap-2 px-2.5 pt-3 ${isPersistent && collapsed ? 'justify-center' : ''}`}>
+        <div className={`flex items-center gap-2 px-2.5 pt-3 ${isPersistent && collapsed ? 'flex-col justify-center' : ''}`}>
             {!(isPersistent && collapsed) && (
               <div className="relative flex-1 min-w-0">
                 <div className="relative">
@@ -1084,28 +1129,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
 
                 {searchQuery && (
                   <div className="gsidebar-pop absolute left-0 right-0 mt-1 max-h-72 overflow-y-auto rounded-xl bg-[#3a0d70] border border-white/15 shadow-xl z-20 py-1">
-                    {searchResults.length > 0 ? (
-                      searchResults.map((item, idx) => (
-                        <button
-                          key={item.key}
-                          type="button"
-                          ref={idx === searchActiveIndex ? searchActiveItemRef : undefined}
-                          onClick={() => selectSearchResult(item.onClick)}
-                          onMouseEnter={() => setSearchActiveIndex(idx)}
-                          className={`w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors ${
-                            idx === searchActiveIndex ? 'bg-white/15 text-white' : 'text-white/85 hover:bg-white/10'
-                          }`}
-                        >
-                          <item.icon className="w-4 h-4 shrink-0" />
-                          <span className="text-[13px] truncate">{item.label}</span>
-                          {groupLabelOf.get(item.key) && (
-                            <span className="ml-auto pl-2 text-[10px] text-white/45 whitespace-nowrap">{groupLabelOf.get(item.key)}</span>
-                          )}
-                        </button>
-                      ))
-                    ) : (
-                      <p className="px-3 py-2.5 text-xs text-white/50">No matching menu.</p>
-                    )}
+                    {renderSearchResults()}
                   </div>
                 )}
               </div>
@@ -1120,6 +1144,24 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
                 className="w-7 h-7 rounded-full flex items-center justify-center text-white/70 hover:text-white hover:bg-white/10 transition-colors shrink-0"
               >
                 {collapsed ? <ChevronsRight className="w-4 h-4" /> : <ChevronsLeft className="w-4 h-4" />}
+              </button>
+            )}
+            {isPersistent && collapsed && (
+              <button
+                type="button"
+                data-gsidebar-search
+                {...(searchFly ? { 'aria-label': 'Search menu' } : tipProps('Search menu'))}
+                onClick={(e) => {
+                  setTip(null);
+                  if (searchFly) return setSearchFly(null);
+                  setFlyout(null);
+                  const r = e.currentTarget.getBoundingClientRect();
+                  const asideRight = (e.currentTarget.closest('aside') as HTMLElement | null)?.getBoundingClientRect().right ?? r.right;
+                  setSearchFly({ top: r.top - 4, left: asideRight + 8 });
+                }}
+                className={`w-full flex items-center justify-center rounded-xl py-2.5 transition-colors ${searchFly ? 'bg-white/15 text-white' : 'text-white/85 hover:bg-white/10'}`}
+              >
+                <Search className="w-[18px] h-[18px]" />
               </button>
             )}
         </div>
@@ -1231,6 +1273,39 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
           </button>
         </div>
       </aside>
+
+      {collapsed && isPersistent && searchFly &&
+        createPortal(
+          <div
+            data-gsidebar-searchfly
+            className="gsidebar-pop fixed z-[1300] w-[300px] rounded-2xl p-2 shadow-2xl border border-white/15"
+            style={{ top: searchFly.top, left: searchFly.left, background: '#3a0d70' }}
+            role="dialog"
+            aria-label="Search menu"
+          >
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 text-white/40 absolute left-2.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                autoFocus
+                value={sidebarSearch}
+                onChange={(e) => setSidebarSearch(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    setSidebarSearch('');
+                    setSearchFly(null);
+                    return;
+                  }
+                  handleSearchKeyDown(e);
+                }}
+                placeholder="Search menu…"
+                className="w-full pl-8 pr-3 py-2 rounded-xl bg-white/10 text-white text-[13px] placeholder-white/40 focus:outline-none focus:bg-white/15"
+              />
+            </div>
+            {searchQuery && <div className="mt-1 max-h-72 overflow-y-auto py-1">{renderSearchResults()}</div>}
+          </div>,
+          document.body
+        )}
 
       {collapsed && isPersistent && tip &&
         createPortal(
