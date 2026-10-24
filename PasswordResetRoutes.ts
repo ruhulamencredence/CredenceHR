@@ -26,6 +26,7 @@
 // handles the requests; a Superadmin always, and only a Superadmin changes
 // the settings. A handler who isn't a Superadmin resets "user" accounts only.
 
+import { clearLoginLock } from "./LoginGuard";
 import type { Express } from "express";
 import crypto from "crypto";
 import bcrypt from "bcryptjs";
@@ -255,6 +256,7 @@ export function registerPasswordResetRoutes(app: Express, deps: Deps) {
       const r: any = await queryDB("/*unscoped*/ UPDATE password_reset_codes SET used_at = NOW() WHERE id = ? AND used_at IS NULL", [row.id]);
       if (typeof r?.affectedRows === "number" && r.affectedRows === 0) return res.status(400).json({ error: BAD_CODE });
       await queryDB("/*unscoped*/ UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?", [await bcrypt.hash(password, 10), u.id]);
+      await clearLoginLock(queryDB, Number(u.id));
       await endAllSessions(queryDB, Number(u.id), "password");
       res.json({ success: true, message: "Your password has been changed. Sign in with the new password." });
     } catch (err: any) {
@@ -371,6 +373,7 @@ export function registerPasswordResetRoutes(app: Express, deps: Deps) {
       if (typeof done?.affectedRows === "number" && done.affectedRows === 0) return res.status(409).json({ error: "Someone else has just handled this request." });
       const temp = tempPassword();
       await queryDB("/*unscoped*/ UPDATE users SET password_hash = ?, must_change_password = 1 WHERE id = ?", [await bcrypt.hash(temp, 10), r.user_id]);
+      await clearLoginLock(queryDB, Number(r.user_id));
       await endAllSessions(queryDB, Number(r.user_id), "password");
       await queryDB("INSERT INTO user_access_audit (target_user_id, actor_user_id, action, detail) VALUES (?, ?, 'password-request-reset', ?)", [
         r.user_id,
