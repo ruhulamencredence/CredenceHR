@@ -1,10 +1,11 @@
 import React, { useState, useEffect, lazy, Suspense } from 'react';
-import { ArrowUp, MapPin, Download, Building2 } from 'lucide-react';
+import { ArrowUp, MapPin, Download, Building2, Fingerprint } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import credenceLogo from '../assets/credence-logo.png';
 import { apiUrl } from '../lib/api';
 import { setActiveCompanyId } from '../lib/company';
 import { appDeviceInfo, takeSignedOutReason } from '../lib/device';
+import { fingerprintLogin, fingerprintSupported, savedFingerprint } from '../lib/fingerprint';
 import { PrivacyPolicy } from './PrivacyPolicy';
 import { ForgotPasswordPopup, type ForgotOptions } from './ForgotPasswordPopup';
 import { PasswordInput } from './PasswordInput';
@@ -202,6 +203,51 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
       throw new Error("Couldn't get your location. Please check that GPS/Location is turned on and try again.");
     }
   };
+
+  // Sign in with fingerprint — offered when it was turned on for this device
+  // (Profile -> Fingerprint login) for this workspace. On the app the phone's
+  // fingerprint prompt opens by itself once.
+  const [fp, setFp] = useState(savedFingerprint);
+  const [fpReady, setFpReady] = useState(false);
+  const fpHere = !!fp && fpReady && (ownerMode || !fp.workspace || fp.workspace === workspace?.code);
+  useEffect(() => {
+    if (!fp) return;
+    fingerprintSupported().then(setFpReady);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const handleFingerprint = async () => {
+    setError('');
+    setLoading(true);
+    try {
+      let extra: Record<string, any> = ownerMode ? { system: true } : { workspace: workspace?.code };
+      if (isNativeApp) {
+        const device = await appDeviceInfo();
+        setLocating(true);
+        let coords: { latitude: number; longitude: number };
+        try {
+          coords = await requestLoginLocation();
+        } finally {
+          setLocating(false);
+        }
+        extra = { ...extra, latitude: coords.latitude, longitude: coords.longitude, platform: 'app', ...(device || {}) };
+      }
+      const data = await fingerprintLogin(extra);
+      setActiveCompanyId(data.active_company_id || null);
+      onLoginSuccess(data.token, data.user);
+    } catch (err: any) {
+      if (err?.code !== 'CANCELLED') setError(err instanceof TypeError ? "Couldn't reach the server. Check your connection and try again." : err.message || 'Something went wrong');
+      setFp(savedFingerprint());
+    } finally {
+      setLoading(false);
+    }
+  };
+  const [fpAsked, setFpAsked] = useState(false);
+  useEffect(() => {
+    if (!isNativeApp || !fpHere || fpAsked) return;
+    setFpAsked(true);
+    void handleFingerprint();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fpHere]);
 
   const handleWorkspace = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -458,6 +504,19 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
               {!loading && <ArrowUp className="w-4 h-4 rotate-45" />}
             </button>
           </form>
+
+          {fpHere && fp && (
+            <button
+              type="button"
+              onClick={() => void handleFingerprint()}
+              disabled={loading}
+              className="w-full mt-3 flex items-center justify-center gap-2 py-3 rounded-full font-medium text-[15px] transition-opacity disabled:opacity-50 hover:opacity-80"
+              style={{ border: '1.5px solid var(--g-accent)', color: 'var(--g-accent)', background: 'transparent' }}
+            >
+              <Fingerprint className="w-5 h-5" />
+              <span className="truncate">Sign in with fingerprint · {fp.name.split(' ')[0]}</span>
+            </button>
+          )}
 
           {forgotOpen && (
             <ForgotPasswordPopup

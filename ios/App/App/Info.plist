@@ -20,6 +20,8 @@
     <string>$(MARKETING_VERSION)</string>
     <key>CFBundleVersion</key>
     <string>$(CURRENT_PROJECT_VERSION)</string>
+    <key>NSFaceIDUsageDescription</key>
+    <string>Sign in to CredenceHR with Face ID instead of your password.</string>
     <key>NSLocationWhenInUseUsageDescription</key>
     <string>CredenceHR uses your location to check you in at your project site, and to record where Team Attendance was taken.</string>
     <key>NSCameraUsageDescription</key>

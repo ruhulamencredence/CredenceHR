@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { User } from '../types';
-import { ChevronLeft, Mail, ShieldCheck, User as UserIcon, Lock, Info, LogOut, BadgeCheck, Building2, UserCircle2, Package, MessageSquareHeart } from 'lucide-react';
+import { ChevronLeft, Mail, ShieldCheck, User as UserIcon, Lock, Info, LogOut, BadgeCheck, Building2, UserCircle2, Package, MessageSquareHeart, Fingerprint } from 'lucide-react';
+import { FingerprintSettings } from './FingerprintSettings';
+import { canUseFingerprint } from '../lib/fingerprint';
 import { FeedbackPopup, canGiveFeedback } from './feedback/FeedbackPopup';
 import { PersonalDataForm } from './PersonalDataForm';
 import { ChangePasswordForm } from './ChangePasswordForm';
@@ -51,6 +53,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
   const [showChangeUsername, setShowChangeUsername] = useState(false);
   const [showAssetManagement, setShowAssetManagement] = useState(false);
   const [showFeedback, setShowFeedback] = useState(false);
+  const [showFingerprint, setShowFingerprint] = useState(false);
   const appVersion = `web ${typeof __APP_BUILD__ !== 'undefined' ? __APP_BUILD__ : ''}`.trim();
   const [username, setUsername] = useState(user.username || '');
   const [bgTheme, setBgTheme] = useState<BackgroundThemeId>(getSavedBackgroundTheme());
@@ -107,6 +110,7 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
   return (
     <div className="w-full">
       {showFeedback && <FeedbackPopup token={token} onClose={() => setShowFeedback(false)} />}
+      {showFingerprint && <FingerprintSettings token={token} user={user} onClose={() => setShowFingerprint(false)} />}
 
       {/* ---------------- Mobile layout ---------------- */}
       <div className="md:hidden">
@@ -207,6 +211,9 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
             </p>
             <section className="gemini-card overflow-hidden">
               <ProfileRow icon={<Lock className="w-4 h-4" />} label="Change Password" onClick={() => setShowChangePassword(true)} />
+              {canUseFingerprint(user) && (
+                <ProfileRow icon={<Fingerprint className="w-4 h-4" />} label="Fingerprint login" onClick={() => setShowFingerprint(true)} />
+              )}
               {!!username && (
                 <ProfileRow icon={<UserCircle2 className="w-4 h-4" />} label="Change Username" onClick={() => setShowChangeUsername(true)} />
               )}
@@ -321,6 +328,9 @@ export const ProfilePage: React.FC<ProfilePageProps> = ({ user, token, onBack, o
             </p>
             <ProfileRow icon={<Package className="w-4 h-4" />} label="My Asset" onClick={() => setShowAssetManagement(true)} padded />
             <ProfileRow icon={<Lock className="w-4 h-4" />} label="Change Password" onClick={() => setShowChangePassword(true)} padded />
+            {canUseFingerprint(user) && (
+              <ProfileRow icon={<Fingerprint className="w-4 h-4" />} label="Fingerprint login" onClick={() => setShowFingerprint(true)} padded />
+            )}
             {!!username && (
               <ProfileRow icon={<UserCircle2 className="w-4 h-4" />} label="Change Username" onClick={() => setShowChangeUsername(true)} padded />
             )}
