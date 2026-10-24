@@ -20,61 +20,109 @@ import { PackageCheck, Truck, History, Loader2, RefreshCw, AlertTriangle, Undo2 
 import { formatDate } from '../lib/formatDate';
 import { MailPopup as Popup, inputCls, labelCls, primaryBtn, ghostBtn } from './mail/MailPopup';
 import { LoadingBlock } from './LoadingBlock';
-import { MdDispatch, MdRow, MdStatusChip, MdTimelinePopup, isOverdue, mdFetch, qtyText, todayDhaka } from './MprDispatchShared';
+import { MdDispatch, MdRow, MdStatusChip, MdTimelinePopup, PO_STATUSES, isOverdue, mdFetch, qtyText, receiptText, todayDhaka } from './MprDispatchShared';
 
+// Truck No: numbers, with single dashes between them (11-2345).
+const truckDigits = (v: string) => v.replace(/[^0-9-]/g, '').replace(/-+/g, '-').replace(/^-/, '');
+const nowTimeDhaka = () => new Date().toLocaleTimeString('en-GB', { timeZone: 'Asia/Dhaka', hour: '2-digit', minute: '2-digit', hour12: false });
+
+// The receiving form. Project, MPR No, material and Qty come from the
+// dispatch; Supplier too when Purchase gave one. Date and time start at now.
 const ReceivePopup: React.FC<{ token: string; row: MdRow; d: MdDispatch; onClose: () => void; onDone: (complete: boolean) => void }> = ({ token, row, d, onClose, onDone }) => {
   const [qty, setQty] = useState(String(d.qty));
   const [date, setDate] = useState(todayDhaka());
+  const [time, setTime] = useState(nowTimeDhaka());
+  const [supplier, setSupplier] = useState(d.supplier);
+  const [truckNo, setTruckNo] = useState(truckDigits(d.vehicleNo).replace(/-$/, ''));
+  const [poStatus, setPoStatus] = useState('');
+  const [receivedBy, setReceivedBy] = useState('');
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const n = Number(qty);
   const short = Number.isFinite(n) && qty !== '' && n < d.qty;
+  const ready = qty !== '' && !!date && !!time && !!supplier.trim() && !!truckNo && !!poStatus && !!receivedBy.trim() && !(short && !note.trim());
   const go = async () => {
     setBusy(true);
     setError('');
     try {
-      const r = await mdFetch<{ status: string }>(token, `/api/material-receive/${d.id}`, 'POST', { receivedQty: qty, receivedDate: date, note });
+      const r = await mdFetch<{ status: string }>(token, `/api/material-receive/${d.id}`, 'POST', {
+        receivedQty: qty,
+        receivedDate: date,
+        receivedTime: time,
+        supplier,
+        truckNo: truckNo.replace(/-$/, ''),
+        poStatus,
+        receivedBy,
+        note
+      });
       onDone(r.status === 'received');
     } catch (e: any) {
       setError(e.message);
       setBusy(false);
     }
   };
+  const fixed = (label: string, value: React.ReactNode) => (
+    <div>
+      <div className={labelCls}>{label}</div>
+      <div className="liquid-glass-inset rounded-2xl px-3 py-2 text-sm text-slate-800 min-h-[38px]">{value || '—'}</div>
+    </div>
+  );
   return (
     <Popup
       title="Material received"
       icon={<PackageCheck className="w-4 h-4" />}
       onClose={busy ? () => {} : onClose}
-      size="md"
+      size="lg"
       footer={
         <>
           <button type="button" className={ghostBtn} onClick={onClose} disabled={busy}>Cancel</button>
-          <button type="button" className={primaryBtn} onClick={() => void go()} disabled={busy || qty === '' || (short && !note.trim())}>
+          <button type="button" className={primaryBtn} onClick={() => void go()} disabled={busy || !ready}>
             {busy && <Loader2 className="w-4 h-4 animate-spin" />} Confirm received
           </button>
         </>
       }
     >
       <div className="space-y-3 text-left">
-        <div className="liquid-glass-inset rounded-[24px] p-3 text-xs space-y-0.5">
-          <div className="font-semibold text-slate-800">{row.projectName} · {row.mprNo}</div>
-          <div className="text-slate-700">{row.item}{row.specification ? ` (${row.specification})` : ''}</div>
-          <div className="text-slate-500">
-            Sent {qtyText(d.qty, row.unit)} on {d.dispatchDate ? formatDate(d.dispatchDate) : '—'}
-            {d.supplier ? ` · ${d.supplier}` : ''}
-            {d.challanNo ? ` · Challan ${d.challanNo}` : ''}
-            {d.vehicleNo ? ` · Vehicle ${d.vehicleNo}` : ''}
-          </div>
-        </div>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {fixed('Project', row.projectName)}
+          {fixed('MPR No', row.mprNo)}
+          {fixed('Materials Name', `${row.item}${row.specification ? ` (${row.specification})` : ''}`)}
+          {fixed('Quantity sent', `${qtyText(d.qty, row.unit)} on ${d.dispatchDate ? formatDate(d.dispatchDate) : '—'}${d.poNo ? ` · P.O. ${d.poNo}` : ''}`)}
           <div>
-            <label className={labelCls}>Qty that arrived{row.unit ? ` (${row.unit})` : ''}</label>
-            <input className={inputCls} inputMode="decimal" value={qty} onChange={(e) => setQty(e.target.value)} autoFocus />
-          </div>
-          <div>
-            <label className={labelCls}>Received on</label>
+            <label className={labelCls}>Receiving Date</label>
             <input type="date" className={inputCls} value={date} max={todayDhaka()} min={d.dispatchDate || undefined} onChange={(e) => setDate(e.target.value)} />
+          </div>
+          <div>
+            <label className={labelCls}>Receiving Time</label>
+            <input type="time" className={inputCls} value={time} onChange={(e) => setTime(e.target.value)} />
+          </div>
+          {d.supplier ? (
+            fixed('Supplier Name', d.supplier)
+          ) : (
+            <div>
+              <label className={labelCls}>Supplier Name</label>
+              <input className={inputCls} value={supplier} onChange={(e) => setSupplier(e.target.value)} placeholder="Purchase didn't give one — type it" />
+            </div>
+          )}
+          <div>
+            <label className={labelCls}>Quantity received{row.unit ? ` (${row.unit})` : ''}</label>
+            <input className={inputCls} inputMode="decimal" value={qty} onChange={(e) => setQty(e.target.value)} />
+          </div>
+          <div>
+            <label className={labelCls}>Truck No</label>
+            <input className={inputCls} inputMode="numeric" value={truckNo} onChange={(e) => setTruckNo(truckDigits(e.target.value))} placeholder="e.g. 11-2345" />
+          </div>
+          <div>
+            <label className={labelCls}>PO Status</label>
+            <select className={inputCls} value={poStatus} onChange={(e) => setPoStatus(e.target.value)}>
+              <option value="">Pick…</option>
+              {PO_STATUSES.map((p) => <option key={p} value={p}>{p}</option>)}
+            </select>
+          </div>
+          <div className="sm:col-span-2">
+            <label className={labelCls}>Received By</label>
+            <input className={inputCls} value={receivedBy} onChange={(e) => setReceivedBy(e.target.value)} placeholder="Name of the person who took the material" />
           </div>
         </div>
         <div>
@@ -252,10 +300,7 @@ export const MaterialReceive: React.FC<{ token: string; canTakeBack?: boolean }>
                           </div>
                           <div className="text-slate-500">{[d.supplier, d.challanNo && `Challan ${d.challanNo}`, d.vehicleNo && `Vehicle ${d.vehicleNo}`].filter(Boolean).join(' · ') || '—'}</div>
                           {d.status === 'received' && (
-                            <div className={d.receivedQty !== null && d.receivedQty < d.qty ? 'text-amber-700' : 'text-emerald-700'}>
-                              Received {qtyText(d.receivedQty, r.unit)} on {d.receivedDate ? formatDate(d.receivedDate) : '—'}
-                              {d.receivedNote ? ` — ${d.receivedNote}` : ''}
-                            </div>
+                            <div className={d.receivedQty !== null && d.receivedQty < d.qty ? 'text-amber-700' : 'text-emerald-700'}>{receiptText(d, r.unit)}</div>
                           )}
                         </div>
                       </div>
