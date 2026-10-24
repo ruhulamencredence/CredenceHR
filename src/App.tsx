@@ -1537,7 +1537,7 @@ export default function App() {
         ) : selfServiceView === 'mySignatures' && canOpenSelfView('mySignatures', user) ? (
           <MySignatures token={token} user={user} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'materialReceive' && canOpenSelfView('materialReceive', user) ? (
-          <div className="w-full px-4 sm:px-6 lg:px-8 pt-3 pb-28 md:pb-8"><MaterialReceive token={token} /></div>
+          <div className="w-full px-4 sm:px-6 lg:px-8 pt-3 pb-28 md:pb-8"><MaterialReceive token={token} canTakeBack={user.role === 'superadmin' || !!user.can_return_dispatch} /></div>
         ) : selfServiceView === 'myPayslips' && canOpenSelfView('myPayslips', user) ? (
           <MyPayslips token={token} onBack={() => setSelfServiceView(null)} />
         ) : selfServiceView === 'myTargets' ? (
