@@ -2025,6 +2025,9 @@ export interface ChatRoom {
   // Only set for type === 'direct' — the other participant, so the room list
   // can show their name/avatar instead of a room title (direct chats have none).
   other_participant: ChatDirectoryUser | null;
+  // This account's background for the conversation (chat/ChatExtras.tsx
+  // CHAT_WALLPAPERS); null = the default.
+  wallpaper?: string | null;
 }
 
 export interface ChatRoomMember {
@@ -2058,6 +2061,15 @@ export interface ChatMessage {
   reply_to_content: string | null;
   reply_to_sender_name: string | null;
   created_at: string;
+  // "Delete for everyone": set once unsent (content and attachment are gone).
+  unsent_at?: string | null;
+  // One per account that reacted (ChatRoutes.ts loadMessages).
+  reactions?: ChatReaction[];
+}
+export interface ChatReaction {
+  emoji: string;
+  user_id: number;
+  name: string;
 }
 // Chat (and Calls, which start from a Chat) for this account: a Superadmin
 // always; anyone else unless Module Access -> Chat is turned off. The API

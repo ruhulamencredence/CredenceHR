@@ -191,6 +191,55 @@ export async function ensureChatSchema(dbPool: any): Promise<void> {
     // ORDER BY id DESC) and the unread-count aggregate (WHERE room_id = ?
     // AND sender_id != ?) below — both are hit on every room open.
     await dbPool.query(`CREATE INDEX idx_chat_messages_room ON chat_messages (room_id, id)`).catch(() => {});
+    // WhatsApp-style message actions (see the routes further down):
+    //   unsent_at            "Delete for everyone": the content and
+    //                        attachment are wiped, everyone sees
+    //                        "This message was deleted".
+    //   chat_message_hidden  "Delete for me": only this account stops
+    //                        seeing the message.
+    //   chat_message_reactions  one emoji per (message, account).
+    //   chat_wallpapers      each account's conversation background, per
+    //                        room (room_id 0 = the default for every chat).
+    //   users.chat_about     the "About" line on a chat profile.
+    for (const [sql, ignore] of [
+      ["ALTER TABLE chat_messages ADD COLUMN unsent_at TIMESTAMP NULL DEFAULT NULL", "ER_DUP_FIELDNAME"],
+      ["ALTER TABLE chat_messages ADD COLUMN unsent_by INT NULL", "ER_DUP_FIELDNAME"],
+      ["ALTER TABLE users ADD COLUMN chat_about VARCHAR(140) NULL", "ER_DUP_FIELDNAME"]
+    ] as [string, string][]) {
+      await dbPool.query(sql).catch((err: any) => {
+        if (err?.code !== ignore) console.warn("⚠️ Chat: " + err.message);
+      });
+    }
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS chat_message_hidden (
+        message_id INT NOT NULL,
+        user_id INT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (message_id, user_id),
+        FOREIGN KEY (message_id) REFERENCES chat_messages(id) ON DELETE CASCADE,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      )
+    `);
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS chat_message_reactions (
+        message_id INT NOT NULL,
+        user_id INT NOT NULL,
+        emoji VARCHAR(16) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (message_id, user_id),
+        FOREIGN KEY (message_id) REFERENCES chat_messages(id) ON DELETE CASCADE,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      ) DEFAULT CHARSET=utf8mb4
+    `);
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS chat_wallpapers (
+        user_id INT NOT NULL,
+        room_id INT NOT NULL,
+        wallpaper VARCHAR(32) NOT NULL,
+        PRIMARY KEY (user_id, room_id),
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      )
+    `);
   } catch (err: any) {
     console.warn("⚠️ Could not ensure Chat tables exist: " + err.message);
   }
@@ -263,19 +312,44 @@ export async function insertChatMessage(
       params.replyToId ?? null
     ]
   );
-  const rows = await queryDB(
-    `SELECT cm.id, cm.room_id, cm.sender_id, u.name AS sender_name, cm.message_type, cm.content,
-            cm.attachment_filename, cm.attachment_mimetype, (cm.attachment_data IS NOT NULL) AS has_attachment,
-            cm.reply_to_id, cm.created_at,
-            rt.content AS reply_to_content, rtu.name AS reply_to_sender_name
-     FROM chat_messages cm
-     JOIN users u ON u.id = cm.sender_id
-     LEFT JOIN chat_messages rt ON rt.id = cm.reply_to_id
-     LEFT JOIN users rtu ON rtu.id = rt.sender_id
-     WHERE cm.id = ?`,
-    [result.insertId]
-  );
-  return rows[0];
+  return (await loadMessages(queryDB, "cm.id = ?", [result.insertId]))[0];
+}
+
+// One shape for a message everywhere (history, send, live updates). A reply
+// shows what it quotes ("This message was deleted" once that was unsent), and
+// every message carries its reactions: [{ emoji, user_id, name }].
+const MESSAGE_SELECT = `
+  SELECT cm.id, cm.room_id, cm.sender_id, u.name AS sender_name, cm.message_type, cm.content,
+         cm.attachment_filename, cm.attachment_mimetype, (cm.attachment_data IS NOT NULL) AS has_attachment,
+         cm.reply_to_id, cm.created_at, cm.unsent_at,
+         CASE WHEN rt.unsent_at IS NOT NULL THEN 'This message was deleted'
+              WHEN rt.content IS NOT NULL AND rt.content <> '' THEN rt.content
+              WHEN rt.message_type = 'image' THEN '📷 Photo'
+              WHEN rt.message_type = 'audio' THEN '🎤 Voice message'
+              WHEN rt.message_type = 'file' THEN CONCAT('📎 ', COALESCE(rt.attachment_filename, 'File'))
+              ELSE rt.content END AS reply_to_content,
+         rtu.name AS reply_to_sender_name
+  FROM chat_messages cm
+  JOIN users u ON u.id = cm.sender_id
+  LEFT JOIN chat_messages rt ON rt.id = cm.reply_to_id
+  LEFT JOIN users rtu ON rtu.id = rt.sender_id`;
+export async function loadMessages(queryDB: ChatRouteDeps["queryDB"], where: string, params: any[], tail = ""): Promise<any[]> {
+  const rows: any[] = (await queryDB(`${MESSAGE_SELECT} WHERE ${where} ${tail}`, params)) || [];
+  if (!rows.length) return rows;
+  const ids = rows.map((r) => Number(r.id));
+  const reacts: any[] =
+    (await queryDB(
+      `SELECT r.message_id, r.user_id, r.emoji, u.name FROM chat_message_reactions r JOIN users u ON u.id = r.user_id
+        WHERE r.message_id IN (${ids.map(() => "?").join(",")}) ORDER BY r.created_at ASC`,
+      ids
+    ).catch(() => [])) || [];
+  const byMsg = new Map<number, any[]>();
+  for (const r of reacts) {
+    const list = byMsg.get(Number(r.message_id)) || [];
+    list.push({ emoji: r.emoji, user_id: Number(r.user_id), name: r.name });
+    byMsg.set(Number(r.message_id), list);
+  }
+  return rows.map((r) => ({ ...r, reactions: byMsg.get(Number(r.id)) || [] }));
 }
 
 async function upsertRead(queryDB: ChatRouteDeps["queryDB"], roomId: number, userId: number, messageId: number): Promise<void> {
@@ -344,7 +418,7 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
         `SELECT r.id, r.type, r.title, r.parent_room_id, r.created_by,
                 (r.avatar_data IS NOT NULL) AS has_avatar,
                 m.role AS my_role,
-                lm.id AS last_message_id, lm.content AS last_message_content,
+                lm.id AS last_message_id, IF(lm.unsent_at IS NULL, lm.content, 'This message was deleted') AS last_message_content,
                 lm.message_type AS last_message_type, lm.sender_id AS last_message_sender_id,
                 lm.created_at AS last_message_at
          FROM chat_room_members m
@@ -383,9 +457,13 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
         for (const o of others) otherParticipantByRoom.set(o.room_id, o);
       }
 
+      // This account's conversation backgrounds (room 0 = its default).
+      const wp: any[] = (await queryDB("SELECT room_id, wallpaper FROM chat_wallpapers WHERE user_id = ?", [userId]).catch(() => [])) || [];
+      const wallpaperOf = new Map<number, string>(wp.map((w: any) => [Number(w.room_id), String(w.wallpaper)]));
       res.json(
         rooms.map((r: any) => ({
           ...r,
+          wallpaper: wallpaperOf.get(Number(r.id)) || wallpaperOf.get(0) || null,
           unread_count: unreadByRoom.get(r.id) || 0,
           other_participant: r.type === "direct" ? otherParticipantByRoom.get(r.id) || null : null
         }))
@@ -578,21 +656,16 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
       }
       const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 100);
       const beforeId = req.query.beforeId ? Number(req.query.beforeId) : null;
-      const rows = await queryDB(
-        `SELECT cm.id, cm.room_id, cm.sender_id, u.name AS sender_name, cm.message_type, cm.content,
-                cm.attachment_filename, cm.attachment_mimetype, (cm.attachment_data IS NOT NULL) AS has_attachment,
-                cm.reply_to_id, cm.created_at,
-                rt.content AS reply_to_content, rtu.name AS reply_to_sender_name
-         FROM chat_messages cm
-         JOIN users u ON u.id = cm.sender_id
-         LEFT JOIN chat_messages rt ON rt.id = cm.reply_to_id
-         LEFT JOIN users rtu ON rtu.id = rt.sender_id
-         WHERE cm.room_id = ? AND cm.deleted_at IS NULL ${beforeId ? "AND cm.id < ?" : ""}
-         ORDER BY cm.id DESC LIMIT ${limit}`,
+      // Leaves out what this account deleted for itself ("Delete for me").
+      const rows = await loadMessages(
+        queryDB,
+        `cm.room_id = ? AND cm.deleted_at IS NULL ${beforeId ? "AND cm.id < ?" : ""}
+         AND NOT EXISTS (SELECT 1 FROM chat_message_hidden h WHERE h.message_id = cm.id AND h.user_id = ?)`,
         // LIMIT is written in (an integer clamped above) rather than bound:
         // MySQL 8.0.22+ refuses a bound LIMIT that the driver sends as a
         // double ("Incorrect arguments to mysqld_stmt_execute").
-        beforeId ? [roomId, beforeId] : [roomId]
+        beforeId ? [roomId, beforeId, req.user.id] : [roomId, req.user.id],
+        `ORDER BY cm.id DESC LIMIT ${limit}`
       );
       res.json(rows.reverse()); // oldest-first, ready to append/prepend in the UI
     } catch (err: any) {
@@ -645,7 +718,7 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
     try {
       const messageId = Number(req.params.id);
       const rows = await queryDB(
-        "SELECT room_id, attachment_mimetype, attachment_data, attachment_filename FROM chat_messages WHERE id = ?",
+        "SELECT room_id, attachment_mimetype, attachment_data, attachment_filename FROM chat_messages WHERE id = ? AND unsent_at IS NULL",
         [messageId]
       );
       const row = rows[0];
@@ -705,6 +778,184 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
         [msg.room_id, msg.sender_id, messageId]
       );
       res.json(rows);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ---- WhatsApp-style message actions -------------------------------------
+  const UNSEND_WINDOW_MS = 48 * 60 * 60 * 1000;
+  const messageRow = async (id: number) => ((await queryDB("SELECT id, room_id, sender_id, created_at, unsent_at FROM chat_messages WHERE id = ?", [id])) || [])[0];
+
+  // POST /api/chat/messages/:id/react — { emoji } sets this account's one
+  // reaction (the same emoji again, or emoji null, takes it off).
+  app.post("/api/chat/messages/:id/react", authenticateToken, requireChat, async (req: any, res) => {
+    try {
+      const msg = await messageRow(Number(req.params.id));
+      if (!msg) return res.status(404).json({ error: "Message not found." });
+      if (!(await isMember(queryDB, msg.room_id, req.user.id))) return res.status(403).json({ error: "Not a member of this room." });
+      if (msg.unsent_at) return res.status(400).json({ error: "This message was deleted." });
+      const emoji = req.body?.emoji ? String(req.body.emoji).trim().slice(0, 16) : "";
+      const mine: any[] = await queryDB("SELECT emoji FROM chat_message_reactions WHERE message_id = ? AND user_id = ?", [msg.id, req.user.id]);
+      if (!emoji || mine[0]?.emoji === emoji) {
+        await queryDB("DELETE FROM chat_message_reactions WHERE message_id = ? AND user_id = ?", [msg.id, req.user.id]);
+      } else {
+        await queryDB(
+          "INSERT INTO chat_message_reactions (message_id, user_id, emoji) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE emoji = VALUES(emoji), created_at = CURRENT_TIMESTAMP",
+          [msg.id, req.user.id, emoji]
+        );
+      }
+      const [updated] = await loadMessages(queryDB, "cm.id = ?", [msg.id]);
+      io.to(`room:${msg.room_id}`).emit("message_reactions", { roomId: msg.room_id, messageId: msg.id, reactions: updated?.reactions || [] });
+      res.json({ reactions: updated?.reactions || [] });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/chat/messages/:id/unsend — "Delete for everyone": the sender
+  // within 48 hours, or an admin of the group / community at any time.
+  // The text and attachment are wiped; everyone sees "This message was deleted".
+  app.post("/api/chat/messages/:id/unsend", authenticateToken, requireChat, async (req: any, res) => {
+    try {
+      const msg = await messageRow(Number(req.params.id));
+      if (!msg) return res.status(404).json({ error: "Message not found." });
+      if (!(await isMember(queryDB, msg.room_id, req.user.id))) return res.status(403).json({ error: "Not a member of this room." });
+      if (msg.unsent_at) return res.json({ success: true });
+      const own = Number(msg.sender_id) === Number(req.user.id);
+      const room = ((await queryDB("SELECT type FROM chat_rooms WHERE id = ?", [msg.room_id])) || [])[0];
+      const asAdmin = room && room.type !== "direct" && (await isRoomAdmin(queryDB, msg.room_id, req.user));
+      if (!own && !asAdmin) return res.status(403).json({ error: "You can only delete your own messages for everyone." });
+      if (own && !asAdmin && Date.now() - new Date(msg.created_at).getTime() > UNSEND_WINDOW_MS) {
+        return res.status(400).json({ error: "Too late to delete for everyone (48 hours) — you can still delete it for yourself." });
+      }
+      await queryDB(
+        "UPDATE chat_messages SET unsent_at = NOW(), unsent_by = ?, content = NULL, attachment_data = NULL, attachment_filename = NULL, attachment_mimetype = NULL WHERE id = ?",
+        [req.user.id, msg.id]
+      );
+      await queryDB("DELETE FROM chat_message_reactions WHERE message_id = ?", [msg.id]);
+      io.to(`room:${msg.room_id}`).emit("message_unsent", { roomId: msg.room_id, messageId: msg.id });
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/chat/messages/hide — "Delete for me": { messageIds } leave this
+  // account's view only.
+  app.post("/api/chat/messages/hide", authenticateToken, requireChat, async (req: any, res) => {
+    try {
+      const ids = [...new Set<number>((Array.isArray(req.body?.messageIds) ? req.body.messageIds : []).map(Number).filter((n: number) => n > 0))].slice(0, 200);
+      let hidden = 0;
+      for (const id of ids) {
+        const msg = await messageRow(id);
+        if (!msg || !(await isMember(queryDB, msg.room_id, req.user.id))) continue;
+        await queryDB("INSERT IGNORE INTO chat_message_hidden (message_id, user_id) VALUES (?, ?)", [id, req.user.id]);
+        hidden++;
+      }
+      res.json({ hidden });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // PUT /api/chat/rooms/:id/wallpaper — { wallpaper, forAll } this
+  // account's background for one conversation, or (forAll) its default for
+  // every chat (clears the per-chat ones). wallpaper null = back to default.
+  const WALLPAPERS = new Set(["frosted", "doodle", "plain", "mint", "sky", "blush", "lavender", "sand", "slate"]);
+  app.put("/api/chat/rooms/:id/wallpaper", authenticateToken, requireChat, async (req: any, res) => {
+    try {
+      const roomId = Number(req.params.id);
+      const forAll = !!req.body?.forAll;
+      const wallpaper = req.body?.wallpaper ? String(req.body.wallpaper) : null;
+      if (wallpaper && !WALLPAPERS.has(wallpaper)) return res.status(400).json({ error: "Unknown wallpaper." });
+      if (!forAll && !(await isMember(queryDB, roomId, req.user.id))) return res.status(403).json({ error: "Not a member of this room." });
+      const target = forAll ? 0 : roomId;
+      if (forAll) await queryDB("DELETE FROM chat_wallpapers WHERE user_id = ?", [req.user.id]);
+      if (wallpaper) {
+        await queryDB("INSERT INTO chat_wallpapers (user_id, room_id, wallpaper) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE wallpaper = VALUES(wallpaper)", [req.user.id, target, wallpaper]);
+      } else {
+        await queryDB("DELETE FROM chat_wallpapers WHERE user_id = ? AND room_id = ?", [req.user.id, target]);
+      }
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET/PUT /api/chat/me/about — this account's "About" line.
+  app.get("/api/chat/me/about", authenticateToken, requireChat, async (req: any, res) => {
+    try {
+      const rows: any[] = await queryDB("SELECT chat_about FROM users WHERE id = ?", [req.user.id]);
+      res.json({ about: rows[0]?.chat_about || "" });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app.put("/api/chat/me/about", authenticateToken, requireChat, async (req: any, res) => {
+    try {
+      const about = String(req.body?.about ?? "").trim().slice(0, 140);
+      await queryDB("UPDATE users SET chat_about = ? WHERE id = ?", [about || null, req.user.id]);
+      res.json({ about });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/chat/rooms/:id/profile — what the conversation's info page
+  // shows. A direct chat: the other person (name, About, and the same
+  // directory-safe work details Employee Directory shows everyone —
+  // designation, department, work email / phone, branch), common groups.
+  // Any room: its shared photos, files and voice messages (newest 60).
+  app.get("/api/chat/rooms/:id/profile", authenticateToken, requireChat, async (req: any, res) => {
+    try {
+      const roomId = Number(req.params.id);
+      if (!(await isMember(queryDB, roomId, req.user.id))) return res.status(403).json({ error: "Not a member of this room." });
+      const room = ((await queryDB("SELECT id, type, title, created_at FROM chat_rooms WHERE id = ?", [roomId])) || [])[0];
+      if (!room) return res.status(404).json({ error: "Room not found." });
+      let person: any = null;
+      let commonGroups: any[] = [];
+      if (room.type === "direct") {
+        const other = ((await queryDB(
+          "SELECT u.id, u.name, u.email, u.username, u.chat_about FROM chat_room_members m JOIN users u ON u.id = m.user_id WHERE m.room_id = ? AND m.user_id <> ? LIMIT 1",
+          [roomId, req.user.id]
+        )) || [])[0];
+        if (other) {
+          const emp = ((await queryDB(
+            "/*unscoped*/ SELECT designation, department, email, phone, mobile, branch, employee_id FROM all_employees WHERE user_id = ? ORDER BY is_active DESC LIMIT 1",
+            [other.id]
+          ).catch(() => [])) || [])[0];
+          person = {
+            id: Number(other.id),
+            name: other.name,
+            username: other.username || "",
+            about: other.chat_about || "",
+            email: emp?.email || other.email || "",
+            phone: emp?.mobile || emp?.phone || "",
+            designation: emp?.designation || "",
+            department: emp?.department || "",
+            branch: emp?.branch || "",
+            employee_id: emp?.employee_id || ""
+          };
+          commonGroups = (await queryDB(
+            `SELECT r.id, r.type, r.title FROM chat_rooms r
+              JOIN chat_room_members a ON a.room_id = r.id AND a.user_id = ?
+              JOIN chat_room_members b ON b.room_id = r.id AND b.user_id = ?
+             WHERE r.type <> 'direct' ORDER BY r.title`,
+            [req.user.id, other.id]
+          )) || [];
+        }
+      }
+      const media: any[] =
+        (await queryDB(
+          `SELECT cm.id, cm.message_type, cm.attachment_filename, cm.created_at, u.name AS sender_name
+             FROM chat_messages cm JOIN users u ON u.id = cm.sender_id
+            WHERE cm.room_id = ? AND cm.deleted_at IS NULL AND cm.unsent_at IS NULL AND cm.attachment_data IS NOT NULL
+              AND NOT EXISTS (SELECT 1 FROM chat_message_hidden h WHERE h.message_id = cm.id AND h.user_id = ?)
+            ORDER BY cm.id DESC LIMIT 60`,
+          [roomId, req.user.id]
+        )) || [];
+      res.json({ room: { id: room.id, type: room.type, title: room.title, created_at: room.created_at }, person, commonGroups, media });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
