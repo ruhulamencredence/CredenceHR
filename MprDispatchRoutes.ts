@@ -611,8 +611,14 @@ export function registerMprDispatchRoutes(app: Express, deps: Deps) {
           Number(req.user.id)
         ])) || [];
       const ds = await dispatchesFor(rows.map((r) => Number(r.id)));
+      // Where a take-back's new Delivery Date may fall (the date picker's limits).
+      const out = [];
+      for (const r of rows) {
+        const w = await deliveryWindow(r, req.user.role);
+        out.push({ ...rowOut(r, ds.get(Number(r.id)) || []), newDeliveryMin: w.min, newDeliveryMax: w.max });
+      }
       res.setHeader("Cache-Control", "no-store");
-      res.json({ rows: rows.map((r) => rowOut(r, ds.get(Number(r.id)) || [])) });
+      res.json({ rows: out });
     })
   );
 
@@ -697,21 +703,30 @@ export function registerMprDispatchRoutes(app: Express, deps: Deps) {
   // The new date follows the same rules as editing a Delivery Date
   // (EntriesRoutes.ts): not before today / the entry date, inside the
   // Budget's delivery range, and the Condition Set's "job_edit" notice.
-  async function newDeliveryProblem(entry: any, date: string, role: string): Promise<string | null> {
+  // The window a new Delivery Date must fall in: from the latest of today,
+  // the entry date, the Budget's "from" and today + the notice days, up to
+  // the Budget's "to" (null = open). The take-back date picker uses it too.
+  async function deliveryWindow(entry: any, role: string) {
+    const today = todayInDhaka();
     const entryDate = toDateOnlyString(entry.entry_date) || "";
-    const floor = entryDate && entryDate > todayInDhaka() ? entryDate : todayInDhaka();
-    if (date < floor) return `The new Delivery Date can't be earlier than ${floor}.`;
+    let from: string | null = null,
+      to: string | null = null;
     if (entry.budget_id) {
       const b: any = ((await queryDB("SELECT delivery_date_from, delivery_date_to FROM budgets WHERE id = ?", [entry.budget_id])) || [])[0];
-      const from = toDateOnlyString(b?.delivery_date_from);
-      const to = toDateOnlyString(b?.delivery_date_to);
-      if ((from && date < from) || (to && date > to)) return `Delivery Date must be between ${from || "—"} and ${to || "—"} for this Budget.`;
+      from = toDateOnlyString(b?.delivery_date_from);
+      to = toDateOnlyString(b?.delivery_date_to);
     }
     const lead = await resolveMinLeadDays(queryDB, "job_edit", { projectId: entry.project_id, budgetId: entry.budget_id, userRole: role });
-    if (lead !== null) {
-      const earliest = addDaysToDateStr(todayInDhaka(), lead);
-      if (date < earliest) return `Delivery Date needs at least ${lead} day(s) notice — the earliest allowed date is ${earliest}.`;
-    }
+    const earliest = lead !== null ? addDaysToDateStr(today, lead) : null;
+    const min = [today, entryDate, from, earliest].filter(Boolean).sort().pop() as string;
+    return { min, max: to, from, to, lead, earliest, floor: entryDate > today ? entryDate : today };
+  }
+  async function newDeliveryProblem(entry: any, date: string, role: string): Promise<string | null> {
+    const w = await deliveryWindow(entry, role);
+    if (date < w.floor) return `The new Delivery Date can't be earlier than ${w.floor}.`;
+    if ((w.from && date < w.from) || (w.to && date > w.to)) return `Delivery Date must be between ${w.from || "—"} and ${w.to || "—"} for this Budget.`;
+    if (w.earliest && date < w.earliest) return `Delivery Date needs at least ${w.lead} day(s) notice — the earliest allowed date is ${w.earliest}.`;
+    if (w.max && w.min > w.max) return "No Delivery Date is possible inside this Budget's range any more — ask Purchase / the Admin.";
     return null;
   }
   app.post(

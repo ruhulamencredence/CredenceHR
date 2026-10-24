@@ -309,7 +309,11 @@ const TakeBackPopup: React.FC<{ token: string; row: MdRow; onClose: () => void; 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const today = todayDhaka();
-  const minDate = row.entryDate && row.entryDate > today ? row.entryDate : today;
+  // The server's window (Budget range, today / entry date, notice days).
+  const minDate = row.newDeliveryMin || (row.entryDate && row.entryDate > today ? row.entryDate : today);
+  const maxDate = row.newDeliveryMax || undefined;
+  const noDate = !!maxDate && minDate > maxDate;
+  const outside = !!deliveryDate && (deliveryDate < minDate || (!!maxDate && deliveryDate > maxDate));
   const go = async () => {
     setBusy(true);
     setError('');
@@ -331,7 +335,7 @@ const TakeBackPopup: React.FC<{ token: string; row: MdRow; onClose: () => void; 
       footer={
         <>
           <button type="button" className={ghostBtn} onClick={onClose} disabled={busy}>Cancel</button>
-          <button type="button" className={primaryBtn} onClick={() => void go()} disabled={busy || !deliveryDate}>
+          <button type="button" className={primaryBtn} onClick={() => void go()} disabled={busy || !deliveryDate || outside || noDate}>
             {busy && <Loader2 className="w-4 h-4 animate-spin" />} Take back
           </button>
         </>
@@ -346,8 +350,13 @@ const TakeBackPopup: React.FC<{ token: string; row: MdRow; onClose: () => void; 
         <p className="text-xs text-slate-600">The row leaves Purchase's dispatch list and goes back to the MPR list. Purchase is told.</p>
         <div>
           <label className={labelCls}>New Delivery Date (needed)</label>
-          <input type="date" className={fieldCls} value={deliveryDate} min={minDate} onChange={(e) => setDeliveryDate(e.target.value)} />
-          <p className="mt-1 text-[11px] text-slate-500">Now {row.deliveryDate ? formatDate(row.deliveryDate) : '—'}. The row goes back with the new date.</p>
+          <input type="date" className={fieldCls} value={deliveryDate} min={minDate} max={maxDate} disabled={noDate} onChange={(e) => setDeliveryDate(e.target.value)} />
+          <p className={`mt-1 text-[11px] ${outside || noDate ? 'text-rose-700 font-semibold' : 'text-slate-500'}`}>
+            {noDate
+              ? "No date is possible inside this Budget's delivery range any more — ask Purchase / the Admin."
+              : `Pick between ${formatDate(minDate)} and ${maxDate ? formatDate(maxDate) : 'any later date'}${maxDate ? " (the Budget's delivery range)" : ''}.`}
+            {!noDate && ` Now ${row.deliveryDate ? formatDate(row.deliveryDate) : '—'}.`}
+          </p>
         </div>
         <div>
           <label className={labelCls}>Reason (optional)</label>

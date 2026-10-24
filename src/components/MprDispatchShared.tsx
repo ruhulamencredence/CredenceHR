@@ -84,6 +84,10 @@ export interface MdRow {
   // The project confirmed it still needs the row (My MPR in Dispatch).
   confirmedAt: string | null;
   confirmedBy: string;
+  // My MPR in Dispatch only: where a take-back's new Delivery Date may fall
+  // (the Budget's delivery range, today / entry date, the notice days).
+  newDeliveryMin?: string;
+  newDeliveryMax?: string | null;
   dispatches: MdDispatch[];
 }
 
