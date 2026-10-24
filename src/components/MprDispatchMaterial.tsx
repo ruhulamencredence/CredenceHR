@@ -46,7 +46,8 @@ const norm = (s: any) => String(s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '')
 
 // ---------------------------------------------------------------------------
 // The dispatch form: one line per MPR row (Qty / supplier / rate / P.O.), and
-// what the lines share (date, challan, vehicle, note). Used for both the
+// what the lines share (date, P.O., challan, vehicle, note) — a line's own
+// value wins over the shared one. Used for both the
 // on-screen dispatch and an uploaded sheet.
 // ---------------------------------------------------------------------------
 const DispatchPopup: React.FC<{
@@ -59,7 +60,7 @@ const DispatchPopup: React.FC<{
   onDone: (n: number) => void;
 }> = ({ token, rows, start, fromExcel, skipped = [], onClose, onDone }) => {
   const [lines, setLines] = useState<Line[]>(start);
-  const [shared, setShared] = useState({ dispatchDate: todayDhaka(), challanNo: '', vehicleNo: '', note: '', supplier: '' });
+  const [shared, setShared] = useState({ dispatchDate: todayDhaka(), poNo: '', challanNo: '', vehicleNo: '', note: '', supplier: '' });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [lineErrors, setLineErrors] = useState<Record<number, string>>({});
@@ -76,7 +77,7 @@ const DispatchPopup: React.FC<{
         qty: l.qty,
         supplier: l.supplier || shared.supplier,
         rate: l.rate,
-        poNo: l.poNo,
+        poNo: l.poNo || shared.poNo,
         challanNo: l.challanNo || shared.challanNo,
         vehicleNo: l.vehicleNo || shared.vehicleNo,
         dispatchDate: l.dispatchDate || shared.dispatchDate,
@@ -109,10 +110,14 @@ const DispatchPopup: React.FC<{
       }
     >
       <div className="space-y-3 text-left">
-        <div className="grid sm:grid-cols-4 gap-2">
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-2">
           <div>
             <label className={labelCls}>Dispatch date</label>
             <input type="date" className={inputCls} value={shared.dispatchDate} max={todayDhaka()} onChange={(e) => setShared({ ...shared, dispatchDate: e.target.value })} />
+          </div>
+          <div>
+            <label className={labelCls}>P.O-Number (all lines)</label>
+            <input className={inputCls} value={shared.poNo} onChange={(e) => setShared({ ...shared, poNo: e.target.value })} />
           </div>
           <div>
             <label className={labelCls}>Challan No</label>
@@ -167,7 +172,7 @@ const DispatchPopup: React.FC<{
                     </td>
                     <td className="px-2 py-1.5"><input className={cell} value={l.supplier} placeholder={shared.supplier} onChange={(e) => set(i, { supplier: e.target.value })} aria-label="Supplier" /></td>
                     <td className="px-2 py-1.5"><input className={cell} inputMode="decimal" value={l.rate} onChange={(e) => set(i, { rate: e.target.value })} aria-label="Rate" /></td>
-                    <td className="px-2 py-1.5"><input className={cell} value={l.poNo} onChange={(e) => set(i, { poNo: e.target.value })} aria-label="P.O-Number" /></td>
+                    <td className="px-2 py-1.5"><input className={cell} value={l.poNo} placeholder={shared.poNo} onChange={(e) => set(i, { poNo: e.target.value })} aria-label="P.O-Number" /></td>
                   </tr>
                 );
               })}
