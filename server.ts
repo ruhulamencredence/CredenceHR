@@ -53,7 +53,6 @@ import { ensureRosterSchema, registerRosterRoutes } from "./RosterRoutes";
 import { ensureBreakSchema, registerBreakRoutes } from "./BreakRoutes";
 import { ensurePasswordResetSchema, registerPasswordResetRoutes } from "./PasswordResetRoutes";
 import { ensureBudgetNoticeSchema } from "./BudgetNoticeDraft";
-import { ensureMeasurementSchema, registerMeasurementRoutes } from "./MeasurementRoutes";
 import { ensureEmployeeRecordsGuard } from "./EmployeeRecordsGuard";
 import { ensureMprDispatchSchema, registerMprDispatchRoutes } from "./MprDispatchRoutes";
 import { ensureESignSchema, registerESignRoutes } from "./ESignRoutes";
@@ -270,8 +269,6 @@ async function initDB() {
     await ensurePasswordResetSchema(dbPool);
     // Budget import -> draft notice (BudgetNoticeDraft.ts).
     await ensureBudgetNoticeSchema(dbPool);
-    // PEPM Management -> Measurement Sheet (MeasurementRoutes.ts).
-    await ensureMeasurementSchema(dbPool);
     // PEPM -> Dispatch Material / Material Receive (MprDispatchRoutes.ts).
     await ensureMprDispatchSchema(dbPool);
     // E-Signature on Document Vault documents (ESignRoutes.ts).
@@ -303,7 +300,7 @@ const USER_CLAIM_CATEGORIES = ["Transport", "Fuel", "Toll", "Parking", "Others"]
 // running day-to-day without also giving them the full Admin Panel ->
 // Vehicle Management tab (fleet CRUD, the Approval Workflow's own queue,
 // etc.). See the two routes' own comments for what the bypass does.
-const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports", "users", "attendance", "attendance_reports", "leave_applications", "recycle", "editlog", "notices", "claims", "approvals", "conveyance", "disbursement", "employees", "departments", "tracking", "office_attendance", "holidays", "payroll", "asset_management", "vehicle_management", "vehicle_maintainer", "exit_offboarding", "performance_management", "recruitment", "grievance_disciplinary", "hr_analytics", "document_vault", "hr_operations", "admin_dashboard", "task_management", "mobile_bill", "target_reports", "mail_admin", "duty_roster", "break_time", "measurement_sheet"] as const;
+const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports", "users", "attendance", "attendance_reports", "leave_applications", "recycle", "editlog", "notices", "claims", "approvals", "conveyance", "disbursement", "employees", "departments", "tracking", "office_attendance", "holidays", "payroll", "asset_management", "vehicle_management", "vehicle_maintainer", "exit_offboarding", "performance_management", "recruitment", "grievance_disciplinary", "hr_analytics", "document_vault", "hr_operations", "admin_dashboard", "task_management", "mobile_bill", "target_reports", "mail_admin", "duty_roster", "break_time"] as const;
 
 // Granular per-module action layers — mirrors PermissionLayerKey/
 // PERMISSION_LAYERS in src/types.ts (single source of truth is duplicated
@@ -316,7 +313,7 @@ const PERMISSION_LAYER_KEYS = ["read", "edit_add", "entry_upload", "delete_trash
 const USERS_LAYER_KEYS = [...PERMISSION_LAYER_KEYS, "block_account", "password_requests"] as const;
 // Which modules currently enforce PERMISSION_LAYER_KEYS — mirrors
 // PERMISSION_LAYER_MODULES in src/types.ts. Rolled out module by module.
-const PERMISSION_LAYER_MODULES = ["departments", "projects", "approvals", "users", "reports", "tracking", "payroll", "mobile_bill", "office_attendance", "conveyance", "hr_operations", "exit_offboarding", "target_reports", "attendance_reports", "mail_admin", "duty_roster", "break_time", "document_vault", "measurement_sheet", "employees"] as const;
+const PERMISSION_LAYER_MODULES = ["departments", "projects", "approvals", "users", "reports", "tracking", "payroll", "mobile_bill", "office_attendance", "conveyance", "hr_operations", "exit_offboarding", "target_reports", "attendance_reports", "mail_admin", "duty_roster", "break_time", "document_vault", "employees"] as const;
 // Employee Tracking's layers: "read" = the live map, history and status
 // cards; "stay_report" = the Stay Report (TrackingStayReport.ts). Both are
 // reading, so an account with Employee Tracking and no saved layers has both.
@@ -391,7 +388,6 @@ const DUTY_ROSTER_LAYER_KEYS = ["read", "roster_manage"] as const;
 // "break_manage" = change the break rules and end a forgotten break.
 // Explicit-only — the no-saved-layers default is "read" alone.
 const BREAK_LAYER_KEYS = ["read", "break_manage"] as const;
-const MEASUREMENT_LAYER_KEYS = ["read", "edit_add", "delete_trash", "material_budget"] as const;
 // Employees: "read" = everything the module did before; "employee_delete" =
 // delete an Employee record (only one with no pay / service records,
 // EmployeeRecordsGuard.ts). Explicit-only.
@@ -443,7 +439,6 @@ const MODULE_LAYER_KEY_SETS: Record<string, readonly string[]> = {
   mail_admin: MAIL_ADMIN_LAYER_KEYS,
   duty_roster: DUTY_ROSTER_LAYER_KEYS,
   break_time: BREAK_LAYER_KEYS,
-  measurement_sheet: MEASUREMENT_LAYER_KEYS,
   employees: EMPLOYEE_LAYER_KEYS,
   document_vault: DOCUMENT_VAULT_LAYER_KEYS,
   leave_manage: LEAVE_MANAGE_LAYER_KEYS,
@@ -3038,7 +3033,6 @@ async function startServer() {
   // Credence Mail — users' own mailboxes over IMAP/SMTP (MailRoutes.ts).
   registerMailRoutes(app, io, { authenticateToken, queryDB, isMySQL: () => !!(isMySQLConnected && dbPool), requireModuleLayer, hasModuleLayer });
   // Duty Roster — shifts and who works which shift when (RosterRoutes.ts).
-  registerMeasurementRoutes(app, { authenticateToken, requireAdmin, requireModuleLayer, hasModuleLayer, queryDB });
   registerMprDispatchRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer, queryDB, parseQtyNumber, toDateOnlyString, todayInDhaka, createAlert });
   registerRosterRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer, queryDB, todayInDhaka, createAlert });
   // Break Time (Self Service + Admin Panel module "break_time").

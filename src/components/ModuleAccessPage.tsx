@@ -146,7 +146,7 @@ const FLAG = Object.fromEntries(FLAGS.map((f) => [f.key, f])) as Record<FlagKey,
 const INLINE_FLAGS: FlagKey[] = ['can_view_group_dashboard', 'can_manage_leave'];
 
 const MODULE_SECTION: Partial<Record<AdminModuleKey, SectionKey>> = {
-  reports: 'pepm', mprs: 'pepm', imports: 'pepm', recycle: 'pepm', editlog: 'pepm', measurement_sheet: 'pepm',
+  reports: 'pepm', mprs: 'pepm', imports: 'pepm', recycle: 'pepm', editlog: 'pepm',
   admin_dashboard: 'hr', approvals: 'hr', notices: 'hr', holidays: 'hr', departments: 'hr', task_management: 'hr', target_reports: 'hr',
   attendance: 'attendance', attendance_reports: 'attendance', office_attendance: 'attendance', duty_roster: 'attendance', break_time: 'attendance', leave_applications: 'attendance',
   claims: 'claims', conveyance: 'claims', disbursement: 'claims', mobile_bill: 'claims',
@@ -165,7 +165,6 @@ const MODULE_DESC: Partial<Record<AdminModuleKey, string>> = {
   imports: 'Bulk upload from Excel.',
   recycle: 'Deleted jobs, restore them.',
   editlog: 'Who changed which MPR row.',
-  measurement_sheet: 'Measurement sheets of the projects.',
   approvals: 'Approval workflows.',
   attendance_reports: 'Monthly attendance by department.',
   leave_applications: 'Who applied for leave, by month.',

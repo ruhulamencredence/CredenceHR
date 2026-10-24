@@ -9,7 +9,7 @@ import { Loader2 } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 
 // A "% done" loader for long jobs — every import (Budget / Rate File Excel,
-// Bulk Add Users, HR Data Import, Mobile Bill SIMs and bills, Measurement Sheet
+// Bulk Add Users, HR Data Import, Mobile Bill SIMs and bills
 // drawings) and Delete budget, Remove unused rows, Approve & Calculate — so the
 // wait doesn't feel stuck. Uploads report real progress (xhrJson below); the server's own
 // work can't report back, so that part eases toward the cap and jumps to 100%
