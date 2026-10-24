@@ -3,7 +3,7 @@ export type UserRole = 'superadmin' | 'admin' | 'user';
 // Every Admin Panel tab. A Superadmin implicitly has all of these; a plain Admin
 // only sees/uses the ones the Superadmin has explicitly granted via
 // PUT /api/users/:id/module-permissions. Mirrors ADMIN_MODULE_KEYS in server.ts.
-export type AdminModuleKey = 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'recycle' | 'editlog' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'disbursement' | 'employees' | 'departments' | 'tracking' | 'office_attendance' | 'holidays' | 'payroll' | 'asset_management' | 'vehicle_management' | 'vehicle_maintainer' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'hr_operations' | 'admin_dashboard' | 'task_management' | 'mobile_bill' | 'target_reports' | 'mail_admin' | 'duty_roster' | 'break_time';
+export type AdminModuleKey = 'projects' | 'branches' | 'mprs' | 'imports' | 'reports' | 'users' | 'recycle' | 'editlog' | 'attendance' | 'attendance_reports' | 'leave_applications' | 'notices' | 'claims' | 'approvals' | 'conveyance' | 'disbursement' | 'employees' | 'departments' | 'tracking' | 'office_attendance' | 'holidays' | 'payroll' | 'asset_management' | 'vehicle_management' | 'vehicle_maintainer' | 'exit_offboarding' | 'performance_management' | 'recruitment' | 'grievance_disciplinary' | 'hr_analytics' | 'document_vault' | 'hr_operations' | 'admin_dashboard' | 'task_management' | 'mobile_bill' | 'target_reports' | 'mail_admin' | 'duty_roster' | 'break_time' | 'user_feedback';
 
 // Admin Panel -> Reports & Insights is not its own module grant: it shows for
 // anyone holding at least one of the modules its reports come from (each
@@ -86,7 +86,8 @@ export const ADMIN_MODULES: { key: AdminModuleKey; label: string }[] = [
   // Duty Roster (DutyRoster.tsx): shifts and who works which shift on which
   // day — read by every attendance and payroll figure.
   { key: 'duty_roster', label: 'Duty Roster' },
-  { key: 'break_time', label: 'Break Time' }
+  { key: 'break_time', label: 'Break Time' },
+  { key: 'user_feedback', label: 'User Feedback' }
 ];
 
 // Granular per-module action layers, layered on top of the coarse module
@@ -779,6 +780,8 @@ export interface User {
   can_receive_material?: boolean;
   // Material Receive -> take an MPR row back out of Dispatch Material — off by default.
   can_return_dispatch?: boolean;
+  // Self Service -> Give feedback (FeedbackRoutes.ts) — off by default.
+  can_give_feedback?: boolean;
   // Self Service -> My Duty Roster (RosterRoutes.ts) — off by default.
   can_view_roster?: boolean;
   // Self Service -> Break Time (BreakRoutes.ts) — off by default.

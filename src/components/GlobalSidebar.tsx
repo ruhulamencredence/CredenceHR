@@ -9,7 +9,7 @@ import {
   ChevronsLeft, ChevronsRight, ShieldAlert, Search, PieChart, FileUp,
   Target, UserPlus, Gavel, FolderLock, Sparkles, ExternalLink, Car, HandCoins,
   ClipboardList, BookOpen, ClipboardCheck, TrendingUp, Settings, Pencil, Check, Mail, CalendarRange, PenLine, ReceiptText,
-  Coffee,
+  Coffee, MessageSquareHeart
 } from 'lucide-react';
 import { User, AdminModuleKey, chatAllowed, REPORTS_INSIGHTS_MODULES, DATA_IMPORT_MODULES } from '../types';
 import credenceLogo from '../assets/credence-logo.png';
@@ -605,6 +605,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
     { key: 'users', label: 'Users', icon: Users, onClick: () => onGoToAdminModule('users') },
     ...orgItems,
     { key: 'mail_admin', label: 'Mail Administration', icon: Mail, onClick: () => onGoToAdminModule('mail_admin') },
+    { key: 'user_feedback', label: 'User Feedback', icon: MessageSquareHeart, onClick: () => onGoToAdminModule('user_feedback') },
   ].filter((i) => canSeeModule(i.key as AdminModuleKey));
 
   // Not part of MIS — Superadmin-only, but not "Users management", so kept
@@ -708,7 +709,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
       key: 'g_settings',
       label: 'Settings & Administration',
       icon: Server,
-      entries: pick('users', 'projects', 'branches', 'mail_admin', 'companies', 'devices', 'active_users', 'data_import', 'permanent_delete_log')
+      entries: pick('users', 'projects', 'branches', 'mail_admin', 'user_feedback', 'companies', 'devices', 'active_users', 'data_import', 'permanent_delete_log')
     },
     { key: 'g_pepm', label: 'PEPM Management', icon: BarChart3, entries: pick('reports', 'mprs', 'imports', 'recycle', 'editlog') }
   ]);

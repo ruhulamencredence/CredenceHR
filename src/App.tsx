@@ -51,6 +51,7 @@ import { Spinner } from './components/Spinner';
 import { ApkModal } from './components/ApkModal';
 import { FloatingChatButton } from './components/FloatingChatButton';
 import { AiAssistant } from './components/AiAssistant';
+import { FeedbackHost, canGiveFeedback } from './components/feedback/FeedbackPopup';
 import { CallLayer } from './components/CallLayer';
 import { LeaveManage } from './components/LeaveManage';
 import { ApproveApplications } from './components/ApproveApplications';
@@ -1671,6 +1672,8 @@ export default function App() {
 
       {/* Website only: offer desktop notifications once (WebPushPrompt.tsx). */}
       {token && user && <WebPushPrompt token={token} userId={user.id} />}
+      {/* Give feedback (More menu) + the 7-day "How do you like the app?" question. */}
+      {token && user && canGiveFeedback(user) && <FeedbackHost key={user.id} token={token} />}
 
       {/* FloatingChatButton's popup — a centered card sized like
           NewLeaveApplicationModal (max-w-3xl, rounded-2xl, its own backdrop)

@@ -200,6 +200,8 @@ export const LINKED_TABLES = new Map<string, [string, string]>([
   ["chat_message_reactions", ["message_id", "chat_messages"]],
   ["chat_pinned_messages", ["room_id", "chat_rooms"]],
   ["chat_wallpapers", ["user_id", "users"]],
+  ["app_feedback", ["user_id", "users"]],
+  ["feedback_prompts", ["user_id", "users"]],
   ["conveyance_bill_items", ["bill_id", "conveyance_bills"]],
   ["conveyance_claim_department_access", ["user_id", "users"]],
   ["document_signatures", ["document_id", "employee_documents"]],

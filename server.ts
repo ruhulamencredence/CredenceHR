@@ -31,6 +31,7 @@ import { registerProjectRoutes } from "./ProjectRoutes";
 import { registerAuthRoutes } from "./AuthRoutes";
 import { ensureLoginGuardSchema } from "./LoginGuard";
 import { maskDatabaseErrors, apiNotFoundAndErrors } from "./ApiErrors";
+import { ensureFeedbackSchema, registerFeedbackRoutes } from "./FeedbackRoutes";
 import { ensureSchemaMigrations } from "./schemaMigrations";
 import { registerBudgetImportRoutes } from "./BudgetImportRoutes";
 import { registerMovementClaimRoutes } from "./MovementClaimRoutes";
@@ -271,6 +272,8 @@ async function initDB() {
     await ensurePasswordResetSchema(dbPool);
     // Sign-in attempts, for stopping password guessing (LoginGuard.ts).
     await ensureLoginGuardSchema(dbPool);
+    // User feedback about the app (FeedbackRoutes.ts).
+    await ensureFeedbackSchema(dbPool);
     // Approval requests with no approver yet (rehomeAwaitingApprovals).
     await dbPool.query("ALTER TABLE approval_requests ADD COLUMN awaiting_approver TINYINT(1) NOT NULL DEFAULT 0").catch((err: any) => {
       if (err?.code !== "ER_DUP_FIELDNAME") console.warn("⚠️ approval_requests.awaiting_approver: " + err.message);
@@ -317,7 +320,7 @@ const USER_CLAIM_CATEGORIES = ["Transport", "Fuel", "Toll", "Parking", "Others"]
 // running day-to-day without also giving them the full Admin Panel ->
 // Vehicle Management tab (fleet CRUD, the Approval Workflow's own queue,
 // etc.). See the two routes' own comments for what the bypass does.
-const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports", "users", "attendance", "attendance_reports", "leave_applications", "recycle", "editlog", "notices", "claims", "approvals", "conveyance", "disbursement", "employees", "departments", "tracking", "office_attendance", "holidays", "payroll", "asset_management", "vehicle_management", "vehicle_maintainer", "exit_offboarding", "performance_management", "recruitment", "grievance_disciplinary", "hr_analytics", "document_vault", "hr_operations", "admin_dashboard", "task_management", "mobile_bill", "target_reports", "mail_admin", "duty_roster", "break_time"] as const;
+const ADMIN_MODULE_KEYS = ["projects", "branches", "mprs", "imports", "reports", "users", "attendance", "attendance_reports", "leave_applications", "recycle", "editlog", "notices", "claims", "approvals", "conveyance", "disbursement", "employees", "departments", "tracking", "office_attendance", "holidays", "payroll", "asset_management", "vehicle_management", "vehicle_maintainer", "exit_offboarding", "performance_management", "recruitment", "grievance_disciplinary", "hr_analytics", "document_vault", "hr_operations", "admin_dashboard", "task_management", "mobile_bill", "target_reports", "mail_admin", "duty_roster", "break_time", "user_feedback"] as const;
 
 // Granular per-module action layers — mirrors PermissionLayerKey/
 // PERMISSION_LAYERS in src/types.ts (single source of truth is duplicated
@@ -3181,6 +3184,9 @@ async function startServer() {
   registerRosterRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer, queryDB, todayInDhaka, createAlert });
   // Break Time (Self Service + Admin Panel module "break_time").
   registerBreakRoutes(app, { authenticateToken, requireAdmin, requireModuleLayer, hasModuleLayer, queryDB, todayInDhaka });
+
+  // Self Service -> Give feedback; Admin Panel -> User Feedback (FeedbackRoutes.ts).
+  registerFeedbackRoutes(app, { authenticateToken, requireAdmin, requireSuperAdmin, requireModule, queryDB });
 
   // An /api address no route answered: 404 JSON; bad JSON / thrown errors:
   // JSON too (ApiErrors.ts). After every route, before the web app.
