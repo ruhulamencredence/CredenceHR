@@ -3232,7 +3232,10 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           the complete Check In/Check Out history on mobile (with a floating "Add
           Check In/Out" button opening the form in a sheet) and the plain Check
           In/Out form directly on desktop, where there's room for it inline. */}
-      <div className={mobileActiveSection === 'claim' && canSeeMovementClaim ? 'block max-md:!mt-0 mobile-page-in' : 'hidden'}>
+      {/* Mounted only for an account with the claim (they load data on mount;
+          without access every page asked and got 403s). */}
+      {canSeeMovementClaim && (
+      <div className={mobileActiveSection === 'claim' ? 'block max-md:!mt-0 mobile-page-in' : 'hidden'}>
         <div className="hidden md:block">
           {!isNativeApp && <ModulePath path={['Self Service', 'My HR', 'My Claim/Bill', 'Movement Claims']} />}
           <ClaimCard token={token} onSuccess={() => setClaimListRefreshKey((k) => k + 1)} />
@@ -3247,6 +3250,7 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           />
         </div>
       </div>
+      )}
 
       {/* My Claims — reachable via its own mobile tile / bottom-nav item, same as
           Movement Claim above; no separate desktop entry point (Movement Claim's
@@ -3254,7 +3258,8 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           mobile-only. onCheckOut/refreshKey wired the same as the 'claim'
           section's copy above, so a still-open claim can be completed straight
           from this list too, without bouncing back to the Movement Claim page. */}
-      <div className={mobileActiveSection === 'claims' && canSeeMovementClaim ? 'block md:hidden max-md:!mt-0 mobile-page-in' : 'hidden'}>
+      {canSeeMovementClaim && (
+      <div className={mobileActiveSection === 'claims' ? 'block md:hidden max-md:!mt-0 mobile-page-in' : 'hidden'}>
         <MyClaimsCard
           token={token}
           onBack={() => goToMobileSection(null)}
@@ -3262,14 +3267,17 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
           onCheckOut={() => setShowClaimFormSheet(true)}
         />
       </div>
+      )}
 
       {/* Conveyance Bill Claim — direct user-submitted expense claims (separate
           from the GPS-based Movement Claims above). Reachable via its own mobile
           tile / bottom-nav item and the Navbar's "Claims" header menu on desktop
           (see claimsNavRequest above) — either way now its own dedicated page. */}
-      <div className={mobileActiveSection === 'conveyanceClaim' && canSeeConveyanceClaim ? 'block max-md:!mt-0 mobile-page-in' : 'hidden'}>
+      {canSeeConveyanceClaim && (
+      <div className={mobileActiveSection === 'conveyanceClaim' ? 'block max-md:!mt-0 mobile-page-in' : 'hidden'}>
         <ConveyanceClaimCard token={token} onBack={() => goToMobileSection(null)} />
       </div>
+      )}
 
       {/* Leave Applications (Review/Approved/Rejected) — reachable by tapping
           the Leave Summary card above, on both mobile and desktop (same
