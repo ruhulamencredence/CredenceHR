@@ -2065,6 +2065,8 @@ export interface ChatMessage {
   unsent_at?: string | null;
   // Set when the sender edited the text (shows "Edited").
   edited_at?: string | null;
+  // A copy forwarded from another chat (shows "Forwarded").
+  is_forwarded?: number | boolean;
   // One per account that reacted (ChatRoutes.ts loadMessages).
   reactions?: ChatReaction[];
 }

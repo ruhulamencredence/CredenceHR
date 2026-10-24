@@ -15,13 +15,13 @@
 // 'receive_message' socket event to every member's open ChatPanel.
 
 import { UserAvatar } from './UserAvatar';
-import { wallpaperCss, WallpaperPicker, MessageMenu, ReactionChips, ReactionsWho, useChatProfile, PersonDetails, SharedMedia, CommonGroups, MyAboutPopup } from './chat/ChatExtras';
+import { wallpaperCss, WallpaperPicker, MessageMenu, ForwardPopup, ReactionChips, ReactionsWho, useChatProfile, PersonDetails, SharedMedia, CommonGroups, MyAboutPopup } from './chat/ChatExtras';
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { VoiceRecorder } from 'capacitor-voice-recorder';
 import {
   ArrowLeft, Search, Plus, X, Send, Paperclip, Check, CheckCheck,
-  Users, UserPlus, Shield, LogOut, Trash2, MessageSquare, Link as LinkIcon, Mic, Phone, Video, ChevronDown, Ban, UserRound
+  Users, UserPlus, Shield, LogOut, Trash2, MessageSquare, Link as LinkIcon, Mic, Phone, Video, ChevronDown, Ban, UserRound, Forward
 } from 'lucide-react';
 import { User, ChatRoom, ChatMessage, ChatRoomMember, ChatDirectoryUser, ChatReadReceipt, ChatReaction } from '../types';
 import { apiUrl } from '../lib/api';
@@ -232,6 +232,8 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
   // holds its text and Send saves the change instead of sending a new one.
   const [editing, setEditing] = useState<ChatMessage | null>(null);
   const [editError, setEditError] = useState('');
+  const [forwardMsg, setForwardMsg] = useState<ChatMessage | null>(null);
+  const [toast, setToast] = useState('');
   const [whoMsg, setWhoMsg] = useState<ChatMessage | null>(null);
   const [showMyAbout, setShowMyAbout] = useState(false);
   const [profileTick, setProfileTick] = useState(0);
@@ -1288,6 +1290,11 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
                           </p>
                         ) : (
                           <>
+                            {!!msg.is_forwarded && (
+                              <div className="flex items-center gap-1 text-[11px] italic text-slate-400 mb-0.5">
+                                <Forward className="w-3 h-3" /> Forwarded
+                              </div>
+                            )}
                             {msg.reply_to_id && (
                               <button
                                 type="button"
@@ -1625,6 +1632,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
             setReplyTo(menuMsg);
             messageInputRef.current?.focus();
           }}
+          onForward={() => setForwardMsg(menuMsg)}
           onEdit={() => {
             setReplyTo(null);
             setEditError('');
@@ -1639,6 +1647,26 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
       )}
       {whoMsg && (
         <ReactionsWho token={token} msg={whoMsg} meId={user.id} onClose={() => setWhoMsg(null)} onReacted={(reactions) => patchMessage(whoMsg.id, { reactions })} />
+      )}
+      {forwardMsg && (
+        <ForwardPopup
+          token={token}
+          msg={forwardMsg}
+          meId={user.id}
+          rooms={rooms}
+          directory={directory}
+          roomName={(r) => roomDisplayName(r, user.id)}
+          onClose={() => setForwardMsg(null)}
+          onDone={(text) => {
+            setForwardMsg(null);
+            setToast(text);
+            setTimeout(() => setToast(''), 2500);
+            fetchRooms();
+          }}
+        />
+      )}
+      {toast && (
+        <div className="fixed left-1/2 -translate-x-1/2 bottom-24 z-[80] px-4 py-2 rounded-full bg-slate-900/85 text-white text-xs shadow-lg">{toast}</div>
       )}
       {showMyAbout && <MyAboutPopup token={token} onClose={() => setShowMyAbout(false)} />}
 

@@ -206,6 +206,8 @@ export async function ensureChatSchema(dbPool: any): Promise<void> {
       ["ALTER TABLE chat_messages ADD COLUMN unsent_by INT NULL", "ER_DUP_FIELDNAME"],
       // "Edit": the sender changes a text message within 15 minutes; it then shows "Edited".
       ["ALTER TABLE chat_messages ADD COLUMN edited_at TIMESTAMP NULL DEFAULT NULL", "ER_DUP_FIELDNAME"],
+      // "Forward": a copy sent on to other chats shows "Forwarded".
+      ["ALTER TABLE chat_messages ADD COLUMN is_forwarded TINYINT(1) NOT NULL DEFAULT 0", "ER_DUP_FIELDNAME"],
       ["ALTER TABLE users ADD COLUMN chat_about VARCHAR(140) NULL", "ER_DUP_FIELDNAME"]
     ] as [string, string][]) {
       await dbPool.query(sql).catch((err: any) => {
@@ -297,12 +299,13 @@ export async function insertChatMessage(
     attachmentMimetype?: string | null;
     attachmentFilename?: string | null;
     replyToId?: number | null;
+    forwarded?: boolean;
   }
 ): Promise<any> {
   const result = await queryDB(
     `INSERT INTO chat_messages
-      (room_id, sender_id, message_type, content, attachment_filename, attachment_mimetype, attachment_data, reply_to_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      (room_id, sender_id, message_type, content, attachment_filename, attachment_mimetype, attachment_data, reply_to_id, is_forwarded)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       params.roomId,
       params.senderId,
@@ -311,7 +314,8 @@ export async function insertChatMessage(
       params.attachmentFilename ?? null,
       params.attachmentMimetype ?? null,
       params.attachmentBuffer ?? null,
-      params.replyToId ?? null
+      params.replyToId ?? null,
+      params.forwarded ? 1 : 0
     ]
   );
   return (await loadMessages(queryDB, "cm.id = ?", [result.insertId]))[0];
@@ -323,7 +327,7 @@ export async function insertChatMessage(
 const MESSAGE_SELECT = `
   SELECT cm.id, cm.room_id, cm.sender_id, u.name AS sender_name, cm.message_type, cm.content,
          cm.attachment_filename, cm.attachment_mimetype, (cm.attachment_data IS NOT NULL) AS has_attachment,
-         cm.reply_to_id, cm.created_at, cm.unsent_at, cm.edited_at,
+         cm.reply_to_id, cm.created_at, cm.unsent_at, cm.edited_at, cm.is_forwarded,
          CASE WHEN rt.unsent_at IS NOT NULL THEN 'This message was deleted'
               WHEN rt.content IS NOT NULL AND rt.content <> '' THEN rt.content
               WHEN rt.message_type = 'image' THEN '📷 Photo'
@@ -808,6 +812,52 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
       const [updated] = await loadMessages(queryDB, "cm.id = ?", [msg.id]);
       io.to(`room:${msg.room_id}`).emit("message_edited", { roomId: msg.room_id, messageId: msg.id, content: updated.content, edited_at: updated.edited_at });
       res.json(updated);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/chat/messages/:id/forward — { roomIds, userIds }: a copy of
+  // the message (text and / or attachment) goes to up to 5 chats this
+  // account is in, or to people (their direct chat, made if needed). The
+  // copies show "Forwarded" and carry no reply quote.
+  app.post("/api/chat/messages/:id/forward", authenticateToken, requireChat, async (req: any, res) => {
+    try {
+      const src: any = ((await queryDB(
+        "SELECT id, room_id, message_type, content, attachment_filename, attachment_mimetype, attachment_data, unsent_at FROM chat_messages WHERE id = ? AND deleted_at IS NULL",
+        [Number(req.params.id)]
+      )) || [])[0];
+      if (!src) return res.status(404).json({ error: "Message not found." });
+      if (!(await isMember(queryDB, src.room_id, req.user.id))) return res.status(403).json({ error: "Not a member of this room." });
+      if (src.unsent_at) return res.status(400).json({ error: "This message was deleted." });
+      const toNum = (v: any) => (Array.isArray(v) ? v : []).map(Number).filter((n: number) => Number.isFinite(n) && n > 0);
+      const roomIds = new Set<number>(toNum(req.body?.roomIds));
+      const people = await withChat(toNum(req.body?.userIds).filter((n: number) => n !== Number(req.user.id)));
+      for (const uid of people) roomIds.add(await findOrCreateDirectRoom(queryDB, Number(req.user.id), uid));
+      if (!roomIds.size) return res.status(400).json({ error: "Pick at least one chat." });
+      if (roomIds.size > 5) return res.status(400).json({ error: "You can forward to up to 5 chats at a time." });
+      const sent: number[] = [];
+      for (const roomId of roomIds) {
+        if (!(await isMember(queryDB, roomId, req.user.id))) continue;
+        const message = await insertChatMessage(queryDB, {
+          roomId,
+          senderId: req.user.id,
+          messageType: src.message_type,
+          content: src.content,
+          attachmentBuffer: src.attachment_data ? (Buffer.isBuffer(src.attachment_data) ? src.attachment_data : Buffer.from(src.attachment_data)) : null,
+          attachmentMimetype: src.attachment_mimetype,
+          attachmentFilename: src.attachment_filename,
+          forwarded: true
+        });
+        // A direct chat just made for this: its sockets join the room now.
+        io.in(`user:${req.user.id}`).socketsJoin(`room:${roomId}`);
+        const others: any[] = (await queryDB("SELECT user_id FROM chat_room_members WHERE room_id = ?", [roomId])) || [];
+        for (const o of others) io.in(`user:${o.user_id}`).socketsJoin(`room:${roomId}`);
+        io.to(`room:${roomId}`).emit("receive_message", message);
+        void notifyNewMessage(queryDB, message);
+        sent.push(roomId);
+      }
+      res.json({ forwarded: sent.length, roomIds: sent });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
