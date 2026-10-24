@@ -8,14 +8,14 @@
 // actions").
 //   - Conversation wallpapers (per chat, or a default for every chat).
 //   - The message menu (long-press on a phone, the ⌄ button on a computer):
-//     quick reactions, Reply, Forward, Edit (own text, 15 minutes), Copy,
+//     quick reactions, Reply, Pin, Forward, Edit (own text, 15 minutes), Copy,
 //     Delete for me, Delete for everyone.
 //   - Reaction chips under a bubble, and who reacted.
 //   - Chat profile sections: About, work details, shared media, common
 //     groups, the wallpaper picker; and editing one's own About.
 
 import React, { useEffect, useState } from 'react';
-import { Reply, Forward, Search, Check, Copy, Trash2, Ban, Pencil as EditIcon, Smile, Loader2, Image as ImageIcon, FileText, Mic, Users, Shield, Mail, Phone, Briefcase, Building2, IdCard, Pencil } from 'lucide-react';
+import { Reply, Forward, Pin, PinOff, Search, Check, Copy, Trash2, Ban, Pencil as EditIcon, Smile, Loader2, Image as ImageIcon, FileText, Mic, Users, Shield, Mail, Phone, Briefcase, Building2, IdCard, Pencil } from 'lucide-react';
 import { MailPopup as Popup, inputCls, labelCls, primaryBtn, ghostBtn } from '../mail/MailPopup';
 import { apiUrl } from '../../lib/api';
 import { formatDate } from '../../lib/formatDate';
@@ -106,12 +106,16 @@ export const MessageMenu: React.FC<{
   // Own text messages, within 15 minutes of sending.
   onEdit: () => void;
   onForward: () => void;
+  // Pinned for everyone in the chat (up to 3) — or taken off.
+  isPinned: boolean;
+  onPin: () => void;
+  onUnpin: () => void;
   onClose: () => void;
   onReacted: (reactions: ChatReaction[]) => void;
   onHidden: () => void;
   onUnsent: () => void;
   confirm: (message: string) => Promise<boolean>;
-}> = ({ token, msg, meId, isRoomAdmin, onReply, onEdit, onForward, onClose, onReacted, onHidden, onUnsent, confirm }) => {
+}> = ({ token, msg, meId, isRoomAdmin, onReply, onEdit, onForward, isPinned, onPin, onUnpin, onClose, onReacted, onHidden, onUnsent, confirm }) => {
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const mine = msg.sender_id === meId;
@@ -185,6 +189,25 @@ export const MessageMenu: React.FC<{
               onReply();
               onClose();
             })}
+          {!unsent &&
+            (isPinned
+              ? item('unpin', <PinOff className="w-4 h-4" />, 'Unpin', async () => {
+                  setBusy('unpin');
+                  try {
+                    const res = await fetch(apiUrl(`/api/chat/messages/${msg.id}/pin`), { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+                    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Could not unpin');
+                    onUnpin();
+                    onClose();
+                  } catch (e: any) {
+                    setError(e.message);
+                  } finally {
+                    setBusy('');
+                  }
+                })
+              : item('pin', <Pin className="w-4 h-4" />, 'Pin', () => {
+                  onPin();
+                  onClose();
+                }))}
           {!unsent &&
             item('forward', <Forward className="w-4 h-4" />, 'Forward', () => {
               onForward();
@@ -579,5 +602,97 @@ export const ForwardPopup: React.FC<{
         {error && <div className="text-xs px-3 py-2 rounded-xl bg-rose-50 text-rose-700">{error}</div>}
       </div>
     </Popup>
+  );
+};
+
+// ---- Pinned messages ------------------------------------------------------------
+export interface ChatPin {
+  message: ChatMessage;
+  pinned_at: string;
+  expires_at: string | null;
+  pinned_by_name: string;
+}
+export const pinPreview = (m: ChatMessage) =>
+  m.content || (m.message_type === 'image' ? '📷 Photo' : m.message_type === 'audio' ? '🎤 Voice message' : `📎 ${m.attachment_filename || 'File'}`);
+
+// "Choose how long your pin lasts" — like WhatsApp; at most 3 per chat.
+export const PinPopup: React.FC<{ token: string; msg: ChatMessage; pinnedCount: number; onClose: () => void; onDone: (text: string) => void }> = ({ token, msg, pinnedCount, onClose, onDone }) => {
+  const [duration, setDuration] = useState<'24h' | '7d' | '30d'>('7d');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const go = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      const res = await fetch(apiUrl(`/api/chat/messages/${msg.id}/pin`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ duration })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Could not pin');
+      onDone(data.replaced ? 'Pinned — the oldest pin was replaced (3 at most).' : 'Message pinned.');
+    } catch (e: any) {
+      setError(e.message);
+      setBusy(false);
+    }
+  };
+  return (
+    <Popup
+      title="Pin message"
+      icon={<Pin className="w-4 h-4" />}
+      size="md"
+      onClose={busy ? () => {} : onClose}
+      footer={
+        <>
+          <button type="button" className={ghostBtn} onClick={onClose} disabled={busy}>Cancel</button>
+          <button type="button" className={primaryBtn} onClick={() => void go()} disabled={busy}>
+            {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Pin className="w-4 h-4" />} Pin
+          </button>
+        </>
+      }
+    >
+      <div className="space-y-3 text-left">
+        <div className="liquid-glass-inset rounded-[20px] px-3 py-2 text-xs text-slate-600 line-clamp-2">{pinPreview(msg)}</div>
+        <p className="text-xs text-slate-600">Choose how long the pin lasts. Everyone in the chat sees it at the top; you can unpin it any time.</p>
+        <div className="liquid-glass-inset rounded-[20px] divide-y divide-slate-200/60">
+          {([['24h', '24 hours'], ['7d', '7 days'], ['30d', '30 days']] as const).map(([k, label]) => (
+            <label key={k} className="flex items-center justify-between px-4 py-3 text-sm text-slate-800 cursor-pointer">
+              {label}
+              <input type="radio" name="pin-duration" checked={duration === k} onChange={() => setDuration(k)} className="accent-violet-600 w-4 h-4" />
+            </label>
+          ))}
+        </div>
+        {pinnedCount >= 3 && <p className="text-[11px] text-amber-700">This chat already has 3 pins — the oldest one will be replaced.</p>}
+        {error && <div className="text-xs px-3 py-2 rounded-xl bg-rose-50 text-rose-700">{error}</div>}
+      </div>
+    </Popup>
+  );
+};
+
+// The bar under the chat header: the pinned message on show (tap to jump to
+// it; each tap moves on to the next pin), with a little 1-of-3 marker.
+export const PinnedBar: React.FC<{ pins: ChatPin[]; index: number; meId: number; onTap: () => void }> = ({ pins, index, meId, onTap }) => {
+  if (!pins.length) return null;
+  const p = pins[index % pins.length];
+  return (
+    <button type="button" onClick={onTap} className="w-full flex items-center gap-2.5 px-3 py-2 bg-white/90 border-b border-violet-100/70 text-left hover:bg-white">
+      {pins.length > 1 && (
+        <span className="flex flex-col gap-0.5 self-stretch py-0.5" aria-hidden>
+          {pins.map((_, i) => (
+            <span key={i} className={`w-[3px] flex-1 rounded-full ${i === index % pins.length ? 'bg-violet-600' : 'bg-slate-300'}`} />
+          ))}
+        </span>
+      )}
+      <Pin className="w-4 h-4 text-violet-600 shrink-0 -rotate-45" />
+      <span className="min-w-0 flex-1">
+        <span className="block text-[11px] font-semibold text-violet-700">
+          Pinned message{pins.length > 1 ? ` ${(index % pins.length) + 1} of ${pins.length}` : ''}
+        </span>
+        <span className="block text-xs text-slate-600 truncate">
+          {p.message.sender_id === meId ? 'You' : p.message.sender_name}: {pinPreview(p.message)}
+        </span>
+      </span>
+    </button>
   );
 };

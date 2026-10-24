@@ -15,7 +15,7 @@
 // 'receive_message' socket event to every member's open ChatPanel.
 
 import { UserAvatar } from './UserAvatar';
-import { wallpaperCss, WallpaperPicker, MessageMenu, ForwardPopup, ReactionChips, ReactionsWho, useChatProfile, PersonDetails, SharedMedia, CommonGroups, MyAboutPopup } from './chat/ChatExtras';
+import { wallpaperCss, WallpaperPicker, MessageMenu, ForwardPopup, PinPopup, PinnedBar, ChatPin, ReactionChips, ReactionsWho, useChatProfile, PersonDetails, SharedMedia, CommonGroups, MyAboutPopup } from './chat/ChatExtras';
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Capacitor } from '@capacitor/core';
 import { VoiceRecorder } from 'capacitor-voice-recorder';
@@ -233,6 +233,21 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
   const [editing, setEditing] = useState<ChatMessage | null>(null);
   const [editError, setEditError] = useState('');
   const [forwardMsg, setForwardMsg] = useState<ChatMessage | null>(null);
+  // Pinned messages of the open chat (bar under the header) and the pin popup.
+  const [pins, setPins] = useState<ChatPin[]>([]);
+  const [pinIndex, setPinIndex] = useState(0);
+  const [pinMsg, setPinMsg] = useState<ChatMessage | null>(null);
+  const fetchPins = useCallback(
+    async (roomId: number) => {
+      try {
+        const res = await fetch(apiUrl(`/api/chat/rooms/${roomId}/pins`), { headers: { Authorization: `Bearer ${token}` } });
+        if (res.ok && roomId === activeRoomIdRef.current) setPins(await res.json());
+      } catch {
+        // Offline — the bar keeps what it showed.
+      }
+    },
+    [token]
+  );
   const [toast, setToast] = useState('');
   const [whoMsg, setWhoMsg] = useState<ChatMessage | null>(null);
   const [showMyAbout, setShowMyAbout] = useState(false);
@@ -246,9 +261,23 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
     window.open(URL.createObjectURL(await res.blob()), '_blank');
   };
   // Brings a quoted message into view (tapping a reply's quote) and flashes it.
-  const jumpToMessage = (id: number) => {
+  const jumpToMessage = async (id: number) => {
+    // Not loaded yet (older than what is on screen): load earlier pages until it is.
+    let have = messages;
+    for (let i = 0; i < 10 && activeRoomId && !have.some((m) => m.id === id) && have.length; i++) {
+      const res = await fetch(apiUrl(`/api/chat/rooms/${activeRoomId}/messages?limit=100&beforeId=${have[0].id}`), { headers: { Authorization: `Bearer ${token}` } }).catch(() => null);
+      const older: ChatMessage[] = res && res.ok ? await res.json() : [];
+      if (!older.length) break;
+      have = [...older, ...have];
+      setMessages(have);
+      await new Promise((r) => setTimeout(r, 60));
+    }
     const el = messagesContainerRef.current?.querySelector(`[data-msg-id="${id}"]`) as HTMLElement | null;
-    if (!el || !messagesContainerRef.current) return;
+    if (!el || !messagesContainerRef.current) {
+      setToast('That message is no longer in this chat.');
+      setTimeout(() => setToast(''), 2500);
+      return;
+    }
     messagesContainerRef.current.scrollTop = el.offsetTop - messagesContainerRef.current.clientHeight / 3;
     el.classList.add('chat-flash');
     setTimeout(() => el.classList.remove('chat-flash'), 1200);
@@ -419,6 +448,10 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
       if (roomId === activeRoomIdRef.current) patchMessage(messageId, { content, edited_at });
       setRooms((prev) => prev.map((r) => (r.id === roomId && r.last_message_id === messageId ? { ...r, last_message_content: content } : r)));
     };
+    const onPins = ({ roomId }: { roomId: number }) => {
+      if (roomId === activeRoomIdRef.current) void fetchPins(roomId);
+    };
+    socket.on('pins_changed', onPins);
     socket.on('message_reactions', onReactions);
     socket.on('message_edited', onEdited);
     socket.on('message_unsent', onUnsent);
@@ -434,6 +467,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
     return () => {
       socket.off('connect', askPresence);
       socket.off('receive_message', onReceive);
+      socket.off('pins_changed', onPins);
       socket.off('message_reactions', onReactions);
       socket.off('message_edited', onEdited);
       socket.off('message_unsent', onUnsent);
@@ -443,7 +477,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
       socket.off('members_changed', onMembersChanged);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fetchRooms, fetchMembers, user.id, patchMessage]);
+  }, [fetchRooms, fetchMembers, user.id, patchMessage, fetchPins]);
 
   const openRoom = useCallback(
     async (roomId: number) => {
@@ -451,10 +485,14 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
       setShowInfoPanel(false);
       setReplyTo(null);
       setEditing(null);
+      setPins([]);
+      setPinIndex(0);
       setOtherReadMessageId(null);
       setMentionQuery(null);
       setLoadingMessages(true);
       getChatSocket()?.emit('join_room', roomId);
+      activeRoomIdRef.current = roomId;
+      void fetchPins(roomId);
       // Members are needed up-front for @mention autocomplete in a group/
       // community, not just when the info panel is opened — see
       // handleTyping/mentionCandidates below.
@@ -1226,6 +1264,16 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
               )}
             </div>
 
+            <PinnedBar
+              pins={pins}
+              index={pinIndex}
+              meId={user.id}
+              onTap={() => {
+                const p = pins[pinIndex % pins.length];
+                if (p) void jumpToMessage(p.message.id);
+                setPinIndex((i) => (i + 1) % Math.max(1, pins.length));
+              }}
+            />
             {/* The account's wallpaper for this chat (Contact / Group info ->
                 Chat wallpaper); "Frosted" — faint Frosted Glass under a soft
                 lavender wash — when none is picked. */}
@@ -1633,6 +1681,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
             messageInputRef.current?.focus();
           }}
           onForward={() => setForwardMsg(menuMsg)}
+          isPinned={pins.some((p) => p.message.id === menuMsg.id)}
+          onPin={() => setPinMsg(menuMsg)}
+          onUnpin={() => activeRoom && void fetchPins(activeRoom.id)}
           onEdit={() => {
             setReplyTo(null);
             setEditError('');
@@ -1647,6 +1698,21 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({ token, user, onBack, initi
       )}
       {whoMsg && (
         <ReactionsWho token={token} msg={whoMsg} meId={user.id} onClose={() => setWhoMsg(null)} onReacted={(reactions) => patchMessage(whoMsg.id, { reactions })} />
+      )}
+      {pinMsg && activeRoom && (
+        <PinPopup
+          token={token}
+          msg={pinMsg}
+          pinnedCount={pins.length}
+          onClose={() => setPinMsg(null)}
+          onDone={(text) => {
+            setPinMsg(null);
+            setPinIndex(0);
+            void fetchPins(activeRoom.id);
+            setToast(text);
+            setTimeout(() => setToast(''), 2500);
+          }}
+        />
       )}
       {forwardMsg && (
         <ForwardPopup

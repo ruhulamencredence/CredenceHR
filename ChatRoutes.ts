@@ -235,6 +235,19 @@ export async function ensureChatSchema(dbPool: any): Promise<void> {
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
       ) DEFAULT CHARSET=utf8mb4
     `);
+    // Pinned messages: up to 3 per chat, each for 24 hours / 7 / 30 days.
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS chat_pinned_messages (
+        message_id INT NOT NULL PRIMARY KEY,
+        room_id INT NOT NULL,
+        pinned_by INT NULL,
+        pinned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        expires_at TIMESTAMP NULL DEFAULT NULL,
+        KEY idx_chat_pins_room (room_id),
+        FOREIGN KEY (message_id) REFERENCES chat_messages(id) ON DELETE CASCADE,
+        FOREIGN KEY (room_id) REFERENCES chat_rooms(id) ON DELETE CASCADE
+      )
+    `);
     await dbPool.query(`
       CREATE TABLE IF NOT EXISTS chat_wallpapers (
         user_id INT NOT NULL,
@@ -863,6 +876,71 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
     }
   });
 
+  // Pinned messages (like WhatsApp): any member pins a message for everyone
+  // in the chat for 24 hours, 7 days or 30 days; at most 3 per chat — a
+  // 4th replaces the oldest. GET lists the live ones, newest first.
+  const PIN_MAX = 3;
+  const PIN_DAYS: Record<string, number> = { "24h": 1, "7d": 7, "30d": 30 };
+  const livePins = (roomId: number) =>
+    queryDB(
+      `SELECT p.message_id, p.pinned_at, p.expires_at, pu.name AS pinned_by_name
+         FROM chat_pinned_messages p LEFT JOIN users pu ON pu.id = p.pinned_by
+        WHERE p.room_id = ? AND (p.expires_at IS NULL OR p.expires_at > NOW())
+        ORDER BY p.pinned_at DESC`,
+      [roomId]
+    );
+  app.get("/api/chat/rooms/:id/pins", authenticateToken, requireChat, async (req: any, res) => {
+    try {
+      const roomId = Number(req.params.id);
+      if (!(await isMember(queryDB, roomId, req.user.id))) return res.status(403).json({ error: "Not a member of this room." });
+      const pins: any[] = (await livePins(roomId)) || [];
+      const msgs = pins.length ? await loadMessages(queryDB, `cm.id IN (${pins.map(() => "?").join(",")}) AND cm.unsent_at IS NULL`, pins.map((p) => p.message_id)) : [];
+      const byId = new Map(msgs.map((m: any) => [Number(m.id), m]));
+      res.json(
+        pins
+          .filter((p) => byId.has(Number(p.message_id)))
+          .map((p) => ({ message: byId.get(Number(p.message_id)), pinned_at: p.pinned_at, expires_at: p.expires_at, pinned_by_name: p.pinned_by_name || "" }))
+      );
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app.post("/api/chat/messages/:id/pin", authenticateToken, requireChat, async (req: any, res) => {
+    try {
+      const msg = await messageRow(Number(req.params.id));
+      if (!msg) return res.status(404).json({ error: "Message not found." });
+      if (!(await isMember(queryDB, msg.room_id, req.user.id))) return res.status(403).json({ error: "Not a member of this room." });
+      if (msg.unsent_at) return res.status(400).json({ error: "This message was deleted." });
+      const days = PIN_DAYS[String(req.body?.duration || "7d")];
+      if (!days) return res.status(400).json({ error: "Pick how long: 24 hours, 7 days or 30 days." });
+      await queryDB("DELETE FROM chat_pinned_messages WHERE room_id = ? AND expires_at IS NOT NULL AND expires_at <= NOW()", [msg.room_id]);
+      await queryDB(
+        `INSERT INTO chat_pinned_messages (message_id, room_id, pinned_by, pinned_at, expires_at) VALUES (?, ?, ?, NOW(), NOW() + INTERVAL ${days} DAY)
+         ON DUPLICATE KEY UPDATE pinned_by = VALUES(pinned_by), pinned_at = NOW(), expires_at = VALUES(expires_at)`,
+        [msg.id, msg.room_id, req.user.id]
+      );
+      // Keep the newest 3.
+      const all: any[] = (await queryDB("SELECT message_id FROM chat_pinned_messages WHERE room_id = ? ORDER BY pinned_at DESC, message_id DESC", [msg.room_id])) || [];
+      for (const old of all.slice(PIN_MAX)) await queryDB("DELETE FROM chat_pinned_messages WHERE message_id = ?", [old.message_id]);
+      io.to(`room:${msg.room_id}`).emit("pins_changed", { roomId: msg.room_id });
+      res.json({ success: true, replaced: Math.max(0, all.length - PIN_MAX) });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app.delete("/api/chat/messages/:id/pin", authenticateToken, requireChat, async (req: any, res) => {
+    try {
+      const msg = await messageRow(Number(req.params.id));
+      if (!msg) return res.status(404).json({ error: "Message not found." });
+      if (!(await isMember(queryDB, msg.room_id, req.user.id))) return res.status(403).json({ error: "Not a member of this room." });
+      await queryDB("DELETE FROM chat_pinned_messages WHERE message_id = ?", [msg.id]);
+      io.to(`room:${msg.room_id}`).emit("pins_changed", { roomId: msg.room_id });
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // POST /api/chat/messages/:id/react — { emoji } sets this account's one
   // reaction (the same emoji again, or emoji null, takes it off).
   app.post("/api/chat/messages/:id/react", authenticateToken, requireChat, async (req: any, res) => {
@@ -910,7 +988,9 @@ export function registerChatRoutes(app: Express, io: SocketIOServer, deps: ChatR
         [req.user.id, msg.id]
       );
       await queryDB("DELETE FROM chat_message_reactions WHERE message_id = ?", [msg.id]);
+      const unpinned: any = await queryDB("DELETE FROM chat_pinned_messages WHERE message_id = ?", [msg.id]);
       io.to(`room:${msg.room_id}`).emit("message_unsent", { roomId: msg.room_id, messageId: msg.id });
+      if (Number(unpinned?.affectedRows)) io.to(`room:${msg.room_id}`).emit("pins_changed", { roomId: msg.room_id });
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });

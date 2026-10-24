@@ -198,6 +198,7 @@ export const LINKED_TABLES = new Map<string, [string, string]>([
   ["chat_push_tokens", ["user_id", "users"]],
   ["chat_message_hidden", ["message_id", "chat_messages"]],
   ["chat_message_reactions", ["message_id", "chat_messages"]],
+  ["chat_pinned_messages", ["room_id", "chat_rooms"]],
   ["chat_wallpapers", ["user_id", "users"]],
   ["conveyance_bill_items", ["bill_id", "conveyance_bills"]],
   ["conveyance_claim_department_access", ["user_id", "users"]],
