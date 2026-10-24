@@ -108,12 +108,24 @@ export async function ensureMprDispatchSchema(dbPool: any): Promise<void> {
     ["md_queued_at", "TIMESTAMP NULL DEFAULT NULL"],
     ["md_queued_by", "INT NULL"]
   ];
+  // What the project fills in on receiving (Material Receive form).
+  const recvCols: [string, string][] = [
+    ["received_time", "TIME NULL"],
+    ["received_supplier", "VARCHAR(255) NULL"],
+    ["truck_no", "VARCHAR(40) NULL"],
+    ["po_status", "VARCHAR(40) NULL"],
+    ["received_by_text", "VARCHAR(255) NULL"]
+  ];
+  for (const [c, d] of recvCols) await run(`mpr_dispatches.${c}`, `ALTER TABLE mpr_dispatches ADD COLUMN ${c} ${d}`, ["ER_DUP_FIELDNAME"]);
   for (const [c, d] of cols) await run(`entries.${c}`, `ALTER TABLE entries ADD COLUMN ${c} ${d}`, ["ER_DUP_FIELDNAME"]);
   // Self Service switch: confirm material received for one's own projects.
   await run("users.can_receive_material", "ALTER TABLE users ADD COLUMN can_receive_material TINYINT(1) NOT NULL DEFAULT 0", ["ER_DUP_FIELDNAME"]);
   // Self Service switch: take one's own MPR rows back out of Dispatch Material.
   await run("users.can_return_dispatch", "ALTER TABLE users ADD COLUMN can_return_dispatch TINYINT(1) NOT NULL DEFAULT 0", ["ER_DUP_FIELDNAME"]);
 }
+
+// PO Status choices on the Material Receive form.
+export const PO_STATUSES = ["PO Received", "PO Pending", "Without PO"];
 
 export const MD_STATUS_LABEL: Record<string, string> = {
   pending: "Not dispatched",
@@ -299,6 +311,11 @@ export function registerMprDispatchRoutes(app: Express, deps: Deps) {
     receivedDate: toDateOnlyString(d.received_date),
     receivedNote: d.received_note || "",
     receivedBy: d.received_by_name || "",
+    receivedTime: d.received_time ? String(d.received_time).slice(0, 5) : "",
+    receivedSupplier: d.received_supplier || "",
+    truckNo: d.truck_no || "",
+    poStatus: d.po_status || "",
+    receivedByText: d.received_by_text || "",
     cancelReason: d.cancel_reason || ""
   });
   const DISPATCH_SQL = `
@@ -674,8 +691,11 @@ export function registerMprDispatchRoutes(app: Express, deps: Deps) {
     })
   );
 
-  // Confirms one dispatch arrived: { receivedQty, receivedDate, note }.
-  // Less than was sent needs a note (short / damaged).
+  // Confirms one dispatch arrived: { receivedQty, receivedDate, receivedTime,
+  // supplier, truckNo, poStatus, receivedBy, note }. Project, MPR No,
+  // material and Qty come from the dispatch; Supplier too when Purchase gave
+  // one, else the project types it. Truck No is numbers only. Less than was
+  // sent needs a note (short / damaged).
   app.post(
     "/api/material-receive/:dispatchId",
     authenticateToken,
@@ -696,15 +716,30 @@ export function registerMprDispatchRoutes(app: Express, deps: Deps) {
       if (date > todayInDhaka()) throw bad("Received date can't be in the future.");
       const sentOn = toDateOnlyString(d.dispatch_date);
       if (sentOn && date < sentOn) throw bad(`Received date can't be before it was sent (${sentOn}).`);
+      const time = str(req.body?.receivedTime, 8);
+      if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) throw bad("Enter the receiving time.");
+      const nowTime = new Date().toLocaleTimeString("en-GB", { timeZone: "Asia/Dhaka", hour: "2-digit", minute: "2-digit", hour12: false });
+      if (date === todayInDhaka() && time > nowTime) throw bad("Receiving time can't be in the future.");
+      const supplier = str(d.supplier) || str(req.body?.supplier);
+      if (!supplier) throw bad("Enter the supplier name.");
+      const truckNo = str(req.body?.truckNo, 40).replace(/^-+|-+$/g, "");
+      if (!truckNo) throw bad("Enter the truck number.");
+      if (!/^[0-9]+(-[0-9]+)*$/.test(truckNo)) throw bad("Truck No can only have numbers (e.g. 11-2345).");
+      const poStatus = str(req.body?.poStatus, 40);
+      if (!PO_STATUSES.includes(poStatus)) throw bad("Pick the PO status.");
+      const receivedBy = str(req.body?.receivedBy);
+      if (!receivedBy) throw bad("Enter who received it.");
       const note = str(req.body?.note, 1000);
       const short = qty < Number(d.qty) - EPS;
       if (short && !note) throw bad("Less than was sent — say why (short, damaged…).");
       const done: any = await queryDB(
-        "UPDATE mpr_dispatches SET status = 'received', received_qty = ?, received_date = ?, received_note = ?, received_by = ?, received_at = NOW() WHERE id = ? AND status = 'sent'",
-        [r2(qty), date, note || null, Number(req.user.id), Number(d.id)]
+        `UPDATE mpr_dispatches SET status = 'received', received_qty = ?, received_date = ?, received_time = ?, received_supplier = ?, truck_no = ?, po_status = ?,
+           received_by_text = ?, received_note = ?, received_by = ?, received_at = NOW() WHERE id = ? AND status = 'sent'`,
+        [r2(qty), date, time, str(d.supplier) ? null : supplier, truckNo, poStatus, receivedBy, note || null, Number(req.user.id), Number(d.id)]
       );
       if (!Number(done?.affectedRows)) throw bad("Already received.");
-      await log(Number(d.entry_id), Number(d.id), "receive", r2(qty), short ? `Short by ${r2(Number(d.qty) - qty)} — ${note}` : note || "", Number(req.user.id));
+      const recvDetail = [`${time}`, `Truck ${truckNo}`, poStatus, `Received by ${receivedBy}`, !str(d.supplier) && `Supplier ${supplier}`].filter(Boolean).join(" · ");
+      await log(Number(d.entry_id), Number(d.id), "receive", r2(qty), short ? `${recvDetail} · Short by ${r2(Number(d.qty) - qty)} — ${note}` : [recvDetail, note].filter(Boolean).join(" · "), Number(req.user.id));
       const now = await refreshEntry(Number(d.entry_id));
       // Purchase hears about a short receipt.
       if (short && d.created_by) {
