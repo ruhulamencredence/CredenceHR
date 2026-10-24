@@ -558,7 +558,12 @@ export const MprDispatchMaterial: React.FC<{ token: string }> = ({ token }) => {
                         <td className="px-2 py-2 text-right whitespace-nowrap font-semibold">{qtyText(r.remaining)}</td>
                         <td className="px-2 py-2 text-slate-600">{lastD ? [lastD.supplier, lastD.poNo].filter(Boolean).join(' · ') || '—' : '—'}</td>
                         {seesAll && <td className="px-2 py-2 text-slate-600">{r.queuedBy || '—'}</td>}
-                        <td className="px-2 py-2"><MdStatusChip status={r.status} queued={r.queuedAt} /></td>
+                        <td className="px-2 py-2">
+                          <MdStatusChip status={r.status} queued={r.queuedAt} />
+                          {r.confirmedAt && r.status === 'pending' && (
+                            <div className="mt-0.5 text-[10px] font-semibold text-teal-700" title={`Confirmed by ${r.confirmedBy || 'the project'}`}>✓ Project confirmed</div>
+                          )}
+                        </td>
                         <td className="px-2 py-2">
                           <div className="flex justify-end gap-1.5">
                             {sendable(r) && (

@@ -49,6 +49,7 @@ import { UserAccessDrawer, UserAccessChips, userInitials, ROLE_BADGE, ROLE_LABEL
 import { UserBulkBar } from './UserBulkBar';
 import { ModuleAccessPage } from './ModuleAccessPage';
 import { PasswordRequestsPopup } from './PasswordRequestsPopup';
+import { JobEditDetailsPopup } from './JobEditDetailsPopup';
 import { BudgetNoticePopup, type BudgetNoticeDraftInfo } from './BudgetNoticePopup';
 import { AccessTemplatesModal } from './AccessTemplatesModal';
 import { BudgetSubmissionReport } from './BudgetSubmissionReport';
@@ -877,6 +878,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
   // Edit Log table below already covers approved Add MPRs permanently).
   const recentlyReviewedJobEditRequests = jobEditRequests.filter((r) => r.status !== 'pending');
 
+  // Edit Log -> Job Edit Approvals -> Details (JobEditDetailsPopup.tsx).
+  const [jobEditDetails, setJobEditDetails] = useState<PendingJobEdit | null>(null);
   const actOnJobEditRequest = async (id: number, action: 'approve' | 'reject') => {
     if (action === 'reject' && !(await confirmDialog('Reject this Job Edit request?'))) return;
     setActingJobEditId(id);
@@ -891,6 +894,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       if (!res.ok) throw new Error(data.error || 'Failed to act on this request');
       // An approved Add MPR shows up in the MPR Edit Log table too — refresh both.
       await Promise.all([fetchJobEditRequests(), fetchMprEditLog()]);
+      setJobEditDetails(null);
     } catch (err: any) {
       setJobEditActionError(err.message || 'Something went wrong');
     } finally {
@@ -4938,6 +4942,13 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   <div className="flex items-center gap-2 flex-shrink-0">
                     <button
                       type="button"
+                      onClick={() => setJobEditDetails(r)}
+                      className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 transition-colors"
+                    >
+                      <Eye className="w-3.5 h-3.5" /> Details
+                    </button>
+                    <button
+                      type="button"
                       disabled={actingJobEditId === r.id}
                       onClick={() => actOnJobEditRequest(r.id, 'approve')}
                       className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50 transition-colors"
@@ -4966,7 +4977,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
               <div className="divide-y divide-slate-100">
                 {recentlyReviewedJobEditRequests.map((r) => (
                   <div key={r.id} className="px-6 py-2.5 flex items-center justify-between gap-3">
-                    <p className="text-xs text-slate-500 truncate">{describeJobEditRequest(r)}</p>
+                    <button type="button" onClick={() => setJobEditDetails(r)} className="text-xs text-slate-500 truncate text-left hover:text-blue-700 hover:underline" title="Details">
+                      {describeJobEditRequest(r)}
+                    </button>
                     <span
                       className={`text-[10px] font-semibold px-2 py-0.5 rounded-full flex-shrink-0 ${
                         r.status === 'approved'
@@ -4982,6 +4995,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
             </div>
           )}
         </div>
+        {jobEditDetails && (
+          <JobEditDetailsPopup
+            r={jobEditDetails}
+            acting={actingJobEditId === jobEditDetails.id}
+            onClose={() => setJobEditDetails(null)}
+            onAct={(action) => void actOnJobEditRequest(jobEditDetails.id, action)}
+          />
+        )}
         <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
           <div className="p-6 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div>
