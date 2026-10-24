@@ -12,7 +12,7 @@ import { syncAllZkDevices, syncZkDevice, startZkSyncSchedule, ensureZkSchema } f
 import { resolveMinLeadDays, addDaysToDateStr, DeliveryConditionType } from "./deliveryDateConditions";
 import { registerProfileRoutes } from "./profileRoutes";
 import { registerHolidayRoutes, ensureHolidayCalendarSchema } from "./holidayRoutes";
-import { registerAlertRoutes, ensureAlertsSchema, createAlert, setAlertsIo, notifyRecordChanged } from "./Alerts";
+import { registerAlertRoutes, ensureAlertsSchema, createAlert, setAlertsIo, notifyRecordChanged, type AlertType } from "./Alerts";
 import { registerUserManagementRoutes } from "./UserManagement";
 import { registerConveyanceBillClaimRoutes, disburseConveyanceBill } from "./ConveyanceBillClaimRoutes";
 import { registerLiveTrackingRoutes } from "./LiveTrackingRoutes";
@@ -29,6 +29,8 @@ import { registerEntriesRoutes } from "./EntriesRoutes";
 import { registerDebugRoutes } from "./DebugRoutes";
 import { registerProjectRoutes } from "./ProjectRoutes";
 import { registerAuthRoutes } from "./AuthRoutes";
+import { ensureLoginGuardSchema } from "./LoginGuard";
+import { maskDatabaseErrors, apiNotFoundAndErrors } from "./ApiErrors";
 import { ensureSchemaMigrations } from "./schemaMigrations";
 import { registerBudgetImportRoutes } from "./BudgetImportRoutes";
 import { registerMovementClaimRoutes } from "./MovementClaimRoutes";
@@ -267,6 +269,12 @@ async function initDB() {
     await ensureBreakSchema(dbPool);
     // Forgot password (PasswordResetRoutes.ts).
     await ensurePasswordResetSchema(dbPool);
+    // Sign-in attempts, for stopping password guessing (LoginGuard.ts).
+    await ensureLoginGuardSchema(dbPool);
+    // Approval requests with no approver yet (rehomeAwaitingApprovals).
+    await dbPool.query("ALTER TABLE approval_requests ADD COLUMN awaiting_approver TINYINT(1) NOT NULL DEFAULT 0").catch((err: any) => {
+      if (err?.code !== "ER_DUP_FIELDNAME") console.warn("⚠️ approval_requests.awaiting_approver: " + err.message);
+    });
     // Budget import -> draft notice (BudgetNoticeDraft.ts).
     await ensureBudgetNoticeSchema(dbPool);
     // Measurement Sheet was taken out of the software: drop its table and the
@@ -803,7 +811,23 @@ async function createTemplateApprovalRequest(
     : await resolveSupervisorApprover(requestedBy);
 
   const totalSteps = (supervisorId ? 1 : 0) + templateSteps;
-  if (totalSteps === 0) return { autoApproved: true, template: null };
+  if (totalSteps === 0) {
+    // HR filing a Vehicle Requisition directly and choosing no Supervisor
+    // (overrideSupervisorId === null) with no Template still goes straight
+    // through, as before.
+    if (overrideSupervisorId === null) return { autoApproved: true, template: null };
+    // Nobody to approve it yet (no Supervisor, no Template): it is NOT
+    // approved on its own any more. It waits as "no approver yet"
+    // (awaiting_approver) — a Superadmin may still decide it — and moves to
+    // a Supervisor / Template the moment one is set (rehomeAwaitingApprovals).
+    const r: any = await queryDB(
+      `INSERT INTO approval_requests (source_type, event_type, source_id, requested_by, status, current_step, total_steps, actions_json, template_id, supervisor_step_user_id, awaiting_approver)
+       VALUES (?, 'submit', ?, ?, 'pending', 1, 1, '[]', NULL, NULL, 1)`,
+      [sourceType, sourceId, requestedBy]
+    );
+    await alertNoApprover(sourceType, Number(r?.insertId), requestedBy);
+    return { autoApproved: false, template: null };
+  }
 
   await queryDB(
     `INSERT INTO approval_requests (source_type, event_type, source_id, requested_by, status, current_step, total_steps, actions_json, template_id, supervisor_step_user_id)
@@ -811,6 +835,103 @@ async function createTemplateApprovalRequest(
     [sourceType, sourceId, requestedBy, totalSteps, template ? template.id : null, supervisorId || null]
   );
   return { autoApproved: false, template };
+}
+
+// ---- Requests with no approver yet --------------------------------------------
+// A request whose employee has neither a Supervisor nor an Approval Template
+// waits (approval_requests.awaiting_approver = 1) instead of approving
+// itself. Superadmins (and Approvals-module accounts) are told once; when a
+// Supervisor or Template exists for that employee later, the request moves
+// to it (step 1) and that approver is alerted. Runs when an approvals list
+// is opened, when the request's approver is looked up, and every 10 minutes.
+const APPROVAL_REQUEST_TYPE: Record<string, "conveyance" | "leave" | "timesheet" | "asset" | "vehicle" | "mobile" | "loan"> = {
+  user_claim: "conveyance",
+  attendance_correction: "timesheet",
+  leave_application: "leave",
+  asset_requisition: "asset",
+  vehicle_requisition: "vehicle",
+  mobile_limit_request: "mobile",
+  advance_request: "loan"
+};
+const APPROVAL_ALERT: Record<string, { type: AlertType; label: string }> = {
+  user_claim: { type: "conveyance_approval", label: "Conveyance Bill Claim" },
+  attendance_correction: { type: "hr_action", label: "Attendance Correction" },
+  leave_application: { type: "leave_approval", label: "Leave Application" },
+  asset_requisition: { type: "asset_approval", label: "Asset Requisition" },
+  vehicle_requisition: { type: "vehicle_approval", label: "Vehicle Requisition" },
+  mobile_limit_request: { type: "mobile_limit_approval", label: "Mobile Limit Request" },
+  advance_request: { type: "loan_approval", label: "Loan / Advance Request" }
+};
+async function alertNoApprover(sourceType: string, requestId: number, requestedBy: number): Promise<void> {
+  try {
+    const who: any[] = (await queryDB("SELECT name FROM users WHERE id = ?", [requestedBy])) || [];
+    const label = APPROVAL_ALERT[sourceType]?.label || "Request";
+    const admins: any[] =
+      (await queryDB(
+        `SELECT DISTINCT u.id FROM users u
+          WHERE COALESCE(u.is_blocked, 0) = 0 AND (u.role = 'superadmin'
+             OR EXISTS (SELECT 1 FROM admin_module_permissions m WHERE m.user_id = u.id AND m.module_key = 'approvals'))`
+      )) || [];
+    for (const a of admins) {
+      if (Number(a.id) === Number(requestedBy)) continue;
+      await createAlert(queryDB, {
+        userId: Number(a.id),
+        type: "hr_action",
+        title: "No approver set",
+        message: `${who[0]?.name || "An employee"}'s ${label} is waiting: they have no Supervisor and no Approval Template. Set one (Employees -> Supervisor, or Approval Templates) and it moves there, or decide it yourself in Approvals.`,
+        relatedType: "approval_request",
+        relatedId: requestId
+      }).catch(() => {});
+    }
+  } catch (err: any) {
+    console.warn("⚠️ Could not alert about a request with no approver: " + err.message);
+  }
+}
+async function rehomeAwaitingApprovals(onlyId?: number): Promise<number> {
+  let moved = 0;
+  const rows: any[] =
+    (await queryDB(
+      `SELECT * FROM approval_requests WHERE status = 'pending' AND awaiting_approver = 1${onlyId ? " AND id = ?" : ""}`,
+      onlyId ? [onlyId] : []
+    ).catch(() => [])) || [];
+  for (const r of rows) {
+    try {
+      const type = APPROVAL_REQUEST_TYPE[r.source_type];
+      if (!type) continue;
+      let template = await resolveApprovalTemplate(Number(r.requested_by), type);
+      let steps = 0;
+      if (template) {
+        const all: any[] = (await queryDB("SELECT * FROM approval_template_steps")) || [];
+        steps = all.filter((x: any) => Number(x.template_id) === Number(template.id)).length;
+        if (!steps) template = null;
+      }
+      const sup = template?.skip_auto_supervisor ? null : await resolveSupervisorApprover(Number(r.requested_by));
+      const total = (sup ? 1 : 0) + steps;
+      if (!total) continue;
+      const done: any = await queryDB(
+        "UPDATE approval_requests SET awaiting_approver = 0, template_id = ?, supervisor_step_user_id = ?, total_steps = ?, current_step = 1 WHERE id = ? AND awaiting_approver = 1",
+        [template ? template.id : null, sup || null, total, r.id]
+      );
+      if (!Number(done?.affectedRows)) continue;
+      moved++;
+      Object.assign(r, { awaiting_approver: 0, template_id: template ? template.id : null, supervisor_step_user_id: sup || null, total_steps: total, current_step: 1 });
+      const mapping = APPROVAL_ALERT[r.source_type];
+      const who: any[] = (await queryDB("SELECT name FROM users WHERE id = ?", [r.requested_by])) || [];
+      for (const a of await getCurrentStepApprovers(r)) {
+        await createAlert(queryDB, {
+          userId: a.user_id,
+          type: mapping?.type || "hr_action",
+          title: "Approval waiting on you",
+          message: `${who[0]?.name || "An employee"}'s ${mapping?.label || "request"} was waiting for an approver — it is now waiting on you.`,
+          relatedType: r.source_type,
+          relatedId: Number(r.source_id)
+        }).catch(() => {});
+      }
+    } catch (err: any) {
+      console.warn(`⚠️ Could not move approval request #${r.id} to its new approver: ${err.message}`);
+    }
+  }
+  return moved;
 }
 
 // Who's authorized to act on an approval_requests row's CURRENT step, whether
@@ -823,6 +944,14 @@ async function createTemplateApprovalRequest(
 // Supervisor and the Template's own steps are shifted down by one (its own
 // step_order 1 is this request's step_order 2, and so on).
 async function getCurrentStepApprovers(request: any): Promise<{ user_id: number; user_name: string | null }[]> {
+  // No approver yet: move it to a Supervisor / Template if one exists now,
+  // else nobody (only a Superadmin's override can decide it).
+  if (Number(request.awaiting_approver) === 1) {
+    await rehomeAwaitingApprovals(Number(request.id));
+    const fresh = ((await queryDB("SELECT * FROM approval_requests WHERE id = ?", [request.id])) || [])[0];
+    if (!fresh || Number(fresh.awaiting_approver) === 1) return [];
+    Object.assign(request, fresh);
+  }
   const hasSupervisorStep = !!request.supervisor_step_user_id;
   if (hasSupervisorStep && Number(request.current_step) === 1) {
     const rows = await queryDB("SELECT id, name FROM users WHERE id = ?", [request.supervisor_step_user_id]);
@@ -2130,6 +2259,8 @@ async function startServer() {
   // Raised from Express's 100kb default so a Budget Excel file (sent as base64 in the
   // import request) doesn't get rejected before it reaches the route handler.
   app.use(express.json({ limit: "25mb" }));
+  // No database error text in API answers (ApiErrors.ts).
+  maskDatabaseErrors(app);
 
   // --- Auth Middleware ---
   const authenticateToken = (req: any, res: any, next: any) => {
@@ -2842,7 +2973,11 @@ async function startServer() {
   // Assignments) now lives in ApprovalRoutes.ts — registered below via
   // registerApprovalRoutes(). Leave's own reliever-decision route is
   // unaffected and still lives further down in this file.
+  // Requests that had no approver move on once one is set (every 10 minutes
+  // too, besides whenever an approvals list is opened).
+  setInterval(() => void rehomeAwaitingApprovals().catch(() => {}), 10 * 60 * 1000);
   registerApprovalRoutes(app, {
+    rehomeAwaitingApprovals,
     authenticateToken,
     requireAdmin,
     requireSuperAdmin,
@@ -3046,6 +3181,10 @@ async function startServer() {
   registerRosterRoutes(app, { authenticateToken, requireAdmin, requireModule, requireModuleLayer, hasModuleLayer, queryDB, todayInDhaka, createAlert });
   // Break Time (Self Service + Admin Panel module "break_time").
   registerBreakRoutes(app, { authenticateToken, requireAdmin, requireModuleLayer, hasModuleLayer, queryDB, todayInDhaka });
+
+  // An /api address no route answered: 404 JSON; bad JSON / thrown errors:
+  // JSON too (ApiErrors.ts). After every route, before the web app.
+  apiNotFoundAndErrors(app);
 
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

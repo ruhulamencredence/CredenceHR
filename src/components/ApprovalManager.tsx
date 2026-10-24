@@ -470,6 +470,9 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
                     <td className="px-4 py-3 text-slate-700">{r.requested_by_name || `User #${r.requested_by}`}</td>
                     <td className="px-4 py-3 text-xs text-slate-500">
                       Step {r.current_step} of {r.total_steps}
+                      {r.status === 'pending' && Number(r.awaiting_approver) === 1 && (
+                        <div className="text-amber-700 font-medium">No approver set yet — set a Supervisor or Approval Template (or decide it as Superadmin)</div>
+                      )}
                       {r.status === 'pending' && r.current_approver_name && (
                         <div className="text-slate-400">Waiting on {r.current_approver_name}</div>
                       )}
