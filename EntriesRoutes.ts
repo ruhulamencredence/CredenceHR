@@ -2102,7 +2102,21 @@ export function registerEntriesRoutes(app: Express, deps: EntriesRouteDeps) {
          WHERE r.status = 'pending' OR r.reviewed_at >= NOW() - INTERVAL 30 DAY
          ORDER BY (r.status = 'pending') DESC, r.created_at DESC`
       );
-      res.json(rows.map(parseJobEditRequestRow));
+      // The Budget row behind each proposed MPR row (Specification, Unit, the
+      // Budget's Req. Qty) for the reviewer's Details view.
+      const parsed = rows.map(parseJobEditRequestRow);
+      const lines = (r: any): any[] => (r.action === "add_job" ? (Array.isArray(r.payload?.items) ? r.payload.items : []) : r.action === "add_item" && r.payload ? [r.payload] : []);
+      const itemIds = [...new Set(parsed.flatMap((r: any) => lines(r).map((it: any) => Number(it.budget_item_id)).filter((n: number) => n > 0)))];
+      if (itemIds.length) {
+        const bi: any[] = await queryDB(`SELECT id, specification, unit, req_qty FROM budget_items WHERE id IN (${itemIds.map(() => "?").join(",")})`, itemIds);
+        const byId = new Map(bi.map((b) => [Number(b.id), b]));
+        for (const r of parsed)
+          for (const it of lines(r)) {
+            const b = byId.get(Number(it.budget_item_id));
+            if (b) Object.assign(it, { specification: b.specification || "", unit: b.unit || "", budget_qty: b.req_qty ?? null });
+          }
+      }
+      res.json(parsed);
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Failed to load Job Edit requests" });
     }
