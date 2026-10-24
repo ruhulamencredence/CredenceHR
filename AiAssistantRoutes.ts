@@ -2039,7 +2039,7 @@ const INTENTS: Intent[] = [
     args: (t, c) => (hasAny(t, LAST_MONTH) ? { month_year: monthShift(c.today.slice(0, 7), -1) } : {}) },
   { tool: "asset_lookup", keys: ["kar kache", "কার কাছে", "asset koyta", "কয়টা asset", "asset khali", "খালি asset", "laptop koyta", "কয়টা laptop", "asset list", "who has", "কার নামে"],
     args: (t) => { const m = /(\S{2,30})\s+(?:kar kache|কার কাছে|কার নামে)/.exec(t) || /(?:who has|kar kache|কার কাছে)\s+(?!ache|আছে)(\S{2,30})/.exec(t); return { query: m ? m[1].replace(/[?]/g, "").trim() : "" }; } },
-  { tool: "my_pending_approvals", keys: ["amar kache approval", "amar approval", "আমার কাছে কয়টা", "আমার অনুমোদনের", "আমার কাছে অনুমোদন", "approval koyta", "koyta approval", "কয়টা approval", "pending approval amar", "amar kache pending", "আমার কাছে পেন্ডিং", "approve korte hobe", "approve বাকি", "approve baki", "waiting for my approval", "my approvals", "my pending approvals"] },
+  { tool: "my_pending_approvals", keys: ["approve korar jonno", "approve er jonno", "amar kache approve", "অনুমোদনের জন্য কিছু", "অনুমোদন করার জন্য", "approve korte hobe ki", "amar kache approval", "amar approval", "আমার কাছে কয়টা", "আমার অনুমোদনের", "আমার কাছে অনুমোদন", "approval koyta", "koyta approval", "কয়টা approval", "pending approval amar", "amar kache pending", "আমার কাছে পেন্ডিং", "approve korte hobe", "approve বাকি", "approve baki", "waiting for my approval", "my approvals", "my pending approvals"] },
   { tool: "my_profile", keys: ["amar supervisor", "আমার supervisor", "আমার সুপারভাইজার", "amar boss", "my supervisor", "amar joining", "আমার যোগদান", "joining date", "যোগদানের তারিখ", "amar designation", "আমার পদবি", "amar podobi", "amar employee id", "আমার employee id", "আমার আইডি", "amar department", "আমার department", "my profile", "আমার প্রোফাইল", "amar profile", "koto bochor chakri", "কত বছর চাকরি", "amar confirmation", "probation kobe sesh"] },
   { tool: "my_assets", keys: ["amar asset", "আমার asset", "আমার অ্যাসেট", "amar kache ki asset", "আমার কাছে কী", "my asset", "laptop amar", "acknowledge asset", "asset acknowledge", "asset requisition status", "requisition koi", "asset er obostha"] },
   { tool: "my_rides", keys: ["amar ride", "আমার ride", "amar gari", "আমার গাড়ি", "gari booking", "গাড়ির বুকিং", "ride status", "my ride", "vehicle requisition status", "gari kobe", "গাড়ি কবে", "driver ke", "ড্রাইভার কে"] },
@@ -2107,7 +2107,8 @@ const INTENTS: Intent[] = [
 
 const OWN_TOOL: Record<string, string> = { late_on_date: "my_late_days", task_overview: "my_tasks", target_progress: "my_targets_progress", vehicle_overview: "my_rides" };
 
-const GREET = ["hi", "hello", "hey", "salam", "assalam", "হাই", "হ্যালো", "সালাম", "আসসালাম", "kemon acho", "কেমন আছ", "good morning", "শুভ সকাল"];
+const GREET = ["hi", "hello", "hey", "salam", "assalam", "হাই", "হ্যালো", "সালাম", "আসসালাম", "kemon acho", "kemon achen", "কেমন আছ", "good morning", "শুভ সকাল",
+  "ki khobor", "কী খবর", "কি খবর", "ki obostha apnar", "valo achen", "ভালো আছেন", "how are you"];
 const THANKS = ["thanks", "thank you", "ধন্যবাদ", "dhonnobad", "thx", "অনেক ধন্যবাদ"];
 
 function suggestionsFor(c: Ctx): string[] {
@@ -2464,6 +2465,9 @@ function knownWords() {
   for (const h of HELP) wordsOf(h.keys, vocab);
   for (const [q] of TRAINING) wordsOf([q], vocab);
   wordsOf([...HOW, ...LAST_MONTH, ...LEAVE_WORDS, ...APPLY_WORDS, ...HOLIDAY_WORDS, ...HUMAN_WORDS, ...THANKS, ...GREET], vocab);
+  // The words the leave-request reader looks for (kalke, porshu, months, sick…)
+  // stay as written: "correcting" them would lose the dates.
+  for (const w of String(parseLeaveRequest).toLowerCase().match(/[a-z]{3,}|[\u0980-\u09ff]{2,}/g) || []) vocab.add(w);
   return vocab;
 }
 function editDistance(a: string, b: string, max: number) {
