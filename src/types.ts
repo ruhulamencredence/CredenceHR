@@ -553,6 +553,9 @@ export interface ApprovalTemplate {
 
 export interface ApprovalRequest {
   id: number;
+  // 1 while it waits for an approver (no Supervisor and no Approval Template
+  // for the employee); it moves to one as soon as one is set.
+  awaiting_approver?: number | null;
   source_type: 'attendance' | 'claim' | 'user_claim' | 'attendance_correction' | 'leave_application' | 'asset_requisition' | 'vehicle_requisition' | 'mobile_limit_request' | 'advance_request';
   event_type: 'check_in' | 'check_out' | 'submit';
   source_id: number;

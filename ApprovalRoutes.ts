@@ -66,6 +66,9 @@ interface ApprovalRouteDeps {
   // step advance — a final approve/reject already sends its own notification
   // from inside performApprovalAction's per-source finalize/reject call.
   getCurrentStepApprovers: (request: any) => Promise<{ user_id: number; user_name: string | null }[]>;
+  // Requests that had no approver (no Supervisor, no Template) move to one
+  // that exists now (server.ts) — run before the approval lists are built.
+  rehomeAwaitingApprovals: (onlyId?: number) => Promise<number>;
   isVehicleMaintainerStep: (request: any) => Promise<boolean>;
   isAssetFulfillerStep: (request: any) => Promise<boolean>;
   isConveyanceDisburserStep: (request: any) => Promise<boolean>;
@@ -88,6 +91,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
     toDateOnlyString,
     attachApprovalStatuses,
     getCurrentStepApprovers,
+    rehomeAwaitingApprovals,
     isVehicleMaintainerStep,
     isAssetFulfillerStep,
     isConveyanceDisburserStep,
@@ -285,6 +289,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
   // details + who's up next) for the Admin Panel -> Approvals queue/history.
   app.get("/api/approvals", authenticateToken, requireAdmin, requireModule("approvals"), async (req: any, res) => {
     try {
+      await rehomeAwaitingApprovals().catch(() => 0);
       const [requests, chain, templateStepApproverRows, projects, users] = await Promise.all([
         queryDB("SELECT ar.*, u.name AS requested_by_name FROM approval_requests ar LEFT JOIN users u ON u.id = ar.requested_by ORDER BY ar.id DESC"),
         getApprovalChain(),
@@ -407,7 +412,8 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
           // supervisor_step_user_id is set, step_order 1 IS that Supervisor and
           // the Template's own steps are shifted down by one.
           let currentApprovers: { user_id: number; user_name: string | null }[] = [];
-          if (r.status === "pending") {
+          // Still waiting for an approver (no Supervisor, no Template): nobody.
+          if (r.status === "pending" && Number(r.awaiting_approver) !== 1) {
             const hasSupervisorStep = !!r.supervisor_step_user_id;
             if (hasSupervisorStep && Number(r.current_step) === 1) {
               const su = userMap.get(Number(r.supervisor_step_user_id));
@@ -549,6 +555,7 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
   app.get("/api/my-approvals", authenticateToken, async (req: any, res) => {
     try {
       const myId = Number(req.user.id);
+      await rehomeAwaitingApprovals().catch(() => 0);
 
       // Phase 1 — everything needed to work out WHICH pending requests are
       // actually this account's to act on. approval_requests is already
@@ -561,7 +568,9 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       // pulling every Leave Application ever filed — see the old version's
       // comment (now below) on why this exists.
       const [pendingRequests, templateStepApproverRows, templateSteps, chain, relieverRows, allClearanceItems, allExitRequests, directLeaveRows] = await Promise.all([
-        queryDB("SELECT * FROM approval_requests WHERE status = 'pending' ORDER BY id ASC"),
+        // A request still waiting for an approver (no Supervisor, no
+        // Template) is nobody's to act on — never the old global chain's.
+        queryDB("SELECT * FROM approval_requests WHERE status = 'pending' AND COALESCE(awaiting_approver, 0) = 0 ORDER BY id ASC"),
         queryDB(
           `SELECT s.template_id, s.step_order, sa.user_id
            FROM approval_template_step_approvers sa
