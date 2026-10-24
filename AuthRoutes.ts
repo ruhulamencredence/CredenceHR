@@ -11,6 +11,8 @@ import { sessionLifetimeSeconds } from "./SessionSecurity";
 import { resolveCompanyContext } from "./CompanyRoutes";
 import { workspaceStartCompany } from "./CompanyRoutes";
 import { checkAppDevice } from "./DeviceRoutes";
+import { loginBlocked, recordLogin } from "./LoginGuard";
+import { clientIp } from "./ActiveUsersRoutes";
 import { activeCompanyId } from "./companyContext";
 import { activeGroupId } from "./companyContext";
 import { companyStore } from "./companyContext";
@@ -67,15 +69,25 @@ export function registerAuthRoutes(app: Express, deps: RegisterAuthRoutesDeps) {
         "SELECT * FROM users WHERE email = ? OR username = ?",
         [identifier, usernameCandidate]
       );
+      // Password guessing is stopped (LoginGuard.ts): 5 wrong tries lock the
+      // account for 15 minutes, 30 from one address make it wait. Unknown
+      // login IDs are counted the same way, so nothing tells them apart.
+      const ip = clientIp(req);
+      const knownId = users.length ? Number(users[0].id) : null;
+      const blocked = await loginBlocked(queryDB, ip, identifier, knownId);
+      if (blocked) return res.status(429).json({ error: blocked, code: "LOGIN_LOCKED" });
       if (users.length === 0) {
+        await recordLogin(queryDB, ip, identifier, null, false);
         return res.status(400).json({ error: "Invalid login ID or password" });
       }
 
       const user = users[0];
       const validPassword = await bcrypt.compare(password, user.password_hash);
       if (!validPassword) {
+        await recordLogin(queryDB, ip, identifier, knownId, false);
         return res.status(400).json({ error: "Invalid login ID or password" });
       }
+      await recordLogin(queryDB, ip, identifier, knownId, true);
       // Multi-company: the workspace typed before the login form must be this
       // account's own group (CompanyRoutes.ts). Older app builds send none.
       // The <address>/system sign-in page is for the system owner only.
