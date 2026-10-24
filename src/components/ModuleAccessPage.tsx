@@ -76,6 +76,7 @@ type FlagKey =
   | 'can_view_mail_directory'
   | 'can_use_mail_groups'
   | 'can_receive_material'
+  | 'can_return_dispatch'
   | 'can_view_roster'
   | 'can_take_break'
   | 'can_sign_documents'
@@ -109,6 +110,7 @@ const FLAGS: FlagDef[] = [
   { key: 'can_job_edit', label: 'Job Edit', desc: 'Change MPRs after Final Submit.', section: 'pepm', endpoint: null },
   { key: 'can_edit_delivery_date', label: 'Edit Delivery Date', desc: 'Change an MPR row’s delivery date.', section: 'pepm', endpoint: null },
   { key: 'can_receive_material', label: 'Material Receive', desc: 'Confirm material Purchase sent to their projects.', section: 'pepm', endpoint: 'material-receive-access' },
+  { key: 'can_return_dispatch', label: 'Take back from Dispatch', desc: 'Take their own MPR rows back out of Dispatch Material while nothing is sent.', section: 'pepm', endpoint: 'return-dispatch-access' },
 
   { key: 'can_view_tasks', label: 'My Tasks', desc: 'Tasks given to them, and requests to HR.', section: 'hr', endpoint: 'tasks-access' },
   { key: 'can_view_targets', label: 'My Targets', desc: 'Monthly / yearly targets and their progress.', section: 'hr', endpoint: 'targets-access' },

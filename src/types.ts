@@ -783,6 +783,8 @@ export interface User {
   can_view_mail_directory?: boolean;
   can_use_mail_groups?: boolean;
   can_receive_material?: boolean;
+  // Material Receive -> take an MPR row back out of Dispatch Material — off by default.
+  can_return_dispatch?: boolean;
   // Self Service -> My Duty Roster (RosterRoutes.ts) — off by default.
   can_view_roster?: boolean;
   // Self Service -> Break Time (BreakRoutes.ts) — off by default.

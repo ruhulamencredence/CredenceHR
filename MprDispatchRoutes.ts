@@ -111,6 +111,8 @@ export async function ensureMprDispatchSchema(dbPool: any): Promise<void> {
   for (const [c, d] of cols) await run(`entries.${c}`, `ALTER TABLE entries ADD COLUMN ${c} ${d}`, ["ER_DUP_FIELDNAME"]);
   // Self Service switch: confirm material received for one's own projects.
   await run("users.can_receive_material", "ALTER TABLE users ADD COLUMN can_receive_material TINYINT(1) NOT NULL DEFAULT 0", ["ER_DUP_FIELDNAME"]);
+  // Self Service switch: take one's own MPR rows back out of Dispatch Material.
+  await run("users.can_return_dispatch", "ALTER TABLE users ADD COLUMN can_return_dispatch TINYINT(1) NOT NULL DEFAULT 0", ["ER_DUP_FIELDNAME"]);
 }
 
 export const MD_STATUS_LABEL: Record<string, string> = {
@@ -613,6 +615,62 @@ export function registerMprDispatchRoutes(app: Express, deps: Deps) {
       const rows: any[] = (await queryDB(sql, params)) || [];
       const ds = await dispatchesFor(rows.map((r) => Number(r.id)));
       res.json({ rows: rows.map((r) => rowOut(r, ds.get(Number(r.id)) || [])) });
+    })
+  );
+
+  // "My MPR in Dispatch" -> Take back: the project takes rows it entered back
+  // out of Dispatch Material, like Purchase's unqueue — only while nothing has
+  // been sent on the row. Needs Material Receive and its own switch
+  // (users.can_return_dispatch, off by default). Purchase hears about it.
+  app.post(
+    "/api/material-receive/take-back",
+    authenticateToken,
+    handler(async (req, res) => {
+      await receiveGate(req);
+      const me = Number(req.user.id);
+      if (req.user.role !== "superadmin") {
+        const rows: any[] = (await queryDB("SELECT can_return_dispatch FROM users WHERE id = ?", [me])) || [];
+        if (!Number(rows[0]?.can_return_dispatch)) throw bad("Taking rows back from Dispatch isn't turned on for your account.", 403);
+      }
+      const ids = [...new Set<number>((Array.isArray(req.body?.entryIds) ? req.body.entryIds : []).map(Number).filter((n: number) => n > 0))].slice(0, 500);
+      if (!ids.length) throw bad("Pick at least one MPR row.");
+      const reason = str(req.body?.reason, 1000);
+      let removed = 0,
+        kept = 0,
+        notYours = 0;
+      const byQueuer = new Map<number, string[]>();
+      for (const id of ids) {
+        const entry: any = ((await queryDB(`${ROW_SQL} AND e.id = ?`, [id])) || [])[0];
+        if (!entry || Number(entry.created_by) !== me) {
+          notYours++;
+          continue;
+        }
+        const sent: any[] = (await queryDB("SELECT COUNT(*) AS n FROM mpr_dispatches WHERE entry_id = ? AND status <> 'cancelled'", [id])) || [];
+        if (Number(sent[0]?.n || 0) > 0) {
+          kept++;
+          continue;
+        }
+        const r: any = await queryDB("UPDATE entries SET md_queued_at = NULL, md_queued_by = NULL WHERE id = ? AND md_queued_at IS NOT NULL", [id]);
+        if (!Number(r?.affectedRows)) continue;
+        await log(id, null, "unqueue", null, `Taken back by the project${reason ? ` — ${reason}` : ""}`, me);
+        removed++;
+        const queuer = Number(entry.md_queued_by);
+        if (queuer && queuer !== me) {
+          const list = byQueuer.get(queuer) || [];
+          list.push(`${entry.project_name} · ${entry.mpr_no} ${entry.item_name}`);
+          byQueuer.set(queuer, list);
+        }
+      }
+      for (const [userId, lines] of byQueuer) {
+        await createAlert(queryDB, {
+          userId,
+          type: "mpr_dispatch",
+          title: "MPR taken back from Dispatch",
+          message: `${req.user.name || "The project"} took back: ${lines.slice(0, 4).join("; ")}${lines.length > 4 ? ` and ${lines.length - 4} more` : ""}${reason ? `. Reason: ${reason}` : ""}`,
+          relatedType: "mpr_dispatch"
+        }).catch(() => {});
+      }
+      res.json({ removed, kept, notYours });
     })
   );
 
