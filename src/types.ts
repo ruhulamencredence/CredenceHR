@@ -782,6 +782,7 @@ export interface User {
   can_return_dispatch?: boolean;
   // Self Service -> Give feedback (FeedbackRoutes.ts) — off by default.
   can_give_feedback?: boolean;
+  can_use_fingerprint?: boolean;
   // Self Service -> My Duty Roster (RosterRoutes.ts) — off by default.
   can_view_roster?: boolean;
   // Self Service -> Break Time (BreakRoutes.ts) — off by default.

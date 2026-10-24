@@ -32,6 +32,7 @@ import { registerAuthRoutes } from "./AuthRoutes";
 import { ensureLoginGuardSchema } from "./LoginGuard";
 import { maskDatabaseErrors, apiNotFoundAndErrors } from "./ApiErrors";
 import { ensureFeedbackSchema, registerFeedbackRoutes } from "./FeedbackRoutes";
+import { ensureFingerprintSchema, registerFingerprintRoutes } from "./FingerprintRoutes";
 import { ensureSchemaMigrations } from "./schemaMigrations";
 import { registerBudgetImportRoutes } from "./BudgetImportRoutes";
 import { registerMovementClaimRoutes } from "./MovementClaimRoutes";
@@ -274,6 +275,7 @@ async function initDB() {
     await ensureLoginGuardSchema(dbPool);
     // User feedback about the app (FeedbackRoutes.ts).
     await ensureFeedbackSchema(dbPool);
+    await ensureFingerprintSchema(dbPool);
     // Approval requests with no approver yet (rehomeAwaitingApprovals).
     await dbPool.query("ALTER TABLE approval_requests ADD COLUMN awaiting_approver TINYINT(1) NOT NULL DEFAULT 0").catch((err: any) => {
       if (err?.code !== "ER_DUP_FIELDNAME") console.warn("⚠️ approval_requests.awaiting_approver: " + err.message);
@@ -2663,6 +2665,7 @@ async function startServer() {
 
   // Sign-in routes (/api/auth/*) live in AuthRoutes.ts.
   registerAuthRoutes(app, { JWT_SECRET, authenticateToken, getAdminModules, getAllModulePermissionLayers, pepmEnabled, queryDB });
+  registerFingerprintRoutes(app, { JWT_SECRET, authenticateToken, getAdminModules, getAllModulePermissionLayers, pepmEnabled, queryDB });
 
   // Projects routes live in ProjectRoutes.ts.
   registerProjectRoutes(app, { authenticateToken, queryDB, requireAdmin, requireModule, requireModuleLayer });
