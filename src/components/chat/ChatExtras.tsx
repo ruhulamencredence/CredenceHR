@@ -8,19 +8,20 @@
 // actions").
 //   - Conversation wallpapers (per chat, or a default for every chat).
 //   - The message menu (long-press on a phone, the ⌄ button on a computer):
-//     quick reactions, Reply, Edit (own text, 15 minutes), Copy, Delete for
-//     me, Delete for everyone.
+//     quick reactions, Reply, Forward, Edit (own text, 15 minutes), Copy,
+//     Delete for me, Delete for everyone.
 //   - Reaction chips under a bubble, and who reacted.
 //   - Chat profile sections: About, work details, shared media, common
 //     groups, the wallpaper picker; and editing one's own About.
 
 import React, { useEffect, useState } from 'react';
-import { Reply, Copy, Trash2, Ban, Pencil as EditIcon, Smile, Loader2, Image as ImageIcon, FileText, Mic, Users, Shield, Mail, Phone, Briefcase, Building2, IdCard, Pencil } from 'lucide-react';
+import { Reply, Forward, Search, Check, Copy, Trash2, Ban, Pencil as EditIcon, Smile, Loader2, Image as ImageIcon, FileText, Mic, Users, Shield, Mail, Phone, Briefcase, Building2, IdCard, Pencil } from 'lucide-react';
 import { MailPopup as Popup, inputCls, labelCls, primaryBtn, ghostBtn } from '../mail/MailPopup';
 import { apiUrl } from '../../lib/api';
 import { formatDate } from '../../lib/formatDate';
 import { CHAT_CONVERSATION_BACKGROUND } from '../../lib/backgroundTheme';
-import type { ChatMessage, ChatReaction } from '../../types';
+import type { ChatMessage, ChatReaction, ChatRoom, ChatDirectoryUser } from '../../types';
+import { UserAvatar } from '../UserAvatar';
 
 // ---- Wallpapers ---------------------------------------------------------------
 // A light doodle tile (chat bubbles, a pencil, a hard hat, stars) like
@@ -104,12 +105,13 @@ export const MessageMenu: React.FC<{
   onReply: () => void;
   // Own text messages, within 15 minutes of sending.
   onEdit: () => void;
+  onForward: () => void;
   onClose: () => void;
   onReacted: (reactions: ChatReaction[]) => void;
   onHidden: () => void;
   onUnsent: () => void;
   confirm: (message: string) => Promise<boolean>;
-}> = ({ token, msg, meId, isRoomAdmin, onReply, onEdit, onClose, onReacted, onHidden, onUnsent, confirm }) => {
+}> = ({ token, msg, meId, isRoomAdmin, onReply, onEdit, onForward, onClose, onReacted, onHidden, onUnsent, confirm }) => {
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const mine = msg.sender_id === meId;
@@ -181,6 +183,11 @@ export const MessageMenu: React.FC<{
           {!unsent &&
             item('reply', <Reply className="w-4 h-4" />, 'Reply', () => {
               onReply();
+              onClose();
+            })}
+          {!unsent &&
+            item('forward', <Forward className="w-4 h-4" />, 'Forward', () => {
+              onForward();
               onClose();
             })}
           {canEdit &&
@@ -459,6 +466,116 @@ export const MyAboutPopup: React.FC<{ token: string; onClose: () => void }> = ({
           ))}
         </div>
         <p className="text-[11px] text-slate-500">Shown to the people you chat with, on your chat profile.</p>
+        {error && <div className="text-xs px-3 py-2 rounded-xl bg-rose-50 text-rose-700">{error}</div>}
+      </div>
+    </Popup>
+  );
+};
+
+// ---- Forward ----------------------------------------------------------------------
+// Pick up to 5 chats (or people — their direct chat is made if needed) to
+// send a copy of the message to; the copies show "Forwarded".
+const FORWARD_MAX = 5;
+export const ForwardPopup: React.FC<{
+  token: string;
+  msg: ChatMessage;
+  meId: number;
+  rooms: ChatRoom[];
+  directory: ChatDirectoryUser[];
+  roomName: (r: ChatRoom) => string;
+  onClose: () => void;
+  onDone: (text: string, roomIds: number[]) => void;
+}> = ({ token, msg, meId, rooms, directory, roomName, onClose, onDone }) => {
+  const [q, setQ] = useState('');
+  const [picked, setPicked] = useState<string[]>([]); // "r:<roomId>" / "u:<userId>"
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const words = q.trim().toLowerCase();
+  // People already in a direct chat show as that chat, not twice.
+  const withDirect = new Set(rooms.filter((r) => r.type === 'direct' && r.other_participant).map((r) => r.other_participant!.id));
+  const roomRows = rooms.filter((r) => !words || roomName(r).toLowerCase().includes(words));
+  const people = directory.filter((d) => d.id !== meId && !withDirect.has(d.id) && (!words || d.name.toLowerCase().includes(words)));
+  const toggle = (key: string) =>
+    setPicked((p) => (p.includes(key) ? p.filter((k) => k !== key) : p.length >= FORWARD_MAX ? p : [...p, key]));
+  const send = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      const res = await fetch(apiUrl(`/api/chat/messages/${msg.id}/forward`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          roomIds: picked.filter((k) => k.startsWith('r:')).map((k) => Number(k.slice(2))),
+          userIds: picked.filter((k) => k.startsWith('u:')).map((k) => Number(k.slice(2)))
+        })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Could not forward');
+      onDone(`Forwarded to ${data.forwarded} chat${data.forwarded === 1 ? '' : 's'}.`, data.roomIds || []);
+    } catch (e: any) {
+      setError(e.message);
+      setBusy(false);
+    }
+  };
+  const row = (key: string, avatar: React.ReactNode, title: string, sub: string) => {
+    const on = picked.includes(key);
+    const full = !on && picked.length >= FORWARD_MAX;
+    return (
+      <button key={key} type="button" onClick={() => toggle(key)} disabled={full} className={`w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-black/5 ${full ? 'opacity-40' : ''}`}>
+        {avatar}
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-medium text-slate-800 truncate">{title}</div>
+          {sub && <div className="text-[11px] text-slate-500 truncate">{sub}</div>}
+        </div>
+        <span className={`w-5 h-5 rounded-full border flex items-center justify-center shrink-0 ${on ? 'bg-violet-600 border-violet-600 text-white' : 'border-slate-300'}`}>
+          {on && <Check className="w-3.5 h-3.5" />}
+        </span>
+      </button>
+    );
+  };
+  const preview = msg.content || (msg.message_type === 'image' ? '📷 Photo' : msg.message_type === 'audio' ? '🎤 Voice message' : `📎 ${msg.attachment_filename || 'File'}`);
+  return (
+    <Popup
+      title="Forward message"
+      icon={<Forward className="w-4 h-4" />}
+      size="md"
+      onClose={busy ? () => {} : onClose}
+      footer={
+        <>
+          <button type="button" className={ghostBtn} onClick={onClose} disabled={busy}>Cancel</button>
+          <button type="button" className={primaryBtn} onClick={() => void send()} disabled={busy || !picked.length}>
+            {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Forward className="w-4 h-4" />} Forward{picked.length ? ` (${picked.length})` : ''}
+          </button>
+        </>
+      }
+    >
+      <div className="space-y-3 text-left">
+        <div className="liquid-glass-inset rounded-[20px] px-3 py-2 text-xs text-slate-600 line-clamp-2">{preview}</div>
+        <div className="relative">
+          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <input className={`${inputCls.replace('text-sm', 'text-base sm:text-sm')} pl-9`} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search chats and people" />
+        </div>
+        <p className="text-[11px] text-slate-500">Pick up to {FORWARD_MAX} chats · {picked.length} picked</p>
+        <div className="liquid-glass-inset rounded-[20px] max-h-[45vh] overflow-y-auto py-1">
+          {roomRows.length > 0 && <div className="px-3 pt-1 pb-0.5 text-[10px] font-semibold uppercase text-slate-400">Chats</div>}
+          {roomRows.map((r) =>
+            row(
+              `r:${r.id}`,
+              <UserAvatar
+                userId={r.type === 'direct' ? r.other_participant?.id : null}
+                name={roomName(r)}
+                token={token}
+                className="w-9 h-9 text-xs"
+                fallback={r.type === 'community' ? <Shield className="w-4 h-4" /> : r.type === 'group' ? <Users className="w-4 h-4" /> : undefined}
+              />,
+              roomName(r),
+              r.type === 'direct' ? '' : r.type === 'community' ? 'Community' : 'Group'
+            )
+          )}
+          {people.length > 0 && <div className="px-3 pt-2 pb-0.5 text-[10px] font-semibold uppercase text-slate-400">Other people</div>}
+          {people.slice(0, 60).map((d) => row(`u:${d.id}`, <UserAvatar userId={d.id} name={d.name} token={token} className="w-9 h-9 text-xs" />, d.name, d.email || ''))}
+          {!roomRows.length && !people.length && <p className="px-3 py-4 text-xs text-slate-400 text-center">No match.</p>}
+        </div>
         {error && <div className="text-xs px-3 py-2 rounded-xl bg-rose-50 text-rose-700">{error}</div>}
       </div>
     </Popup>
