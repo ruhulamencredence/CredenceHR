@@ -44,7 +44,13 @@ function setSaved(v: SavedFingerprint | null) {
 }
 
 const isApp = () => Capacitor.isNativePlatform();
-const plugin = async () => (await import('@capgo/capacitor-native-biometric')).NativeBiometric;
+// NEVER return the plugin itself from an async function or put it in a promise:
+// a Capacitor plugin is a proxy that answers EVERY property, "then" included, so
+// the promise machinery would "call" a native method named then and wait for ever
+// (the dialog's check never finished and the button stayed off). It is wrapped
+// in a plain object, and used as `.api`.
+const plugin = async () => ({ api: (await import('@capgo/capacitor-native-biometric')).NativeBiometric });
+type Bio = Awaited<ReturnType<typeof plugin>>;
 
 // The app's pages come from the server, so they can be newer than the
 // installed APK. An APK built before the fingerprint plugin was added has no
@@ -60,7 +66,7 @@ const nativePluginMissing = () => isApp() && !Capacitor.isPluginAvailable('Nativ
 export async function fingerprintStatus(): Promise<'ok' | 'app_old' | 'no_sensor'> {
   try {
     if (nativePluginMissing()) return 'app_old';
-    if (isApp()) return (await (await plugin()).isAvailable()).isAvailable ? 'ok' : 'no_sensor';
+    if (isApp()) return (await within((await plugin()).api.isAvailable(), 10000, 'The phone\'s fingerprint check')).isAvailable ? 'ok' : 'no_sensor';
     const pkc = (window as any).PublicKeyCredential;
     return !!pkc && (await pkc.isUserVerifyingPlatformAuthenticatorAvailable()) ? 'ok' : 'no_sensor';
   } catch {
@@ -76,7 +82,7 @@ export async function fingerprintDetails(): Promise<string> {
     if (isApp()) {
       parts.push(`plugin ${Capacitor.isPluginAvailable('NativeBiometric') ? 'native' : 'MISSING'}`);
       if (!nativePluginMissing()) {
-        const r: any = await within((await plugin()).isAvailable(), 8000, 'isAvailable');
+        const r: any = await within((await plugin()).api.isAvailable(), 8000, 'isAvailable');
         parts.push(`sensor ${r.isAvailable ? 'ok' : 'not ready'}`, `type ${r.biometryType}`, `strong ${r.strongBiometryIsAvailable ? 'yes' : 'no'}`);
         if (r.errorCode !== undefined) parts.push(`error ${r.errorCode}`);
       }
@@ -128,7 +134,7 @@ export async function enableFingerprint(token: string, user: User, workspace: st
   if (nativePluginMissing()) throw new Error(APP_TOO_OLD);
   if (isApp()) {
     step('1/3 Checking this phone…');
-    let nb: Awaited<ReturnType<typeof plugin>>;
+    let nb: Bio;
     let device: Awaited<ReturnType<typeof appDeviceInfo>>;
     try {
       nb = await within(plugin(), 10000, 'The fingerprint part of the app');
@@ -142,7 +148,7 @@ export async function enableFingerprint(token: string, user: User, workspace: st
     try {
       const { AccessControl } = await import('@capgo/capacitor-native-biometric');
       await within(
-        nb.setCredentials({ username: String(user.id), password: secret, server: SERVER, accessControl: AccessControl.BIOMETRY_CURRENT_SET, title: 'Turn on fingerprint sign-in', negativeButtonText: 'Cancel' }),
+        nb.api.setCredentials({ username: String(user.id), password: secret, server: SERVER, accessControl: AccessControl.BIOMETRY_CURRENT_SET, title: 'Turn on fingerprint sign-in', negativeButtonText: 'Cancel' }),
         90000,
         'The phone\'s fingerprint window'
       );
@@ -171,7 +177,7 @@ export async function removeFingerprint(token: string, id: number): Promise<void
 }
 export async function forgetHere() {
   setSaved(null);
-  if (isApp()) await (await plugin()).deleteCredentials({ server: SERVER }).catch(() => {});
+  if (isApp()) await (await plugin()).api.deleteCredentials({ server: SERVER }).catch(() => {});
 }
 
 // Sign in. `extra` is what the password sign-in also sends (workspace, and on
@@ -183,7 +189,7 @@ export async function fingerprintLogin(extra: Record<string, any>): Promise<{ to
       const nb = await plugin();
       let creds;
       try {
-        creds = await nb.getSecureCredentials({ server: SERVER, title: 'Sign in to CredenceHR', reason: 'Sign in to CredenceHR', negativeButtonText: 'Use password' });
+        creds = await nb.api.getSecureCredentials({ server: SERVER, title: 'Sign in to CredenceHR', reason: 'Sign in to CredenceHR', negativeButtonText: 'Use password' });
       } catch (e: any) {
         if (cancelled(e)) throw Object.assign(new Error(''), { code: 'CANCELLED' });
         const code = Number(e?.code);
