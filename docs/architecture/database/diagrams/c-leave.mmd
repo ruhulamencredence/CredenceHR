@@ -1,0 +1,74 @@
+erDiagram
+  leave_year_settings {
+    int id PK
+    varchar close_month_day
+    varchar start_month_day
+    tinyint auto_rollover
+    int last_rollover_year
+  }
+  leave_balances {
+    int id PK
+    int user_id FK
+    decimal casual_leave
+    decimal sick_leave
+    decimal leave_without_pay
+  }
+  leave_applications {
+    int id PK
+    int user_id FK
+    int approver_id FK
+    varchar leave_type
+    date start_date
+    date end_date
+    decimal day_count
+  }
+  leave_balance_workflow_items {
+    int id PK
+    int workflow_id FK
+    varchar category_key
+    decimal balance_days
+  }
+  leave_categories {
+    int id PK
+    varchar category_key
+    varchar label
+    int company_id
+  }
+  leave_balance_workflows {
+    int id PK
+    varchar name
+    enum scope_type
+    varchar designation
+    tinyint is_active
+    int group_id
+  }
+  leave_category_balances {
+    int id PK
+    int user_id FK
+    int category_id FK
+    decimal balance
+  }
+  leave_application_department_access {
+    int id PK
+    int user_id FK
+    varchar department
+  }
+  leave_category_policies {
+    int id PK
+    varchar category_key
+    int min_advance_notice_days
+    tinyint reliever_required
+    int max_consecutive_days
+    tinyint require_paid_leave_exhausted
+    int company_id
+  }
+  users {
+    int id PK
+  }
+  users ||--o{ leave_balances : "user_id"
+  users ||--o{ leave_applications : "approver_id"
+  users ||--o{ leave_applications : "user_id"
+  leave_balance_workflows ||--o{ leave_balance_workflow_items : "workflow_id"
+  leave_categories ||--o{ leave_category_balances : "category_id"
+  users ||--o{ leave_category_balances : "user_id"
+  users ||--o{ leave_application_department_access : "user_id"

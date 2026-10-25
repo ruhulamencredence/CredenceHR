@@ -1,0 +1,202 @@
+erDiagram
+  zk_devices {
+    int id PK
+    varchar name
+    varchar ip_address
+    int port
+    varchar serial_number
+    tinyint is_active
+    timestamp last_synced_at
+  }
+  site_attendance_settings {
+    int id PK
+    tinyint require_approval
+    tinyint require_photo
+    tinyint require_location
+    int backdate_days
+    varchar reminder_time
+    int company_id
+  }
+  attendance {
+    int id PK
+    int user_id FK
+    int project_id FK
+    date attendance_date
+    timestamp check_in_at
+    decimal check_in_lat
+    decimal check_in_lng
+  }
+  duty_shifts {
+    int id PK
+    int company_id
+    varchar name
+    varchar code
+    time start_time
+    time end_time
+    int grace_minutes
+  }
+  vehicle_ride_settings {
+    int id PK
+    int grace_minutes
+    int reminder_minutes
+  }
+  tracking_device_state {
+    int user_id PK,FK
+    tinyint location_on
+    tinyint foreground_granted
+    tinyint background_granted
+    tinyint precise_granted
+    varchar mode
+    int battery_pct
+  }
+  duty_roster_department_access {
+    int id PK
+    int user_id FK
+    varchar department
+  }
+  site_attendance_members {
+    int id PK
+    int team_id FK
+    int employee_id FK
+  }
+  zk_attendance_logs {
+    int id PK
+    int device_id FK
+    varchar device_user_pin
+    datetime punch_time
+    int verify_mode
+    int work_code
+    timestamp synced_at
+  }
+  duty_roster {
+    int id PK
+    int employee_id FK
+    int shift_id FK
+    date roster_date
+    tinyint is_off
+    varchar note
+  }
+  employee_breaks {
+    int id PK
+    int user_id FK
+    date break_date
+    datetime started_at
+    datetime ended_at
+    int minutes
+    varchar note
+  }
+  break_settings {
+    int id PK
+    int company_id
+    int allowed_minutes
+    int max_breaks
+  }
+  late_policy_settings {
+    int id PK
+    time shift_start_time
+    int grace_minutes
+    int lates_per_deduction_day
+    int extreme_grace_minutes
+    int extreme_lates_per_deduction_day
+    date effective_date
+  }
+  location_pings {
+    int id PK
+    int user_id FK
+    decimal lat
+    decimal lng
+    int accuracy_m
+    int battery_pct
+    timestamp recorded_at
+  }
+  site_attendance_sheets {
+    int id PK
+    int team_id FK
+    date attendance_date
+    varchar status
+    timestamp submitted_at
+    decimal lat
+    decimal lng
+  }
+  tracking_notice_recipients {
+    int id PK
+    int notice_id FK
+    int user_id FK
+    int employee_pk
+    varchar reason
+    datetime last_ping
+    timestamp sent_at
+  }
+  attendance_corrections {
+    int id PK
+    int user_id FK
+    int project_id FK
+    date attendance_date
+    datetime requested_check_in_at
+    datetime requested_check_out_at
+    text remarks
+  }
+  site_attendance_teams {
+    int id PK
+    int project_id FK
+    varchar name
+    varchar site_location
+    int supervisor_user_id
+    int backup_user_id
+    decimal lat
+  }
+  late_waivers {
+    int id PK
+    int employee_id FK
+    int waived_by FK
+    date waiver_date
+    varchar reason
+  }
+  site_attendance_entries {
+    int id PK
+    int sheet_id FK
+    int employee_id FK
+    int team_id
+    date attendance_date
+    varchar status
+    varchar in_time
+  }
+  attendance_report_department_access {
+    int id PK
+    int user_id FK
+    varchar department
+  }
+  all_employees {
+    int id PK
+  }
+  notices {
+    int id PK
+  }
+  projects {
+    int id PK
+  }
+  users {
+    int id PK
+  }
+  projects ||--o{ attendance : "project_id"
+  users ||--o{ attendance : "user_id"
+  users ||--o{ tracking_device_state : "user_id"
+  users ||--o{ duty_roster_department_access : "user_id"
+  all_employees ||--o{ site_attendance_members : "employee_id"
+  site_attendance_teams ||--o{ site_attendance_members : "team_id"
+  zk_devices ||--o{ zk_attendance_logs : "device_id"
+  all_employees ||..o{ duty_roster : "employee_id"
+  duty_shifts ||..o{ duty_roster : "shift_id"
+  users ||--o{ employee_breaks : "user_id"
+  users ||--o{ location_pings : "user_id"
+  site_attendance_teams ||--o{ site_attendance_sheets : "team_id"
+  notices ||--o{ tracking_notice_recipients : "notice_id"
+  users ||--o{ tracking_notice_recipients : "user_id"
+  projects ||--o{ attendance_corrections : "project_id"
+  users ||--o{ attendance_corrections : "user_id"
+  projects ||..o{ site_attendance_teams : "project_id"
+  all_employees ||--o{ late_waivers : "employee_id"
+  users ||--o{ late_waivers : "waived_by"
+  all_employees ||--o{ site_attendance_entries : "employee_id"
+  site_attendance_sheets ||--o{ site_attendance_entries : "sheet_id"
+  users ||--o{ attendance_report_department_access : "user_id"

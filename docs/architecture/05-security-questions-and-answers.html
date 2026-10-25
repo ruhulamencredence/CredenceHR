@@ -1,0 +1,347 @@
+<!doctype html><html lang="bn"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>প্রশ্ন-উত্তর — CredenceHR</title><style>body{margin:0;font:16px/1.65 'Noto Sans Bengali','Segoe UI',system-ui,sans-serif;color:#1b1233;background:#f6f4fb}
+nav{position:sticky;top:0;z-index:5;background:#2a0f5c;display:flex;gap:4px;flex-wrap:wrap;padding:8px 14px}
+nav a{color:#e9ddff;text-decoration:none;font-size:14px;padding:6px 12px;border-radius:999px}
+nav a:hover,nav a.on{background:#7c3aed;color:#fff}
+main{max-width:1180px;margin:0 auto;padding:24px 22px 80px;background:#fff;box-shadow:0 0 40px rgba(60,20,120,.08)}
+h1{font-size:30px;border-bottom:3px solid #7c3aed;padding-bottom:8px}h2{margin-top:2em;border-bottom:1px solid #e5defa;padding-bottom:4px}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14px;display:block;overflow-x:auto}
+th,td{border:1px solid #ddd5f3;padding:6px 10px;vertical-align:top;text-align:left}th{background:#efe9ff}
+code{background:#f1ecff;padding:1px 5px;border-radius:4px;font-size:.92em}pre{background:#f7f5fc;padding:12px;border-radius:8px;overflow:auto}
+pre.mermaid{background:#fff;border:1px solid #e5defa;text-align:center;overflow:auto;padding:14px}
+img{max-width:100%;height:auto;border:1px solid #e5defa;border-radius:8px}blockquote{border-left:4px solid #a78bfa;margin:12px 0;padding:4px 14px;background:#faf8ff}
+details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href="index.html">সূচি</a><a class="" href="database/README.html">ডাটাবেস ডায়াগ্রাম</a><a class="" href="database/data-dictionary.html">Data Dictionary</a><a class="" href="02-application-workflow.html">Application Workflow</a><a class="" href="03-technology-and-libraries.html">প্রযুক্তি ও লাইব্রেরি</a><a class="" href="04-security.html">Security</a><a class="" href="security/access-control-matrix.html">Access Matrix</a><a class="on" href="05-security-questions-and-answers.html">প্রশ্ন-উত্তর</a></nav><main><h1 id="-">নিরাপত্তা নিয়ে প্রশ্ন করলে কী উত্তর দেবেন (প্রশ্ন-উত্তর)</h1>
+<blockquote>
+<p>ক্লায়েন্ট, অডিটর বা ম্যানেজমেন্ট যেসব প্রশ্ন সাধারণত করে, তার উত্তর। প্রতিটি উত্তরের পাশে অবস্থা:
+✅ <strong>আছে</strong> (কোড/টেস্টে প্রমাণসহ) · ⚠️ <strong>আংশিক</strong> · ❌ <strong>নেই</strong> · 🏢 <strong>প্রতিষ্ঠান/হোস্টিংয়ের ব্যাপার</strong> (সফটওয়্যারের কোডে নয়, আপনাদের সার্ভার/নীতিতে ঠিক করতে হবে)।
+প্রমাণের জায়গা: <code>04-security.md</code> এবং <code>docs/test-logs/</code>। <strong>যা নেই তা "আছে" বলবেন না।</strong> অডিটে সেটাই সবচেয়ে বড় ঝুঁকি।</p>
+</blockquote>
+<hr />
+<h2 id="_1">ক. পরিচয় যাচাই ও লগইন</h2>
+<table>
+<thead>
+<tr>
+<th>প্রশ্ন</th>
+<th>উত্তর</th>
+<th>অবস্থা</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>পাসওয়ার্ড কীভাবে রাখা হয়?</td>
+<td>bcrypt hash (cost 10)। সরল পাসওয়ার্ড কোথাও রাখা হয় না, লগেও না।</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>কেউ পাসওয়ার্ড অনুমান করলে?</td>
+<td>৫ বার ভুলে অ্যাকাউন্ট ১৫ মিনিট লক, এক IP থেকে ৩০ বার ভুলে অপেক্ষা। সব চেষ্টা <code>login_attempts</code>-এ। আমাদের টেস্টে ২৫ বার ভুলের পর আটকেছে।</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>পাসওয়ার্ডের নীতি কী?</td>
+<td>কমপক্ষে ৬ অক্ষর। জটিলতার শর্ত নেই (<code>111111</code> চলে)।</td>
+<td>⚠️ (উন্নতি দরকার)</td>
+</tr>
+<tr>
+<td>Two-factor (2FA/MFA) আছে?</td>
+<td>সাধারণ লগইনে TOTP/SMS 2FA <strong>নেই</strong>। বিকল্প: Passkey/Fingerprint লগইন (ফোনে hardware-সুরক্ষিত), মোবাইলে "একটি ফোন" নিয়ম, ই-স্বাক্ষরে ইমেইল OTP।</td>
+<td>⚠️</td>
+</tr>
+<tr>
+<td>পাসওয়ার্ড ভুলে গেলে?</td>
+<td>ইমেইলে ৬ অঙ্কের কোড (১৫ মিনিট, ৫ চেষ্টা) অথবা HR অস্থায়ী পাসওয়ার্ড দেয়। দুটোতেই পুরোনো সব সেশন বন্ধ। কে অ্যাকাউন্ট আছে তা বোঝা যায় না।</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>লগইন কতক্ষণ থাকে?</td>
+<td>ওয়েবে ১২ ঘণ্টা বা ৬০ মিনিট নিষ্ক্রিয় হলে শেষ; অ্যাপে ৭ দিন বা ৩ দিন না খুললে। Superadmin বদলাতে পারে।</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>চাকরি ছাড়লে বা সন্দেহ হলে লগইন বন্ধ হয়?</td>
+<td>হ্যাঁ। ব্লক, পদত্যাগ/বরখাস্ত কার্যকর, বা Superadmin-এর "sign out" হলে সব সেশন সঙ্গে সঙ্গে বন্ধ (প্রতি রিকোয়েস্টে যাচাই)।</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>পাসওয়ার্ড বদলালে চুরি যাওয়া সেশনের কী হয়?</td>
+<td>বাকি সব সেশন বন্ধ হয় (যে সেশন থেকে বদলানো সেটা থাকে)।</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Single Sign-On আছে?</td>
+<td>360 ERP-এর সাথে SSO হস্তান্তর আছে (সার্ভার-টু-সার্ভার, গোপন চাবি ব্রাউজারে যায় না)। অন্য Identity Provider (Azure AD, Google) <strong>নেই</strong>।</td>
+<td>⚠️</td>
+</tr>
+</tbody>
+</table>
+<h2 id="_2">খ. অনুমতি ও গোপনীয়তা</h2>
+<table>
+<thead>
+<tr>
+<th>প্রশ্ন</th>
+<th>উত্তর</th>
+<th>অবস্থা</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>কে কী দেখবে তা কীভাবে নিয়ন্ত্রণ হয়?</td>
+<td>তিন ভূমিকা (Superadmin/Admin/কর্মী) + ৪০ মডিউল + মডিউলের ভেতরে layer + বিভাগ-সীমা + কোম্পানি-সীমা। সব সার্ভারে প্রয়োগ হয় (UI লুকানো ছাড়াও API বন্ধ)।</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>বেতনের তথ্য কে দেখে?</td>
+<td>শুধু Payroll মডিউলের Admin। কর্মী শুধু নিজের payslip। টেস্টে কর্মী অন্যের payroll খুলতে পারেনি।</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>একজন একাই বেতন বানিয়ে পরিশোধ করতে পারে?</td>
+<td>না। HR বানায় → Audit অনুমোদন (যে submit করেছে সে নয়) → Accounts পরিশোধ। ব্যতিক্রম: Superadmin।</td>
+<td>⚠️</td>
+</tr>
+<tr>
+<td>পদাধিকার বাড়িয়ে নেওয়া যায়?</td>
+<td>কর্মী নিজের role বাড়াতে পারে না; Admin নিজেকে বেশি মডিউল দিতে পারে না; API দিয়ে নতুন Superadmin বানানো যায় না (সবই টেস্টে যাচাই)।</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>একাধিক কোম্পানির ডাটা আলাদা থাকে?</td>
+<td>হ্যাঁ, কোডে প্রতিটি SQL-এ কোম্পানির ফিল্টার বসে। (ডাটাবেস-স্তরে আলাদা স্কিমা নেই, একই ডাটাবেসে।)</td>
+<td>⚠️</td>
+</tr>
+<tr>
+<td>ব্যক্তিগত তথ্য (NID, ঠিকানা) কে দেখে?</td>
+<td>Employees মডিউলের Admin সব কর্মীর NID দেখেন; Employee Directory-তে সবাই সবার ফোন নম্বর দেখে। নীতি ঠিক করা দরকার।</td>
+<td>⚠️</td>
+</tr>
+<tr>
+<td>লোকেশন ট্র্যাকিং কি সম্মতি ছাড়া?</td>
+<td>না। আলাদা সুইচ (ডিফল্ট বন্ধ) ও ব্যবহারকারীকে নোটিশ ও সম্মতির পেজ।</td>
+<td>✅</td>
+</tr>
+</tbody>
+</table>
+<h2 id="_3">গ. ডাটা সুরক্ষা</h2>
+<table>
+<thead>
+<tr>
+<th>প্রশ্ন</th>
+<th>উত্তর</th>
+<th>অবস্থা</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ট্রানজিটে (ইন্টারনেটে) এনক্রিপশন?</td>
+<td>সার্ভার Nginx-এর পেছনে HTTPS-এ চালানোর কনফিগ আছে (<code>deploy/nginx.conf.example</code>), HTTPS হলে HSTS যায়। <strong>সার্টিফিকেট বসানো আপনাদের কাজ।</strong></td>
+<td>🏢</td>
+</tr>
+<tr>
+<td>রেস্টে (ডাটাবেস/ডিস্কে) এনক্রিপশন?</td>
+<td>অ্যাপ নিজে পুরো ডাটাবেস এনক্রিপ্ট করে না। নির্দিষ্ট সিক্রেট এনক্রিপ্ট/hash: মেইল পাসওয়ার্ড (AES-256-GCM), সব পাসওয়ার্ড (bcrypt), token/কোড (hash)। ডিস্ক এনক্রিপশন হোস্টিংয়ে।</td>
+<td>⚠️ 🏢</td>
+</tr>
+<tr>
+<td>SQL Injection থেকে সুরক্ষা?</td>
+<td>সব query prepared statement। লগইনে injection চেষ্টা টেস্টে আটকেছে।</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>XSS থেকে সুরক্ষা?</td>
+<td>React নিজে escape করে; Notice-এর HTML সার্ভার ও ব্রাউজারে পরিষ্কার। টেস্ট: <code>&lt;script&gt;</code>/<code>onerror</code> ফেরে না।</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>ফাইল আপলোড নিরাপদ?</td>
+<td>আকার সীমিত (২৫–৩০MB), ছবির ধরন যাচাই। ডকুমেন্টের ধরন-যাচাই ও ভাইরাস স্ক্যান <strong>নেই</strong>।</td>
+<td>⚠️</td>
+</tr>
+<tr>
+<td>ভুল বা ডাটাবেসের ত্রুটি ব্যবহারকারী দেখে?</td>
+<td>না। ডাটাবেসের বার্তা লুকানো, সংক্ষিপ্ত সাধারণ বার্তা যায়।</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>গুরুত্বপূর্ণ রেকর্ড ভুলে মুছে যেতে পারে?</td>
+<td>কর্মী মুছতে গেলে বেতন/সেবা-রেকর্ড থাকলে আটকায় (ডাটাবেসও আটকায়)। পরিশোধিত বেতন বদলানো যায় না।</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>ব্যাকআপ?</td>
+<td>সফটওয়্যারে ডাটাবেস ব্যাকআপের স্বয়ংক্রিয় ব্যবস্থা <strong>নেই</strong>। ফাইলও ডাটাবেসে, তাই ডাটাবেস ব্যাকআপই সব। MySQL dump/স্ন্যাপশট সময়সূচি আপনাদের ঠিক করতে হবে।</td>
+<td>🏢 ❌</td>
+</tr>
+<tr>
+<td>ডিজাস্টার রিকভারি (RTO/RPO)?</td>
+<td>লিখিত পরিকল্পনা <strong>নেই</strong>।</td>
+<td>🏢 ❌</td>
+</tr>
+</tbody>
+</table>
+<h2 id="_4">ঘ. নিরীক্ষা ও লগ</h2>
+<table>
+<thead>
+<tr>
+<th>প্রশ্ন</th>
+<th>উত্তর</th>
+<th>অবস্থা</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>কে কী করেছে তার প্রমাণ থাকে?</td>
+<td>লগইন চেষ্টা, পাসওয়ার্ড রিসেট, অ্যাক্সেস বদল, payroll-এ প্রতিটি লেখা, কর্মীর তথ্য বদল (আগে/পরে), ই-স্বাক্ষর ঘটনা, MPR সম্পাদনা, Mail অ্যাডমিন কাজ। <code>04-security.md</code> §৮।</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>সব ডাটা-পড়ার লগ আছে?</td>
+<td>না। সব পেজ খোলার লগ নেই (শুধু Payroll-এ কে কোন পেজ খুলল আছে)।</td>
+<td>⚠️</td>
+</tr>
+<tr>
+<td>লগ কেন্দ্রীয়/অপরিবর্তনীয়?</td>
+<td>আলাদা SIEM/অপরিবর্তনীয় লগ <strong>নেই</strong>। অ্যাপ লগ PM2-তে।</td>
+<td>❌</td>
+</tr>
+<tr>
+<td>লগ কতদিন রাখা?</td>
+<td><code>login_attempts</code> ৩০ দিন; বাকিগুলো মোছার স্বয়ংক্রিয় ব্যবস্থা দেখিনি (জমে থাকে)। নীতি ঠিক করা দরকার।</td>
+<td>⚠️</td>
+</tr>
+</tbody>
+</table>
+<h2 id="-_1">ঙ. ই-স্বাক্ষর ও ডকুমেন্ট</h2>
+<table>
+<thead>
+<tr>
+<th>প্রশ্ন</th>
+<th>উত্তর</th>
+<th>অবস্থা</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>স্বাক্ষর কি আইনত বৈধ?</td>
+<td>প্রযুক্তিগতভাবে: স্বাক্ষরকারী চেনা (OTP চালু করলে), ফাইলের SHA-256, সময়, ক্রম, QR দিয়ে যাচাই, ঐচ্ছিক PKCS#7 সার্টিফিকেট স্বাক্ষর। <strong>আইনি বৈধতার জন্য</strong> বাংলাদেশের CCA-অনুমোদিত সার্টিফিকেট কিনে (<code>ESIGN_CERT_FILE</code>) বসানো এবং আইনজীবীর মত লাগবে। বর্তমান সার্টিফিকেট self-signed হলে Adobe-এ "validity unknown" দেখাবে।</td>
+<td>⚠️</td>
+</tr>
+<tr>
+<td>স্বাক্ষরের পর ফাইল বদলালে ধরা যায়?</td>
+<td>হ্যাঁ। সার্টিফিকেট স্বাক্ষরে এক বাইট বদলালেও PDF reader ধরে; <code>/verify</code> পেজেও ফাইল মেলানো যায়।</td>
+<td>✅</td>
+</tr>
+</tbody>
+</table>
+<h2 id="_5">চ. বাইরের সেবা ও তৃতীয় পক্ষ</h2>
+<table>
+<thead>
+<tr>
+<th>প্রশ্ন</th>
+<th>উত্তর</th>
+<th>অবস্থা</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ডাটা কি বাইরের কোনো সেবায় যায়?</td>
+<td>শুধু যা <code>.env</code>-এ চালু করা হয়েছে: <strong>Google Gemini</strong> (AI Assistant, চালু থাকলে প্রশ্ন ও ফল Google-এ যায়, বন্ধ রাখা যায়), <strong>Firebase</strong> (পুশ নোটিফিকেশন, শিরোনাম/বার্তা), <strong>SMTP/IMAP</strong> (মেইল সার্ভার), <strong>CARTO</strong> (মানচিত্র টাইল), <strong>360 ERP</strong> (SSO)। কোনোটাই বাধ্যতামূলক নয়।</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Analytics/ট্র্যাকার?</td>
+<td>তৃতীয় পক্ষের analytics নেই (নিজস্ব <code>platform_visits</code> টেবিল আছে)।</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>থার্ড-পার্টি লাইব্রেরির তালিকা ও লাইসেন্স?</td>
+<td><code>dependency-sbom.csv</code> (৭২৬ প্যাকেজ, লাইসেন্সসহ) ও <code>03-technology-and-libraries.md</code>। একটি GPL-3.0 লাইব্রেরি অব্যবহৃত অবস্থায় রয়ে গেছে, বাদ দেওয়ার তালিকায়।</td>
+<td>⚠️</td>
+</tr>
+<tr>
+<td>লাইব্রেরির দুর্বলতা পরীক্ষা (<code>npm audit</code>)?</td>
+<td>নিয়মিত প্রক্রিয়া <strong>লিখিত নেই</strong>। (১৮ অক্টোবর "নিরাপত্তা আপডেট" commit আছে, প্রক্রিয়া হিসেবে নয়।)</td>
+<td>⚠️</td>
+</tr>
+</tbody>
+</table>
+<h2 id="_6">ছ. উন্নয়ন ও পরীক্ষা</h2>
+<table>
+<thead>
+<tr>
+<th>প্রশ্ন</th>
+<th>উত্তর</th>
+<th>অবস্থা</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>কোডে সিক্রেট লেখা আছে?</td>
+<td>না। <code>.env</code> ও <code>.jwt-secret</code> git-এর বাইরে। (সতর্কতা: <code>.env.example</code>-এ নমুনা অ্যাডমিন পাসওয়ার্ড, লাইভে বদলাতে হবে।)</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>কী কী টেস্ট হয়?</td>
+<td>স্বয়ংক্রিয়: ২ বছরের HR সিমুলেশন (২৮৪ ধাপ), ৫ বছরের কর্মী-জীবন (৩৫৩ ধাপ), নিরাপত্তা "ভাঙার চেষ্টা" (৫৫), onboarding ও HR-linkage ইউনিট/ইন্টিগ্রেশন (১৩১), ১০৪ পেজের UI স্মোক, TypeScript টাইপ চেক। লগ <code>docs/test-logs/</code>।</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>বাইরের penetration test?</td>
+<td><strong>হয়নি।</strong></td>
+<td>❌</td>
+</tr>
+<tr>
+<td>কোড রিভিউ ও পরিবর্তনের রেকর্ড?</td>
+<td>git ইতিহাস ও <code>CHANGES_*.md</code>। PR-ভিত্তিক বাধ্যতামূলক রিভিউ প্রক্রিয়া লিখিত নেই।</td>
+<td>⚠️</td>
+</tr>
+<tr>
+<td>নতুন ফিচারে নিরাপত্তা নিশ্চিত?</td>
+<td><code>CLAUDE.md</code>-র নিয়ম: প্রতিটি নতুন ফিচার অনুমতির পেছনে, UI ও API দুদিকে।</td>
+<td>✅</td>
+</tr>
+</tbody>
+</table>
+<h2 id="_7">জ. ঘটনা, আইন ও গোপনীয়তা নীতি</h2>
+<table>
+<thead>
+<tr>
+<th>প্রশ্ন</th>
+<th>উত্তর</th>
+<th>অবস্থা</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>নিরাপত্তা-ঘটনার প্রতিক্রিয়া পরিকল্পনা?</td>
+<td><strong>লিখিত নেই।</strong> প্রযুক্তিগত হাতিয়ার আছে (ব্লক, sign-out, ফোন সরানো, <code>JWT_SECRET</code> বদলে সবাইকে বের করা, লগ)। <code>04-security.md</code> §১২।</td>
+<td>❌</td>
+</tr>
+<tr>
+<td>Privacy Policy?</td>
+<td>অ্যাপের ভেতরে Privacy Policy পেজ আছে (<code>PrivacyPolicy.tsx</code>)। বিষয়বস্তু আইনজীবীকে দিয়ে মিলিয়ে নিন।</td>
+<td>⚠️</td>
+</tr>
+<tr>
+<td>ডাটা সংরক্ষণ ও মোছার নীতি?</td>
+<td>লিখিত নেই। সিস্টেম বেতন/সেবা-রেকর্ড মুছতে দেয় না; কাউকে "ভুলে যাওয়ার" অনুরোধ (GDPR-ধাঁচ) পূরণের স্বয়ংক্রিয় ব্যবস্থা নেই।</td>
+<td>❌</td>
+</tr>
+<tr>
+<td>সম্মতি (compliance) সার্টিফিকেট (ISO 27001, SOC 2)?</td>
+<td>নেই।</td>
+<td>❌</td>
+</tr>
+<tr>
+<td>কর্মীদের নিরাপত্তা প্রশিক্ষণ, ভেন্ডর নীতি, ভৌত নিরাপত্তা?</td>
+<td>সংগঠনের বিষয়।</td>
+<td>🏢</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="_8">কীভাবে উত্তর দেবেন (পরামর্শ)</h2>
+<ol>
+<li><strong>সবসময় প্রমাণ দেখান:</strong> "আমরা নিরাপদ" বলার বদলে ফাইলের নাম বা টেস্ট লগ দেখান।</li>
+<li><strong>যা নেই তা স্বীকার করুন এবং তারিখসহ পরিকল্পনা দিন।</strong> ❌ ও ⚠️ সারি ধরে একটি কর্মপরিকল্পনা বানিয়ে রাখুন।</li>
+<li><strong>"হোস্টিং-নির্ভর" (🏢) প্রশ্নে</strong> আপনাদের সার্ভার প্রদানকারীর নথি (ডাটা সেন্টার, ব্যাকআপ, TLS) আলাদা দেখাতে হবে।</li>
+<li><strong>অডিট আসার আগে:</strong> <code>CORS_ORIGINS</code> সেট, পাসওয়ার্ড নীতি কড়া, অব্যবহৃত GPL লাইব্রেরি বাদ, ব্যাকআপ পরীক্ষা (একবার পুনরুদ্ধার করে দেখা), penetration test বুক করা। এগুলো সবচেয়ে কম খরচে সবচেয়ে বেশি প্রশ্নের উত্তর বদলে দেয়।</li>
+</ol></main><script src="assets/mermaid.min.js"></script><script>mermaid.initialize({startOnLoad:true,securityLevel:"loose",theme:"default",flowchart:{useMaxWidth:true},maxTextSize:900000});</script></body></html>

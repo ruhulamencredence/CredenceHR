@@ -1,0 +1,177 @@
+erDiagram
+  rate_file_meta {
+    int id PK
+    varchar original_filename
+    varchar file_mimetype
+    longblob file_data
+    timestamp imported_at
+  }
+  job_edit_requests {
+    int id PK
+    int job_id FK
+    int entry_id FK
+    enum action
+    text payload
+    enum status
+    timestamp reviewed_at
+  }
+  job_submissions {
+    int id PK
+    int job_id FK
+    int budget_id FK
+    int user_id FK
+    timestamp submitted_at
+  }
+  mpr_fulfil_log {
+    int id PK
+    int entry_id FK
+    int user_id FK
+    int dispatch_id
+    varchar action
+    decimal qty
+    varchar detail
+  }
+  entry_permanent_delete_log {
+    int id PK
+    int entry_id FK
+    date entry_date
+    varchar job_name
+    varchar job_no
+    varchar project_name
+    varchar mpr_no
+  }
+  material_categories {
+    int id PK
+    int sl_no
+    varchar head
+    varchar sub1
+    varchar sub2
+    varchar sub3
+    varchar details
+  }
+  budget_submissions {
+    int id PK
+    int budget_id FK
+    int user_id FK
+    timestamp submitted_at
+  }
+  entries {
+    int id PK
+    int budget_id FK
+    int project_id FK
+    int job_id FK
+    int mpr_id FK
+    int budget_item_id FK
+    date entry_date
+  }
+  budget_items {
+    int id PK
+    int budget_id FK
+    varchar sl_no
+    varchar project_name
+    varchar req_no
+    varchar mrf_no
+    varchar item_date
+  }
+  mpr_dispatches {
+    int id PK
+    int entry_id FK
+    decimal qty
+    date dispatch_date
+    varchar supplier
+    decimal rate
+    varchar po_no
+  }
+  budgets {
+    int id PK
+    varchar budget_name
+    varchar original_filename
+    varchar file_mimetype
+    longblob file_data
+    date delivery_date_from
+    date delivery_date_to
+  }
+  delivery_date_conditions {
+    int id PK
+    enum condition_type
+    enum scope
+    int scope_id
+    int min_lead_days
+    tinyint apply_to_admins
+    tinyint enabled
+  }
+  rate_list {
+    int id PK
+    varchar materials_name
+    varchar unit
+    decimal rate
+    varchar specification
+    varchar assigned_person
+    varchar remarks
+  }
+  entry_edit_history {
+    int id PK
+    int entry_id FK
+    int edited_by FK
+    varchar field_name
+    varchar old_value
+    varchar new_value
+    timestamp edited_at
+  }
+  jobs {
+    int id PK
+    int budget_id FK
+    varchar job_no
+    varchar job_duration
+  }
+  mpr_numbers {
+    int id PK
+    varchar mpr_no
+    int group_id
+  }
+  projects {
+    int id PK
+  }
+  users {
+    int id PK
+  }
+  entries ||--o{ job_edit_requests : "entry_id"
+  jobs ||--o{ job_edit_requests : "job_id"
+  jobs ||--o{ job_submissions : "job_id"
+  users ||--o{ job_submissions : "user_id"
+  budgets ||..o{ job_submissions : "budget_id"
+  entries ||..o{ mpr_fulfil_log : "entry_id"
+  users ||..o{ mpr_fulfil_log : "user_id"
+  entries ||..o{ entry_permanent_delete_log : "entry_id"
+  budgets ||--o{ budget_submissions : "budget_id"
+  users ||--o{ budget_submissions : "user_id"
+  budgets ||--o{ entries : "budget_id"
+  budget_items ||--o{ entries : "budget_item_id"
+  jobs ||--o{ entries : "job_id"
+  mpr_numbers ||--o{ entries : "mpr_id"
+  projects ||--o{ entries : "project_id"
+  budgets ||--o{ budget_items : "budget_id"
+  entries ||..o{ mpr_dispatches : "entry_id"
+  users ||--o{ entry_edit_history : "edited_by"
+  entries ||--o{ entry_edit_history : "entry_id"
+  budgets ||--o{ jobs : "budget_id"
+  budgets ||--o{ jobs : "budget_id"
+  budgets ||--o{ jobs : "budget_id"
+  budgets ||--o{ jobs : "budget_id"
+  budgets ||--o{ jobs : "budget_id"
+  budgets ||--o{ jobs : "budget_id"
+  budgets ||--o{ jobs : "budget_id"
+  budgets ||--o{ jobs : "budget_id"
+  budgets ||--o{ jobs : "budget_id"
+  budgets ||--o{ jobs : "budget_id"
+  budgets ||--o{ jobs : "budget_id"
+  budgets ||--o{ jobs : "budget_id"
+  budgets ||--o{ jobs : "budget_id"
+  budgets ||--o{ jobs : "budget_id"
+  budgets ||--o{ jobs : "budget_id"
+  budgets ||--o{ jobs : "budget_id"
+  budgets ||--o{ jobs : "budget_id"
+  budgets ||--o{ jobs : "budget_id"
+  budgets ||--o{ jobs : "budget_id"
+  budgets ||--o{ jobs : "budget_id"
+  budgets ||--o{ jobs : "budget_id"

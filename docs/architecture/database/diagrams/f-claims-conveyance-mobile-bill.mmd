@@ -1,0 +1,193 @@
+erDiagram
+  user_claim_references {
+    int id PK
+    int user_claim_id FK
+    int claim_id FK
+    decimal amount
+  }
+  user_claims {
+    int id PK
+    int user_id FK
+    date claim_date
+    date from_date
+    date to_date
+    varchar category
+    decimal amount
+  }
+  mobile_bills {
+    int id PK
+    int sim_id FK
+    int employee_id FK
+    int company_id
+    char bill_month
+    decimal amount
+    decimal limit_amount
+  }
+  bill_claim_policy_settings {
+    int id PK
+    int company_id
+    varchar policy_key
+    varchar policy_value
+  }
+  bill_claim_categories {
+    int id PK
+    int company_id
+    varchar name
+    varchar description
+    tinyint is_active
+    int sort_order
+    decimal max_per_bill
+  }
+  claim_approval_signatures {
+    int id PK
+    int approval_request_id FK
+    int step_order
+    int approver_user_id
+    mediumblob image
+    datetime signed_at
+  }
+  conveyance_claim_department_access {
+    int id PK
+    int user_id FK
+    varchar department
+  }
+  user_claim_items {
+    int id PK
+    int user_claim_id FK
+    int category_id FK
+    varchar category_name
+    date bill_date
+    decimal amount
+    varchar description
+  }
+  claims {
+    int id PK
+    int user_id FK
+    varchar purpose
+    enum status
+    timestamp check_in_at
+    decimal check_in_lat
+    decimal check_in_lng
+  }
+  mobile_limit_requests {
+    int id PK
+    int sim_id FK
+    int user_id FK
+    int company_id
+    decimal current_limit
+    decimal requested_limit
+    varchar scope
+  }
+  mobile_limit_policies {
+    int id PK
+    int company_id
+    varchar employee_type
+    decimal limit_amount
+    varchar note
+  }
+  conveyance_bill_items {
+    int id PK
+    int bill_id FK
+    int claim_id FK
+    int user_claim_id FK
+    enum source
+    date entry_date
+    varchar particulars
+  }
+  mobile_sims {
+    int id PK
+    int employee_id FK
+    int company_id
+    varchar phone_number
+    varchar operator
+    varchar sim_type
+    varchar package_name
+  }
+  mobile_sim_events {
+    int id PK
+    int sim_id FK
+    varchar action
+    varchar message
+    int actor_id
+    decimal old_limit
+    decimal new_limit
+  }
+  user_claim_history {
+    int id PK
+    int user_claim_id FK
+    varchar action
+    int actor_id
+    varchar actor_name
+    text reason
+    int version
+  }
+  bill_claim_policy_history {
+    bigint id PK
+    int company_ref
+    int actor_id
+    varchar actor_name
+    varchar actor_role
+    varchar action
+    varchar target_type
+  }
+  conveyance_bills {
+    int id PK
+    int user_id FK
+    int disbursed_by FK
+    date bill_date
+    text remarks
+    tinyint is_disbursed
+    varchar voucher_no
+  }
+  all_employees {
+    int id PK
+  }
+  approval_requests {
+    int id PK
+  }
+  leave_categories {
+    int id PK
+  }
+  users {
+    int id PK
+  }
+  claims ||--o{ user_claim_references : "claim_id"
+  user_claims ||--o{ user_claim_references : "user_claim_id"
+  users ||--o{ user_claims : "user_id"
+  mobile_sims ||--o{ mobile_bills : "sim_id"
+  all_employees ||..o{ mobile_bills : "employee_id"
+  approval_requests ||..o{ claim_approval_signatures : "approval_request_id"
+  users ||--o{ conveyance_claim_department_access : "user_id"
+  user_claims ||--o{ user_claim_items : "user_claim_id"
+  leave_categories ||..o{ user_claim_items : "category_id"
+  users ||--o{ claims : "user_id"
+  mobile_sims ||--o{ mobile_limit_requests : "sim_id"
+  users ||--o{ mobile_limit_requests : "user_id"
+  conveyance_bills ||--o{ conveyance_bill_items : "bill_id"
+  claims ||--o{ conveyance_bill_items : "claim_id"
+  user_claims ||--o{ conveyance_bill_items : "user_claim_id"
+  all_employees ||..o{ mobile_sims : "employee_id"
+  mobile_sims ||--o{ mobile_sim_events : "sim_id"
+  user_claims ||--o{ user_claim_history : "user_claim_id"
+  users ||--o{ conveyance_bills : "disbursed_by"
+  users ||--o{ conveyance_bills : "disbursed_by"
+  users ||--o{ conveyance_bills : "disbursed_by"
+  users ||--o{ conveyance_bills : "disbursed_by"
+  users ||--o{ conveyance_bills : "disbursed_by"
+  users ||--o{ conveyance_bills : "disbursed_by"
+  users ||--o{ conveyance_bills : "disbursed_by"
+  users ||--o{ conveyance_bills : "disbursed_by"
+  users ||--o{ conveyance_bills : "disbursed_by"
+  users ||--o{ conveyance_bills : "disbursed_by"
+  users ||--o{ conveyance_bills : "disbursed_by"
+  users ||--o{ conveyance_bills : "disbursed_by"
+  users ||--o{ conveyance_bills : "disbursed_by"
+  users ||--o{ conveyance_bills : "disbursed_by"
+  users ||--o{ conveyance_bills : "disbursed_by"
+  users ||--o{ conveyance_bills : "disbursed_by"
+  users ||--o{ conveyance_bills : "disbursed_by"
+  users ||--o{ conveyance_bills : "disbursed_by"
+  users ||--o{ conveyance_bills : "disbursed_by"
+  users ||--o{ conveyance_bills : "disbursed_by"
+  users ||--o{ conveyance_bills : "disbursed_by"
+  users ||--o{ conveyance_bills : "user_id"
