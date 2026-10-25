@@ -89,7 +89,7 @@
    does this with zero visible effect of its own — it's not actually
    masking anything out, just changing which renderer draws the corners.
    Apply this class to any card that pairs rounded corners with a
-   translucent/gradient fill, alongside its existing rounded-*/overflow
+   translucent/gradient fill, alongside its existing rounded-* and overflow
    classes. */
 .glass-mask-fix {
   -webkit-mask-image: -webkit-radial-gradient(white, white);
@@ -198,7 +198,7 @@ body::before {
   were not rewritten line-by-line; this maps that existing utility vocabulary
   onto the same brand tokens above so the whole app reads as one design system
   instead of two. Every blue-###/variant combination actually used anywhere in
-  src/**/*.tsx is covered below (checked against the full component tree, not
+  the src tree's .tsx files is covered below (checked against the full component tree, not
   just the handful used in the most common places) so no button/badge/border is
   left showing the Tailwind default blue once the rest of the app goes violet.
 */

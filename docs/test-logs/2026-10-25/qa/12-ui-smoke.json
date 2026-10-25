@@ -1,0 +1,1064 @@
+[
+ {
+  "label": "superadmin-desktop",
+  "url": "/",
+  "ms": 11920,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/dashboard",
+  "ms": 7618,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/reports-insights",
+  "ms": 2573,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/data-import",
+  "ms": 2623,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/projects",
+  "ms": 2522,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/branches",
+  "ms": 2545,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/mprs",
+  "ms": 2564,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/imports",
+  "ms": 2530,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/reports",
+  "ms": 2571,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/users",
+  "ms": 2518,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/employees",
+  "ms": 2562,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/departments",
+  "ms": 2643,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/attendance",
+  "ms": 2541,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/attendance-reports",
+  "ms": 2669,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/leave-applications",
+  "ms": 2603,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/office-attendance",
+  "ms": 2511,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/tracking",
+  "ms": 2523,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/recycle",
+  "ms": 2526,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/editlog",
+  "ms": 2460,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/notices",
+  "ms": 2531,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/claims",
+  "ms": 2466,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/approvals",
+  "ms": 2496,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/conveyance",
+  "ms": 2524,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/bill-claim-policy",
+  "ms": 2473,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/disbursement",
+  "ms": 2545,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/holidays",
+  "ms": 2576,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/asset-management",
+  "ms": 2581,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/vehicle-management",
+  "ms": 2525,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/permanent-delete-log",
+  "ms": 2552,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/companies",
+  "ms": 2502,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/devices",
+  "ms": 2520,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/active-users",
+  "ms": 2530,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/exit-offboarding",
+  "ms": 2551,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/performance-management",
+  "ms": 2540,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/recruitment",
+  "ms": 2450,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/grievance-disciplinary",
+  "ms": 2497,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/hr-analytics",
+  "ms": 2497,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/document-vault",
+  "ms": 2531,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/hr-operations",
+  "ms": 2555,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/task-management",
+  "ms": 2561,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/mobile-bill",
+  "ms": 2680,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/target-reports",
+  "ms": 2534,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/mail-admin",
+  "ms": 2558,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/duty-roster",
+  "ms": 2527,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/break-time",
+  "ms": 2556,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-desktop",
+  "url": "/admin/user-feedback",
+  "ms": 2501,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-self-desktop",
+  "url": "/self/leave-management",
+  "ms": 3481,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-self-desktop",
+  "url": "/self/timesheet",
+  "ms": 2719,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-self-desktop",
+  "url": "/self/approve-applications",
+  "ms": 2563,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-self-desktop",
+  "url": "/self/payroll",
+  "ms": 2530,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-self-desktop",
+  "url": "/self/employee-directory",
+  "ms": 2504,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-self-desktop",
+  "url": "/self/resignation",
+  "ms": 2518,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-self-desktop",
+  "url": "/self/asset-management",
+  "ms": 2514,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-self-desktop",
+  "url": "/self/vehicle-management",
+  "ms": 2454,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-self-desktop",
+  "url": "/self/my-cases",
+  "ms": 2484,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-self-desktop",
+  "url": "/self/my-letters",
+  "ms": 2513,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-self-desktop",
+  "url": "/self/team-attendance",
+  "ms": 2511,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-self-desktop",
+  "url": "/self/my-tasks",
+  "ms": 2481,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-self-desktop",
+  "url": "/self/my-mobile-sim",
+  "ms": 2500,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-self-desktop",
+  "url": "/self/my-loans",
+  "ms": 2473,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-self-desktop",
+  "url": "/self/my-targets",
+  "ms": 2489,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-self-desktop",
+  "url": "/self/mail",
+  "ms": 2448,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-self-desktop",
+  "url": "/self/duty-roster",
+  "ms": 2475,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-self-desktop",
+  "url": "/self/break-time",
+  "ms": 2449,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-self-desktop",
+  "url": "/self/material-receive",
+  "ms": 2472,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-self-desktop",
+  "url": "/self/documents-to-sign",
+  "ms": 2429,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-self-desktop",
+  "url": "/self/payslips",
+  "ms": 2434,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/",
+  "ms": 3423,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/leave-management",
+  "ms": 2713,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/timesheet",
+  "ms": 2657,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/approve-applications",
+  "ms": 2562,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/payroll",
+  "ms": 2554,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/employee-directory",
+  "ms": 2695,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/resignation",
+  "ms": 2514,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/asset-management",
+  "ms": 2495,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/vehicle-management",
+  "ms": 2510,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/my-cases",
+  "ms": 2534,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/my-letters",
+  "ms": 2544,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/team-attendance",
+  "ms": 2483,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/my-tasks",
+  "ms": 2535,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/my-mobile-sim",
+  "ms": 2447,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/my-loans",
+  "ms": 2626,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/my-targets",
+  "ms": 2521,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/mail",
+  "ms": 2458,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/duty-roster",
+  "ms": 2787,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/break-time",
+  "ms": 2505,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/material-receive",
+  "ms": 2764,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/documents-to-sign",
+  "ms": 2746,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-desktop",
+  "url": "/self/payslips",
+  "ms": 2497,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-mobile",
+  "url": "/",
+  "ms": 3408,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-mobile",
+  "url": "/self/leave-management",
+  "ms": 2651,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-mobile",
+  "url": "/self/timesheet",
+  "ms": 2663,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-mobile",
+  "url": "/self/approve-applications",
+  "ms": 2551,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-mobile",
+  "url": "/self/payroll",
+  "ms": 2518,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-mobile",
+  "url": "/self/employee-directory",
+  "ms": 2799,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-mobile",
+  "url": "/self/resignation",
+  "ms": 2524,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-mobile",
+  "url": "/self/asset-management",
+  "ms": 2513,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-mobile",
+  "url": "/self/vehicle-management",
+  "ms": 2596,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-mobile",
+  "url": "/self/my-cases",
+  "ms": 2508,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-mobile",
+  "url": "/self/my-letters",
+  "ms": 2545,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-mobile",
+  "url": "/self/team-attendance",
+  "ms": 2546,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-mobile",
+  "url": "/self/my-tasks",
+  "ms": 2472,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-mobile",
+  "url": "/self/my-mobile-sim",
+  "ms": 2560,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-mobile",
+  "url": "/self/my-loans",
+  "ms": 2502,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-mobile",
+  "url": "/self/my-targets",
+  "ms": 2468,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-mobile",
+  "url": "/self/mail",
+  "ms": 2535,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-mobile",
+  "url": "/self/duty-roster",
+  "ms": 2637,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-mobile",
+  "url": "/self/break-time",
+  "ms": 2522,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-mobile",
+  "url": "/self/material-receive",
+  "ms": 2499,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-mobile",
+  "url": "/self/documents-to-sign",
+  "ms": 2780,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "employee-mobile",
+  "url": "/self/payslips",
+  "ms": 2563,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-mobile",
+  "url": "/",
+  "ms": 3555,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-mobile",
+  "url": "/admin/employees",
+  "ms": 2689,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-mobile",
+  "url": "/admin/payroll",
+  "ms": 2638,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-mobile",
+  "url": "/admin/leave-applications",
+  "ms": 2461,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-mobile",
+  "url": "/admin/approvals",
+  "ms": 2511,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-mobile",
+  "url": "/admin/conveyance",
+  "ms": 2463,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ },
+ {
+  "label": "superadmin-mobile",
+  "url": "/admin/users",
+  "ms": 2533,
+  "errors": [],
+  "api4xx5xx": [],
+  "overflowPx": 0,
+  "blank": false
+ }
+]
