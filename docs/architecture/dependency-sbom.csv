@@ -206,7 +206,7 @@ package,version,license,direct_dependency,dev_only,homepage
 @rollup/rollup-linux-riscv64-musl,4.64.0,MIT,no,,
 @rollup/rollup-linux-s390x-gnu,4.64.0,MIT,no,,
 @rollup/rollup-linux-x64-gnu,4.64.0,MIT,no,,https://rollupjs.org/
-@rollup/rollup-linux-x64-musl,4.64.0,MIT,no,,
+@rollup/rollup-linux-x64-musl,4.64.0,MIT,no,,https://rollupjs.org/
 @rollup/rollup-openbsd-x64,4.64.0,MIT,no,,
 @rollup/rollup-openharmony-arm64,4.64.0,MIT,no,,
 @rollup/rollup-win32-arm64-msvc,4.64.0,MIT,no,,
