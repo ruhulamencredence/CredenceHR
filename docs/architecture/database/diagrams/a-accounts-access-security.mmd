@@ -5,14 +5,15 @@ erDiagram
     varchar description
     text features_json
     text modules_json
+    int company_id
     tinyint is_default
-    int features_rev
   }
   admin_module_permission_layers {
     int id PK
     int user_id FK
     varchar module_key
     varchar layer_key
+    int company_id
   }
   admin_module_permissions {
     int id PK

@@ -1,6 +1,6 @@
 # Data Dictionary — CredenceHR ডাটাবেস (সব টেবিল ও কলাম)
 
-> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২১৫টি টেবিল, ২৩০৪টি কলাম)।
+> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২১৫টি টেবিল, ২৩১১টি কলাম)।
 > `PK` = প্রাইমারি কী, `FK` = ঘোষিত foreign key (→ কোন টেবিল), `logical` = foreign key ঘোষণা নেই কিন্তু নাম দেখে যে টেবিলের সাথে সম্পর্ক বোঝা যায়।
 
 ## K. Communication: Notices, Chat, Mail, Assistant, Feedback
@@ -1138,6 +1138,7 @@ Unique: `unique_device_pin_time`(device_id,device_user_pin,punch_time)
 | `last_synced_at` | timestamp | হ্যাঁ |  | |
 | `last_sync_status` | varchar(255) | হ্যাঁ |  | |
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+| `company_id` | int(11) | না | default 1 | কোম্পানি-মালিকানা (code-level scope) |
 
 Unique: `unique_device_ip_port`(ip_address,port)
 
@@ -1157,6 +1158,7 @@ Unique: `unique_device_ip_port`(ip_address,port)
 | `created_by` | int(11) | হ্যাঁ |  | |
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
 | `updated_at` | timestamp | হ্যাঁ | default current_timestamp() on update current_timestamp() | |
+| `company_id` | int(11) | না | default 1 | কোম্পানি-মালিকানা (code-level scope) |
 | `is_default` | tinyint(1) | না | default 0 | |
 | `features_rev` | int(11) | না | default 1 | |
 
@@ -1169,8 +1171,9 @@ Unique: `unique_device_ip_port`(ip_address,port)
 | `module_key` | varchar(50) | না |  | |
 | `layer_key` | varchar(30) | না |  | |
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+| `company_id` | int(11) | না | default 1 | কোম্পানি-মালিকানা (code-level scope) |
 
-Unique: `unique_user_module_layer`(user_id,module_key,layer_key)
+Unique: `unique_user_company_module_layer`(user_id,company_id,module_key,layer_key)
 
 ### `admin_module_permissions`
 
@@ -1699,6 +1702,7 @@ Unique: `unique_user_budget_job_no`(created_by,budget_id,job_no)
 | `details` | varchar(255) | হ্যাঁ |  | |
 | `sector` | varchar(100) | হ্যাঁ |  | |
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+| `group_id` | int(11) | না | default 1 | |
 
 ### `mpr_dispatches`
 
@@ -1820,6 +1824,7 @@ Unique: `uq_mpr_po_line`(entry_id,po_no)
 | `is_manual` | tinyint(1) | না | default 0 | |
 | `added_by` | int(11) | হ্যাঁ |  | |
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
+| `group_id` | int(11) | না | default 1 | |
 
 ## F. Claims, Conveyance & Mobile Bill
 
@@ -2233,14 +2238,15 @@ Unique: `unique_workspace_code`(workspace_code)
 | কলাম | ধরন | Null | মান/কী | সম্পর্ক |
 |---|---|---|---|---|
 | `id` | int(11) | না | PK auto_increment | |
-| `name` | varchar(150) | না | UNI  | |
+| `name` | varchar(150) | না |  | |
 | `supervisor_user_id` | int(11) | হ্যাঁ |  | FK → `users.id` |
 | `include_supervisor_approval` | tinyint(1) | না | default 1 | |
 | `is_active` | tinyint(1) | না | default 1 | |
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
 | `updated_at` | timestamp | হ্যাঁ | default current_timestamp() on update current_timestamp() | |
+| `company_id` | int(11) | না | default 1 | কোম্পানি-মালিকানা (code-level scope) |
 
-Unique: `name`(name)
+Unique: `unique_company_name`(company_id,name)
 
 ### `employee_advances`
 
@@ -2625,6 +2631,7 @@ Unique: `uniq_workflow_category`(workflow_id,category_key)
 | `created_by` | int(11) | হ্যাঁ |  | FK → `users.id` |
 | `created_at` | timestamp | হ্যাঁ | default current_timestamp() | |
 | `updated_at` | timestamp | হ্যাঁ | default current_timestamp() on update current_timestamp() | |
+| `group_id` | int(11) | না | default 1 | |
 
 ### `leave_balances`
 
