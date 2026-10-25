@@ -508,6 +508,32 @@ export function registerAttendanceRoutes(app: Express, deps: AttendanceRouteDeps
       const today = todayInDhaka();
       if (String(attendance_date) > today) return res.status(400).json({ error: "Can't correct a future date." });
       if (!check_in_at && !check_out_at) return res.status(400).json({ error: "Enter an In Time or Out Time to correct." });
+      // The In Time is on the day being corrected; the Out Time that day or,
+      // for a night shift, the next morning — and never before the In Time
+      // (the one sent, or the one already on record when only Out is sent).
+      const DT = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?$/;
+      const ymd = String(attendance_date).slice(0, 10);
+      const nextYmd = new Date(Date.parse(`${ymd}T00:00:00Z`) + 864e5).toISOString().slice(0, 10);
+      for (const [v, label, days] of [[check_in_at, "In Time", [ymd]], [check_out_at, "Out Time", [ymd, nextYmd]]] as [any, string, string[]][]) {
+        if (!v) continue;
+        const m = DT.exec(String(v));
+        if (!m || Number(m[2]) > 23 || Number(m[3]) > 59) return res.status(400).json({ error: `${label} is not a valid time.` });
+        if (!days.includes(m[1])) return res.status(400).json({ error: `${label} must be on ${days.join(" or ")} (the day being corrected${days.length > 1 ? ", or the next morning for a night shift" : ""}).` });
+      }
+      const norm = (v: any) => (v ? String(v).replace("T", " ").padEnd(19, ":00").slice(0, 19) : "");
+      let effIn = norm(check_in_at);
+      let effOut = norm(check_out_at);
+      if (!effIn || !effOut) {
+        const rec = await queryDB(
+          "SELECT DATE_FORMAT(check_in_at, '%Y-%m-%d %H:%i:%s') AS i, DATE_FORMAT(check_out_at, '%Y-%m-%d %H:%i:%s') AS o FROM attendance WHERE user_id = ? AND project_id = ? AND attendance_date = ? LIMIT 1",
+          [req.user.id, projectId, ymd]
+        );
+        effIn = effIn || rec[0]?.i || "";
+        effOut = effOut || rec[0]?.o || "";
+      }
+      if (effIn && effOut && effOut <= effIn) {
+        return res.status(400).json({ error: "Out Time must be after In Time. For a night shift, the Out Time is on the next day." });
+      }
 
       const projects = await queryDB("SELECT * FROM projects WHERE id = ?", [projectId]);
       if (projects.length === 0) return res.status(400).json({ error: "Project not found." });

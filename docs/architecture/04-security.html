@@ -156,7 +156,7 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <li><strong>মডিউল অনুমতি:</strong> <code>requireModule("payroll")</code>; Admin নিজে নিজেকে বাড়াতে পারে না (টেস্ট <code>AUTHZ-04</code>)।</li>
 <li><strong>Layer:</strong> মডিউলের ভেতরের সূক্ষ্ম ধাপ (<code>requireModuleLayer</code>)। <strong>🔒 layer</strong> ডিফল্টে বন্ধ, Superadmin না দিলে কেউ পায় না। উদাহরণ: <code>salary_hold</code>, <code>audit_approve</code>, <code>accounts_pay</code>, <code>permanent_delete</code>, <code>mail_password</code>, <code>block_account</code>।</li>
 <li><strong>বিভাগ-সীমা:</strong> Attendance Report, Leave, Duty Roster, Conveyance Claim-এ Admin শুধু নির্দিষ্ট বিভাগের কর্মী দেখে।</li>
-<li><strong>কোম্পানি-সীমা:</strong> ৫৬টি টেবিলে <code>company_id</code>; <code>companyScope.ts</code> প্রতিটি <code>SELECT/UPDATE/DELETE/INSERT</code>-এ ফিল্টার নিজে বসায়। কোম্পানি বদলাতে ব্যবহারকারীর ওই কোম্পানিতে প্রবেশাধিকার লাগে।</li>
+<li><strong>কোম্পানি-সীমা:</strong> ৫৬টি টেবিলে <code>company_id</code>; <code>companyScope.ts</code> প্রতিটি <code>SELECT/UPDATE/DELETE/INSERT</code>-এ ফিল্টার নিজে বসায়। কোম্পানি বদলাতে ব্যবহারকারীর ওই কোম্পানিতে প্রবেশাধিকার লাগে। <strong>Admin Panel-এর কাজে (strict scope)</strong> — <code>requireModule</code>/<code>requireModuleLayer</code> পার হলেই — id দিয়ে একটা রেকর্ড খোলা বা বদলানোও শুধু চলতি কোম্পানির (বা সেখানে assign করা) কর্মীর হয়; আগে একই group-এর অন্য কোম্পানির কর্মীর ব্যাংক অ্যাকাউন্ট, বেতন, নাম id পাঠিয়ে পড়া/বদলানো যেত (টেস্ট <code>qa-companies.mjs</code> CO-06..13)। নিজের ছুটি, My Approvals-এর মতো self-service অংশে group-জুড়ে খোঁজা আগের মতোই চলে (অন্য কোম্পানির Supervisor approve করতে পারেন, CO-15)।</li>
 <li><strong>Self-service সুইচ:</strong> Loan, Payslip, Roster, Chat, Fingerprint, AI Assistant ইত্যাদি ব্যবহারকারীভিত্তিক সুইচ, ডিফল্টে বন্ধ।</li>
 <li><strong>কাজের বিভাজন (segregation of duties):</strong> Payroll: HR বানায় → Audit approve → Accounts pay। <strong>যে কোনো বেতন চালিয়েছে, হাতে বদলেছে বা মাস submit করেছে সে approve করতে পারে না; যে চালিয়েছে, submit বা approve করেছে সে pay করতে পারে না</strong> (মাস ও একক বেতন দুটোতেই)। Audit ও Accounts পায় "View only" (<code>payroll_view</code>) layer: সব দেখে, কিছু বদলাতে পারে না, তাই দেখার জন্য HR-এর বানানো/বদলানোর অনুমতি দিতে হয় না। বোনাস, overtime ও কর্তন ঋণাত্মক হয় না; নিষ্ক্রিয় কর্মীর বেতন শুধু ছেড়ে যাওয়ার মাস পর্যন্ত চলে (ghost employee নিয়ন্ত্রণ)। Onboarding: <strong>যে খুলেছে সে approve করতে পারে না</strong>। (Superadmin ব্যতিক্রম, ১০ নম্বরে।)</li>
 <li><strong>নিজের দাবি নিজে অনুমোদন নয়:</strong> কর্মী নিজের ছুটি নিজে approve করতে পারে না (টেস্ট <code>LEAVE-12</code>)।</li>
@@ -199,6 +199,16 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>ছুটি দ্বৈত আবেদন</td>
 <td>একই দিনে দ্বিতীয় আবেদন 409; ব্যালেন্স শূন্যের নিচে যায় না</td>
 <td>টেস্ট <code>LEAVE-04..06</code></td>
+</tr>
+<tr>
+<td>একসাথে দুবার চাপ (double-click, দুই ট্যাব, দুই server worker)</td>
+<td>approve, payroll submit/approve/return/pay, বেতন "paid", বিল disburse, ঋণ approve — প্রতিটা ডাটাবেসে শর্তসহ <code>UPDATE ... WHERE status = &lt;আগের অবস্থা&gt;</code>; যে দ্বিতীয় আসে সে 409 পায়। ফলে ঋণের কিস্তি দুবার কাটে না, বিল দুবার দেওয়া হয় না। দিনে একটা claim ও একটা চলমান ঋণ-আবেদনের নিয়ম একসাথে পাঠালেও ভাঙে না</td>
+<td>টেস্ট <code>qa-concurrency.mjs</code> C1–C9</td>
+</tr>
+<tr>
+<td>সময়ের সঠিকতা</td>
+<td>Timesheet সংশোধনে In Time ওই দিনেরই, Out Time ওই দিন বা (night shift) পরদিন সকাল, এবং In Time-এর পরে; অবাস্তব সময় (25:00) বাতিল</td>
+<td>টেস্ট <code>qa-dates.mjs</code> DT-11..13b</td>
 </tr>
 <tr>
 <td>ডাটাবেস ত্রুটি গোপন</td>
@@ -428,6 +438,22 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <tr>
 <td>UI স্মোক (১০৪ পেজ)</td>
 <td>০ সমস্যা</td>
+</tr>
+<tr>
+<td>একসাথে দুবার চাপ (<code>qa-concurrency</code>)</td>
+<td>৯ পাস, ০ ফেল (আগে ৫টা ফেল, ঠিক করা)</td>
+</tr>
+<tr>
+<td>কোম্পানি আলাদা রাখা (<code>qa-companies</code>)</td>
+<td>১৮ পাস, ০ ফেল (আগে id দিয়ে অন্য কোম্পানির তথ্য পড়া/বদলানো যেত, ঠিক করা)</td>
+</tr>
+<tr>
+<td>তারিখের কিনারা (<code>qa-dates</code>)</td>
+<td>১৫ পাস, ০ ফেল</td>
+</tr>
+<tr>
+<td>বাংলা PDF/Excel (<code>qa-bangla-*</code>)</td>
+<td>PDF-এ বাংলা ঠিক (আগে গোলমাল/"????"); Excel ৫ পাস</td>
 </tr>
 </tbody>
 </table>

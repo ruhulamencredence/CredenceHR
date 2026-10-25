@@ -10,7 +10,7 @@
 // Self Service -> My Letters & Service Record.
 
 import React from 'react';
-import jsPDF from 'jspdf';
+import jsPDF from '../lib/jspdf';
 import autoTable from 'jspdf-autotable';
 import { UserPlus, TrendingUp, ArrowLeftRight, BadgeCheck, Banknote, FileText, Gavel, LogOut, Award, Circle } from 'lucide-react';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';

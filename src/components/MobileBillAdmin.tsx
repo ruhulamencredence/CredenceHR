@@ -14,9 +14,10 @@
 //   Reports   — MobileBillReports.tsx.
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import jsPDF from 'jspdf';
+import jsPDF from '../lib/jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
+import { readWorkbook } from '../lib/readWorkbook';
 import { BarChart3, CheckCircle2, FileDown, FileSpreadsheet, Inbox, Pencil, Plus, Receipt, Search, Smartphone, SlidersHorizontal, Trash2, Upload } from 'lucide-react';
 import { Spinner } from './Spinner';
 import { ProgressOverlay, useLongTask } from './ProgressOverlay';
@@ -422,7 +423,7 @@ const EditBillModal: React.FC<{ token: string; month: string; row: BillRow; onCl
 // Reads the first sheet of an Excel/CSV file into rows (array of arrays).
 async function readSheet(file: File): Promise<{ sheets: string[]; read: (name: string) => any[][] }> {
   const buf = await file.arrayBuffer();
-  const wb = XLSX.read(buf, { type: 'array' });
+  const wb = readWorkbook(buf);
   return {
     sheets: wb.SheetNames,
     read: (name: string) => XLSX.utils.sheet_to_json<any[]>(wb.Sheets[name], { header: 1, defval: '', raw: false, blankrows: false })

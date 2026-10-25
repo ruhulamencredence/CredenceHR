@@ -31,6 +31,9 @@ export interface CompanyContext {
   // The signed-in account, and whether it is the system owner working inside
   // another group's workspace (Admin Panel -> Companies -> Workspaces -> Open).
   userId?: number;
+  // Set by the Admin Panel module gates (server.ts adminScopeNext): looking
+  // up or changing one record stays inside the active company.
+  strict?: boolean;
   visiting?: boolean;
 }
 

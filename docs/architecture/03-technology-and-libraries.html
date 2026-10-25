@@ -265,6 +265,24 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>Pure JS, নির্ভরতা কম।</td>
 </tr>
 <tr>
+<td><code>@pdf-lib/fontkit</code></td>
+<td>1.1.1</td>
+<td>MIT</td>
+<td>1</td>
+<td><code>ESignRoutes.ts</code></td>
+<td>সই করা PDF-এ বাংলা ফন্ট (Noto Sans Bengali, <code>assets/fonts/</code>) বসানো ও যুক্তাক্ষর সাজানো</td>
+<td>আগে বাংলা নাম "????" হতো। শুধু বাংলা লেখা থাকলে ফন্ট যোগ হয় (ব্যবহৃত অক্ষরের subset)।</td>
+</tr>
+<tr>
+<td><code>regenerator-runtime</code></td>
+<td>0.13.11</td>
+<td>MIT</td>
+<td>1</td>
+<td><code>ESignRoutes.ts</code></td>
+<td>fontkit-এর বাংলা shaper-এর দরকারি global</td>
+<td>এটা ছাড়া বাংলা লেখায় fontkit "regeneratorRuntime is not defined" দেয়।</td>
+</tr>
+<tr>
 <td><code>qrcode</code></td>
 <td>1.5.4</td>
 <td>MIT</td>
@@ -956,7 +974,19 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td><code>jspdf</code>, <code>jspdf-autotable</code></td>
 <td>PDF রিপোর্ট ভাঙা</td>
 <td>কোন রিপোর্ট; ফন্ট/বাংলা অক্ষর</td>
-<td>ফন্ট এম্বেড করুন; বড় রিপোর্টে সারি ভাগ করুন।</td>
+<td>সব PDF <code>src/lib/jspdf.ts</code> থেকে jsPDF নেয় — বাংলা লাইন ব্রাউজার নিজে সাজিয়ে ছবি হিসেবে বসায় (তাই PDF-এ বাংলা খোঁজা/কপি করা যায় না)। নতুন ফাইলে <code>'jspdf'</code> নয়, <code>../lib/jspdf</code> import করুন। বড় রিপোর্টে সারি ভাগ করুন।</td>
+</tr>
+<tr>
+<td><code>@pdf-lib/fontkit</code></td>
+<td>সই করা PDF-এ বাংলা "?" বা ভাঙা</td>
+<td><code>assets/fonts/NotoSansBengali-*.ttf</code> আছে কিনা</td>
+<td>ফন্ট ফাইল সার্ভারে রাখুন (না পেলে <code>/usr/share/fonts/truetype/noto/</code> খোঁজে)।</td>
+</tr>
+<tr>
+<td><code>xlsx</code> (import)</td>
+<td>CSV-র বাংলা "à¦°à¦¹" হয়ে আসে</td>
+<td>ফাইলটা কোথা থেকে export করা</td>
+<td>সব upload <code>src/lib/readWorkbook.ts</code> দিয়ে পড়ে (UTF-8 CSV ঠিক পড়ে); নতুন import পাতায়ও এটা ব্যবহার করুন।</td>
 </tr>
 <tr>
 <td><code>leaflet</code>, <code>@capacitor/geolocation</code></td>

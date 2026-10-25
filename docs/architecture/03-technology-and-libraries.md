@@ -41,6 +41,8 @@
 | `node-zklib` | 1.3.0 | ISC | 1 | `zkSync.ts` | ZKTeco বায়োমেট্রিক ডিভাইসের সাথে কথা বলা | অফিসের fingerprint মেশিন থেকে punch টেনে আনা, আলাদা সফটওয়্যার ছাড়াই। |
 | `nodemailer` | 10.2.1 | MIT-0 | 2 | `MailRoutes.ts`, `mailer.ts` | SMTP-তে ইমেইল পাঠানো | Forgot-password কোড, OTP, রিপোর্ট ইমেইল, Credence Mail। |
 | `pdf-lib` | 1.17.1 | MIT | 2 | `ESignCertificate.ts`, `ESignRoutes.ts` | PDF তৈরি/সম্পাদনা (স্বাক্ষর, সার্টিফিকেট পাতা) | Pure JS, নির্ভরতা কম। |
+| `@pdf-lib/fontkit` | 1.1.1 | MIT | 1 | `ESignRoutes.ts` | সই করা PDF-এ বাংলা ফন্ট (Noto Sans Bengali, `assets/fonts/`) বসানো ও যুক্তাক্ষর সাজানো | আগে বাংলা নাম "????" হতো। শুধু বাংলা লেখা থাকলে ফন্ট যোগ হয় (ব্যবহৃত অক্ষরের subset)। |
+| `regenerator-runtime` | 0.13.11 | MIT | 1 | `ESignRoutes.ts` | fontkit-এর বাংলা shaper-এর দরকারি global | এটা ছাড়া বাংলা লেখায় fontkit "regeneratorRuntime is not defined" দেয়। |
 | `qrcode` | 1.5.4 | MIT | 1 | `ESignRoutes.ts` | QR কোড (স্বাক্ষর যাচাই লিংক) | সার্টিফিকেট পাতায় /verify লিংক। |
 | `redis` | 4.7.1 | MIT | 1 | `server.ts` | Redis সংযোগ (Socket.IO adapter-এর জন্য) | শুধু একাধিক worker চালালে লাগে; এক প্রসেসে বাধ্যতামূলক নয়। |
 | `sanitize-html` | 2.18.1 | MIT | 1 | `NoticeSafety.ts` | Notice-এর HTML পরিষ্কার (স্ক্রিপ্ট, onerror বাদ) | Stored XSS রোধ। সার্ভারে সংরক্ষণ ও পড়া, দুবারই। |
@@ -174,7 +176,9 @@
 | `node-zklib`, `node-cron` | ZKTeco ডিভাইস থেকে হাজিরা আসে না | ডিভাইসের IP/পোর্ট, নেটওয়ার্ক | `zkSync.ts`-এর লগ দেখুন; ডিভাইস রিস্টার্ট। |
 | `@google/genai` | AI Assistant কাজ করে না | API key, কোটা | key/কোটা ঠিক করুন; বাকি অ্যাপ এতে ভাঙে না। |
 | `react`, `vite`, `tailwindcss` | বিল্ড ফেল, সাদা পেজ | `npm run build`-এর এরর, ব্রাউজার Console | এরর-এর ফাইল ঠিক করুন; না পারলে আগের সংস্করণে ফেরত (৫.১)। |
-| `jspdf`, `jspdf-autotable` | PDF রিপোর্ট ভাঙা | কোন রিপোর্ট; ফন্ট/বাংলা অক্ষর | ফন্ট এম্বেড করুন; বড় রিপোর্টে সারি ভাগ করুন। |
+| `jspdf`, `jspdf-autotable` | PDF রিপোর্ট ভাঙা | কোন রিপোর্ট; ফন্ট/বাংলা অক্ষর | সব PDF `src/lib/jspdf.ts` থেকে jsPDF নেয় — বাংলা লাইন ব্রাউজার নিজে সাজিয়ে ছবি হিসেবে বসায় (তাই PDF-এ বাংলা খোঁজা/কপি করা যায় না)। নতুন ফাইলে `'jspdf'` নয়, `../lib/jspdf` import করুন। বড় রিপোর্টে সারি ভাগ করুন। |
+| `@pdf-lib/fontkit` | সই করা PDF-এ বাংলা "?" বা ভাঙা | `assets/fonts/NotoSansBengali-*.ttf` আছে কিনা | ফন্ট ফাইল সার্ভারে রাখুন (না পেলে `/usr/share/fonts/truetype/noto/` খোঁজে)। |
+| `xlsx` (import) | CSV-র বাংলা "à¦°à¦¹" হয়ে আসে | ফাইলটা কোথা থেকে export করা | সব upload `src/lib/readWorkbook.ts` দিয়ে পড়ে (UTF-8 CSV ঠিক পড়ে); নতুন import পাতায়ও এটা ব্যবহার করুন। |
 | `leaflet`, `@capacitor/geolocation` | ম্যাপ/লোকেশন আসে না | ব্রাউজার/ফোনের লোকেশন অনুমতি, HTTPS | HTTPS ছাড়া লোকেশন চলে না; অনুমতি দিন। |
 | `capacitor` (মোবাইল) | অ্যাপ বিল্ড ফেল | Android Studio/Gradle সংস্করণ | `npx cap sync`, তারপর আবার বিল্ড। |
 

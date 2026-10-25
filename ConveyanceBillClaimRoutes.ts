@@ -119,11 +119,14 @@ export async function disburseConveyanceBill(
   let voucher_no = typeof voucherNo === "string" ? voucherNo.trim().slice(0, 100) : "";
   if (!voucher_no) voucher_no = `PV-${id}-${todayInDhaka().replace(/-/g, "")}`;
 
-  await queryDB("UPDATE conveyance_bills SET is_disbursed = 1, voucher_no = ?, disbursed_at = NOW(), disbursed_by = ? WHERE id = ?", [
+  // Only if still not paid out: a second click (or bulk + single at the same
+  // moment) pays nothing twice.
+  const paid: any = await queryDB("UPDATE conveyance_bills SET is_disbursed = 1, voucher_no = ?, disbursed_at = NOW(), disbursed_by = ? WHERE id = ? AND COALESCE(is_disbursed, 0) = 0", [
     voucher_no,
     userId,
     id
   ]);
+  if (paid && paid.affectedRows === 0) throw fail(409, "This Bill was just disbursed by someone else.");
 
   try {
     const totalRows = await queryDB("SELECT COALESCE(SUM(amount), 0) AS total FROM conveyance_bill_items WHERE bill_id = ?", [id]);
@@ -1100,6 +1103,19 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
           filedBy ? filedBy.id : null
         ]
       );
+      // One claim a day: two sent at the same moment both pass the check
+      // above; the later one is taken back here (works across server workers).
+      if (policyNow.one_claim_per_day) {
+        const rows: any[] = (await queryDB("SELECT id, claim_date FROM user_claims WHERE user_id = ? AND id < ?", [claimant.id, result.insertId])) || [];
+        const earlier = rows.find((r: any) => dhakaDate(r.claim_date) === today);
+        if (earlier) {
+          await queryDB("DELETE FROM user_claims WHERE id = ?", [result.insertId]);
+          return res.status(400).json({
+            error: `A claim was already filed today (#${earlier.id}). One claim a day — edit that claim to add or change bills.`,
+            today_claim_id: Number(earlier.id)
+          });
+        }
+      }
 
       try {
         for (const l of checked.lines) {

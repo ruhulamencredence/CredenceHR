@@ -18,6 +18,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
+import { readWorkbook } from '../lib/readWorkbook';
 import {
   AlertTriangle,
   CalendarClock,
@@ -412,7 +413,7 @@ export const DataImport: React.FC<{ token: string; onlyKind?: string }> = ({ tok
   const parseFile = async (file: File, kind: Kind): Promise<{ rows: Record<string, string>[]; matched: { header: string; field: Field }[]; ignored: string[] }> => {
     {
       // A CSV is read as written (raw), so a phone number keeps its leading 0.
-      const wb = XLSX.read(await file.arrayBuffer(), { type: 'array', raw: /\.csv$/i.test(file.name) });
+      const wb = readWorkbook(await file.arrayBuffer(), { raw: /\.csv$/i.test(file.name) });
       // The first sheet that has a header row (skips an Instructions sheet put first).
       const sheetName = wb.SheetNames.find((n) => n.toLowerCase() === 'data') || wb.SheetNames[0];
       const grid: any[][] = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, raw: true, defval: '' });

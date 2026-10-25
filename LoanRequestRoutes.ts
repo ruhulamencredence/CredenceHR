@@ -82,14 +82,18 @@ export async function finalizeAdvanceRequest(queryDB: QueryDB, createAlert: Crea
   const r = rows[0];
   if (!r) throw new Error("Request not found.");
   if (r.status !== "pending") throw new Error("This request has already been decided.");
+  // Decided once: of two approvals at the same moment only the first one
+  // gets past this, so the loan is never given twice.
+  const took: any = await queryDB(
+    "UPDATE advance_requests SET status = 'approved', chain_status = CASE WHEN chain_status = 'in_progress' THEN 'approved' ELSE chain_status END, decided_by = ?, decision_remarks = ?, decided_at = CURRENT_TIMESTAMP WHERE id = ? AND status = 'pending'",
+    [actorId, remarks, requestId]
+  );
+  if (took && took.affectedRows === 0) throw Object.assign(new Error("This request has already been decided."), { statusCode: 409 });
   const result: any = await queryDB(
     "INSERT INTO employee_advances (employee_id, total_amount, monthly_installment, reason, created_by) VALUES (?, ?, ?, ?, ?)",
     [r.employee_id, money(r.total_amount), money(r.monthly_installment), r.reason, actorId]
   );
-  await queryDB(
-    "UPDATE advance_requests SET status = 'approved', chain_status = CASE WHEN chain_status = 'in_progress' THEN 'approved' ELSE chain_status END, decided_by = ?, decision_remarks = ?, decided_at = CURRENT_TIMESTAMP, advance_id = ? WHERE id = ?",
-    [actorId, remarks, result.insertId, requestId]
-  );
+  await queryDB("UPDATE advance_requests SET advance_id = ? WHERE id = ?", [result.insertId, requestId]);
   const uid = await employeeUserId(queryDB, Number(r.employee_id));
   if (uid) {
     await createAlert(queryDB, {
@@ -269,6 +273,12 @@ export function registerLoanRequestRoutes(app: Express, deps: LoanRequestRouteDe
         [emp.id, total, installment, reason, uid, kind, installments]
       );
       const id = Number(r.insertId);
+      // Two sent at the same moment both pass the check above; the later one is taken back.
+      const earlier: any[] = (await queryDB("SELECT id FROM advance_requests WHERE employee_id = ? AND status = 'pending' AND id < ?", [emp.id, id])) || [];
+      if (earlier.length) {
+        await queryDB("DELETE FROM advance_requests WHERE id = ?", [id]);
+        return res.status(400).json({ error: "You already have a request waiting for a decision." });
+      }
       const what = `${req.user.name || "An employee"} applied for a ${kind === "advance" ? "salary advance" : "loan"} of ${tk(total)}, ${installments} installment${installments === 1 ? "" : "s"} of ${tk(installment)}: ${reason}`;
       const { autoApproved } = await createTemplateApprovalRequest("loan", "advance_request", id, uid);
       if (autoApproved) {

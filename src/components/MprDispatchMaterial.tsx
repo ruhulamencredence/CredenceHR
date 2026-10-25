@@ -20,6 +20,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as XLSX from 'xlsx';
+import { readWorkbook } from '../lib/readWorkbook';
 import { Truck, Download, Upload, Search, RefreshCw, History, Loader2, AlertTriangle, CheckSquare, Square, ListMinus } from 'lucide-react';
 import { formatDate } from '../lib/formatDate';
 import { confirmDialog } from '../lib/confirmDialog';
@@ -337,7 +338,7 @@ export const MprDispatchMaterial: React.FC<{ token: string }> = ({ token }) => {
     longTask.creep(90, undefined, 1500);
     try {
       await new Promise((r) => setTimeout(r, 30));
-      const wb = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: true });
+      const wb = readWorkbook(await file.arrayBuffer(), { cellDates: true });
       const grid: any[][] = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: true, defval: '' });
       const headAt = grid.findIndex((row) => row.some((c) => norm(c) === 'rowid'));
       if (headAt < 0) throw new Error('No "Row ID" column — download the sheet from this page, fill it and upload that one.');

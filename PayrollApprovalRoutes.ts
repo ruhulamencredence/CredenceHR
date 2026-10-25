@@ -146,7 +146,15 @@ export async function settlePaidPayroll(
   payroll: any,
   userId: number,
   payment?: { date: string; method: string | null; reference: string | null }
-) {
+): Promise<boolean> {
+  // Marked Paid first, and only if it wasn't already: a second click (or a
+  // second Accounts person at the same moment) changes nothing and never
+  // recovers the loan installment twice.
+  const done: any = await queryDB(
+    "UPDATE payrolls SET payment_status = 'paid', paid_by = ?, paid_at = CURRENT_TIMESTAMP, payment_date = ?, payment_reference = ?, payment_method = COALESCE(?, payment_method) WHERE id = ? AND payment_status <> 'paid'",
+    [userId, payment?.date || null, payment?.reference || null, payment?.method || null, payroll.id]
+  );
+  if (done && done.affectedRows === 0) return false;
   let remainingToRecover = Number(payroll.advance_deduction) || 0;
   if (remainingToRecover > 0) {
     const advances: any[] = await queryDB("SELECT * FROM employee_advances WHERE employee_id = ? AND status = 'active' ORDER BY created_at ASC", [payroll.employee_id]);
@@ -161,10 +169,7 @@ export async function settlePaidPayroll(
       remainingToRecover = money(remainingToRecover - recover);
     }
   }
-  await queryDB(
-    "UPDATE payrolls SET payment_status = 'paid', paid_by = ?, paid_at = CURRENT_TIMESTAMP, payment_date = ?, payment_reference = ?, payment_method = COALESCE(?, payment_method) WHERE id = ?",
-    [userId, payment?.date || null, payment?.reference || null, payment?.method || null, payroll.id]
-  );
+  return true;
 }
 
 // Who holds a Payroll layer (Superadmins always do).
@@ -418,7 +423,11 @@ export function registerPayrollApprovalRoutes(app: Express, deps: PayrollApprova
       const b = await ensureBatch(month);
       if (b.status !== "draft" && b.status !== "returned") return bad(res, `This month is already ${b.status}.`);
       const note = typeof req.body?.note === "string" ? req.body.note.trim().slice(0, 1000) || null : null;
-      await queryDB("UPDATE payroll_batches SET status = 'submitted', submitted_by = ?, submitted_at = CURRENT_TIMESTAMP, audit_note = NULL WHERE id = ?", [req.user.id, b.id]);
+      const sub: any = await queryDB(
+        "UPDATE payroll_batches SET status = 'submitted', submitted_by = ?, submitted_at = CURRENT_TIMESTAMP, audit_note = NULL WHERE id = ? AND status IN ('draft', 'returned')",
+        [req.user.id, b.id]
+      );
+      if (sub && sub.affectedRows === 0) return bad(res, "This month was just submitted by someone else.", 409);
       await event(b.id, "submitted", req.user.id, note);
       const total = runs.filter((r) => !Number(r.is_held)).reduce((s, r) => s + Number(r.net_salary || 0), 0);
       await notify(
@@ -443,9 +452,14 @@ export function registerPayrollApprovalRoutes(app: Express, deps: PayrollApprova
       if (conflict) return bad(res, conflict, 403);
       const note = typeof req.body?.note === "string" ? req.body.note.trim().slice(0, 1000) || null : null;
       // Ids from the (company-scoped) month list — an UPDATE isn't scoped.
+      // The month changes hands once, even if Approve is pressed twice at once.
+      const got: any = await queryDB(
+        "UPDATE payroll_batches SET status = 'approved', audited_by = ?, audited_at = CURRENT_TIMESTAMP, audit_note = ? WHERE id = ? AND status = 'submitted'",
+        [req.user.id, note, b.id]
+      );
+      if (got && got.affectedRows === 0) return bad(res, "This salary sheet was just approved or returned by someone else.", 409);
       const ids = monthList.filter((r) => r.payment_status === "unpaid" && !Number(r.is_held)).map((r) => Number(r.id));
       if (ids.length) await queryDB(`UPDATE payrolls SET payment_status = 'processed' WHERE id IN (${ids.map(() => "?").join(",")})`, ids);
-      await queryDB("UPDATE payroll_batches SET status = 'approved', audited_by = ?, audited_at = CURRENT_TIMESTAMP, audit_note = ? WHERE id = ?", [req.user.id, note, b.id]);
       await event(b.id, "approved", req.user.id, note);
       await notify(
         [...(await layerHolders(queryDB, "accounts_pay")), Number(b.submitted_by)],
@@ -468,9 +482,13 @@ export function registerPayrollApprovalRoutes(app: Express, deps: PayrollApprova
       if (!note) return bad(res, "Write what HR needs to correct.");
       // What Audit had approved goes back to unpaid; anything already paid
       // individually stays paid.
+      const got: any = await queryDB(
+        "UPDATE payroll_batches SET status = 'returned', audited_by = ?, audited_at = CURRENT_TIMESTAMP, audit_note = ? WHERE id = ? AND status = ?",
+        [req.user.id, note, b.id, b.status]
+      );
+      if (got && got.affectedRows === 0) return bad(res, "This salary sheet was just changed by someone else — reload it.", 409);
       const ids = (await monthRuns(month)).filter((r) => r.payment_status === "processed").map((r) => Number(r.id));
       if (ids.length) await queryDB(`UPDATE payrolls SET payment_status = 'unpaid' WHERE id IN (${ids.map(() => "?").join(",")})`, ids);
-      await queryDB("UPDATE payroll_batches SET status = 'returned', audited_by = ?, audited_at = CURRENT_TIMESTAMP, audit_note = ? WHERE id = ?", [req.user.id, note, b.id]);
       await event(b.id, "returned", req.user.id, note);
       await notify([Number(b.submitted_by)], "Salary Sheet Returned by Audit", `${req.user.name || "Audit"} returned the ${monthText(month)} salary: ${note}`, req.user.id);
       res.json({ success: true, status: "returned" });
@@ -492,13 +510,15 @@ export function registerPayrollApprovalRoutes(app: Express, deps: PayrollApprova
       const method = typeof req.body?.payment_method === "string" ? req.body.payment_method.trim().slice(0, 50) || null : null;
       const reference = typeof req.body?.payment_reference === "string" ? req.body.payment_reference.trim().slice(0, 150) || null : null;
       if (!method) return bad(res, "Choose how it was paid.");
+      // Claim the month first: a second Pay at the same moment stops here.
+      const got: any = await queryDB(
+        "UPDATE payroll_batches SET status = 'paid', paid_by = ?, paid_at = CURRENT_TIMESTAMP, payment_date = ?, payment_method = ?, payment_reference = ? WHERE id = ? AND status = 'approved'",
+        [req.user.id, date, method, reference, b.id]
+      );
+      if (got && got.affectedRows === 0) return bad(res, "This salary sheet was just paid by someone else.", 409);
       const ids = monthList.filter((r) => r.payment_status === "processed" && !Number(r.is_held)).map((r) => Number(r.id));
       const runs: any[] = ids.length ? await queryDB(`SELECT * FROM payrolls WHERE id IN (${ids.map(() => "?").join(",")})`, ids) : [];
       for (const p of runs) await settlePaidPayroll(queryDB, p, req.user.id, { date, method, reference });
-      await queryDB(
-        "UPDATE payroll_batches SET status = 'paid', paid_by = ?, paid_at = CURRENT_TIMESTAMP, payment_date = ?, payment_method = ?, payment_reference = ? WHERE id = ?",
-        [req.user.id, date, method, reference, b.id]
-      );
       const total = runs.reduce((s, r) => s + Number(r.net_salary || 0), 0);
       await event(b.id, "paid", req.user.id, [`${runs.length} employees`, tk(total), method, reference].filter(Boolean).join(" · "));
       // Employees and HR hear about it.

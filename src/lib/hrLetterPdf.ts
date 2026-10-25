@@ -48,7 +48,7 @@ export const longDate = (d: string | null | undefined) => {
 };
 
 export async function buildLetterPdf(input: LetterPdfInput): Promise<jsPDF> {
-  const { default: JsPDF } = await import('jspdf');
+  const { default: JsPDF } = await import('./jspdf');
   const doc = new JsPDF({ unit: 'mm', format: 'a4' });
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();

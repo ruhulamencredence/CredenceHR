@@ -10,7 +10,7 @@
 // for good or for one month, a new SIM). PDF and Excel.
 
 import React, { useEffect, useMemo, useState } from 'react';
-import jsPDF from 'jspdf';
+import jsPDF from '../lib/jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import { FileDown, FileSpreadsheet, Search } from 'lucide-react';

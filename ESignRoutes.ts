@@ -59,8 +59,13 @@
 //   name, the signers and the dates — never the file.
 
 import crypto from "crypto";
+import fs from "fs";
+import path from "path";
 import type { Express } from "express";
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
+import fontkit from "@pdf-lib/fontkit";
+// fontkit's Bengali shaper is built with generators that expect this global.
+import regeneratorRuntime from "regenerator-runtime";
 import QRCode from "qrcode";
 import type { AlertType } from "./Alerts";
 import { sendMail, isMailerConfigured } from "./mailer";
@@ -238,8 +243,38 @@ const SIGNABLE = (mime: string, name: string) => {
   if (m === "image/jpeg" || m === "image/jpg" || /\.jpe?g$/.test(n)) return "jpg";
   return null;
 };
-// The standard PDF fonts only cover Latin-1.
-const pdfText = (s: any) => String(s ?? "").replace(/[^\x20-\x7E -ÿ]/g, "?");
+// The standard PDF fonts only cover Latin-1; Bangla (a name, a document
+// type) is drawn in Noto Sans Bengali instead, which fontkit shapes
+// (conjuncts, vowel signs before the consonant). Anything else outside
+// Latin-1 still becomes "?".
+const pdfText = (s: any) => String(s ?? "").replace(/[^\x20-\x7E\xA0-\xFF]/g, "?");
+(globalThis as any).regeneratorRuntime ??= regeneratorRuntime;
+const BN = "\u0980-\u09FF\u200C\u200D";
+const HAS_BN = new RegExp(`[${BN}]`);
+// "রহিম উদ্দিন · IP 1.2.3.4" -> ["রহিম উদ্দিন", " · IP 1.2.3.4"]
+const RUNS = new RegExp(`[${BN}]+(?:\\s+[${BN}]+)*|[^${BN}]+`, "g");
+const BN_FONT_FILES = ["NotoSansBengali-Regular.ttf", "NotoSansBengali-Bold.ttf"];
+const bnFontBytes = (bold: boolean): Buffer | null => {
+  const file = BN_FONT_FILES[bold ? 1 : 0];
+  for (const dir of [path.join(process.cwd(), "assets", "fonts"), "/usr/share/fonts/truetype/noto"]) {
+    try {
+      return fs.readFileSync(path.join(dir, file));
+    } catch {}
+  }
+  return null;
+};
+// A Helvetica face plus, when the text needs it, its Bengali partner.
+interface Face { latin: PDFFont; bn: PDFFont | null }
+const pieces = (face: Face, text: string) =>
+  (String(text ?? "").match(RUNS) || []).map((r) => (HAS_BN.test(r) && face.bn ? { s: r, f: face.bn } : { s: pdfText(r), f: face.latin }));
+const widthOf = (face: Face, text: string, size: number) => pieces(face, text).reduce((w, p) => w + p.f.widthOfTextAtSize(p.s, size), 0);
+function drawT(page: PDFPage, text: string, o: { x: number; y: number; size: number; font: Face; color?: any; opacity?: number }) {
+  let x = o.x;
+  for (const p of pieces(o.font, text)) {
+    page.drawText(p.s, { x, y: o.y, size: o.size, font: p.f, color: o.color, opacity: o.opacity });
+    x += p.f.widthOfTextAtSize(p.s, o.size);
+  }
+}
 const dhaka = (d: any) =>
   d ? new Date(d).toLocaleString("en-GB", { timeZone: "Asia/Dhaka", day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true }) + " (BST)" : "";
 const PNG_RE = /^data:image\/png;base64,/;
@@ -259,12 +294,13 @@ function publicBase(req: any) {
   return `${proto}://${host}`;
 }
 
-// Fit text into a width by shrinking, then cutting.
-function fitText(font: PDFFont, text: string, size: number, width: number) {
-  let s = pdfText(text);
+// Fit text into a width by shrinking, then cutting (never leaving a
+// dangling Bengali hasant or vowel sign at the cut).
+function fitText(font: Face, text: string, size: number, width: number) {
+  let s = String(text ?? "");
   let sz = size;
-  while (sz > 6 && font.widthOfTextAtSize(s, sz) > width) sz -= 0.5;
-  while (s.length > 1 && font.widthOfTextAtSize(s, sz) > width) s = s.slice(0, -1);
+  while (sz > 6 && widthOf(font, s, sz) > width) sz -= 0.5;
+  while (s.length > 1 && widthOf(font, s, sz) > width) s = Array.from(s).slice(0, -1).join("").replace(/[\u09BC-\u09D7\u200C\u200D]+$/, "");
   return { s, sz };
 }
 
@@ -325,8 +361,13 @@ export async function buildSignedPdf(opts: {
     const page = pdf.addPage([A4.w, A4.h]);
     page.drawImage(img, { x: (A4.w - img.width * scale) / 2, y: A4.h - 30 - img.height * scale, width: img.width * scale, height: img.height * scale });
   }
-  const font = await pdf.embedFont(StandardFonts.Helvetica);
-  const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
+  // The Bengali font goes in only when some text needs it (subset to the
+  // letters used, so a few KB).
+  const needsBn = HAS_BN.test(JSON.stringify([opts.docType, opts.fileName, opts.ownerName, opts.requestedBy, opts.signers.map((x) => [x.name, x.label, x.signed_name]), opts.events || []]));
+  if (needsBn) pdf.registerFontkit(fontkit);
+  const bnBytes = needsBn ? [bnFontBytes(false), bnFontBytes(true)] : [null, null];
+  const font: Face = { latin: await pdf.embedFont(StandardFonts.Helvetica), bn: bnBytes[0] ? await pdf.embedFont(bnBytes[0], { subset: true }) : null };
+  const bold: Face = { latin: await pdf.embedFont(StandardFonts.HelveticaBold), bn: bnBytes[1] || bnBytes[0] ? await pdf.embedFont((bnBytes[1] || bnBytes[0])!, { subset: true }) : null };
   const gray = rgb(0.38, 0.4, 0.45);
   const violet = rgb(0.43, 0.0, 0.87);
   const images = await Promise.all(opts.signers.map(async (s) => (s.image ? pdf.embedPng(s.image).catch(() => null) : null)));
@@ -338,7 +379,7 @@ export async function buildSignedPdf(opts: {
     const line = `Digitally signed via CredenceHR  ·  Verification code ${opts.verifyCode}  ·  ${opts.verifyUrl}`;
     const f = fitText(font, line, 7, width - 40);
     page.drawRectangle({ x: 14, y: 6, width: width - 28, height: 13, color: rgb(1, 1, 1), opacity: 0.85 });
-    page.drawText(f.s, { x: 20, y: 10, size: f.sz, font, color: gray });
+    drawT(page, f.s, { x: 20, y: 10, size: f.sz, font, color: gray });
   };
 
   // On the document's own signature line (e.g. "Sincerely, ____ Head of HR").
@@ -351,8 +392,8 @@ export async function buildSignedPdf(opts: {
       const sc = Math.min(b.w / img.width, b.h / img.height);
       page.drawImage(img, { x: b.x, y: b.y + 1, width: img.width * sc, height: img.height * sc });
     }
-    page.drawText(pdfText(`e-signed ${dhaka(opts.signers[lineIdx].signed_at)}`), { x: b.x + b.w + 6, y: b.y + 8, size: 6, font, color: gray });
-    page.drawText(pdfText(opts.verifyCode), { x: b.x + b.w + 6, y: b.y + 1, size: 6, font, color: gray });
+    drawT(page, (`e-signed ${dhaka(opts.signers[lineIdx].signed_at)}`), { x: b.x + b.w + 6, y: b.y + 8, size: 6, font, color: gray });
+    drawT(page, (opts.verifyCode), { x: b.x + b.w + 6, y: b.y + 1, size: 6, font, color: gray });
     // Everyone else (e.g. the employee, "received") signs on the same row,
     // from the right edge, as far as there is room; all of them are on the
     // Signature Certificate page anyway.
@@ -370,11 +411,11 @@ export async function buildSignedPdf(opts: {
       }
       page.drawLine({ start: { x, y: b.y }, end: { x: x + b.w, y: b.y }, thickness: 0.85, color: rgb(0.58, 0.64, 0.72) });
       const n = fitText(bold, s.signed_name, 9, b.w);
-      page.drawText(n.s, { x, y: b.y - 13, size: n.sz, font: bold, color: rgb(0.12, 0.16, 0.23) });
+      drawT(page, n.s, { x, y: b.y - 13, size: n.sz, font: bold, color: rgb(0.12, 0.16, 0.23) });
       const l = fitText(font, s.label || "", 8, b.w);
-      if (l.s) page.drawText(l.s, { x, y: b.y - 24, size: l.sz, font, color: rgb(0.28, 0.33, 0.41) });
+      if (l.s) drawT(page, l.s, { x, y: b.y - 24, size: l.sz, font, color: rgb(0.28, 0.33, 0.41) });
       const t = fitText(font, `e-signed ${dhaka(s.signed_at)}`, 6, b.w);
-      page.drawText(t.s, { x, y: b.y - 33, size: t.sz, font, color: gray });
+      drawT(page, t.s, { x, y: b.y - 33, size: t.sz, font, color: gray });
     });
   }
 
@@ -399,11 +440,11 @@ export async function buildSignedPdf(opts: {
         last.drawImage(img, { x: x + 6, y: y + 34, width: img.width * sc, height: img.height * sc });
       }
       const n = fitText(bold, s.signed_name, 8, boxW - 12);
-      last.drawText(n.s, { x: x + 6, y: y + 22, size: n.sz, font: bold, color: rgb(0.1, 0.1, 0.15) });
+      drawT(last, n.s, { x: x + 6, y: y + 22, size: n.sz, font: bold, color: rgb(0.1, 0.1, 0.15) });
       const l = fitText(font, s.label || "", 7, boxW - 12);
-      if (l.s) last.drawText(l.s, { x: x + 6, y: y + 13, size: l.sz, font, color: gray });
+      if (l.s) drawT(last, l.s, { x: x + 6, y: y + 13, size: l.sz, font, color: gray });
       const t = fitText(font, dhaka(s.signed_at), 6.5, boxW - 12);
-      last.drawText(t.s, { x: x + 6, y: y + 4, size: t.sz, font, color: gray });
+      drawT(last, t.s, { x: x + 6, y: y + 4, size: t.sz, font, color: gray });
     });
   }
 
@@ -411,16 +452,16 @@ export async function buildSignedPdf(opts: {
   const cert = pdf.addPage([595.28, 841.89]);
   const W = 595.28;
   let y = 800;
-  cert.drawText("Signature Certificate", { x: 40, y, size: 20, font: bold, color: violet });
+  drawT(cert, "Signature Certificate", { x: 40, y, size: 20, font: bold, color: violet });
   y -= 18;
-  cert.drawText("This document was signed electronically in CredenceHR.", { x: 40, y, size: 9, font, color: gray });
+  drawT(cert, "This document was signed electronically in CredenceHR.", { x: 40, y, size: 9, font, color: gray });
   cert.drawImage(qr, { x: W - 40 - 96, y: 720, width: 96, height: 96 });
-  cert.drawText("Scan to verify", { x: W - 40 - 96 + 18, y: 708, size: 7.5, font, color: gray });
+  drawT(cert, "Scan to verify", { x: W - 40 - 96 + 18, y: 708, size: 7.5, font, color: gray });
   y -= 30;
   const row = (k: string, v: string) => {
-    cert.drawText(pdfText(k), { x: 40, y, size: 8.5, font: bold, color: rgb(0.25, 0.25, 0.3) });
+    drawT(cert, (k), { x: 40, y, size: 8.5, font: bold, color: rgb(0.25, 0.25, 0.3) });
     const f = fitText(font, v, 8.5, W - 40 - 160 - (y > 700 ? 110 : 0));
-    cert.drawText(f.s, { x: 160, y, size: f.sz, font, color: rgb(0.1, 0.1, 0.15) });
+    drawT(cert, f.s, { x: 160, y, size: f.sz, font, color: rgb(0.1, 0.1, 0.15) });
     y -= 15;
   };
   row("Document", opts.docType);
@@ -429,25 +470,25 @@ export async function buildSignedPdf(opts: {
   row("Sent for signing by", `${opts.requestedBy}, ${dhaka(opts.requestedAt)}`);
   row("Verification code", opts.verifyCode);
   row("Verify at", opts.verifyUrl);
-  cert.drawText("Original file SHA-256", { x: 40, y, size: 8.5, font: bold, color: rgb(0.25, 0.25, 0.3) });
-  cert.drawText(opts.originalSha256, { x: 160, y, size: 7, font, color: rgb(0.1, 0.1, 0.15) });
+  drawT(cert, "Original file SHA-256", { x: 40, y, size: 8.5, font: bold, color: rgb(0.25, 0.25, 0.3) });
+  drawT(cert, opts.originalSha256, { x: 160, y, size: 7, font, color: rgb(0.1, 0.1, 0.15) });
   y -= 26;
-  cert.drawText(`Signers (${opts.signers.length}), in order`, { x: 40, y, size: 11, font: bold, color: rgb(0.1, 0.1, 0.15) });
+  drawT(cert, `Signers (${opts.signers.length}), in order`, { x: 40, y, size: 11, font: bold, color: rgb(0.1, 0.1, 0.15) });
   y -= 10;
   opts.signers.forEach((s, i) => {
     const h = 64;
     y -= h;
     cert.drawRectangle({ x: 40, y, width: W - 80, height: h - 6, color: rgb(0.98, 0.97, 1), borderColor: rgb(0.88, 0.85, 0.95), borderWidth: 0.6 });
-    cert.drawText(`${i + 1}`, { x: 50, y: y + h / 2 - 6, size: 14, font: bold, color: violet });
+    drawT(cert, `${i + 1}`, { x: 50, y: y + h / 2 - 6, size: 14, font: bold, color: violet });
     const img = images[i];
     if (img) {
       const sc = Math.min(150 / img.width, 40 / img.height);
       cert.drawImage(img, { x: 72, y: y + 8, width: img.width * sc, height: img.height * sc });
     }
     const nx = 240;
-    cert.drawText(pdfText(s.signed_name), { x: nx, y: y + 40, size: 10, font: bold, color: rgb(0.1, 0.1, 0.15) });
-    cert.drawText(pdfText([s.label, s.name !== s.signed_name ? `account: ${s.name}` : ""].filter(Boolean).join("  ·  ")), { x: nx, y: y + 27, size: 8, font, color: gray });
-    cert.drawText(pdfText(`Signed ${dhaka(s.signed_at)}${s.ip ? `  ·  IP ${s.ip}` : ""}`), { x: nx, y: y + 14, size: 8, font, color: gray });
+    drawT(cert, (s.signed_name), { x: nx, y: y + 40, size: 10, font: bold, color: rgb(0.1, 0.1, 0.15) });
+    drawT(cert, ([s.label, s.name !== s.signed_name ? `account: ${s.name}` : ""].filter(Boolean).join("  ·  ")), { x: nx, y: y + 27, size: 8, font, color: gray });
+    drawT(cert, (`Signed ${dhaka(s.signed_at)}${s.ip ? `  ·  IP ${s.ip}` : ""}`), { x: nx, y: y + 14, size: 8, font, color: gray });
   });
   y -= 24;
   const notes = [
@@ -463,7 +504,7 @@ export async function buildSignedPdf(opts: {
       : [])
   ];
   for (const n of notes) {
-    cert.drawText(pdfText(n), { x: 40, y, size: 8, font, color: gray });
+    drawT(cert, (n), { x: 40, y, size: 8, font, color: gray });
     y -= 12;
   }
   // Audit Trail: every step, hash-chained.
@@ -471,11 +512,11 @@ export async function buildSignedPdf(opts: {
     let page = pdf.addPage([595.28, 841.89]);
     let yy = 800;
     const head = () => {
-      page.drawText("Audit Trail", { x: 40, y: yy, size: 18, font: bold, color: violet });
+      drawT(page, "Audit Trail", { x: 40, y: yy, size: 18, font: bold, color: violet });
       yy -= 16;
-      page.drawText(pdfText(`${opts.docType} · verification code ${opts.verifyCode}`), { x: 40, y: yy, size: 8.5, font, color: gray });
+      drawT(page, (`${opts.docType} · verification code ${opts.verifyCode}`), { x: 40, y: yy, size: 8.5, font, color: gray });
       yy -= 22;
-      for (const [x, t] of [[40, "When (BST)"], [150, "What"], [300, "Who"], [430, "IP / device"]] as [number, string][]) page.drawText(t, { x, y: yy, size: 8, font: bold, color: rgb(0.25, 0.25, 0.3) });
+      for (const [x, t] of [[40, "When (BST)"], [150, "What"], [300, "Who"], [430, "IP / device"]] as [number, string][]) drawT(page, t, { x, y: yy, size: 8, font: bold, color: rgb(0.25, 0.25, 0.3) });
       yy -= 12;
     };
     head();
@@ -486,9 +527,9 @@ export async function buildSignedPdf(opts: {
         head();
       }
       page.drawLine({ start: { x: 40, y: yy + 9 }, end: { x: 555, y: yy + 9 }, thickness: 0.3, color: rgb(0.88, 0.88, 0.92) });
-      const cell = (f: PDFFont, text: string, size: number, width: number, x: number, color = rgb(0.15, 0.15, 0.2)) => {
+      const cell = (f: Face, text: string, size: number, width: number, x: number, color = rgb(0.15, 0.15, 0.2)) => {
         const t = fitText(f, text, size, width);
-        page.drawText(t.s, { x, y: yy, size: t.sz, font: f, color });
+        drawT(page, t.s, { x, y: yy, size: t.sz, font: f, color });
       };
       cell(font, dhaka(e.at).replace(" (BST)", ""), 7.5, 105, 40);
       cell(bold, e.label, 7.5, 145, 150);
@@ -505,17 +546,17 @@ export async function buildSignedPdf(opts: {
       page = pdf.addPage([595.28, 841.89]);
       yy = 800;
     }
-    page.drawText("History fingerprint (last hash of the chain)", { x: 40, y: yy, size: 8, font: bold, color: rgb(0.25, 0.25, 0.3) });
+    drawT(page, "History fingerprint (last hash of the chain)", { x: 40, y: yy, size: 8, font: bold, color: rgb(0.25, 0.25, 0.3) });
     yy -= 11;
-    page.drawText(pdfText(opts.eventsHead || ""), { x: 40, y: yy, size: 7, font, color: gray });
+    drawT(page, (opts.eventsHead || ""), { x: 40, y: yy, size: 7, font, color: gray });
     yy -= 14;
-    page.drawText(
+    drawT(page, 
       pdfText(opts.sealed ? "Sealed by the CredenceHR server (HMAC-SHA256) - the verify page checks the seal." : "Not sealed by the server (no seal key set)."),
       { x: 40, y: yy, size: 8, font, color: gray }
     );
   }
   for (const p of pdf.getPages()) footer(p);
-  pdf.setTitle(`${pdfText(opts.docType)} (signed)`);
+  pdf.setTitle(`${opts.docType} (signed)`);
   pdf.setProducer("CredenceHR E-Signature");
   pdf.setCreator("CredenceHR");
   if (opts.certificate) {

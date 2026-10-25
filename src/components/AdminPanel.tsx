@@ -2,7 +2,8 @@ import { activePeople } from '../lib/activePeople';
 import { ColumnFilterMenu, ColumnToggleMenu } from './ColumnFilterMenu';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import * as XLSX from 'xlsx';
-import jsPDF from 'jspdf';
+import { readWorkbook } from '../lib/readWorkbook';
+import jsPDF from '../lib/jspdf';
 import autoTable from 'jspdf-autotable';
 import credenceLogo from '../assets/credence-logo.png';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from '../lib/pdfLetterhead';
@@ -2273,7 +2274,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       const buf = await file.arrayBuffer();
       longTask.step(8, 'Opening the workbook…');
       await new Promise((r) => setTimeout(r, 30)); // let the bar paint before the heavy parse
-      const workbook = XLSX.read(buf, { type: 'array', cellDates: true });
+      const workbook = readWorkbook(buf, { cellDates: true });
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
       const rawRows: any[] = XLSX.utils.sheet_to_json(sheet, { defval: '' });
       longTask.step(18, `Reading ${rawRows.length.toLocaleString()} rows…`);
@@ -2399,7 +2400,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       const buf = await file.arrayBuffer();
       longTask.step(8, 'Opening the workbook…');
       await new Promise((r) => setTimeout(r, 30)); // let the bar paint before the heavy parse
-      const workbook = XLSX.read(buf, { type: 'array', cellDates: true });
+      const workbook = readWorkbook(buf, { cellDates: true });
       longTask.step(18, 'Reading the Rate and Materials Category sheets…');
 
       const rateSheet = workbook.Sheets['Rate'];
@@ -2680,7 +2681,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
       const buf = await file.arrayBuffer();
       longTask.step(30, 'Opening the workbook…');
       await new Promise((r) => setTimeout(r, 30)); // let the bar paint before the parse
-      const workbook = XLSX.read(buf, { type: 'array', cellDates: true });
+      const workbook = readWorkbook(buf, { cellDates: true });
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
       const rawRows: any[] = XLSX.utils.sheet_to_json(sheet, { defval: '' });
       longTask.step(80, `Reading ${rawRows.length.toLocaleString()} rows…`);

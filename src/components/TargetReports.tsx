@@ -11,7 +11,7 @@
 // cancelling / closing someone's target with "Targets — Cancel / Close".
 
 import React, { useEffect, useMemo, useState } from 'react';
-import jsPDF from 'jspdf';
+import jsPDF from '../lib/jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import { FileDown, FileSpreadsheet, Search, Target as TargetIcon } from 'lucide-react';

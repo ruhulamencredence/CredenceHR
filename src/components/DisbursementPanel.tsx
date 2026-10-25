@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import jsPDF from 'jspdf';
+import jsPDF from '../lib/jspdf';
 import { loadBillApprovers, drawApproverBlock } from '../lib/approverSignatures';
 import autoTable from 'jspdf-autotable';
 import { Banknote, Filter, Printer, CheckSquare, Square, RotateCcw, X, ReceiptText } from 'lucide-react';

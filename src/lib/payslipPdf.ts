@@ -7,7 +7,7 @@
 // attendance). Shared by Payroll -> Payslips (PayslipManagementPanel.tsx)
 // and Self Service -> My Payslip (MyPayslips.tsx), so both give the same PDF.
 
-import jsPDF from 'jspdf';
+import jsPDF from './jspdf';
 import autoTable from 'jspdf-autotable';
 import { payslipRows, pdfMoney, PayslipLine } from './payslipRows';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from './pdfLetterhead';

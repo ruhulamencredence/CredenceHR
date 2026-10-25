@@ -1,6 +1,6 @@
 import { activePeople } from '../lib/activePeople';
 import React, { useEffect, useRef, useState } from 'react';
-import jsPDF from 'jspdf';
+import jsPDF from '../lib/jspdf';
 import autoTable from 'jspdf-autotable';
 import { Wallet, Plus, Trash2, X, Route, Filter, FileDown, Pencil, Check, Paperclip, MapPin, Clock, Save } from 'lucide-react';
 import {

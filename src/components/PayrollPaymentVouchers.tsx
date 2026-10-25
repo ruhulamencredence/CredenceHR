@@ -13,7 +13,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import * as XLSX from 'xlsx';
-import jsPDF from 'jspdf';
+import jsPDF from '../lib/jspdf';
 import autoTable from 'jspdf-autotable';
 import { Banknote, FileSpreadsheet, Landmark, Printer, Smartphone } from 'lucide-react';
 import { apiUrl } from '../lib/api';

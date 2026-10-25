@@ -1407,7 +1407,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       const made = await finalizeAdvanceRequest(queryDB, createAlert, Number(request.id), req.user.id, remarks);
       res.json({ success: true, status: "approved", advance_id: made.advance_id });
     } catch (err: any) {
-      res.status(500).json({ error: err.message || "Failed to record the decision." });
+      res.status(Number.isInteger(err?.statusCode) ? err.statusCode : 500).json({ error: err.message || "Failed to record the decision." });
     }
   });
 
@@ -3423,7 +3423,8 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       if (req.user.role !== "superadmin" && [rows[0].generated_by, rows[0].last_edited_by, b.submitted_by].some((u) => Number(u) === me)) {
         return res.status(403).json({ error: "You ran, changed or submitted this salary — someone else from Audit has to approve it." });
       }
-      await queryDB("UPDATE payrolls SET payment_status = 'processed' WHERE id = ?", [req.params.id]);
+      const pr: any = await queryDB("UPDATE payrolls SET payment_status = 'processed' WHERE id = ? AND payment_status = 'unpaid' AND COALESCE(is_held, 0) = 0", [req.params.id]);
+      if (pr && pr.affectedRows === 0) return res.status(409).json({ error: "This payroll run was just changed by someone else — reload it." });
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -3450,7 +3451,8 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.body?.payment_date || "")) ? String(req.body.payment_date) : todayInDhakaStr();
       const method = typeof req.body?.payment_method === "string" ? req.body.payment_method.trim().slice(0, 50) || null : null;
       const reference = typeof req.body?.payment_reference === "string" ? req.body.payment_reference.trim().slice(0, 150) || null : null;
-      await settlePaidPayroll(queryDB, payroll, req.user.id, { date, method, reference });
+      const paidNow = await settlePaidPayroll(queryDB, payroll, req.user.id, { date, method, reference });
+      if (!paidNow) return res.status(409).json({ error: "This payroll run was just marked Paid by someone else." });
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Failed to mark as paid." });

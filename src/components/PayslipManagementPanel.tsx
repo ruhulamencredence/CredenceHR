@@ -18,7 +18,7 @@
 //     button) attached, via POST /api/payroll/:id/email.
 
 import React, { useEffect, useMemo, useState } from 'react';
-import jsPDF from 'jspdf';
+import jsPDF from '../lib/jspdf';
 import {
   ReceiptText,
   FileDown,

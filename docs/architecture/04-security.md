@@ -60,7 +60,7 @@
 2. **মডিউল অনুমতি:** `requireModule("payroll")`; Admin নিজে নিজেকে বাড়াতে পারে না (টেস্ট `AUTHZ-04`)।
 3. **Layer:** মডিউলের ভেতরের সূক্ষ্ম ধাপ (`requireModuleLayer`)। **🔒 layer** ডিফল্টে বন্ধ, Superadmin না দিলে কেউ পায় না। উদাহরণ: `salary_hold`, `audit_approve`, `accounts_pay`, `permanent_delete`, `mail_password`, `block_account`।
 4. **বিভাগ-সীমা:** Attendance Report, Leave, Duty Roster, Conveyance Claim-এ Admin শুধু নির্দিষ্ট বিভাগের কর্মী দেখে।
-5. **কোম্পানি-সীমা:** ৫৬টি টেবিলে `company_id`; `companyScope.ts` প্রতিটি `SELECT/UPDATE/DELETE/INSERT`-এ ফিল্টার নিজে বসায়। কোম্পানি বদলাতে ব্যবহারকারীর ওই কোম্পানিতে প্রবেশাধিকার লাগে।
+5. **কোম্পানি-সীমা:** ৫৬টি টেবিলে `company_id`; `companyScope.ts` প্রতিটি `SELECT/UPDATE/DELETE/INSERT`-এ ফিল্টার নিজে বসায়। কোম্পানি বদলাতে ব্যবহারকারীর ওই কোম্পানিতে প্রবেশাধিকার লাগে। **Admin Panel-এর কাজে (strict scope)** — `requireModule`/`requireModuleLayer` পার হলেই — id দিয়ে একটা রেকর্ড খোলা বা বদলানোও শুধু চলতি কোম্পানির (বা সেখানে assign করা) কর্মীর হয়; আগে একই group-এর অন্য কোম্পানির কর্মীর ব্যাংক অ্যাকাউন্ট, বেতন, নাম id পাঠিয়ে পড়া/বদলানো যেত (টেস্ট `qa-companies.mjs` CO-06..13)। নিজের ছুটি, My Approvals-এর মতো self-service অংশে group-জুড়ে খোঁজা আগের মতোই চলে (অন্য কোম্পানির Supervisor approve করতে পারেন, CO-15)।
 6. **Self-service সুইচ:** Loan, Payslip, Roster, Chat, Fingerprint, AI Assistant ইত্যাদি ব্যবহারকারীভিত্তিক সুইচ, ডিফল্টে বন্ধ।
 7. **কাজের বিভাজন (segregation of duties):** Payroll: HR বানায় → Audit approve → Accounts pay। **যে কোনো বেতন চালিয়েছে, হাতে বদলেছে বা মাস submit করেছে সে approve করতে পারে না; যে চালিয়েছে, submit বা approve করেছে সে pay করতে পারে না** (মাস ও একক বেতন দুটোতেই)। Audit ও Accounts পায় "View only" (`payroll_view`) layer: সব দেখে, কিছু বদলাতে পারে না, তাই দেখার জন্য HR-এর বানানো/বদলানোর অনুমতি দিতে হয় না। বোনাস, overtime ও কর্তন ঋণাত্মক হয় না; নিষ্ক্রিয় কর্মীর বেতন শুধু ছেড়ে যাওয়ার মাস পর্যন্ত চলে (ghost employee নিয়ন্ত্রণ)। Onboarding: **যে খুলেছে সে approve করতে পারে না**। (Superadmin ব্যতিক্রম, ১০ নম্বরে।)
 8. **নিজের দাবি নিজে অনুমোদন নয়:** কর্মী নিজের ছুটি নিজে approve করতে পারে না (টেস্ট `LEAVE-12`)।
@@ -79,6 +79,8 @@
 | কর্মী মুছলে বেতন-রেকর্ড | ডাটাবেস `ON DELETE RESTRICT` (১৪টি foreign key), API-তেও `409` | `EmployeeRecordsGuard.ts`, টেস্ট |
 | পরিশোধিত বেতন | বদলানো যায় না ("A Paid payroll run can't be edited"); একই কর্মী-মাস দুবার হয় না (UNIQUE) | `PayrollRoutes.ts`, টেস্ট |
 | ছুটি দ্বৈত আবেদন | একই দিনে দ্বিতীয় আবেদন 409; ব্যালেন্স শূন্যের নিচে যায় না | টেস্ট `LEAVE-04..06` |
+| একসাথে দুবার চাপ (double-click, দুই ট্যাব, দুই server worker) | approve, payroll submit/approve/return/pay, বেতন "paid", বিল disburse, ঋণ approve — প্রতিটা ডাটাবেসে শর্তসহ `UPDATE ... WHERE status = <আগের অবস্থা>`; যে দ্বিতীয় আসে সে 409 পায়। ফলে ঋণের কিস্তি দুবার কাটে না, বিল দুবার দেওয়া হয় না। দিনে একটা claim ও একটা চলমান ঋণ-আবেদনের নিয়ম একসাথে পাঠালেও ভাঙে না | টেস্ট `qa-concurrency.mjs` C1–C9 |
+| সময়ের সঠিকতা | Timesheet সংশোধনে In Time ওই দিনেরই, Out Time ওই দিন বা (night shift) পরদিন সকাল, এবং In Time-এর পরে; অবাস্তব সময় (25:00) বাতিল | টেস্ট `qa-dates.mjs` DT-11..13b |
 | ডাটাবেস ত্রুটি গোপন | ব্যবহারকারী ডাটাবেসের বার্তা (কলামের নাম ইত্যাদি) দেখে না, লগে যায় | `ApiErrors.ts` |
 | তথ্য প্রকাশ কমানো | পাসওয়ার্ড hash কোনো API-তে ফেরে না (টেস্ট `SEC-08`); কর্মী অন্যের payroll/payslip পায় না (`PAY-06/07`) | টেস্ট |
 | ফাইল | ডাটাবেসের BLOB-এ (আলাদা ফাইল সার্ভার নেই); JSON সীমা ২৫MB, Nginx ৩০MB; ছবির MIME যাচাই | `profileRoutes.ts`, `deploy/nginx.conf.example` |
@@ -163,6 +165,10 @@
 | নিরাপত্তা/নীতির "ভাঙার চেষ্টা" | ৫০ পাস, ৫ ফেল (উপরের সীমাবদ্ধতা ২, ১, ৬-এর অংশ) |
 | প্রজেক্টের নিজস্ব `test:onboarding` / `test:hr-linkage` | ১০২ / ২৯ পাস, ০ ফেল |
 | UI স্মোক (১০৪ পেজ) | ০ সমস্যা |
+| একসাথে দুবার চাপ (`qa-concurrency`) | ৯ পাস, ০ ফেল (আগে ৫টা ফেল, ঠিক করা) |
+| কোম্পানি আলাদা রাখা (`qa-companies`) | ১৮ পাস, ০ ফেল (আগে id দিয়ে অন্য কোম্পানির তথ্য পড়া/বদলানো যেত, ঠিক করা) |
+| তারিখের কিনারা (`qa-dates`) | ১৫ পাস, ০ ফেল |
+| বাংলা PDF/Excel (`qa-bangla-*`) | PDF-এ বাংলা ঠিক (আগে গোলমাল/"????"); Excel ৫ পাস |
 
 ২৫ অক্টোবরের আগে ধরা এবং এখন **ঠিক হওয়া** জিনিস (প্রমাণসহ): কর্মী মুছলে payroll মোছা, Notice XSS, লগইনে সীমাহীন চেষ্টা, দ্বৈত ছুটি, পাসওয়ার্ড বদলের পরও পুরোনো token, JWT-র কোডে লেখা গোপন মান, HTML ত্রুটি-পাতা, ডাটাবেস-বার্তা প্রকাশ।
 

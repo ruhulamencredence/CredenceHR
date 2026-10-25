@@ -9,7 +9,7 @@
 
 import { useLiveRefresh } from '../lib/liveRefresh';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import jsPDF from 'jspdf';
+import jsPDF from '../lib/jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import { ClipboardList, FileDown, FileSpreadsheet, Inbox, ListChecks, Plus, Repeat, Search, BarChart3 } from 'lucide-react';

@@ -21,6 +21,11 @@
 //            user_id = ? / employee_id = ?) — anything in the account's own
 //            group, so someone working in two companies still finds their own
 //            leave, profile… from either. Never another group's.
+//            Not inside an Admin Panel module request (ctx.strict, set by the
+//            module gates in server.ts): there a lookup or change of one
+//            employee's record stays in the active company, so an HR Admin of
+//            one company can't reach a sister company's employee by id.
+//            Accounts (users) are still found group-wide — names only.
 //
 // INSERTs into the tables that carry company_id get the active company, so a
 // new employee / department / branch / project created while working in a
@@ -331,13 +336,15 @@ export function scopeSql(sql: string): string {
   if (head.startsWith("INSERT")) return scopeInsert(sql, ctx.companyId, ctx.groupId);
   if (head.startsWith("UPDATE") || head.startsWith("DELETE")) return guardWrite(sql, ctx);
   if (!head.startsWith("SELECT") && !head.startsWith("(")) return sql;
-  const s = scopes(ctx, !!ctx.wholeGroup || SINGLE_LOOKUP_RE.test(sql));
+  const single = SINGLE_LOOKUP_RE.test(sql);
+  const s = scopes(ctx, !!ctx.wholeGroup || (single && !ctx.strict));
+  const su = ctx.strict && single && !ctx.wholeGroup ? scopes(ctx, true) : s;
   const gid = int(ctx.groupId);
   return sql.replace(TABLE_RE, (match, kw: string, table: string, aliasPart: string | undefined, alias: string | undefined) => {
     const t = table.toLowerCase();
     let sub: string;
     if (t === "all_employees") sub = s.employees;
-    else if (t === "users") sub = s.users;
+    else if (t === "users") sub = su.users;
     else if (COMPANY_TABLES.has(t)) sub = s.company(t);
     else if (CONFIG_TABLES.has(t)) sub = s.config(t);
     else if (OWN_TABLES.has(t)) sub = s.own(t);
@@ -358,6 +365,15 @@ const WRITE_RE = /^\s*(UPDATE\s+`?([A-Za-z_][A-Za-z0-9_]*)`?\s+SET\b[\s\S]*?|DEL
 const WRITE_ALL_RE = /^\s*(UPDATE\s+`?([A-Za-z_][A-Za-z0-9_]*)`?\s+SET\b[\s\S]*|DELETE\s+FROM\s+`?([A-Za-z_][A-Za-z0-9_]*)`?)\s*$/i;
 function writeGuard(table: string, ctx: CompanyContext): string | null {
   const gid = int(ctx.groupId);
+  if (ctx.strict && !ctx.wholeGroup) {
+    // Admin Panel module request: only the active company's employees.
+    const cid = int(ctx.companyId);
+    const own = `(company_id = ${cid} OR id IN (SELECT employee_id FROM employee_company_assignments WHERE company_id = ${cid} AND is_active = 1))`;
+    if (table === "all_employees") return own;
+    const emp = `SELECT id FROM all_employees WHERE ${own}`;
+    if (EMPLOYEE_TABLES.has(table)) return `employee_id IN (${emp})`;
+    if (USER_TABLES.has(table)) return `user_id IN (SELECT user_id FROM all_employees WHERE ${own} AND user_id IS NOT NULL UNION SELECT user_id FROM user_company_access WHERE company_id = ${cid})`;
+  }
   if (CONFIG_TABLES.has(table) || OWN_TABLES.has(table)) return `company_id = ${int(ctx.companyId)}`;
   if (COMPANY_TABLES.has(table)) return `company_id IN (SELECT id FROM companies WHERE group_id = ${gid})`;
   if (GROUP_TABLES.has(table)) return `group_id = ${gid}`;

@@ -204,7 +204,7 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </pre>
 <ul>
 <li>রোস্টারে "Off" বা শিফট দিলে ওই কর্মীর ওই দিনের ছুটি/কর্মদিবস ও দেরির সময় বদলে যায় (<code>RosterRoutes.ts</code>)।</li>
-<li>ভুল উপস্থিতি: কর্মী <strong>সংশোধন আবেদন</strong> দেয় → Approval।</li>
+<li>ভুল উপস্থিতি: কর্মী <strong>সংশোধন আবেদন</strong> দেয় → Approval। In Time ওই দিনের; Out Time In Time-এর আগে দিলে সেটা night shift ধরে পরদিন সকালের সময় হিসেবে যায় (ফর্মে "Next day" লেখা দেখায়)। অন্য তারিখের সময় বা In-এর আগের Out সার্ভার নেয় না।</li>
 <li>ZK ডিভাইসের PIN কর্মীর সাথে না জুড়লে punch কারো নামে যায় না (Unlinked PINs তালিকা)।</li>
 </ul>
 <hr />

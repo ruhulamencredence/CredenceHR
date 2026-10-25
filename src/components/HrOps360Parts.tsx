@@ -10,7 +10,7 @@
 // loan, disciplinary action), and the Dossier PDF / Excel export.
 
 import React, { useEffect, useState } from 'react';
-import jsPDF from 'jspdf';
+import jsPDF from '../lib/jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import { Paperclip } from 'lucide-react';

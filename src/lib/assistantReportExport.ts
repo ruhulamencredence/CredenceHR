@@ -24,7 +24,7 @@ export interface AssistantReport {
 const cell = (v: string | number | null) => (v === null || v === undefined ? '' : String(v));
 
 export async function downloadAssistantPdf(token: string, r: AssistantReport, preparedBy: string, mode: 'save' | 'email' = 'save') {
-  const [{ default: jsPDF }, { default: autoTable }, co] = await Promise.all([import('jspdf'), import('jspdf-autotable'), loadPdfCompany(token)]);
+  const [{ default: jsPDF }, { default: autoTable }, co] = await Promise.all([import('./jspdf'), import('jspdf-autotable'), loadPdfCompany(token)]);
   const doc = new jsPDF({ orientation: r.columns.length > 6 ? 'landscape' : 'portrait', unit: 'mm', format: 'a4' });
   const y = drawStandardHeader(doc, co, r.title, [...(r.details || []), ['Prepared by', preparedBy]]);
   autoTable(doc, {

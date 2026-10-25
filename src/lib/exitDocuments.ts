@@ -9,7 +9,7 @@
 // GET /api/exit-requests/:id/documents, which only accounts with the Exit
 // layer "exit_pdf" can read.
 
-import jsPDF from 'jspdf';
+import jsPDF from './jspdf';
 import autoTable from 'jspdf-autotable';
 import { drawPdfLetterhead, finalizePdfPageNumbers, loadImageElement } from './pdfLetterhead';
 import { savePdfCrossPlatform } from './saveFile';

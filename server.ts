@@ -1121,7 +1121,11 @@ async function performApprovalAction(
       remarks,
       acted_at: new Date().toISOString()
     });
-    await queryDB("UPDATE approval_requests SET status = 'returned', current_step = 1, actions_json = ? WHERE id = ?", [JSON.stringify(trail), requestId]);
+    const back: any = await queryDB(
+      "UPDATE approval_requests SET status = 'returned', current_step = 1, actions_json = ? WHERE id = ? AND status = 'pending' AND current_step = ?",
+      [JSON.stringify(trail), requestId, Number(request.current_step)]
+    );
+    if (back && back.affectedRows === 0) throw new ApprovalActionError(409, "Someone acted on this request a moment ago — reload it to see what happened.");
     await queryDB("UPDATE user_claims SET edit_state = 'returned', return_reason = ?, approved_amount = NULL WHERE id = ?", [remarks, request.source_id]);
     await recordClaimHistory(queryDB, Number(request.source_id), "returned", { id: actorUser.id, name: actorUser.name }, remarks);
     try {
@@ -1211,12 +1215,16 @@ async function performApprovalAction(
     newStep = Number(request.current_step) + 1;
   }
 
-  await queryDB("UPDATE approval_requests SET status = ?, current_step = ?, actions_json = ? WHERE id = ?", [
+  // Only if nobody acted on this step meanwhile (two approvers, a
+  // double-click): the second one changes nothing and runs no side effects.
+  const moved: any = await queryDB("UPDATE approval_requests SET status = ?, current_step = ?, actions_json = ? WHERE id = ? AND status = 'pending' AND current_step = ?", [
     newStatus,
     newStep,
     JSON.stringify(actions),
-    requestId
+    requestId,
+    Number(request.current_step)
   ]);
+  if (moved && moved.affectedRows === 0) throw new ApprovalActionError(409, "Someone acted on this request a moment ago — reload it to see what happened.");
   // Conveyance Bill Claim: keep this approver's signature with this approval
   // (Bill Claim Policy -> "Put each approver's signature…"); never blocks the approval.
   if (request.source_type === "user_claim" && action === "approved" && claimPolicy?.approver_signature) {
@@ -2435,17 +2443,28 @@ async function startServer() {
   // any admin route that belongs to one of the Admin Panel tabs, so the
   // Superadmin's per-account module grants (admin_module_permissions) are
   // actually enforced server-side, not just hidden in the UI.
+  // An Admin Panel module request works only on the active company's
+  // employees and their records (companyScope.ts "strict"): an HR Admin of one
+  // company can't open or change a sister company's employee, salary or
+  // request by its id. Self Service keeps finding one's own records anywhere
+  // in the group.
+  const adminScopeNext = (next: any) => {
+    const st = companyStore.getStore();
+    if (st) st.strict = true;
+    next();
+  };
+
   const requireModule = (moduleKey: AdminModuleKey) => async (req: any, res: any, next: any) => {
     if (!req.user) return res.status(401).json({ error: "Access token required" });
     if (req.user.onb) return res.status(403).json({ error: "Admin access required" });
-    if (req.user.role === "superadmin") return next();
+    if (req.user.role === "superadmin") return adminScopeNext(next);
     if (req.user.role !== "admin" && req.user.role !== "user") return res.status(403).json({ error: "Admin access required" });
     try {
       const modules = await getAdminModules(req.user.id);
       if (!modules.includes(moduleKey)) {
         return res.status(403).json({ error: "You don't have access to this section. Ask your Superadmin to grant it." });
       }
-      next();
+      adminScopeNext(next);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -2459,14 +2478,14 @@ async function startServer() {
   const requireAnyModule = (moduleKeys: AdminModuleKey[]) => async (req: any, res: any, next: any) => {
     if (!req.user) return res.status(401).json({ error: "Access token required" });
     if (req.user.onb) return res.status(403).json({ error: "Admin access required" });
-    if (req.user.role === "superadmin") return next();
+    if (req.user.role === "superadmin") return adminScopeNext(next);
     if (req.user.role !== "admin" && req.user.role !== "user") return res.status(403).json({ error: "Admin access required" });
     try {
       const modules = await getAdminModules(req.user.id);
       if (!moduleKeys.some((k) => modules.includes(k))) {
         return res.status(403).json({ error: "You don't have access to this section. Ask your Superadmin to grant it." });
       }
-      next();
+      adminScopeNext(next);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -2490,14 +2509,14 @@ async function startServer() {
     async (req: any, res: any, next: any) => {
       if (!req.user) return res.status(401).json({ error: "Access token required" });
       if (req.user.onb) return res.status(403).json({ error: "Admin access required" });
-      if (req.user.role === "superadmin") return next();
+      if (req.user.role === "superadmin") return adminScopeNext(next);
       if (req.user.role !== "admin" && req.user.role !== "user") return res.status(403).json({ error: "Admin access required" });
       try {
         const modules = await getAdminModules(req.user.id);
         if (!modules.includes(moduleKey)) {
           return res.status(403).json({ error: "You don't have access to this section. Ask your Superadmin to grant it." });
         }
-        if (!(PERMISSION_LAYER_MODULES as readonly string[]).includes(moduleKey)) return next();
+        if (!(PERMISSION_LAYER_MODULES as readonly string[]).includes(moduleKey)) return adminScopeNext(next);
         const grantedLayers = await getModulePermissionLayersForModule(req.user.id, moduleKey);
         const effectiveLayers: string[] = grantedLayers.length > 0
           ? grantedLayers
@@ -2511,7 +2530,7 @@ async function startServer() {
         if (!effectiveLayers.includes(layer)) {
           return res.status(403).json({ error: "You don't have permission to do this. Ask your Superadmin to grant it." });
         }
-        next();
+        adminScopeNext(next);
       } catch (err: any) {
         res.status(500).json({ error: err.message });
       }
