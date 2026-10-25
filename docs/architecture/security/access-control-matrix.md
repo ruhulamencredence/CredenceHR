@@ -25,7 +25,7 @@
 | Approvals | `approvals` | `read` Read Only<br>`edit_add` Edit/Add<br>`entry_upload` Entry/Upload<br>`delete_trash` Delete/Trash<br>🔒`permanent_delete` Permanent Delete |
 | Notices | `notices` | শুধু মডিউলের অনুমতি (layer নেই) |
 | Holidays (Global Calendar) | `holidays` | শুধু মডিউলের অনুমতি (layer নেই) |
-| Payroll | `payroll` | `read` Payroll<br>🔒`salary_month` Salary Month Setting<br>🔒`salary_hold` Salary Hold / Release<br>🔒`audit_approve` Audit Approve<br>🔒`accounts_pay` Accounts Pay<br>🔒`access_log` Activity Log<br>🔒`salary_bulk_upload` Salary Bulk Upload |
+| Payroll | `payroll` | `read` Payroll<br>`payroll_view` View only (Audit / Accounts)<br>🔒`salary_month` Salary Month Setting<br>🔒`salary_hold` Salary Hold / Release<br>🔒`audit_approve` Audit Approve<br>🔒`accounts_pay` Accounts Pay<br>🔒`access_log` Activity Log<br>🔒`salary_bulk_upload` Salary Bulk Upload |
 | Asset Management | `asset_management` | শুধু মডিউলের অনুমতি (layer নেই) |
 | Vehicle Management | `vehicle_management` | শুধু মডিউলের অনুমতি (layer নেই) |
 | Vehicle Maintainer (Ride Bypass) | `vehicle_maintainer` | শুধু মডিউলের অনুমতি (layer নেই) |

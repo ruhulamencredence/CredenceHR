@@ -211,20 +211,22 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
   SS[&quot;বেতন কাঠামো&lt;br/&gt;salary_structures&lt;br/&gt;(তারিখ ধরে, পুরোনো রেকর্ড বদলায় না)&quot;] --&gt; WZ
   ATW[&quot;উপস্থিতি, ছুটি, দেরি&quot;] --&gt; WZ
   BN[&quot;bonus (pending_bonuses), ঋণ কিস্তি,&lt;br/&gt;pay items, overtime&quot;] --&gt; WZ
-  WZ[&quot;Payroll wizard (HR)&lt;br/&gt;উপস্থিতি যাচাই: মোট দিন ছাড়াতে পারবে না&quot;] --&gt; GEN[&quot;payrolls তৈরি&lt;br/&gt;কর্মী × মাস = একটি&quot;]
+  WZ[&quot;Payroll wizard (HR)&lt;br/&gt;উপস্থিতি যাচাই: মোট দিন ছাড়াতে পারবে না&lt;br/&gt;ঋণাত্মক bonus/overtime/কর্তন নয়&lt;br/&gt;নিষ্ক্রিয় কর্মী: শুধু ছেড়ে যাওয়ার মাস পর্যন্ত&quot;] --&gt; GEN[&quot;payrolls তৈরি&lt;br/&gt;কর্মী × মাস = একটি&quot;]
   GEN --&gt; HOLD{&quot;কারও বেতন hold?&quot;}
   HOLD -- হ্যাঁ --&gt; HD[&quot;মাসের বাইরে থাকে; ছাড়লে আলাদা চলে&quot;]
   HOLD -- না --&gt; SUB
   GEN --&gt; SUB[&quot;HR: Submit for Audit&lt;br/&gt;(মাস লক)&quot;]
-  SUB --&gt; AUD{&quot;Audit (layer audit_approve)&lt;br/&gt;যে submit করেছে সে নয়&quot;}
+  SUB --&gt; AUD{&quot;Audit (View only + audit_approve)&lt;br/&gt;যে submit করেছে বা কোনো বেতন&lt;br/&gt;চালিয়েছে/বদলেছে সে নয়&quot;}
   AUD -- ফেরত নোট সহ --&gt; GEN
   AUD -- approve --&gt; PR[&quot;অবস্থা: Processed&quot;]
-  PR --&gt; PAY[&quot;Accounts (layer accounts_pay)&lt;br/&gt;তারিখ, পদ্ধতি, রেফারেন্স দিয়ে Pay&quot;]
+  PR --&gt; PAY[&quot;Accounts (View only + accounts_pay)&lt;br/&gt;যে চালিয়েছে, submit বা approve করেছে সে নয়&lt;br/&gt;তারিখ, পদ্ধতি, রেফারেন্স দিয়ে Pay&quot;]
   PAY --&gt; PD[&quot;Paid: আর বদলানো যায় না&lt;br/&gt;ঋণের কিস্তি কাটা হিসেবে ধরা হয়&quot;]
   PD --&gt; PSLIP[&quot;কর্মীর My Payslip + PDF + 'Salary Paid' alert&quot;]
   GEN -. প্রতিটি লেখা .-&gt; LOG[(payroll_access_log)]
 </pre>
 <p><strong>হিসাব:</strong> net = মোট আয় (বেসিক + ভাতা + overtime + bonus) − কর − PF − ঋণ কিস্তি − অনুপস্থিতি/দেরি কর্তন − অন্য কর্তন। কর ও PF <strong>হাতে/কাঠামোতে দেওয়া</strong> (আয়কর স্ল্যাবের স্বয়ংক্রিয় হিসাব নেই)।
+<strong>কে কোন layer পায়:</strong> HR = "Payroll" (<code>read</code>, বানানো ও বদলানো)। Audit = "View only" (<code>payroll_view</code>) + Audit Approve। Accounts = "View only" + Accounts Pay। View only সব পেজ ও রিপোর্ট দেখে, কিছু বদলাতে পারে না। নিয়মগুলো Superadmin-এর জন্য খাটে না।
+<strong>কর্মীর বেতন অ্যাকাউন্ট বদল:</strong> যোগ/বদল/মোছা <code>employee_change_log</code>-এ (পুরনো → নতুন, কে) থাকে, কর্মী "Salary account changed" alert পায়।
 ফাইল: <code>PayrollRoutes.ts</code>, <code>PayrollApprovalRoutes.ts</code>, <code>PayrollItemsRoutes.ts</code>, <code>PayslipRoutes.ts</code>।</p>
 <hr />
 <h2 id="conveyance-bill-claim-disbursement">১০. Conveyance Bill Claim → Disbursement</h2>

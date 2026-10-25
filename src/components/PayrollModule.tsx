@@ -631,12 +631,18 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({ token, onBack }) =
     logVisit('view', TAB_NAMES[activeTab] || activeTab);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
-  // Activity Log tab: only for Payroll's "access_log" layer.
+  // Activity Log tab: only for Payroll's "access_log" layer. canEdit = the
+  // "Payroll" layer; a "View only" account (Audit / Accounts) gets just the
+  // Dashboard, the list, Approval and the log — no tab that changes salaries.
   const [canSeeLog, setCanSeeLog] = useState(false);
+  const [canEdit, setCanEdit] = useState(false);
   useEffect(() => {
     fetch(apiUrl('/api/payroll/approval-access'), { headers: authHeaders })
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => setCanSeeLog(!!d?.access_log))
+      .then((d) => {
+        setCanSeeLog(!!d?.access_log);
+        setCanEdit(!!d?.edit);
+      })
       .catch(() => {});
   }, [authHeaders]);
 
@@ -736,54 +742,66 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({ token, onBack }) =
           >
             Payroll List
           </button>
-          <button
-            onClick={() => setActiveTab('attendance')}
-            className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
-              activeTab === 'attendance' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-blue-600'
-            }`}
-          >
-            Attendance & OT
-          </button>
-          <button
-            onClick={() => setActiveTab('payslips')}
-            className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
-              activeTab === 'payslips' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-blue-600'
-            }`}
-          >
-            Payslips
-          </button>
-          <button
-            onClick={() => setActiveTab('loans')}
-            className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
-              activeTab === 'loans' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-blue-600'
-            }`}
-          >
-            Loans & Advances
-          </button>
-          <button
-            onClick={() => setActiveTab('bonus')}
-            className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
-              activeTab === 'bonus' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-blue-600'
-            }`}
-          >
-            Bonus & Incentive
-          </button>
-          <button
-            onClick={() => setActiveTab('adjustments')}
-            className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
-              activeTab === 'adjustments' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-blue-600'
-            }`}
-          >
-            Allowance & Adjustment
-          </button>
-          <button
-            onClick={() => setActiveTab('setup')}
-            className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
-              activeTab === 'setup' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-blue-600'
-            }`}
-          >
-            Salary Setup
-          </button>
+          {canEdit && (
+            <button
+              onClick={() => setActiveTab('attendance')}
+              className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+                activeTab === 'attendance' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-blue-600'
+              }`}
+            >
+              Attendance & OT
+            </button>
+          )}
+          {canEdit && (
+            <button
+              onClick={() => setActiveTab('payslips')}
+              className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+                activeTab === 'payslips' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-blue-600'
+              }`}
+            >
+              Payslips
+            </button>
+          )}
+          {canEdit && (
+            <button
+              onClick={() => setActiveTab('loans')}
+              className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+                activeTab === 'loans' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-blue-600'
+              }`}
+            >
+              Loans & Advances
+            </button>
+          )}
+          {canEdit && (
+            <button
+              onClick={() => setActiveTab('bonus')}
+              className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+                activeTab === 'bonus' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-blue-600'
+              }`}
+            >
+              Bonus & Incentive
+            </button>
+          )}
+          {canEdit && (
+            <button
+              onClick={() => setActiveTab('adjustments')}
+              className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+                activeTab === 'adjustments' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-blue-600'
+              }`}
+            >
+              Allowance & Adjustment
+            </button>
+          )}
+          {canEdit && (
+            <button
+              onClick={() => setActiveTab('setup')}
+              className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+                activeTab === 'setup' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-blue-600'
+              }`}
+            >
+              Salary Setup
+            </button>
+          )}
           <button
             onClick={() => setActiveTab('approval')}
             className={`px-4 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
@@ -805,7 +823,9 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({ token, onBack }) =
         </div>
 
         {activeTab === 'list' ? (
-          <PayrollListPanel token={token} />
+          <PayrollListPanel token={token} canEdit={canEdit} />
+        ) : !canEdit && ['attendance', 'payslips', 'loans', 'bonus', 'adjustments', 'setup'].includes(activeTab) ? (
+          <PayrollApprovalPanel token={token} monthYear={monthYear} />
         ) : activeTab === 'attendance' ? (
           <AttendanceOvertimeSummaryPanel token={token} />
         ) : activeTab === 'payslips' ? (
@@ -887,6 +907,8 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({ token, onBack }) =
             <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4">
               <h3 className="text-sm font-semibold text-slate-700 mb-3">Quick Actions</h3>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {canEdit && (
+                  <>
                 <button
                   onClick={() => {
                     setShowProcessModal(true);
@@ -905,6 +927,8 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({ token, onBack }) =
                 >
                   <ReceiptText className="w-4 h-4" /> Generate Payslips
                 </button>
+                  </>
+                )}
                 <button
                   onClick={() => {
                     setShowReportsModal(true);
@@ -920,7 +944,7 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({ token, onBack }) =
         ) : null}
       </div>
 
-      {showProcessModal && (
+      {showProcessModal && canEdit && (
         <RunPayrollWizard
           token={token}
           initialMonthYear={monthYear}
@@ -928,7 +952,7 @@ export const PayrollModule: React.FC<PayrollModuleProps> = ({ token, onBack }) =
           onCompleted={fetchSummary}
         />
       )}
-      {showPayslipModal && (
+      {showPayslipModal && canEdit && (
         <GeneratePayslipModal token={token} monthYear={monthYear} onClose={() => setShowPayslipModal(false)} />
       )}
       {showReportsModal && (

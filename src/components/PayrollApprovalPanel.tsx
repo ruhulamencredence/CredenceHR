@@ -39,6 +39,8 @@ interface ApprovalState {
   events: { action: string; by: string | null; note: string | null; at: string }[];
   can: { submit: boolean; approve: boolean; return_: boolean; pay: boolean };
   is_submitter: boolean;
+  // Why this account can't approve / pay (it ran, submitted or approved it).
+  conflict?: string | null;
 }
 
 const tk = (n: number) => `৳${(Number(n) || 0).toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -229,8 +231,8 @@ export const PayrollApprovalPanel: React.FC<{ token: string; monthYear?: string 
                   <Landmark className="w-3.5 h-3.5" /> Pay (Accounts)
                 </button>
               )}
-              {data.status === 'submitted' && data.is_submitter && !data.can.approve && (
-                <span className="text-[11px] text-slate-500 self-center">You submitted this — someone else from Audit approves it.</span>
+              {data.conflict && (
+                <span className="text-[11px] text-slate-500 self-center">{data.conflict}</span>
               )}
             </div>
             {(data.status === 'submitted' || data.status === 'approved') && (

@@ -437,6 +437,40 @@ function num(v: any, fallback: any = 0): number {
   return Number.isFinite(f) ? f : 0;
 }
 
+// Amounts that only ever add to (or are) a salary line. A negative one would
+// cut the net pay without showing up as a deduction, so it is refused —
+// a cut goes in Other Deduction.
+const NON_NEGATIVE_FIELDS: [string, string][] = [
+  ["overtime_hours", "Overtime hours"],
+  ["overtime_amount", "Overtime amount"],
+  ["bonus_amount", "Bonus"],
+  ["other_deduction", "Other deduction"]
+];
+function negativeAmount(src: any): string | null {
+  for (const [key, label] of NON_NEGATIVE_FIELDS) {
+    const v = src?.[key];
+    if (v !== undefined && v !== null && v !== "" && Number(v) < 0) return `${label} can't be negative — put a cut in Other Deduction instead.`;
+  }
+  return null;
+}
+
+// Ghost-employee control: an inactive employee (resigned, terminated or
+// switched off) is paid only for a month that began before they left — the
+// last month's salary. With no leaving date on record nothing is paid.
+async function inactiveEmployeeBlock(queryDB: (sql: string, params?: any[]) => Promise<any>, employeeId: number, monthYear: string): Promise<string | null> {
+  const rows: any[] = await queryDB(
+    `SELECT is_active, DATE_FORMAT(COALESCE(job_status_effective_date, status_effective_date), '%Y-%m-%d') AS left_on
+       FROM all_employees WHERE id = ?`,
+    [employeeId]
+  );
+  if (!rows.length || Number(rows[0].is_active ?? 1) === 1) return null;
+  const leftOn = rows[0].left_on ? String(rows[0].left_on) : "";
+  if (leftOn && leftOn >= `${monthYear}-01`) return null;
+  return leftOn
+    ? `This employee left on ${leftOn} — there is no salary for ${monthYear}.`
+    : "This employee is inactive. Set their leaving date (Employees → Status) before running a last salary.";
+}
+
 // Rounds to 2 decimals the same way every DECIMAL(10,2) column here stores.
 function money(v: number): number {
   return Math.round((v + Number.EPSILON) * 100) / 100;
@@ -2996,6 +3030,11 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
             results.push({ employee_id: employeeId, success: false, error: "This employee's salary is run by their own company." });
             continue;
           }
+          const blocked = negativeAmount(row) || (await inactiveEmployeeBlock(queryDB, employeeId, monthYear));
+          if (blocked) {
+            results.push({ employee_id: employeeId, success: false, error: blocked });
+            continue;
+          }
           const existing = await queryDB("SELECT id FROM payrolls WHERE employee_id = ? AND month_year = ?", [employeeId, monthYear]);
           if (existing.length > 0) {
             results.push({ employee_id: employeeId, success: false, error: `Payroll for ${monthYear} already exists for this employee.` });
@@ -3154,6 +3193,10 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       if (empRows.length === 0) return res.status(404).json({ error: "Employee not found." });
       if (Number(empRows[0].company_id ?? 1) !== activeCompanyId())
         return res.status(400).json({ error: "This employee's salary is run by their own company." });
+      const negG = negativeAmount(req.body);
+      if (negG) return res.status(400).json({ error: negG });
+      const goneG = await inactiveEmployeeBlock(queryDB, Number(employee_id), String(month_year));
+      if (goneG) return res.status(400).json({ error: goneG });
 
       const existing = await queryDB("SELECT id FROM payrolls WHERE employee_id = ? AND month_year = ?", [Number(employee_id), String(month_year)]);
       if (existing.length > 0) {
@@ -3275,6 +3318,8 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       }
       const lockE = await monthLocked(queryDB, String(existing.month_year));
       if (lockE) return res.status(400).json({ error: lockedMessage(lockE) });
+      const negE = negativeAmount(req.body);
+      if (negE) return res.status(400).json({ error: negE });
 
       const workingDays = Math.max(1, Math.round(num(req.body?.total_working_days, existing.total_working_days)));
       const present = Math.max(0, Math.round(num(req.body?.present_days, existing.present_days)));
@@ -3343,13 +3388,13 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
            total_working_days = ?, present_days = ?, absent_days = ?, leave_days = ?, lwp_days = ?, overtime_hours = ?,
            basic_amount = ?, allowances_total = ?, overtime_amount = ?, bonus_amount = ?, gross_earned = ?,
            absent_deduction = ?, tax_deduction = ?, pf_deduction = ?, advance_deduction = ?, other_deduction = ?, total_deduction = ?,
-           net_salary = ?, payment_method = ?, remarks = ?, item_earnings = ?, item_deductions = ?
+           net_salary = ?, payment_method = ?, remarks = ?, item_earnings = ?, item_deductions = ?, last_edited_by = ?
          WHERE id = ?`,
         [
           workingDays, present, absent, leave, lwp, otHours,
           basicAmount, allowancesEarned, otAmount, bonus, grossWithItems,
           absentDeduction, taxDeduction, pfDeduction, advanceDeduction, otherDed, totalDeduction,
-          netSalary, method, note, pay.earnings, pay.deductions, req.params.id
+          netSalary, method, note, pay.earnings, pay.deductions, req.user.id, req.params.id
         ]
       );
       await savePayLines(queryDB, Number(existing.id), Number(existing.employee_id), String(existing.month_year), pay.lines);
@@ -3373,6 +3418,11 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       if (!b || !["submitted", "approved", "paid"].includes(b.status)) {
         return res.status(400).json({ error: "Submit this month's salary for Audit first (Payroll → Approval)." });
       }
+      // Same duty split as approving the month (PayrollApprovalRoutes.ts).
+      const me = Number(req.user.id);
+      if (req.user.role !== "superadmin" && [rows[0].generated_by, rows[0].last_edited_by, b.submitted_by].some((u) => Number(u) === me)) {
+        return res.status(403).json({ error: "You ran, changed or submitted this salary — someone else from Audit has to approve it." });
+      }
       await queryDB("UPDATE payrolls SET payment_status = 'processed' WHERE id = ?", [req.params.id]);
       res.json({ success: true });
     } catch (err: any) {
@@ -3392,6 +3442,11 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       if (payroll.payment_status === "paid") return res.status(400).json({ error: "This payroll run is already marked Paid." });
       if (Number(payroll.is_held)) return res.status(400).json({ error: "This salary is on hold. Release it first." });
       if (payroll.payment_status !== "processed") return res.status(400).json({ error: "Audit has to approve (process) this salary before it can be paid." });
+      const bp = await batchFor(queryDB, String(payroll.month_year));
+      const meP = Number(req.user.id);
+      if (req.user.role !== "superadmin" && [payroll.generated_by, payroll.last_edited_by, bp?.submitted_by, bp?.audited_by].some((u) => Number(u) === meP)) {
+        return res.status(403).json({ error: "You ran, changed, submitted or approved this salary — someone else from Accounts has to pay it." });
+      }
       const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.body?.payment_date || "")) ? String(req.body.payment_date) : todayInDhakaStr();
       const method = typeof req.body?.payment_method === "string" ? req.body.payment_method.trim().slice(0, 50) || null : null;
       const reference = typeof req.body?.payment_reference === "string" ? req.body.payment_reference.trim().slice(0, 150) || null : null;

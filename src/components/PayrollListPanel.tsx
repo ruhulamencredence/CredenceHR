@@ -13,6 +13,8 @@ import { LoadingBlock } from './LoadingBlock';
 
 interface PayrollListPanelProps {
   token: string;
+  // false = Payroll "View only": no Delete.
+  canEdit?: boolean;
 }
 
 interface PayrollListRecord {
@@ -75,7 +77,7 @@ const StatusBadge: React.FC<{ status: PayrollListRecord['payment_status'] }> = (
   );
 };
 
-export const PayrollListPanel: React.FC<PayrollListPanelProps> = ({ token }) => {
+export const PayrollListPanel: React.FC<PayrollListPanelProps> = ({ token, canEdit = true }) => {
   const authHeaders = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
   const [monthYear, setMonthYear] = useState(currentMonthYear());
@@ -395,6 +397,7 @@ export const PayrollListPanel: React.FC<PayrollListPanelProps> = ({ token }) => 
                           >
                             {actionId === r.id ? <Spinner size={12} /> : 'Approve'}
                           </button>}
+                          {canEdit && (
                           <button
                             onClick={() => removeRecord(r.id)}
                             disabled={actionId === r.id}
@@ -403,6 +406,7 @@ export const PayrollListPanel: React.FC<PayrollListPanelProps> = ({ token }) => 
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
+                          )}
                         </>
                       )}
                       {r.payment_status === 'processed' && runAccess.pay && (

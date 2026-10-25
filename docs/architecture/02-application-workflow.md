@@ -238,21 +238,23 @@ flowchart TD
   SS["বেতন কাঠামো<br/>salary_structures<br/>(তারিখ ধরে, পুরোনো রেকর্ড বদলায় না)"] --> WZ
   ATW["উপস্থিতি, ছুটি, দেরি"] --> WZ
   BN["bonus (pending_bonuses), ঋণ কিস্তি,<br/>pay items, overtime"] --> WZ
-  WZ["Payroll wizard (HR)<br/>উপস্থিতি যাচাই: মোট দিন ছাড়াতে পারবে না"] --> GEN["payrolls তৈরি<br/>কর্মী × মাস = একটি"]
+  WZ["Payroll wizard (HR)<br/>উপস্থিতি যাচাই: মোট দিন ছাড়াতে পারবে না<br/>ঋণাত্মক bonus/overtime/কর্তন নয়<br/>নিষ্ক্রিয় কর্মী: শুধু ছেড়ে যাওয়ার মাস পর্যন্ত"] --> GEN["payrolls তৈরি<br/>কর্মী × মাস = একটি"]
   GEN --> HOLD{"কারও বেতন hold?"}
   HOLD -- হ্যাঁ --> HD["মাসের বাইরে থাকে; ছাড়লে আলাদা চলে"]
   HOLD -- না --> SUB
   GEN --> SUB["HR: Submit for Audit<br/>(মাস লক)"]
-  SUB --> AUD{"Audit (layer audit_approve)<br/>যে submit করেছে সে নয়"}
+  SUB --> AUD{"Audit (View only + audit_approve)<br/>যে submit করেছে বা কোনো বেতন<br/>চালিয়েছে/বদলেছে সে নয়"}
   AUD -- ফেরত নোট সহ --> GEN
   AUD -- approve --> PR["অবস্থা: Processed"]
-  PR --> PAY["Accounts (layer accounts_pay)<br/>তারিখ, পদ্ধতি, রেফারেন্স দিয়ে Pay"]
+  PR --> PAY["Accounts (View only + accounts_pay)<br/>যে চালিয়েছে, submit বা approve করেছে সে নয়<br/>তারিখ, পদ্ধতি, রেফারেন্স দিয়ে Pay"]
   PAY --> PD["Paid: আর বদলানো যায় না<br/>ঋণের কিস্তি কাটা হিসেবে ধরা হয়"]
   PD --> PSLIP["কর্মীর My Payslip + PDF + 'Salary Paid' alert"]
   GEN -. প্রতিটি লেখা .-> LOG[(payroll_access_log)]
 ```
 
 **হিসাব:** net = মোট আয় (বেসিক + ভাতা + overtime + bonus) − কর − PF − ঋণ কিস্তি − অনুপস্থিতি/দেরি কর্তন − অন্য কর্তন। কর ও PF **হাতে/কাঠামোতে দেওয়া** (আয়কর স্ল্যাবের স্বয়ংক্রিয় হিসাব নেই)।
+**কে কোন layer পায়:** HR = "Payroll" (`read`, বানানো ও বদলানো)। Audit = "View only" (`payroll_view`) + Audit Approve। Accounts = "View only" + Accounts Pay। View only সব পেজ ও রিপোর্ট দেখে, কিছু বদলাতে পারে না। নিয়মগুলো Superadmin-এর জন্য খাটে না।
+**কর্মীর বেতন অ্যাকাউন্ট বদল:** যোগ/বদল/মোছা `employee_change_log`-এ (পুরনো → নতুন, কে) থাকে, কর্মী "Salary account changed" alert পায়।
 ফাইল: `PayrollRoutes.ts`, `PayrollApprovalRoutes.ts`, `PayrollItemsRoutes.ts`, `PayslipRoutes.ts`।
 
 ---

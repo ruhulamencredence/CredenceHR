@@ -580,6 +580,13 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
               [employeeId, pay.type, pay.label, pay.bank, pay.branch, pay.provider, pay.number, pay.pct, have.length]
             );
+            // Same trail as Employees -> Payment tab (EmployeeRoutes.ts).
+            const kind = pay.type === "mfs" ? "MFS" : pay.type === "cash" ? "Cash" : "Bank";
+            await queryDB("INSERT INTO employee_change_log (employee_id, field_name, old_value, new_value, action_by) VALUES (?, 'payment_account', NULL, ?, ?)", [
+              employeeId,
+              `${kind} "${pay.label}"${pay.bank || pay.provider ? ` ${pay.bank || pay.provider}` : ""}${pay.number ? ` ${pay.number}` : ""} — ${pay.pct}% (Data Import)`,
+              Number(ctx.user?.id) || null
+            ]).catch(() => {});
           }
           prep.accounts.set(employeeId, [...have, { account_type: pay.type, account_number: pay.number, percentage: pay.pct, is_active: 1 }]);
         };

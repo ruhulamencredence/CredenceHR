@@ -89,3 +89,22 @@
 3. **A-3** নিষ্ক্রিয় কর্মীর payroll বন্ধ।
 4. **A-2** Submitter-এর Pay বন্ধ।
 5. **A-4** ঋণাত্মক আয়ের ঘর বন্ধ।
+
+---
+
+## ৬. সমাধান ও পুনঃপরীক্ষা (একই দিন)
+
+পাঁচটি সমস্যাই ঠিক করা হয়েছে। একই স্ক্রিপ্ট, নতুন নিয়ম অনুযায়ী আরও চেক যোগ করে আবার চালানো হয়েছে: **৫২টি চেক — ৪৯ পাস, ০ ফেল, ৩ তথ্য** (`test-logs/2026-10-25/06-audit-manager-retest.log`)।
+
+| সমস্যা | কী করা হলো | যাচাই |
+|---|---|---|
+| A-1 | Payroll-এ নতুন layer **"View only (Audit / Accounts)"** (`payroll_view`)। এটা দিয়ে সব Payroll পেজ ও রিপোর্ট খোলা যায় (GET), কিছু বদলানো যায় না। বদলাতে আগের মতোই "Payroll" layer লাগে। View only অ্যাকাউন্ট UI-তে শুধু Dashboard, Payroll List, Approval, Activity Log ও Download Reports দেখে; Run Payroll, Salary Setup, Loans, Bonus ইত্যাদি লুকানো, Delete বোতামও নেই। | PAY-03c, PAY-06b, PAY-14b, SOD-01…03; ব্রাউজারে দেখা |
+| A-1 (বাকি অংশ) | যে কোনো বেতন চালিয়েছে বা হাতে বদলেছে (`generated_by`, নতুন `last_edited_by`), সে ওই মাস অনুমোদন দিতে পারে না — "Payroll" layer থাকলেও। | SOD-12, SOD-13 |
+| A-2 | যে মাস চালিয়েছে, submit বা অনুমোদন করেছে, সে Pay করতে পারে না। একক বেতনের Process / Mark Paid-এও একই নিয়ম। Approval পাতায় কারণ লেখা দেখায়। | SOD-07, SOD-14, SOD-15 |
+| A-3 | নিষ্ক্রিয় কর্মীর বেতন চলে শুধু ছেড়ে যাওয়ার মাস পর্যন্ত (Job Status-এর তারিখ ধরে); তারিখ না থাকলে চলে না। একক ও Bulk দুটোতেই। | SOD-09, SOD-09b |
+| A-4 | Bonus, Overtime (ঘণ্টা ও টাকা) ও Other deduction ঋণাত্মক হলে বেতন চালানো ও এডিট দুটোই আটকায়। | SOD-10 |
+| A-5 | বেতনের অ্যাকাউন্ট যোগ / বদল / মোছা `employee_change_log`-এ যায় (পুরনো → নতুন, কে; Employee History-তে "Salary Payment Account")। Data Import-এ যোগ হলেও লেখা হয়। কর্মী "Salary account changed" alert পান (নম্বরের শেষ ৪ অঙ্ক)। | LOG-08, LOG-08b |
+
+**অন্য পরীক্ষা আগের মতোই:** HR ২ বছর সিমুলেশন ২৮৪ পাস / ৪ ফেল (৪টিই পুরনো R-01 ছুটির সমস্যা), কর্মী ৫ বছর ৩৫৩ / ১ (স্ক্রিপ্টের পুরনো পথ), unit test ৫৪ + ২৫ পাস, TypeScript পরিষ্কার।
+
+**যা করতে হবে লাইভে:** Audit ও Accounts অ্যাকাউন্ট থেকে "Payroll" layer তুলে "View only" দিন (Admin Panel → Users → Module Access → Payroll)। যাদের "Payroll" আছে তাদের কিছু বদলায় না।

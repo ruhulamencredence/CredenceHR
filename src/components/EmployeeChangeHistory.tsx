@@ -26,6 +26,7 @@ const HISTORY_FIELD_LABELS: Record<string, string> = {
   email: 'Email',
   phone: 'Phone',
   is_active: 'Status',
+  payment_account: 'Salary Payment Account',
   branch: 'Branch',
   nid_ssn: 'NID / SSN',
   is_foreigner: 'Foreigner',

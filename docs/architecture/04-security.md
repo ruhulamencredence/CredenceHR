@@ -62,7 +62,7 @@
 4. **বিভাগ-সীমা:** Attendance Report, Leave, Duty Roster, Conveyance Claim-এ Admin শুধু নির্দিষ্ট বিভাগের কর্মী দেখে।
 5. **কোম্পানি-সীমা:** ৫৬টি টেবিলে `company_id`; `companyScope.ts` প্রতিটি `SELECT/UPDATE/DELETE/INSERT`-এ ফিল্টার নিজে বসায়। কোম্পানি বদলাতে ব্যবহারকারীর ওই কোম্পানিতে প্রবেশাধিকার লাগে।
 6. **Self-service সুইচ:** Loan, Payslip, Roster, Chat, Fingerprint, AI Assistant ইত্যাদি ব্যবহারকারীভিত্তিক সুইচ, ডিফল্টে বন্ধ।
-7. **কাজের বিভাজন (segregation of duties):** Payroll: HR বানায় → **যে submit করেছে সে approve করতে পারে না** → Audit approve → Accounts pay। Onboarding: **যে খুলেছে সে approve করতে পারে না**। (Superadmin ব্যতিক্রম, ১০ নম্বরে।)
+7. **কাজের বিভাজন (segregation of duties):** Payroll: HR বানায় → Audit approve → Accounts pay। **যে কোনো বেতন চালিয়েছে, হাতে বদলেছে বা মাস submit করেছে সে approve করতে পারে না; যে চালিয়েছে, submit বা approve করেছে সে pay করতে পারে না** (মাস ও একক বেতন দুটোতেই)। Audit ও Accounts পায় "View only" (`payroll_view`) layer: সব দেখে, কিছু বদলাতে পারে না, তাই দেখার জন্য HR-এর বানানো/বদলানোর অনুমতি দিতে হয় না। বোনাস, overtime ও কর্তন ঋণাত্মক হয় না; নিষ্ক্রিয় কর্মীর বেতন শুধু ছেড়ে যাওয়ার মাস পর্যন্ত চলে (ghost employee নিয়ন্ত্রণ)। Onboarding: **যে খুলেছে সে approve করতে পারে না**। (Superadmin ব্যতিক্রম, ১০ নম্বরে।)
 8. **নিজের দাবি নিজে অনুমোদন নয়:** কর্মী নিজের ছুটি নিজে approve করতে পারে না (টেস্ট `LEAVE-12`)।
 9. **নিয়ম (`CLAUDE.md`):** নতুন যেকোনো ফিচার/মেনু/বোতাম/API অনুমতির পেছনে থাকবে। UI লুকানো **এবং** API বন্ধ।
 
@@ -115,7 +115,7 @@
 | পাসওয়ার্ড রিসেট অনুরোধ ও কোড | `password_reset_log`, `password_reset_requests` | — |
 | অ্যাক্সেস বদল (কে কাকে কোন অনুমতি দিল, পাসওয়ার্ড রিসেট) | `user_access_audit` | — |
 | Payroll: কে খুলল, কী করল | `payroll_access_log` | — |
-| কর্মীর তথ্য বদল (আগের/পরের মান) | `employee_change_log` | — |
+| কর্মীর তথ্য বদল (আগের/পরের মান), বেতনের ব্যাংক/MFS অ্যাকাউন্ট যোগ-বদল-মোছা (কর্মীকে alert যায়) | `employee_change_log` | — |
 | MPR entry সম্পাদনা/স্থায়ী মোছা | `entry_edit_history`, `entry_permanent_delete_log` | — |
 | ই-স্বাক্ষর ঘটনা | `document_events` | — |
 | Mail অ্যাডমিন কাজ | `mail_admin_log` | — |

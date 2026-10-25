@@ -11,6 +11,7 @@ import { keptRecordsOf } from "./EmployeeRecordsGuard";
 import { recordEmployeeEditHistory } from "./EmployeeTransferRoutes";
 import { applyDueHrActions } from "./HROperationsRoutes";
 import { activeCompanyId } from "./companyContext";
+import { createAlert } from "./Alerts";
 import { isSeparatedJobStatus } from "./AccountBlock";
 import { EMPLOYEE_BOOL_FIELDS } from "./memoryDbFallback";
 import bcrypt from "bcryptjs";
@@ -552,6 +553,42 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
     }
   });
 
+  // Audit trail for the salary accounts: every add / change / removal goes to
+  // employee_change_log (field "payment_account", old → new, who), and the
+  // employee is told — changing where a salary is paid is the classic
+  // payroll-fraud step, so it must never happen silently.
+  const paymentAccountText = (r: any): string | null => {
+    if (!r) return null;
+    const type = r.account_type === "mfs" ? "MFS" : r.account_type === "cash" ? "Cash" : "Bank";
+    const where = [r.bank_name || r.provider, r.branch_name].filter(Boolean).join(", ");
+    const tail = Number(r.is_active ?? 1) ? "" : " (inactive)";
+    return `${type} "${r.account_label || ""}"${where ? ` ${where}` : ""}${r.account_number ? ` ${r.account_number}` : ""} — ${Number(r.percentage)}%${tail}`;
+  };
+  async function logPaymentAccountChange(employeeId: number, before: any, after: any, actorId: number) {
+    const oldText = paymentAccountText(before);
+    const newText = paymentAccountText(after);
+    if (oldText === newText) return;
+    await queryDB("INSERT INTO employee_change_log (employee_id, field_name, old_value, new_value, action_by) VALUES (?, 'payment_account', ?, ?, ?)", [
+      employeeId,
+      oldText,
+      newText,
+      actorId || null
+    ]).catch((err: any) => console.warn("⚠️ Could not log a payment account change: " + err.message));
+    const emp: any[] = await queryDB("SELECT user_id FROM all_employees WHERE id = ?", [employeeId]).catch(() => []);
+    const uid = Number(emp[0]?.user_id || 0);
+    if (!uid || uid === Number(actorId)) return;
+    const last4 = (r: any) => (r?.account_number ? `…${String(r.account_number).slice(-4)}` : "");
+    const what = !before ? `A salary account ${last4(after)} was added` : !after ? `Your salary account ${last4(before)} was removed` : `Your salary account ${last4(before)} was changed${after.account_number !== before.account_number ? ` to ${last4(after)}` : ""}`;
+    await createAlert(queryDB, {
+      userId: uid,
+      type: "hr_action",
+      title: "Salary account changed",
+      message: `${what}. If you didn't ask for this, tell HR right away.`,
+      relatedType: "employee",
+      relatedId: employeeId
+    }).catch(() => {});
+  }
+
   // Shared validation for POST/PUT below — throws with a message safe to
   // send straight back to the client.
   function validatePaymentAccountBody(body: any) {
@@ -575,7 +612,7 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
     };
   }
 
-  app.post("/api/employees/:id/payment-accounts", authenticateToken, requireAdmin, requireModule("employees"), async (req, res) => {
+  app.post("/api/employees/:id/payment-accounts", authenticateToken, requireAdmin, requireModule("employees"), async (req: any, res) => {
     try {
       const id = Number(req.params.id);
       const employeeExists = await queryDB("SELECT id FROM all_employees WHERE id = ?", [id]);
@@ -594,13 +631,15 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)`,
         [id, v.accountType, v.accountLabel, v.bankName, v.branchName, v.provider, v.accountNumber, v.percentage, existingActive.length]
       );
+      const added: any[] = await queryDB("SELECT * FROM employee_payment_accounts WHERE id = ?", [result.insertId]);
+      await logPaymentAccountChange(id, null, added[0], Number(req.user?.id));
       res.status(201).json({ id: result.insertId });
     } catch (err: any) {
       res.status(err.message?.includes("required") || err.message?.includes("Percentage") || err.message?.includes("label") ? 400 : 500).json({ error: err.message });
     }
   });
 
-  app.put("/api/employees/:id/payment-accounts/:rowId", authenticateToken, requireAdmin, requireModule("employees"), async (req, res) => {
+  app.put("/api/employees/:id/payment-accounts/:rowId", authenticateToken, requireAdmin, requireModule("employees"), async (req: any, res) => {
     try {
       const id = Number(req.params.id);
       const rowId = Number(req.params.rowId);
@@ -623,19 +662,22 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
          WHERE id = ?`,
         [v.accountType, v.accountLabel, v.bankName, v.branchName, v.provider, v.accountNumber, v.percentage, isActive ? 1 : 0, rowId]
       );
+      const updated: any[] = await queryDB("SELECT * FROM employee_payment_accounts WHERE id = ?", [rowId]);
+      await logPaymentAccountChange(id, existing[0], updated[0], Number(req.user?.id));
       res.json({ success: true });
     } catch (err: any) {
       res.status(err.message?.includes("required") || err.message?.includes("Percentage") || err.message?.includes("label") ? 400 : 500).json({ error: err.message });
     }
   });
 
-  app.delete("/api/employees/:id/payment-accounts/:rowId", authenticateToken, requireAdmin, requireModule("employees"), async (req, res) => {
+  app.delete("/api/employees/:id/payment-accounts/:rowId", authenticateToken, requireAdmin, requireModule("employees"), async (req: any, res) => {
     try {
       const id = Number(req.params.id);
       const rowId = Number(req.params.rowId);
-      const existing = await queryDB("SELECT id FROM employee_payment_accounts WHERE id = ? AND employee_id = ?", [rowId, id]);
+      const existing = await queryDB("SELECT * FROM employee_payment_accounts WHERE id = ? AND employee_id = ?", [rowId, id]);
       if (existing.length === 0) return res.status(404).json({ error: "Payment account not found" });
       await queryDB("DELETE FROM employee_payment_accounts WHERE id = ?", [rowId]);
+      await logPaymentAccountChange(id, existing[0], null, Number(req.user?.id));
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });

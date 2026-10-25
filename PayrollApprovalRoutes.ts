@@ -14,7 +14,10 @@
 //              payment date, method and reference — every Processed run
 //              becomes Paid (advance installments are recovered then)
 //
-// The one who submitted a month can't also approve it. A salary on hold is
+// Duties stay apart (a Superadmin excepted): whoever ran any of the month's
+// salaries or submitted it can't approve it, and whoever ran, submitted or
+// approved it can't pay it. "View only" (payroll_view) lets Audit and
+// Accounts read every Payroll page without HR's "read" layer. A salary on hold is
 // left out; once released, Audit processes it and Accounts pays it on its
 // own (the per-run Process / Mark Paid buttons, now behind the same layers).
 //
@@ -31,7 +34,7 @@ type CreateAlert = (
   queryDB: QueryDB,
   params: { userId: number; type: AlertType; title: string; message: string; relatedType?: string; relatedId?: number }
 ) => Promise<void>;
-type PayrollLayer = "read" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log";
+type PayrollLayer = "read" | "payroll_view" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log";
 
 interface PayrollApprovalDeps {
   authenticateToken: any;
@@ -105,9 +108,12 @@ export async function ensurePayrollApprovalSchema(dbPool: any) {
     )
   `);
   // payrolls: what Accounts recorded when it was paid.
+  // last_edited_by: who last changed a run by hand (PUT /api/payroll/:id) —
+  // like generated_by, that person can't approve or pay it.
   for (const [col, def] of [
     ["payment_date", "DATE NULL"],
-    ["payment_reference", "VARCHAR(150) NULL"]
+    ["payment_reference", "VARCHAR(150) NULL"],
+    ["last_edited_by", "INT NULL"]
   ]) {
     try {
       await dbPool.query(`ALTER TABLE payrolls ADD COLUMN ${col} ${def}`);
@@ -286,18 +292,20 @@ export function registerPayrollApprovalRoutes(app: Express, deps: PayrollApprova
 
   // ---- what this account may do -----------------------------------------
   app.get("/api/payroll/approval-access", ...gate, async (req: any, res: any) => {
-    const [audit, pay, log] = await Promise.all([
+    const [audit, pay, log, edit] = await Promise.all([
       hasModuleLayer(req.user, "payroll", "audit_approve"),
       hasModuleLayer(req.user, "payroll", "accounts_pay"),
-      hasModuleLayer(req.user, "payroll", "access_log")
+      hasModuleLayer(req.user, "payroll", "access_log"),
+      hasModuleLayer(req.user, "payroll", "read")
     ]);
-    res.json({ audit_approve: audit, accounts_pay: pay, access_log: log });
+    // edit = HR's "Payroll" layer; without it the account only views.
+    res.json({ audit_approve: audit, accounts_pay: pay, access_log: log, edit });
   });
 
   // ---- one month's approval state ---------------------------------------
   async function monthRuns(monthYear: string) {
     return ((await queryDB(
-      `SELECT p.id, p.employee_id, p.net_salary, p.payment_status, p.is_held, p.hold_reason, p.payment_date, p.payment_reference,
+      `SELECT p.id, p.employee_id, p.net_salary, p.payment_status, p.is_held, p.hold_reason, p.payment_date, p.payment_reference, p.generated_by, p.last_edited_by,
               e.name AS employee_name, e.employee_id AS employee_code, e.department, e.designation, e.user_id
          FROM payrolls p JOIN all_employees e ON e.id = p.employee_id
         WHERE p.month_year = ? ORDER BY e.name ASC`,
@@ -310,6 +318,22 @@ export function registerPayrollApprovalRoutes(app: Express, deps: PayrollApprova
     const rows: any[] = await queryDB(`SELECT id, name FROM users WHERE id IN (${list.map(() => "?").join(",")})`, list);
     return new Map<number, string>(rows.map((r: any) => [Number(r.id), r.name]));
   }
+  // Why this account may not approve / pay the month (null = it may).
+  // A Superadmin is never stopped.
+  function approveConflict(user: any, b: any, runs: any[]): string | null {
+    if (user.role === "superadmin") return null;
+    if (Number(b?.submitted_by) === Number(user.id)) return "You submitted this salary sheet — someone else from Audit has to approve it.";
+    if (runs.some((r) => Number(r.generated_by) === Number(user.id) || Number(r.last_edited_by) === Number(user.id))) return "You ran or changed payroll for some employees in this month — someone else from Audit has to approve it.";
+    return null;
+  }
+  function payConflict(user: any, b: any, runs: any[]): string | null {
+    if (user.role === "superadmin") return null;
+    if (Number(b?.submitted_by) === Number(user.id)) return "You submitted this salary sheet — someone else from Accounts has to pay it.";
+    if (Number(b?.audited_by) === Number(user.id)) return "You approved this salary sheet for Audit — someone else from Accounts has to pay it.";
+    if (runs.some((r) => Number(r.generated_by) === Number(user.id) || Number(r.last_edited_by) === Number(user.id))) return "You ran or changed payroll for some employees in this month — someone else from Accounts has to pay it.";
+    return null;
+  }
+
   async function event(batchId: number, action: string, userId: number, note: string | null) {
     await queryDB("INSERT INTO payroll_batch_events (batch_id, action, user_id, note) VALUES (?, ?, ?, ?)", [batchId, action, userId, note]);
   }
@@ -336,7 +360,11 @@ export function registerPayrollApprovalRoutes(app: Express, deps: PayrollApprova
       const events: any[] = b ? await queryDB("SELECT * FROM payroll_batch_events WHERE batch_id = ? ORDER BY id ASC", [b.id]) : [];
       const names = await userNames([b?.submitted_by, b?.audited_by, b?.paid_by, ...events.map((e) => e.user_id)]);
       const count = (s: string) => runs.filter((r) => r.payment_status === s).length;
-      const [audit, pay] = await Promise.all([hasModuleLayer(req.user, "payroll", "audit_approve"), hasModuleLayer(req.user, "payroll", "accounts_pay")]);
+      const [audit, pay, edit] = await Promise.all([
+        hasModuleLayer(req.user, "payroll", "audit_approve"),
+        hasModuleLayer(req.user, "payroll", "accounts_pay"),
+        hasModuleLayer(req.user, "payroll", "read")
+      ]);
       const status = b?.status || "draft";
       res.json({
         month_year: month,
@@ -367,11 +395,13 @@ export function registerPayrollApprovalRoutes(app: Express, deps: PayrollApprova
         held: runs.filter((r) => Number(r.is_held)).map((r) => ({ name: r.employee_name, code: r.employee_code, reason: r.hold_reason })),
         events: events.map((e) => ({ action: e.action, by: names.get(Number(e.user_id)) || null, note: e.note, at: e.created_at })),
         can: {
-          submit: (status === "draft" || status === "returned") && runs.length > 0,
-          approve: audit && status === "submitted" && (req.user.role === "superadmin" || Number(b?.submitted_by) !== Number(req.user.id)),
+          submit: edit && (status === "draft" || status === "returned") && runs.length > 0,
+          approve: audit && status === "submitted" && !approveConflict(req.user, b, runs),
           return_: audit && (status === "submitted" || status === "approved"),
-          pay: pay && status === "approved"
+          pay: pay && status === "approved" && !payConflict(req.user, b, runs)
         },
+        // Shown next to a button this account can't use, so it knows why.
+        conflict: status === "submitted" && audit ? approveConflict(req.user, b, runs) : status === "approved" && pay ? payConflict(req.user, b, runs) : null,
         is_submitter: Number(b?.submitted_by) === Number(req.user.id)
       });
     } catch (err: any) {
@@ -408,12 +438,12 @@ export function registerPayrollApprovalRoutes(app: Express, deps: PayrollApprova
       const month = String(req.params.month);
       const b = await batchFor(queryDB, month);
       if (!b || b.status !== "submitted") return bad(res, "Only a salary sheet submitted for audit can be approved.");
-      if (req.user.role !== "superadmin" && Number(b.submitted_by) === Number(req.user.id)) {
-        return bad(res, "You submitted this salary sheet — someone else from Audit has to approve it.", 403);
-      }
+      const monthList = await monthRuns(month);
+      const conflict = approveConflict(req.user, b, monthList);
+      if (conflict) return bad(res, conflict, 403);
       const note = typeof req.body?.note === "string" ? req.body.note.trim().slice(0, 1000) || null : null;
       // Ids from the (company-scoped) month list — an UPDATE isn't scoped.
-      const ids = (await monthRuns(month)).filter((r) => r.payment_status === "unpaid" && !Number(r.is_held)).map((r) => Number(r.id));
+      const ids = monthList.filter((r) => r.payment_status === "unpaid" && !Number(r.is_held)).map((r) => Number(r.id));
       if (ids.length) await queryDB(`UPDATE payrolls SET payment_status = 'processed' WHERE id IN (${ids.map(() => "?").join(",")})`, ids);
       await queryDB("UPDATE payroll_batches SET status = 'approved', audited_by = ?, audited_at = CURRENT_TIMESTAMP, audit_note = ? WHERE id = ?", [req.user.id, note, b.id]);
       await event(b.id, "approved", req.user.id, note);
@@ -454,12 +484,15 @@ export function registerPayrollApprovalRoutes(app: Express, deps: PayrollApprova
       const month = String(req.params.month);
       const b = await batchFor(queryDB, month);
       if (!b || b.status !== "approved") return bad(res, "Audit has to approve this salary sheet before it can be paid.");
+      const monthList = await monthRuns(month);
+      const conflict = payConflict(req.user, b, monthList);
+      if (conflict) return bad(res, conflict, 403);
       const date = String(req.body?.payment_date || "");
       if (!DATE_RE.test(date)) return bad(res, "Enter the payment date.");
       const method = typeof req.body?.payment_method === "string" ? req.body.payment_method.trim().slice(0, 50) || null : null;
       const reference = typeof req.body?.payment_reference === "string" ? req.body.payment_reference.trim().slice(0, 150) || null : null;
       if (!method) return bad(res, "Choose how it was paid.");
-      const ids = (await monthRuns(month)).filter((r) => r.payment_status === "processed" && !Number(r.is_held)).map((r) => Number(r.id));
+      const ids = monthList.filter((r) => r.payment_status === "processed" && !Number(r.is_held)).map((r) => Number(r.id));
       const runs: any[] = ids.length ? await queryDB(`SELECT * FROM payrolls WHERE id IN (${ids.map(() => "?").join(",")})`, ids) : [];
       for (const p of runs) await settlePaidPayroll(queryDB, p, req.user.id, { date, method, reference });
       await queryDB(

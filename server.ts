@@ -358,7 +358,10 @@ const TRACKING_DEFAULT_LAYERS = ["read", "stay_report"] as const;
 // explicit-only (PayrollApprovalRoutes.ts).
 // "salary_bulk_upload" (explicit-only): Payroll -> Salary Setup -> Bulk Upload
 // and the Salary Structure kind of HR Data Import (DataImportRoutes.ts).
-const PAYROLL_LAYER_KEYS = ["read", "salary_month", "salary_hold", "audit_approve", "accounts_pay", "access_log", "salary_bulk_upload"] as const;
+// "payroll_view" = View only: opens every Payroll page and report but can't
+// change anything — for Audit and Accounts, so seeing the sheet they approve /
+// pay doesn't also hand them HR's "read" (= run payroll, salaries, loans).
+const PAYROLL_LAYER_KEYS = ["read", "payroll_view", "salary_month", "salary_hold", "audit_approve", "accounts_pay", "access_log", "salary_bulk_upload"] as const;
 // Mobile Bill's layers: "read" = the module as it was; "limit_history" =
 // Reports -> Limit changes (who changed which SIM's limit, when). Both are
 // reading, so an account with Mobile Bill and no saved layers has both.
@@ -2464,7 +2467,7 @@ async function startServer() {
   // on for a module is never a silent regression; a Superadmin only actually
   // restricts anything once they explicitly save a narrower set in the
   // Module Access modal.
-  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "dispatch_material" | "dispatch_all" | "po_import" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "block_account" | "limit_history" | "link_pins" | "on_behalf" | "onboarding_create" | "onboarding_review" | "onboarding_approve" | "exit_dues" | "exit_pdf" | "reminders_receive" | "salary_bulk_upload" | "target_export" | "target_cancel" | "exit_clearance_setup" | "late_list" | "mail_open" | "mail_password" | "mail_settings" | "mail_groups" | "roster_manage" | "break_manage" | "password_requests" | "sign_request" | "esign_settings" | "employee_delete") =>
+  const requireModuleLayer = (moduleKey: AdminModuleKey, layer: typeof PERMISSION_LAYER_KEYS[number] | "submission_status" | "dispatch_material" | "dispatch_all" | "po_import" | "stay_report" | "live" | "salary_month" | "salary_hold" | "audit_approve" | "accounts_pay" | "access_log" | "payroll_view" | "block_account" | "limit_history" | "link_pins" | "on_behalf" | "onboarding_create" | "onboarding_review" | "onboarding_approve" | "exit_dues" | "exit_pdf" | "reminders_receive" | "salary_bulk_upload" | "target_export" | "target_cancel" | "exit_clearance_setup" | "late_list" | "mail_open" | "mail_password" | "mail_settings" | "mail_groups" | "roster_manage" | "break_manage" | "password_requests" | "sign_request" | "esign_settings" | "employee_delete") =>
     async (req: any, res: any, next: any) => {
       if (!req.user) return res.status(401).json({ error: "Access token required" });
       if (req.user.onb) return res.status(403).json({ error: "Admin access required" });
@@ -2775,10 +2778,17 @@ async function startServer() {
   // Payroll -> Approval (HR -> Audit -> Accounts) and Activity Log. Registered
   // before every other payroll route: its logger has to see each /api/payroll
   // request, and its GET routes would otherwise be caught by GET /api/payroll/:id.
+  // Payroll's own gate: reading (GET, and the page's own visit log) is open to
+  // the "payroll_view" layer too; every change still needs "read".
+  const requirePayroll = (k: "payroll") => async (req: any, res: any, next: any) => {
+    const reading = req.method === "GET" || (req.method === "POST" && String(req.originalUrl || "").split("?")[0] === "/api/payroll/access-log");
+    if (reading && (await hasModuleLayer(req.user, k, "payroll_view").catch(() => false))) return next();
+    return requireModuleLayer(k, "read")(req, res, next);
+  };
   registerPayrollApprovalRoutes(app, {
     authenticateToken,
     requireAdmin,
-    requireModule: (k: "payroll") => requireModuleLayer(k, "read"),
+    requireModule: requirePayroll,
     requireModuleLayer,
     hasModuleLayer,
     queryDB,
@@ -2786,13 +2796,14 @@ async function startServer() {
   });
   // Registered first: its /api/payroll/pay-items and /api/payroll/adjustments
   // would otherwise be caught by PayrollRoutes' GET /api/payroll/:id.
-  registerPayrollItemsRoutes(app, { authenticateToken, requireAdmin, requireModule: (k: "payroll") => requireModuleLayer(k, "read"), queryDB });
+  registerPayrollItemsRoutes(app, { authenticateToken, requireAdmin, requireModule: requirePayroll, queryDB });
   // Every existing payroll route needs the module's "read" layer (on by
-  // default); the salary month setting needs "salary_month" (ticked only).
+  // default; "payroll_view" is enough to read); the salary month setting
+  // needs "salary_month" (ticked only).
   registerPayrollRoutes(app, {
     authenticateToken,
     requireAdmin,
-    requireModule: (k: "payroll") => requireModuleLayer(k, "read"),
+    requireModule: requirePayroll,
     requireModuleLayer,
     hasModuleLayer,
     getAdminModules,

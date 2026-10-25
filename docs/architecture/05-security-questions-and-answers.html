@@ -95,7 +95,7 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </tr>
 <tr>
 <td>একজন একাই বেতন বানিয়ে পরিশোধ করতে পারে?</td>
-<td>না। HR বানায় → Audit অনুমোদন (যে submit করেছে সে নয়) → Accounts পরিশোধ। ব্যতিক্রম: Superadmin।</td>
+<td>না। HR বানায় → Audit অনুমোদন → Accounts পরিশোধ। যে বেতন চালিয়েছে/বদলেছে বা submit করেছে সে অনুমোদন দিতে পারে না; যে চালিয়েছে, submit বা অনুমোদন করেছে সে পরিশোধ করতে পারে না। Audit/Accounts "View only" layer পায় (দেখে, বদলাতে পারে না)। Audit Manager টেস্ট ৪৯/৪৯ পাস (<code>test-logs/2026-10-25/06-audit-manager-retest.log</code>)। ব্যতিক্রম: Superadmin।</td>
 <td>⚠️</td>
 </tr>
 <tr>
@@ -189,7 +189,7 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <tbody>
 <tr>
 <td>কে কী করেছে তার প্রমাণ থাকে?</td>
-<td>লগইন চেষ্টা, পাসওয়ার্ড রিসেট, অ্যাক্সেস বদল, payroll-এ প্রতিটি লেখা, কর্মীর তথ্য বদল (আগে/পরে), ই-স্বাক্ষর ঘটনা, MPR সম্পাদনা, Mail অ্যাডমিন কাজ। <code>04-security.md</code> §৮।</td>
+<td>লগইন চেষ্টা, পাসওয়ার্ড রিসেট, অ্যাক্সেস বদল, payroll-এ প্রতিটি লেখা, কর্মীর তথ্য বদল (আগে/পরে), বেতনের ব্যাংক অ্যাকাউন্ট বদল (কর্মীকে alert সহ), ই-স্বাক্ষর ঘটনা, MPR সম্পাদনা, Mail অ্যাডমিন কাজ। <code>04-security.md</code> §৮।</td>
 <td>✅</td>
 </tr>
 <tr>
