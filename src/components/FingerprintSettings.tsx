@@ -13,7 +13,7 @@ import { Capacitor } from '@capacitor/core';
 import { MailPopup as Popup, primaryBtn, ghostBtn } from './mail/MailPopup';
 import { confirmDialog } from '../lib/confirmDialog';
 import { apiUrl } from '../lib/api';
-import { APP_TOO_OLD, enableFingerprint, fingerprintStatus, removeFingerprint, savedFingerprint } from '../lib/fingerprint';
+import { APP_TOO_OLD, enableFingerprint, fingerprintDetails, fingerprintStatus, removeFingerprint, savedFingerprint } from '../lib/fingerprint';
 import type { User } from '../types';
 
 interface Device {
@@ -37,6 +37,7 @@ export const FingerprintSettings: React.FC<{ token: string; user: User; onClose:
   const [status, setStatus] = useState<'ok' | 'app_old' | 'no_sensor' | null>(null);
   const [busy, setBusy] = useState(false);
   const [step, setStep] = useState('');
+  const [details, setDetails] = useState('');
   const [error, setError] = useState('');
   const [done, setDone] = useState('');
   const [hereId, setHereId] = useState(() => savedFingerprint()?.id || 0);
@@ -55,6 +56,7 @@ export const FingerprintSettings: React.FC<{ token: string; user: User; onClose:
   useEffect(() => {
     void load();
     fingerprintStatus().then(setStatus);
+    fingerprintDetails().then(setDetails);
   }, [load]);
 
   const onHere = !!hereId && !!devices?.some((d) => d.id === hereId);
@@ -149,6 +151,7 @@ export const FingerprintSettings: React.FC<{ token: string; user: User; onClose:
             </div>
           )}
         </div>
+        {details && <p className="text-[10px] text-slate-400 break-words">{details}</p>}
         <p className="text-[11px] text-slate-500">
           Your fingerprint never leaves the {app ? 'phone' : 'device'} — the {app ? 'phone' : 'browser'} only confirms it's you. Changing your password turns fingerprint sign-in off everywhere.
         </p>

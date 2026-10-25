@@ -67,6 +67,25 @@ export async function fingerprintStatus(): Promise<'ok' | 'app_old' | 'no_sensor
     return 'no_sensor';
   }
 }
+// One line for the dialog's footer: which web build this is, where it runs, whether the
+// native plugin is there and what the sensor reports — enough to tell what's wrong
+// without a debugger.
+export async function fingerprintDetails(): Promise<string> {
+  const parts = [`web build ${typeof __APP_BUILD__ !== 'undefined' ? __APP_BUILD__ : '?'}`, isApp() ? `app (${Capacitor.getPlatform()})` : 'browser'];
+  try {
+    if (isApp()) {
+      parts.push(`plugin ${Capacitor.isPluginAvailable('NativeBiometric') ? 'native' : 'MISSING'}`);
+      if (!nativePluginMissing()) {
+        const r: any = await within((await plugin()).isAvailable(), 8000, 'isAvailable');
+        parts.push(`sensor ${r.isAvailable ? 'ok' : 'not ready'}`, `type ${r.biometryType}`, `strong ${r.strongBiometryIsAvailable ? 'yes' : 'no'}`);
+        if (r.errorCode !== undefined) parts.push(`error ${r.errorCode}`);
+      }
+    }
+  } catch (e: any) {
+    parts.push(`check failed: ${why(e)}`);
+  }
+  return parts.join(' · ');
+}
 export async function fingerprintSupported(): Promise<boolean> {
   return (await fingerprintStatus()) === 'ok';
 }
