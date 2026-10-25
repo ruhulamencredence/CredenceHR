@@ -15,6 +15,7 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 এই ডকুমেন্টের সংখ্যাগুলো <strong>চালু সার্ভারের <code>information_schema</code> থেকে নেওয়া</strong> (২৫ অক্টোবর ২০২৬), হাতে লেখা নয়।</p>
 </blockquote>
 <h2 id="_2">১. এক নজরে</h2>
+<!-- AUTO:stats -->
 <table>
 <thead>
 <tr>
@@ -25,23 +26,23 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <tbody>
 <tr>
 <td>টেবিল</td>
-<td><strong>২১২</strong></td>
+<td><strong>২১৫</strong></td>
 </tr>
 <tr>
 <td>কলাম</td>
-<td><strong>২,২৭২</strong></td>
+<td><strong>২,৩০৩</strong></td>
 </tr>
 <tr>
 <td>ঘোষিত Foreign Key</td>
-<td><strong>২৮৭</strong> (ON DELETE: CASCADE ১৪৪, SET NULL ১২৯, RESTRICT ১৪)</td>
+<td><strong>২৪৯</strong> (ON DELETE: CASCADE ১৪৪, SET NULL ৯১, RESTRICT ১৪)</td>
 </tr>
 <tr>
 <td><code>company_id</code> আছে এমন টেবিল (multi-company)</td>
-<td>৫৬</td>
+<td>৫২</td>
 </tr>
 <tr>
 <td>ফাইল/ছবি ডাটাবেসেই রাখা হয় (BLOB কলাম)</td>
-<td>২৯টি কলাম (ডকুমেন্ট, ছবি, স্বাক্ষর, মেইল সংযুক্তি, সার্টিফিকেট)</td>
+<td>২৮টি কলাম (ডকুমেন্ট, ছবি, স্বাক্ষর, মেইল সংযুক্তি, সার্টিফিকেট)</td>
 </tr>
 <tr>
 <td>সবচেয়ে বেশি কলামের টেবিল</td>
@@ -49,13 +50,15 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </tr>
 </tbody>
 </table>
-<h2 id="_3">১ক. পুরো ডাটাবেস এক ছবিতে (সব ২১২ টেবিল)</h2>
+<!-- /AUTO:stats -->
+
+<h2 id="_3">১ক. পুরো ডাটাবেস এক ছবিতে (সব <!--n:tables-->২১৫<!--/n--> টেবিল)</h2>
 <p><strong><a href="full-diagram.html"><code>full-diagram.html</code></a></strong>: ব্রাউজারে zoom, টেনে সরানো ও টেবিলের নাম খুঁজে হাইলাইট করা যায় (ইন্টারনেট লাগে না)। প্রিন্ট/প্রেজেন্টেশনের জন্য:
-<a href="diagrams/full-application-er.pdf">PDF (ভেক্টর, যত খুশি zoom)</a> · <a href="diagrams/full-application-er.svg">SVG</a> · <a href="diagrams/full-application-er.png">PNG (৮৬৮৪×৮৭৭৫)</a> · <a href="diagrams/full-application-er.dot">Graphviz সোর্স</a></p>
+<a href="diagrams/full-application-er.pdf">PDF (ভেক্টর, যত খুশি zoom)</a> · <a href="diagrams/full-application-er.svg">SVG</a> · <a href="diagrams/full-application-er.png">PNG</a> · <a href="diagrams/full-application-er.dot">Graphviz সোর্স</a></p>
 <ul>
 <li>১৩টি রঙিন বাক্স = ১৩ মডিউল। মাঝখানে <strong><code>users</code></strong> (সব মডিউল এর সাথে জোড়া)।</li>
 <li>প্রতিটি টেবিলে PK (লাল), FK (নীল), আর কয়েকটি মূল কলাম; বাকি কলাম "… +N কলাম" হিসেবে সংক্ষেপে, পুরোটা <code>data-dictionary.md</code>-তে।</li>
-<li>সরল রেখা = ঘোষিত foreign key (২৮৭টি), ধূসর ডটেড = যুক্তিগত সম্পর্ক (কোডে মানা হয়, ডাটাবেসে ঘোষিত নয়)। <code>users</code>-এ যাওয়া "কে বানিয়েছে/অনুমোদন করেছে" রেখাগুলোও এখানে আঁকা, তাই <code>users</code>-এর চারপাশে ঘন।</li>
+<li>সরল রেখা = ঘোষিত foreign key (<!--n:fks-->২৪৯<!--/n-->টি), ধূসর ডটেড = যুক্তিগত সম্পর্ক (কোডে মানা হয়, ডাটাবেসে ঘোষিত নয়)। <code>users</code>-এ যাওয়া "কে বানিয়েছে/অনুমোদন করেছে" রেখাগুলোও এখানে আঁকা, তাই <code>users</code>-এর চারপাশে ঘন।</li>
 </ul>
 <p><img alt="পুরো ডাটাবেস" src="diagrams/full-application-er.png" /></p>
 <h2 id="_4">২. মডিউল মানচিত্র</h2>
@@ -73,6 +76,7 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </ol>
 <h2 id="_6">৪. মডিউল অনুযায়ী ডায়াগ্রাম</h2>
 <p>প্রতিটি diagram-এ: <strong>PK</strong>, <strong>FK</strong> আর কয়েকটি মূল কলাম। ধূসর রেখা = ঘোষিত foreign key, ডটেড = যুক্তিগত সম্পর্ক। অন্য মডিউলের টেবিল শুধু <code>id</code> সহ দেখানো। পুরো কলাম তালিকা <code>data-dictionary.md</code>-তে।</p>
+<!-- AUTO:modules -->
 <h3 id="k-communication-notices-chat-mail-assistant-feedback-36">K. Communication: Notices, Chat, Mail, Assistant, Feedback (36টি টেবিল)</h3>
 <p>নোটিশ, Chat, Credence Mail (সবচেয়ে বেশি টেবিল), Assistant, Feedback।</p>
 <p>মূল টেবিল: <code>notices</code>, <code>chat_*</code>, <code>mail_*</code>, <code>assistant_*</code></p>
@@ -117,14 +121,14 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 
 </details>
 
-<h3 id="m-pepm-mpr-jobs-budget-materials-16">M. PEPM: MPR, Jobs, Budget &amp; Materials (16টি টেবিল)</h3>
+<h3 id="m-pepm-mpr-jobs-budget-materials-18">M. PEPM: MPR, Jobs, Budget &amp; Materials (18টি টেবিল)</h3>
 <p>প্রজেক্ট কেনাকাটার চক্র: MPR সারি → Dispatch → Receive।</p>
 <p>মূল টেবিল: <code>jobs</code>, <code>entries</code>, <code>budgets</code>, <code>mpr_numbers</code>, <code>mpr_dispatches</code></p>
 <p><img alt="M. PEPM: MPR, Jobs, Budget &amp; Materials" src="diagrams/m-pepm-mpr-jobs-budget-materials.png" /></p>
 <p><a href="diagrams/m-pepm-mpr-jobs-budget-materials.svg">বড় SVG</a> · <a href="diagrams/m-pepm-mpr-jobs-budget-materials.mmd">Mermaid সোর্স</a></p>
 <details><summary>এই মডিউলের সব টেবিলের নাম</summary>
 
-`budget_items`, `budget_submissions`, `budgets`, `delivery_date_conditions`, `entries`, `entry_edit_history`, `entry_permanent_delete_log`, `job_edit_requests`, `job_submissions`, `jobs`, `material_categories`, `mpr_dispatches`, `mpr_fulfil_log`, `mpr_numbers`, `rate_file_meta`, `rate_list`
+`budget_items`, `budget_submissions`, `budgets`, `delivery_date_conditions`, `entries`, `entry_edit_history`, `entry_permanent_delete_log`, `job_edit_requests`, `job_submissions`, `jobs`, `material_categories`, `mpr_dispatches`, `mpr_fulfil_log`, `mpr_numbers`, `mpr_po_imports`, `mpr_po_lines`, `rate_file_meta`, `rate_list`
 
 </details>
 
@@ -150,14 +154,14 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 
 </details>
 
-<h3 id="c-leave-9">C. Leave (9টি টেবিল)</h3>
+<h3 id="c-leave-10">C. Leave (10টি টেবিল)</h3>
 <p>ছুটির ধরন, নীতি, ব্যালেন্স ও আবেদন।</p>
 <p>মূল টেবিল: <code>leave_applications</code>, <code>leave_balances</code>, <code>leave_categories</code>, <code>leave_category_policies</code></p>
 <p><img alt="C. Leave" src="diagrams/c-leave.png" /></p>
 <p><a href="diagrams/c-leave.svg">বড় SVG</a> · <a href="diagrams/c-leave.mmd">Mermaid সোর্স</a></p>
 <details><summary>এই মডিউলের সব টেবিলের নাম</summary>
 
-`leave_application_department_access`, `leave_applications`, `leave_balance_workflow_items`, `leave_balance_workflows`, `leave_balances`, `leave_categories`, `leave_category_balances`, `leave_category_policies`, `leave_year_settings`
+`leave_accrual_log`, `leave_application_department_access`, `leave_applications`, `leave_balance_workflow_items`, `leave_balance_workflows`, `leave_balances`, `leave_categories`, `leave_category_balances`, `leave_category_policies`, `leave_year_settings`
 
 </details>
 
@@ -215,6 +219,7 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 `alerts`, `approval_chain_steps`, `approval_requests`, `approval_template_step_approvers`, `approval_template_steps`, `approval_templates`
 
 </details>
+<!-- /AUTO:modules -->
 
 <h2 id="_7">৫. ফাইল</h2>
 <table>
@@ -227,7 +232,7 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <tbody>
 <tr>
 <td><code>data-dictionary.md</code></td>
-<td>২১২ টেবিলের সব কলাম, ধরন, null, ডিফল্ট, সম্পর্ক</td>
+<td><!--n:tables-->২১৫<!--/n--> টেবিলের সব কলাম, ধরন, null, ডিফল্ট, সম্পর্ক</td>
 </tr>
 <tr>
 <td><code>diagrams/*.mmd</code></td>
@@ -248,4 +253,9 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </tbody>
 </table>
 <h2 id="_8">৬. ডায়াগ্রাম নতুন করে বানাতে</h2>
-<p>চালু ডাটাবেস থেকে <code>information_schema</code> পড়ে <code>docs/architecture/tools/</code> এর স্ক্রিপ্ট চালান (নিচে "টুলস" দেখুন)। নতুন ফিচারে টেবিল যোগ হলে ডায়াগ্রাম আবার বানিয়ে নেবেন।</p></main><script src="../assets/mermaid.min.js"></script><script>mermaid.initialize({startOnLoad:true,securityLevel:"loose",theme:"default",flowchart:{useMaxWidth:true},maxTextSize:900000});</script></body></html>
+<p>নিজে থেকেই হয়: কোডে টেবিল বদলালে GitHub-এর <strong>Docs sync</strong> কাজটি সার্ভার চালিয়ে <code>information_schema</code> পড়ে এই পেজ, ডিকশনারি, সব ছবি ও draw.io ফাইল আবার বানায়। হাতে চালাতে: চালু MariaDB-তে সার্ভার একবার চালিয়ে <code>npm run docs:db</code> (বিস্তারিত <code>../README.md</code>-এর "স্বয়ংক্রিয় আপডেট")।</p>
+<h2 id="drawio">draw.io ফাইল</h2>
+<p><code>credencehr-database.drawio</code> — draw.io (diagrams.net) এ খোলা ও এডিট করা যায়।
+১৪টি পেজ: পেজ ১ = সম্পূর্ণ ডাটাবেস (<!--n:tables-->২১৫<!--/n--> টেবিল), বাকি ১৩টি = মডিউল অনুযায়ী।
+টেবিলে শুধু মূল কলাম (PK/FK/মূল ফিল্ড) আছে; পূর্ণ কলাম তালিকা <code>data-dictionary.md</code> তে।
+জেনারেটর: <code>../tools/db/drawio_*</code> (<code>npm run docs:db</code> নিজে চালায়)।</p></main><script src="../assets/mermaid.min.js"></script><script>mermaid.initialize({startOnLoad:true,securityLevel:"loose",theme:"default",flowchart:{useMaxWidth:true},maxTextSize:900000});</script></body></html>

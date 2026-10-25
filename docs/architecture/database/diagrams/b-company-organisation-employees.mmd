@@ -1,12 +1,12 @@
 erDiagram
-  hr_emp_education {
+  all_employees {
     int id PK
-    int employee_id FK
-    varchar level
-    varchar degree
-    varchar major
-    varchar institute
-    varchar board_university
+    int user_id FK
+    int department_id FK
+    int branch_id FK
+    varchar employee_id
+    varchar zk_device_pin
+    varchar name
   }
   branches {
     int id PK
@@ -17,14 +17,23 @@ erDiagram
     varchar location_label
     int location_radius
   }
-  employee_transfers {
+  companies {
     int id PK
-    int employee_id FK
-    int from_supervisor_id FK
-    int to_supervisor_id FK
-    int action_by FK
-    int from_department_id
-    varchar from_department_name
+    int group_id FK
+    varchar name
+    varchar short_code
+    tinyint is_mother
+    varchar address
+    varchar phone
+  }
+  company_groups {
+    int id PK
+    varchar name
+    varchar short_name
+    varchar logo_mime
+    longblob logo_data
+    varchar workspace_code
+    varchar tagline
   }
   departments {
     int id PK
@@ -32,7 +41,41 @@ erDiagram
     varchar name
     tinyint include_supervisor_approval
     tinyint is_active
+  }
+  employee_advances {
+    int id PK
+    int employee_id FK
+    decimal total_amount
+    decimal monthly_installment
+    decimal paid_amount
+    varchar reason
+    enum status
+  }
+  employee_change_log {
+    int id PK
+    int employee_id FK
+    int action_by FK
+    varchar field_name
+    text old_value
+    text new_value
+  }
+  employee_company_assignments {
+    int id PK
+    int employee_id FK
     int company_id
+    varchar employee_code
+    varchar designation
+    varchar department
+    date start_date
+  }
+  employee_documents {
+    int id PK
+    int user_id FK
+    varchar doc_type
+    varchar file_name
+    varchar file_mimetype
+    longblob file_data
+    tinyint requires_signature
   }
   employee_pay_items {
     int id PK
@@ -42,6 +85,48 @@ erDiagram
     enum kind
     decimal amount
     varchar start_month
+  }
+  employee_payment_accounts {
+    int id PK
+    int employee_id FK
+    enum account_type
+    varchar account_label
+    varchar bank_name
+    varchar branch_name
+    varchar provider
+  }
+  employee_supervisors {
+    int id PK
+    int employee_id FK
+    int supervisor_id FK
+    date effective_date
+    tinyint is_direct
+  }
+  employee_transfers {
+    int id PK
+    int employee_id FK
+    int from_supervisor_id FK
+    int to_supervisor_id FK
+    int action_by FK
+    int from_department_id
+    varchar from_department_name
+  }
+  holiday_calendar {
+    int id PK
+    date entry_date
+    enum day_type
+    varchar title
+    enum applies_to
+    int company_id
+  }
+  hr_emp_education {
+    int id PK
+    int employee_id FK
+    varchar level
+    varchar degree
+    varchar major
+    varchar institute
+    varchar board_university
   }
   hr_emp_experience {
     int id PK
@@ -61,13 +146,14 @@ erDiagram
     varchar occupation
     varchar phone
   }
-  employee_change_log {
+  hr_emp_training {
     int id PK
     int employee_id FK
-    int action_by FK
-    varchar field_name
-    text old_value
-    text new_value
+    varchar title
+    varchar training_type
+    varchar organizer
+    varchar location
+    date from_date
   }
   hr_employee_service {
     int id PK
@@ -87,123 +173,36 @@ erDiagram
     int company_id
     int location_radius
   }
-  employee_payment_accounts {
-    int id PK
-    int employee_id FK
-    enum account_type
-    varchar account_label
-    varchar bank_name
-    varchar branch_name
-    varchar provider
-  }
-  employee_company_assignments {
-    int id PK
-    int employee_id FK
-    int company_id
-    varchar employee_code
-    varchar designation
-    varchar department
-    date start_date
-  }
-  hr_emp_training {
-    int id PK
-    int employee_id FK
-    varchar title
-    varchar training_type
-    varchar organizer
-    varchar location
-    date from_date
-  }
-  all_employees {
-    int id PK
-    int user_id FK
-    int department_id FK
-    int branch_id FK
-    varchar employee_id
-    varchar zk_device_pin
-    varchar name
-  }
-  holiday_calendar {
-    int id PK
-    date entry_date
-    enum day_type
-    varchar title
-    enum applies_to
-    int company_id
-  }
-  company_groups {
-    int id PK
-    varchar name
-    varchar short_name
-    varchar logo_mime
-    longblob logo_data
-    varchar workspace_code
-    varchar tagline
-  }
-  employee_supervisors {
-    int id PK
-    int employee_id FK
-    int supervisor_id FK
-    date effective_date
-    tinyint is_direct
-  }
   server_profiles {
     int id PK
     varchar name
     varchar url
     int group_id
   }
-  companies {
-    int id PK
-    int group_id FK
-    varchar name
-    varchar short_code
-    tinyint is_mother
-    varchar address
-    varchar phone
-  }
-  employee_advances {
-    int id PK
-    int employee_id FK
-    decimal total_amount
-    decimal monthly_installment
-    decimal paid_amount
-    varchar reason
-    enum status
-  }
-  employee_documents {
-    int id PK
-    int user_id FK
-    varchar doc_type
-    varchar file_name
-    varchar file_mimetype
-    longblob file_data
-    tinyint requires_signature
-  }
   users {
     int id PK
   }
-  all_employees ||--o{ hr_emp_education : "employee_id"
+  branches ||--o{ all_employees : "branch_id"
+  departments ||--o{ all_employees : "department_id"
+  users ||--o{ all_employees : "user_id"
   projects ||--o{ branches : "project_id"
+  company_groups ||--o{ companies : "group_id"
+  users ||--o{ departments : "supervisor_user_id"
+  all_employees ||--o{ employee_advances : "employee_id"
+  users ||--o{ employee_change_log : "action_by"
+  all_employees ||--o{ employee_change_log : "employee_id"
+  all_employees ||--o{ employee_company_assignments : "employee_id"
+  users ||--o{ employee_documents : "user_id"
+  all_employees ||--o{ employee_pay_items : "employee_id"
+  all_employees ||--o{ employee_payment_accounts : "employee_id"
+  all_employees ||--o{ employee_supervisors : "employee_id"
+  all_employees ||--o{ employee_supervisors : "supervisor_id"
   users ||--o{ employee_transfers : "action_by"
   all_employees ||--o{ employee_transfers : "employee_id"
   all_employees ||--o{ employee_transfers : "from_supervisor_id"
   all_employees ||--o{ employee_transfers : "to_supervisor_id"
-  users ||--o{ departments : "supervisor_user_id"
-  all_employees ||--o{ employee_pay_items : "employee_id"
+  all_employees ||--o{ hr_emp_education : "employee_id"
   all_employees ||--o{ hr_emp_experience : "employee_id"
   all_employees ||--o{ hr_emp_family : "employee_id"
-  users ||--o{ employee_change_log : "action_by"
-  all_employees ||--o{ employee_change_log : "employee_id"
-  all_employees ||--o{ hr_employee_service : "employee_id"
-  all_employees ||--o{ employee_payment_accounts : "employee_id"
-  all_employees ||--o{ employee_company_assignments : "employee_id"
   all_employees ||--o{ hr_emp_training : "employee_id"
-  branches ||--o{ all_employees : "branch_id"
-  departments ||--o{ all_employees : "department_id"
-  users ||--o{ all_employees : "user_id"
-  all_employees ||--o{ employee_supervisors : "employee_id"
-  all_employees ||--o{ employee_supervisors : "supervisor_id"
-  company_groups ||--o{ companies : "group_id"
-  all_employees ||--o{ employee_advances : "employee_id"
-  users ||--o{ employee_documents : "user_id"
+  all_employees ||--o{ hr_employee_service : "employee_id"

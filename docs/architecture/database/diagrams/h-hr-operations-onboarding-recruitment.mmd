@@ -1,21 +1,4 @@
 erDiagram
-  hr_action_approval_steps {
-    int id PK
-    varchar action_type
-    int step_order
-    varchar label
-    text approver_user_ids
-    int company_id
-  }
-  hr_onboarding_items {
-    int id PK
-    int employee_id FK
-    varchar task_key
-    varchar label
-    varchar category
-    int sort_order
-    varchar status
-  }
   candidate_interviews {
     int id PK
     int candidate_id FK
@@ -25,13 +8,12 @@ erDiagram
     decimal rating
     enum status
   }
-  onboarding_applications {
+  hr_action_approval_steps {
     int id PK
-    int user_id FK
-    int candidate_id FK
-    int department_id FK
-    int branch_id FK
-    int employee_id FK
+    varchar action_type
+    int step_order
+    varchar label
+    text approver_user_ids
     int company_id
   }
   hr_actions {
@@ -43,14 +25,14 @@ erDiagram
     varchar status
     tinyint applied
   }
-  hr_letters {
+  hr_increment_policies {
     int id PK
-    int employee_id FK
-    int hr_action_id FK
-    varchar ref_no
-    varchar letter_type
-    int template_id
-    varchar subject
+    int department_id FK
+    varchar name
+    varchar basis
+    int fixed_month
+    int min_service_months
+    decimal default_percent
   }
   hr_info_requests {
     int id PK
@@ -61,21 +43,6 @@ erDiagram
     varchar doc_type
     varchar note
   }
-  hr_reminder_log {
-    int id PK
-    int employee_id FK
-    int user_id FK
-    int company_id
-    varchar kind
-    varchar ref_key
-    date ref_date
-  }
-  hr_ops_settings {
-    int id PK
-    varchar setting_key
-    text setting_value
-    int company_id
-  }
   hr_letter_requests {
     int id PK
     int employee_id FK
@@ -84,51 +51,6 @@ erDiagram
     varchar purpose
     varchar status
     int letter_id
-  }
-  hr_report_runs {
-    int id PK
-    int report_id
-    int owner_user_id
-    varchar report_name
-    varchar period
-    int row_count
-    text recipients_json
-  }
-  hr_onboarding_tasks {
-    int id PK
-    varchar task_key
-    varchar label
-    varchar category
-    int due_days
-    int sort_order
-    tinyint is_active
-  }
-  onboarding_documents {
-    int id PK
-    int application_id FK
-    varchar doc_type
-    varchar file_name
-    varchar file_mime
-    longblob file_data
-    timestamp uploaded_at
-  }
-  job_postings {
-    int id PK
-    int posted_by FK
-    varchar title
-    varchar department
-    varchar designation
-    int vacancy_count
-    text description
-  }
-  job_candidates {
-    int id PK
-    int posting_id FK
-    int employee_id FK
-    varchar name
-    varchar email
-    varchar phone
-    varchar source
   }
   hr_letter_templates {
     int id PK
@@ -139,14 +61,56 @@ erDiagram
     tinyint is_default
     tinyint is_active
   }
-  hr_increment_policies {
+  hr_letters {
     int id PK
-    int department_id FK
-    varchar name
-    varchar basis
-    int fixed_month
-    int min_service_months
-    decimal default_percent
+    int employee_id FK
+    int hr_action_id FK
+    varchar ref_no
+    varchar letter_type
+    int template_id
+    varchar subject
+  }
+  hr_onboarding_items {
+    int id PK
+    int employee_id FK
+    varchar task_key
+    varchar label
+    varchar category
+    int sort_order
+    varchar status
+  }
+  hr_onboarding_tasks {
+    int id PK
+    varchar task_key
+    varchar label
+    varchar category
+    int due_days
+    int sort_order
+    tinyint is_active
+  }
+  hr_ops_settings {
+    int id PK
+    varchar setting_key
+    text setting_value
+    int company_id
+  }
+  hr_reminder_log {
+    int id PK
+    int employee_id FK
+    int user_id FK
+    int company_id
+    varchar kind
+    varchar ref_key
+    date ref_date
+  }
+  hr_report_runs {
+    int id PK
+    int report_id
+    int owner_user_id
+    varchar report_name
+    varchar period
+    int row_count
+    text recipients_json
   }
   hr_saved_reports {
     int id PK
@@ -156,6 +120,42 @@ erDiagram
     text schedule_json
     varchar last_period
     timestamp last_run_at
+  }
+  job_candidates {
+    int id PK
+    int posting_id FK
+    int employee_id FK
+    varchar name
+    varchar email
+    varchar phone
+    varchar source
+  }
+  job_postings {
+    int id PK
+    int posted_by FK
+    varchar title
+    varchar department
+    varchar designation
+    int vacancy_count
+    text description
+  }
+  onboarding_applications {
+    int id PK
+    int user_id FK
+    int candidate_id FK
+    int department_id FK
+    int branch_id FK
+    int employee_id FK
+    int company_id
+  }
+  onboarding_documents {
+    int id PK
+    int application_id FK
+    varchar doc_type
+    varchar file_name
+    varchar file_mime
+    longblob file_data
+    timestamp uploaded_at
   }
   all_employees {
     int id PK
@@ -172,27 +172,27 @@ erDiagram
   users {
     int id PK
   }
-  all_employees ||--o{ hr_onboarding_items : "employee_id"
   job_candidates ||--o{ candidate_interviews : "candidate_id"
   users ||--o{ candidate_interviews : "interviewer_id"
+  all_employees ||--o{ hr_actions : "employee_id"
+  salary_structures ||..o{ hr_actions : "salary_structure_id"
+  departments ||..o{ hr_increment_policies : "department_id"
+  all_employees ||--o{ hr_info_requests : "employee_id"
+  users ||..o{ hr_info_requests : "user_id"
+  all_employees ||--o{ hr_letter_requests : "employee_id"
+  users ||--o{ hr_letter_requests : "user_id"
+  all_employees ||--o{ hr_letters : "employee_id"
+  hr_actions ||..o{ hr_letters : "hr_action_id"
+  all_employees ||--o{ hr_onboarding_items : "employee_id"
+  all_employees ||..o{ hr_reminder_log : "employee_id"
+  users ||..o{ hr_reminder_log : "user_id"
+  users ||--o{ hr_saved_reports : "owner_user_id"
+  job_postings ||--o{ job_candidates : "posting_id"
+  all_employees ||..o{ job_candidates : "employee_id"
+  users ||--o{ job_postings : "posted_by"
   users ||--o{ onboarding_applications : "user_id"
   job_candidates ||..o{ onboarding_applications : "candidate_id"
   departments ||..o{ onboarding_applications : "department_id"
   branches ||..o{ onboarding_applications : "branch_id"
   all_employees ||..o{ onboarding_applications : "employee_id"
-  all_employees ||--o{ hr_actions : "employee_id"
-  salary_structures ||..o{ hr_actions : "salary_structure_id"
-  all_employees ||--o{ hr_letters : "employee_id"
-  hr_actions ||..o{ hr_letters : "hr_action_id"
-  all_employees ||--o{ hr_info_requests : "employee_id"
-  users ||..o{ hr_info_requests : "user_id"
-  all_employees ||..o{ hr_reminder_log : "employee_id"
-  users ||..o{ hr_reminder_log : "user_id"
-  all_employees ||--o{ hr_letter_requests : "employee_id"
-  users ||--o{ hr_letter_requests : "user_id"
   onboarding_applications ||--o{ onboarding_documents : "application_id"
-  users ||--o{ job_postings : "posted_by"
-  job_postings ||--o{ job_candidates : "posting_id"
-  all_employees ||..o{ job_candidates : "employee_id"
-  departments ||..o{ hr_increment_policies : "department_id"
-  users ||--o{ hr_saved_reports : "owner_user_id"

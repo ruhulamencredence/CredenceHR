@@ -23,7 +23,7 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="on" hre
 </thead>
 <tbody>
 <tr>
-<td><strong>ডাটাবেস ডায়াগ্রাম</strong> (২১২ টেবিল, ১৩ মডিউলে ভাগ)</td>
+<td><strong>ডাটাবেস ডায়াগ্রাম</strong> (<!--n:tables-->২১৫<!--/n--> টেবিল, ১৩ মডিউলে ভাগ)</td>
 <td><a href="database/README.html"><code>database/README.md</code></a> ও <strong><a href="database/full-diagram.html"><code>database/full-diagram.html</code></a> (পুরো ২১২ টেবিল এক ছবিতে)</strong></td>
 </tr>
 <tr>
@@ -219,12 +219,42 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="on" hre
 <li>লাইভের <code>.env</code>-এ <code>CORS_ORIGINS</code> সেট করা। 2. পাসওয়ার্ডের নীতি ৮+ অক্ষর ও সাধারণ পাসওয়ার্ড বাদ। 3. ✅ অব্যবহৃত লাইব্রেরি বাদ — GPL-3.0 <code>@mlightcad/libredwg-web</code>, <code>dxf-parser</code>, <code>motion</code> (২৫ অক্টোবর ২০২৬)। 4. ডাটাবেস ব্যাকআপ চালু করে <strong>একবার পুনরুদ্ধার পরীক্ষা</strong>। 5. Penetration test বুক।</li>
 </ol>
 <hr />
-<h2 id="_6">ডকুমেন্ট হালনাগাদ রাখার নিয়ম</h2>
-<ul>
-<li>নতুন টেবিল/ফিচার যোগ হলে <code>tools/</code> এর স্ক্রিপ্ট চালিয়ে ডাটাবেস ডায়াগ্রাম ও data dictionary আবার বানান:</li>
-<li><code>tools/generate_db_docs.py</code> (চালু ডাটাবেসের <code>information_schema</code> থেকে <code>.mmd</code> ও <code>data-dictionary.md</code>)</li>
-<li><code>tools/render_mermaid.mjs</code> (<code>.mmd</code> → <code>.svg</code>/<code>.png</code>, Playwright + Mermaid)</li>
-<li><code>tools/access_matrix.mts</code> (<code>npx tsx</code> দিয়ে অনুমতি তালিকা)</li>
-<li>নিরাপত্তা-সম্পর্কিত বদলে <code>04-security.md</code> ও প্রশ্ন-উত্তর ফাইল মিলিয়ে নিন।</li>
-<li>স্ক্রিপ্টগুলোতে আমার পরীক্ষার পরিবেশের পথ (<code>/tmp/claude-0/...</code>) ধরা আছে, নিজের পরিবেশে বদলে নিন।</li>
-</ul></main><script src="assets/mermaid.min.js"></script><script>mermaid.initialize({startOnLoad:true,securityLevel:"loose",theme:"default",flowchart:{useMaxWidth:true},maxTextSize:900000});</script></body></html>
+<h2 id="_6">ডকুমেন্ট হালনাগাদ রাখার নিয়ম (স্বয়ংক্রিয় আপডেট)</h2>
+<p><strong>নিজে থেকে যা হয়:</strong> <code>main</code> বা <code>claude/nice-fermi-0tale9</code>-এ কোড, <code>schema.sql</code>, <code>package.json</code> বা এই ফোল্ডারে কিছু push হলেই GitHub-এর <strong>Docs sync</strong> কাজটি (<code>.github/workflows/docs-sync.yml</code>) চলে। এটি:</p>
+<ol>
+<li>খালি MariaDB-তে সার্ভার একবার চালিয়ে সব টেবিল বানায়, তারপর <code>information_schema</code> পড়ে।</li>
+<li>নতুন করে বানায়: <code>database/README.md</code>-এর সংখ্যা ও মডিউল অংশ, <code>data-dictionary.md</code>, সব মডিউল ডায়াগ্রাম (<code>.mmd/.svg/.png</code>), পুরো ডাটাবেসের ছবি (SVG/PNG/PDF ও <code>full-diagram.html</code>), <code>credencehr-database.drawio</code>।</li>
+<li><code>security/access-control-matrix.md</code> (<code>src/types.ts</code> থেকে) আর <code>dependency-sbom.csv</code> (<code>package-lock.json</code> থেকে) বানায়।</li>
+<li>সব HTML বানায়, এক-ফাইলের <code>CredenceHR-Documentation.html</code>-সহ।</li>
+<li>বদল থাকলে একই ব্রাঞ্চে <code>docs: auto-sync ...</code> নামে কমিট করে।</li>
+</ol>
+<p>নতুন টেবিল নামের মিল বা FK দেখে নিজেই কোনো মডিউলে বসে (<code>tools/db/groups.json</code>)। ভুল মডিউলে গেলে ওই ফাইলে সরিয়ে দিন।</p>
+<p><strong>হাতে যা লিখতে হয়</strong> (Docs sync রানের Summary-তে ও <code>npm run docs:check</code>-এ সতর্কবার্তা আসে):
+- নতুন লাইব্রেরি হলে: <code>03-technology-and-libraries.md</code>-এ এক সারি (কেন, কী সুবিধা)।
+- নতুন workflow বা অনুমোদনের নিয়ম বদলালে: <code>02-application-workflow.md</code>।
+- নিরাপত্তায় বদল হলে: <code>04-security.md</code> ও <code>05-security-questions-and-answers.md</code>।
+- নতুন মডিউলের বর্ণনা: <code>tools/db/module-notes.json</code>।</p>
+<p><strong>নিজের কম্পিউটারে চালাতে:</strong></p>
+<table>
+<thead>
+<tr>
+<th>কমান্ড</th>
+<th>কী করে</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>npm run docs:check</code></td>
+<td>কিছু না বদলে দেখায় কী পুরনো হয়েছে</td>
+</tr>
+<tr>
+<td><code>npm run docs:sync</code></td>
+<td>Access Matrix, SBOM ও সব HTML (ডাটাবেস লাগে না)</td>
+</tr>
+<tr>
+<td><code>npm run docs:db</code></td>
+<td>সাথে ডাটাবেসের সবকিছু। <code>DB_*</code> env-এ একটা <strong>খালি</strong> ডাটাবেস দিন, লাগবে python3 (<code>pip install markdown</code>) ও Playwright Chromium</td>
+</tr>
+</tbody>
+</table>
+<p><code>README.md</code>-এর <code>&lt;!-- AUTO:... --&gt;</code> ও <code>&lt;!--n:...--&gt;</code> চিহ্নের ভেতরের লেখা স্ক্রিপ্ট লেখে, হাতে বদলাবেন না। বাকি সব লেখা হাতে লেখা এবং স্ক্রিপ্ট সেগুলো ছোঁয় না।</p></main><script src="assets/mermaid.min.js"></script><script>mermaid.initialize({startOnLoad:true,securityLevel:"loose",theme:"default",flowchart:{useMaxWidth:true},maxTextSize:900000});</script></body></html>

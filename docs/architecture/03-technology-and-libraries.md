@@ -98,6 +98,10 @@
 | `@capacitor/status-bar` | 8.0.4 | MIT | 1 | `App.tsx` | স্ট্যাটাস বার রং |  |
 | `@capgo/capacitor-native-biometric` | 8.9.1 | MPL-2.0 | 1 | `fingerprint.ts` | ফোনের fingerprint/face + Keystore/Keychain | সিক্রেট ফোনের নিরাপদ স্টোরে, fingerprint ছাড়া খোলে না। |
 | `capacitor-voice-recorder` | 7.0.6 | MIT | 1 | `ChatPanel.tsx` | Chat-এ ভয়েস মেসেজ রেকর্ড |  |
+| `@capacitor/android` | 8.5.2 | MIT | 0 | — (বিল্ড টুল) | Android নেটিভ প্রজেক্ট (android/) | Android অ্যাপ বিল্ড (`.github/workflows/android.yml`)। |
+| `@capacitor/ios` | 8.5.2 | MIT | 0 | — (বিল্ড টুল) | iOS নেটিভ প্রজেক্ট (ios/) | iOS অ্যাপ বিল্ড (`.github/workflows/ios.yml`)। |
+| `@capacitor/cli` | 8.5.2 | MIT | 0 | — (বিল্ড টুল) | `npx cap sync` — ওয়েব বিল্ড নেটিভ প্রজেক্টে কপি | শুধু বিল্ডের সময় লাগে, অ্যাপের ভেতরে যায় না। |
+| `@capacitor/assets` | 3.0.5 | MIT | 0 | — (বিল্ড টুল) | অ্যাপ আইকন ও splash ছবি বানানো | একটা ছবি থেকে সব সাইজ নিজে বানায়। |
 
 ### Build
 

@@ -1,7 +1,8 @@
 import json,re,collections,os
 M=json.load(open('model.json')); cols=M['cols']; fks=M['fks']; inf=M['inf']
 G=json.load(open('groups.json'))
-OUT='/home/user/CredenceHR/docs/architecture/database'
+OUT=os.environ['DOCS_DB_OUT']
+def bn(n): return str(n).translate(str.maketrans('0123456789','০১২৩৪৫৬৭৮৯'))
 tab2g={t:g for g,ts in G.items() for t in ts}
 AUDIT=re.compile(r'(created|updated|approved|reviewed|decided|paid|held|released|generated|processed|deleted|sent|resolved|cancelled|completed|assigned|uploaded|requested|submitted|recorded|issued|by)_?by(_user_id)?$|^(created|updated|approved|reviewed|decided|paid|held|released|generated|processed|deleted|sent|resolved|cancelled|completed|assigned|uploaded|requested|submitted|recorded|issued)_by')
 SKIPCOL={'company_id','target_id'}
@@ -66,7 +67,7 @@ for g,ts in G.items():
     open(f'{OUT}/diagrams/{fn}.mmd','w').write(diagrams[g])
     diagrams[g+'_fn']=fn
 # data dictionary
-D=['# Data Dictionary — CredenceHR ডাটাবেস (সব টেবিল ও কলাম)','',f'> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, ২১২টি টেবিল, {sum(len(c) for c in cols.values())}টি কলাম)।','> `PK` = প্রাইমারি কী, `FK` = ঘোষিত foreign key (→ কোন টেবিল), `logical` = foreign key ঘোষণা নেই কিন্তু নাম দেখে যে টেবিলের সাথে সম্পর্ক বোঝা যায়।','']
+D=['# Data Dictionary — CredenceHR ডাটাবেস (সব টেবিল ও কলাম)','',f'> স্বয়ংক্রিয়ভাবে তৈরি: চালু সার্ভারের `information_schema` থেকে (MariaDB, {bn(len(cols))}টি টেবিল, {bn(sum(len(c) for c in cols.values()))}টি কলাম)।','> `PK` = প্রাইমারি কী, `FK` = ঘোষিত foreign key (→ কোন টেবিল), `logical` = foreign key ঘোষণা নেই কিন্তু নাম দেখে যে টেবিলের সাথে সম্পর্ক বোঝা যায়।','']
 fkmap={t:{c:(rt,rc) for c,rt,rc in v} for t,v in fks.items()}
 infmap={t:dict(v) for t,v in inf.items()}
 idx=collections.defaultdict(list)

@@ -6,7 +6,7 @@
 
 | আপনার প্রয়োজন | ফাইল |
 |---|---|
-| **ডাটাবেস ডায়াগ্রাম** (২১২ টেবিল, ১৩ মডিউলে ভাগ) | [`database/README.md`](database/README.md) ও **[`database/full-diagram.html`](database/full-diagram.html) (পুরো ২১২ টেবিল এক ছবিতে)** |
+| **ডাটাবেস ডায়াগ্রাম** (<!--n:tables-->২১৫<!--/n--> টেবিল, ১৩ মডিউলে ভাগ) | [`database/README.md`](database/README.md) ও **[`database/full-diagram.html`](database/full-diagram.html) (পুরো ২১২ টেবিল এক ছবিতে)** |
 | ডাটাবেসের প্রতিটি টেবিল-কলামের তালিকা | [`database/data-dictionary.md`](database/data-dictionary.md) |
 | **পুরো application workflow** (architecture, লগইন, অনুমতি, ছুটি, বেতন, ক্লেইম, ই-স্বাক্ষর, কর্মীর জীবনচক্র…) | [`02-application-workflow.md`](02-application-workflow.md) |
 | **কোথায় কোন লাইব্রেরি, কেন, কী সুবিধা** | [`03-technology-and-libraries.md`](03-technology-and-libraries.md) |
@@ -62,11 +62,30 @@
 
 ---
 
-## ডকুমেন্ট হালনাগাদ রাখার নিয়ম
+## ডকুমেন্ট হালনাগাদ রাখার নিয়ম (স্বয়ংক্রিয় আপডেট)
 
-- নতুন টেবিল/ফিচার যোগ হলে `tools/` এর স্ক্রিপ্ট চালিয়ে ডাটাবেস ডায়াগ্রাম ও data dictionary আবার বানান:
-  - `tools/generate_db_docs.py` (চালু ডাটাবেসের `information_schema` থেকে `.mmd` ও `data-dictionary.md`)
-  - `tools/render_mermaid.mjs` (`.mmd` → `.svg`/`.png`, Playwright + Mermaid)
-  - `tools/access_matrix.mts` (`npx tsx` দিয়ে অনুমতি তালিকা)
-- নিরাপত্তা-সম্পর্কিত বদলে `04-security.md` ও প্রশ্ন-উত্তর ফাইল মিলিয়ে নিন।
-- স্ক্রিপ্টগুলোতে আমার পরীক্ষার পরিবেশের পথ (`/tmp/claude-0/...`) ধরা আছে, নিজের পরিবেশে বদলে নিন।
+**নিজে থেকে যা হয়:** `main` বা `claude/nice-fermi-0tale9`-এ কোড, `schema.sql`, `package.json` বা এই ফোল্ডারে কিছু push হলেই GitHub-এর **Docs sync** কাজটি (`.github/workflows/docs-sync.yml`) চলে। এটি:
+
+1. খালি MariaDB-তে সার্ভার একবার চালিয়ে সব টেবিল বানায়, তারপর `information_schema` পড়ে।
+2. নতুন করে বানায়: `database/README.md`-এর সংখ্যা ও মডিউল অংশ, `data-dictionary.md`, সব মডিউল ডায়াগ্রাম (`.mmd/.svg/.png`), পুরো ডাটাবেসের ছবি (SVG/PNG/PDF ও `full-diagram.html`), `credencehr-database.drawio`।
+3. `security/access-control-matrix.md` (`src/types.ts` থেকে) আর `dependency-sbom.csv` (`package-lock.json` থেকে) বানায়।
+4. সব HTML বানায়, এক-ফাইলের `CredenceHR-Documentation.html`-সহ।
+5. বদল থাকলে একই ব্রাঞ্চে `docs: auto-sync ...` নামে কমিট করে।
+
+নতুন টেবিল নামের মিল বা FK দেখে নিজেই কোনো মডিউলে বসে (`tools/db/groups.json`)। ভুল মডিউলে গেলে ওই ফাইলে সরিয়ে দিন।
+
+**হাতে যা লিখতে হয়** (Docs sync রানের Summary-তে ও `npm run docs:check`-এ সতর্কবার্তা আসে):
+- নতুন লাইব্রেরি হলে: `03-technology-and-libraries.md`-এ এক সারি (কেন, কী সুবিধা)।
+- নতুন workflow বা অনুমোদনের নিয়ম বদলালে: `02-application-workflow.md`।
+- নিরাপত্তায় বদল হলে: `04-security.md` ও `05-security-questions-and-answers.md`।
+- নতুন মডিউলের বর্ণনা: `tools/db/module-notes.json`।
+
+**নিজের কম্পিউটারে চালাতে:**
+
+| কমান্ড | কী করে |
+|---|---|
+| `npm run docs:check` | কিছু না বদলে দেখায় কী পুরনো হয়েছে |
+| `npm run docs:sync` | Access Matrix, SBOM ও সব HTML (ডাটাবেস লাগে না) |
+| `npm run docs:db` | সাথে ডাটাবেসের সবকিছু। `DB_*` env-এ একটা **খালি** ডাটাবেস দিন, লাগবে python3 (`pip install markdown`) ও Playwright Chromium |
+
+`README.md`-এর `<!-- AUTO:... -->` ও `<!--n:...-->` চিহ্নের ভেতরের লেখা স্ক্রিপ্ট লেখে, হাতে বদলাবেন না। বাকি সব লেখা হাতে লেখা এবং স্ক্রিপ্ট সেগুলো ছোঁয় না।

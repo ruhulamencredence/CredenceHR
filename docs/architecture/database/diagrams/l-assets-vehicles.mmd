@@ -1,4 +1,13 @@
 erDiagram
+  asset_assignment_claims {
+    int id PK
+    int assignment_id FK
+    int employee_user_id FK
+    enum issue_type
+    text description
+    enum status
+    text resolution_note
+  }
   asset_assignments {
     int id PK
     int asset_id FK
@@ -7,6 +16,15 @@ erDiagram
     date assigned_date
     date returned_date
     enum condition_on_assign
+  }
+  asset_requisition_events {
+    int id PK
+    int requisition_id
+    int actor_user_id
+    varchar actor_name
+    varchar action
+    text message
+    text details_json
   }
   asset_requisition_items {
     int id PK
@@ -17,14 +35,18 @@ erDiagram
     decimal quantity
     varchar source
   }
-  asset_requisition_events {
+  asset_requisitions {
     int id PK
-    int requisition_id
-    int actor_user_id
-    varchar actor_name
-    varchar action
-    text message
-    text details_json
+    int employee_user_id FK
+    int manager_id FK
+    int assigned_asset_id FK
+    varchar asset_category
+    text reason
+    enum urgency
+  }
+  asset_settings {
+    int id PK
+    tinyint show_inventory
   }
   assets {
     int id PK
@@ -44,28 +66,6 @@ erDiagram
     varchar pickup_location
     varchar destination
   }
-  asset_assignment_claims {
-    int id PK
-    int assignment_id FK
-    int employee_user_id FK
-    enum issue_type
-    text description
-    enum status
-    text resolution_note
-  }
-  asset_requisitions {
-    int id PK
-    int employee_user_id FK
-    int manager_id FK
-    int assigned_asset_id FK
-    varchar asset_category
-    text reason
-    enum urgency
-  }
-  asset_settings {
-    int id PK
-    tinyint show_inventory
-  }
   vehicles {
     int id PK
     varchar vehicle_no
@@ -77,15 +77,15 @@ erDiagram
   users {
     int id PK
   }
+  asset_assignments ||--o{ asset_assignment_claims : "assignment_id"
+  users ||--o{ asset_assignment_claims : "employee_user_id"
   assets ||--o{ asset_assignments : "asset_id"
   users ||--o{ asset_assignments : "employee_user_id"
   asset_requisitions ||--o{ asset_assignments : "requisition_id"
   asset_requisitions ||--o{ asset_requisition_items : "requisition_id"
-  vehicles ||--o{ vehicle_requisitions : "assigned_vehicle_id"
-  users ||--o{ vehicle_requisitions : "driver_user_id"
-  users ||--o{ vehicle_requisitions : "employee_user_id"
-  asset_assignments ||--o{ asset_assignment_claims : "assignment_id"
-  users ||--o{ asset_assignment_claims : "employee_user_id"
   assets ||--o{ asset_requisitions : "assigned_asset_id"
   users ||--o{ asset_requisitions : "employee_user_id"
   users ||--o{ asset_requisitions : "manager_id"
+  vehicles ||--o{ vehicle_requisitions : "assigned_vehicle_id"
+  users ||--o{ vehicle_requisitions : "driver_user_id"
+  users ||--o{ vehicle_requisitions : "employee_user_id"

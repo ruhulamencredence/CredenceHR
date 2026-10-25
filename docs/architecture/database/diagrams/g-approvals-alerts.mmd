@@ -1,8 +1,12 @@
 erDiagram
-  approval_template_step_approvers {
+  alerts {
     int id PK
-    int step_id FK
     int user_id FK
+    varchar type
+    varchar title
+    text message
+    varchar related_type
+    int related_id
   }
   approval_chain_steps {
     int id PK
@@ -18,6 +22,18 @@ erDiagram
     int source_id
     enum status
   }
+  approval_template_step_approvers {
+    int id PK
+    int step_id FK
+    int user_id FK
+  }
+  approval_template_steps {
+    int id PK
+    int template_id FK
+    int step_order
+    enum approver_type
+    varchar label
+  }
   approval_templates {
     int id PK
     varchar name
@@ -27,29 +43,13 @@ erDiagram
     int company_id
     tinyint skip_auto_supervisor
   }
-  alerts {
-    int id PK
-    int user_id FK
-    varchar type
-    varchar title
-    text message
-    varchar related_type
-    int related_id
-  }
-  approval_template_steps {
-    int id PK
-    int template_id FK
-    int step_order
-    enum approver_type
-    varchar label
-  }
   users {
     int id PK
   }
-  approval_template_steps ||--o{ approval_template_step_approvers : "step_id"
-  users ||--o{ approval_template_step_approvers : "user_id"
+  users ||--o{ alerts : "user_id"
   users ||--o{ approval_chain_steps : "user_id"
   users ||--o{ approval_requests : "supervisor_step_user_id"
   approval_templates ||--o{ approval_requests : "template_id"
-  users ||--o{ alerts : "user_id"
+  approval_template_steps ||--o{ approval_template_step_approvers : "step_id"
+  users ||--o{ approval_template_step_approvers : "user_id"
   approval_templates ||--o{ approval_template_steps : "template_id"

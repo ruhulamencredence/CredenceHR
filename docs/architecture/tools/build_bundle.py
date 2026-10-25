@@ -40,3 +40,8 @@ out = '<!doctype html><html lang="bn"><head><meta charset="utf-8"><meta name="vi
 dst = os.path.join(ROOT, 'CredenceHR-Documentation.html')
 open(dst, 'w', encoding='utf-8').write(out)
 print(dst, len(out)//1024, 'KB')
+
+# শুধু Application Workflow, এক ফাইলে (Mermaid ভেতরে)
+wf = open(os.path.join(ROOT, '02-application-workflow.html'), encoding='utf-8').read()
+wf = wf.replace('<script src="assets/mermaid.min.js"></script>', '<script>' + mermaid + '</script>')
+open(os.path.join(ROOT, 'CredenceHR-Full-Workflow.html'), 'w', encoding='utf-8').write(wf)

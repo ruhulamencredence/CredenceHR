@@ -1,69 +1,4 @@
 erDiagram
-  rate_file_meta {
-    int id PK
-    varchar original_filename
-    varchar file_mimetype
-    longblob file_data
-    timestamp imported_at
-  }
-  job_edit_requests {
-    int id PK
-    int job_id FK
-    int entry_id FK
-    enum action
-    text payload
-    enum status
-    timestamp reviewed_at
-  }
-  job_submissions {
-    int id PK
-    int job_id FK
-    int budget_id FK
-    int user_id FK
-    timestamp submitted_at
-  }
-  mpr_fulfil_log {
-    int id PK
-    int entry_id FK
-    int user_id FK
-    int dispatch_id
-    varchar action
-    decimal qty
-    varchar detail
-  }
-  entry_permanent_delete_log {
-    int id PK
-    int entry_id FK
-    date entry_date
-    varchar job_name
-    varchar job_no
-    varchar project_name
-    varchar mpr_no
-  }
-  material_categories {
-    int id PK
-    int sl_no
-    varchar head
-    varchar sub1
-    varchar sub2
-    varchar sub3
-    varchar details
-  }
-  budget_submissions {
-    int id PK
-    int budget_id FK
-    int user_id FK
-    timestamp submitted_at
-  }
-  entries {
-    int id PK
-    int budget_id FK
-    int project_id FK
-    int job_id FK
-    int mpr_id FK
-    int budget_item_id FK
-    date entry_date
-  }
   budget_items {
     int id PK
     int budget_id FK
@@ -73,14 +8,11 @@ erDiagram
     varchar mrf_no
     varchar item_date
   }
-  mpr_dispatches {
+  budget_submissions {
     int id PK
-    int entry_id FK
-    decimal qty
-    date dispatch_date
-    varchar supplier
-    decimal rate
-    varchar po_no
+    int budget_id FK
+    int user_id FK
+    timestamp submitted_at
   }
   budgets {
     int id PK
@@ -100,14 +32,14 @@ erDiagram
     tinyint apply_to_admins
     tinyint enabled
   }
-  rate_list {
+  entries {
     int id PK
-    varchar materials_name
-    varchar unit
-    decimal rate
-    varchar specification
-    varchar assigned_person
-    varchar remarks
+    int budget_id FK
+    int project_id FK
+    int job_id FK
+    int mpr_id FK
+    int budget_item_id FK
+    date entry_date
   }
   entry_edit_history {
     int id PK
@@ -118,16 +50,101 @@ erDiagram
     varchar new_value
     timestamp edited_at
   }
+  entry_permanent_delete_log {
+    int id PK
+    int entry_id FK
+    date entry_date
+    varchar job_name
+    varchar job_no
+    varchar project_name
+    varchar mpr_no
+  }
+  job_edit_requests {
+    int id PK
+    int job_id FK
+    int entry_id FK
+    enum action
+    text payload
+    enum status
+    timestamp reviewed_at
+  }
+  job_submissions {
+    int id PK
+    int job_id FK
+    int budget_id FK
+    int user_id FK
+    timestamp submitted_at
+  }
   jobs {
     int id PK
     int budget_id FK
     varchar job_no
     varchar job_duration
   }
+  material_categories {
+    int id PK
+    int sl_no
+    varchar head
+    varchar sub1
+    varchar sub2
+    varchar sub3
+    varchar details
+  }
+  mpr_dispatches {
+    int id PK
+    int entry_id FK
+    decimal qty
+    date dispatch_date
+    varchar supplier
+    decimal rate
+    varchar po_no
+  }
+  mpr_fulfil_log {
+    int id PK
+    int entry_id FK
+    int user_id FK
+    int dispatch_id
+    varchar action
+    decimal qty
+    varchar detail
+  }
   mpr_numbers {
     int id PK
     varchar mpr_no
     int group_id
+  }
+  mpr_po_imports {
+    int id PK
+    varchar file_name
+    int total_lines
+    int matched_lines
+    int new_pos
+    int unmatched_lines
+  }
+  mpr_po_lines {
+    int id PK
+    int entry_id FK
+    varchar po_no
+    date po_date
+    varchar req_no
+    varchar app_no
+    varchar supplier
+  }
+  rate_file_meta {
+    int id PK
+    varchar original_filename
+    varchar file_mimetype
+    longblob file_data
+    timestamp imported_at
+  }
+  rate_list {
+    int id PK
+    varchar materials_name
+    varchar unit
+    decimal rate
+    varchar specification
+    varchar assigned_person
+    varchar remarks
   }
   projects {
     int id PK
@@ -135,14 +152,7 @@ erDiagram
   users {
     int id PK
   }
-  entries ||--o{ job_edit_requests : "entry_id"
-  jobs ||--o{ job_edit_requests : "job_id"
-  jobs ||--o{ job_submissions : "job_id"
-  users ||--o{ job_submissions : "user_id"
-  budgets ||..o{ job_submissions : "budget_id"
-  entries ||..o{ mpr_fulfil_log : "entry_id"
-  users ||..o{ mpr_fulfil_log : "user_id"
-  entries ||..o{ entry_permanent_delete_log : "entry_id"
+  budgets ||--o{ budget_items : "budget_id"
   budgets ||--o{ budget_submissions : "budget_id"
   users ||--o{ budget_submissions : "user_id"
   budgets ||--o{ entries : "budget_id"
@@ -150,28 +160,17 @@ erDiagram
   jobs ||--o{ entries : "job_id"
   mpr_numbers ||--o{ entries : "mpr_id"
   projects ||--o{ entries : "project_id"
-  budgets ||--o{ budget_items : "budget_id"
-  entries ||..o{ mpr_dispatches : "entry_id"
   users ||--o{ entry_edit_history : "edited_by"
   entries ||--o{ entry_edit_history : "entry_id"
+  entries ||..o{ entry_permanent_delete_log : "entry_id"
+  entries ||--o{ job_edit_requests : "entry_id"
+  jobs ||--o{ job_edit_requests : "job_id"
+  jobs ||--o{ job_submissions : "job_id"
+  users ||--o{ job_submissions : "user_id"
+  budgets ||..o{ job_submissions : "budget_id"
   budgets ||--o{ jobs : "budget_id"
   budgets ||--o{ jobs : "budget_id"
-  budgets ||--o{ jobs : "budget_id"
-  budgets ||--o{ jobs : "budget_id"
-  budgets ||--o{ jobs : "budget_id"
-  budgets ||--o{ jobs : "budget_id"
-  budgets ||--o{ jobs : "budget_id"
-  budgets ||--o{ jobs : "budget_id"
-  budgets ||--o{ jobs : "budget_id"
-  budgets ||--o{ jobs : "budget_id"
-  budgets ||--o{ jobs : "budget_id"
-  budgets ||--o{ jobs : "budget_id"
-  budgets ||--o{ jobs : "budget_id"
-  budgets ||--o{ jobs : "budget_id"
-  budgets ||--o{ jobs : "budget_id"
-  budgets ||--o{ jobs : "budget_id"
-  budgets ||--o{ jobs : "budget_id"
-  budgets ||--o{ jobs : "budget_id"
-  budgets ||--o{ jobs : "budget_id"
-  budgets ||--o{ jobs : "budget_id"
-  budgets ||--o{ jobs : "budget_id"
+  entries ||..o{ mpr_dispatches : "entry_id"
+  entries ||..o{ mpr_fulfil_log : "entry_id"
+  users ||..o{ mpr_fulfil_log : "user_id"
+  entries ||..o{ mpr_po_lines : "entry_id"

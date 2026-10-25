@@ -326,8 +326,8 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </thead>
 <tbody>
 <tr>
-<td><del><code>@mlightcad/libredwg-web</code></del></td>
-<td><del>0.7.17</del></td>
+<td>~~<code>@mlightcad/libredwg-web</code>~~</td>
+<td>~~0.7.17~~</td>
 <td>GPL-3.0</td>
 <td>0</td>
 <td>—</td>
@@ -335,8 +335,8 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>✅ বাদ দেওয়া হয়েছে (২৫ অক্টোবর ২০২৬) — কোডে ব্যবহার ছিল না। এর সাথে GPL-3.0 লাইসেন্সের ঝুঁকিও গেল।</td>
 </tr>
 <tr>
-<td><del><code>dxf-parser</code></del></td>
-<td><del>1.1.2</del></td>
+<td>~~<code>dxf-parser</code>~~</td>
+<td>~~1.1.2~~</td>
 <td>MIT</td>
 <td>0</td>
 <td>—</td>
@@ -475,8 +475,8 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </thead>
 <tbody>
 <tr>
-<td><del><code>motion</code></del></td>
-<td><del>12.43.0</del></td>
+<td>~~<code>motion</code>~~</td>
+<td>~~12.43.0~~</td>
 <td>MIT</td>
 <td>0</td>
 <td>—</td>
@@ -631,6 +631,42 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td><code>ChatPanel.tsx</code></td>
 <td>Chat-এ ভয়েস মেসেজ রেকর্ড</td>
 <td></td>
+</tr>
+<tr>
+<td><code>@capacitor/android</code></td>
+<td>8.5.2</td>
+<td>MIT</td>
+<td>0</td>
+<td>— (বিল্ড টুল)</td>
+<td>Android নেটিভ প্রজেক্ট (android/)</td>
+<td>Android অ্যাপ বিল্ড (<code>.github/workflows/android.yml</code>)।</td>
+</tr>
+<tr>
+<td><code>@capacitor/ios</code></td>
+<td>8.5.2</td>
+<td>MIT</td>
+<td>0</td>
+<td>— (বিল্ড টুল)</td>
+<td>iOS নেটিভ প্রজেক্ট (ios/)</td>
+<td>iOS অ্যাপ বিল্ড (<code>.github/workflows/ios.yml</code>)।</td>
+</tr>
+<tr>
+<td><code>@capacitor/cli</code></td>
+<td>8.5.2</td>
+<td>MIT</td>
+<td>0</td>
+<td>— (বিল্ড টুল)</td>
+<td><code>npx cap sync</code> — ওয়েব বিল্ড নেটিভ প্রজেক্টে কপি</td>
+<td>শুধু বিল্ডের সময় লাগে, অ্যাপের ভেতরে যায় না।</td>
+</tr>
+<tr>
+<td><code>@capacitor/assets</code></td>
+<td>3.0.5</td>
+<td>MIT</td>
+<td>0</td>
+<td>— (বিল্ড টুল)</td>
+<td>অ্যাপ আইকন ও splash ছবি বানানো</td>
+<td>একটা ছবি থেকে সব সাইজ নিজে বানায়।</td>
 </tr>
 </tbody>
 </table>
@@ -822,4 +858,124 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </tbody>
 </table>
 <h2 id="_5">৪. নিরাপত্তায় যে লাইব্রেরি ভূমিকা রাখে</h2>
-<p><code>bcryptjs</code> (পাসওয়ার্ড) · <code>jsonwebtoken</code> (token) · <code>sanitize-html</code> + <code>dompurify</code> (XSS) · <code>mysql2</code> prepared statement (SQL injection) · <code>@simplewebauthn/*</code> (passkey) · <code>@signpdf/*</code> + <code>node-forge</code> + <code>pdf-lib</code> (ডিজিটাল স্বাক্ষর) · <code>cors</code> (অন্য সাইট) · <code>node:crypto</code> (AES-256-GCM মেইল পাসওয়ার্ড, SHA-256 হ্যাশ)। বিস্তারিত: <code>04-security.md</code>।</p></main><script src="assets/mermaid.min.js"></script><script>mermaid.initialize({startOnLoad:true,securityLevel:"loose",theme:"default",flowchart:{useMaxWidth:true},maxTextSize:900000});</script></body></html>
+<p><code>bcryptjs</code> (পাসওয়ার্ড) · <code>jsonwebtoken</code> (token) · <code>sanitize-html</code> + <code>dompurify</code> (XSS) · <code>mysql2</code> prepared statement (SQL injection) · <code>@simplewebauthn/*</code> (passkey) · <code>@signpdf/*</code> + <code>node-forge</code> + <code>pdf-lib</code> (ডিজিটাল স্বাক্ষর) · <code>cors</code> (অন্য সাইট) · <code>node:crypto</code> (AES-256-GCM মেইল পাসওয়ার্ড, SHA-256 হ্যাশ)। বিস্তারিত: <code>04-security.md</code>।</p>
+<h2 id="_6">৫. কোনো লাইব্রেরিতে সমস্যা হলে কীভাবে সমাধান করবেন</h2>
+<h3 id="_7">৫.১ সাধারণ ধাপ (যেকোনো লাইব্রেরির জন্য)</h3>
+<ol>
+<li><strong>কোথায় ভাঙছে ধরুন।</strong> সার্ভারের লগ: <code>npm run pm2:logs</code>। ব্রাউজারের লগ: F12 → Console।</li>
+<li><strong>সম্প্রতি কী বদলেছে দেখুন।</strong> <code>git log -5 -- package.json package-lock.json</code>। সমস্যা আপডেটের পর শুরু হলে প্রায়ই সেটাই কারণ।</li>
+<li><strong>আগের সংস্করণে ফেরত যান।</strong> <code>package.json</code>-এ সংস্করণ পিন করুন (<code>^</code> সরিয়ে), <code>npm ci</code>, তারপর <code>npm run build</code> ও <code>npm run pm2:reload</code>। <code>package-lock.json</code> কমিটে থাকে বলে <code>npm ci</code> সবসময় একই সংস্করণ বসায়।</li>
+<li><strong>নিরাপত্তা সমস্যা হলে</strong> <code>npm audit</code> চালান। ঠিক করার চেষ্টা: <code>npm audit fix</code>। বড় সংস্করণ লাফ দিলে (<code>--force</code>) আগে স্টেজিং-এ পরীক্ষা করুন।</li>
+<li><strong>ঠিক হলে যাচাই করুন:</strong> <code>npm run lint</code> (tsc), <code>npm run test:onboarding</code>, <code>npm run test:hr-linkage</code>, তারপর ব্রাউজারে মূল পেজগুলো।</li>
+<li><strong>ফেরত যাওয়া না গেলে</strong> সেই লাইব্রেরি একটা ছোট wrapper ফাইলে (যেমন <code>mailer.ts</code>, <code>NoticeSafety.ts</code>) থাকে, তাই বদলাতে এক ফাইলই ছুঁতে হয়।</li>
+</ol>
+<h3 id="_8">৫.২ গুরুত্বপূর্ণ লাইব্রেরি ধরে ধরে</h3>
+<table>
+<thead>
+<tr>
+<th>লাইব্রেরি</th>
+<th>সম্ভাব্য সমস্যা</th>
+<th>প্রথমে কী দেখবেন</th>
+<th>সমাধান / বিকল্প</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>mysql2</code></td>
+<td>সংযোগ ছিঁড়ে যায়, "too many connections"</td>
+<td><code>.env</code>-এ DB host/user/password, MariaDB চলছে কিনা (<code>systemctl status mariadb</code>)</td>
+<td>DB চালু করুন, pool সীমা ঠিক করুন। সার্ভার ডিবি না পেলে in-memory-তে নামে, ডেটা থাকে না।</td>
+</tr>
+<tr>
+<td><code>express</code></td>
+<td>রুট কাজ করে না, 500</td>
+<td><code>pm2 logs</code>; কোন <code>*Routes.ts</code>-এ এরর</td>
+<td>ওই ফাইলের <code>registerXxxRoutes</code> দেখুন। <code>ApiErrors</code> JSON এরর দেয়।</td>
+</tr>
+<tr>
+<td><code>jsonwebtoken</code></td>
+<td>সবাই হঠাৎ লগআউট</td>
+<td>JWT key ফাইল/env বদলেছে কিনা</td>
+<td>পুরনো key ফিরিয়ে দিন। key বদলালে সবার নতুন লগইন লাগবে।</td>
+</tr>
+<tr>
+<td><code>bcryptjs</code></td>
+<td>লগইন ধীর</td>
+<td>সার্ভারের CPU</td>
+<td>cost কমানো ঠিক না; সার্ভার বাড়ান। এটি pure JS, তাই <code>bcrypt</code> (native)-এ গেলে দ্রুত হয়।</td>
+</tr>
+<tr>
+<td><code>socket.io</code> / <code>redis</code></td>
+<td>Chat/real-time বন্ধ</td>
+<td>Redis চলছে কিনা, <code>REDIS_URL</code></td>
+<td>একাধিক worker থাকলে Redis লাগে। Redis নামলে এক worker-এ চালানো যায় (শুধু একটি process)।</td>
+</tr>
+<tr>
+<td><code>nodemailer</code> / <code>imapflow</code></td>
+<td>মেইল যায় না/আসে না</td>
+<td>SMTP/IMAP host, port, পাসওয়ার্ড, প্রোভাইডারের "app password"</td>
+<td><code>mailer.ts</code>-এ সেটিং ঠিক করুন; প্রোভাইডার বদলাতে শুধু সেটিং।</td>
+</tr>
+<tr>
+<td><code>sanitize-html</code> / <code>dompurify</code></td>
+<td>Notice/মেইলে ফরম্যাট হারায়</td>
+<td><code>NoticeSafety.ts</code>-এর allow-list</td>
+<td>দরকারি ট্যাগ allow-list-এ যোগ করুন। নিরাপত্তা শিথিল করবেন না।</td>
+</tr>
+<tr>
+<td><code>pdf-lib</code>, <code>@signpdf/*</code>, <code>node-forge</code></td>
+<td>ই-স্বাক্ষর PDF ভুল/খালি</td>
+<td><code>.p12</code> সার্টিফিকেট ও পাসফ্রেজ, মেয়াদ</td>
+<td>নতুন সার্টিফিকেট দিন। <code>ESignCertificate.ts</code> একটাই ফাইল।</td>
+</tr>
+<tr>
+<td><code>firebase-admin</code>, <code>web-push</code></td>
+<td>পুশ নোটিফিকেশন আসে না</td>
+<td>সার্ভিস অ্যাকাউন্ট JSON, VAPID key</td>
+<td>key নবায়ন করুন; ডিভাইস টোকেন পুরনো হলে অ্যাপ আবার খুলুন।</td>
+</tr>
+<tr>
+<td><code>node-zklib</code>, <code>node-cron</code></td>
+<td>ZKTeco ডিভাইস থেকে হাজিরা আসে না</td>
+<td>ডিভাইসের IP/পোর্ট, নেটওয়ার্ক</td>
+<td><code>zkSync.ts</code>-এর লগ দেখুন; ডিভাইস রিস্টার্ট।</td>
+</tr>
+<tr>
+<td><code>@google/genai</code></td>
+<td>AI Assistant কাজ করে না</td>
+<td>API key, কোটা</td>
+<td>key/কোটা ঠিক করুন; বাকি অ্যাপ এতে ভাঙে না।</td>
+</tr>
+<tr>
+<td><code>react</code>, <code>vite</code>, <code>tailwindcss</code></td>
+<td>বিল্ড ফেল, সাদা পেজ</td>
+<td><code>npm run build</code>-এর এরর, ব্রাউজার Console</td>
+<td>এরর-এর ফাইল ঠিক করুন; না পারলে আগের সংস্করণে ফেরত (৫.১)।</td>
+</tr>
+<tr>
+<td><code>jspdf</code>, <code>jspdf-autotable</code></td>
+<td>PDF রিপোর্ট ভাঙা</td>
+<td>কোন রিপোর্ট; ফন্ট/বাংলা অক্ষর</td>
+<td>ফন্ট এম্বেড করুন; বড় রিপোর্টে সারি ভাগ করুন।</td>
+</tr>
+<tr>
+<td><code>leaflet</code>, <code>@capacitor/geolocation</code></td>
+<td>ম্যাপ/লোকেশন আসে না</td>
+<td>ব্রাউজার/ফোনের লোকেশন অনুমতি, HTTPS</td>
+<td>HTTPS ছাড়া লোকেশন চলে না; অনুমতি দিন।</td>
+</tr>
+<tr>
+<td><code>capacitor</code> (মোবাইল)</td>
+<td>অ্যাপ বিল্ড ফেল</td>
+<td>Android Studio/Gradle সংস্করণ</td>
+<td><code>npx cap sync</code>, তারপর আবার বিল্ড।</td>
+</tr>
+</tbody>
+</table>
+<h3 id="_9">৫.৩ বিশেষ সতর্কতা</h3>
+<ul>
+<li><strong>অব্যবহৃত লাইব্রেরি</strong> (<code>libredwg-web</code>, <code>dxf-parser</code>, <code>motion</code> — তিনটিই এখন বাদ, §৩; ভবিষ্যতে এমন কিছু পেলে): কোনো সমস্যা হলে আগে মুছে ফেলুন (<code>npm uninstall</code>), কারণ কোডে নেই। GPL লাইসেন্সের প্যাকেজ থাকলে আইনি ঝুঁকিও কমে।</li>
+<li><strong><code>xlsx</code></strong> npm রেজিস্ট্রিতে পুরনো (0.18.5); নতুন সংস্করণ SheetJS-এর নিজস্ব সাইট থেকে আসে। সেখানে নেটওয়ার্ক আটকালে বিল্ড ফেল করতে পারে। তখন সার্ভারে <code>package-lock.json</code> অনুযায়ী <code>npm ci</code> চালান।</li>
+<li><strong>ডেটা বা নিরাপত্তা-সংক্রান্ত লাইব্রেরি</strong> (<code>jsonwebtoken</code>, <code>bcryptjs</code>, <code>sanitize-html</code>, <code>mysql2</code>) আপডেট করলে লগইন, Notice ও রিপোর্ট আগে স্টেজিং-এ পরীক্ষা করুন।</li>
+<li><strong>আপডেটের নিয়ম:</strong> মাসে একবার <code>npm outdated</code> ও <code>npm audit</code>; এক এক করে আপডেট, প্রতিবার লিন্ট+টেস্ট+বিল্ড।</li>
+</ul></main><script src="assets/mermaid.min.js"></script><script>mermaid.initialize({startOnLoad:true,securityLevel:"loose",theme:"default",flowchart:{useMaxWidth:true},maxTextSize:900000});</script></body></html>

@@ -1,0 +1,23 @@
+// full.svg -> diagrams/full-application-er.{svg,png,pdf} + full-diagram.html
+const { chromium } = (await import(process.env.PLAYWRIGHT || "playwright")).default ?? await import(process.env.PLAYWRIGHT || "playwright");
+import fs from "fs";
+const OUT = process.env.DOCS_DB_OUT, D = OUT + "/diagrams/";
+const svg = fs.readFileSync("full.svg", "utf8");
+fs.writeFileSync(D + "full-application-er.svg", svg);
+fs.copyFileSync("full.dot", D + "full-application-er.dot");
+const m = svg.match(/<svg[^>]*width="([\d.]+)pt" height="([\d.]+)pt"/);
+const w = Math.ceil(parseFloat(m[1]) * 4 / 3), h = Math.ceil(parseFloat(m[2]) * 4 / 3);
+const sized = svg.replace(/<svg([^>]*)width="[^"]+" height="[^"]+"/, `<svg$1width="${w}" height="${h}"`);
+const b = await chromium.launch(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : {});
+const p = await b.newPage({ viewport: { width: Math.min(w, 16000), height: Math.min(h, 16000) }, deviceScaleFactor: 1 });
+await p.setContent(`<html><body style="margin:0;background:#fff">${sized}</body></html>`);
+await p.waitForTimeout(800);
+await p.screenshot({ path: D + "full-application-er.png", clip: { x: 0, y: 0, width: w, height: h } });
+await p.pdf({ path: D + "full-application-er.pdf", width: w + "px", height: h + "px", printBackground: true, pageRanges: "1" });
+await b.close();
+const tables = JSON.parse(fs.readFileSync("model.json", "utf8")).cols;
+const n = String(Object.keys(tables).length).replace(/\d/g, d => "০১২৩৪৫৬৭৮৯"[d]);
+let inner = svg.replace(/<\?xml[^>]*>\s*/, "").replace(/<!DOCTYPE[^>]*>\s*/, "").replace(/<svg([^>]*)width="[^"]+" height="[^"]+"/, '<svg id="er"$1');
+const tpl = fs.readFileSync(process.env.FULL_TPL, "utf8");
+fs.writeFileSync(OUT + "/full-diagram.html", tpl.replace("{{TABLES}}", n).replace("{{SVG}}", () => inner));
+console.log("full diagram", w, "x", h);

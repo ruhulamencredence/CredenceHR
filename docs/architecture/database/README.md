@@ -5,23 +5,25 @@
 
 ## ১. এক নজরে
 
+<!-- AUTO:stats -->
 | বিষয় | সংখ্যা |
 |---|---|
-| টেবিল | **২১২** |
-| কলাম | **২,২৭২** |
-| ঘোষিত Foreign Key | **২৮৭** (ON DELETE: CASCADE ১৪৪, SET NULL ১২৯, RESTRICT ১৪) |
-| `company_id` আছে এমন টেবিল (multi-company) | ৫৬ |
-| ফাইল/ছবি ডাটাবেসেই রাখা হয় (BLOB কলাম) | ২৯টি কলাম (ডকুমেন্ট, ছবি, স্বাক্ষর, মেইল সংযুক্তি, সার্টিফিকেট) |
+| টেবিল | **২১৫** |
+| কলাম | **২,৩০৩** |
+| ঘোষিত Foreign Key | **২৪৯** (ON DELETE: CASCADE ১৪৪, SET NULL ৯১, RESTRICT ১৪) |
+| `company_id` আছে এমন টেবিল (multi-company) | ৫২ |
+| ফাইল/ছবি ডাটাবেসেই রাখা হয় (BLOB কলাম) | ২৮টি কলাম (ডকুমেন্ট, ছবি, স্বাক্ষর, মেইল সংযুক্তি, সার্টিফিকেট) |
 | সবচেয়ে বেশি কলামের টেবিল | `users` (৬২), `all_employees` (৪৯), `payrolls` (৪১) |
+<!-- /AUTO:stats -->
 
-## ১ক. পুরো ডাটাবেস এক ছবিতে (সব ২১২ টেবিল)
+## ১ক. পুরো ডাটাবেস এক ছবিতে (সব <!--n:tables-->২১৫<!--/n--> টেবিল)
 
 **[`full-diagram.html`](full-diagram.html)**: ব্রাউজারে zoom, টেনে সরানো ও টেবিলের নাম খুঁজে হাইলাইট করা যায় (ইন্টারনেট লাগে না)। প্রিন্ট/প্রেজেন্টেশনের জন্য:
-[PDF (ভেক্টর, যত খুশি zoom)](diagrams/full-application-er.pdf) · [SVG](diagrams/full-application-er.svg) · [PNG (৮৬৮৪×৮৭৭৫)](diagrams/full-application-er.png) · [Graphviz সোর্স](diagrams/full-application-er.dot)
+[PDF (ভেক্টর, যত খুশি zoom)](diagrams/full-application-er.pdf) · [SVG](diagrams/full-application-er.svg) · [PNG](diagrams/full-application-er.png) · [Graphviz সোর্স](diagrams/full-application-er.dot)
 
 - ১৩টি রঙিন বাক্স = ১৩ মডিউল। মাঝখানে **`users`** (সব মডিউল এর সাথে জোড়া)।
 - প্রতিটি টেবিলে PK (লাল), FK (নীল), আর কয়েকটি মূল কলাম; বাকি কলাম "… +N কলাম" হিসেবে সংক্ষেপে, পুরোটা `data-dictionary.md`-তে।
-- সরল রেখা = ঘোষিত foreign key (২৮৭টি), ধূসর ডটেড = যুক্তিগত সম্পর্ক (কোডে মানা হয়, ডাটাবেসে ঘোষিত নয়)। `users`-এ যাওয়া "কে বানিয়েছে/অনুমোদন করেছে" রেখাগুলোও এখানে আঁকা, তাই `users`-এর চারপাশে ঘন।
+- সরল রেখা = ঘোষিত foreign key (<!--n:fks-->২৪৯<!--/n-->টি), ধূসর ডটেড = যুক্তিগত সম্পর্ক (কোডে মানা হয়, ডাটাবেসে ঘোষিত নয়)। `users`-এ যাওয়া "কে বানিয়েছে/অনুমোদন করেছে" রেখাগুলোও এখানে আঁকা, তাই `users`-এর চারপাশে ঘন।
 
 ![পুরো ডাটাবেস](diagrams/full-application-er.png)
 
@@ -45,6 +47,7 @@
 
 প্রতিটি diagram-এ: **PK**, **FK** আর কয়েকটি মূল কলাম। ধূসর রেখা = ঘোষিত foreign key, ডটেড = যুক্তিগত সম্পর্ক। অন্য মডিউলের টেবিল শুধু `id` সহ দেখানো। পুরো কলাম তালিকা `data-dictionary.md`-তে।
 
+<!-- AUTO:modules -->
 ### K. Communication: Notices, Chat, Mail, Assistant, Feedback (36টি টেবিল)
 
 নোটিশ, Chat, Credence Mail (সবচেয়ে বেশি টেবিল), Assistant, Feedback।
@@ -109,7 +112,7 @@ HR কাজ (পদোন্নতি, বদলি, increment, চিঠি), 
 
 </details>
 
-### M. PEPM: MPR, Jobs, Budget & Materials (16টি টেবিল)
+### M. PEPM: MPR, Jobs, Budget & Materials (18টি টেবিল)
 
 প্রজেক্ট কেনাকাটার চক্র: MPR সারি → Dispatch → Receive।
 
@@ -121,7 +124,7 @@ HR কাজ (পদোন্নতি, বদলি, increment, চিঠি), 
 
 <details><summary>এই মডিউলের সব টেবিলের নাম</summary>
 
-`budget_items`, `budget_submissions`, `budgets`, `delivery_date_conditions`, `entries`, `entry_edit_history`, `entry_permanent_delete_log`, `job_edit_requests`, `job_submissions`, `jobs`, `material_categories`, `mpr_dispatches`, `mpr_fulfil_log`, `mpr_numbers`, `rate_file_meta`, `rate_list`
+`budget_items`, `budget_submissions`, `budgets`, `delivery_date_conditions`, `entries`, `entry_edit_history`, `entry_permanent_delete_log`, `job_edit_requests`, `job_submissions`, `jobs`, `material_categories`, `mpr_dispatches`, `mpr_fulfil_log`, `mpr_numbers`, `mpr_po_imports`, `mpr_po_lines`, `rate_file_meta`, `rate_list`
 
 </details>
 
@@ -157,7 +160,7 @@ Movement claim, Conveyance Bill Claim (employee claim → approval → bill → 
 
 </details>
 
-### C. Leave (9টি টেবিল)
+### C. Leave (10টি টেবিল)
 
 ছুটির ধরন, নীতি, ব্যালেন্স ও আবেদন।
 
@@ -169,7 +172,7 @@ Movement claim, Conveyance Bill Claim (employee claim → approval → bill → 
 
 <details><summary>এই মডিউলের সব টেবিলের নাম</summary>
 
-`leave_application_department_access`, `leave_applications`, `leave_balance_workflow_items`, `leave_balance_workflows`, `leave_balances`, `leave_categories`, `leave_category_balances`, `leave_category_policies`, `leave_year_settings`
+`leave_accrual_log`, `leave_application_department_access`, `leave_applications`, `leave_balance_workflow_items`, `leave_balance_workflows`, `leave_balances`, `leave_categories`, `leave_category_balances`, `leave_category_policies`, `leave_year_settings`
 
 </details>
 
@@ -252,12 +255,13 @@ Document Vault আর ডিজিটাল স্বাক্ষর।
 `alerts`, `approval_chain_steps`, `approval_requests`, `approval_template_step_approvers`, `approval_template_steps`, `approval_templates`
 
 </details>
+<!-- /AUTO:modules -->
 
 ## ৫. ফাইল
 
 | ফাইল | কী |
 |---|---|
-| `data-dictionary.md` | ২১২ টেবিলের সব কলাম, ধরন, null, ডিফল্ট, সম্পর্ক |
+| `data-dictionary.md` | <!--n:tables-->২১৫<!--/n--> টেবিলের সব কলাম, ধরন, null, ডিফল্ট, সম্পর্ক |
 | `diagrams/*.mmd` | Mermaid সোর্স (ডায়াগ্রাম আবার বানাতে) |
 | `diagrams/*.svg`, `*.png` | তৈরি ছবি (প্রেজেন্টেশনে ব্যবহার করুন) |
 | `full-diagram.html`, `diagrams/full-application-er.*` | পুরো ডাটাবেসের এক ছবি (HTML viewer, PDF, SVG, PNG) |
@@ -265,11 +269,11 @@ Document Vault আর ডিজিটাল স্বাক্ষর।
 
 ## ৬. ডায়াগ্রাম নতুন করে বানাতে
 
-চালু ডাটাবেস থেকে `information_schema` পড়ে `docs/architecture/tools/` এর স্ক্রিপ্ট চালান (নিচে "টুলস" দেখুন)। নতুন ফিচারে টেবিল যোগ হলে ডায়াগ্রাম আবার বানিয়ে নেবেন।
+নিজে থেকেই হয়: কোডে টেবিল বদলালে GitHub-এর **Docs sync** কাজটি সার্ভার চালিয়ে `information_schema` পড়ে এই পেজ, ডিকশনারি, সব ছবি ও draw.io ফাইল আবার বানায়। হাতে চালাতে: চালু MariaDB-তে সার্ভার একবার চালিয়ে `npm run docs:db` (বিস্তারিত `../README.md`-এর "স্বয়ংক্রিয় আপডেট")।
 
 ## draw.io ফাইল
 
 `credencehr-database.drawio` — draw.io (diagrams.net) এ খোলা ও এডিট করা যায়।
-১৪টি পেজ: পেজ ১ = সম্পূর্ণ ডাটাবেস (২১২ টেবিল), বাকি ১৩টি = মডিউল অনুযায়ী।
+১৪টি পেজ: পেজ ১ = সম্পূর্ণ ডাটাবেস (<!--n:tables-->২১৫<!--/n--> টেবিল), বাকি ১৩টি = মডিউল অনুযায়ী।
 টেবিলে শুধু মূল কলাম (PK/FK/মূল ফিল্ড) আছে; পূর্ণ কলাম তালিকা `data-dictionary.md` তে।
-জেনারেটর: `../tools/drawio_*.{py,mjs}` (স্ক্র্যাচ ইনপুট ফাইল লাগে, কেবল রেফারেন্স)।
+জেনারেটর: `../tools/db/drawio_*` (`npm run docs:db` নিজে চালায়)।

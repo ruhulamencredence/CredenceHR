@@ -15,7 +15,10 @@
     "pm2:start": "npm run build && pm2 start ecosystem.config.cjs",
     "pm2:reload": "npm run build && pm2 reload ecosystem.config.cjs",
     "pm2:stop": "pm2 stop ecosystem.config.cjs",
-    "pm2:logs": "pm2 logs credencehr"
+    "pm2:logs": "pm2 logs credencehr",
+    "docs:sync": "node docs/architecture/tools/sync_docs.mjs",
+    "docs:check": "node docs/architecture/tools/sync_docs.mjs --check",
+    "docs:db": "bash docs/architecture/tools/db/build_schema.sh && node docs/architecture/tools/sync_docs.mjs --db"
   },
   "dependencies": {
     "@capacitor-community/background-geolocation": "^1.2.26",

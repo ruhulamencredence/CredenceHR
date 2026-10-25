@@ -22,7 +22,7 @@ flowchart TB
     S["Socket.IO (Chat, কল)"]
     J["Background jobs<br/>(রিমাইন্ডার, ZK sync, mail, ছুটির বছর)"]
   end
-  DB[("MySQL / MariaDB<br/>২১২ টেবিল<br/>ফাইলসহ")]
+  DB[("MySQL / MariaDB<br/>সব টেবিল<br/>ফাইলসহ")]
   RD[("Redis<br/>(একাধিক PM2 worker হলে<br/>Chat সিঙ্ক)")]
   subgraph Ext["বাইরের সেবা (ঐচ্ছিক, .env দিয়ে চালু)"]
     SM["SMTP / IMAP<br/>(মেইল)"]

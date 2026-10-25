@@ -1,4 +1,4 @@
-import { ADMIN_MODULES, MODULE_LAYER_OPTIONS, PERMISSION_LAYERS, EXPLICIT_ONLY_LAYERS, PERMISSION_LAYER_MODULES } from "/home/user/CredenceHR/src/types";
+import { ADMIN_MODULES, MODULE_LAYER_OPTIONS, PERMISSION_LAYERS, EXPLICIT_ONLY_LAYERS, PERMISSION_LAYER_MODULES } from "../../../src/types";
 const out: string[] = [];
 out.push("| মডিউল (Admin Panel) | কী | layer / অনুমতির ধাপ (🔒 = ডিফল্টে বন্ধ, Superadmin টিক দিলে তবেই) |", "|---|---|---|");
 for (const m of ADMIN_MODULES) {
