@@ -49,10 +49,19 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </tr>
 </tbody>
 </table>
-<h2 id="_3">২. মডিউল মানচিত্র</h2>
+<h2 id="_3">১ক. পুরো ডাটাবেস এক ছবিতে (সব ২১২ টেবিল)</h2>
+<p><strong><a href="full-diagram.html"><code>full-diagram.html</code></a></strong>: ব্রাউজারে zoom, টেনে সরানো ও টেবিলের নাম খুঁজে হাইলাইট করা যায় (ইন্টারনেট লাগে না)। প্রিন্ট/প্রেজেন্টেশনের জন্য:
+<a href="diagrams/full-application-er.pdf">PDF (ভেক্টর, যত খুশি zoom)</a> · <a href="diagrams/full-application-er.svg">SVG</a> · <a href="diagrams/full-application-er.png">PNG (৮৬৮৪×৮৭৭৫)</a> · <a href="diagrams/full-application-er.dot">Graphviz সোর্স</a></p>
+<ul>
+<li>১৩টি রঙিন বাক্স = ১৩ মডিউল। মাঝখানে <strong><code>users</code></strong> (সব মডিউল এর সাথে জোড়া)।</li>
+<li>প্রতিটি টেবিলে PK (লাল), FK (নীল), আর কয়েকটি মূল কলাম; বাকি কলাম "… +N কলাম" হিসেবে সংক্ষেপে, পুরোটা <code>data-dictionary.md</code>-তে।</li>
+<li>সরল রেখা = ঘোষিত foreign key (২৮৭টি), ধূসর ডটেড = যুক্তিগত সম্পর্ক (কোডে মানা হয়, ডাটাবেসে ঘোষিত নয়)। <code>users</code>-এ যাওয়া "কে বানিয়েছে/অনুমোদন করেছে" রেখাগুলোও এখানে আঁকা, তাই <code>users</code>-এর চারপাশে ঘন।</li>
+</ul>
+<p><img alt="পুরো ডাটাবেস" src="diagrams/full-application-er.png" /></p>
+<h2 id="_4">২. মডিউল মানচিত্র</h2>
 <p><img alt="মডিউল মানচিত্র" src="diagrams/00-module-map.png" /></p>
 <p>তীরের পাশের সংখ্যা = ওই দুই মডিউলের মধ্যে কয়টি foreign key। <a href="diagrams/00-module-map.svg">বড় SVG</a></p>
-<h2 id="_4">৩. মূল ধারণাগুলো (ডাটাবেস বুঝতে প্রথমে এগুলো)</h2>
+<h2 id="_5">৩. মূল ধারণাগুলো (ডাটাবেস বুঝতে প্রথমে এগুলো)</h2>
 <ol>
 <li><strong><code>users</code> বনাম <code>all_employees</code>:</strong> <code>users</code> = যে লগইন করে (পাসওয়ার্ড, role, অনুমতি)। <code>all_employees</code> = HR-এর কর্মী রেকর্ড (পদবি, বিভাগ, যোগদান, ব্যক্তিগত তথ্য)। একজন কর্মীর লগইন না-ও থাকতে পারে; থাকলে <code>all_employees.user_id</code> → <code>users.id</code>।</li>
 <li><strong>Multi-company:</strong> ৫৬টি টেবিলে <code>company_id</code>। এটা ডাটাবেসের foreign key নয়, <strong>কোডে প্রয়োগ হয়</strong> (<code>companyScope.ts</code> প্রতিটি SQL-এ নিজে থেকে কোম্পানির ফিল্টার বসায়)। তাই diagram-এ <code>company_id</code> লাইন আঁকা হয়নি।</li>
@@ -62,7 +71,7 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <li><strong>নামের নিয়ম:</strong> সব টেবিল <code>snake_case</code>, প্রাইমারি কী <code>id</code> (auto-increment), সময়: <code>created_at</code>/<code>updated_at</code>। তারিখ API-তে <code>"YYYY-MM-DD"</code> স্ট্রিং।</li>
 <li><strong>কিছু সম্পর্ক ঘোষিত foreign key নয়</strong> (কোডে মানা হয়)। diagram-এ এগুলো <strong>ডটেড (...)</strong> রেখায়। যেমন <code>*_by</code> (কে বানিয়েছে/অনুমোদন করেছে) কলাম diagram-এ দেখানো হয়নি, ডাটা ডিকশনারিতে আছে।</li>
 </ol>
-<h2 id="_5">৪. মডিউল অনুযায়ী ডায়াগ্রাম</h2>
+<h2 id="_6">৪. মডিউল অনুযায়ী ডায়াগ্রাম</h2>
 <p>প্রতিটি diagram-এ: <strong>PK</strong>, <strong>FK</strong> আর কয়েকটি মূল কলাম। ধূসর রেখা = ঘোষিত foreign key, ডটেড = যুক্তিগত সম্পর্ক। অন্য মডিউলের টেবিল শুধু <code>id</code> সহ দেখানো। পুরো কলাম তালিকা <code>data-dictionary.md</code>-তে।</p>
 <h3 id="k-communication-notices-chat-mail-assistant-feedback-36">K. Communication: Notices, Chat, Mail, Assistant, Feedback (36টি টেবিল)</h3>
 <p>নোটিশ, Chat, Credence Mail (সবচেয়ে বেশি টেবিল), Assistant, Feedback।</p>
@@ -207,7 +216,7 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 
 </details>
 
-<h2 id="_6">৫. ফাইল</h2>
+<h2 id="_7">৫. ফাইল</h2>
 <table>
 <thead>
 <tr>
@@ -229,10 +238,14 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>তৈরি ছবি (প্রেজেন্টেশনে ব্যবহার করুন)</td>
 </tr>
 <tr>
+<td><code>full-diagram.html</code>, <code>diagrams/full-application-er.*</code></td>
+<td>পুরো ডাটাবেসের এক ছবি (HTML viewer, PDF, SVG, PNG)</td>
+</tr>
+<tr>
 <td><code>../index.html</code></td>
 <td>সব ডকুমেন্ট ব্রাউজারে (ইন্টারনেট ছাড়াই)</td>
 </tr>
 </tbody>
 </table>
-<h2 id="_7">৬. ডায়াগ্রাম নতুন করে বানাতে</h2>
+<h2 id="_8">৬. ডায়াগ্রাম নতুন করে বানাতে</h2>
 <p>চালু ডাটাবেস থেকে <code>information_schema</code> পড়ে <code>docs/architecture/tools/</code> এর স্ক্রিপ্ট চালান (নিচে "টুলস" দেখুন)। নতুন ফিচারে টেবিল যোগ হলে ডায়াগ্রাম আবার বানিয়ে নেবেন।</p></main><script src="../assets/mermaid.min.js"></script><script>mermaid.initialize({startOnLoad:true,securityLevel:"loose",theme:"default",flowchart:{useMaxWidth:true},maxTextSize:900000});</script></body></html>

@@ -6,7 +6,7 @@
 
 | আপনার প্রয়োজন | ফাইল |
 |---|---|
-| **ডাটাবেস ডায়াগ্রাম** (২১২ টেবিল, ১৩ মডিউলে ভাগ) | [`database/README.md`](database/README.md) |
+| **ডাটাবেস ডায়াগ্রাম** (২১২ টেবিল, ১৩ মডিউলে ভাগ) | [`database/README.md`](database/README.md) ও **[`database/full-diagram.html`](database/full-diagram.html) (পুরো ২১২ টেবিল এক ছবিতে)** |
 | ডাটাবেসের প্রতিটি টেবিল-কলামের তালিকা | [`database/data-dictionary.md`](database/data-dictionary.md) |
 | **পুরো application workflow** (architecture, লগইন, অনুমতি, ছুটি, বেতন, ক্লেইম, ই-স্বাক্ষর, কর্মীর জীবনচক্র…) | [`02-application-workflow.md`](02-application-workflow.md) |
 | **কোথায় কোন লাইব্রেরি, কেন, কী সুবিধা** | [`03-technology-and-libraries.md`](03-technology-and-libraries.md) |
