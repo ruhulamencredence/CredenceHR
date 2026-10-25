@@ -742,7 +742,7 @@ export const MailCompose: React.FC<{
       )}
       <input ref={fileRef} type="file" multiple className="hidden" onChange={(e) => { void addFiles(e.target.files); e.target.value = ''; }} />
 
-      <div className="flex items-center gap-1 px-3 py-2.5 shrink-0" style={{ paddingBottom: 'max(0.625rem, env(safe-area-inset-bottom))' }}>
+      <div className="flex items-center gap-1 px-3 py-2.5 shrink-0" style={{ paddingBottom: 'max(0.625rem, var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)))' }}>
         <div className="hidden sm:flex items-center rounded-full overflow-hidden shrink-0 mr-2">
           <button type="button" disabled={!!busy || !account} onClick={() => void send(false)} className="pl-6 pr-4 py-2 text-sm font-medium text-white bg-[#0b57d0] hover:bg-[#0a4ebb] hover:shadow disabled:opacity-60 inline-flex items-center gap-2">
             {busy === 'send' && <Loader2 className="w-4 h-4 animate-spin" />} Send
@@ -796,7 +796,9 @@ export const MailCompose: React.FC<{
     <>
       {mode === 'max' && <div className="fixed inset-0 z-[89] liquid-glass-backdrop" onClick={() => setMode('normal')} />}
       <div
-        className={`fixed z-[90] bg-white flex flex-col overflow-hidden ${
+        // phones: full screen, so start below the status bar (--native-safe-area-inset-top is set
+        // by the Android app, where env() reads 0)
+        className={`fixed z-[90] bg-white flex flex-col overflow-hidden max-sm:pt-[var(--native-safe-area-inset-top,env(safe-area-inset-top,0px))] ${
           mode === 'max'
             ? 'inset-0 sm:inset-x-8 sm:inset-y-[6vh] sm:mx-auto sm:max-w-5xl sm:rounded-2xl shadow-2xl'
             : `inset-0 sm:inset-auto sm:right-4 sm:bottom-0 sm:rounded-t-xl shadow-[0_8px_30px_rgba(0,0,0,0.25)] ${mode === 'min' ? 'sm:w-72 sm:h-10' : 'sm:w-[560px] sm:h-[min(620px,calc(100vh-5rem))]'}`
