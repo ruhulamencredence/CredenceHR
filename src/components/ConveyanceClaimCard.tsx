@@ -60,6 +60,8 @@ export const ConveyanceClaimCard: React.FC<ConveyanceClaimCardProps> = ({ token,
   const [editingClaim, setEditingClaim] = useState<UserClaim | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [tab, setTab] = useState<ClaimTab>('pending');
+  // In the phone app the server sends the last 3 months only (X-History-Limited).
+  const [limited, setLimited] = useState(false);
 
 // Live refresh: reload when a request changes (src/lib/liveRefresh.ts).
 useLiveRefresh(() => fetchClaims(true));
@@ -67,7 +69,10 @@ useLiveRefresh(() => fetchClaims(true));
     if (silent !== true) setLoading(true);
     try {
       const res = await fetch(apiUrl('/api/user-claims/mine'), { headers: { Authorization: `Bearer ${token}` } });
-      if (res.ok) setClaims(await res.json());
+      if (res.ok) {
+        setLimited(res.headers.get('X-History-Limited') === '3-months');
+        setClaims(await res.json());
+      }
     } catch {
       // Offline/unreachable — just show the empty state below.
     } finally {
@@ -134,6 +139,7 @@ useLiveRefresh(() => fetchClaims(true));
           so this doesn't sit flush against the card's rounded top edge. */}
       <div className="px-4 pt-5 md:pt-2 pb-1">
         <div className="text-xs font-semibold text-slate-500">My Conveyance Claims</div>
+        {limited && <p className="mt-0.5 text-[11px] text-slate-400">Showing the last 3 months here. Open CredenceHR on the website to see everything.</p>}
       </div>
 
       {/* Review / Approved / Rejected — rounded-pill segmented control

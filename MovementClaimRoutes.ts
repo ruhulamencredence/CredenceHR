@@ -7,6 +7,7 @@
 // The shared helpers they use are passed in by startServer().
 
 import type { Express } from "express";
+import { isAppSession } from "./SessionSecurity";
 
 export interface RegisterMovementClaimRoutesDeps {
   authenticateToken: any;
@@ -108,10 +109,17 @@ export function registerMovementClaimRoutes(app: Express, deps: RegisterMovement
     }
   });
 
-  // The calling user's own claim history, most recent first.
+  // The calling user's own claim history, most recent first. In the phone app
+  // only the last 3 months are sent (plus any check-in still open, whatever its
+  // age); the website gets the whole history.
   app.get("/api/claims/mine", authenticateToken, requireMovementClaimAccess, async (req: any, res) => {
     try {
-      const rows = await queryDB("SELECT * FROM claims WHERE user_id = ? ORDER BY id DESC", [req.user.id]);
+      const inApp = isAppSession(req.user, req);
+      const rows = await queryDB(
+        `SELECT * FROM claims WHERE user_id = ?${inApp ? " AND (status = 'open' OR check_in_at >= NOW() - INTERVAL 3 MONTH)" : ""} ORDER BY id DESC`,
+        [req.user.id]
+      );
+      res.setHeader("X-History-Limited", inApp ? "3-months" : "none");
       res.json(rows.slice(0, 200));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
