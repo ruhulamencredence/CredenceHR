@@ -1,5 +1,5 @@
 {
- "when": "2026-10-25T17:44:35.695Z",
+ "when": "2026-10-25T18:06:43.960Z",
  "summary": {
   "PASS": 14,
   "FAIL": 0
@@ -9,13 +9,13 @@
    "id": "QA-01a",
    "status": "PASS",
    "name": "An Admin with no modules gets no birthdays, HR alerts or task counts",
-   "detail": "{\"today\":\"2026-10-25\",\"birthdays\":[],\"attendance_approvals\":[],\"attendance_corrections\":[],\"documents\":[],\"status_effective\":[],\"tasks\":[],\"alerts\":[]}"
+   "detail": "{\"today\":\"2026-10-26\",\"birthdays\":[],\"attendance_approvals\":[],\"attendance_corrections\":[],\"documents\":[],\"status_effective\":[],\"tasks\":[],\"alerts\":[]}"
   },
   {
    "id": "QA-01b",
    "status": "PASS",
    "name": "An Admin with the Employees module sees birthdays, but not other modules' task counts",
-   "detail": "{\"today\":\"2026-10-25\",\"birthdays\":[{\"name\":\"Birthday Person\",\"employee_code\":null,\"department\":\"Finance\",\"designation\":\"Officer\",\"date\":\"2026-10-27\",\"days_away\":2,\"turning\":36}],\"attendance_approvals\""
+   "detail": "{\"today\":\"2026-10-26\",\"birthdays\":[{\"name\":\"Birthday Person\",\"employee_code\":null,\"department\":\"Finance\",\"designation\":\"Officer\",\"date\":\"2026-10-28\",\"days_away\":2,\"turning\":36}],\"attendance_approvals\""
   },
   {
    "id": "QA-01c",
@@ -38,32 +38,32 @@
   {
    "id": "PWD-01",
    "status": "PASS",
-   "name": "Weak passwords refused when creating a user (111111, 11111111, password1, abcdefgh, 12345678, Pass1)",
-   "detail": "400,400,400,400,400,400"
+   "name": "Simple passwords are accepted when creating a user (1234, 111111, password, a)",
+   "detail": "200,200,200,200"
   },
   {
    "id": "PWD-02",
    "status": "PASS",
-   "name": "A password containing the person's own email / name is refused",
-   "detail": "400 {\"error\":\"The password can't contain your email or name.\"}"
+   "name": "An empty password is refused",
+   "detail": "400 {\"error\":\"Name, email and password are required\"}"
   },
   {
    "id": "PWD-03",
    "status": "PASS",
-   "name": "A sound password (River7Blue) is accepted",
-   "detail": "200 {\"success\":true,\"id\":137,\"name\":\"Strong\",\"email\":\"strong.pw@credence.test\",\"role\":\"user\"}"
+   "name": "The user signs in with the simple password 1234",
+   "detail": ""
   },
   {
    "id": "PWD-04",
    "status": "PASS",
-   "name": "Changing my own password follows the same rule",
-   "detail": "400 / 200"
+   "name": "Changing my own password to 1111 works",
+   "detail": "200 {\"success\":true}"
   },
   {
    "id": "PWD-05",
    "status": "PASS",
-   "name": "Employee login and Admin reset follow the rule",
-   "detail": "employee login 400 {\"error\":\"The password needs at least one letter and one number.\"}; admin reset 400"
+   "name": "Employee login (123) and Admin reset (0000) accept simple passwords too",
+   "detail": "201 / 200"
   },
   {
    "id": "EMP-02",

@@ -38,22 +38,20 @@ const l1 = await api(SA, 'POST', '/api/hr-ops/letters/preview', {});
 const n1 = await api(SA, 'POST', '/api/notices/999999/dismiss', {});
 T('QA-04', [d1, d2, l1, n1].every((r) => r.status >= 400 && r.status < 500), 'Too-long name, letter with no employee, unknown notice → 4xx (not 500)', [d1, d2, l1, n1].map((r) => r.status).join(' / '));
 
-// ---- SEC-07 password policy, every place a password is chosen ----
-const bad = ['111111', '11111111', 'password1', 'abcdefgh', '12345678', 'Pass1'];
+// ---- Password rule: any password the person likes (company policy), not empty ----
+const simple = ['1234', '111111', 'password', 'a'];
 const created = [];
-for (const pw of bad) created.push((await api(SA, 'POST', '/api/users', { name: 'Weak', email: `weak.${created.length}@credence.test`, password: pw, role: 'user' })).status);
-T('PWD-01', created.every((s) => s === 400), `Weak passwords refused when creating a user (${bad.join(', ')})`, created.join(','));
-const own = await api(SA, 'POST', '/api/users', { name: 'Karim Uddin', email: 'karim.uddin@credence.test', password: 'karimuddin1', role: 'user' });
-T('PWD-02', own.status === 400, 'A password containing the person\'s own email / name is refused', J(own));
-const good = await api(SA, 'POST', '/api/users', { name: 'Strong', email: 'strong.pw@credence.test', password: 'River7Blue', role: 'user' });
-T('PWD-03', ok(good), 'A sound password (River7Blue) is accepted', J(good));
-const ST = await login('strong.pw@credence.test', 'River7Blue');
-const ch1 = await api(ST, 'PUT', '/api/profile/password', { current_password: 'River7Blue', new_password: '12345678' });
-const ch2 = await api(ST, 'PUT', '/api/profile/password', { current_password: 'River7Blue', new_password: 'Mango42Tree' });
-T('PWD-04', ch1.status === 400 && ok(ch2), 'Changing my own password follows the same rule', `${ch1.status} / ${ch2.status}`);
-const rs = await api(SA, 'PUT', `/api/users/${good.body.id}/reset-password`, { new_password: 'abcdefgh' });
-const el = await api(SA, 'POST', '/api/employees', { name: 'Login Weak', designation: 'Officer', department_id: 1, joining_date: '2024-01-01', email: 'login.weak@credence.test', create_login: true, login_email: 'login.weak@credence.test', login_password: '11111111' });
-T('PWD-05', el.status === 400 && rs.status === 400, 'Employee login and Admin reset follow the rule', `employee login ${J(el)}; admin reset ${rs.status}`);
+for (const pw of simple) created.push((await api(SA, 'POST', '/api/users', { name: 'Simple', email: `simple.${created.length}@credence.test`, password: pw, role: 'user' })).status);
+T('PWD-01', created.every((s) => s >= 200 && s < 300), `Simple passwords are accepted when creating a user (${simple.join(', ')})`, created.join(','));
+const empty = await api(SA, 'POST', '/api/users', { name: 'Empty', email: 'empty.pw@credence.test', password: '', role: 'user' });
+T('PWD-02', empty.status === 400, 'An empty password is refused', J(empty));
+const S1 = await login('simple.0@credence.test', '1234');
+T('PWD-03', !!S1, 'The user signs in with the simple password 1234');
+const ch = await api(S1, 'PUT', '/api/profile/password', { current_password: '1234', new_password: '1111' });
+T('PWD-04', ok(ch) && !!(await login('simple.0@credence.test', '1111')), 'Changing my own password to 1111 works', J(ch));
+const el = await api(SA, 'POST', '/api/employees', { name: 'Login Simple', designation: 'Officer', department_id: 1, joining_date: '2024-01-01', email: 'login.simple@credence.test', create_login: true, login_email: 'login.simple@credence.test', login_password: '123' });
+const rs = await api(SA, 'PUT', `/api/users/${(await api(SA, 'GET', '/api/users')).body.find((u) => u.email === 'simple.1@credence.test').id}/reset-password`, { new_password: '0000' });
+T('PWD-05', ok(el) && ok(rs) && !!(await login('login.simple@credence.test', '123')) && !!(await login('simple.1@credence.test', '0000')), 'Employee login (123) and Admin reset (0000) accept simple passwords too', `${el.status} / ${rs.status}`);
 
 // ---- EMP-02 / EMP-04 email and age ----
 const em = await api(SA, 'POST', '/api/employees', { name: 'Bad Mail', designation: 'Officer', department_id: 1, joining_date: '2024-01-01', email: 'not-an-email' });

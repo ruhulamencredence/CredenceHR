@@ -119,7 +119,7 @@ export const IMPORT_KINDS: Kind[] = [
         example: "rahim",
         note: "Email or username they sign in with. With a Password, creates their login (role User) with the default Access Template; skipped if they already have one"
       },
-      { key: "login_password", label: "Password", type: "text", aliases: ["pass", "login password"], example: "Rahim@2026", note: "At least 6 characters" },
+      { key: "login_password", label: "Password", type: "text", aliases: ["pass", "login password"], example: "1234", note: "Any password" },
       {
         key: "payment_type",
         label: "Payment Type",
