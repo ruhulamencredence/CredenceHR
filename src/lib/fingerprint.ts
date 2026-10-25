@@ -85,18 +85,50 @@ async function call(path: string, token: string | null, body?: any, method = 'PO
 // Plugin codes: 11 app cancel, 15 system cancel, 16 user cancel, 17 "Use password".
 const cancelled = (e: any) => [11, 15, 16, 17].includes(Number(e?.code)) || /cancel|abort|NotAllowedError/i.test(`${e?.name || ''} ${e?.message || ''}`);
 
-// Turn it on for this device (after signing in with the password).
-export async function enableFingerprint(token: string, user: User, workspace: string | null): Promise<void> {
+// A step that never answers becomes an error that names the step, so the
+// dialog never just sits there.
+const within = <T,>(p: Promise<T>, ms: number, what: string): Promise<T> =>
+  new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`${what} didn't answer in ${Math.round(ms / 1000)} seconds.`)), ms);
+    p.then(
+      (v) => {
+        clearTimeout(t);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(t);
+        reject(e);
+      }
+    );
+  });
+const why = (e: any) => [e?.code !== undefined ? `code ${e.code}` : '', e?.message || String(e || '')].filter(Boolean).join(': ');
+
+// Turn it on for this device (after signing in with the password). `step`
+// tells the screen which step is running.
+export async function enableFingerprint(token: string, user: User, workspace: string | null, step: (text: string) => void = () => {}): Promise<void> {
   if (nativePluginMissing()) throw new Error(APP_TOO_OLD);
   if (isApp()) {
-    const nb = await plugin();
-    const device = await appDeviceInfo();
-    const { secret } = await call('/api/auth/fingerprint/app', token, device || {});
+    step('1/3 Checking this phone…');
+    let nb: Awaited<ReturnType<typeof plugin>>;
+    let device: Awaited<ReturnType<typeof appDeviceInfo>>;
+    try {
+      nb = await within(plugin(), 10000, 'The fingerprint part of the app');
+      device = await within(appDeviceInfo(), 10000, 'Reading this phone');
+    } catch (e: any) {
+      throw new Error(`Couldn't start (${why(e)}).`);
+    }
+    step('2/3 Registering this phone with the server…');
+    const { secret } = await within(call('/api/auth/fingerprint/app', token, device || {}), 20000, 'The server');
+    step('3/3 Waiting for your fingerprint — touch the sensor when the phone asks…');
     try {
       const { AccessControl } = await import('@capgo/capacitor-native-biometric');
-      await nb.setCredentials({ username: String(user.id), password: secret, server: SERVER, accessControl: AccessControl.BIOMETRY_CURRENT_SET, title: 'Turn on fingerprint sign-in', negativeButtonText: 'Cancel' });
+      await within(
+        nb.setCredentials({ username: String(user.id), password: secret, server: SERVER, accessControl: AccessControl.BIOMETRY_CURRENT_SET, title: 'Turn on fingerprint sign-in', negativeButtonText: 'Cancel' }),
+        90000,
+        'The phone\'s fingerprint window'
+      );
     } catch (e: any) {
-      throw new Error(cancelled(e) ? 'Cancelled — fingerprint sign-in was not turned on.' : "Couldn't save the fingerprint on this phone.");
+      throw new Error(cancelled(e) ? 'Cancelled — fingerprint sign-in was not turned on.' : `Couldn't save the fingerprint on this phone (${why(e)}).`);
     }
   } else {
     const { startRegistration } = await import('@simplewebauthn/browser');

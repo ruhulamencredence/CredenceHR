@@ -36,6 +36,7 @@ export const FingerprintSettings: React.FC<{ token: string; user: User; onClose:
   const [devices, setDevices] = useState<Device[] | null>(null);
   const [status, setStatus] = useState<'ok' | 'app_old' | 'no_sensor' | null>(null);
   const [busy, setBusy] = useState(false);
+  const [step, setStep] = useState('');
   const [error, setError] = useState('');
   const [done, setDone] = useState('');
   const [hereId, setHereId] = useState(() => savedFingerprint()?.id || 0);
@@ -62,7 +63,7 @@ export const FingerprintSettings: React.FC<{ token: string; user: User; onClose:
     setError('');
     setDone('');
     try {
-      await enableFingerprint(token, user, workspaceCode());
+      await enableFingerprint(token, user, workspaceCode(), setStep);
       setHereId(savedFingerprint()?.id || 0);
       setDone('Done — next time, tap "Sign in with fingerprint" on the sign-in screen.');
       await load();
@@ -110,7 +111,7 @@ export const FingerprintSettings: React.FC<{ token: string; user: User; onClose:
               <button type="button" className={primaryBtn} onClick={() => void turnOn()} disabled={busy || status === null}>
                 {busy && <Loader2 className="w-4 h-4 animate-spin" />} Turn on for this {app ? 'phone' : 'browser'}
               </button>
-              {busy && <p className="text-xs text-slate-500">{app ? 'Touch the fingerprint sensor when the phone asks…' : 'Follow your browser\'s fingerprint / Windows Hello window…'}</p>}
+              {busy && <p className="text-xs text-slate-600">{app ? step || 'Starting…' : 'Follow your browser\'s fingerprint / Windows Hello window…'}</p>}
             </>
           )}
         </div>
