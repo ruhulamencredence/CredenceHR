@@ -1396,9 +1396,10 @@ export const CredenceMail: React.FC<{
 
       {/* Phone: write button */}
       {/* (.liquid-glass-button is position: relative, so the wrapper is the fixed one.)
-          Above the assistant button in the corner. */}
+          Above the assistant's edge tab (AiAssistant.tsx: 48px tall, 132px up by default),
+          measured the same way so the two never sit on top of each other. */}
       {!selectedId && !ro && (
-        <div className="md:hidden fixed right-4 z-40" style={{ bottom: 'calc(9.5rem + env(safe-area-inset-bottom))' }}>
+        <div className="md:hidden fixed right-4 z-40" style={{ bottom: 'calc(196px + env(safe-area-inset-bottom, 0px))' }}>
           <button
             type="button"
             onClick={() => setCompose({ accountId: accountFilter || undefined })}
@@ -1413,7 +1414,12 @@ export const CredenceMail: React.FC<{
       {drawer && (
         <div className="md:hidden fixed inset-0 z-[85] liquid-glass-backdrop" onClick={() => setDrawer(false)}>
           <div className="absolute inset-y-0 left-0 w-[78%] max-w-xs" onClick={(e) => e.stopPropagation()}>
-            <div className="liquid-glass liquid-glass-in h-full rounded-r-[32px] p-4 flex flex-col gap-3 overflow-y-auto" style={{ paddingTop: 'max(1rem, env(safe-area-inset-top))' }}>
+            <div className="liquid-glass liquid-glass-in h-full rounded-r-[32px] p-4 flex flex-col gap-3 overflow-y-auto" style={{
+              // below the phone's status bar: the APK sets --native-safe-area-inset-top
+              // (env() reads 0 there), the same as Navbar / GlobalSidebar
+              paddingTop: 'calc(var(--native-safe-area-inset-top, env(safe-area-inset-top, 0px)) + 1rem)',
+              paddingBottom: 'calc(var(--native-safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) + 1rem)',
+            }}>
               <div className="flex items-center justify-between">
                 <span className="font-bold text-slate-900 flex items-center gap-2"><Mail className="w-5 h-5 text-sky-600" /> Credence Mail</span>
                 <button type="button" onClick={() => setDrawer(false)} className="liquid-glass-chip p-1.5 rounded-full text-slate-600" aria-label="Close"><X className="w-4 h-4" /></button>
