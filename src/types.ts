@@ -248,7 +248,7 @@ export const layersFor = (moduleKey: AdminModuleKey) => MODULE_LAYER_OPTIONS[mod
 // allow editing Leave balances" toggle), which these layers narrow further,
 // same "no saved rows -> full access" default as everywhere else on this
 // system (see requireLeaveManagerLayer() in server.ts).
-export type LeaveManageLayerKey = 'edit_balance' | 'bulk_set_balance' | 'add_category' | 'edit_policy' | 'year_settings' | 'workflow_manage';
+export type LeaveManageLayerKey = 'edit_balance' | 'bulk_set_balance' | 'add_category' | 'edit_policy' | 'year_settings' | 'workflow_manage' | 'leave_rules';
 
 export const LEAVE_MANAGE_LAYERS: { key: LeaveManageLayerKey; label: string }[] = [
   { key: 'edit_balance', label: 'Edit Balance' },
@@ -257,7 +257,10 @@ export const LEAVE_MANAGE_LAYERS: { key: LeaveManageLayerKey; label: string }[] 
   { key: 'edit_policy', label: 'Leave Policy' },
   { key: 'year_settings', label: 'Year Settings' },
   { key: 'workflow_manage', label: 'Balance Workflows' },
+  { key: 'leave_rules', label: 'Leave Rules (accrual, carry-forward, eligibility)' },
 ];
+// Not part of the no-saved-layers default: it changes balances by itself, so it is ticked on purpose.
+export const LEAVE_MANAGE_EXPLICIT_ONLY: LeaveManageLayerKey[] = ['leave_rules'];
 
 // Global Calendar (Admin Panel -> Holidays) — one row per Weekend/Holiday
 // date. Read by every account (Timesheet needs this so a Weekend/Holiday date
@@ -851,6 +854,17 @@ export interface LeaveCategoryPolicy {
   // Leave Without Pay style rule: this Leave Type may only be applied for
   // once Casual Leave AND Sick Leave balances are both exhausted (0).
   require_paid_leave_exhausted: boolean;
+  // Leave Rules (Leave Manage layer "leave_rules"); all off by default.
+  // Who may apply: 'any' | 'female' | 'male', and months of service needed.
+  gender?: 'any' | 'female' | 'male';
+  min_service_months?: number;
+  // Days earned each completed month (1 decimal), and the most the balance may reach.
+  accrual_per_month?: number;
+  balance_cap?: number | null;
+  // Most days carried into the next Leave Year (null = no carry-forward rule).
+  carry_forward_max?: number | null;
+  // First month accrual runs for (YYYY-MM).
+  accrual_from?: string | null;
 }
 
 // One row of Self Service -> Leave Management (GET/PUT /api/leave-balances). A

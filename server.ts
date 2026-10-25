@@ -438,7 +438,10 @@ const REPORT_LAYER_KEYS = ["read", "edit_add", "delete_trash", "permanent_delete
 // "module" (no admin_module_permissions grant) and its operations don't map
 // onto the generic Read/Edit-Add/Entry-Upload/Delete-Trash/Permanent-Delete
 // set — see requireLeaveManagerLayer() below.
-const LEAVE_MANAGE_LAYER_KEYS = ["edit_balance", "bulk_set_balance", "add_category", "edit_policy", "year_settings", "workflow_manage"] as const;
+// "leave_rules" (accrual, carry-forward, who may apply) changes balances by itself, so it is explicit-only:
+// left out of the no-saved-layers default (LEAVE_MANAGE_DEFAULT_LAYERS).
+const LEAVE_MANAGE_LAYER_KEYS = ["edit_balance", "bulk_set_balance", "add_category", "edit_policy", "year_settings", "workflow_manage", "leave_rules"] as const;
+const LEAVE_MANAGE_DEFAULT_LAYERS = LEAVE_MANAGE_LAYER_KEYS.filter((k) => k !== "leave_rules");
 
 // Every (module_key -> its allowed layer keys) the Module Access Layers PUT
 // endpoint (UserManagement.ts) accepts — a single map instead of one flat
@@ -2654,7 +2657,7 @@ async function startServer() {
         return res.status(403).json({ error: "You don't have access to manage Leave balances. Ask your Superadmin to grant it." });
       }
       const grantedLayers = await getModulePermissionLayersForModule(req.user.id, "leave_manage");
-      const effectiveLayers = grantedLayers.length > 0 ? grantedLayers : LEAVE_MANAGE_LAYER_KEYS;
+      const effectiveLayers: readonly string[] = grantedLayers.length > 0 ? grantedLayers : LEAVE_MANAGE_DEFAULT_LAYERS;
       if (!effectiveLayers.includes(layer)) {
         return res.status(403).json({ error: "You don't have permission to do this. Ask your Superadmin to grant it." });
       }

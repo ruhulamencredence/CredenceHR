@@ -75,6 +75,7 @@ const USER_TABLES = new Set([
   "leave_applications",
   "leave_balances",
   "leave_category_balances",
+  "leave_accrual_log",
   "claims",
   "user_claims",
   "conveyance_bills",

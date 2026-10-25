@@ -22,6 +22,8 @@ interface LeaveManageProps {
 // (LeaveReviewPage.tsx), so this page only ever manages everyone's.
 export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack }) => {
   const canManageAll = user.role === 'superadmin' || !!user.can_manage_leave;
+  // Leave Rules (accrual, carry-forward, who may apply) have their own layer, off until ticked.
+  const canRules = user.role === 'superadmin' || (user.module_permission_layers?.leave_manage || []).includes('leave_rules');
   // Same isNativeApp split JobEditPanel.tsx already uses: the web build keeps
   // the table below untouched, the Android APK build gets a card list instead
   // (a wide multi-column table doesn't work well on a phone screen).
@@ -80,6 +82,15 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
   const [savingPolicyFor, setSavingPolicyFor] = useState<string | null>(null);
   const [policyError, setPolicyError] = useState('');
   const [policySuccess, setPolicySuccess] = useState('');
+  // Leave Rules per Leave Type (gender, months of service, days earned a month,
+  // balance cap, carry-forward limit) — kept as text while typing.
+  type RulesDraft = { gender: string; min_service_months: string; accrual_per_month: string; balance_cap: string; carry_forward_max: string };
+  const [rulesDraft, setRulesDraft] = useState<Record<string, RulesDraft>>({});
+  const [savingRulesFor, setSavingRulesFor] = useState<string | null>(null);
+  const [accrualRunning, setAccrualRunning] = useState(false);
+  const emptyRules: RulesDraft = { gender: 'any', min_service_months: '0', accrual_per_month: '0', balance_cap: '', carry_forward_max: '' };
+  const rulesFor = (key: string): RulesDraft => rulesDraft[key] || emptyRules;
+  const setRules = (key: string, patch: Partial<RulesDraft>) => setRulesDraft((prev) => ({ ...prev, [key]: { ...(prev[key] || emptyRules), ...patch } }));
 
   const draftFor = (categoryKey: string) =>
     policyDraft[categoryKey] || { min_advance_notice_days: '0', reliever_required: true, max_consecutive_days: '', require_paid_leave_exhausted: false };
@@ -91,6 +102,20 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
       if (!res.ok) throw new Error(data.error || 'Failed to load Leave Policies');
       const rows: LeaveCategoryPolicy[] = Array.isArray(data) ? data : [];
       setPolicies(rows);
+      setRulesDraft(
+        Object.fromEntries(
+          rows.map((p) => [
+            p.category_key,
+            {
+              gender: p.gender || 'any',
+              min_service_months: String(p.min_service_months ?? 0),
+              accrual_per_month: String(p.accrual_per_month ?? 0),
+              balance_cap: p.balance_cap == null ? '' : String(p.balance_cap),
+              carry_forward_max: p.carry_forward_max == null ? '' : String(p.carry_forward_max)
+            }
+          ])
+        )
+      );
       setPolicyDraft((prev) => {
         const next = { ...prev };
         for (const p of rows) {
@@ -148,6 +173,58 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
       setPolicyError(err.message || 'Failed to save this Leave Policy');
     } finally {
       setSavingPolicyFor(null);
+    }
+  };
+
+  const saveRules = async (categoryKey: string) => {
+    const d = rulesFor(categoryKey);
+    const num = (v: string) => (v.trim() === '' ? null : Number(v));
+    const cap = num(d.balance_cap);
+    const carry = num(d.carry_forward_max);
+    if ([Number(d.min_service_months), Number(d.accrual_per_month), cap, carry].some((n) => n !== null && (!Number.isFinite(n) || n < 0))) {
+      setPolicySuccess('');
+      setPolicyError('Months of service, days earned, balance cap and carry-forward limit must be 0 or more (cap and carry-forward may be blank).');
+      return;
+    }
+    setSavingRulesFor(categoryKey);
+    setPolicyError('');
+    setPolicySuccess('');
+    try {
+      const res = await fetch(apiUrl(`/api/leave-policies/${encodeURIComponent(categoryKey)}/rules`), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ gender: d.gender, min_service_months: Number(d.min_service_months), accrual_per_month: Number(d.accrual_per_month), balance_cap: cap, carry_forward_max: carry })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to save the Leave Rules');
+      setPolicies((prev) => [...prev.filter((p) => p.category_key !== categoryKey), data]);
+      setPolicySuccess(
+        data.accrual_per_month > 0
+          ? `Rules saved. ${data.accrual_per_month} day(s) a month are credited from ${data.accrual_from} (nothing is back-paid).`
+          : 'Rules saved.'
+      );
+    } catch (err: any) {
+      setPolicyError(err.message || 'Failed to save the Leave Rules');
+    } finally {
+      setSavingRulesFor(null);
+    }
+  };
+
+  const runAccrualNow = async () => {
+    setAccrualRunning(true);
+    setPolicyError('');
+    setPolicySuccess('');
+    try {
+      const res = await fetch(apiUrl('/api/leave-accrual/run'), { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not run the accrual');
+      setPolicySuccess(
+        data.credited > 0 ? `${data.days} day(s) credited to ${data.credited} account(s) for ${data.months} month(s).` : 'Nothing owed right now — every completed month is already credited.'
+      );
+    } catch (err: any) {
+      setPolicyError(err.message || 'Could not run the accrual');
+    } finally {
+      setAccrualRunning(false);
     }
   };
 
@@ -1089,9 +1166,24 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
                     Casual/Sick must be exhausted first. Enforced automatically when anyone submits a Leave Application.
                   </p>
 
+                  {canRules && (
+                    <div className="mb-3 flex items-center gap-2 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() => void runAccrualNow()}
+                        disabled={accrualRunning}
+                        className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                      >
+                        {accrualRunning ? <Spinner size={12} /> : <PlayCircle className="w-3.5 h-3.5 text-blue-600" />} Credit owed accrual now
+                      </button>
+                      <span className="text-[11px] text-slate-500">Days earned each month are credited by themselves; this just does it right now.</span>
+                    </div>
+                  )}
+
                   <div className="space-y-3">
                     {policyCategories.map((cat) => {
                       const draft = draftFor(cat.key);
+                      const rules = rulesFor(cat.key);
                       const isSaving = savingPolicyFor === cat.key;
                       return (
                         <div key={cat.key} className="rounded-xl border border-slate-200 bg-white p-3.5">
@@ -1166,6 +1258,107 @@ export const LeaveManage: React.FC<LeaveManageProps> = ({ token, user, onBack })
                               Only after Casual + Sick exhausted
                             </label>
                           </div>
+
+                          {canRules && (
+                            <div className="mt-3 pt-3 border-t border-slate-100">
+                              <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
+                                <span className="text-[11px] font-bold text-slate-700">Leave Rules</span>
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <button
+                                    type="button"
+                                    onClick={() => setRules(cat.key, { gender: 'female', min_service_months: '6' })}
+                                    className="text-[10px] font-semibold px-2 py-1 rounded-md bg-slate-100 text-slate-600 hover:bg-slate-200"
+                                    title="Female staff with 6 months of service. Also set Max Consecutive Days above (16 weeks = 112)."
+                                  >
+                                    Maternity preset
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setRules(cat.key, { accrual_per_month: '1.7', balance_cap: rules.balance_cap })}
+                                    className="text-[10px] font-semibold px-2 py-1 rounded-md bg-slate-100 text-slate-600 hover:bg-slate-200"
+                                    title="About 1 day for every 18 days (≈ 1.7 a month)"
+                                  >
+                                    Earned leave: ~1 day per 18
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => void saveRules(cat.key)}
+                                    disabled={savingRulesFor === cat.key}
+                                    className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50 transition-colors"
+                                  >
+                                    {savingRulesFor === cat.key ? <Spinner size={12} className="text-white" /> : <Save className="w-3 h-3" />}
+                                    Save rules
+                                  </button>
+                                </div>
+                              </div>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+                                <div>
+                                  <label className="block text-[10px] font-semibold text-slate-500 mb-1">Who may apply</label>
+                                  <select
+                                    value={rules.gender}
+                                    onChange={(e) => setRules(cat.key, { gender: e.target.value })}
+                                    className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                  >
+                                    <option value="any">Everyone</option>
+                                    <option value="female">Female only</option>
+                                    <option value="male">Male only</option>
+                                  </select>
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] font-semibold text-slate-500 mb-1">Months of service needed</label>
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    value={rules.min_service_months}
+                                    onChange={(e) => setRules(cat.key, { min_service_months: e.target.value })}
+                                    className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                  />
+                                  <p className="text-[10px] text-slate-400 mt-0.5">From the joining date; 0 = none</p>
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] font-semibold text-slate-500 mb-1">Days earned per month</label>
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    step={0.1}
+                                    value={rules.accrual_per_month}
+                                    onChange={(e) => setRules(cat.key, { accrual_per_month: e.target.value })}
+                                    className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                  />
+                                  <p className="text-[10px] text-slate-400 mt-0.5">
+                                    0 = none{(() => {
+                                      const p = policies.find((x) => x.category_key === cat.key);
+                                      return p?.accrual_from && (p.accrual_per_month || 0) > 0 ? ` · from ${p.accrual_from}` : '';
+                                    })()}
+                                  </p>
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] font-semibold text-slate-500 mb-1">Balance cap (days)</label>
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    placeholder="No cap"
+                                    value={rules.balance_cap}
+                                    onChange={(e) => setRules(cat.key, { balance_cap: e.target.value })}
+                                    className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                  />
+                                  <p className="text-[10px] text-slate-400 mt-0.5">Earning stops at this</p>
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] font-semibold text-slate-500 mb-1">Carry forward (days)</label>
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    placeholder="No rule"
+                                    value={rules.carry_forward_max}
+                                    onChange={(e) => setRules(cat.key, { carry_forward_max: e.target.value })}
+                                    className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                  />
+                                  <p className="text-[10px] text-slate-400 mt-0.5">Most that moves into next year; 0 = all lapse</p>
+                                </div>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       );
                     })}

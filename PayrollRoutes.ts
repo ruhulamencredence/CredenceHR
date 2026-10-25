@@ -2707,20 +2707,24 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
       // runs over a Friday / holiday used to add those days too, which
       // pushed present + leave past the working days and hid a real absent
       // day (absent = working - present - leave), so it was paid.
+      // "Leave Without Pay" is kept apart (lwpDatesByUser): those days are
+      // unpaid, so they are counted as LWP (cut from the pay), not as leave.
       const leaveDatesByUser = new Map<number, Set<string>>();
+      const lwpDatesByUser = new Map<number, Set<string>>();
       if (userIds.length > 0) {
         const leavePlaceholders = userIds.map(() => "?").join(",");
         const leaveRows = await queryDB(
-          `SELECT user_id, start_date, end_date FROM leave_applications
+          `SELECT user_id, leave_type, start_date, end_date FROM leave_applications
            WHERE status = 'approved' AND start_date <= ? AND end_date >= ? AND user_id IN (${leavePlaceholders})`,
           [monthEnd, monthStart, ...userIds]
         );
         for (const l of leaveRows) {
           const start = String(l.start_date).slice(0, 10);
           const end = String(l.end_date).slice(0, 10);
-          const set = leaveDatesByUser.get(Number(l.user_id)) || new Set<string>();
+          const target = l.leave_type === "without_pay" ? lwpDatesByUser : leaveDatesByUser;
+          const set = target.get(Number(l.user_id)) || new Set<string>();
           for (const d of period.dates) if (d >= start && d <= end) set.add(d);
-          leaveDatesByUser.set(Number(l.user_id), set);
+          target.set(Number(l.user_id), set);
         }
       }
 
@@ -2776,10 +2780,19 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
         const hol = holidaysOf(e);
         const appLeaveDays = [...(e.user_id ? leaveDatesByUser.get(Number(e.user_id)) || [] : [])].filter((d) => !hol.has(d) && !presentDates.has(d) && !siteLeaveByEmployee.get(Number(e.id))?.has(d)).length;
         const leave = Math.min(workingDays, appLeaveDays + siteLeaveDays);
+        // Approved Leave Without Pay: working days with no attendance, not
+        // already counted as paid leave (a day is only ever one of them).
+        const paidLeaveDates = e.user_id ? leaveDatesByUser.get(Number(e.user_id)) : undefined;
+        const lwp = Math.min(
+          workingDays - leave,
+          [...(e.user_id ? lwpDatesByUser.get(Number(e.user_id)) || [] : [])].filter(
+            (d) => !hol.has(d) && !presentDates.has(d) && !paidLeaveDates?.has(d) && !siteLeaveByEmployee.get(Number(e.id))?.has(d)
+          ).length
+        );
         // A leave day still to come was also counted among the upcoming
         // "expected present" days: present + leave never pass the working days.
-        const present = Math.min(workingDays - leave, hasAttendanceData ? presentDates.size + upcomingDays : workingDays);
-        const absent = Math.max(0, workingDays - present - leave);
+        const present = Math.min(workingDays - leave - lwp, hasAttendanceData ? presentDates.size + upcomingDays : workingDays);
+        const absent = Math.max(0, workingDays - present - leave - lwp);
         const lateCount = lateDatesByEmployee.get(e.id)?.length || 0;
         const lateDeductionDays = Math.floor(lateCount / latesPerDay);
         const extremeLateCount = extremeLateDatesByEmployee.get(e.id)?.length || 0;
@@ -2794,7 +2807,7 @@ export function registerPayrollRoutes(app: Express, deps: PayrollRouteDeps) {
           present_days: present,
           absent_days: hasAttendanceData ? absent : 0,
           leave_days: leave,
-          lwp_days: 0,
+          lwp_days: lwp,
           overtime_hours: 0,
           late_count: lateCount,
           late_deduction_days: lateDeductionDays,

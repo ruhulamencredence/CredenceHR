@@ -305,6 +305,41 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
     console.warn("⚠️ Could not ensure leave_category_policies table exists: " + err.message);
   }
 
+  // Leave rules on top of the policy (LeaveRoutes.ts, Leave Manage layer
+  // "leave_rules"): who may apply (gender, months of service), days earned
+  // each month, a cap on the balance, and how much carries into the next
+  // Leave Year. All OFF by default (0 / NULL / 'any'), so nothing changes
+  // until a Leave Manager turns a rule on.
+  for (const [col, def] of [
+    ["min_service_months", "INT NOT NULL DEFAULT 0"],
+    ["gender", "VARCHAR(10) NOT NULL DEFAULT 'any'"],
+    ["accrual_per_month", "DECIMAL(4,1) NOT NULL DEFAULT 0"],
+    ["balance_cap", "DECIMAL(5,1) NULL DEFAULT NULL"],
+    ["carry_forward_max", "DECIMAL(5,1) NULL DEFAULT NULL"],
+    ["accrual_from", "CHAR(7) NULL DEFAULT NULL"]
+  ] as [string, string][]) {
+    try {
+      await dbPool.query(`ALTER TABLE leave_category_policies ADD COLUMN ${col} ${def}`);
+    } catch (err: any) {
+      if (err.code !== "ER_DUP_FIELDNAME") console.warn(`⚠️ leave_category_policies.${col}: ` + err.message);
+    }
+  }
+  try {
+    await dbPool.query(`
+      CREATE TABLE IF NOT EXISTS leave_accrual_log (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        category_key VARCHAR(100) NOT NULL,
+        month_year CHAR(7) NOT NULL,
+        days DECIMAL(5,1) NOT NULL DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_leave_accrual (user_id, category_key, month_year)
+      )
+    `);
+  } catch (err: any) {
+    console.warn("⚠️ Could not ensure leave_accrual_log table exists: " + err.message);
+  }
+
   // Job Edit Approval queue — same self-healing pattern as entry_edit_history above.
   // See schema.sql's job_edit_requests comment for the full explanation.
   try {
