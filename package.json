@@ -62,7 +62,6 @@
     "lottie-react": "^3.1.0",
     "lucide-react": "^0.546.0",
     "mailparser": "^3.9.40",
-    "motion": "^12.23.24",
     "mysql2": "^3.23.3",
     "node-cron": "^4.6.0",
     "node-forge": "^1.4.0",
