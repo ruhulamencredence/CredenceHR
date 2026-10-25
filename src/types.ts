@@ -95,7 +95,7 @@ export const ADMIN_MODULES: { key: AdminModuleKey; label: string }[] = [
 // combination of these per (Admin/User account, module) via Admin Panel ->
 // Users -> Module Access. Independent checkboxes, not hierarchical: having
 // 'delete_trash' does NOT imply 'edit_add' is also granted.
-export type PermissionLayerKey = 'read' | 'edit_add' | 'entry_upload' | 'delete_trash' | 'permanent_delete' | 'submission_status' | 'dispatch_material' | 'dispatch_all' | 'stay_report' | 'salary_month' | 'salary_hold' | 'block_account' | 'limit_history' | 'link_pins' | 'audit_approve' | 'accounts_pay' | 'access_log' | 'live' | 'on_behalf' | 'onboarding_create' | 'onboarding_review' | 'onboarding_approve' | 'exit_dues' | 'exit_pdf' | 'reminders_receive' | 'salary_bulk_upload' | 'target_export' | 'target_cancel' | 'exit_clearance_setup' | 'late_list' | 'mail_open' | 'mail_password' | 'mail_settings' | 'mail_groups' | 'roster_manage' | 'break_manage' | 'password_requests' | 'sign_request' | 'esign_settings' | 'employee_delete';
+export type PermissionLayerKey = 'read' | 'edit_add' | 'entry_upload' | 'delete_trash' | 'permanent_delete' | 'submission_status' | 'dispatch_material' | 'dispatch_all' | 'po_import' | 'stay_report' | 'salary_month' | 'salary_hold' | 'block_account' | 'limit_history' | 'link_pins' | 'audit_approve' | 'accounts_pay' | 'access_log' | 'live' | 'on_behalf' | 'onboarding_create' | 'onboarding_review' | 'onboarding_approve' | 'exit_dues' | 'exit_pdf' | 'reminders_receive' | 'salary_bulk_upload' | 'target_export' | 'target_cancel' | 'exit_clearance_setup' | 'late_list' | 'mail_open' | 'mail_password' | 'mail_settings' | 'mail_groups' | 'roster_manage' | 'break_manage' | 'password_requests' | 'sign_request' | 'esign_settings' | 'employee_delete';
 
 export const PERMISSION_LAYERS: { key: PermissionLayerKey; label: string }[] = [
   { key: 'read', label: 'Read Only' },
@@ -123,7 +123,8 @@ export const MODULE_LAYER_OPTIONS: Partial<Record<AdminModuleKey, { key: Permiss
     { key: 'permanent_delete', label: 'Permanent Delete' },
     { key: 'submission_status', label: 'Budget Submission Status' },
     { key: 'dispatch_material', label: 'Dispatch Material (own)' },
-    { key: 'dispatch_all', label: 'Dispatch Material: see all' }
+    { key: 'dispatch_all', label: 'Dispatch Material: see all' },
+    { key: 'po_import', label: 'P.O Import' }
   ],
   // Employee Tracking -> Stay Report (how long at each place, day by day).
   tracking: [
@@ -233,7 +234,7 @@ export const MODULE_LAYER_OPTIONS: Partial<Record<AdminModuleKey, { key: Permiss
 };
 // Layers an account has only when explicitly ticked — never part of the
 // "module granted, no layers saved yet" default (requireModuleLayer).
-export const EXPLICIT_ONLY_LAYERS: PermissionLayerKey[] = ['permanent_delete', 'submission_status', 'dispatch_material', 'dispatch_all', 'salary_month', 'salary_hold', 'block_account', 'link_pins', 'audit_approve', 'accounts_pay', 'access_log', 'live', 'on_behalf', 'onboarding_create', 'onboarding_review', 'onboarding_approve', 'exit_dues', 'exit_pdf', 'reminders_receive', 'salary_bulk_upload', 'target_export', 'target_cancel', 'exit_clearance_setup', 'late_list', 'mail_open', 'mail_password', 'mail_settings', 'mail_groups', 'roster_manage', 'break_manage', 'password_requests', 'sign_request', 'esign_settings', 'employee_delete'];
+export const EXPLICIT_ONLY_LAYERS: PermissionLayerKey[] = ['permanent_delete', 'submission_status', 'dispatch_material', 'dispatch_all', 'po_import', 'salary_month', 'salary_hold', 'block_account', 'link_pins', 'audit_approve', 'accounts_pay', 'access_log', 'live', 'on_behalf', 'onboarding_create', 'onboarding_review', 'onboarding_approve', 'exit_dues', 'exit_pdf', 'reminders_receive', 'salary_bulk_upload', 'target_export', 'target_cancel', 'exit_clearance_setup', 'late_list', 'mail_open', 'mail_password', 'mail_settings', 'mail_groups', 'roster_manage', 'break_manage', 'password_requests', 'sign_request', 'esign_settings', 'employee_delete'];
 export const layersFor = (moduleKey: AdminModuleKey) => MODULE_LAYER_OPTIONS[moduleKey] || PERMISSION_LAYERS;
 
 // Leave Manage's own operation-specific layers — same independent-checkbox
@@ -247,7 +248,7 @@ export const layersFor = (moduleKey: AdminModuleKey) => MODULE_LAYER_OPTIONS[mod
 // allow editing Leave balances" toggle), which these layers narrow further,
 // same "no saved rows -> full access" default as everywhere else on this
 // system (see requireLeaveManagerLayer() in server.ts).
-export type LeaveManageLayerKey = 'edit_balance' | 'bulk_set_balance' | 'add_category' | 'edit_policy' | 'year_settings' | 'workflow_manage';
+export type LeaveManageLayerKey = 'edit_balance' | 'bulk_set_balance' | 'add_category' | 'edit_policy' | 'year_settings' | 'workflow_manage' | 'leave_rules';
 
 export const LEAVE_MANAGE_LAYERS: { key: LeaveManageLayerKey; label: string }[] = [
   { key: 'edit_balance', label: 'Edit Balance' },
@@ -256,7 +257,10 @@ export const LEAVE_MANAGE_LAYERS: { key: LeaveManageLayerKey; label: string }[] 
   { key: 'edit_policy', label: 'Leave Policy' },
   { key: 'year_settings', label: 'Year Settings' },
   { key: 'workflow_manage', label: 'Balance Workflows' },
+  { key: 'leave_rules', label: 'Leave Rules (accrual, carry-forward, eligibility)' },
 ];
+// Not part of the no-saved-layers default: it changes balances by itself, so it is ticked on purpose.
+export const LEAVE_MANAGE_EXPLICIT_ONLY: LeaveManageLayerKey[] = ['leave_rules'];
 
 // Global Calendar (Admin Panel -> Holidays) — one row per Weekend/Holiday
 // date. Read by every account (Timesheet needs this so a Weekend/Holiday date
@@ -850,6 +854,17 @@ export interface LeaveCategoryPolicy {
   // Leave Without Pay style rule: this Leave Type may only be applied for
   // once Casual Leave AND Sick Leave balances are both exhausted (0).
   require_paid_leave_exhausted: boolean;
+  // Leave Rules (Leave Manage layer "leave_rules"); all off by default.
+  // Who may apply: 'any' | 'female' | 'male', and months of service needed.
+  gender?: 'any' | 'female' | 'male';
+  min_service_months?: number;
+  // Days earned each completed month (1 decimal), and the most the balance may reach.
+  accrual_per_month?: number;
+  balance_cap?: number | null;
+  // Most days carried into the next Leave Year (null = no carry-forward rule).
+  carry_forward_max?: number | null;
+  // First month accrual runs for (YYYY-MM).
+  accrual_from?: string | null;
 }
 
 // One row of Self Service -> Leave Management (GET/PUT /api/leave-balances). A
@@ -1145,6 +1160,8 @@ export interface Entry {
   // File. matched_rate/computed_amount null with rate_calculated_at set means it WAS
   // attempted but genuinely found no match (vs. null rate_calculated_at = never run yet).
   matched_rate?: number | null;
+  // P.O numbers put on the row by Reports -> P.O Import (comma-separated).
+  po_numbers?: string | null;
   computed_amount?: number | null;
   category_head?: string | null;
   category_sub1?: string | null;

@@ -233,7 +233,7 @@ export const MprDispatchMaterial: React.FC<{ token: string }> = ({ token }) => {
       if (statuses.size && !statuses.has(r.status)) return false;
       if (from && (!r.deliveryDate || r.deliveryDate < from)) return false;
       if (to && (!r.deliveryDate || r.deliveryDate > to)) return false;
-      const hay = `${r.projectName} ${r.mprNo} ${r.item} ${r.specification} ${r.jobNo} ${r.budgetName} ${r.queuedBy} ${r.dispatches.map((d) => `${d.supplier} ${d.poNo} ${d.challanNo}`).join(' ')}`.toLowerCase();
+      const hay = `${r.projectName} ${r.mprNo} ${r.item} ${r.specification} ${r.jobNo} ${r.budgetName} ${r.queuedBy} ${r.dispatches.map((d) => `${d.supplier} ${d.poNo} ${d.challanNo}`).join(' ')} ${(r.pos || []).map((p) => `${p.poNo} ${p.supplier}`).join(' ')}`.toLowerCase();
       return words.every((w) => hay.includes(w));
     });
   }, [rows, q, project, statuses, from, to]);
@@ -264,12 +264,14 @@ export const MprDispatchMaterial: React.FC<{ token: string }> = ({ token }) => {
     return c;
   }, [rows]);
 
+  // The latest imported P.O (Reports -> P.O Import) fills supplier, rate and P.O.
+  const lastPo = (r: MdRow) => (r.pos && r.pos.length ? r.pos[r.pos.length - 1] : null);
   const lineFor = (r: MdRow): Line => ({
     entryId: r.id,
     qty: r.remaining !== null ? String(r.remaining) : '',
-    supplier: '',
-    rate: '',
-    poNo: '',
+    supplier: lastPo(r)?.supplier || '',
+    rate: lastPo(r)?.rate != null ? String(lastPo(r)!.rate) : '',
+    poNo: lastPo(r)?.poNo || '',
     challanNo: '',
     vehicleNo: '',
     dispatchDate: '',
@@ -556,7 +558,15 @@ export const MprDispatchMaterial: React.FC<{ token: string }> = ({ token }) => {
                         <td className="px-2 py-2 text-right whitespace-nowrap">{qtyText(r.dispatchedQty)}</td>
                         <td className="px-2 py-2 text-right whitespace-nowrap">{qtyText(r.receivedQty)}</td>
                         <td className="px-2 py-2 text-right whitespace-nowrap font-semibold">{qtyText(r.remaining)}</td>
-                        <td className="px-2 py-2 text-slate-600">{lastD ? [lastD.supplier, lastD.poNo].filter(Boolean).join(' · ') || '—' : '—'}</td>
+                        <td className="px-2 py-2 text-slate-600">
+                          {lastD ? [lastD.supplier, lastD.poNo].filter(Boolean).join(' · ') || '—' : !r.pos?.length ? '—' : null}
+                          {(r.pos || []).map((p) => (
+                            <div key={p.poNo} className="mt-0.5 whitespace-nowrap" title={`Imported P.O${p.poDate ? ` · ${formatDate(p.poDate)}` : ''}${p.orderQty != null ? ` · Qty ${p.orderQty}` : ''}${p.rate != null ? ` · Rate ${p.rate}` : ''}`}>
+                              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700">P.O {p.poNo}</span>
+                              {p.supplier && <span className="ml-1 text-[11px] text-slate-500">{p.supplier}</span>}
+                            </div>
+                          ))}
+                        </td>
                         {seesAll && <td className="px-2 py-2 text-slate-600">{r.queuedBy || '—'}</td>}
                         <td className="px-2 py-2">
                           <MdStatusChip status={r.status} queued={r.queuedAt} />

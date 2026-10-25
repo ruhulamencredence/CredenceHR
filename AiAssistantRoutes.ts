@@ -260,6 +260,15 @@ const HELP: HelpEntry[] = [
       "• **Year Settings:** HR-এর ছুটির বছর কবে শেষ আর কবে শুরু (যেমন ১ জানুয়ারি – ৩১ ডিসেম্বর) ঠিক করুন; নতুন বছর শুরু হলে workflow আপনা থেকে চলে।\n" +
       "• **Leave Balance Workflows:** \"General\" সবার জন্য, আর দরকার হলে পদবি (Designation) অনুযায়ী আলাদা workflow (যেমন Manager, GM) — প্রতিটা ছুটির ধরনে বছরে কত দিন। পদবির workflow সেই পদবির কর্মীদের জন্য General-এর বদলে খাটে। **\"Apply Now\"** দিয়ে সাথে সাথে ব্যালেন্স বসানো যায়।",
     nav: "self:leaveManagement", can: (c) => isSuper(c) || c.flags.can_manage_leave },
+  { id: "leave_rules", title: "ছুটির নিয়ম — মাসে জমা, পরের বছরে টানা, কে আবেদন করতে পারবে (মাতৃত্বকালীন সহ)",
+    keys: ["leave accrual", "accrual", "earn leave", "earned leave", "আর্ন লিভ", "মাসে ছুটি জমা", "ছুটি জমা", "carry forward", "carry-forward", "পরের বছরে টানা", "ছুটি টানা", "maternity", "মাতৃত্বকালীন", "paternity", "পিতৃত্বকালীন", "leave eligibility", "মাতৃত্ব ছুটি", "matrittho", "leave rules", "ছুটির নিয়ম"],
+    steps:
+      "মেনু → Self Service → HRM → Leave Manage → **Leave Policies** → প্রতিটা ছুটির ধরনের নিচে **Leave Rules**:\n" +
+      "• **কে আবেদন করতে পারবে:** Everyone / Female only / Male only, আর কত মাসের চাকরি লাগবে (joining date থেকে)। শর্ত না মিললে আবেদনই নেওয়া হয় না। **Maternity preset** বোতামে নারী + ৬ মাস বসে; একই কার্ডের **Max Consecutive Days**-এ সর্বোচ্চ দিন (১৬ সপ্তাহ = ১১২) দিন।\n" +
+      "• **মাসে কত দিন জমা:** Days earned per month (যেমন ১.৭ ≈ ১৮ দিনে ১); **Balance cap** দিলে এর বেশি জমে না। প্রতিটা পূর্ণ মাসের জন্য একবার করে নিজে থেকে জমা হয় (যিনি মাসের আগে যোগ দিয়েছেন তিনি); চালু করার **পরের মাস** থেকে শুরু, পেছনের মাস পরিশোধ হয় না।\n" +
+      "• **পরের বছরে টানা:** Carry forward-এ সর্বোচ্চ কত দিন যাবে; ০ দিলে সব বাতিল, ফাঁকা রাখলে এই নিয়ম নেই। বছর শেষের rollover-এ কাজ করে (Year Settings-এ \"Start next year automatically\" চালু থাকতে হবে)।\n" +
+      "• এই অংশের জন্য Module Access-এর Leave Manage layer-এ **Leave Rules** টিক লাগে (শুরুতে বন্ধ)।",
+    nav: "self:leaveManagement", can: (c) => isSuper(c) || c.flags.can_manage_leave },
   { id: "leave_manage_access", title: "কাউকে Leave Manage-এর অনুমতি দেওয়া",
     keys: ["leave manage access", "leave manage permission", "balance edit access", "ব্যালেন্স এডিটের অনুমতি", "leave balance access", "allow editing leave"],
     steps:

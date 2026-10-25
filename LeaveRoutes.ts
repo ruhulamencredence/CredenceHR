@@ -24,6 +24,13 @@ import type { Express } from "express";
 import { companyStore, activeGroupId, DEFAULT_COMPANY_ID, DEFAULT_GROUP_ID } from "./companyContext";
 import { runsBackgroundJobs } from "./jobRunner";
 
+// Carry-forward at the year rollover: category (balance key) -> most days that
+// carry over, and each account's balance from just before the rollover.
+interface LeaveCarry {
+  max: Record<string, number>;
+  prev: Map<number, Record<string, number>>;
+}
+
 interface LeaveRouteDeps {
   authenticateToken: any;
   queryDB: (sql: string, params?: any[]) => Promise<any>;
@@ -43,7 +50,7 @@ interface LeaveRouteDeps {
   // "year_settings"/"workflow_manage" (see LEAVE_MANAGE_LAYER_KEYS in
   // server.ts). Applied to each of Leave Manage's write routes below, one
   // layer per route.
-  requireLeaveManagerLayer: (layer: "edit_balance" | "bulk_set_balance" | "add_category" | "edit_policy" | "year_settings" | "workflow_manage") => any;
+  requireLeaveManagerLayer: (layer: "edit_balance" | "bulk_set_balance" | "add_category" | "edit_policy" | "year_settings" | "workflow_manage" | "leave_rules") => any;
   hasLeaveManageAccess: (userId: number, role: string) => Promise<boolean>;
   getCurrentStepApprovers: (request: any) => Promise<{ user_id: number; user_name: string | null }[]>;
   createAlert: (...args: any[]) => Promise<any>;
@@ -201,12 +208,20 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
     targetIds: number[],
     fixedValues: Partial<Record<"casual_leave" | "sick_leave" | "leave_without_pay", number>>,
     customValues: Record<string, number>,
-    actingUserId: number
+    actingUserId: number,
+    carry?: LeaveCarry
   ): Promise<void> {
     const categoryIdByKey = new Map<string, number>();
     for (const key of Object.keys(customValues)) {
       categoryIdByKey.set(key, await findOrCreateCategoryByKey(key, actingUserId));
     }
+
+    // Days carried into the new Leave Year: what the account had left before
+    // this rollover (the snapshot), up to the category's carry-forward limit.
+    const carried = (userId: number, key: string) => {
+      if (!carry || carry.max[key] === undefined) return 0;
+      return Math.max(0, Math.min(carry.prev.get(userId)?.[key] || 0, carry.max[key]));
+    };
 
     for (const userId of targetIds) {
       const used = await getUsedThisYear(userId);
@@ -215,12 +230,12 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
         const existingRows: any = await queryDB("SELECT * FROM leave_balances WHERE user_id = ?", [userId]);
         const existing = existingRows[0];
         const nextCasual =
-          fixedValues.casual_leave !== undefined ? Math.max(0, fixedValues.casual_leave - used.casual) : Number(existing?.casual_leave || 0);
+          fixedValues.casual_leave !== undefined ? Math.max(0, fixedValues.casual_leave - used.casual) + carried(userId, "casual_leave") : Number(existing?.casual_leave || 0);
         const nextSick =
-          fixedValues.sick_leave !== undefined ? Math.max(0, fixedValues.sick_leave - used.sick) : Number(existing?.sick_leave || 0);
+          fixedValues.sick_leave !== undefined ? Math.max(0, fixedValues.sick_leave - used.sick) + carried(userId, "sick_leave") : Number(existing?.sick_leave || 0);
         const nextLwp =
           fixedValues.leave_without_pay !== undefined
-            ? Math.max(0, fixedValues.leave_without_pay - used.without_pay)
+            ? Math.max(0, fixedValues.leave_without_pay - used.without_pay) + carried(userId, "leave_without_pay")
             : Number(existing?.leave_without_pay || 0);
 
         if (existing) {
@@ -237,7 +252,7 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
       }
 
       for (const key of Object.keys(customValues)) {
-        const nextBalance = Math.max(0, customValues[key] - (used.custom[key] || 0));
+        const nextBalance = Math.max(0, customValues[key] - (used.custom[key] || 0)) + carried(userId, key);
         await queryDB(
           "INSERT INTO leave_category_balances (user_id, category_id, balance) VALUES (?, ?, ?) " +
             "ON DUPLICATE KEY UPDATE balance = VALUES(balance)",
@@ -258,7 +273,7 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
   // year-end auto-rollover (checkAndRunLeaveYearRollover below). Returns how
   // many (workflow, account) balance writes actually happened, so callers can
   // tell "nothing to apply" apart from a real 0-account workflow.
-  async function applyAllActiveWorkflows(actingUserId: number | null, onlyWorkflowId?: number, onlyUserIds?: number[]): Promise<number> {
+  async function applyAllActiveWorkflows(actingUserId: number | null, onlyWorkflowId?: number, onlyUserIds?: number[], carry?: LeaveCarry): Promise<number> {
     const workflows: any = onlyWorkflowId
       ? await queryDB("SELECT * FROM leave_balance_workflows WHERE id = ? AND is_active = 1", [onlyWorkflowId])
       : await queryDB("SELECT * FROM leave_balance_workflows WHERE is_active = 1");
@@ -307,7 +322,7 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
       }
       if (Object.keys(fixedValues).length === 0 && Object.keys(customValues).length === 0) continue;
 
-      await applyBalancesToTargets(targetIds, fixedValues, customValues, actingUserId as number);
+      await applyBalancesToTargets(targetIds, fixedValues, customValues, actingUserId as number, carry);
       appliedCount += targetIds.length;
     }
     return appliedCount;
@@ -341,6 +356,131 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
   // today has reached this year's start_month_day AND this calendar year
   // hasn't already been rolled over (last_rollover_year), so it's safe to
   // call this often; it only ever actually applies workflows once per year.
+  // ---- Leave rules: carry-forward at the year rollover, monthly accrual --------
+  // A Leave Type's policy key ("casual" …) as the balance key the workflows use.
+  const BALANCE_KEY: Record<string, string> = { casual: "casual_leave", sick: "sick_leave", without_pay: "leave_without_pay" };
+  const balanceKeyOf = (policyKey: string) => BALANCE_KEY[policyKey] || policyKey;
+
+  // The carry-forward rules (category -> most days carried) with every
+  // account's balance as it stands now, taken BEFORE the rollover rewrites
+  // balances. null = no category has a carry-forward rule.
+  async function loadCarry(): Promise<LeaveCarry | null> {
+    const rules: any[] = (await queryDB("SELECT category_key, carry_forward_max FROM leave_category_policies WHERE carry_forward_max IS NOT NULL")) || [];
+    if (!rules.length) return null;
+    const max: Record<string, number> = {};
+    for (const r of rules) max[balanceKeyOf(String(r.category_key))] = Math.max(0, Number(r.carry_forward_max) || 0);
+    const prev = new Map<number, Record<string, number>>();
+    const put = (userId: number, key: string, v: number) => {
+      const o = prev.get(userId) || {};
+      o[key] = v;
+      prev.set(userId, o);
+    };
+    for (const b of ((await queryDB("SELECT * FROM leave_balances")) as any[]) || []) {
+      for (const k of ["casual_leave", "sick_leave", "leave_without_pay"]) if (max[k] !== undefined) put(Number(b.user_id), k, Number(b[k]) || 0);
+    }
+    const customKeys = Object.keys(max).filter((k) => !["casual_leave", "sick_leave", "leave_without_pay"].includes(k));
+    if (customKeys.length) {
+      const rows: any[] = (await queryDB("SELECT b.user_id, c.category_key, b.balance FROM leave_category_balances b JOIN leave_categories c ON c.id = b.category_id")) || [];
+      for (const r of rows) if (max[r.category_key] !== undefined) put(Number(r.user_id), String(r.category_key), Number(r.balance) || 0);
+    }
+    return { max, prev };
+  }
+
+  // A category with a carry-forward rule that no active Balance Workflow
+  // sets (e.g. an accrual-only Earn Leave) isn't rewritten by the rollover:
+  // its balance just loses what is above the carry-forward limit.
+  async function capUntouchedCarryCategories(carry: LeaveCarry): Promise<void> {
+    const touched = new Set<string>(
+      (((await queryDB(
+        "SELECT DISTINCT i.category_key FROM leave_balance_workflow_items i JOIN leave_balance_workflows w ON w.id = i.workflow_id WHERE w.is_active = 1"
+      )) as any[]) || []).map((r: any) => String(r.category_key))
+    );
+    for (const [key, cap] of Object.entries(carry.max)) {
+      if (touched.has(key)) continue;
+      if (["casual_leave", "sick_leave", "leave_without_pay"].includes(key)) {
+        await queryDB(`UPDATE leave_balances SET ${key} = LEAST(${key}, ?)`, [cap]);
+      } else {
+        const cat: any[] = (await queryDB("SELECT id FROM leave_categories WHERE category_key = ?", [key])) || [];
+        if (cat[0]) await queryDB("UPDATE leave_category_balances SET balance = LEAST(balance, ?) WHERE category_id = ?", [cap, Number(cat[0].id)]);
+      }
+    }
+  }
+
+  // Monthly accrual: for every Leave Type with "days earned per month", each
+  // eligible account (employee record active, joined before the month began,
+  // gender / months-of-service rule met) is credited once per COMPLETED month
+  // from the month the rule was turned on. Each credit is logged
+  // (leave_accrual_log, one row per account + type + month), so running it
+  // again — or on two servers at once — never credits a month twice.
+  async function runLeaveAccrual(): Promise<{ months: number; credited: number; days: number }> {
+    const out = { months: 0, credited: 0, days: 0 };
+    const rules: any[] = (await queryDB("SELECT * FROM leave_category_policies WHERE accrual_per_month > 0 AND accrual_from IS NOT NULL")) || [];
+    if (!rules.length) return out;
+    const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Dhaka" });
+    const thisMonth = today.slice(0, 7);
+    const emps: any[] =
+      (await queryDB(
+        `SELECT e.user_id, e.gender, e.joining_date FROM all_employees e
+           JOIN users u ON u.id = e.user_id
+          WHERE e.user_id IS NOT NULL AND COALESCE(e.is_active, 1) = 1 AND e.joining_date IS NOT NULL
+            AND u.role IN ('admin', 'user') AND COALESCE(u.is_blocked, 0) = 0`
+      )) || [];
+    for (const r of rules) {
+      const key = String(r.category_key);
+      const rules1 = await getLeavePolicy(key);
+      let ym = String(r.accrual_from);
+      // At most the last 36 months, in case the server was off for long.
+      const floor = (() => {
+        const d = new Date(`${thisMonth}-01T00:00:00Z`);
+        d.setUTCMonth(d.getUTCMonth() - 36);
+        return d.toISOString().slice(0, 7);
+      })();
+      if (ym < floor) ym = floor;
+      while (ym < thisMonth) {
+        const first = `${ym}-01`;
+        const done = new Set<number>(
+          (((await queryDB("SELECT user_id FROM leave_accrual_log WHERE category_key = ? AND month_year = ?", [key, ym])) as any[]) || []).map((x: any) => Number(x.user_id))
+        );
+        for (const e of emps) {
+          const uid = Number(e.user_id);
+          if (done.has(uid)) continue;
+          const joined = ymd(e.joining_date);
+          if (!joined || joined > first) continue;
+          if (eligibilityProblem(rules1, key, e, first)) continue;
+          let delta = rules1.accrual_per_month;
+          if (rules1.balance_cap !== null) delta = Math.max(0, Math.min(delta, rules1.balance_cap - (await getLeaveTypeBalance(uid, key))));
+          const ins: any = await queryDB("INSERT IGNORE INTO leave_accrual_log (user_id, category_key, month_year, days) VALUES (?, ?, ?, ?)", [uid, key, ym, delta]);
+          if (typeof ins?.affectedRows === "number" && ins.affectedRows === 0) continue; // another run got there first
+          if (delta > 0) {
+            await adjustLeaveTypeBalance(uid, key, delta);
+            out.credited++;
+            out.days += delta;
+          }
+        }
+        out.months++;
+        const d = new Date(`${ym}-01T00:00:00Z`);
+        d.setUTCMonth(d.getUTCMonth() + 1);
+        ym = d.toISOString().slice(0, 7);
+      }
+    }
+    return out;
+  }
+  async function checkAndRunLeaveAccrual(): Promise<void> {
+    try {
+      const groups: any[] = await queryDB("SELECT g.id, (SELECT c.id FROM companies c WHERE c.group_id = g.id AND c.is_mother = 1 LIMIT 1) AS mother_id FROM company_groups g").catch(() => []);
+      if (!groups.length) {
+        await runLeaveAccrual();
+        return;
+      }
+      for (const g of groups) {
+        const r = await companyStore.run({ companyId: Number(g.mother_id || DEFAULT_COMPANY_ID), groupId: Number(g.id), wholeGroup: true }, () => runLeaveAccrual());
+        if (r.credited) console.log(`✅ Leave accrual: ${r.days} day(s) credited to ${r.credited} account(s) (group ${g.id}).`);
+      }
+    } catch (err: any) {
+      console.warn("⚠️ Leave accrual failed: " + err.message);
+    }
+  }
+
   async function checkAndRunLeaveYearRollover(): Promise<void> {
     // Multi-company: each group keeps its own Year Settings (row id = group
     // id) and rolls over only its own people.
@@ -371,7 +511,9 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
       const actingUserId = superadmins[0] ? Number(superadmins[0].id) : settings.updated_by ? Number(settings.updated_by) : null;
       if (!actingUserId) return;
 
-      await applyAllActiveWorkflows(actingUserId);
+      const carry = await loadCarry();
+      await applyAllActiveWorkflows(actingUserId, undefined, undefined, carry || undefined);
+      if (carry) await capUntouchedCarryCategories(carry);
       await queryDB("UPDATE leave_year_settings SET last_rollover_year = ? WHERE id = ?", [currentYear, groupId]);
       console.log(`✅ Leave Year auto-rollover applied for ${currentYear} (start date ${startMonthDay}, group ${groupId}).`);
     } catch (err: any) {
@@ -657,7 +799,10 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
   // category defined before this feature existed) is filled in with the same
   // "no restriction, Reliever required" defaults leave_category_policies is
   // seeded with, so callers never have to special-case a missing row.
-  const DEFAULT_LEAVE_POLICY = { min_advance_notice_days: 0, reliever_required: true, max_consecutive_days: null as number | null, require_paid_leave_exhausted: false };
+  // Leave rules (Leave Manage layer "leave_rules"): all off by default.
+  const DEFAULT_LEAVE_RULES = { min_service_months: 0, gender: "any" as string, accrual_per_month: 0, balance_cap: null as number | null, carry_forward_max: null as number | null, accrual_from: null as string | null };
+  const DEFAULT_LEAVE_POLICY = { min_advance_notice_days: 0, reliever_required: true, max_consecutive_days: null as number | null, require_paid_leave_exhausted: false, ...DEFAULT_LEAVE_RULES };
+  const numOrNull = (v: any) => (v === null || v === undefined ? null : Number(v));
   async function getLeavePolicy(categoryKey: string) {
     const rows: any = await queryDB("SELECT * FROM leave_category_policies WHERE category_key = ?", [categoryKey]);
     if (rows.length === 0) return { category_key: categoryKey, ...DEFAULT_LEAVE_POLICY };
@@ -667,8 +812,44 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
       min_advance_notice_days: Number(r.min_advance_notice_days) || 0,
       reliever_required: !!Number(r.reliever_required),
       max_consecutive_days: r.max_consecutive_days === null ? null : Number(r.max_consecutive_days),
-      require_paid_leave_exhausted: !!Number(r.require_paid_leave_exhausted)
+      require_paid_leave_exhausted: !!Number(r.require_paid_leave_exhausted),
+      min_service_months: Number(r.min_service_months) || 0,
+      gender: ["female", "male"].includes(String(r.gender)) ? String(r.gender) : "any",
+      accrual_per_month: Number(r.accrual_per_month) || 0,
+      balance_cap: numOrNull(r.balance_cap),
+      carry_forward_max: numOrNull(r.carry_forward_max),
+      accrual_from: r.accrual_from ? String(r.accrual_from) : null
     };
+  }
+  type LeaveRules = typeof DEFAULT_LEAVE_RULES;
+
+  // Whole months between two YYYY-MM-DD dates (joining -> asOf).
+  const monthsBetween = (from: string, asOf: string) => {
+    const [fy, fm, fd] = from.split("-").map(Number);
+    const [ty, tm, td] = asOf.split("-").map(Number);
+    return (ty - fy) * 12 + (tm - fm) - (td < fd ? 1 : 0);
+  };
+  const ymd = (v: any): string | null => {
+    if (!v) return null;
+    if (v instanceof Date) return `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, "0")}-${String(v.getDate()).padStart(2, "0")}`;
+    const s = String(v).slice(0, 10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+  };
+  // Who may use a Leave Type (gender, months of service), from the employee
+  // record linked to the account. null = allowed, else the reason to show.
+  function eligibilityProblem(rules: LeaveRules, label: string, emp: any, onDate: string): string | null {
+    if (rules.gender !== "any") {
+      const g = String(emp?.gender || "").trim().toLowerCase();
+      if (!g) return `${label} depends on gender, and yours isn't on your employee record. Ask HR to fill it in.`;
+      if (g !== rules.gender) return `${label} is only for ${rules.gender} employees.`;
+    }
+    if (rules.min_service_months > 0) {
+      const joined = ymd(emp?.joining_date);
+      if (!joined) return `${label} needs ${rules.min_service_months} months of service, and your joining date isn't on your employee record. Ask HR to fill it in.`;
+      const served = monthsBetween(joined, onDate);
+      if (served < rules.min_service_months) return `${label} needs ${rules.min_service_months} months of service (you have ${Math.max(0, served)}).`;
+    }
+    return null;
   }
 
   app.get("/api/leave-policies", authenticateToken, async (req: any, res) => {
@@ -712,6 +893,61 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
         [categoryKey, minAdvanceNoticeDays, relieverRequired, maxConsecutiveDays, requirePaidLeaveExhausted, req.user.id]
       );
       res.json(await getLeavePolicy(categoryKey));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // PUT: the Leave Rules of one Leave Type (layer "leave_rules"): who may apply
+  // (gender, months of service), days earned per month and the cap on the
+  // balance, and how many days carry into the next Leave Year. Turning
+  // accrual on starts it with the NEXT month — nothing is back-paid.
+  app.put("/api/leave-policies/:categoryKey/rules", authenticateToken, requireLeaveManager, requireLeaveManagerLayer("leave_rules"), async (req: any, res) => {
+    try {
+      const categoryKey = String(req.params.categoryKey || "").trim();
+      if (!categoryKey || !(await isValidLeaveType(categoryKey))) return res.status(400).json({ error: "Unknown Leave Type." });
+      const b = req.body || {};
+      const gender = ["any", "female", "male"].includes(String(b.gender)) ? String(b.gender) : null;
+      if (!gender) return res.status(400).json({ error: "Who may apply must be Everyone, Female or Male." });
+      const minService = Math.trunc(Number(b.min_service_months) || 0);
+      if (minService < 0 || minService > 600) return res.status(400).json({ error: "Months of service must be between 0 and 600." });
+      const accrual = Math.round((Number(b.accrual_per_month) || 0) * 10) / 10;
+      if (accrual < 0 || accrual > 31) return res.status(400).json({ error: "Days earned per month must be between 0 and 31." });
+      const opt = (v: any, label: string): number | null | "bad" => {
+        if (v === null || v === undefined || v === "") return null;
+        const n = Math.round(Number(v) * 10) / 10;
+        return Number.isFinite(n) && n >= 0 && n <= 9999 ? n : "bad";
+      };
+      const cap = opt(b.balance_cap, "Balance cap");
+      const carry = opt(b.carry_forward_max, "Carry-forward limit");
+      if (cap === "bad" || carry === "bad") return res.status(400).json({ error: "Balance cap and carry-forward limit must be numbers (0 or more), or blank." });
+
+      const before = await getLeavePolicy(categoryKey);
+      // Accrual starts next month, whenever it is switched on (or back on).
+      let accrualFrom: string | null = before.accrual_from;
+      if (accrual > 0 && (before.accrual_per_month <= 0 || !accrualFrom)) {
+        const d = new Date(new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Dhaka" }).slice(0, 7) + "-01T00:00:00Z");
+        d.setUTCMonth(d.getUTCMonth() + 1);
+        accrualFrom = d.toISOString().slice(0, 7);
+      }
+      if (accrual <= 0) accrualFrom = null;
+      await queryDB(
+        `INSERT INTO leave_category_policies (category_key, min_service_months, gender, accrual_per_month, balance_cap, carry_forward_max, accrual_from, updated_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE min_service_months = VALUES(min_service_months), gender = VALUES(gender), accrual_per_month = VALUES(accrual_per_month),
+           balance_cap = VALUES(balance_cap), carry_forward_max = VALUES(carry_forward_max), accrual_from = VALUES(accrual_from), updated_by = VALUES(updated_by)`,
+        [categoryKey, minService, gender, accrual, cap, carry, accrualFrom, req.user.id]
+      );
+      res.json(await getLeavePolicy(categoryKey));
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST: credit any completed month that is still owed (also runs by itself).
+  app.post("/api/leave-accrual/run", authenticateToken, requireLeaveManager, requireLeaveManagerLayer("leave_rules"), async (_req: any, res) => {
+    try {
+      res.json(await runLeaveAccrual());
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
@@ -1075,6 +1311,13 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
       const diffDays = Math.round((e.getTime() - s.getTime()) / (1000 * 60 * 60 * 24)) + 1;
       const dayCount = diffDays <= 0 ? 0 : (is_half_day ? Math.max(0.5, diffDays - 0.5) : diffDays);
       if (dayCount <= 0) return res.status(400).json({ error: "Day Count must be greater than 0." });
+
+      // Leave rules: who may use this Leave Type (gender, months of service).
+      if (policy.gender !== "any" || policy.min_service_months > 0) {
+        const empRows: any = await queryDB("SELECT gender, joining_date FROM all_employees WHERE user_id = ? LIMIT 1", [req.user.id]);
+        const problem = eligibilityProblem(policy, await getLeaveTypeLabel(leave_type), empRows[0], String(start_date));
+        if (problem) return res.status(400).json({ error: problem });
+      }
 
       if (policy.max_consecutive_days !== null && dayCount > policy.max_consecutive_days) {
         return res.status(400).json({
@@ -1798,6 +2041,9 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
   if (runsBackgroundJobs()) {
     checkAndRunLeaveYearRollover();
     setInterval(checkAndRunLeaveYearRollover, 6 * 60 * 60 * 1000);
+    // Monthly accrual (Leave Rules), checked at start and every 6 hours too.
+    setTimeout(checkAndRunLeaveAccrual, 30_000);
+    setInterval(checkAndRunLeaveAccrual, 6 * 60 * 60 * 1000);
   }
 
   return { ensureDefaultLeaveBalances };

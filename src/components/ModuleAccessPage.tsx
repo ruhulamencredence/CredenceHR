@@ -22,6 +22,7 @@ import {
   Department,
   EXPLICIT_ONLY_LAYERS,
   LEAVE_MANAGE_LAYERS,
+  LEAVE_MANAGE_EXPLICIT_ONLY,
   PERMISSION_LAYER_MODULES,
   User,
   layersFor
@@ -220,7 +221,7 @@ function accessOf(u: User): Access {
     layers[m] = new Set(saved && saved.length > 0 ? saved : modules.has(m) ? defaultLayers(m) : []);
   }
   const savedLeave = u.module_permission_layers?.leave_manage;
-  layers.leave_manage = new Set(savedLeave && savedLeave.length > 0 ? savedLeave : u.can_manage_leave ? LEAVE_MANAGE_LAYERS.map((l) => l.key) : []);
+  layers.leave_manage = new Set(savedLeave && savedLeave.length > 0 ? savedLeave : u.can_manage_leave ? LEAVE_MANAGE_LAYERS.map((l) => l.key).filter((k) => !LEAVE_MANAGE_EXPLICIT_ONLY.includes(k)) : []);
   const flags = Object.fromEntries(FLAGS.map((f) => [f.key, flagOf(u, f.key)])) as Record<FlagKey, boolean>;
   if (u.role !== 'admin') flags.can_access_user_panel = false;
   return { modules, layers, flags };
@@ -458,7 +459,7 @@ export function ModuleAccessPage({ token, users, initialIds, departments, viewer
     edit((a, u) => {
       if (!flagEligible(f)(u)) return;
       a.flags[f.key] = on;
-      if (f.key === 'can_manage_leave' && on && a.layers.leave_manage.size === 0) a.layers.leave_manage = new Set(LEAVE_MANAGE_LAYERS.map((l) => l.key));
+      if (f.key === 'can_manage_leave' && on && a.layers.leave_manage.size === 0) a.layers.leave_manage = new Set(LEAVE_MANAGE_LAYERS.map((l) => l.key).filter((k) => !LEAVE_MANAGE_EXPLICIT_ONLY.includes(k)));
     });
   const setModule = (m: string, on: boolean) =>
     edit((a) => {

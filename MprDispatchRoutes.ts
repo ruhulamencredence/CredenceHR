@@ -32,6 +32,7 @@
 
 import type { Express } from "express";
 import { resolveMinLeadDays, addDaysToDateStr } from "./deliveryDateConditions";
+import { poLinesFor } from "./PoImportRoutes";
 
 interface Deps {
   authenticateToken: any;
@@ -368,8 +369,10 @@ export function registerMprDispatchRoutes(app: Express, deps: Deps) {
       sql += " ORDER BY e.delivery_date ASC, p.project_name ASC, e.id ASC";
       const rows: any[] = (await queryDB(sql, params)) || [];
       const ds = await dispatchesFor(rows.map((r) => Number(r.id)));
+      // Purchase orders put on these rows by Reports -> P.O Import.
+      const pos = await poLinesFor(queryDB, rows.map((r) => Number(r.id)));
       res.setHeader("Cache-Control", "no-store");
-      res.json({ all, rows: rows.map((r) => rowOut(r, ds.get(Number(r.id)) || [])) });
+      res.json({ all, rows: rows.map((r) => ({ ...rowOut(r, ds.get(Number(r.id)) || []), pos: pos.get(Number(r.id)) || [] })) });
     })
   );
 

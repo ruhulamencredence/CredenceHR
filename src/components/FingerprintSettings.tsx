@@ -13,7 +13,7 @@ import { Capacitor } from '@capacitor/core';
 import { MailPopup as Popup, primaryBtn, ghostBtn } from './mail/MailPopup';
 import { confirmDialog } from '../lib/confirmDialog';
 import { apiUrl } from '../lib/api';
-import { enableFingerprint, fingerprintSupported, removeFingerprint, savedFingerprint } from '../lib/fingerprint';
+import { APP_TOO_OLD, enableFingerprint, fingerprintDetails, fingerprintStatus, removeFingerprint, savedFingerprint } from '../lib/fingerprint';
 import type { User } from '../types';
 
 interface Device {
@@ -34,8 +34,10 @@ const workspaceCode = () => {
 
 export const FingerprintSettings: React.FC<{ token: string; user: User; onClose: () => void }> = ({ token, user, onClose }) => {
   const [devices, setDevices] = useState<Device[] | null>(null);
-  const [supported, setSupported] = useState<boolean | null>(null);
+  const [status, setStatus] = useState<'ok' | 'app_old' | 'no_sensor' | null>(null);
   const [busy, setBusy] = useState(false);
+  const [step, setStep] = useState('');
+  const [details, setDetails] = useState('');
   const [error, setError] = useState('');
   const [done, setDone] = useState('');
   const [hereId, setHereId] = useState(() => savedFingerprint()?.id || 0);
@@ -53,7 +55,8 @@ export const FingerprintSettings: React.FC<{ token: string; user: User; onClose:
   }, [token]);
   useEffect(() => {
     void load();
-    fingerprintSupported().then(setSupported);
+    fingerprintStatus().then(setStatus);
+    fingerprintDetails().then(setDetails);
   }, [load]);
 
   const onHere = !!hereId && !!devices?.some((d) => d.id === hereId);
@@ -62,7 +65,7 @@ export const FingerprintSettings: React.FC<{ token: string; user: User; onClose:
     setError('');
     setDone('');
     try {
-      await enableFingerprint(token, user, workspaceCode());
+      await enableFingerprint(token, user, workspaceCode(), setStep);
       setHereId(savedFingerprint()?.id || 0);
       setDone('Done — next time, tap "Sign in with fingerprint" on the sign-in screen.');
       await load();
@@ -98,16 +101,19 @@ export const FingerprintSettings: React.FC<{ token: string; user: User; onClose:
             <p className="text-sm text-slate-700 flex items-center justify-center gap-1.5">
               <CheckCircle2 className="w-4 h-4 text-emerald-500" /> On for this {app ? 'phone' : 'browser'}
             </p>
-          ) : supported === false ? (
+          ) : status === 'app_old' ? (
+            <p className="text-sm text-amber-800 bg-amber-50 rounded-xl px-3 py-2">{APP_TOO_OLD}</p>
+          ) : status === 'no_sensor' ? (
             <p className="text-sm text-slate-600">
               {app ? "This phone has no fingerprint or face set up. Add one in the phone's Settings → Security, then come back." : "This browser / computer has no fingerprint, face or Windows Hello set up, so it can't be used here."}
             </p>
           ) : (
             <>
               <p className="text-sm text-slate-600">Sign in with your fingerprint{app ? '' : ' (or face / Windows Hello)'} instead of typing the password on this {app ? 'phone' : 'browser'}.</p>
-              <button type="button" className={primaryBtn} onClick={() => void turnOn()} disabled={busy || supported === null}>
+              <button type="button" className={primaryBtn} onClick={() => void turnOn()} disabled={busy || status === null}>
                 {busy && <Loader2 className="w-4 h-4 animate-spin" />} Turn on for this {app ? 'phone' : 'browser'}
               </button>
+              {busy && <p className="text-xs text-slate-600">{app ? step || 'Starting…' : 'Follow your browser\'s fingerprint / Windows Hello window…'}</p>}
             </>
           )}
         </div>
@@ -145,6 +151,7 @@ export const FingerprintSettings: React.FC<{ token: string; user: User; onClose:
             </div>
           )}
         </div>
+        {details && <p className="text-[10px] text-slate-400 break-words">{details}</p>}
         <p className="text-[11px] text-slate-500">
           Your fingerprint never leaves the {app ? 'phone' : 'device'} — the {app ? 'phone' : 'browser'} only confirms it's you. Changing your password turns fingerprint sign-in off everywhere.
         </p>

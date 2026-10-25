@@ -7,7 +7,7 @@ export default defineConfig(() => {
   return {
     plugins: [react(), tailwindcss()],
     // The build date, shown as the website's version (feedback, Version Info).
-    define: { __APP_BUILD__: JSON.stringify(new Date().toISOString().slice(0, 10)) },
+    define: { __APP_BUILD__: JSON.stringify(new Date().toISOString().slice(0, 16).replace('T', ' ')) },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
