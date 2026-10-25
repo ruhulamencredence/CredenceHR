@@ -882,21 +882,36 @@ async function alertNoApprover(sourceType: string, requestId: number, requestedB
     const label = APPROVAL_ALERT[sourceType]?.label || "Request";
     const admins: any[] =
       (await queryDB(
-        `SELECT DISTINCT u.id FROM users u
+        `SELECT DISTINCT u.id, u.role FROM users u
           WHERE COALESCE(u.is_blocked, 0) = 0 AND (u.role = 'superadmin'
              OR EXISTS (SELECT 1 FROM admin_module_permissions m WHERE m.user_id = u.id AND m.module_key = 'approvals'))`
       )) || [];
+    // Only a Superadmin can decide such a request, so only a Superadmin is
+    // told to; everyone else is told how to give it an approver.
+    const name = who[0]?.name || "An employee";
     for (const a of admins) {
       if (Number(a.id) === Number(requestedBy)) continue;
       await createAlert(queryDB, {
         userId: Number(a.id),
         type: "hr_action",
         title: "No approver set",
-        message: `${who[0]?.name || "An employee"}'s ${label} is waiting: they have no Supervisor and no Approval Template. Set one (Employees -> Supervisor, or Approval Templates) and it moves there, or decide it yourself in Approvals.`,
+        message:
+          a.role === "superadmin"
+            ? `${name}'s ${label} is waiting: they have no Supervisor and no Approval Template. Set one (Employees -> Supervisor, or Approval Templates) and it moves there by itself, or decide it yourself in Admin Panel -> Approvals.`
+            : `${name}'s ${label} is waiting: they have no Supervisor and no Approval Template. Set one (Employees -> Supervisor, or Approval Templates) and it moves there by itself. Until then only a Superadmin can decide it.`,
         relatedType: "approval_request",
         relatedId: requestId
       }).catch(() => {});
     }
+    // The employee hears it too, so they don't wait on nobody.
+    await createAlert(queryDB, {
+      userId: Number(requestedBy),
+      type: APPROVAL_ALERT[sourceType]?.type || "hr_action",
+      title: "No approver set yet",
+      message: `Your ${label} has no approver yet: no Supervisor or Approval Template is set for you. HR has been told — it moves on by itself once one is set. You can remind HR.`,
+      relatedType: "approval_request",
+      relatedId: requestId
+    }).catch(() => {});
   } catch (err: any) {
     console.warn("⚠️ Could not alert about a request with no approver: " + err.message);
   }
@@ -1400,6 +1415,9 @@ async function attachUserClaimApproval(rows: any[]): Promise<any[]> {
           current_step: r.current_step,
           total_steps: r.total_steps,
           current_approver_name: currentApprovers.length > 0 ? currentApprovers.map((a) => a.user_name || `User #${a.user_id}`).join(" or ") : null,
+          // No Supervisor and no Template yet (getCurrentStepApprovers has
+          // already moved it if one exists now).
+          no_approver: r.status === "pending" && Number(r.awaiting_approver) === 1,
           actions
         }
       };
@@ -1445,6 +1463,7 @@ async function attachAttendanceCorrectionApproval(rows: any[]): Promise<any[]> {
           current_step: r.current_step,
           total_steps: r.total_steps,
           current_approver_name: currentApprovers.length > 0 ? currentApprovers.map((a) => a.user_name || `User #${a.user_id}`).join(" or ") : null,
+          no_approver: r.status === "pending" && Number(r.awaiting_approver) === 1,
           actions
         }
       };

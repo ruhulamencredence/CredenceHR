@@ -635,6 +635,8 @@ export interface ApprovalStatusSummary {
   status: 'pending' | 'approved' | 'rejected';
   current_step: number;
   total_steps: number;
+  // Pending with nobody: no Supervisor and no Approval Template set yet.
+  no_approver?: boolean;
 }
 
 // Same idea as ApprovalStatusSummary, but for an Attendance Correction request
@@ -998,6 +1000,8 @@ export interface LeaveApplication {
   created_at?: string;
   current_step?: number | null;
   total_steps?: number | null;
+  // Pending with nobody: no Supervisor and no Approval Template set yet.
+  no_approver?: boolean;
   // Reliever workflow — picked by the applicant at submission (ANY account,
   // required); the request sits waiting on the Reliever's own Approve/Reject
   // BEFORE it ever reaches the Dynamic Approval Engine. See POST

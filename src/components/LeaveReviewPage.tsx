@@ -255,7 +255,7 @@ useLiveRefresh(() => load(true));
                         </span>
                       </td>
                       <td className="px-4 py-3 text-slate-600">
-                        {a.status === 'pending' ? (a.approver_name || '—') : (a.decided_by_name || '—')}
+                        {a.status === 'pending' ? (a.no_approver ? 'No approver set yet' : a.approver_name || '—') : (a.decided_by_name || '—')}
                         {a.status === 'rejected' && a.remarks && (
                           <span className="block text-[11px] text-slate-400 mt-0.5">Reason: {a.remarks}</span>
                         )}
@@ -316,7 +316,7 @@ useLiveRefresh(() => load(true));
                 </div>
                 {a.status === 'pending' ? (
                   <div className="mt-2.5 pt-2.5 border-t border-slate-100 flex items-center gap-1.5 text-[11px] text-amber-700">
-                    <Clock className="w-3 h-3" /> Awaiting approval{a.approver_name ? ` from ${a.approver_name}` : ''}
+                    <Clock className="w-3 h-3" /> {a.no_approver ? 'No approver set yet — tell HR' : `Awaiting approval${a.approver_name ? ` from ${a.approver_name}` : ''}`}
                     {a.total_steps ? <span className="text-amber-500">&nbsp;(Layer {a.current_step} of {a.total_steps})</span> : null}
                   </div>
                 ) : (

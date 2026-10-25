@@ -117,6 +117,15 @@ export const ConveyanceClaimDetailModal: React.FC<ConveyanceClaimDetailModalProp
             </div>
           )}
 
+          {claim.status === 'pending' && claim.edit_mode !== 'returned' && claim.approval?.no_approver && (
+            <div className="flex items-start gap-2 text-xs px-3 py-2.5 rounded-xl bg-amber-50 text-amber-700">
+              <Clock className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+              <div>
+                <div className="font-semibold">No approver set yet</div>
+                <p className="mt-0.5">No Supervisor or Approval Template is set for you. HR has been told — it moves on by itself once one is set.</p>
+              </div>
+            </div>
+          )}
           {claim.status === 'pending' && claim.edit_mode !== 'returned' && claim.approval?.current_approver_name && (
             <div className="flex items-start gap-2 text-xs px-3 py-2.5 rounded-xl bg-amber-50 text-amber-700">
               <Clock className="w-3.5 h-3.5 shrink-0 mt-0.5" />

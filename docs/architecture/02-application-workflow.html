@@ -161,7 +161,7 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
   AP[&quot;Approval engine:&lt;br/&gt;টেমপ্লেটের ধাপ ধরে অনুমোদন&quot;] --&gt; D{&quot;সিদ্ধান্ত&quot;}
   D -- approved --&gt; OK[&quot;ছুটি মঞ্জুর&lt;br/&gt;payroll ও উপস্থিতিতে ছুটি হিসেবে আসে&quot;]
   D -- rejected --&gt; RJ[&quot;ব্যালেন্সে দিন ফেরত&quot;]
-  S -. approver না থাকলে .-&gt; W[&quot;অপেক্ষায় থাকে&lt;br/&gt;⚠ বর্তমানে কেউ approve করতে পারে না (R-01)&quot;]
+  S -. Supervisor ও Template কোনোটাই নেই .-&gt; W[&quot;অপেক্ষায় থাকে: কর্মী দেখেন 'No approver set yet — tell HR'&lt;br/&gt;Superadmin ও HR alert পান; শুধু Superadmin সিদ্ধান্ত দিতে পারেন&lt;br/&gt;Supervisor/Template সেট হলে নিজে থেকে সেখানে যায়&quot;]
 </pre>
 <ul>
 <li>ব্যালেন্স: ছুটির বছর শুরুতে নীতি (workflow) অনুযায়ী বসে; বছর শেষে rollover job চলে (<code>LeaveRoutes.ts</code>, ৬ ঘণ্টা পরপর পরীক্ষা)।</li>
@@ -179,7 +179,9 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
   ACT --&gt;|শেষ ধাপ approved| FIN[&quot;মূল রেকর্ডের অবস্থা বদলায়&lt;br/&gt;(ছুটি, bill তৈরি ...)&quot;]
   ACT --&gt;|rejected| REJ[&quot;আবেদনকারীকে জানানো&quot;]
 </pre>
-<p>ফাইল: <code>ApprovalRoutes.ts</code> (তালিকা ও act: <code>GET /api/my-approvals</code>, <code>POST /api/my-approvals/:id/act</code>), <code>Alerts.ts</code> (notification)। প্রতি ১০ মিনিটে <code>rehomeAwaitingApprovals</code> অপেক্ষমাণ আবেদন নতুন approver-এ সরায়।</p>
+<p><strong>কে প্রথম অনুমোদন দেন:</strong> কর্মীর Direct Supervisor (না থাকলে Department Supervisor) ধাপ ১, তারপর Template-এর layer। Supervisor নিজে আবেদন করলে সরাসরি Template-এর layer-এ যায় (টেস্ট <code>test-logs/2026-10-25/07-supervisor-chain.log</code>, ৩৬/৩৬)।
+<strong>Supervisor ও Template দুটোই না থাকলে:</strong> আবেদন "approver নেই" অবস্থায় অপেক্ষা করে (<code>approval_requests.awaiting_approver = 1</code>)। কর্মী alert পান এবং নিজের পেজে "No approver set yet — tell HR" দেখেন। Superadmin ও Approvals মডিউলের Admin alert পান। শুধু Superadmin Admin Panel → Approvals থেকে সিদ্ধান্ত দিতে পারেন। Supervisor বা Template সেট হলে আবেদন নিজে থেকে সেখানে সরে যায়: কেউ Approvals তালিকা খুললে, নইলে প্রতি ১০ মিনিটে (<code>rehomeAwaitingApprovals</code>)। টেস্ট: <code>test-logs/2026-10-25/09-no-approver-after-fix.log</code>।
+ফাইল: <code>ApprovalRoutes.ts</code> (তালিকা ও act: <code>GET /api/my-approvals</code>, <code>POST /api/my-approvals/:id/act</code>), <code>Alerts.ts</code> (notification)।</p>
 <hr />
 <h2 id="_2">৮. উপস্থিতি: তিন উৎস, একটি হিসাব</h2>
 <pre class="mermaid">flowchart TD

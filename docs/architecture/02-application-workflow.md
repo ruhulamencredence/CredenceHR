@@ -177,7 +177,7 @@ flowchart TD
   AP["Approval engine:<br/>টেমপ্লেটের ধাপ ধরে অনুমোদন"] --> D{"সিদ্ধান্ত"}
   D -- approved --> OK["ছুটি মঞ্জুর<br/>payroll ও উপস্থিতিতে ছুটি হিসেবে আসে"]
   D -- rejected --> RJ["ব্যালেন্সে দিন ফেরত"]
-  S -. approver না থাকলে .-> W["অপেক্ষায় থাকে<br/>⚠ বর্তমানে কেউ approve করতে পারে না (R-01)"]
+  S -. Supervisor ও Template কোনোটাই নেই .-> W["অপেক্ষায় থাকে: কর্মী দেখেন 'No approver set yet — tell HR'<br/>Superadmin ও HR alert পান; শুধু Superadmin সিদ্ধান্ত দিতে পারেন<br/>Supervisor/Template সেট হলে নিজে থেকে সেখানে যায়"]
 ```
 
 - ব্যালেন্স: ছুটির বছর শুরুতে নীতি (workflow) অনুযায়ী বসে; বছর শেষে rollover job চলে (`LeaveRoutes.ts`, ৬ ঘণ্টা পরপর পরীক্ষা)।
@@ -199,7 +199,9 @@ flowchart LR
   ACT -->|rejected| REJ["আবেদনকারীকে জানানো"]
 ```
 
-ফাইল: `ApprovalRoutes.ts` (তালিকা ও act: `GET /api/my-approvals`, `POST /api/my-approvals/:id/act`), `Alerts.ts` (notification)। প্রতি ১০ মিনিটে `rehomeAwaitingApprovals` অপেক্ষমাণ আবেদন নতুন approver-এ সরায়।
+**কে প্রথম অনুমোদন দেন:** কর্মীর Direct Supervisor (না থাকলে Department Supervisor) ধাপ ১, তারপর Template-এর layer। Supervisor নিজে আবেদন করলে সরাসরি Template-এর layer-এ যায় (টেস্ট `test-logs/2026-10-25/07-supervisor-chain.log`, ৩৬/৩৬)।
+**Supervisor ও Template দুটোই না থাকলে:** আবেদন "approver নেই" অবস্থায় অপেক্ষা করে (`approval_requests.awaiting_approver = 1`)। কর্মী alert পান এবং নিজের পেজে "No approver set yet — tell HR" দেখেন। Superadmin ও Approvals মডিউলের Admin alert পান। শুধু Superadmin Admin Panel → Approvals থেকে সিদ্ধান্ত দিতে পারেন। Supervisor বা Template সেট হলে আবেদন নিজে থেকে সেখানে সরে যায়: কেউ Approvals তালিকা খুললে, নইলে প্রতি ১০ মিনিটে (`rehomeAwaitingApprovals`)। টেস্ট: `test-logs/2026-10-25/09-no-approver-after-fix.log`।
+ফাইল: `ApprovalRoutes.ts` (তালিকা ও act: `GET /api/my-approvals`, `POST /api/my-approvals/:id/act`), `Alerts.ts` (notification)।
 
 ---
 

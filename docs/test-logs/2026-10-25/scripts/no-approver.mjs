@@ -52,11 +52,15 @@ for (const [type, label, r, table] of items) {
 const myL = list((await api(H.token, 'GET', '/api/leave-applications/mine')).body)[0];
 const myC = list((await api(H.token, 'GET', '/api/user-claims/mine')).body)[0];
 const myT = list((await api(H.token, 'GET', '/api/attendance/corrections/mine')).body)[0];
-say('4.1', 'What the employee sees on their own pages', `Leave: ${myL?.status} (waiting on: ${JSON.stringify(myL?.current_approvers ?? myL?.pending_with ?? myL?.approval?.current_approvers ?? null)}); Claim: ${myC?.status}; Timesheet: ${myT?.status}`);
+say('4.1', 'What the employee sees on their own pages (no_approver = page shows "No approver set yet — tell HR")', `Leave: ${myL?.status}, no_approver=${myL?.no_approver}; Claim: ${myC?.status}, no_approver=${myC?.approval?.no_approver}; Timesheet: ${myT?.status}, no_approver=${myT?.approval?.no_approver}`);
+say('4.1b', 'Alert to the employee', `${sql(`SELECT COUNT(*) FROM alerts WHERE user_id=${H.uid} AND title='No approver set yet'`)} × "${sql(`SELECT message FROM alerts WHERE user_id=${H.uid} AND title='No approver set yet' LIMIT 1`)}"`);
 // Alerts.
 const alertsTo = (uid) => sql(`SELECT COUNT(*) FROM alerts WHERE user_id=${uid} AND title='No approver set'`);
 say('4.2', '"No approver set" alerts sent', `Superadmin: ${alertsTo(1)}, HR (Approvals module): ${alertsTo(hrId)}`);
 say('4.3', 'What the alert to HR says', sql(`SELECT message FROM alerts WHERE user_id=${hrId} AND title='No approver set' LIMIT 1`));
+say('4.4', 'What the alert to the Superadmin says', sql(`SELECT message FROM alerts WHERE user_id=1 AND title='No approver set' LIMIT 1`));
+// STOP_AFTER_SUBMIT=1 leaves the three requests waiting (for looking at the pages).
+if (process.env.STOP_AFTER_SUBMIT) process.exit(0);
 // Queues.
 const saMine = list((await api(SA, 'GET', '/api/my-approvals')).body).filter((r) => items.some(([t]) => t === r.source_type)).length;
 const saAdmin = list((await api(SA, 'GET', '/api/approvals')).body).filter((r) => r.status === 'pending' && Number(r.awaiting_approver) === 1);

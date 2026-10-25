@@ -1182,12 +1182,15 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
           let currentApproverName = r.approver_name;
           let currentStep: number | null = null;
           let totalSteps: number | null = null;
+          let noApprover = false;
           if (ar) {
             totalSteps = Number(ar.total_steps);
             currentStep = Number(ar.current_step);
             if (ar.status === "pending") {
               const approvers = await getCurrentStepApprovers(ar);
               currentApproverName = approvers.length > 0 ? approvers.map((a) => a.user_name || `User #${a.user_id}`).join(" or ") : null;
+              // No Supervisor and no Template yet — the page says so.
+              noApprover = Number(ar.awaiting_approver) === 1;
             }
           }
           return {
@@ -1202,6 +1205,7 @@ export function registerLeaveRoutes(app: Express, deps: LeaveRouteDeps) {
             approver_name: currentApproverName,
             current_step: currentStep,
             total_steps: totalSteps,
+            no_approver: noApprover,
             reliever_name: r.reliever_name || null,
             decided_by_name: deciderNames.get(Number(r.decided_by)) || null,
             leave_type_label: leaveTypeLabelFor(r.leave_type)

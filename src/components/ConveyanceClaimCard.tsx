@@ -210,6 +210,9 @@ useLiveRefresh(() => fetchClaims(true));
                       {c.category} &middot; ৳{Number(c.amount).toLocaleString('en-BD', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </div>
                     <ClaimEditNote claim={c} />
+                    {c.status === 'pending' && c.edit_mode !== 'returned' && c.approval?.no_approver && (
+                      <div className="text-[11px] text-amber-700 mt-0.5">No approver set yet — tell HR</div>
+                    )}
                     {c.status === 'pending' && c.edit_mode !== 'returned' && c.approval?.current_approver_name && (
                       <div className="text-[11px] text-amber-600 mt-0.5">
                         Waiting on {c.approval.current_approver_name}
@@ -264,6 +267,9 @@ useLiveRefresh(() => fetchClaims(true));
                         <UserClaimStatusBadge status={c.status} />
                       </div>
                       <ClaimEditNote claim={c} />
+                      {c.status === 'pending' && c.edit_mode !== 'returned' && c.approval?.no_approver && (
+                        <div className="text-[10px] text-amber-700 mt-0.5">No approver set yet — tell HR</div>
+                      )}
                       {c.status === 'pending' && c.edit_mode !== 'returned' && c.approval?.current_approver_name && (
                         <div className="text-[10px] text-amber-600 mt-0.5">
                           Waiting on {c.approval.current_approver_name}

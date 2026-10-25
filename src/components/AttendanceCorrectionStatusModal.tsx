@@ -172,9 +172,9 @@ export const AttendanceCorrectionStatusModal: React.FC<AttendanceCorrectionStatu
                             action ? 'text-emerald-700' : isCurrent ? 'text-amber-700' : 'text-slate-400'
                           }`}
                         >
-                          {action ? action.approver_name : isCurrent ? approval!.current_approver_name || `Step ${step}` : `Step ${step}`}
+                          {action ? action.approver_name : isCurrent ? (approval!.no_approver ? 'No approver set yet' : approval!.current_approver_name || `Step ${step}`) : `Step ${step}`}
                         </p>
-                        {isCurrent && <p className="text-[10px] text-amber-600">Waiting for review</p>}
+                        {isCurrent && <p className="text-[10px] text-amber-600">{approval!.no_approver ? 'Tell HR — it moves on once a Supervisor or Template is set' : 'Waiting for review'}</p>}
                       </div>
                     </div>
                   );
