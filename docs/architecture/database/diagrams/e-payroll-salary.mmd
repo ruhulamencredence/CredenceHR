@@ -1,0 +1,144 @@
+erDiagram
+  payrolls {
+    int id PK
+    int employee_id FK
+    varchar month_year
+    int total_working_days
+    int present_days
+    int absent_days
+    int leave_days
+  }
+  payroll_line_items {
+    int id PK
+    int payroll_id FK
+    int employee_id FK
+    varchar month_year
+    enum source
+    int source_id
+    varchar name
+  }
+  payroll_batch_events {
+    int id PK
+    int user_id FK
+    int company_id
+    int batch_id
+    varchar action
+    varchar note
+  }
+  pay_grades {
+    int id PK
+    varchar grade_name
+    varchar grade_code
+    decimal basic_salary
+    varchar description
+    tinyint is_active
+    int company_id
+  }
+  pending_bonuses {
+    int id PK
+    int employee_id FK
+    varchar month_year
+    decimal amount
+    varchar reason
+  }
+  payroll_batches {
+    int id PK
+    int company_id
+    varchar month_year
+    enum status
+    timestamp submitted_at
+    int audited_by
+    timestamp audited_at
+  }
+  payroll_payment_splits {
+    int id PK
+    int payroll_id FK
+    enum account_type
+    varchar account_label
+    varchar bank_name
+    varchar branch_name
+    varchar provider
+  }
+  salary_adjustments {
+    int id PK
+    int employee_id FK
+    enum kind
+    varchar for_month
+    decimal total_amount
+    decimal installment_amount
+    varchar start_month
+  }
+  pay_grade_components {
+    int id PK
+    int pay_grade_id FK
+    int component_id FK
+    decimal amount
+  }
+  final_settlements {
+    int id PK
+    int exit_id FK
+    int user_id FK
+    int prepared_by FK
+    decimal unused_leave_days
+    decimal unused_leave_encashment
+    decimal gratuity_amount
+  }
+  salary_structures {
+    int id PK
+    int employee_id FK
+    decimal basic_salary
+    decimal house_rent
+    decimal medical_allowance
+    decimal conveyance_allowance
+    decimal other_allowance
+  }
+  salary_components {
+    int id PK
+    varchar name
+    enum component_type
+    varchar description
+    tinyint is_active
+    int company_id
+  }
+  salary_month_settings {
+    int id PK
+    int company_id
+    tinyint start_day
+    char effective_month
+  }
+  advance_requests {
+    int id PK
+    int employee_id FK
+    int advance_id FK
+    decimal total_amount
+    decimal monthly_installment
+    varchar reason
+    enum status
+  }
+  all_employees {
+    int id PK
+  }
+  employee_advances {
+    int id PK
+  }
+  exit_requests {
+    int id PK
+  }
+  users {
+    int id PK
+  }
+  all_employees ||--o{ payrolls : "employee_id"
+  payrolls ||--o{ payroll_line_items : "payroll_id"
+  all_employees ||..o{ payroll_line_items : "employee_id"
+  users ||..o{ payroll_batch_events : "user_id"
+  all_employees ||--o{ pending_bonuses : "employee_id"
+  payrolls ||--o{ payroll_payment_splits : "payroll_id"
+  all_employees ||--o{ salary_adjustments : "employee_id"
+  salary_components ||--o{ pay_grade_components : "component_id"
+  pay_grades ||--o{ pay_grade_components : "pay_grade_id"
+  exit_requests ||--o{ final_settlements : "exit_id"
+  users ||--o{ final_settlements : "prepared_by"
+  users ||--o{ final_settlements : "user_id"
+  all_employees ||--o{ salary_structures : "employee_id"
+  employee_advances ||--o{ advance_requests : "advance_id"
+  all_employees ||--o{ advance_requests : "employee_id"

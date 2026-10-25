@@ -1,0 +1,251 @@
+<!doctype html><html lang="bn"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ডাটাবেস ডায়াগ্রাম — CredenceHR</title><style>body{margin:0;font:16px/1.65 'Noto Sans Bengali','Segoe UI',system-ui,sans-serif;color:#1b1233;background:#f6f4fb}
+nav{position:sticky;top:0;z-index:5;background:#2a0f5c;display:flex;gap:4px;flex-wrap:wrap;padding:8px 14px}
+nav a{color:#e9ddff;text-decoration:none;font-size:14px;padding:6px 12px;border-radius:999px}
+nav a:hover,nav a.on{background:#7c3aed;color:#fff}
+main{max-width:1180px;margin:0 auto;padding:24px 22px 80px;background:#fff;box-shadow:0 0 40px rgba(60,20,120,.08)}
+h1{font-size:30px;border-bottom:3px solid #7c3aed;padding-bottom:8px}h2{margin-top:2em;border-bottom:1px solid #e5defa;padding-bottom:4px}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14px;display:block;overflow-x:auto}
+th,td{border:1px solid #ddd5f3;padding:6px 10px;vertical-align:top;text-align:left}th{background:#efe9ff}
+code{background:#f1ecff;padding:1px 5px;border-radius:4px;font-size:.92em}pre{background:#f7f5fc;padding:12px;border-radius:8px;overflow:auto}
+pre.mermaid{background:#fff;border:1px solid #e5defa;text-align:center;overflow:auto;padding:14px}
+img{max-width:100%;height:auto;border:1px solid #e5defa;border-radius:8px}blockquote{border-left:4px solid #a78bfa;margin:12px 0;padding:4px 14px;background:#faf8ff}
+details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href="../index.html">সূচি</a><a class="on" href="../database/README.html">ডাটাবেস ডায়াগ্রাম</a><a class="" href="../database/data-dictionary.html">Data Dictionary</a><a class="" href="../02-application-workflow.html">Application Workflow</a><a class="" href="../03-technology-and-libraries.html">প্রযুক্তি ও লাইব্রেরি</a><a class="" href="../04-security.html">Security</a><a class="" href="../security/access-control-matrix.html">Access Matrix</a><a class="" href="../05-security-questions-and-answers.html">প্রশ্ন-উত্তর</a></nav><main><h1 id="_1">ডাটাবেস ডায়াগ্রাম ও ডাটা ডিকশনারি</h1>
+<blockquote>
+<p>ডাটাবেস: <strong>MySQL / MariaDB</strong> (InnoDB, <code>utf8mb4</code>)। সার্ভার চালু হলেই সব টেবিল নিজে তৈরি/হালনাগাদ হয় (<code>schema.sql</code> + প্রতিটি মডিউলের <code>ensure*Schema()</code>)।
+এই ডকুমেন্টের সংখ্যাগুলো <strong>চালু সার্ভারের <code>information_schema</code> থেকে নেওয়া</strong> (২৫ অক্টোবর ২০২৬), হাতে লেখা নয়।</p>
+</blockquote>
+<h2 id="_2">১. এক নজরে</h2>
+<table>
+<thead>
+<tr>
+<th>বিষয়</th>
+<th>সংখ্যা</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>টেবিল</td>
+<td><strong>২১২</strong></td>
+</tr>
+<tr>
+<td>কলাম</td>
+<td><strong>২,২৭২</strong></td>
+</tr>
+<tr>
+<td>ঘোষিত Foreign Key</td>
+<td><strong>২৮৭</strong> (ON DELETE: CASCADE ১৪৪, SET NULL ১২৯, RESTRICT ১৪)</td>
+</tr>
+<tr>
+<td><code>company_id</code> আছে এমন টেবিল (multi-company)</td>
+<td>৫৬</td>
+</tr>
+<tr>
+<td>ফাইল/ছবি ডাটাবেসেই রাখা হয় (BLOB কলাম)</td>
+<td>২৯টি কলাম (ডকুমেন্ট, ছবি, স্বাক্ষর, মেইল সংযুক্তি, সার্টিফিকেট)</td>
+</tr>
+<tr>
+<td>সবচেয়ে বেশি কলামের টেবিল</td>
+<td><code>users</code> (৬২), <code>all_employees</code> (৪৯), <code>payrolls</code> (৪১)</td>
+</tr>
+</tbody>
+</table>
+<h2 id="_3">১ক. পুরো ডাটাবেস এক ছবিতে (সব ২১২ টেবিল)</h2>
+<p><strong><a href="full-diagram.html"><code>full-diagram.html</code></a></strong>: ব্রাউজারে zoom, টেনে সরানো ও টেবিলের নাম খুঁজে হাইলাইট করা যায় (ইন্টারনেট লাগে না)। প্রিন্ট/প্রেজেন্টেশনের জন্য:
+<a href="diagrams/full-application-er.pdf">PDF (ভেক্টর, যত খুশি zoom)</a> · <a href="diagrams/full-application-er.svg">SVG</a> · <a href="diagrams/full-application-er.png">PNG (৮৬৮৪×৮৭৭৫)</a> · <a href="diagrams/full-application-er.dot">Graphviz সোর্স</a></p>
+<ul>
+<li>১৩টি রঙিন বাক্স = ১৩ মডিউল। মাঝখানে <strong><code>users</code></strong> (সব মডিউল এর সাথে জোড়া)।</li>
+<li>প্রতিটি টেবিলে PK (লাল), FK (নীল), আর কয়েকটি মূল কলাম; বাকি কলাম "… +N কলাম" হিসেবে সংক্ষেপে, পুরোটা <code>data-dictionary.md</code>-তে।</li>
+<li>সরল রেখা = ঘোষিত foreign key (২৮৭টি), ধূসর ডটেড = যুক্তিগত সম্পর্ক (কোডে মানা হয়, ডাটাবেসে ঘোষিত নয়)। <code>users</code>-এ যাওয়া "কে বানিয়েছে/অনুমোদন করেছে" রেখাগুলোও এখানে আঁকা, তাই <code>users</code>-এর চারপাশে ঘন।</li>
+</ul>
+<p><img alt="পুরো ডাটাবেস" src="diagrams/full-application-er.png" /></p>
+<h2 id="_4">২. মডিউল মানচিত্র</h2>
+<p><img alt="মডিউল মানচিত্র" src="diagrams/00-module-map.png" /></p>
+<p>তীরের পাশের সংখ্যা = ওই দুই মডিউলের মধ্যে কয়টি foreign key। <a href="diagrams/00-module-map.svg">বড় SVG</a></p>
+<h2 id="_5">৩. মূল ধারণাগুলো (ডাটাবেস বুঝতে প্রথমে এগুলো)</h2>
+<ol>
+<li><strong><code>users</code> বনাম <code>all_employees</code>:</strong> <code>users</code> = যে লগইন করে (পাসওয়ার্ড, role, অনুমতি)। <code>all_employees</code> = HR-এর কর্মী রেকর্ড (পদবি, বিভাগ, যোগদান, ব্যক্তিগত তথ্য)। একজন কর্মীর লগইন না-ও থাকতে পারে; থাকলে <code>all_employees.user_id</code> → <code>users.id</code>।</li>
+<li><strong>Multi-company:</strong> ৫৬টি টেবিলে <code>company_id</code>। এটা ডাটাবেসের foreign key নয়, <strong>কোডে প্রয়োগ হয়</strong> (<code>companyScope.ts</code> প্রতিটি SQL-এ নিজে থেকে কোম্পানির ফিল্টার বসায়)। তাই diagram-এ <code>company_id</code> লাইন আঁকা হয়নি।</li>
+<li><strong>অনুমতি টেবিল:</strong> <code>admin_module_permissions</code> (কোন Admin কোন মডিউল), <code>admin_module_permission_layers</code> (মডিউলের ভেতরে কোন কাজ)। বিস্তারিত: <code>../security/</code>।</li>
+<li><strong>ঋণ/বেতন রেকর্ড সুরক্ষা:</strong> বেতন ও সেবা-রেকর্ডের টেবিল (<code>payrolls</code>, <code>salary_structures</code>, <code>hr_actions</code>, <code>hr_letters</code>, <code>employee_transfers</code>, <code>employee_advances</code> ইত্যাদি) থেকে <code>all_employees</code>-এ foreign key <strong><code>ON DELETE RESTRICT</code></strong> (<code>EmployeeRecordsGuard.ts</code>, প্রতিবার চালুর সময় নিশ্চিত করা হয়)। কর্মী মুছতে গেলে ডাটাবেস নিজেই আটকায়।</li>
+<li><strong>ফাইল রাখার ধরন:</strong> আলাদা ফাইল সার্ভার নেই। ফাইল base64 হয়ে এসে ডাটাবেসের BLOB কলামে থাকে। তাই ব্যাকআপ মানেই ডাটাবেস ব্যাকআপ।</li>
+<li><strong>নামের নিয়ম:</strong> সব টেবিল <code>snake_case</code>, প্রাইমারি কী <code>id</code> (auto-increment), সময়: <code>created_at</code>/<code>updated_at</code>। তারিখ API-তে <code>"YYYY-MM-DD"</code> স্ট্রিং।</li>
+<li><strong>কিছু সম্পর্ক ঘোষিত foreign key নয়</strong> (কোডে মানা হয়)। diagram-এ এগুলো <strong>ডটেড (...)</strong> রেখায়। যেমন <code>*_by</code> (কে বানিয়েছে/অনুমোদন করেছে) কলাম diagram-এ দেখানো হয়নি, ডাটা ডিকশনারিতে আছে।</li>
+</ol>
+<h2 id="_6">৪. মডিউল অনুযায়ী ডায়াগ্রাম</h2>
+<p>প্রতিটি diagram-এ: <strong>PK</strong>, <strong>FK</strong> আর কয়েকটি মূল কলাম। ধূসর রেখা = ঘোষিত foreign key, ডটেড = যুক্তিগত সম্পর্ক। অন্য মডিউলের টেবিল শুধু <code>id</code> সহ দেখানো। পুরো কলাম তালিকা <code>data-dictionary.md</code>-তে।</p>
+<h3 id="k-communication-notices-chat-mail-assistant-feedback-36">K. Communication: Notices, Chat, Mail, Assistant, Feedback (36টি টেবিল)</h3>
+<p>নোটিশ, Chat, Credence Mail (সবচেয়ে বেশি টেবিল), Assistant, Feedback।</p>
+<p>মূল টেবিল: <code>notices</code>, <code>chat_*</code>, <code>mail_*</code>, <code>assistant_*</code></p>
+<p><img alt="K. Communication: Notices, Chat, Mail, Assistant, Feedback" src="diagrams/k-communication-notices-chat-mail-assistant-feedback.png" /></p>
+<p><a href="diagrams/k-communication-notices-chat-mail-assistant-feedback.svg">বড় SVG</a> · <a href="diagrams/k-communication-notices-chat-mail-assistant-feedback.mmd">Mermaid সোর্স</a></p>
+<details><summary>এই মডিউলের সব টেবিলের নাম</summary>
+
+`app_feedback`, `assistant_learned`, `assistant_support_messages`, `assistant_support_sessions`, `chat_message_hidden`, `chat_message_reactions`, `chat_messages`, `chat_pinned_messages`, `chat_push_tokens`, `chat_room_members`, `chat_room_reads`, `chat_rooms`, `chat_wallpapers`, `feedback_prompts`, `feedback_settings`, `mail_accounts`, `mail_admin_log`, `mail_blobs`, `mail_contacts`, `mail_events`, `mail_files`, `mail_filters`, `mail_folder_state`, `mail_groups`, `mail_messages`, `mail_personal_groups`, `mail_settings`, `mail_signature_images`, `mail_system_settings`, `mail_tasks`, `mail_templates`, `mail_vacation_log`, `notice_dismissals`, `notice_targets`, `notices`, `report_email_log`
+
+</details>
+
+<h3 id="h-hr-operations-onboarding-recruitment-18">H. HR Operations, Onboarding &amp; Recruitment (18টি টেবিল)</h3>
+<p>HR কাজ (পদোন্নতি, বদলি, increment, চিঠি), নতুন কর্মীর onboarding, নিয়োগ।</p>
+<p>মূল টেবিল: <code>hr_actions</code>, <code>hr_letters</code>, <code>onboarding_applications</code>, <code>job_postings</code>, <code>job_candidates</code></p>
+<p><img alt="H. HR Operations, Onboarding &amp; Recruitment" src="diagrams/h-hr-operations-onboarding-recruitment.png" /></p>
+<p><a href="diagrams/h-hr-operations-onboarding-recruitment.svg">বড় SVG</a> · <a href="diagrams/h-hr-operations-onboarding-recruitment.mmd">Mermaid সোর্স</a></p>
+<details><summary>এই মডিউলের সব টেবিলের নাম</summary>
+
+`candidate_interviews`, `hr_action_approval_steps`, `hr_actions`, `hr_increment_policies`, `hr_info_requests`, `hr_letter_requests`, `hr_letter_templates`, `hr_letters`, `hr_onboarding_items`, `hr_onboarding_tasks`, `hr_ops_settings`, `hr_reminder_log`, `hr_report_runs`, `hr_saved_reports`, `job_candidates`, `job_postings`, `onboarding_applications`, `onboarding_documents`
+
+</details>
+
+<h3 id="d-attendance-roster-breaks-tracking-21">D. Attendance, Roster, Breaks &amp; Tracking (21টি টেবিল)</h3>
+<p>তিন ধরনের উপস্থিতি (রিমোট GPS, অফিস ZKTeco, সাইট muster roll), রোস্টার, বিরতি, লাইভ লোকেশন।</p>
+<p>মূল টেবিল: <code>attendance</code>, <code>zk_attendance_logs</code>, <code>site_attendance_*</code>, <code>duty_roster</code>, <code>employee_breaks</code></p>
+<p><img alt="D. Attendance, Roster, Breaks &amp; Tracking" src="diagrams/d-attendance-roster-breaks-tracking.png" /></p>
+<p><a href="diagrams/d-attendance-roster-breaks-tracking.svg">বড় SVG</a> · <a href="diagrams/d-attendance-roster-breaks-tracking.mmd">Mermaid সোর্স</a></p>
+<details><summary>এই মডিউলের সব টেবিলের নাম</summary>
+
+`attendance`, `attendance_corrections`, `attendance_report_department_access`, `break_settings`, `duty_roster`, `duty_roster_department_access`, `duty_shifts`, `employee_breaks`, `late_policy_settings`, `late_waivers`, `location_pings`, `site_attendance_entries`, `site_attendance_members`, `site_attendance_settings`, `site_attendance_sheets`, `site_attendance_teams`, `tracking_device_state`, `tracking_notice_recipients`, `vehicle_ride_settings`, `zk_attendance_logs`, `zk_devices`
+
+</details>
+
+<h3 id="a-accounts-access-security-23">A. Accounts, Access &amp; Security (23টি টেবিল)</h3>
+<p>লগইন অ্যাকাউন্ট ও কে কী করতে পারবে। পুরো ডাটাবেসের কেন্দ্র <code>users</code> (১৫৮টি foreign key এখানে এসে মেলে)।</p>
+<p>মূল টেবিল: <code>users</code> (লগইন), <code>user_sessions</code>, <code>user_devices</code>, <code>admin_module_permissions</code>(+<code>_layers</code>), <code>login_attempts</code>, <code>password_reset_*</code></p>
+<p><img alt="A. Accounts, Access &amp; Security" src="diagrams/a-accounts-access-security.png" /></p>
+<p><a href="diagrams/a-accounts-access-security.svg">বড় SVG</a> · <a href="diagrams/a-accounts-access-security.mmd">Mermaid সোর্স</a></p>
+<details><summary>এই মডিউলের সব টেবিলের নাম</summary>
+
+`access_templates`, `admin_module_permission_layers`, `admin_module_permissions`, `employee_template_assignments`, `fingerprint_logins`, `login_attempts`, `password_reset_codes`, `password_reset_log`, `password_reset_requests`, `password_reset_settings`, `payroll_access_log`, `platform_visits`, `session_policy`, `user_access_audit`, `user_company_access`, `user_devices`, `user_profile_details`, `user_project_permissions`, `user_sessions`, `user_signatures`, `users`, `web_push_keys`, `web_push_subscriptions`
+
+</details>
+
+<h3 id="m-pepm-mpr-jobs-budget-materials-16">M. PEPM: MPR, Jobs, Budget &amp; Materials (16টি টেবিল)</h3>
+<p>প্রজেক্ট কেনাকাটার চক্র: MPR সারি → Dispatch → Receive।</p>
+<p>মূল টেবিল: <code>jobs</code>, <code>entries</code>, <code>budgets</code>, <code>mpr_numbers</code>, <code>mpr_dispatches</code></p>
+<p><img alt="M. PEPM: MPR, Jobs, Budget &amp; Materials" src="diagrams/m-pepm-mpr-jobs-budget-materials.png" /></p>
+<p><a href="diagrams/m-pepm-mpr-jobs-budget-materials.svg">বড় SVG</a> · <a href="diagrams/m-pepm-mpr-jobs-budget-materials.mmd">Mermaid সোর্স</a></p>
+<details><summary>এই মডিউলের সব টেবিলের নাম</summary>
+
+`budget_items`, `budget_submissions`, `budgets`, `delivery_date_conditions`, `entries`, `entry_edit_history`, `entry_permanent_delete_log`, `job_edit_requests`, `job_submissions`, `jobs`, `material_categories`, `mpr_dispatches`, `mpr_fulfil_log`, `mpr_numbers`, `rate_file_meta`, `rate_list`
+
+</details>
+
+<h3 id="f-claims-conveyance-mobile-bill-17">F. Claims, Conveyance &amp; Mobile Bill (17টি টেবিল)</h3>
+<p>Movement claim, Conveyance Bill Claim (employee claim → approval → bill → disbursement), মোবাইল বিল।</p>
+<p>মূল টেবিল: <code>claims</code>, <code>user_claims</code>, <code>conveyance_bills</code>, <code>mobile_sims</code>, <code>bill_claim_*</code></p>
+<p><img alt="F. Claims, Conveyance &amp; Mobile Bill" src="diagrams/f-claims-conveyance-mobile-bill.png" /></p>
+<p><a href="diagrams/f-claims-conveyance-mobile-bill.svg">বড় SVG</a> · <a href="diagrams/f-claims-conveyance-mobile-bill.mmd">Mermaid সোর্স</a></p>
+<details><summary>এই মডিউলের সব টেবিলের নাম</summary>
+
+`bill_claim_categories`, `bill_claim_policy_history`, `bill_claim_policy_settings`, `claim_approval_signatures`, `claims`, `conveyance_bill_items`, `conveyance_bills`, `conveyance_claim_department_access`, `mobile_bills`, `mobile_limit_policies`, `mobile_limit_requests`, `mobile_sim_events`, `mobile_sims`, `user_claim_history`, `user_claim_items`, `user_claim_references`, `user_claims`
+
+</details>
+
+<h3 id="b-company-organisation-employees-21">B. Company, Organisation &amp; Employees (21টি টেবিল)</h3>
+<p>কোম্পানি-গ্রুপ, সংগঠন কাঠামো আর কর্মীর মূল রেকর্ড। <code>users</code> = লগইন, <code>all_employees</code> = HR-এর কর্মী-রেকর্ড; <code>all_employees.user_id</code> দিয়ে জোড়া।</p>
+<p>মূল টেবিল: <code>companies</code>, <code>departments</code>, <code>branches</code>, <code>projects</code>, <code>all_employees</code>, <code>employee_*</code>, <code>hr_emp_*</code></p>
+<p><img alt="B. Company, Organisation &amp; Employees" src="diagrams/b-company-organisation-employees.png" /></p>
+<p><a href="diagrams/b-company-organisation-employees.svg">বড় SVG</a> · <a href="diagrams/b-company-organisation-employees.mmd">Mermaid সোর্স</a></p>
+<details><summary>এই মডিউলের সব টেবিলের নাম</summary>
+
+`all_employees`, `branches`, `companies`, `company_groups`, `departments`, `employee_advances`, `employee_change_log`, `employee_company_assignments`, `employee_documents`, `employee_pay_items`, `employee_payment_accounts`, `employee_supervisors`, `employee_transfers`, `holiday_calendar`, `hr_emp_education`, `hr_emp_experience`, `hr_emp_family`, `hr_emp_training`, `hr_employee_service`, `projects`, `server_profiles`
+
+</details>
+
+<h3 id="c-leave-9">C. Leave (9টি টেবিল)</h3>
+<p>ছুটির ধরন, নীতি, ব্যালেন্স ও আবেদন।</p>
+<p>মূল টেবিল: <code>leave_applications</code>, <code>leave_balances</code>, <code>leave_categories</code>, <code>leave_category_policies</code></p>
+<p><img alt="C. Leave" src="diagrams/c-leave.png" /></p>
+<p><a href="diagrams/c-leave.svg">বড় SVG</a> · <a href="diagrams/c-leave.mmd">Mermaid সোর্স</a></p>
+<details><summary>এই মডিউলের সব টেবিলের নাম</summary>
+
+`leave_application_department_access`, `leave_applications`, `leave_balance_workflow_items`, `leave_balance_workflows`, `leave_balances`, `leave_categories`, `leave_category_balances`, `leave_category_policies`, `leave_year_settings`
+
+</details>
+
+<h3 id="l-assets-vehicles-9">L. Assets &amp; Vehicles (9টি টেবিল)</h3>
+<p>অফিস সম্পদ ও গাড়ি।</p>
+<p>মূল টেবিল: <code>assets</code>, <code>asset_requisitions</code>, <code>vehicles</code>, <code>vehicle_requisitions</code></p>
+<p><img alt="L. Assets &amp; Vehicles" src="diagrams/l-assets-vehicles.png" /></p>
+<p><a href="diagrams/l-assets-vehicles.svg">বড় SVG</a> · <a href="diagrams/l-assets-vehicles.mmd">Mermaid সোর্স</a></p>
+<details><summary>এই মডিউলের সব টেবিলের নাম</summary>
+
+`asset_assignment_claims`, `asset_assignments`, `asset_requisition_events`, `asset_requisition_items`, `asset_requisitions`, `asset_settings`, `assets`, `vehicle_requisitions`, `vehicles`
+
+</details>
+
+<h3 id="j-documents-e-signature-6">J. Documents &amp; E-Signature (6টি টেবিল)</h3>
+<p>Document Vault আর ডিজিটাল স্বাক্ষর।</p>
+<p>মূল টেবিল: <code>employee_documents</code>, <code>document_signers</code>, <code>document_signatures</code>, <code>esign_certificates</code></p>
+<p><img alt="J. Documents &amp; E-Signature" src="diagrams/j-documents-e-signature.png" /></p>
+<p><a href="diagrams/j-documents-e-signature.svg">বড় SVG</a> · <a href="diagrams/j-documents-e-signature.mmd">Mermaid সোর্স</a></p>
+<details><summary>এই মডিউলের সব টেবিলের নাম</summary>
+
+`document_events`, `document_signatures`, `document_signers`, `esign_certificates`, `esign_otps`, `esign_settings`
+
+</details>
+
+<h3 id="e-payroll-salary-14">E. Payroll &amp; Salary (14টি টেবিল)</h3>
+<p>বেতন কাঠামো থেকে payslip ও final settlement পর্যন্ত। <code>payrolls</code> একজন কর্মী ও একটি মাসে একটি (UNIQUE)।</p>
+<p>মূল টেবিল: <code>salary_structures</code>, <code>payrolls</code>, <code>payroll_batches</code>, <code>final_settlements</code>, <code>employee_advances</code></p>
+<p><img alt="E. Payroll &amp; Salary" src="diagrams/e-payroll-salary.png" /></p>
+<p><a href="diagrams/e-payroll-salary.svg">বড় SVG</a> · <a href="diagrams/e-payroll-salary.mmd">Mermaid সোর্স</a></p>
+<details><summary>এই মডিউলের সব টেবিলের নাম</summary>
+
+`advance_requests`, `final_settlements`, `pay_grade_components`, `pay_grades`, `payroll_batch_events`, `payroll_batches`, `payroll_line_items`, `payroll_payment_splits`, `payrolls`, `pending_bonuses`, `salary_adjustments`, `salary_components`, `salary_month_settings`, `salary_structures`
+
+</details>
+
+<h3 id="i-performance-grievance-exit-targets-tasks-16">I. Performance, Grievance, Exit, Targets &amp; Tasks (16টি টেবিল)</h3>
+<p>কর্মজীবনের বাকি অংশ: মূল্যায়ন, অভিযোগ, শৃঙ্খলা, বিদায়, লক্ষ্য ও কাজ।</p>
+<p>মূল টেবিল: <code>performance_*</code>, <code>grievances</code>, <code>exit_requests</code>, <code>final_settlements</code>, <code>targets</code>, <code>tasks</code></p>
+<p><img alt="I. Performance, Grievance, Exit, Targets &amp; Tasks" src="diagrams/i-performance-grievance-exit-targets-tasks.png" /></p>
+<p><a href="diagrams/i-performance-grievance-exit-targets-tasks.svg">বড় SVG</a> · <a href="diagrams/i-performance-grievance-exit-targets-tasks.mmd">Mermaid সোর্স</a></p>
+<details><summary>এই মডিউলের সব টেবিলের নাম</summary>
+
+`case_feedback`, `disciplinary_actions`, `exit_clearance_approvers`, `exit_clearance_items`, `exit_requests`, `grievances`, `performance_cycles`, `performance_goals`, `performance_reviews`, `target_task_updates`, `target_tasks`, `targets`, `task_assignees`, `task_comments`, `task_recurrences`, `tasks`
+
+</details>
+
+<h3 id="g-approvals-alerts-6">G. Approvals &amp; Alerts (6টি টেবিল)</h3>
+<p>সব অনুমোদন-প্রবাহের সাধারণ ইঞ্জিন আর নোটিফিকেশন।</p>
+<p>মূল টেবিল: <code>approval_templates</code>, <code>approval_requests</code>, <code>alerts</code></p>
+<p><img alt="G. Approvals &amp; Alerts" src="diagrams/g-approvals-alerts.png" /></p>
+<p><a href="diagrams/g-approvals-alerts.svg">বড় SVG</a> · <a href="diagrams/g-approvals-alerts.mmd">Mermaid সোর্স</a></p>
+<details><summary>এই মডিউলের সব টেবিলের নাম</summary>
+
+`alerts`, `approval_chain_steps`, `approval_requests`, `approval_template_step_approvers`, `approval_template_steps`, `approval_templates`
+
+</details>
+
+<h2 id="_7">৫. ফাইল</h2>
+<table>
+<thead>
+<tr>
+<th>ফাইল</th>
+<th>কী</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>data-dictionary.md</code></td>
+<td>২১২ টেবিলের সব কলাম, ধরন, null, ডিফল্ট, সম্পর্ক</td>
+</tr>
+<tr>
+<td><code>diagrams/*.mmd</code></td>
+<td>Mermaid সোর্স (ডায়াগ্রাম আবার বানাতে)</td>
+</tr>
+<tr>
+<td><code>diagrams/*.svg</code>, <code>*.png</code></td>
+<td>তৈরি ছবি (প্রেজেন্টেশনে ব্যবহার করুন)</td>
+</tr>
+<tr>
+<td><code>full-diagram.html</code>, <code>diagrams/full-application-er.*</code></td>
+<td>পুরো ডাটাবেসের এক ছবি (HTML viewer, PDF, SVG, PNG)</td>
+</tr>
+<tr>
+<td><code>../index.html</code></td>
+<td>সব ডকুমেন্ট ব্রাউজারে (ইন্টারনেট ছাড়াই)</td>
+</tr>
+</tbody>
+</table>
+<h2 id="_8">৬. ডায়াগ্রাম নতুন করে বানাতে</h2>
+<p>চালু ডাটাবেস থেকে <code>information_schema</code> পড়ে <code>docs/architecture/tools/</code> এর স্ক্রিপ্ট চালান (নিচে "টুলস" দেখুন)। নতুন ফিচারে টেবিল যোগ হলে ডায়াগ্রাম আবার বানিয়ে নেবেন।</p></main><script src="../assets/mermaid.min.js"></script><script>mermaid.initialize({startOnLoad:true,securityLevel:"loose",theme:"default",flowchart:{useMaxWidth:true},maxTextSize:900000});</script></body></html>

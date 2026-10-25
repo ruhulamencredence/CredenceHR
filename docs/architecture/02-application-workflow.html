@@ -1,0 +1,374 @@
+<!doctype html><html lang="bn"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Application Workflow — CredenceHR</title><style>body{margin:0;font:16px/1.65 'Noto Sans Bengali','Segoe UI',system-ui,sans-serif;color:#1b1233;background:#f6f4fb}
+nav{position:sticky;top:0;z-index:5;background:#2a0f5c;display:flex;gap:4px;flex-wrap:wrap;padding:8px 14px}
+nav a{color:#e9ddff;text-decoration:none;font-size:14px;padding:6px 12px;border-radius:999px}
+nav a:hover,nav a.on{background:#7c3aed;color:#fff}
+main{max-width:1180px;margin:0 auto;padding:24px 22px 80px;background:#fff;box-shadow:0 0 40px rgba(60,20,120,.08)}
+h1{font-size:30px;border-bottom:3px solid #7c3aed;padding-bottom:8px}h2{margin-top:2em;border-bottom:1px solid #e5defa;padding-bottom:4px}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14px;display:block;overflow-x:auto}
+th,td{border:1px solid #ddd5f3;padding:6px 10px;vertical-align:top;text-align:left}th{background:#efe9ff}
+code{background:#f1ecff;padding:1px 5px;border-radius:4px;font-size:.92em}pre{background:#f7f5fc;padding:12px;border-radius:8px;overflow:auto}
+pre.mermaid{background:#fff;border:1px solid #e5defa;text-align:center;overflow:auto;padding:14px}
+img{max-width:100%;height:auto;border:1px solid #e5defa;border-radius:8px}blockquote{border-left:4px solid #a78bfa;margin:12px 0;padding:4px 14px;background:#faf8ff}
+details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href="index.html">সূচি</a><a class="" href="database/README.html">ডাটাবেস ডায়াগ্রাম</a><a class="" href="database/data-dictionary.html">Data Dictionary</a><a class="on" href="02-application-workflow.html">Application Workflow</a><a class="" href="03-technology-and-libraries.html">প্রযুক্তি ও লাইব্রেরি</a><a class="" href="04-security.html">Security</a><a class="" href="security/access-control-matrix.html">Access Matrix</a><a class="" href="05-security-questions-and-answers.html">প্রশ্ন-উত্তর</a></nav><main><h1 id="credencehr-application-workflow">CredenceHR — পুরো Application Workflow</h1>
+<blockquote>
+<p>ভিত্তি: কোড পড়ে ও চালিয়ে (২৫ অক্টোবর ২০২৬, branch <code>claude/nice-fermi-0tale9</code>)। প্রতিটি ধাপে ফাইলের নাম দেওয়া আছে, যাতে যাচাই করা যায়।
+ডায়াগ্রামগুলো Mermaid-এ লেখা। GitHub/VS Code-এ নিজে আঁকা হয়; ইন্টারনেট ছাড়া দেখতে <code>docs/architecture/index.html</code> খুলুন।</p>
+</blockquote>
+<hr />
+<h2 id="architecture">১. সিস্টেমের বড় ছবি (Architecture)</h2>
+<pre class="mermaid">flowchart TB
+  subgraph Clients[&quot;ব্যবহারকারীর ডিভাইস&quot;]
+    W[&quot;ওয়েব ব্রাউজার&lt;br/&gt;(React অ্যাপ)&quot;]
+    A[&quot;মোবাইল অ্যাপ&lt;br/&gt;(Capacitor: Android / iOS)&quot;]
+  end
+  subgraph Edge[&quot;সার্ভারের সামনে&quot;]
+    N[&quot;Nginx&lt;br/&gt;HTTPS, বড় আপলোড ৩০MB&quot;]
+  end
+  subgraph App[&quot;Node.js সার্ভার (Express + TypeScript), PM2 cluster&quot;]
+    MW[&quot;Middleware: CORS ও নিরাপত্তা header,&lt;br/&gt;JWT যাচাই, সেশন/ডিভাইস/ব্লক যাচাই,&lt;br/&gt;কোম্পানি context&quot;]
+    R[&quot;প্রায় ৭০টি Route ফাইল (৭০০+ API)&lt;br/&gt;Admin Panel + Self Service&quot;]
+    S[&quot;Socket.IO (Chat, কল)&quot;]
+    J[&quot;Background jobs&lt;br/&gt;(রিমাইন্ডার, ZK sync, mail, ছুটির বছর)&quot;]
+  end
+  DB[(&quot;MySQL / MariaDB&lt;br/&gt;২১২ টেবিল&lt;br/&gt;ফাইলসহ&quot;)]
+  RD[(&quot;Redis&lt;br/&gt;(একাধিক PM2 worker হলে&lt;br/&gt;Chat সিঙ্ক)&quot;)]
+  subgraph Ext[&quot;বাইরের সেবা (ঐচ্ছিক, .env দিয়ে চালু)&quot;]
+    SM[&quot;SMTP / IMAP&lt;br/&gt;(মেইল)&quot;]
+    FCM[&quot;Firebase / Web Push&lt;br/&gt;(পুশ নোটিফিকেশন)&quot;]
+    GM[&quot;Google Gemini&lt;br/&gt;(AI Assistant)&quot;]
+    ZK[&quot;ZKTeco ডিভাইস&lt;br/&gt;(অফিস উপস্থিতি)&quot;]
+    ERP[&quot;360 ERP (SSO)&quot;]
+  end
+  W --&gt; N
+  A --&gt; N
+  N --&gt; MW --&gt; R
+  W -. websocket .-&gt; S
+  R --&gt; DB
+  S --&gt; RD
+  J --&gt; DB
+  R --&gt; SM
+  R --&gt; FCM
+  R --&gt; GM
+  J --&gt; ZK
+  R --&gt; ERP
+</pre>
+<p><strong>মূল কথা:</strong> একটাই সার্ভার প্রসেস ওয়েব পেজ, API আর Chat দেয়। ডাটা একটাই ডাটাবেসে (ফাইলসহ)। Background job শুধু এক worker-এ চলে (<code>jobRunner.ts</code>), যাতে রিমাইন্ডার দুবার না যায়।</p>
+<hr />
+<h2 id="request-lifecycle">২. একটি রিকোয়েস্টের জীবন (Request Lifecycle)</h2>
+<pre class="mermaid">sequenceDiagram
+  autonumber
+  participant B as ব্রাউজার/অ্যাপ
+  participant S as server.ts (Express)
+  participant Q as queryDB + companyScope
+  participant D as ডাটাবেস
+  B-&gt;&gt;S: GET/POST /api/... + Authorization: Bearer JWT + X-Company-Id
+  S-&gt;&gt;S: CORS + security header, JSON পার্স (ভুল হলে 400 JSON)
+  S-&gt;&gt;S: authenticateToken: JWT সই ঠিক? সেশন শেষ হয়নি? ডিভাইস বৈধ? অ্যাকাউন্ট ব্লক/মুছে ফেলা নয়?
+  S-&gt;&gt;S: কোন কোম্পানিতে কাজ হচ্ছে, তার অধিকার আছে কি?
+  S-&gt;&gt;S: requireAdmin → requireModule(মডিউল) → requireModuleLayer(মডিউল, ধাপ)
+  S-&gt;&gt;S: Route handler: ইনপুট যাচাই (ভুল হলে 400 error)
+  S-&gt;&gt;Q: queryDB(sql, [params])
+  Q-&gt;&gt;Q: কোম্পানির ফিল্টার SQL-এ বসানো (companyScope)
+  Q-&gt;&gt;D: prepared statement (?)
+  D--&gt;&gt;Q: সারি
+  Q--&gt;&gt;S: সারি
+  S--&gt;&gt;B: JSON (ভুল হলে error, ডাটাবেসের বার্তা লুকানো)
+</pre>
+<p>ফাইল: <code>server.ts</code> (<code>authenticateToken</code>, <code>requireAdmin</code>, <code>requireModule</code>, <code>requireModuleLayer</code>), <code>SessionSecurity.ts</code>, <code>DeviceRoutes.ts</code>, <code>AccountBlock.ts</code>, <code>companyContext.ts</code>, <code>companyScope.ts</code>, <code>ApiErrors.ts</code>, <code>WebSecurity.ts</code>।</p>
+<hr />
+<h2 id="workflow">৩. লগইন workflow</h2>
+<pre class="mermaid">flowchart TD
+  S([ব্যবহারকারী লগইন ID + পাসওয়ার্ড দেয়]) --&gt; W{&quot;ওয়ার্কস্পেস (কোম্পানি-গ্রুপ) ঠিক?&quot;}
+  W -- না --&gt; X1[&quot;প্রত্যাখ্যান&quot;]
+  W -- হ্যাঁ --&gt; L{&quot;LoginGuard: ৫ বার ভুল?&lt;br/&gt;বা এক IP থেকে ৩০ বার?&quot;}
+  L -- হ্যাঁ --&gt; X2[&quot;429: ১৫ মিনিট অপেক্ষা&lt;br/&gt;সঠিক পাসওয়ার্ডও তখন চলে না&quot;]
+  L -- না --&gt; P{&quot;পাসওয়ার্ড ঠিক? bcrypt&quot;}
+  P -- না --&gt; X3[&quot;400: একই বার্তা&lt;br/&gt;ভুল ID বা ভুল পাসওয়ার্ড দুটোতেই&lt;br/&gt;+ login_attempts-এ লেখা&quot;]
+  P -- হ্যাঁ --&gt; B{&quot;অ্যাকাউন্ট ব্লক?&quot;}
+  B -- হ্যাঁ --&gt; X4[&quot;403: ব্লক, HR-কে জানান&quot;]
+  B -- না --&gt; O{&quot;onboarding লগইন?&lt;br/&gt;মেয়াদ শেষ?&quot;}
+  O -- মেয়াদ শেষ --&gt; X5[&quot;প্রত্যাখ্যান&quot;]
+  O -- ঠিক --&gt; A{&quot;মোবাইল অ্যাপ?&quot;}
+  A -- হ্যাঁ --&gt; DV{&quot;একটি ফোন নিয়ম:&lt;br/&gt;নতুন ফোন?&quot;}
+  DV -- হ্যাঁ --&gt; X6[&quot;Superadmin-এর অনুমতির অপেক্ষা&quot;]
+  DV -- না --&gt; LOC[&quot;অ্যাপ থেকে লোকেশন নেওয়া&quot;]
+  A -- &quot;না (ওয়েব)&quot; --&gt; T
+  LOC --&gt; T[&quot;JWT তৈরি: ১২ ঘণ্টা ওয়েব / ৭ দিন অ্যাপ&lt;br/&gt;+ user_sessions-এ হ্যাশ করে সেশন&quot;]
+  T --&gt; M{&quot;পাসওয়ার্ড বদলাতে হবে?&lt;br/&gt;must_change_password&quot;}
+  M -- হ্যাঁ --&gt; C[&quot;পাসওয়ার্ড বদল পেজ&quot;]
+  M -- না --&gt; D([ড্যাশবোর্ড])
+  C --&gt; D
+</pre>
+<p><strong>বিকল্প প্রবেশ:</strong> (ক) <strong>Forgot password:</strong> ইমেইলে ৬ অঙ্কের কোড (১৫ মিনিট, ৫ চেষ্টা) অথবা "HR-কে বলুন" (HR একটি অস্থায়ী পাসওয়ার্ড দেয়)। (খ) <strong>Fingerprint/Passkey:</strong> অ্যাপে ফোনের Keystore/Keychain-এর সিক্রেট, ওয়েবে WebAuthn passkey। দুটোই পাসওয়ার্ডের একই নিয়ম (ব্লক, ডিভাইস, কোম্পানি) মানে।
+ফাইল: <code>AuthRoutes.ts</code>, <code>LoginGuard.ts</code>, <code>PasswordResetRoutes.ts</code>, <code>FingerprintRoutes.ts</code>, <code>SessionSecurity.ts</code>।</p>
+<p><strong>সেশন শেষ হয় যখন:</strong> ওয়েবে ১২ ঘণ্টা বা ৬০ মিনিট নিষ্ক্রিয়; অ্যাপে ৭ দিন বা ৩ দিন না খুললে (Superadmin বদলাতে পারে); Logout; Superadmin কাউকে বের করে দিলে; পাসওয়ার্ড বদলালে (বাকি সব সেশন); অ্যাকাউন্ট ব্লক হলে।</p>
+<hr />
+<h2 id="_1">৪. কে কী দেখবে: অনুমতির সিদ্ধান্ত</h2>
+<pre class="mermaid">flowchart TD
+  R([অনুরোধ আসে]) --&gt; J{&quot;JWT ও সেশন বৈধ?&quot;}
+  J -- না --&gt; E1[&quot;401&quot;]
+  J -- হ্যাঁ --&gt; RO{&quot;role&quot;}
+  RO -- superadmin --&gt; OK[&quot;সব অনুমতি&quot;]
+  RO -- &quot;user (কর্মী)&quot; --&gt; SS[&quot;শুধু Self Service:&lt;br/&gt;নিজের তথ্য ও যে সুইচ চালু আছে&lt;br/&gt;যেমন can_view_roster&quot;]
+  RO -- admin --&gt; MOD{&quot;এই মডিউল Superadmin দিয়েছে?&lt;br/&gt;admin_module_permissions&quot;}
+  MOD -- না --&gt; E2[&quot;403&quot;]
+  MOD -- হ্যাঁ --&gt; LY{&quot;মডিউলে layer লাগে?&lt;br/&gt;যেমন payroll → salary_hold&quot;}
+  LY -- layer নেই/বন্ধ --&gt; E3[&quot;403&quot;]
+  LY -- আছে --&gt; DEP{&quot;বিভাগ-সীমা আছে?&lt;br/&gt;যেমন Attendance Report, Leave, Duty Roster&quot;}
+  DEP -- সীমিত --&gt; DS[&quot;শুধু ওই বিভাগের কর্মী&quot;]
+  DEP -- সীমা নেই --&gt; ALL[&quot;সব বিভাগ&quot;]
+  OK --&gt; CO
+  SS --&gt; CO
+  DS --&gt; CO
+  ALL --&gt; CO[&quot;কোম্পানি-সীমা: শুধু বর্তমান কোম্পানির সারি&quot;]
+</pre>
+<ul>
+<li><strong>Layer:</strong> একই মডিউলের ভেতরে ভাগ। যেমন Payroll: <code>read</code>, <code>salary_hold</code>, <code>audit_approve</code>, <code>accounts_pay</code>। যে layer ডিফল্টে বন্ধ (🔒), Superadmin টিক না দিলে কেউ পায় না। পুরো তালিকা: <code>security/access-control-matrix.md</code>।</li>
+<li><strong>নিয়ম (CLAUDE.md):</strong> প্রতিটি নতুন ফিচারে UI লুকানো <strong>এবং</strong> API বন্ধ, দুটোই লাগে।</li>
+</ul>
+<hr />
+<h2 id="hr-">৫. কর্মীর পুরো জীবনচক্র (HR-এর প্রধান প্রবাহ)</h2>
+<pre class="mermaid">flowchart LR
+  A[&quot;Job Posting&quot;] --&gt; B[&quot;প্রার্থী ও ইন্টারভিউ&quot;] --&gt; C[&quot;Hire&quot;]
+  C --&gt; D[&quot;Onboarding আবেদন খোলা&lt;br/&gt;অস্থায়ী লগইন ONB-0001&quot;]
+  D --&gt; E[&quot;নতুন কর্মী ফর্ম ও ডকুমেন্ট জমা&quot;]
+  E --&gt; F{&quot;HR review ও approve&lt;br/&gt;যে খুলেছে সে approve করতে পারে না&quot;}
+  F -- approve --&gt; G[&quot;কর্মী রেকর্ড + আসল লগইন&lt;br/&gt;Appointment letter&quot;]
+  F -- ফেরত --&gt; E
+  G --&gt; H[&quot;সেবাকাল: ছুটি, উপস্থিতি, বেতন,&lt;br/&gt;ক্লেইম, ঋণ, টার্গেট, মূল্যায়ন&quot;]
+  H --&gt; I[&quot;HR Action: নিশ্চিতকরণ,&lt;br/&gt;পদোন্নতি, increment, বদলি&quot;]
+  H --&gt; J[&quot;অভিযোগ / শৃঙ্খলা&quot;]
+  H --&gt; K[&quot;পদত্যাগ / সমাপ্তি&quot;]
+  K --&gt; L[&quot;বিভাগভিত্তিক ছাড়পত্র&lt;br/&gt;IT, Finance, Admin, HR&quot;]
+  L --&gt; M[&quot;Final Settlement&lt;br/&gt;ছুটি নগদায়ন, gratuity, বকেয়া&quot;]
+  M --&gt; N[&quot;লগইন ব্লক&lt;br/&gt;রেকর্ড রাখা থাকে&quot;]
+</pre>
+<p>ফাইল: <code>RecruitmentRoutes.ts</code>, <code>OnboardingSelfServiceRoutes.ts</code>, <code>HROperationsRoutes.ts</code>, <code>ExitOffboardingRoutes.ts</code>, <code>EmployeeRecordsGuard.ts</code>।
+গুরুত্বপূর্ণ: onboarding চলাকালে নতুন ব্যক্তি <strong>কর্মী নন</strong> (<code>all_employees</code>-এ নেই), তাই headcount, payroll, উপস্থিতিতে আসে না। শুধু "My Onboarding" পেজ খোলা যায় (বাকি সব 403 <code>ONBOARDING_ONLY</code>)।</p>
+<hr />
+<h2 id="workflow_1">৬. ছুটির workflow</h2>
+<pre class="mermaid">flowchart TD
+  A([কর্মী: ছুটির আবেদন]) --&gt; V{&quot;যাচাই&quot;}
+  V --&gt;|তারিখ ভুল, কারণ নেই,&lt;br/&gt;ধরন অচেনা| X1[&quot;400&quot;]
+  V --&gt;|একই দিনে আগের আবেদন আছে| X2[&quot;409&quot;]
+  V --&gt;|ব্যালেন্স কম / নীতি ভঙ্গ:&lt;br/&gt;reliever, অগ্রিম নোটিশ, সর্বোচ্চ টানা দিন| X3[&quot;400&quot;]
+  V --&gt;|ঠিক| S[&quot;leave_applications: pending&lt;br/&gt;ব্যালেন্স থেকে দিন কাটে&quot;]
+  S --&gt; RL{&quot;Reliever দরকার?&quot;}
+  RL -- হ্যাঁ --&gt; R1[&quot;Reliever সম্মতি/অসম্মতি&quot;]
+  R1 -- অসম্মতি --&gt; RJ
+  R1 -- সম্মতি --&gt; AP
+  RL -- না --&gt; AP
+  AP[&quot;Approval engine:&lt;br/&gt;টেমপ্লেটের ধাপ ধরে অনুমোদন&quot;] --&gt; D{&quot;সিদ্ধান্ত&quot;}
+  D -- approved --&gt; OK[&quot;ছুটি মঞ্জুর&lt;br/&gt;payroll ও উপস্থিতিতে ছুটি হিসেবে আসে&quot;]
+  D -- rejected --&gt; RJ[&quot;ব্যালেন্সে দিন ফেরত&quot;]
+  S -. approver না থাকলে .-&gt; W[&quot;অপেক্ষায় থাকে&lt;br/&gt;⚠ বর্তমানে কেউ approve করতে পারে না (R-01)&quot;]
+</pre>
+<ul>
+<li>ব্যালেন্স: ছুটির বছর শুরুতে নীতি (workflow) অনুযায়ী বসে; বছর শেষে rollover job চলে (<code>LeaveRoutes.ts</code>, ৬ ঘণ্টা পরপর পরীক্ষা)।</li>
+<li>অনুমোদনকারী ঠিক করে <strong>Approval Template</strong> (<code>approval_templates</code>/<code>_steps</code>/<code>_step_approvers</code>)। কর্মীর সুপারভাইজার বা নির্দিষ্ট ব্যক্তি/ভূমিকা হতে পারে।</li>
+</ul>
+<hr />
+<h2 id="approval-engine">৭. Approval engine (সব অনুমোদনের সাধারণ ইঞ্জিন)</h2>
+<pre class="mermaid">flowchart LR
+  T[(approval_templates&lt;br/&gt;ধাপ + ধাপের approver)] --&gt; Q
+  Q[&quot;যে কোনো আবেদন&lt;br/&gt;ছুটি, ক্লেইম, ঋণ, সম্পদ, উপস্থিতি সংশোধন...&quot;] --&gt; RQ[&quot;approval_requests&quot;]
+  RQ --&gt; ST{&quot;বর্তমান ধাপের approver&quot;}
+  ST --&gt; MY[&quot;Approver-এর 'My Approvals' তালিকা&lt;br/&gt;+ Dashboard + alert (বেল)&quot;]
+  MY --&gt; ACT[&quot;act: approved / rejected + মন্তব্য&quot;]
+  ACT --&gt;|আরও ধাপ আছে| ST
+  ACT --&gt;|শেষ ধাপ approved| FIN[&quot;মূল রেকর্ডের অবস্থা বদলায়&lt;br/&gt;(ছুটি, bill তৈরি ...)&quot;]
+  ACT --&gt;|rejected| REJ[&quot;আবেদনকারীকে জানানো&quot;]
+</pre>
+<p>ফাইল: <code>ApprovalRoutes.ts</code> (তালিকা ও act: <code>GET /api/my-approvals</code>, <code>POST /api/my-approvals/:id/act</code>), <code>Alerts.ts</code> (notification)। প্রতি ১০ মিনিটে <code>rehomeAwaitingApprovals</code> অপেক্ষমাণ আবেদন নতুন approver-এ সরায়।</p>
+<hr />
+<h2 id="_2">৮. উপস্থিতি: তিন উৎস, একটি হিসাব</h2>
+<pre class="mermaid">flowchart TD
+  subgraph Src[&quot;উপস্থিতির তিন উৎস&quot;]
+    R[&quot;রিমোট (প্রজেক্ট)&lt;br/&gt;অ্যাপে GPS check-in/out&lt;br/&gt;প্রজেক্টের কাছে না হলে refuse&quot;]
+    O[&quot;অফিস (ZKTeco)&lt;br/&gt;প্রতি ৫ মিনিটে ডিভাইস থেকে punch আনে&lt;br/&gt;PIN → কর্মী&quot;]
+    SI[&quot;সাইট muster roll&lt;br/&gt;সুপারভাইজার দলের উপস্থিতি দেয়&quot;]
+  end
+  R --&gt; ATT[(attendance)]
+  O --&gt; ZKL[(zk_attendance_logs)]
+  SI --&gt; SAE[(site_attendance_*)]
+  RO[&quot;ডিউটি রোস্টার + শিফট + ছুটির ক্যালেন্ডার&quot;] --&gt; CALC
+  LP[&quot;দেরি নীতি + late waiver&quot;] --&gt; CALC
+  LV[&quot;অনুমোদিত ছুটি&quot;] --&gt; CALC
+  ATT --&gt; CALC
+  ZKL --&gt; CALC
+  SAE --&gt; CALC
+  CALC[&quot;হিসাব: উপস্থিত / অনুপস্থিত / ছুটি / দেরি&quot;] --&gt; REP[&quot;উপস্থিতি রিপোর্ট ও 360° পেজ&quot;]
+  CALC --&gt; PW[&quot;Payroll wizard&quot;]
+</pre>
+<ul>
+<li>রোস্টারে "Off" বা শিফট দিলে ওই কর্মীর ওই দিনের ছুটি/কর্মদিবস ও দেরির সময় বদলে যায় (<code>RosterRoutes.ts</code>)।</li>
+<li>ভুল উপস্থিতি: কর্মী <strong>সংশোধন আবেদন</strong> দেয় → Approval।</li>
+<li>ZK ডিভাইসের PIN কর্মীর সাথে না জুড়লে punch কারো নামে যায় না (Unlinked PINs তালিকা)।</li>
+</ul>
+<hr />
+<h2 id="payroll-workflow-hr-audit-accounts">৯. Payroll workflow (HR → Audit → Accounts)</h2>
+<pre class="mermaid">flowchart TD
+  SS[&quot;বেতন কাঠামো&lt;br/&gt;salary_structures&lt;br/&gt;(তারিখ ধরে, পুরোনো রেকর্ড বদলায় না)&quot;] --&gt; WZ
+  ATW[&quot;উপস্থিতি, ছুটি, দেরি&quot;] --&gt; WZ
+  BN[&quot;bonus (pending_bonuses), ঋণ কিস্তি,&lt;br/&gt;pay items, overtime&quot;] --&gt; WZ
+  WZ[&quot;Payroll wizard (HR)&lt;br/&gt;উপস্থিতি যাচাই: মোট দিন ছাড়াতে পারবে না&quot;] --&gt; GEN[&quot;payrolls তৈরি&lt;br/&gt;কর্মী × মাস = একটি&quot;]
+  GEN --&gt; HOLD{&quot;কারও বেতন hold?&quot;}
+  HOLD -- হ্যাঁ --&gt; HD[&quot;মাসের বাইরে থাকে; ছাড়লে আলাদা চলে&quot;]
+  HOLD -- না --&gt; SUB
+  GEN --&gt; SUB[&quot;HR: Submit for Audit&lt;br/&gt;(মাস লক)&quot;]
+  SUB --&gt; AUD{&quot;Audit (layer audit_approve)&lt;br/&gt;যে submit করেছে সে নয়&quot;}
+  AUD -- ফেরত নোট সহ --&gt; GEN
+  AUD -- approve --&gt; PR[&quot;অবস্থা: Processed&quot;]
+  PR --&gt; PAY[&quot;Accounts (layer accounts_pay)&lt;br/&gt;তারিখ, পদ্ধতি, রেফারেন্স দিয়ে Pay&quot;]
+  PAY --&gt; PD[&quot;Paid: আর বদলানো যায় না&lt;br/&gt;ঋণের কিস্তি কাটা হিসেবে ধরা হয়&quot;]
+  PD --&gt; PSLIP[&quot;কর্মীর My Payslip + PDF + 'Salary Paid' alert&quot;]
+  GEN -. প্রতিটি লেখা .-&gt; LOG[(payroll_access_log)]
+</pre>
+<p><strong>হিসাব:</strong> net = মোট আয় (বেসিক + ভাতা + overtime + bonus) − কর − PF − ঋণ কিস্তি − অনুপস্থিতি/দেরি কর্তন − অন্য কর্তন। কর ও PF <strong>হাতে/কাঠামোতে দেওয়া</strong> (আয়কর স্ল্যাবের স্বয়ংক্রিয় হিসাব নেই)।
+ফাইল: <code>PayrollRoutes.ts</code>, <code>PayrollApprovalRoutes.ts</code>, <code>PayrollItemsRoutes.ts</code>, <code>PayslipRoutes.ts</code>।</p>
+<hr />
+<h2 id="conveyance-bill-claim-disbursement">১০. Conveyance Bill Claim → Disbursement</h2>
+<pre class="mermaid">flowchart TD
+  C([কর্মী: খরচের দাবি&lt;br/&gt;ক্যাটাগরি, তারিখ, পরিমাণ, বিবরণ, রসিদ]) --&gt; POL{&quot;Bill Claim Policy:&lt;br/&gt;সীমা, রসিদ, সময়সীমা&quot;}
+  POL -- ভঙ্গ --&gt; X[&quot;প্রত্যাখ্যান&quot;]
+  POL -- ঠিক --&gt; AE[&quot;Approval engine&lt;br/&gt;টেমপ্লেটের ধাপ: যেমন HR → Accounts&quot;]
+  AE --&gt; SIG{&quot;নীতিতে 'approver signature' চালু?&quot;}
+  SIG -- হ্যাঁ --&gt; SGN[&quot;প্রতি ধাপে approver-এর সংরক্ষিত স্বাক্ষর বসে&quot;]
+  SIG -- না --&gt; L
+  SGN --&gt; L[&quot;শেষ ধাপ approved&quot;]
+  L --&gt; BILL[&quot;conveyance_bills + items তৈরি&quot;]
+  BILL --&gt; DISB[&quot;Disbursement (Accounts):&lt;br/&gt;Voucher নম্বর দিয়ে paid&quot;]
+  DISB --&gt; PDF[&quot;Bill PDF ও Payment Voucher PDF&lt;br/&gt;'Approved By' সহ&quot;]
+</pre>
+<p><strong>Movement Claim</strong> আলাদা: কর্মী কোথাও গেলে GPS-সহ ক্লেইম, একই Approval engine (<code>MovementClaimRoutes.ts</code>)।
+ফাইল: <code>ConveyanceBillClaimRoutes.ts</code>, <code>BillClaimPolicy.ts</code>।</p>
+<hr />
+<h2 id="-document-vault">১১. ই-স্বাক্ষর (Document Vault)</h2>
+<pre class="mermaid">flowchart TD
+  U[&quot;ডকুমেন্ট আপলোড / HR চিঠি&lt;br/&gt;employee_documents (BLOB)&quot;] --&gt; SND[&quot;স্বাক্ষরের জন্য পাঠানো&lt;br/&gt;স্বাক্ষরকারী ও ক্রম&lt;br/&gt;মূল ফাইলের SHA-256 ঠিক হয়&quot;]
+  SND --&gt; TURN{&quot;যার পালা&quot;}
+  TURN --&gt; OTP{&quot;OTP চালু?&quot;}
+  OTP -- হ্যাঁ --&gt; OT[&quot;Credence Mail-এ ৬ অঙ্কের কোড&lt;br/&gt;৫ মিনিট, একবার, ৫ ভুলে ১৫ মিনিট লক&quot;]
+  OTP -- না --&gt; SG
+  OT --&gt; SG[&quot;স্বাক্ষর আঁকা/আপলোড&lt;br/&gt;user_signatures-এ রাখা&quot;]
+  SG --&gt; NEXT{&quot;আরও স্বাক্ষরকারী?&quot;}
+  NEXT -- হ্যাঁ --&gt; AL[&quot;পরের জনকে alert&quot;] --&gt; TURN
+  NEXT -- না --&gt; PDF[&quot;সব স্বাক্ষর PDF-এ বসে&lt;br/&gt;Signature Certificate পাতা + QR&quot;]
+  PDF --&gt; CERT{&quot;সার্টিফিকেট স্বাক্ষর চালু?&quot;}
+  CERT -- হ্যাঁ --&gt; PK[&quot;PKCS#7 ডিজিটাল স্বাক্ষর&lt;br/&gt;(কেনা .p12 বা কোম্পানির self-signed)&quot;]
+  CERT -- না --&gt; V
+  PK --&gt; V[&quot;/verify/&amp;lt;code&amp;gt;: যে কেউ দেখতে পারে কে কখন সই করেছে,&lt;br/&gt;ফাইল মেলাতেও পারে&quot;]
+  V --&gt; EM[&quot;সই করা PDF ইমেইলে পাঠানো&quot;]
+</pre>
+<p>ফাইল: <code>DocumentVaultRoutes.ts</code>, <code>ESignRoutes.ts</code>, <code>ESignCertificate.ts</code>। Adobe Reader-এ "valid" দেখাতে লাইসেন্সপ্রাপ্ত CA-র সার্টিফিকেট দরকার (self-signed-এ "validity unknown")।</p>
+<hr />
+<h2 id="pepm-mpr">১২. PEPM: প্রকল্পের MPR চক্র</h2>
+<pre class="mermaid">flowchart LR
+  P[&quot;প্রজেক্ট ব্যবহারকারী&lt;br/&gt;MPR সারি (entries) তোলে&lt;br/&gt;Job ও Budget-এর মধ্যে&quot;] --&gt; SB[&quot;Budget Submission&lt;br/&gt;'শেষ' চিহ্ন&quot;]
+  SB --&gt; RPT[&quot;Purchase: MPR Entries রিপোর্ট&lt;br/&gt;ফিল্টার → টিক → 'Send to Dispatch'&quot;]
+  RPT --&gt; DM[&quot;Dispatch Material&lt;br/&gt;সরবরাহকারী, রেট, P.O., challan&lt;br/&gt;(স্ক্রিনে বা Excel আপলোডে)&quot;]
+  DM --&gt; OW[&quot;On the way&quot;]
+  OW --&gt; RC[&quot;Project: Material Receive&lt;br/&gt;পুরো/আংশিক গ্রহণ&quot;]
+  RC -. ফেরত নেওয়া .-&gt; P
+  BI[&quot;Budget Excel import&lt;br/&gt;→ খসড়া notice&quot;] --&gt; P
+</pre>
+<p>অনুমতি: Reports মডিউলের layer <code>dispatch_material</code>, <code>dispatch_all</code> (দুটোই 🔒)। Receive-এর সুইচ <code>can_receive_material</code>। ফাইল: <code>EntriesRoutes.ts</code>, <code>MprDispatchRoutes.ts</code>, <code>BudgetImportRoutes.ts</code>।</p>
+<hr />
+<h2 id="notice-chat-mail-alerts">১৩. যোগাযোগ: Notice, Chat, Mail, Alerts</h2>
+<table>
+<thead>
+<tr>
+<th>ব্যবস্থা</th>
+<th>কীভাবে চলে</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Notice</strong></td>
+<td>Admin HTML লেখে → সার্ভার <code>NoticeSafety.ts</code> দিয়ে পরিষ্কার করে → টার্গেট (সবাই বা নির্দিষ্ট ব্যক্তি, <code>notice_targets</code>) → লগইনের পর popup ও Notice board</td>
+</tr>
+<tr>
+<td><strong>Chat</strong></td>
+<td>Socket.IO; রুম, ব্যক্তিগত মেসেজ; edit (১৫ মিনিট), unsend, forward, pin, reaction; ফাইল ডাটাবেসে। Module Access-এর সুইচে চালু</td>
+</tr>
+<tr>
+<td><strong>Credence Mail</strong></td>
+<td>নিজস্ব মেইল ক্লায়েন্ট; IMAP/SMTP দিয়ে মেইল সার্ভারের সাথে; পাসওয়ার্ড AES-256-GCM-এ এনক্রিপ্ট; গ্রুপ, ফিল্টার, টেমপ্লেট, নির্ধারিত পাঠানো</td>
+</tr>
+<tr>
+<td><strong>Alerts (বেল)</strong></td>
+<td>সার্ভারে <code>createAlert()</code>; অ্যাপে পুশ (Firebase), ওয়েবে Web Push</td>
+</tr>
+<tr>
+<td><strong>AI Assistant</strong></td>
+<td>কর্মীর প্রশ্ন → স্থানীয় নিয়মে উত্তর; Gemini চালু থাকলে প্রশ্ন ও ফল Google-এ যায়। সব ডাটা <strong>প্রশ্নকারীর নিজের token দিয়ে</strong> অ্যাপের নিজের API থেকে আনে, তাই যা দেখার অধিকার নেই তা দেখায় না; কিছু লেখে না</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="background-jobs-worker-">১৪. Background jobs (একটি worker-এ)</h2>
+<table>
+<thead>
+<tr>
+<th>কাজ</th>
+<th>কত পরপর</th>
+<th>ফাইল</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ZKTeco ডিভাইস থেকে punch আনা</td>
+<td>৫ মিনিট</td>
+<td><code>zkSync.ts</code> (node-cron)</td>
+</tr>
+<tr>
+<td>অপেক্ষমাণ approval নতুন approver-এ সরানো</td>
+<td>১০ মিনিট</td>
+<td><code>server.ts</code></td>
+</tr>
+<tr>
+<td>HR/সাইট/টাস্ক/টার্গেট রিমাইন্ডার</td>
+<td>৩০–৬০ মিনিট</td>
+<td><code>HrRemindersRoutes.ts</code>, <code>TaskRoutes.ts</code>, <code>TargetRoutes.ts</code>, <code>SiteAttendanceRoutes.ts</code></td>
+</tr>
+<tr>
+<td>ছুটির বছর rollover পরীক্ষা</td>
+<td>৬ ঘণ্টা</td>
+<td><code>LeaveRoutes.ts</code></td>
+</tr>
+<tr>
+<td>Onboarding মেয়াদ শেষ</td>
+<td>১ ঘণ্টা</td>
+<td><code>OnboardingSelfServiceRoutes.ts</code></td>
+</tr>
+<tr>
+<td>Mail: নির্ধারিত পাঠানো / ফোল্ডার watch / পুরোনো blob পরিষ্কার</td>
+<td>১ মিনিট / ১ মিনিট / ৬ ঘণ্টা</td>
+<td><code>MailRoutes.ts</code></td>
+</tr>
+<tr>
+<td>Vehicle ride মেয়াদ</td>
+<td>১ মিনিট</td>
+<td><code>VehicleManagementRoutes.ts</code></td>
+</tr>
+<tr>
+<td>নির্ধারিত HR রিপোর্ট</td>
+<td>১০ মিনিট</td>
+<td><code>HrOpsReportsRoutes.ts</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="_3">১৫. ডিপ্লয়মেন্ট</h2>
+<pre class="mermaid">flowchart LR
+  DEV[&quot;ডেভেলপমেন্ট&lt;br/&gt;npm run dev&lt;br/&gt;(tsx server.ts + Vite এক পোর্টে)&quot;] --&gt; BLD[&quot;npm run build&lt;br/&gt;Vite → dist/ ফ্রন্টএন্ড&lt;br/&gt;esbuild → dist/server.cjs&quot;]
+  BLD --&gt; PM[&quot;PM2 cluster&lt;br/&gt;(ecosystem.config.cjs)&quot;]
+  PM --&gt; NG[&quot;Nginx (HTTPS, proxy)&quot;]
+  NG --&gt; U[&quot;ব্যবহারকারী&quot;]
+  PM --&gt; DBS[(MySQL)]
+  PM --&gt; RDS[(Redis)]
+</pre>
+<p>Node ≥ ২২। <code>.env</code>-এর মূল চাবি: <code>DB_*</code>, <code>JWT_SECRET</code>, <code>ADMIN_EMAIL/PASSWORD</code>, <code>CORS_ORIGINS</code>, <code>MAIL_ENCRYPTION_KEY</code>, <code>REDIS_URL</code>, <code>GEMINI_API_KEY</code> (ঐচ্ছিক), <code>ESIGN_CERT_*</code> (ঐচ্ছিক)।</p>
+<hr />
+<h2 id="workflow-">১৬. যা এই workflow-তে ধরা নেই</h2>
+<p>আসল ফোন অ্যাপের ভেতরের প্রবাহ (GPS, ক্যামেরা), প্রতিটি ছোট রিপোর্ট ও পেজ, মডিউলভিত্তিক সব এজ-কেস। বিস্তারিত দেখতে <code>docs/CredenceHR-Code-Guide-for-Laravel-Developers-BN.md</code> ও সংশ্লিষ্ট <code>*Routes.ts</code> ফাইলের শুরুর মন্তব্য পড়ুন (প্রতিটি ফাইলে প্রবাহ লেখা আছে)।</p></main><script src="assets/mermaid.min.js"></script><script>mermaid.initialize({startOnLoad:true,securityLevel:"loose",theme:"default",flowchart:{useMaxWidth:true},maxTextSize:900000});</script></body></html>

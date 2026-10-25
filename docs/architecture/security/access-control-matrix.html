@@ -1,0 +1,227 @@
+<!doctype html><html lang="bn"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Access Matrix — CredenceHR</title><style>body{margin:0;font:16px/1.65 'Noto Sans Bengali','Segoe UI',system-ui,sans-serif;color:#1b1233;background:#f6f4fb}
+nav{position:sticky;top:0;z-index:5;background:#2a0f5c;display:flex;gap:4px;flex-wrap:wrap;padding:8px 14px}
+nav a{color:#e9ddff;text-decoration:none;font-size:14px;padding:6px 12px;border-radius:999px}
+nav a:hover,nav a.on{background:#7c3aed;color:#fff}
+main{max-width:1180px;margin:0 auto;padding:24px 22px 80px;background:#fff;box-shadow:0 0 40px rgba(60,20,120,.08)}
+h1{font-size:30px;border-bottom:3px solid #7c3aed;padding-bottom:8px}h2{margin-top:2em;border-bottom:1px solid #e5defa;padding-bottom:4px}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14px;display:block;overflow-x:auto}
+th,td{border:1px solid #ddd5f3;padding:6px 10px;vertical-align:top;text-align:left}th{background:#efe9ff}
+code{background:#f1ecff;padding:1px 5px;border-radius:4px;font-size:.92em}pre{background:#f7f5fc;padding:12px;border-radius:8px;overflow:auto}
+pre.mermaid{background:#fff;border:1px solid #e5defa;text-align:center;overflow:auto;padding:14px}
+img{max-width:100%;height:auto;border:1px solid #e5defa;border-radius:8px}blockquote{border-left:4px solid #a78bfa;margin:12px 0;padding:4px 14px;background:#faf8ff}
+details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href="../index.html">সূচি</a><a class="" href="../database/README.html">ডাটাবেস ডায়াগ্রাম</a><a class="" href="../database/data-dictionary.html">Data Dictionary</a><a class="" href="../02-application-workflow.html">Application Workflow</a><a class="" href="../03-technology-and-libraries.html">প্রযুক্তি ও লাইব্রেরি</a><a class="" href="../04-security.html">Security</a><a class="on" href="../security/access-control-matrix.html">Access Matrix</a><a class="" href="../05-security-questions-and-answers.html">প্রশ্ন-উত্তর</a></nav><main><h1 id="access-control-matrix">Access Control Matrix: কে কোন মডিউলে কী করতে পারে</h1>
+<blockquote>
+<p>স্বয়ংক্রিয়ভাবে তৈরি: <code>src/types.ts</code> (<code>ADMIN_MODULES</code>, <code>MODULE_LAYER_OPTIONS</code>, <code>EXPLICIT_ONLY_LAYERS</code>) থেকে। 🔒 = ডিফল্টে বন্ধ, Superadmin টিক দিলে তবেই। Superadmin সবসময় সব পায়।
+মডিউল অনুমতি পায় Admin; কর্মী (<code>user</code>) Admin Panel-এ ঢোকে না, শুধু Self Service-এর সুইচ (যেমন <code>can_view_roster</code>) পায়।</p>
+</blockquote>
+<table>
+<thead>
+<tr>
+<th>মডিউল (Admin Panel)</th>
+<th>কী</th>
+<th>layer / অনুমতির ধাপ (🔒 = ডিফল্টে বন্ধ, Superadmin টিক দিলে তবেই)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Admin Dashboard</td>
+<td><code>admin_dashboard</code></td>
+<td>শুধু মডিউলের অনুমতি (layer নেই)</td>
+</tr>
+<tr>
+<td>Reports</td>
+<td><code>reports</code></td>
+<td><code>read</code> Read Only<br><code>edit_add</code> Edit<br><code>delete_trash</code> Delete/Trash<br>🔒<code>permanent_delete</code> Permanent Delete<br>🔒<code>submission_status</code> Budget Submission Status<br>🔒<code>dispatch_material</code> Dispatch Material (own)<br>🔒<code>dispatch_all</code> Dispatch Material: see all</td>
+</tr>
+<tr>
+<td>Projects</td>
+<td><code>projects</code></td>
+<td><code>read</code> Read Only<br><code>edit_add</code> Edit/Add<br><code>entry_upload</code> Entry/Upload<br><code>delete_trash</code> Delete/Trash<br>🔒<code>permanent_delete</code> Permanent Delete</td>
+</tr>
+<tr>
+<td>Branches</td>
+<td><code>branches</code></td>
+<td>শুধু মডিউলের অনুমতি (layer নেই)</td>
+</tr>
+<tr>
+<td>MPR Numbers</td>
+<td><code>mprs</code></td>
+<td>শুধু মডিউলের অনুমতি (layer নেই)</td>
+</tr>
+<tr>
+<td>Data Import</td>
+<td><code>imports</code></td>
+<td>শুধু মডিউলের অনুমতি (layer নেই)</td>
+</tr>
+<tr>
+<td>Users</td>
+<td><code>users</code></td>
+<td><code>read</code> Read Only<br><code>edit_add</code> Edit/Add<br><code>entry_upload</code> Entry/Upload<br><code>delete_trash</code> Delete/Trash<br>🔒<code>permanent_delete</code> Permanent Delete<br>🔒<code>block_account</code> Block Account<br>🔒<code>password_requests</code> Password requests (Forgot password)</td>
+</tr>
+<tr>
+<td>Employees</td>
+<td><code>employees</code></td>
+<td><code>read</code> Employees (view, add, edit)<br>🔒<code>employee_delete</code> Delete employee records</td>
+</tr>
+<tr>
+<td>Departments</td>
+<td><code>departments</code></td>
+<td><code>read</code> Read Only<br><code>edit_add</code> Edit/Add<br><code>entry_upload</code> Entry/Upload<br><code>delete_trash</code> Delete/Trash<br>🔒<code>permanent_delete</code> Permanent Delete</td>
+</tr>
+<tr>
+<td>Remote Attendance</td>
+<td><code>attendance</code></td>
+<td>শুধু মডিউলের অনুমতি (layer নেই)</td>
+</tr>
+<tr>
+<td>Monthly Attendance Report</td>
+<td><code>attendance_reports</code></td>
+<td><code>read</code> Attendance Reports<br>🔒<code>late_list</code> Late list (who came late)</td>
+</tr>
+<tr>
+<td>Monthly Leave Application</td>
+<td><code>leave_applications</code></td>
+<td>শুধু মডিউলের অনুমতি (layer নেই)</td>
+</tr>
+<tr>
+<td>Office Attendance</td>
+<td><code>office_attendance</code></td>
+<td><code>read</code> Office Attendance<br>🔒<code>link_pins</code> Link Device PINs</td>
+</tr>
+<tr>
+<td>Employee Tracking</td>
+<td><code>tracking</code></td>
+<td><code>read</code> Live Map &amp; History<br><code>stay_report</code> Stay Report<br>🔒<code>live</code> Live Follow</td>
+</tr>
+<tr>
+<td>Movement Claims</td>
+<td><code>claims</code></td>
+<td>শুধু মডিউলের অনুমতি (layer নেই)</td>
+</tr>
+<tr>
+<td>Conveyance Bill Claim</td>
+<td><code>conveyance</code></td>
+<td><code>read</code> Conveyance Bill Claim<br>🔒<code>on_behalf</code> Claim on Behalf</td>
+</tr>
+<tr>
+<td>Conveyance Disbursement</td>
+<td><code>disbursement</code></td>
+<td>শুধু মডিউলের অনুমতি (layer নেই)</td>
+</tr>
+<tr>
+<td>Approvals</td>
+<td><code>approvals</code></td>
+<td><code>read</code> Read Only<br><code>edit_add</code> Edit/Add<br><code>entry_upload</code> Entry/Upload<br><code>delete_trash</code> Delete/Trash<br>🔒<code>permanent_delete</code> Permanent Delete</td>
+</tr>
+<tr>
+<td>Notices</td>
+<td><code>notices</code></td>
+<td>শুধু মডিউলের অনুমতি (layer নেই)</td>
+</tr>
+<tr>
+<td>Holidays (Global Calendar)</td>
+<td><code>holidays</code></td>
+<td>শুধু মডিউলের অনুমতি (layer নেই)</td>
+</tr>
+<tr>
+<td>Payroll</td>
+<td><code>payroll</code></td>
+<td><code>read</code> Payroll<br>🔒<code>salary_month</code> Salary Month Setting<br>🔒<code>salary_hold</code> Salary Hold / Release<br>🔒<code>audit_approve</code> Audit Approve<br>🔒<code>accounts_pay</code> Accounts Pay<br>🔒<code>access_log</code> Activity Log<br>🔒<code>salary_bulk_upload</code> Salary Bulk Upload</td>
+</tr>
+<tr>
+<td>Asset Management</td>
+<td><code>asset_management</code></td>
+<td>শুধু মডিউলের অনুমতি (layer নেই)</td>
+</tr>
+<tr>
+<td>Vehicle Management</td>
+<td><code>vehicle_management</code></td>
+<td>শুধু মডিউলের অনুমতি (layer নেই)</td>
+</tr>
+<tr>
+<td>Vehicle Maintainer (Ride Bypass)</td>
+<td><code>vehicle_maintainer</code></td>
+<td>শুধু মডিউলের অনুমতি (layer নেই)</td>
+</tr>
+<tr>
+<td>Job Recycle</td>
+<td><code>recycle</code></td>
+<td>শুধু মডিউলের অনুমতি (layer নেই)</td>
+</tr>
+<tr>
+<td>MPR Edit Log</td>
+<td><code>editlog</code></td>
+<td>শুধু মডিউলের অনুমতি (layer নেই)</td>
+</tr>
+<tr>
+<td>Exit / Offboarding</td>
+<td><code>exit_offboarding</code></td>
+<td><code>read</code> Exit / Offboarding<br>🔒<code>exit_dues</code> Exit — Dues from other modules<br>🔒<code>exit_pdf</code> Exit — Clearance &amp; Settlement PDF<br>🔒<code>exit_clearance_setup</code> Exit — Clearance Departments setup</td>
+</tr>
+<tr>
+<td>Performance Management</td>
+<td><code>performance_management</code></td>
+<td>শুধু মডিউলের অনুমতি (layer নেই)</td>
+</tr>
+<tr>
+<td>Recruitment (ATS)</td>
+<td><code>recruitment</code></td>
+<td>শুধু মডিউলের অনুমতি (layer নেই)</td>
+</tr>
+<tr>
+<td>Grievance &amp; Disciplinary</td>
+<td><code>grievance_disciplinary</code></td>
+<td>শুধু মডিউলের অনুমতি (layer নেই)</td>
+</tr>
+<tr>
+<td>HR Analytics</td>
+<td><code>hr_analytics</code></td>
+<td>শুধু মডিউলের অনুমতি (layer নেই)</td>
+</tr>
+<tr>
+<td>Document Vault</td>
+<td><code>document_vault</code></td>
+<td><code>read</code> Documents (upload, view, own signature)<br>🔒<code>sign_request</code> Request signatures from others<br>🔒<code>esign_settings</code> E-Signature settings (OTP, read to the end)</td>
+</tr>
+<tr>
+<td>HR Operations</td>
+<td><code>hr_operations</code></td>
+<td><code>read</code> HR Operations<br>🔒<code>onboarding_create</code> Onboarding — Create login<br>🔒<code>onboarding_review</code> Onboarding — Review / Reject<br>🔒<code>onboarding_approve</code> Onboarding — Approve<br>🔒<code>reminders_receive</code> Reminders — receive &amp; view</td>
+</tr>
+<tr>
+<td>Task Management</td>
+<td><code>task_management</code></td>
+<td>শুধু মডিউলের অনুমতি (layer নেই)</td>
+</tr>
+<tr>
+<td>Mobile Bill</td>
+<td><code>mobile_bill</code></td>
+<td><code>read</code> Mobile Bill<br><code>limit_history</code> Limit Change History</td>
+</tr>
+<tr>
+<td>Target Reports</td>
+<td><code>target_reports</code></td>
+<td><code>read</code> Target Reports<br>🔒<code>target_export</code> Targets — Excel / PDF<br>🔒<code>target_cancel</code> Targets — Cancel / Close</td>
+</tr>
+<tr>
+<td>Mail Administration</td>
+<td><code>mail_admin</code></td>
+<td><code>read</code> Mailbox list<br>🔒<code>mail_open</code> Open mailboxes (read only)<br>🔒<code>mail_password</code> See mailbox passwords<br>🔒<code>mail_settings</code> Internal delivery settings<br>🔒<code>mail_groups</code> Set up mail groups</td>
+</tr>
+<tr>
+<td>Duty Roster</td>
+<td><code>duty_roster</code></td>
+<td><code>read</code> See shifts and roster<br>🔒<code>roster_manage</code> Set shifts and roster</td>
+</tr>
+<tr>
+<td>Break Time</td>
+<td><code>break_time</code></td>
+<td><code>read</code> See break report<br>🔒<code>break_manage</code> Break rules, end forgotten breaks</td>
+</tr>
+<tr>
+<td>User Feedback</td>
+<td><code>user_feedback</code></td>
+<td>শুধু মডিউলের অনুমতি (layer নেই)</td>
+</tr>
+</tbody>
+</table></main><script src="../assets/mermaid.min.js"></script><script>mermaid.initialize({startOnLoad:true,securityLevel:"loose",theme:"default",flowchart:{useMaxWidth:true},maxTextSize:900000});</script></body></html>
