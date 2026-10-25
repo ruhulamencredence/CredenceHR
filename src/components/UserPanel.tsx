@@ -3143,12 +3143,13 @@ export const UserPanel: React.FC<UserPanelProps> = ({ token, user, claimsNavRequ
       {/* Dashboard only — never on a section page (Leave, Timesheet, Jobs…). */}
       <div className={`hidden ${mobileActiveSection !== null || showingClaimsPage || showingMainGroupPage ? 'md:hidden' : 'md:block'}`}>
         {!isNativeApp && <ModulePath path={['Dashboard']} />}
-        <div
-          className="rounded-2xl px-6 py-5 sm:px-8 sm:py-6 text-white shadow-sm"
-          style={{ background: 'var(--g-gradient)' }}
-        >
-          <h3 className="text-xl sm:text-2xl font-bold">Welcome back, {user.name.split(' ')[0]}!</h3>
-          <p className="mt-1 text-sm text-white/85">Check in your attendance, submit a New MPR Entry, and keep an eye on Notices — all from here.</p>
+        {/* Same greeting as the Admin Dashboard (AdminPanel.tsx): plain text
+            on the page background — "Hi Name," in the accent colour, a large
+            heading and the line under it. */}
+        <div className="pt-1 pb-1">
+          <p className="text-sm font-semibold" style={{ color: 'var(--g-accent)' }}>Hi {user.name.split(' ')[0]},</p>
+          <h3 className="mt-0.5 text-2xl sm:text-[32px] sm:leading-tight font-bold tracking-tight text-slate-900">Welcome back!</h3>
+          <p className="mt-1 text-sm text-slate-500">Check in your attendance, submit a New MPR Entry, and keep an eye on Notices — all from here.</p>
         </div>
       </div>
 
