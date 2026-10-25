@@ -17,7 +17,7 @@ import { Capacitor } from '@capacitor/core';
 import { sanitizeNoticeHtml } from '../lib/noticeHtml';
 import { App } from '@capacitor/app';
 import { BatteryCharging, Check, CheckCircle2, ChevronDown, ChevronUp, Circle, LocateFixed, MapPin, Smartphone, X } from 'lucide-react';
-import { Lottie } from 'lottie-react';
+import { Lottie } from './LazyLottie';
 import { ActiveNotice } from '../types';
 import trackingAnimation from '../assets/gps-navigation.json';
 import {

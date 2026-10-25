@@ -1112,6 +1112,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
                     value={sidebarSearch}
                     onChange={(e) => setSidebarSearch(e.target.value)}
                     onKeyDown={handleSearchKeyDown}
+                    aria-label="Search menu"
                     placeholder="Search menu…"
                     className="w-full pl-8 pr-7 py-2 rounded-xl bg-white/10 text-white text-[13px] placeholder-white/40 focus:outline-none focus:bg-white/15 transition-colors"
                   />
@@ -1298,6 +1299,7 @@ export const GlobalSidebar: React.FC<GlobalSidebarProps> = ({
                   }
                   handleSearchKeyDown(e);
                 }}
+                aria-label="Search menu"
                 placeholder="Search menu…"
                 className="w-full pl-8 pr-3 py-2 rounded-xl bg-white/10 text-white text-[13px] placeholder-white/40 focus:outline-none focus:bg-white/15"
               />

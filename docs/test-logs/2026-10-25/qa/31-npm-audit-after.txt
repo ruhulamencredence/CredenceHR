@@ -1,0 +1,15 @@
+# npm audit report
+
+node-forge  *
+Severity: high
+node-forge RSA PKCS#1 v1.5 signature verification accepts extra nested DigestAlgorithm elements - https://github.com/advisories/GHSA-86w9-cpqp-85rv
+No fix available
+node_modules/node-forge
+  @signpdf/signer-p12  *
+  Depends on vulnerable versions of node-forge
+  node_modules/@signpdf/signer-p12
+
+2 high severity vulnerabilities
+
+Some issues need review, and may require choosing
+a different dependency.

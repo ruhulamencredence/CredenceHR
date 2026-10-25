@@ -11,6 +11,7 @@ import { EmployeeChangeHistory, HistoryEntryCard, buildHistoryTimeline, HISTORY_
 import { RecordFields, useNameSuggestions, refreshNameSuggestions } from './HrOps360Parts';
 import { confirmDialog } from '../lib/confirmDialog';
 import { LoadingBlock } from './LoadingBlock';
+import { passwordProblem, PASSWORD_HINT } from '../lib/passwordPolicy';
 
 // Add/Edit Employee modal tabs — Basic + Employee Info fields live under
 // "info", the rest mirror the reference HR system's own tab split (Status /
@@ -839,8 +840,9 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
       if (!form.login_username.trim() && !form.email.trim()) {
         return setMessage({ type: 'error', text: 'Enter a login username, or an Email above, to create this employee\u2019s login.' });
       }
-      if (form.login_password.length < 6) {
-        return setMessage({ type: 'error', text: 'Login password must be at least 6 characters.' });
+      const pwBad = passwordProblem(form.login_password);
+      if (pwBad) {
+        return setMessage({ type: 'error', text: pwBad });
       }
     }
 
@@ -1061,8 +1063,9 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
     if (!loginForm.login_username.trim() && !creatingLoginFor.email) {
       return setMessage({ type: 'error', text: 'Enter a login username — this employee has no Email on file to fall back to.' });
     }
-    if (loginForm.login_password.length < 6) {
-      return setMessage({ type: 'error', text: 'Login password must be at least 6 characters.' });
+    const pwBad = passwordProblem(loginForm.login_password);
+    if (pwBad) {
+      return setMessage({ type: 'error', text: pwBad });
     }
 
     setCreatingLogin(true);
@@ -1246,11 +1249,13 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
+              aria-label="Search employees"
               placeholder="Search by name, ID, designation, department, email, phone…"
               className="block w-full pl-9 pr-3 py-2.5 bg-white border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
             />
           </div>
           <select
+            aria-label="Status filter"
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
             className="py-2.5 px-3 bg-white border border-slate-200 rounded-xl text-slate-700 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
@@ -1648,7 +1653,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                           type="text"
                           value={form.login_password}
                           onChange={(e) => setForm((f) => ({ ...f, login_password: e.target.value }))}
-                          placeholder="At least 6 characters"
+                          placeholder={PASSWORD_HINT}
                           className="block w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
                         />
                       </div>
@@ -2377,7 +2382,7 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                   type="text"
                   value={loginForm.login_password}
                   onChange={(e) => setLoginForm((f) => ({ ...f, login_password: e.target.value }))}
-                  placeholder="At least 6 characters"
+                  placeholder={PASSWORD_HINT}
                   className="block w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none"
                 />
               </div>

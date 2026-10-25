@@ -322,6 +322,8 @@ export function registerNoticeRoutes(app: Express, deps: RegisterNoticeRoutesDep
   app.post("/api/notices/:id/dismiss", authenticateToken, async (req: any, res) => {
     try {
       const id = Number(req.params.id);
+      const found: any[] = await queryDB("SELECT id FROM notices WHERE id = ?", [id]);
+      if (!found.length) return res.status(404).json({ error: "Notice not found." });
       await queryDB("INSERT INTO notice_dismissals (notice_id, user_id) VALUES (?, ?)", [id, req.user.id]);
       res.json({ success: true });
     } catch (err: any) {

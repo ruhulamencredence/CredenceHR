@@ -1,5 +1,5 @@
 import React, { Suspense, lazy, useEffect, useRef, useState } from 'react';
-import { LottieLight } from 'lottie-react';
+import { LottieLight } from './LazyLottie';
 import { sanitizeNoticeHtml } from '../lib/noticeHtml';
 import { Bell, X } from 'lucide-react';
 import { ActiveNotice, User } from '../types';

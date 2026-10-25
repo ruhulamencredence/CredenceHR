@@ -10,7 +10,9 @@
 // Panel's letter register and by the Employee's own "My Letters" page, so a
 // letter prints identically from both.
 
-import jsPDF from 'jspdf';
+// jsPDF itself loads only when a letter is built (keeps it out of the
+// first download; see App.tsx's lazy pages).
+import type jsPDF from 'jspdf';
 import { loadImageElement } from './pdfLetterhead';
 import credenceLogo from '../assets/credence-logo.png';
 
@@ -46,7 +48,8 @@ export const longDate = (d: string | null | undefined) => {
 };
 
 export async function buildLetterPdf(input: LetterPdfInput): Promise<jsPDF> {
-  const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+  const { default: JsPDF } = await import('jspdf');
+  const doc = new JsPDF({ unit: 'mm', format: 'a4' });
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
   const left = 22;

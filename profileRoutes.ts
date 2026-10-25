@@ -25,6 +25,7 @@
 import type { Express } from "express";
 import { endAllSessions, sessionKeyOf } from "./SessionSecurity";
 import bcrypt from "bcryptjs";
+import { passwordProblem } from "./src/lib/passwordPolicy";
 
 interface ProfileRouteDeps {
   authenticateToken: any;
@@ -207,7 +208,8 @@ export function registerProfileRoutes(app: Express, deps: ProfileRouteDeps) {
       const currentPassword = String(req.body?.current_password || "");
       const newPassword = String(req.body?.new_password || "");
       if (!currentPassword) return res.status(400).json({ error: "Current password is required." });
-      if (newPassword.length < 6) return res.status(400).json({ error: "New password must be at least 6 characters." });
+      const pwBad = passwordProblem(newPassword, { email: req.user.email, name: req.user.name });
+      if (pwBad) return res.status(400).json({ error: pwBad });
 
       const rows = await queryDB("SELECT password_hash FROM users WHERE id = ?", [userId]);
       if (rows.length === 0) return res.status(404).json({ error: "User not found." });

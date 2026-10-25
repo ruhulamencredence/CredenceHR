@@ -415,6 +415,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
                     spellCheck={false}
                     value={workspaceInput}
                     onChange={(e) => setWorkspaceInput(e.target.value.replace(/\s+/g, '').toLowerCase())}
+                    aria-label="Workspace code"
                     placeholder="e.g. credence"
                     className="block w-full pl-5 pr-11 py-3.5 rounded-full text-[15px] placeholder-slate-400 focus:outline-none transition-shadow"
                     style={{ background: 'var(--g-surface-muted)', border: '1px solid transparent', color: 'var(--g-text)' }}

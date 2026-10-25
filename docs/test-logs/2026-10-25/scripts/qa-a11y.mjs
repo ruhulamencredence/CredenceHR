@@ -20,13 +20,14 @@ for (const [who, auth, url] of pages) {
     const btn = [...document.querySelectorAll('button, [role=button], a[href]')].filter(vis).filter((e) => !name(e) && !e.querySelector('img[alt]:not([alt=""])'));
     const inp = [...document.querySelectorAll('input:not([type=hidden]), select, textarea')].filter(vis).filter((e) => !(e.id && document.querySelector(`label[for="${e.id}"]`)) && !e.closest('label') && !e.getAttribute('aria-label') && !e.getAttribute('aria-labelledby') && !e.getAttribute('title'));
     const img = [...document.querySelectorAll('img')].filter(vis).filter((e) => !e.hasAttribute('alt'));
-    return { unnamedButtons: btn.length, unlabeledInputs: inp.length, placeholderOnly: inp.filter((e) => e.getAttribute('placeholder')).length, imgNoAlt: img.length, sample: btn.slice(0, 3).map((e) => e.outerHTML.slice(0, 90)) };
+    return { unnamedButtons: btn.length, unlabeledInputs: inp.length, placeholderOnly: inp.filter((e) => e.getAttribute('placeholder')).length, imgNoAlt: img.length, sample: btn.slice(0, 3).map((e) => e.outerHTML.slice(0, 90)), inputs: inp.map((e) => `${e.tagName.toLowerCase()}[${e.getAttribute('type') || ''}] placeholder="${e.getAttribute('placeholder') || ''}"`) };
   });
   await p.keyboard.press('Tab'); await p.keyboard.press('Tab');
   const focus = await p.evaluate(() => { const e = document.activeElement; if (!e || e === document.body) return 'nothing focused'; const s = getComputedStyle(e); return s.outlineStyle !== 'none' && s.outlineWidth !== '0px' ? 'visible outline' : s.boxShadow !== 'none' ? 'ring (box-shadow)' : 'NO visible focus'; });
   for (const k of Object.keys(tot)) tot[k] += r[k];
   console.log(`${who.padEnd(10)} ${url.padEnd(18)} unnamed buttons/links ${r.unnamedButtons}, unlabeled inputs ${r.unlabeledInputs} (placeholder only ${r.placeholderOnly}), img without alt ${r.imgNoAlt}, Tab focus: ${focus}`);
   if (r.sample.length) console.log('           e.g. ' + r.sample.join(' | '));
+  if (r.inputs.length) console.log('           inputs: ' + r.inputs.join(' | '));
   await p.close();
 }
 console.log('TOTAL', JSON.stringify(tot));

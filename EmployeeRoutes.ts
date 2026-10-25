@@ -16,6 +16,8 @@ import { isSeparatedJobStatus } from "./AccountBlock";
 import { EMPLOYEE_BOOL_FIELDS } from "./memoryDbFallback";
 import bcrypt from "bcryptjs";
 import type { Express } from "express";
+import { passwordProblem } from "./src/lib/passwordPolicy";
+import { employeeFieldProblem } from "./EmployeeValidation";
 
 export interface RegisterEmployeeRoutesDeps {
   ADMIN_MODULE_KEYS: any;
@@ -224,6 +226,8 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
     try {
       const { employee_id, name, designation, department, department_id, email, phone, is_active, create_login, login_email, login_username, login_password, login_project_ids, login_module_keys } = req.body;
       if (!name || !String(name).trim()) return res.status(400).json({ error: "Name is required" });
+      const fieldBad = employeeFieldProblem(req.body || {}, todayInDhaka());
+      if (fieldBad) return res.status(400).json({ error: fieldBad });
       const zkPin = await checkZkDevicePin(req.body, null);
       if (zkPin.error) return res.status(400).json({ error: zkPin.error });
       const branch = await resolveEmployeeBranch(req.body);
@@ -238,8 +242,9 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
         if (!loginEmail && !loginUsername) {
           return res.status(400).json({ error: "A login email or username is required to create a login for this employee." });
         }
-        if (!login_password || String(login_password).length < 6) {
-          return res.status(400).json({ error: "Login password must be at least 6 characters." });
+        const pwBad = passwordProblem(login_password, { email: loginEmail, username: loginUsername, name });
+        if (pwBad) {
+          return res.status(400).json({ error: pwBad });
         }
         if (loginEmail) {
           const existingEmail = await queryDB("SELECT id FROM users WHERE email = ?", [loginEmail]);
@@ -329,6 +334,8 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
 
       const { employee_id, name, designation, department, department_id, email, phone, is_active } = req.body;
       if (!name || !String(name).trim()) return res.status(400).json({ error: "Name is required" });
+      const fieldBad = employeeFieldProblem(req.body || {}, todayInDhaka(), existing[0]);
+      if (fieldBad) return res.status(400).json({ error: fieldBad });
       const zkPin = await checkZkDevicePin(req.body, id);
       if (zkPin.error) return res.status(400).json({ error: zkPin.error });
       const branch = await resolveEmployeeBranch(req.body);
@@ -707,8 +714,9 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
       if (!loginEmail && !loginUsername) {
         return res.status(400).json({ error: "A login email or username is required to create a login for this employee." });
       }
-      if (!login_password || String(login_password).length < 6) {
-        return res.status(400).json({ error: "Login password must be at least 6 characters." });
+      const pwBad = passwordProblem(login_password, { email: loginEmail, username: loginUsername, name: employee.name });
+      if (pwBad) {
+        return res.status(400).json({ error: pwBad });
       }
       if (loginEmail) {
         const existingEmail = await queryDB("SELECT id FROM users WHERE email = ?", [loginEmail]);

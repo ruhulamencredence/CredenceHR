@@ -609,6 +609,7 @@ useLiveRefresh(() => load());
                       {item.source_type === 'user_claim' && <ClaimChangesNotice item={item} className="mb-2" />}
                       <input
                         type="text"
+                        aria-label="Remarks"
                         placeholder={item.source_type === 'user_claim' ? 'Remarks (a reason is needed to Return or Reject)' : 'Remarks (optional)'}
                         value={remarksDraft[item.id] || ''}
                         onChange={(e) => setRemarksDraft((prev) => ({ ...prev, [item.id]: e.target.value }))}

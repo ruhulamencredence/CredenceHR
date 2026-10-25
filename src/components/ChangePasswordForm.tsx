@@ -8,6 +8,7 @@ import { ChevronLeft, Lock, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { apiUrl } from '../lib/api';
 import { Spinner } from './Spinner';
 import { PasswordInput } from './PasswordInput';
+import { passwordProblem, PASSWORD_HINT, PASSWORD_MIN } from '../lib/passwordPolicy';
 
 interface ChangePasswordFormProps {
   token: string;
@@ -37,8 +38,9 @@ export const ChangePasswordForm: React.FC<ChangePasswordFormProps> = ({ token, o
       setError('Enter your current password.');
       return;
     }
-    if (newPassword.length < 6) {
-      setError('New password must be at least 6 characters.');
+    const pwBad = passwordProblem(newPassword);
+    if (pwBad) {
+      setError(pwBad);
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -117,10 +119,10 @@ export const ChangePasswordForm: React.FC<ChangePasswordFormProps> = ({ token, o
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
                   required
-                  minLength={6}
+                  minLength={PASSWORD_MIN}
                   autoComplete="new-password"
                   className="profile-field-input"
-                  placeholder="At least 6 characters"
+                  placeholder={PASSWORD_HINT}
                 />
               </Field>
               <Field label="Confirm New Password">
@@ -128,7 +130,7 @@ export const ChangePasswordForm: React.FC<ChangePasswordFormProps> = ({ token, o
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   required
-                  minLength={6}
+                  minLength={PASSWORD_MIN}
                   autoComplete="new-password"
                   className="profile-field-input"
                   placeholder="Re-enter New Password"

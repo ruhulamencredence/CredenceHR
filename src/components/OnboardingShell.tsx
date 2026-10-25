@@ -16,6 +16,7 @@ import { apiUrl } from '../lib/api';
 import { PasswordInput } from './PasswordInput';
 import type { User } from '../types';
 import { OnboardingForm, type OnboardingFormState } from './OnboardingForm';
+import { passwordProblem, PASSWORD_HINT } from '../lib/passwordPolicy';
 
 export const SESSION_CHANGED_EVENT = 'credence:session-changed';
 
@@ -92,7 +93,8 @@ export const ChangeTempPassword: React.FC<{ token: string; onDone: () => void; i
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
-    if (next.length < 6) return setError('New password must be at least 6 characters.');
+    const pwBad = passwordProblem(next);
+    if (pwBad) return setError(pwBad);
     if (next !== confirm) return setError('New password and confirmation do not match.');
     if (next === current) return setError('Choose a password different from the current one.');
     setSaving(true);
@@ -118,7 +120,7 @@ export const ChangeTempPassword: React.FC<{ token: string; onDone: () => void; i
       </div>
       <p className="text-xs text-slate-500">{intro}</p>
       <PasswordInput autoComplete="current-password" placeholder={currentLabel} value={current} onChange={(e) => setCurrent(e.target.value)} className={inputCls} />
-      <PasswordInput autoComplete="new-password" placeholder="New password (at least 6 characters)" value={next} onChange={(e) => setNext(e.target.value)} className={inputCls} />
+      <PasswordInput autoComplete="new-password" placeholder={`New password (${PASSWORD_HINT.toLowerCase()})`} value={next} onChange={(e) => setNext(e.target.value)} className={inputCls} />
       <PasswordInput autoComplete="new-password" placeholder="Confirm new password" value={confirm} onChange={(e) => setConfirm(e.target.value)} className={inputCls} />
       {error && <div className="text-xs text-rose-600">{error}</div>}
       <button type="submit" disabled={saving || !current || !next} className="w-full py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold disabled:opacity-50">

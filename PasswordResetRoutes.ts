@@ -33,6 +33,7 @@ import bcrypt from "bcryptjs";
 import { sendMail, isMailerConfigured } from "./mailer";
 import { endAllSessions } from "./SessionSecurity";
 import { clientIp } from "./ActiveUsersRoutes";
+import { passwordProblem } from "./src/lib/passwordPolicy";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 
@@ -116,7 +117,6 @@ const LIMITS: Record<string, { ip: number; user: number }> = {
 };
 const CODE_MINUTES = 15;
 const CODE_TRIES = 5;
-const MIN_PASSWORD = 6;
 
 const SENT_EMAIL = "If that Login ID has an email address, a 6-digit code has been sent to it. It works for 15 minutes.";
 const SENT_REQUEST = "Your request has been sent to HR. They will give you a temporary password.";
@@ -236,7 +236,9 @@ export function registerPasswordResetRoutes(app: Express, deps: Deps) {
       const ip = clientIp(req);
       const code = String(req.body?.code || "").replace(/\D/g, "");
       const password = String(req.body?.new_password || "");
-      if (password.length < MIN_PASSWORD) return res.status(400).json({ error: `The new password must be at least ${MIN_PASSWORD} characters.` });
+      // Checked before looking the account up, so the answer says nothing about it.
+      const pwBad = passwordProblem(password);
+      if (pwBad) return res.status(400).json({ error: pwBad });
       const u = await findAccount(req.body?.identifier);
       if (!(await allowed("verify", ip, u?.id ?? null))) return tooMany(res);
       if (!u || code.length !== 6) return res.status(400).json({ error: BAD_CODE });

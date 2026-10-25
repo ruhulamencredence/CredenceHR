@@ -6,7 +6,7 @@
 import { useLiveRefresh } from '../lib/liveRefresh';
 import React, { useEffect, useState } from 'react';
 import { CalendarDays } from 'lucide-react';
-import { Lottie } from 'lottie-react';
+import { Lottie } from './LazyLottie';
 import { LeaveApplication, LeaveBalance } from '../types';
 import { apiUrl, dedupedFetchJson } from '../lib/api';
 import beachAnimation from '../assets/Beach.json';

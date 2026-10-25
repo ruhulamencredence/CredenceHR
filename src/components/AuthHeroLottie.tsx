@@ -1,5 +1,5 @@
 import React from 'react';
-import { Lottie } from 'lottie-react';
+import { Lottie } from './LazyLottie';
 import authHeroAnimation from '../assets/office-illustration.json';
 
 // Split out from AuthScreen.tsx and loaded via React.lazy() there so the

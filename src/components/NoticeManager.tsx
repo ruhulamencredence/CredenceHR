@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { LottieLight } from 'lottie-react';
+import { LottieLight } from './LazyLottie';
 import { sanitizeNoticeHtml } from '../lib/noticeHtml';
 import {
   Bell, Plus, Trash2, Edit2, X, Eye, EyeOff, Sparkles,

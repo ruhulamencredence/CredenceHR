@@ -40,6 +40,7 @@ import { SHARE_KINDS, CONFIG_TABLES, OWN_TABLES, GROUP_TABLES, GROUP_BACKFILL } 
 const COMPANY_ROWS = "SELECT id, group_id, name, short_code, is_mother, address, phone, email, website, logo_mime, is_active, created_at, shared_settings FROM companies";
 const GROUP_ROWS = "SELECT id, name, short_name, logo_mime, created_at, workspace_code, tagline, is_active FROM company_groups";
 import { deleteCompany, deleteWorkspace, type WithTransaction } from "./companyDelete";
+import { passwordProblem } from "./src/lib/passwordPolicy";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 
@@ -1151,7 +1152,8 @@ export function registerCompanyRoutes(app: Express, deps: CompanyRouteDeps) {
       const adminEmail = String(admin.email || "").trim().toLowerCase().slice(0, 150);
       const adminPassword = String(admin.password || "");
       if (!adminName || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(adminEmail)) throw bad("Enter the name and a valid email of this workspace's Superadmin.");
-      if (adminPassword.length < 8) throw bad("The Superadmin's password must be at least 8 characters.");
+      const pwBadA = passwordProblem(adminPassword, { email: adminEmail, name: adminName });
+      if (pwBadA) throw bad(pwBadA);
       await assertEmailFree(adminEmail);
 
       const g: any = await queryDB("INSERT INTO company_groups (name, short_name, workspace_code, tagline, is_active, logo_mime, logo_data) VALUES (?, ?, ?, ?, ?, ?, ?)", [
@@ -1242,7 +1244,8 @@ export function registerCompanyRoutes(app: Express, deps: CompanyRouteDeps) {
       const email = String(req.body?.email || "").trim().toLowerCase().slice(0, 150);
       const password = String(req.body?.password || "");
       if (!name || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw bad("Enter the name and a valid email.");
-      if (password.length < 8) throw bad("The password must be at least 8 characters.");
+      const pwBadS = passwordProblem(password, { email, name });
+      if (pwBadS) throw bad(pwBadS);
       await assertEmailFree(email);
       const companies = await companiesOfGroup(queryDB, groupId);
       const mother = companies.find((c) => Number(c.is_mother) === 1) || companies[0];
@@ -1259,7 +1262,8 @@ export function registerCompanyRoutes(app: Express, deps: CompanyRouteDeps) {
     try {
       const { u } = await groupSuperadmin(Number(req.params.id), Number(req.params.userId));
       const password = String(req.body?.password || "");
-      if (password.length < 8) throw bad("The password must be at least 8 characters.");
+      const pwBadR = passwordProblem(password);
+      if (pwBadR) throw bad(pwBadR);
       await queryDB("/*unscoped*/ UPDATE users SET password_hash = ? WHERE id = ?", [await bcrypt.hash(password, 10), Number(u.id)]);
       await endAllSessions(queryDB, Number(u.id), "password");
       res.json({ success: true });

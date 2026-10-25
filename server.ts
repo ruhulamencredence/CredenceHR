@@ -897,7 +897,7 @@ async function alertNoApprover(sourceType: string, requestId: number, requestedB
         title: "No approver set",
         message:
           a.role === "superadmin"
-            ? `${name}'s ${label} is waiting: they have no Supervisor and no Approval Template. Set one (Employees -> Supervisor, or Approval Templates) and it moves there by itself, or decide it yourself in Admin Panel -> Approvals.`
+            ? `${name}'s ${label} is waiting: they have no Supervisor and no Approval Template. Set one (Employees -> Supervisor, or Approval Templates) and it moves there by itself, or decide it yourself from My Approvals or Admin Panel -> Approvals.`
             : `${name}'s ${label} is waiting: they have no Supervisor and no Approval Template. Set one (Employees -> Supervisor, or Approval Templates) and it moves there by itself. Until then only a Superadmin can decide it.`,
         relatedType: "approval_request",
         relatedId: requestId

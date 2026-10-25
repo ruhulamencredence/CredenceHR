@@ -22,6 +22,7 @@ import { endAllSessions } from "./SessionSecurity";
 import bcrypt from "bcryptjs";
 import { activeCompanyId } from "./companyContext";
 import { TEMPLATE_FEATURES, ensureAccessTemplateSchema, ensureDefaultAccessTemplate } from "./AccessTemplateDefaults";
+import { passwordProblem } from "./src/lib/passwordPolicy";
 
 interface UserManagementRouteDeps {
   authenticateToken: any;
@@ -259,8 +260,9 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
       if (!name || !email || !password) {
         return res.status(400).json({ error: "Name, email and password are required" });
       }
-      if (password.length < 6) {
-        return res.status(400).json({ error: "Password must be at least 6 characters" });
+      const pwBad = passwordProblem(password, { email, name });
+      if (pwBad) {
+        return res.status(400).json({ error: pwBad });
       }
 
       const existing = await queryDB("SELECT id FROM users WHERE email = ?", [email]);
@@ -294,8 +296,9 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
     try {
       const { id } = req.params;
       const { new_password } = req.body;
-      if (!new_password || String(new_password).length < 6) {
-        return res.status(400).json({ error: "New password must be at least 6 characters." });
+      const pwBad = passwordProblem(new_password);
+      if (pwBad) {
+        return res.status(400).json({ error: pwBad });
       }
 
       const rows: any = await queryDB("SELECT id, role FROM users WHERE id = ?", [id]);

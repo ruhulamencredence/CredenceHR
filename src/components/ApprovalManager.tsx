@@ -523,6 +523,7 @@ export const ApprovalManager: React.FC<ApprovalManagerProps> = ({ token, user, u
                           {r.source_type === 'user_claim' && <ClaimChangesNotice item={r} className="w-full" />}
                           <input
                             type="text"
+                            aria-label="Remarks"
                             placeholder={r.source_type === 'user_claim' ? 'Remarks (needed to Return/Reject)' : 'Remarks (optional)'}
                             value={remarksDraft[r.id] || ''}
                             onChange={(e) => setRemarksDraft((prev) => ({ ...prev, [r.id]: e.target.value }))}

@@ -569,8 +569,9 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       // comment (now below) on why this exists.
       const [pendingRequests, templateStepApproverRows, templateSteps, chain, relieverRows, allClearanceItems, allExitRequests, directLeaveRows] = await Promise.all([
         // A request still waiting for an approver (no Supervisor, no
-        // Template) is nobody's to act on — never the old global chain's.
-        queryDB("SELECT * FROM approval_requests WHERE status = 'pending' AND COALESCE(awaiting_approver, 0) = 0 ORDER BY id ASC"),
+        // Template) is only a Superadmin's to decide (filtered below) —
+        // never the old global chain's.
+        queryDB("SELECT * FROM approval_requests WHERE status = 'pending' ORDER BY id ASC"),
         queryDB(
           `SELECT s.template_id, s.step_order, sa.user_id
            FROM approval_template_step_approvers sa
@@ -623,6 +624,8 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
       const chainByStep = new Map<number, any>(chain.map((s: any) => [Number(s.step_order), s]));
 
       const mine = pendingRequests.filter((r: any) => {
+        // No approver yet: it shows in a Superadmin's queue (never their own).
+        if (Number(r.awaiting_approver) === 1) return req.user.role === "superadmin" && Number(r.requested_by) !== myId;
         // Department Supervisor auto-layer (Part 6) — step_order 1 is the
         // Supervisor when supervisor_step_user_id is set, same shift as
         // GET /api/approvals above.
@@ -844,6 +847,8 @@ export function registerApprovalRoutes(app: Express, deps: ApprovalRouteDeps) {
             requested_by_name: requesterMap.get(Number(r.requested_by))?.name || null,
             current_step: r.current_step,
             total_steps: r.total_steps,
+            // No Supervisor and no Approval Template: here only because this is a Superadmin.
+            no_approver: Number(r.awaiting_approver) === 1,
             vehicle_maintainer_bypass: vehicleMaintainerBypass,
             asset_fulfiller_bypass: assetFulfillerBypass,
             conveyance_disburser_bypass: conveyanceDisburserBypass,

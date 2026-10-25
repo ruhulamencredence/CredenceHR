@@ -6,7 +6,7 @@
 import { useLiveTick } from '../lib/liveRefresh';
 import React, { useEffect, useState } from 'react';
 import { Car, MapPin, ChevronRight } from 'lucide-react';
-import { Lottie } from 'lottie-react';
+import { Lottie } from './LazyLottie';
 import rideAnimation from '../assets/travel-app.json';
 import { apiUrl } from '../lib/api';
 import { BookRideTarget } from '../lib/quickAccess';

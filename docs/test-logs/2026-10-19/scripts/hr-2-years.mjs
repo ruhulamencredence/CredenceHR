@@ -183,9 +183,12 @@ async function applyLeave(k, type, start, days, approver) {
   if (!ok2(la)) return check(`${k} applies ${days}d ${type} from ${start}`, false, J(la));
   const st0 = sql(`SELECT status FROM leave_applications WHERE id=${la.body.id}`);
   let ok = st0 === 'approved';
-  if (!ok) { const a = await approveAs(approver, 'leave_application', la.body.id); ok = ok2(a); if (!ok) check(`${k}'s leave approved by the head`, false, J(a)); }
+  // No Supervisor and no Template (a head of department): it waits for an
+  // approver and only a Superadmin decides it, from their My Approvals.
+  const noApprover = sql(`SELECT IFNULL(MAX(awaiting_approver),0) FROM approval_requests WHERE source_type='leave_application' AND source_id=${la.body.id}`) === '1';
+  if (!ok) { const a = await approveAs(noApprover ? SA : approver, 'leave_application', la.body.id); ok = ok2(a); if (!ok) check(`${k}'s leave approved by ${noApprover ? 'the Superadmin (no approver set)' : 'the head'}`, false, J(a)); }
   if (ok) { leaves[k] ||= new Set(); for (const d of daysOf(start.slice(0, 7))) if (d >= start && d <= endS) leaves[k].add(d); }
-  check(`${k}: ${days} day ${type} leave from ${start} approved${st0 === 'approved' ? ' (head of dept — auto)' : ''}`, ok);
+  check(`${k}: ${days} day ${type} leave from ${start} approved${noApprover ? ' (no approver set — Superadmin decided)' : ''}`, ok);
 }
 
 for (const ym of months) {

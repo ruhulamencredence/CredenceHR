@@ -147,6 +147,7 @@ export const MyApprovalsBell: React.FC<MyApprovalsBellProps> = ({ token }) => {
                   <textarea
                     value={remarksDraft[r.id] || ''}
                     onChange={(e) => setRemarksDraft((prev) => ({ ...prev, [r.id]: e.target.value }))}
+                    aria-label="Remarks"
                     placeholder="Remarks (optional)"
                     rows={1}
                     className="w-full mt-2 text-xs px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-600 focus:outline-none resize-none"

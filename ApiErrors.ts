@@ -8,7 +8,8 @@
 //   - maskDatabaseErrors (installed before the routes): an { error } that is
 //     really a MySQL message ("Out of range value for column 'basic_salary'",
 //     "Duplicate entry …", "Unknown column …") is replaced with a short plain
-//     one; the original goes to the server log with the route.
+//     one; the original goes to the server log with the route. One the
+//     client caused (too long, duplicate, bad reference…) answers 400 / 409.
 //   - apiNotFoundAndErrors (installed after every route): an /api address no
 //     route answers is a 404 { error } (not the app's web page), a body that
 //     isn't valid JSON is a 400 { error } (not Express's HTML error page), a
@@ -31,12 +32,24 @@ function plain(message: string): string {
   return "Something went wrong on the server. Please try again, or tell IT if it keeps happening.";
 }
 
+// A database error caused by what the client sent (too long, wrong format,
+// duplicate, a missing or still-used reference) is the client's to fix: a
+// route that answered 500 for it is moved to 400 / 409, so it isn't counted
+// as a server failure.
+function clientStatus(message: string): number | null {
+  if (/Duplicate entry|foreign key constraint/i.test(message)) return 409;
+  if (/Out of range value|Data too long|Incorrect (?:integer|decimal|date|datetime|string) value|cannot be null|doesn't have a default value/i.test(message)) return 400;
+  return null;
+}
+
 export function maskDatabaseErrors(app: Express): void {
   app.use("/api", (req: any, res: any, next: any) => {
     const json = res.json.bind(res);
     res.json = (body: any) => {
       if (body && typeof body === "object" && typeof body.error === "string" && DB_ERROR.test(body.error)) {
         console.warn(`⚠️ ${req.method} ${req.originalUrl}: ${body.error}`);
+        const fix = res.statusCode >= 500 ? clientStatus(body.error) : null;
+        if (fix) res.status(fix);
         body = { ...body, error: plain(body.error) };
       }
       return json(body);

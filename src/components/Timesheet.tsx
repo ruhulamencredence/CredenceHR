@@ -540,12 +540,12 @@ useLiveRefresh(() => loadData());
               {tab === 'month' && (
                 <>
                   <div className="flex flex-wrap items-center gap-3 mb-4">
-                    <select value={selMonth} onChange={(e) => setSelMonth(Number(e.target.value))} className={selectClass}>
+                    <select aria-label="Month" value={selMonth} onChange={(e) => setSelMonth(Number(e.target.value))} className={selectClass}>
                       {MONTH_NAMES.map((name, idx) => (
                         <option key={name} value={idx + 1}>{name}</option>
                       ))}
                     </select>
-                    <select value={selYear} onChange={(e) => setSelYear(Number(e.target.value))} className={selectClass}>
+                    <select aria-label="Year" value={selYear} onChange={(e) => setSelYear(Number(e.target.value))} className={selectClass}>
                       {yearOptions.map((y) => (
                         <option key={y} value={y}>{y}</option>
                       ))}

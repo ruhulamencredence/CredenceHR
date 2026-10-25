@@ -15,6 +15,9 @@
 //   tasks           — what is waiting on HR, per kind (Task Status Overview)
 //   alerts          — probation / contract ends and document expiries due
 //                     within 30 days (or already past, up to 30 days)
+// Each part is shown only to an account with the module it comes from
+// (EXTRAS_PART_MODULE / TASK_MODULE below; a Superadmin sees everything) —
+// the dashboard itself is open to every Admin, its HR figures are not.
 // Every read goes through queryDB, so it covers the company being worked in
 // (companyScope.ts). Each part fails on its own: a missing table just leaves
 // that part empty.
@@ -44,6 +47,31 @@ const STUCK_SOURCES: Record<string, { label: string; module: string; tab: string
   advance_request: { label: "Loan / salary advance", module: "payroll", tab: "payroll" }
 };
 
+// Which module(s) a part of /extras needs (any one of them).
+const EXTRAS_PART_MODULE: Record<string, string[]> = {
+  birthdays: ["employees"],
+  attendance_approvals: ["attendance"],
+  attendance_corrections: ["attendance"],
+  documents: ["hr_operations"],
+  status_effective: ["hr_operations"],
+  alerts: ["employees", "hr_operations"]
+};
+// Task Status Overview row -> the module whose queue it counts.
+const TASK_MODULE: Record<string, string> = {
+  leave: "leave_applications",
+  attendance: "attendance",
+  corrections: "attendance",
+  claims: "claims",
+  bills: "disbursement",
+  advances: "payroll",
+  assets: "asset_management",
+  vehicles: "vehicle_management",
+  documents: "hr_operations",
+  hr_actions: "hr_operations",
+  exits: "exit_offboarding",
+  grievances: "grievance_disciplinary"
+};
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 const dateOnly = (v: any): string | null => {
   if (!v) return null;
@@ -66,8 +94,11 @@ export function registerAdminDashboardRoutes(app: Express, deps: AdminDashboardR
     return res.status(403).json({ error: "Admin access required" });
   };
 
-  app.get("/api/admin-dashboard/extras", authenticateToken, gate, async (_req: any, res) => {
+  app.get("/api/admin-dashboard/extras", authenticateToken, gate, async (req: any, res) => {
     try {
+      const isSuper = req.user.role === "superadmin";
+      const mods = isSuper ? [] : await getAdminModules(req.user.id).catch(() => [] as string[]);
+      const may = (part: string) => isSuper || (EXTRAS_PART_MODULE[part] || []).some((m) => mods.includes(m));
       const today = todayInDhaka();
       const [employees, users, service, docs, approvals, corrections, letters, infos, actions, leaves, claims, bills, advances, assets, vehicles, exits, grievances] =
         await Promise.all([
@@ -195,13 +226,13 @@ export function registerAdminDashboardRoutes(app: Express, deps: AdminDashboardR
 
       res.json({
         today,
-        birthdays,
-        attendance_approvals: pendingAttendance,
-        attendance_corrections: pendingCorrections,
-        documents,
-        status_effective: statusEffective,
-        tasks,
-        alerts
+        birthdays: may("birthdays") ? birthdays : [],
+        attendance_approvals: may("attendance_approvals") ? pendingAttendance : [],
+        attendance_corrections: may("attendance_corrections") ? pendingCorrections : [],
+        documents: may("documents") ? documents : [],
+        status_effective: may("status_effective") ? statusEffective : [],
+        tasks: tasks.filter((t) => isSuper || mods.includes(TASK_MODULE[t.key])),
+        alerts: may("alerts") ? alerts : []
       });
     } catch (err: any) {
       res.status(500).json({ error: err?.message || String(err) });

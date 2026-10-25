@@ -175,7 +175,7 @@ check('Welcome notice on his board', JSON.stringify(board.body).includes('Welcom
 
 // What Ruhul can and cannot open.
 at('2021-11', 'Permissions');
-const SELF = ['/api/my-payslips', '/api/leave-balances/mine', '/api/leave-applications/mine', '/api/attendance/mine', '/api/attendance/my-projects', '/api/my-loans', '/api/mobile-bill/my', '/api/tasks/mine', '/api/targets', '/api/my-roster', '/api/hr-ops/my/service-book', '/api/hr-ops/my/p360', '/api/hr-ops/my/letters', '/api/my-cases', '/api/assets/my', '/api/employee-documents', '/api/esign/my', '/api/bill-claim-policy/mine', '/api/employee-directory', '/api/exit-requests', '/api/holidays?from=2021-11-01&to=2021-12-31', '/api/notices/board'];
+const SELF = ['/api/my-payslips', '/api/leave-balances/mine', '/api/leave-applications/mine', '/api/attendance/mine', '/api/attendance/my-projects', '/api/my-loans', '/api/mobile-bill/my', '/api/tasks/mine', '/api/targets/mine', '/api/my-roster', '/api/hr-ops/my/service-book', '/api/hr-ops/my/p360', '/api/hr-ops/my/letters', '/api/my-cases', '/api/assets/my', '/api/employee-documents', '/api/esign/my', '/api/bill-claim-policy/mine', '/api/employee-directory', '/api/exit-requests', '/api/holidays?from=2021-11-01&to=2021-12-31', '/api/notices/board'];
 const selfFail = [];
 for (const p of SELF) { const r = await api(R, 'GET', p); if (!ok2(r)) selfFail.push(`${p} ${r.status}`); }
 check(`Ruhul opens all ${SELF.length} Self Service pages`, selfFail.length === 0, selfFail.join(', '));

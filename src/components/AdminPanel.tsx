@@ -73,6 +73,7 @@ import { ADMIN_TAB_KEYS, adminUrlEnabled, adminTabToPath, adminPathToTab } from 
 import { LoadingBlock } from './LoadingBlock';
 
 import { STD_STYLES, STD_HEAD } from '../lib/pdfStandard';
+import { passwordProblem, PASSWORD_HINT, PASSWORD_MIN } from '../lib/passwordPolicy';
 interface AdminPanelProps {
   token: string;
   // The logged-in Admin/Superadmin viewing this panel — used to decide which tabs
@@ -2889,8 +2890,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
 
   const handleResetPassword = async () => {
     if (!resettingPasswordFor) return;
-    if (newPasswordInput.length < 6) {
-      setMessage({ type: 'error', text: 'New password must be at least 6 characters.' });
+    const pwBad = passwordProblem(newPasswordInput);
+    if (pwBad) {
+      setMessage({ type: 'error', text: pwBad });
       return;
     }
     setResettingPassword(true);
@@ -6083,10 +6085,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                 <input
                   type="text"
                   required
-                  minLength={6}
+                  minLength={PASSWORD_MIN}
                   value={newUserPassword}
                   onChange={(e) => setNewUserPassword(e.target.value)}
-                  placeholder="Min. 6 characters"
+                  placeholder={PASSWORD_HINT}
                   className="block w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-900 text-sm focus:ring-2 focus:ring-blue-600 focus:outline-none placeholder-slate-400"
                 />
               </div>
@@ -7392,7 +7394,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
                   type="text"
                   value={newPasswordInput}
                   onChange={(e) => setNewPasswordInput(e.target.value)}
-                  placeholder="At least 6 characters"
+                  placeholder={PASSWORD_HINT}
                   className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                   autoFocus
                 />
@@ -7419,7 +7421,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ token, user, claimsNavRe
               </button>
               <button
                 onClick={handleResetPassword}
-                disabled={resettingPassword || newPasswordInput.length < 6}
+                disabled={resettingPassword || newPasswordInput.length < PASSWORD_MIN}
                 className="px-4 py-2 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors disabled:opacity-50"
               >
                 {resettingPassword ? 'Resetting…' : 'Reset Password'}

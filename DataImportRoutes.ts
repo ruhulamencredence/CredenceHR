@@ -37,6 +37,8 @@ import bcrypt from "bcryptjs";
 import { applyAccessTemplate, ensureDefaultAccessTemplate } from "./AccessTemplateDefaults";
 import { recordEmployeeEditHistory } from "./EmployeeTransferRoutes";
 import { activeCompanyId, activeGroupId } from "./companyContext";
+import { passwordProblem } from "./src/lib/passwordPolicy";
+import { employeeFieldProblem } from "./EmployeeValidation";
 
 type QueryDB = (sql: string, params?: any[]) => Promise<any>;
 
@@ -483,6 +485,10 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
           const d = dateOf(v, k, label, false);
           if (d) set[k] = d;
         }
+        {
+          const bad = employeeFieldProblem(set, today(), existing || null);
+          if (bad) fail(bad);
+        }
         if (str(v.is_active)) {
           const a = parseYesNo(v.is_active);
           if (a === null) fail(`Active "${str(v.is_active)}" — write Yes or No.`);
@@ -518,7 +524,8 @@ export function registerDataImportRoutes(app: Express, deps: DataImportDeps) {
         if (loginId || password) {
           if (!loginId) fail("Password given without a Login ID.");
           if (!password) fail("Login ID given without a Password.");
-          if (password.length < 6) fail("Password must be at least 6 characters.");
+          const pwBad = passwordProblem(password, { email: loginId });
+          if (pwBad) fail(pwBad);
           if (existing?.user_id) {
             notes.push("Already has a login — Login ID / Password ignored");
           } else {

@@ -37,6 +37,23 @@ const MaterialReceive = lazy(retryImport(() => import('./components/MaterialRece
 const MySignatures = lazy(retryImport(() => import('./components/MySignatures').then(m => ({ default: m.MySignatures }))));
 // My Payslip (Self Service, users.can_view_payslip).
 const MyPayslips = lazy(retryImport(() => import('./components/MyPayslips').then(m => ({ default: m.MyPayslips }))));
+// Self Service pages: each loads with its own code (and libraries such as
+// xlsx / jspdf / leaflet / pdf.js) only when opened.
+const LeaveManage = lazy(retryImport(() => import('./components/LeaveManage').then(m => ({ default: m.LeaveManage }))));
+const ApproveApplications = lazy(retryImport(() => import('./components/ApproveApplications').then(m => ({ default: m.ApproveApplications }))));
+const Timesheet = lazy(retryImport(() => import('./components/Timesheet').then(m => ({ default: m.Timesheet }))));
+const PayrollModule = lazy(retryImport(() => import('./components/PayrollModule').then(m => ({ default: m.PayrollModule }))));
+const EmployeeDirectory = lazy(retryImport(() => import('./components/EmployeeDirectory').then(m => ({ default: m.EmployeeDirectory }))));
+const MyResignation = lazy(retryImport(() => import('./components/MyResignation').then(m => ({ default: m.MyResignation }))));
+const AssetManagement = lazy(retryImport(() => import('./components/AssetManagement').then(m => ({ default: m.AssetManagement }))));
+const MyCases = lazy(retryImport(() => import('./components/MyCases').then(m => ({ default: m.MyCases }))));
+const MyTasks = lazy(retryImport(() => import('./components/MyTasks').then(m => ({ default: m.MyTasks }))));
+const MyMobileSim = lazy(retryImport(() => import('./components/MyMobileSim').then(m => ({ default: m.MyMobileSim }))));
+const MyLoans = lazy(retryImport(() => import('./components/MyLoans').then(m => ({ default: m.MyLoans }))));
+const MyTargets = lazy(retryImport(() => import('./components/MyTargets').then(m => ({ default: m.MyTargets }))));
+const MyLetters = lazy(retryImport(() => import('./components/MyLetters').then(m => ({ default: m.MyLetters }))));
+const TeamAttendance = lazy(retryImport(() => import('./components/TeamAttendance').then(m => ({ default: m.TeamAttendance }))));
+const VehicleManagement = lazy(retryImport(() => import('./components/VehicleManagement').then(m => ({ default: m.VehicleManagement }))));
 
 import { AppLoader } from './components/AppLoader';
 import { HrOpsPageSkeleton } from './components/HrOpsSkeleton';
@@ -53,23 +70,8 @@ import { FloatingChatButton } from './components/FloatingChatButton';
 import { AiAssistant } from './components/AiAssistant';
 import { FeedbackHost, canGiveFeedback } from './components/feedback/FeedbackPopup';
 import { CallLayer } from './components/CallLayer';
-import { LeaveManage } from './components/LeaveManage';
-import { ApproveApplications } from './components/ApproveApplications';
-import { Timesheet } from './components/Timesheet';
-import { PayrollModule } from './components/PayrollModule';
 import { openedOnAdminUrl, adminUrlEnabled, adminPathToTab } from './lib/adminUrl';
 import { selfPathToView, selfViewToPath, canOpenSelfView } from './lib/selfUrl';
-import { EmployeeDirectory } from './components/EmployeeDirectory';
-import { MyResignation } from './components/MyResignation';
-import { AssetManagement } from './components/AssetManagement';
-import { MyCases } from './components/MyCases';
-import { MyTasks } from './components/MyTasks';
-import { MyMobileSim } from './components/MyMobileSim';
-import { MyLoans } from './components/MyLoans';
-import { MyTargets } from './components/MyTargets';
-import { MyLetters } from './components/MyLetters';
-import { TeamAttendance } from './components/TeamAttendance';
-import { VehicleManagement } from './components/VehicleManagement';
 import { requestQuickAccessTab } from './lib/quickAccess';
 import { NoticePopup } from './components/NoticePopup';
 import { useBackButtonClose } from './lib/useBackButtonClose';

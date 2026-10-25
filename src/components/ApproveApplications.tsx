@@ -39,6 +39,8 @@ interface MyApprovalItem extends ClaimReviewFields {
   requested_by_name: string | null;
   current_step: number | null;
   total_steps: number | null;
+  // No Supervisor or Approval Template set — listed because this is a Superadmin.
+  no_approver?: boolean;
   created_at: string;
   // Only present on a 'user_claim' item — every Movement Claim (check-in/out)
   // this Conveyance Bill Claim's Amount was built from, each with its own
@@ -545,7 +547,11 @@ useLiveRefresh(() => load(true));
                         </p>
                         <p className="text-[11px] text-slate-400 mt-1">
                           From {item.requested_by_name || `User #${item.requested_by}`}
-                          {item.total_steps ? <> &middot; Layer {item.current_step} of {item.total_steps}</> : null}
+                          {item.no_approver ? (
+                            <span className="text-amber-700 font-medium"> &middot; No approver set — you decide as Superadmin</span>
+                          ) : item.total_steps ? (
+                            <> &middot; Layer {item.current_step} of {item.total_steps}</>
+                          ) : null}
                           {isAssetRequisition && <span className="text-blue-500 font-medium"> &middot; Tap to view details</span>}
                         </p>
 
@@ -706,6 +712,7 @@ useLiveRefresh(() => load(true));
                         )}
                         <input
                           type="text"
+                          aria-label="Remarks"
                           placeholder={item.source_type === 'user_claim' ? 'Remarks (needed to Return or Reject)' : 'Remarks (optional)'}
                           value={remarksDraft[key] || ''}
                           onChange={(e) => setRemarksDraft((prev) => ({ ...prev, [key]: e.target.value }))}

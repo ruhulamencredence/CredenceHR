@@ -110,8 +110,8 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </tr>
 <tr>
 <td>পাসওয়ার্ড নীতি</td>
-<td>কমপক্ষে ৬ অক্ষর (দুর্বল, ১০ নম্বরে দেখুন)</td>
-<td><code>UserManagement.ts</code></td>
+<td>৮–১২৮ অক্ষর, অক্ষর ও সংখ্যা দুটোই; একই অক্ষর বারবার, <code>12345678</code>-ধরনের ধারা, পরিচিত পাসওয়ার্ড (<code>password1</code>…) আর নিজের ইমেইল/নাম চলে না। সব জায়গায় একই নিয়ম (ইউজার বানানো, কর্মীর লগইন, নিজের পাসওয়ার্ড বদল, Admin reset, ইমেইলে reset, Data Import, workspace Superadmin)</td>
+<td><code>src/lib/passwordPolicy.ts</code></td>
 </tr>
 <tr>
 <td>Forgot password</td>
@@ -161,6 +161,8 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <li><strong>কাজের বিভাজন (segregation of duties):</strong> Payroll: HR বানায় → Audit approve → Accounts pay। <strong>যে কোনো বেতন চালিয়েছে, হাতে বদলেছে বা মাস submit করেছে সে approve করতে পারে না; যে চালিয়েছে, submit বা approve করেছে সে pay করতে পারে না</strong> (মাস ও একক বেতন দুটোতেই)। Audit ও Accounts পায় "View only" (<code>payroll_view</code>) layer: সব দেখে, কিছু বদলাতে পারে না, তাই দেখার জন্য HR-এর বানানো/বদলানোর অনুমতি দিতে হয় না। বোনাস, overtime ও কর্তন ঋণাত্মক হয় না; নিষ্ক্রিয় কর্মীর বেতন শুধু ছেড়ে যাওয়ার মাস পর্যন্ত চলে (ghost employee নিয়ন্ত্রণ)। Onboarding: <strong>যে খুলেছে সে approve করতে পারে না</strong>। (Superadmin ব্যতিক্রম, ১০ নম্বরে।)</li>
 <li><strong>নিজের দাবি নিজে অনুমোদন নয়:</strong> কর্মী নিজের ছুটি নিজে approve করতে পারে না (টেস্ট <code>LEAVE-12</code>)।</li>
 <li><strong>নিয়ম (<code>CLAUDE.md</code>):</strong> নতুন যেকোনো ফিচার/মেনু/বোতাম/API অনুমতির পেছনে থাকবে। UI লুকানো <strong>এবং</strong> API বন্ধ।</li>
+<li><strong>Admin Dashboard:</strong> পাতাটা সব Admin খোলেন, কিন্তু প্রতিটি অংশ আসে শুধু সেই মডিউল থাকলে — জন্মদিন (Employees), probation/চুক্তি/ডকুমেন্টের মেয়াদ (Employees বা HR Operations), উপস্থিতির অনুমোদন (Attendance), প্রতিটি "অপেক্ষার কাজ"-এর সংখ্যা তার নিজের মডিউলে (<code>AdminDashboardRoutes.ts</code>; টেস্ট QA-01)।</li>
+<li><strong>কর্মীর তথ্য যাচাই:</strong> ইমেইল <code>name@domain.tld</code> হতে হবে; জন্মতারিখ আসল, ভবিষ্যতের নয়, বয়স ১৪–১০০ (শ্রম আইন ২০০৬, ধারা ৩৪; <code>EmployeeValidation.ts</code>)। পুরনো রেকর্ডে শুধু বদলানো ঘরটা যাচাই হয়।</li>
 </ol>
 <hr />
 <h2 id="_2">৫. ডাটা সুরক্ষা</h2>
@@ -330,9 +332,9 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </tr>
 <tr>
 <td>২</td>
-<td>পাসওয়ার্ড নীতি দুর্বল (৬ অক্ষর, <code>111111</code> চলে)</td>
-<td>মাঝারি</td>
-<td>৮+ অক্ষর, সাধারণ পাসওয়ার্ড তালিকা বাদ</td>
+<td>~~পাসওয়ার্ড নীতি দুর্বল~~ ✅ ২৫ অক্টোবর ঠিক হয়েছে (উপরে "পাসওয়ার্ড নীতি")। শুধু পুরনো bulk project login (ঠিক ৬ অক্ষর) এই নিয়মের বাইরে</td>
+<td>নিম্ন</td>
+<td>bulk project login-এর নিয়ম আলাদা করে ঠিক করুন</td>
 </tr>
 <tr>
 <td>৩</td>
@@ -372,9 +374,9 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 </tr>
 <tr>
 <td>৯</td>
-<td>বিভাগীয় প্রধান/শীর্ষ ব্যক্তির ছুটির approver না থাকলে আবেদন আটকে থাকে (R-01)</td>
+<td>Supervisor ও Template না থাকলে আবেদন অপেক্ষায় থাকে, শুধু Superadmin সিদ্ধান্ত দেন (তাঁর My Approvals-এ আসে; কর্মী "No approver set yet" দেখেন)</td>
 <td>কার্যকারিতা</td>
-<td>fallback approver</td>
+<td>প্রধানদের Supervisor বা Template ঠিক করুন</td>
 </tr>
 <tr>
 <td>১০</td>
@@ -387,6 +389,12 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>বাইরের penetration test ও ব্যাকআপ/পুনরুদ্ধার পরীক্ষা এই ডকুমেন্টে নেই</td>
 <td>—</td>
 <td>নিচের "ডকুমেন্ট প্রস্তুতি" দেখুন</td>
+</tr>
+<tr>
+<td>১২</td>
+<td>e-sign-এর <code>node-forge</code>-এ একটি high দুর্বলতা (RSA স্বাক্ষর <em>যাচাই</em>), এখনো কোনো সংস্করণে ঠিক নেই</td>
+<td>নিম্ন</td>
+<td>অ্যাপ forge দিয়ে শুধু সার্টিফিকেট খোলে ও স্বাক্ষর দেয়, যাচাই করে না; নতুন সংস্করণ এলে আপডেট</td>
 </tr>
 </tbody>
 </table>

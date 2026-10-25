@@ -1192,7 +1192,7 @@ async function buildPlaceholders(
   const settings = await loadSettings(queryDB);
   const world = await loadEmployeeWorld(queryDB);
   const snap = snapshotOf(world, employeeId);
-  if (!snap) throw new Error("Employee not found.");
+  if (!snap) throw Object.assign(new Error("Employee not found."), { statusCode: 404 });
   const e = snap.employee;
   const cur = currentValues(snap);
   const gender = String(e.gender || "").toLowerCase();

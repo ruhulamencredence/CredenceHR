@@ -181,6 +181,7 @@ useLiveRefresh(() => load(true));
                 </div>
                 <input
                   type="text"
+                  aria-label="Remarks"
                   placeholder="Remarks (optional)"
                   value={remarksDraft[item.id] || ''}
                   onChange={(e) => setRemarksDraft((prev) => ({ ...prev, [item.id]: e.target.value }))}

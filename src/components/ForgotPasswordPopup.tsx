@@ -15,6 +15,7 @@ import { KeyRound, Mail, UserRound, Loader2, CheckCircle2, ArrowLeft } from 'luc
 import { apiUrl } from '../lib/api';
 import { PasswordInput } from './PasswordInput';
 import { MailPopup as Popup, inputCls, labelCls, primaryBtn, ghostBtn } from './mail/MailPopup';
+import { passwordProblem } from '../lib/passwordPolicy';
 
 export interface ForgotOptions {
   email: boolean;
@@ -70,7 +71,8 @@ export const ForgotPasswordPopup: React.FC<{
     });
   const verify = () =>
     run(async () => {
-      if (pw.length < 6) throw new Error('The new password must be at least 6 characters.');
+      const pwBad = passwordProblem(pw);
+      if (pwBad) throw new Error(pwBad);
       if (pw !== pw2) throw new Error("The two passwords don't match.");
       const j = await post('/api/auth/forgot/email/verify', { identifier: identifier.trim(), code: code.trim(), new_password: pw });
       setDoneText(j.message);
