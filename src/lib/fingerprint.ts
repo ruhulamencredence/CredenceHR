@@ -46,15 +46,29 @@ function setSaved(v: SavedFingerprint | null) {
 const isApp = () => Capacitor.isNativePlatform();
 const plugin = async () => (await import('@capgo/capacitor-native-biometric')).NativeBiometric;
 
-// Does this phone / browser have a fingerprint (or face, Windows Hello…) set up?
-export async function fingerprintSupported(): Promise<boolean> {
+// The app's pages come from the server, so they can be newer than the
+// installed APK. An APK built before the fingerprint plugin was added has no
+// native NativeBiometric; Capacitor then quietly falls back to the plugin's
+// web mock, which says "available" and "saves" without ever asking for a
+// fingerprint. So on the app the native plugin must really be there.
+export const APP_TOO_OLD =
+  "This version of the CredenceHR app doesn't have fingerprint support yet. Install the latest app (ask IT for the new APK), then try again.";
+const nativePluginMissing = () => isApp() && !Capacitor.isPluginAvailable('NativeBiometric');
+
+// 'ok'; 'app_old' (the installed app lacks the plugin); 'no_sensor' (no fingerprint /
+// face / Windows Hello set up here).
+export async function fingerprintStatus(): Promise<'ok' | 'app_old' | 'no_sensor'> {
   try {
-    if (isApp()) return (await (await plugin()).isAvailable()).isAvailable;
+    if (nativePluginMissing()) return 'app_old';
+    if (isApp()) return (await (await plugin()).isAvailable()).isAvailable ? 'ok' : 'no_sensor';
     const pkc = (window as any).PublicKeyCredential;
-    return !!pkc && (await pkc.isUserVerifyingPlatformAuthenticatorAvailable());
+    return !!pkc && (await pkc.isUserVerifyingPlatformAuthenticatorAvailable()) ? 'ok' : 'no_sensor';
   } catch {
-    return false;
+    return 'no_sensor';
   }
+}
+export async function fingerprintSupported(): Promise<boolean> {
+  return (await fingerprintStatus()) === 'ok';
 }
 
 async function call(path: string, token: string | null, body?: any, method = 'POST') {
@@ -73,6 +87,7 @@ const cancelled = (e: any) => [11, 15, 16, 17].includes(Number(e?.code)) || /can
 
 // Turn it on for this device (after signing in with the password).
 export async function enableFingerprint(token: string, user: User, workspace: string | null): Promise<void> {
+  if (nativePluginMissing()) throw new Error(APP_TOO_OLD);
   if (isApp()) {
     const nb = await plugin();
     const device = await appDeviceInfo();
@@ -112,6 +127,7 @@ export async function forgetHere() {
 // the app the location + device fields).
 export async function fingerprintLogin(extra: Record<string, any>): Promise<{ token: string; user: any; active_company_id?: number }> {
   try {
+    if (nativePluginMissing()) throw new Error(APP_TOO_OLD);
     if (isApp()) {
       const nb = await plugin();
       let creds;
