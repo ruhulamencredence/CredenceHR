@@ -142,3 +142,41 @@
 ## ৪. নিরাপত্তায় যে লাইব্রেরি ভূমিকা রাখে
 
 `bcryptjs` (পাসওয়ার্ড) · `jsonwebtoken` (token) · `sanitize-html` + `dompurify` (XSS) · `mysql2` prepared statement (SQL injection) · `@simplewebauthn/*` (passkey) · `@signpdf/*` + `node-forge` + `pdf-lib` (ডিজিটাল স্বাক্ষর) · `cors` (অন্য সাইট) · `node:crypto` (AES-256-GCM মেইল পাসওয়ার্ড, SHA-256 হ্যাশ)। বিস্তারিত: `04-security.md`।
+
+## ৫. কোনো লাইব্রেরিতে সমস্যা হলে কীভাবে সমাধান করবেন
+
+### ৫.১ সাধারণ ধাপ (যেকোনো লাইব্রেরির জন্য)
+
+1. **কোথায় ভাঙছে ধরুন।** সার্ভারের লগ: `npm run pm2:logs`। ব্রাউজারের লগ: F12 → Console।
+2. **সম্প্রতি কী বদলেছে দেখুন।** `git log -5 -- package.json package-lock.json`। সমস্যা আপডেটের পর শুরু হলে প্রায়ই সেটাই কারণ।
+3. **আগের সংস্করণে ফেরত যান।** `package.json`-এ সংস্করণ পিন করুন (`^` সরিয়ে), `npm ci`, তারপর `npm run build` ও `npm run pm2:reload`। `package-lock.json` কমিটে থাকে বলে `npm ci` সবসময় একই সংস্করণ বসায়।
+4. **নিরাপত্তা সমস্যা হলে** `npm audit` চালান। ঠিক করার চেষ্টা: `npm audit fix`। বড় সংস্করণ লাফ দিলে (`--force`) আগে স্টেজিং-এ পরীক্ষা করুন।
+5. **ঠিক হলে যাচাই করুন:** `npm run lint` (tsc), `npm run test:onboarding`, `npm run test:hr-linkage`, তারপর ব্রাউজারে মূল পেজগুলো।
+6. **ফেরত যাওয়া না গেলে** সেই লাইব্রেরি একটা ছোট wrapper ফাইলে (যেমন `mailer.ts`, `NoticeSafety.ts`) থাকে, তাই বদলাতে এক ফাইলই ছুঁতে হয়।
+
+### ৫.২ গুরুত্বপূর্ণ লাইব্রেরি ধরে ধরে
+
+| লাইব্রেরি | সম্ভাব্য সমস্যা | প্রথমে কী দেখবেন | সমাধান / বিকল্প |
+|---|---|---|---|
+| `mysql2` | সংযোগ ছিঁড়ে যায়, "too many connections" | `.env`-এ DB host/user/password, MariaDB চলছে কিনা (`systemctl status mariadb`) | DB চালু করুন, pool সীমা ঠিক করুন। সার্ভার ডিবি না পেলে in-memory-তে নামে, ডেটা থাকে না। |
+| `express` | রুট কাজ করে না, 500 | `pm2 logs`; কোন `*Routes.ts`-এ এরর | ওই ফাইলের `registerXxxRoutes` দেখুন। `ApiErrors` JSON এরর দেয়। |
+| `jsonwebtoken` | সবাই হঠাৎ লগআউট | JWT key ফাইল/env বদলেছে কিনা | পুরনো key ফিরিয়ে দিন। key বদলালে সবার নতুন লগইন লাগবে। |
+| `bcryptjs` | লগইন ধীর | সার্ভারের CPU | cost কমানো ঠিক না; সার্ভার বাড়ান। এটি pure JS, তাই `bcrypt` (native)-এ গেলে দ্রুত হয়। |
+| `socket.io` / `redis` | Chat/real-time বন্ধ | Redis চলছে কিনা, `REDIS_URL` | একাধিক worker থাকলে Redis লাগে। Redis নামলে এক worker-এ চালানো যায় (শুধু একটি process)। |
+| `nodemailer` / `imapflow` | মেইল যায় না/আসে না | SMTP/IMAP host, port, পাসওয়ার্ড, প্রোভাইডারের "app password" | `mailer.ts`-এ সেটিং ঠিক করুন; প্রোভাইডার বদলাতে শুধু সেটিং। |
+| `sanitize-html` / `dompurify` | Notice/মেইলে ফরম্যাট হারায় | `NoticeSafety.ts`-এর allow-list | দরকারি ট্যাগ allow-list-এ যোগ করুন। নিরাপত্তা শিথিল করবেন না। |
+| `pdf-lib`, `@signpdf/*`, `node-forge` | ই-স্বাক্ষর PDF ভুল/খালি | `.p12` সার্টিফিকেট ও পাসফ্রেজ, মেয়াদ | নতুন সার্টিফিকেট দিন। `ESignCertificate.ts` একটাই ফাইল। |
+| `firebase-admin`, `web-push` | পুশ নোটিফিকেশন আসে না | সার্ভিস অ্যাকাউন্ট JSON, VAPID key | key নবায়ন করুন; ডিভাইস টোকেন পুরনো হলে অ্যাপ আবার খুলুন। |
+| `node-zklib`, `node-cron` | ZKTeco ডিভাইস থেকে হাজিরা আসে না | ডিভাইসের IP/পোর্ট, নেটওয়ার্ক | `zkSync.ts`-এর লগ দেখুন; ডিভাইস রিস্টার্ট। |
+| `@google/genai` | AI Assistant কাজ করে না | API key, কোটা | key/কোটা ঠিক করুন; বাকি অ্যাপ এতে ভাঙে না। |
+| `react`, `vite`, `tailwindcss` | বিল্ড ফেল, সাদা পেজ | `npm run build`-এর এরর, ব্রাউজার Console | এরর-এর ফাইল ঠিক করুন; না পারলে আগের সংস্করণে ফেরত (৫.১)। |
+| `jspdf`, `jspdf-autotable` | PDF রিপোর্ট ভাঙা | কোন রিপোর্ট; ফন্ট/বাংলা অক্ষর | ফন্ট এম্বেড করুন; বড় রিপোর্টে সারি ভাগ করুন। |
+| `leaflet`, `@capacitor/geolocation` | ম্যাপ/লোকেশন আসে না | ব্রাউজার/ফোনের লোকেশন অনুমতি, HTTPS | HTTPS ছাড়া লোকেশন চলে না; অনুমতি দিন। |
+| `capacitor` (মোবাইল) | অ্যাপ বিল্ড ফেল | Android Studio/Gradle সংস্করণ | `npx cap sync`, তারপর আবার বিল্ড। |
+
+### ৫.৩ বিশেষ সতর্কতা
+
+- **অব্যবহৃত লাইব্রেরি** (`libredwg-web`, `dxf-parser`, `motion` ইত্যাদি, §৩): কোনো সমস্যা হলে আগে মুছে ফেলুন (`npm uninstall`), কারণ কোডে নেই। GPL লাইসেন্সের প্যাকেজ থাকলে আইনি ঝুঁকিও কমে।
+- **`xlsx`** npm রেজিস্ট্রিতে পুরনো (0.18.5); নতুন সংস্করণ SheetJS-এর নিজস্ব সাইট থেকে আসে। সেখানে নেটওয়ার্ক আটকালে বিল্ড ফেল করতে পারে। তখন সার্ভারে `package-lock.json` অনুযায়ী `npm ci` চালান।
+- **ডেটা বা নিরাপত্তা-সংক্রান্ত লাইব্রেরি** (`jsonwebtoken`, `bcryptjs`, `sanitize-html`, `mysql2`) আপডেট করলে লগইন, Notice ও রিপোর্ট আগে স্টেজিং-এ পরীক্ষা করুন।
+- **আপডেটের নিয়ম:** মাসে একবার `npm outdated` ও `npm audit`; এক এক করে আপডেট, প্রতিবার লিন্ট+টেস্ট+বিল্ড।
