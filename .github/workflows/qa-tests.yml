@@ -1,0 +1,94 @@
+# Runs every QA suite automatically: unit tests, double-click / two-tab
+# races, company isolation, date edge cases, the approval chain, the forms
+# in a real browser (typing and clicking), Bangla in PDFs and Excel, and a
+# 2,000-employee performance run. Each suite gets a new empty MariaDB and a
+# freshly started server (tests/qa/run-all.sh). The JSON results, PDFs,
+# screenshots of failed steps and the server log are kept as the run's
+# "qa-results" artifact. Run it by hand from Actions -> "QA tests" -> Run
+# workflow (optionally naming only some suites).
+
+name: QA tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      suites:
+        description: "Only these suites (space separated, empty = all): unit bangla-excel bangla-esign concurrency companies dates supervisor-chain e2e-forms bangla-pdf bigdata"
+        required: false
+        default: ""
+  push:
+    branches: [main, claude/nice-fermi-0tale9]
+    paths:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "schema.sql"
+      - "package.json"
+      - "package-lock.json"
+      - "tests/**"
+      - "docs/test-logs/2026-10-25/scripts/**"
+      - ".github/workflows/qa-tests.yml"
+  pull_request:
+    paths:
+      - "**/*.ts"
+      - "**/*.tsx"
+      - "package-lock.json"
+      - "tests/**"
+
+concurrency:
+  group: qa-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  qa:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      db:
+        image: mariadb:11
+        env:
+          MARIADB_ROOT_PASSWORD: qa
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+    env:
+      DB_HOST: 127.0.0.1
+      DB_PORT: 3306
+      DB_USER: root
+      DB_PASSWORD: qa
+      QA_OUT: qa-results
+      QA_SUITES: ${{ github.event.inputs.suites || '' }}
+      TZ: Asia/Dhaka
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install tools
+        run: |
+          npm ci
+          sudo apt-get update -qq
+          # mysql client, PDF -> PNG, and a Bengali font for the browser.
+          sudo apt-get install -y -qq mariadb-client poppler-utils fonts-noto-core
+          # Playwright lives outside package.json on purpose (as in Docs sync).
+          npm install --no-save --no-package-lock --prefix "$RUNNER_TEMP/pw" playwright@1.56.1
+          "$RUNNER_TEMP/pw/node_modules/.bin/playwright" install --with-deps chromium
+          echo "PLAYWRIGHT_FROM=$RUNNER_TEMP/pw/" >> "$GITHUB_ENV"
+          printf '[client]\nuser=root\npassword=qa\nhost=127.0.0.1\nport=3306\n' > ~/.my.cnf
+
+      - name: Run the QA suites
+        run: bash tests/qa/run-all.sh
+
+      - name: Keep the results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-results
+          path: qa-results
+          retention-days: 14

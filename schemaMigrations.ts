@@ -142,7 +142,9 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
   await ensureChatSchema(dbPool);
 
   // Multi-company (CompanyRoutes.ts) — existing data becomes company 1. Runs
-  // after every other table exists.
+  // after the module tables exist; again at the very end for the tables made
+  // further down this function (departments, admin_module_permission_layers…),
+  // which on a brand-new database don't exist yet at this point.
   await ensureCompanySchema(dbPool);
 
   // Mobile app device access (DeviceRoutes.ts).
@@ -2451,4 +2453,9 @@ export async function ensureSchemaMigrations(dbPool: mysql.Pool | null, deps: { 
   } catch (err: any) {
     console.warn("⚠️ Could not migrate the old global Approval Chain into default Templates: " + err.message);
   }
+
+  // Second pass (see the first call above): on a brand-new database this is
+  // what gives departments and Module Access layers their company_id. On an
+  // existing one every step is already done and is skipped.
+  await ensureCompanySchema(dbPool);
 }

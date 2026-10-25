@@ -72,6 +72,8 @@
 4. সব HTML বানায়, এক-ফাইলের `CredenceHR-Documentation.html`-সহ।
 5. বদল থাকলে একই ব্রাঞ্চে `docs: auto-sync ...` নামে কমিট করে।
 
+একই push-এ **QA tests** কাজটিও (`.github/workflows/qa-tests.yml`) চলে: unit টেস্ট, একসাথে দুবার চাপ, কোম্পানি আলাদা রাখা, তারিখের কিনারা, approval chain, আসল ব্রাউজারে ফর্ম পূরণ, বাংলা PDF/Excel ও ২০০০ কর্মীর গতি — প্রতিটা নতুন খালি ডাটাবেসে (`tests/qa/run-all.sh`)। কোনো টেস্ট ফেল করলে রান লাল হয়; ফল, PDF ও ফেল করা ধাপের ছবি Actions-এর "qa-results"-এ থাকে। নিজের কম্পিউটারে: `bash tests/qa/run-all.sh` (ডাটাবেস `mpr_tracker_db` মুছে নতুন বানায় — আসল ডাটার সার্ভারে চালাবেন না)।
+
 নতুন টেবিল নামের মিল বা FK দেখে নিজেই কোনো মডিউলে বসে (`tools/db/groups.json`)। ভুল মডিউলে গেলে ওই ফাইলে সরিয়ে দিন।
 
 **হাতে যা লিখতে হয়** (Docs sync রানের Summary-তে ও `npm run docs:check`-এ সতর্কবার্তা আসে):

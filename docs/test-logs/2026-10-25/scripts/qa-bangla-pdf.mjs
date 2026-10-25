@@ -44,9 +44,16 @@ const made = await p.evaluate(async (NAME) => {
   return out;
 }, NAME);
 await b.close();
+let fails = 0;
 for (const [k, v] of Object.entries(made)) {
   const f = path.join(OUT, `${k}.pdf`);
-  fs.writeFileSync(f, Buffer.from(v, 'base64'));
-  execFileSync('pdftoppm', ['-png', '-r', '70', '-f', '1', '-l', '1', f, path.join(OUT, k)]);
-  console.log('made', f, fs.statSync(f).size, 'bytes');
+  const buf = Buffer.from(v, 'base64');
+  fs.writeFileSync(f, buf);
+  try { execFileSync('pdftoppm', ['-png', '-r', '70', '-f', '1', '-l', '1', f, path.join(OUT, k)]); } catch { console.log('(no pdftoppm: PNG not made)'); }
+  // The app's jsPDF draws Bangla as pictures; plain jsPDF (the "before") can't.
+  const drawn = buf.includes('/Subtype /Image');
+  const ok = k === 'before' ? !drawn : drawn;
+  if (!ok) fails++;
+  console.log(`${ok ? 'PASS' : 'FAIL'} PDF-${k} ${k === 'before' ? 'plain jsPDF has no Bangla drawing (the old gibberish)' : 'Bangla is drawn into the PDF'} — ${f}, ${buf.length} bytes`);
 }
+console.log('\nSUMMARY', JSON.stringify({ PASS: Object.keys(made).length - fails, FAIL: fails }));

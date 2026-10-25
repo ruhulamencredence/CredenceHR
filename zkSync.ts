@@ -72,6 +72,10 @@ export async function ensureZkSchema(dbPool: Pool | null): Promise<void> {
         last_synced_at TIMESTAMP NULL DEFAULT NULL,
         last_sync_status VARCHAR(255) NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        -- made after the company migration on a new database, so it carries
+        -- the column itself (CompanyRoutes.ts adds it to older ones)
+        company_id INT NOT NULL DEFAULT 1,
+        INDEX idx_zk_devices_company (company_id),
         UNIQUE KEY unique_device_ip_port (ip_address, port)
       )
     `);

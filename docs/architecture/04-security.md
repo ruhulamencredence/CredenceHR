@@ -60,7 +60,7 @@
 2. **মডিউল অনুমতি:** `requireModule("payroll")`; Admin নিজে নিজেকে বাড়াতে পারে না (টেস্ট `AUTHZ-04`)।
 3. **Layer:** মডিউলের ভেতরের সূক্ষ্ম ধাপ (`requireModuleLayer`)। **🔒 layer** ডিফল্টে বন্ধ, Superadmin না দিলে কেউ পায় না। উদাহরণ: `salary_hold`, `audit_approve`, `accounts_pay`, `permanent_delete`, `mail_password`, `block_account`।
 4. **বিভাগ-সীমা:** Attendance Report, Leave, Duty Roster, Conveyance Claim-এ Admin শুধু নির্দিষ্ট বিভাগের কর্মী দেখে।
-5. **কোম্পানি-সীমা:** ৫৬টি টেবিলে `company_id`; `companyScope.ts` প্রতিটি `SELECT/UPDATE/DELETE/INSERT`-এ ফিল্টার নিজে বসায়। কোম্পানি বদলাতে ব্যবহারকারীর ওই কোম্পানিতে প্রবেশাধিকার লাগে। **Admin Panel-এর কাজে (strict scope)** — `requireModule`/`requireModuleLayer` পার হলেই — id দিয়ে একটা রেকর্ড খোলা বা বদলানোও শুধু চলতি কোম্পানির (বা সেখানে assign করা) কর্মীর হয়; আগে একই group-এর অন্য কোম্পানির কর্মীর ব্যাংক অ্যাকাউন্ট, বেতন, নাম id পাঠিয়ে পড়া/বদলানো যেত (টেস্ট `qa-companies.mjs` CO-06..13)। নিজের ছুটি, My Approvals-এর মতো self-service অংশে group-জুড়ে খোঁজা আগের মতোই চলে (অন্য কোম্পানির Supervisor approve করতে পারেন, CO-15)।
+5. **কোম্পানি-সীমা:** ৫৬টি টেবিলে `company_id`; `companyScope.ts` প্রতিটি `SELECT/UPDATE/DELETE/INSERT`-এ ফিল্টার নিজে বসায়। কোম্পানি বদলাতে ব্যবহারকারীর ওই কোম্পানিতে প্রবেশাধিকার লাগে। **Admin Panel-এর কাজে (strict scope)** — `requireModule`/`requireModuleLayer` পার হলেই — id দিয়ে একটা রেকর্ড খোলা বা বদলানোও শুধু চলতি কোম্পানির (বা সেখানে assign করা) কর্মীর হয়; আগে একই group-এর অন্য কোম্পানির কর্মীর ব্যাংক অ্যাকাউন্ট, বেতন, নাম id পাঠিয়ে পড়া/বদলানো যেত (টেস্ট `qa-companies.mjs` CO-06..13)। নিজের ছুটি, My Approvals-এর মতো self-service অংশে group-জুড়ে খোঁজা আগের মতোই চলে (অন্য কোম্পানির Supervisor approve করতে পারেন, CO-15)। একদম নতুন ডাটাবেসে প্রথম চালুতে `departments`, Module Access layer, `access_templates` ও `zk_devices`-এ `company_id` আসত না (তাই নতুন কর্মী যোগ ভেঙে যেত); এখন প্রথম চালুতেই আসে (QA tests workflow এটা প্রতিবার খালি ডাটাবেসে পরীক্ষা করে)।
 6. **Self-service সুইচ:** Loan, Payslip, Roster, Chat, Fingerprint, AI Assistant ইত্যাদি ব্যবহারকারীভিত্তিক সুইচ, ডিফল্টে বন্ধ।
 7. **কাজের বিভাজন (segregation of duties):** Payroll: HR বানায় → Audit approve → Accounts pay। **যে কোনো বেতন চালিয়েছে, হাতে বদলেছে বা মাস submit করেছে সে approve করতে পারে না; যে চালিয়েছে, submit বা approve করেছে সে pay করতে পারে না** (মাস ও একক বেতন দুটোতেই)। Audit ও Accounts পায় "View only" (`payroll_view`) layer: সব দেখে, কিছু বদলাতে পারে না, তাই দেখার জন্য HR-এর বানানো/বদলানোর অনুমতি দিতে হয় না। বোনাস, overtime ও কর্তন ঋণাত্মক হয় না; নিষ্ক্রিয় কর্মীর বেতন শুধু ছেড়ে যাওয়ার মাস পর্যন্ত চলে (ghost employee নিয়ন্ত্রণ)। Onboarding: **যে খুলেছে সে approve করতে পারে না**। (Superadmin ব্যতিক্রম, ১০ নম্বরে।)
 8. **নিজের দাবি নিজে অনুমোদন নয়:** কর্মী নিজের ছুটি নিজে approve করতে পারে না (টেস্ট `LEAVE-12`)।
@@ -169,6 +169,10 @@
 | কোম্পানি আলাদা রাখা (`qa-companies`) | ১৮ পাস, ০ ফেল (আগে id দিয়ে অন্য কোম্পানির তথ্য পড়া/বদলানো যেত, ঠিক করা) |
 | তারিখের কিনারা (`qa-dates`) | ১৫ পাস, ০ ফেল |
 | বাংলা PDF/Excel (`qa-bangla-*`) | PDF-এ বাংলা ঠিক (আগে গোলমাল/"????"); Excel ৫ পাস |
+| ফর্মে টাইপ ও ক্লিক করে (`qa-e2e-forms`, আসল ব্রাউজার) | ১০ পাস, ০ ফেল (লগইন, নতুন কর্মী, ছুটি আবেদন ও অনুমোদন, night shift সংশোধন) |
+| বড় কোম্পানি (`qa-bigdata`, ৩০০০ ও ৫০০০ কর্মী) | ১৫ পাস, ০ ফেল (তালিকা < ০.৬ সে.; ৫০০০ জনের মাসের বেতন একবারে ২৪ সে.) |
+
+এই টেস্টগুলো প্রতি push-এ GitHub-এ নিজে চলে: **QA tests** workflow (`.github/workflows/qa-tests.yml`, `tests/qa/run-all.sh`) — প্রতিটা টেস্ট নতুন খালি ডাটাবেসে; ফল Actions-এর "qa-results"-এ।
 
 ২৫ অক্টোবরের আগে ধরা এবং এখন **ঠিক হওয়া** জিনিস (প্রমাণসহ): কর্মী মুছলে payroll মোছা, Notice XSS, লগইনে সীমাহীন চেষ্টা, দ্বৈত ছুটি, পাসওয়ার্ড বদলের পরও পুরোনো token, JWT-র কোডে লেখা গোপন মান, HTML ত্রুটি-পাতা, ডাটাবেস-বার্তা প্রকাশ।
 

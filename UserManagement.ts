@@ -91,7 +91,11 @@ export function registerUserManagementRoutes(app: Express, deps: UserManagementR
       modules_json TEXT NULL,
       created_by INT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      -- made after the company migration on a new database, so it carries
+      -- the column itself (CompanyRoutes.ts adds it to older ones)
+      company_id INT NOT NULL DEFAULT 1,
+      INDEX idx_access_templates_company (company_id)
     )
   `)
     .then(() => ensureAccessTemplateSchema(queryDB))

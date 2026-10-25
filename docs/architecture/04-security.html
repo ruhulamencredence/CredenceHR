@@ -156,7 +156,7 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <li><strong>মডিউল অনুমতি:</strong> <code>requireModule("payroll")</code>; Admin নিজে নিজেকে বাড়াতে পারে না (টেস্ট <code>AUTHZ-04</code>)।</li>
 <li><strong>Layer:</strong> মডিউলের ভেতরের সূক্ষ্ম ধাপ (<code>requireModuleLayer</code>)। <strong>🔒 layer</strong> ডিফল্টে বন্ধ, Superadmin না দিলে কেউ পায় না। উদাহরণ: <code>salary_hold</code>, <code>audit_approve</code>, <code>accounts_pay</code>, <code>permanent_delete</code>, <code>mail_password</code>, <code>block_account</code>।</li>
 <li><strong>বিভাগ-সীমা:</strong> Attendance Report, Leave, Duty Roster, Conveyance Claim-এ Admin শুধু নির্দিষ্ট বিভাগের কর্মী দেখে।</li>
-<li><strong>কোম্পানি-সীমা:</strong> ৫৬টি টেবিলে <code>company_id</code>; <code>companyScope.ts</code> প্রতিটি <code>SELECT/UPDATE/DELETE/INSERT</code>-এ ফিল্টার নিজে বসায়। কোম্পানি বদলাতে ব্যবহারকারীর ওই কোম্পানিতে প্রবেশাধিকার লাগে। <strong>Admin Panel-এর কাজে (strict scope)</strong> — <code>requireModule</code>/<code>requireModuleLayer</code> পার হলেই — id দিয়ে একটা রেকর্ড খোলা বা বদলানোও শুধু চলতি কোম্পানির (বা সেখানে assign করা) কর্মীর হয়; আগে একই group-এর অন্য কোম্পানির কর্মীর ব্যাংক অ্যাকাউন্ট, বেতন, নাম id পাঠিয়ে পড়া/বদলানো যেত (টেস্ট <code>qa-companies.mjs</code> CO-06..13)। নিজের ছুটি, My Approvals-এর মতো self-service অংশে group-জুড়ে খোঁজা আগের মতোই চলে (অন্য কোম্পানির Supervisor approve করতে পারেন, CO-15)।</li>
+<li><strong>কোম্পানি-সীমা:</strong> ৫৬টি টেবিলে <code>company_id</code>; <code>companyScope.ts</code> প্রতিটি <code>SELECT/UPDATE/DELETE/INSERT</code>-এ ফিল্টার নিজে বসায়। কোম্পানি বদলাতে ব্যবহারকারীর ওই কোম্পানিতে প্রবেশাধিকার লাগে। <strong>Admin Panel-এর কাজে (strict scope)</strong> — <code>requireModule</code>/<code>requireModuleLayer</code> পার হলেই — id দিয়ে একটা রেকর্ড খোলা বা বদলানোও শুধু চলতি কোম্পানির (বা সেখানে assign করা) কর্মীর হয়; আগে একই group-এর অন্য কোম্পানির কর্মীর ব্যাংক অ্যাকাউন্ট, বেতন, নাম id পাঠিয়ে পড়া/বদলানো যেত (টেস্ট <code>qa-companies.mjs</code> CO-06..13)। নিজের ছুটি, My Approvals-এর মতো self-service অংশে group-জুড়ে খোঁজা আগের মতোই চলে (অন্য কোম্পানির Supervisor approve করতে পারেন, CO-15)। একদম নতুন ডাটাবেসে প্রথম চালুতে <code>departments</code>, Module Access layer, <code>access_templates</code> ও <code>zk_devices</code>-এ <code>company_id</code> আসত না (তাই নতুন কর্মী যোগ ভেঙে যেত); এখন প্রথম চালুতেই আসে (QA tests workflow এটা প্রতিবার খালি ডাটাবেসে পরীক্ষা করে)।</li>
 <li><strong>Self-service সুইচ:</strong> Loan, Payslip, Roster, Chat, Fingerprint, AI Assistant ইত্যাদি ব্যবহারকারীভিত্তিক সুইচ, ডিফল্টে বন্ধ।</li>
 <li><strong>কাজের বিভাজন (segregation of duties):</strong> Payroll: HR বানায় → Audit approve → Accounts pay। <strong>যে কোনো বেতন চালিয়েছে, হাতে বদলেছে বা মাস submit করেছে সে approve করতে পারে না; যে চালিয়েছে, submit বা approve করেছে সে pay করতে পারে না</strong> (মাস ও একক বেতন দুটোতেই)। Audit ও Accounts পায় "View only" (<code>payroll_view</code>) layer: সব দেখে, কিছু বদলাতে পারে না, তাই দেখার জন্য HR-এর বানানো/বদলানোর অনুমতি দিতে হয় না। বোনাস, overtime ও কর্তন ঋণাত্মক হয় না; নিষ্ক্রিয় কর্মীর বেতন শুধু ছেড়ে যাওয়ার মাস পর্যন্ত চলে (ghost employee নিয়ন্ত্রণ)। Onboarding: <strong>যে খুলেছে সে approve করতে পারে না</strong>। (Superadmin ব্যতিক্রম, ১০ নম্বরে।)</li>
 <li><strong>নিজের দাবি নিজে অনুমোদন নয়:</strong> কর্মী নিজের ছুটি নিজে approve করতে পারে না (টেস্ট <code>LEAVE-12</code>)।</li>
@@ -455,8 +455,17 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>বাংলা PDF/Excel (<code>qa-bangla-*</code>)</td>
 <td>PDF-এ বাংলা ঠিক (আগে গোলমাল/"????"); Excel ৫ পাস</td>
 </tr>
+<tr>
+<td>ফর্মে টাইপ ও ক্লিক করে (<code>qa-e2e-forms</code>, আসল ব্রাউজার)</td>
+<td>১০ পাস, ০ ফেল (লগইন, নতুন কর্মী, ছুটি আবেদন ও অনুমোদন, night shift সংশোধন)</td>
+</tr>
+<tr>
+<td>বড় কোম্পানি (<code>qa-bigdata</code>, ৩০০০ ও ৫০০০ কর্মী)</td>
+<td>১৫ পাস, ০ ফেল (তালিকা &lt; ০.৬ সে.; ৫০০০ জনের মাসের বেতন একবারে ২৪ সে.)</td>
+</tr>
 </tbody>
 </table>
+<p>এই টেস্টগুলো প্রতি push-এ GitHub-এ নিজে চলে: <strong>QA tests</strong> workflow (<code>.github/workflows/qa-tests.yml</code>, <code>tests/qa/run-all.sh</code>) — প্রতিটা টেস্ট নতুন খালি ডাটাবেসে; ফল Actions-এর "qa-results"-এ।</p>
 <p>২৫ অক্টোবরের আগে ধরা এবং এখন <strong>ঠিক হওয়া</strong> জিনিস (প্রমাণসহ): কর্মী মুছলে payroll মোছা, Notice XSS, লগইনে সীমাহীন চেষ্টা, দ্বৈত ছুটি, পাসওয়ার্ড বদলের পরও পুরোনো token, JWT-র কোডে লেখা গোপন মান, HTML ত্রুটি-পাতা, ডাটাবেস-বার্তা প্রকাশ।</p>
 <hr />
 <h2 id="_5">১২. দুর্ঘটনা ঘটলে কী করা যায় (প্রযুক্তিগত হাতিয়ার)</h2>

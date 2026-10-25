@@ -228,6 +228,7 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="on" hre
 <li>সব HTML বানায়, এক-ফাইলের <code>CredenceHR-Documentation.html</code>-সহ।</li>
 <li>বদল থাকলে একই ব্রাঞ্চে <code>docs: auto-sync ...</code> নামে কমিট করে।</li>
 </ol>
+<p>একই push-এ <strong>QA tests</strong> কাজটিও (<code>.github/workflows/qa-tests.yml</code>) চলে: unit টেস্ট, একসাথে দুবার চাপ, কোম্পানি আলাদা রাখা, তারিখের কিনারা, approval chain, আসল ব্রাউজারে ফর্ম পূরণ, বাংলা PDF/Excel ও ২০০০ কর্মীর গতি — প্রতিটা নতুন খালি ডাটাবেসে (<code>tests/qa/run-all.sh</code>)। কোনো টেস্ট ফেল করলে রান লাল হয়; ফল, PDF ও ফেল করা ধাপের ছবি Actions-এর "qa-results"-এ থাকে। নিজের কম্পিউটারে: <code>bash tests/qa/run-all.sh</code> (ডাটাবেস <code>mpr_tracker_db</code> মুছে নতুন বানায় — আসল ডাটার সার্ভারে চালাবেন না)।</p>
 <p>নতুন টেবিল নামের মিল বা FK দেখে নিজেই কোনো মডিউলে বসে (<code>tools/db/groups.json</code>)। ভুল মডিউলে গেলে ওই ফাইলে সরিয়ে দিন।</p>
 <p><strong>হাতে যা লিখতে হয়</strong> (Docs sync রানের Summary-তে ও <code>npm run docs:check</code>-এ সতর্কবার্তা আসে):
 - নতুন লাইব্রেরি হলে: <code>03-technology-and-libraries.md</code>-এ এক সারি (কেন, কী সুবিধা)।
