@@ -2,6 +2,8 @@ import json,re,html,sys
 exec(open('build_drawio.py').read().split("jobs={}")[0])
 LAY=json.load(open('layouts.json'))
 S=1.0  # pt -> px
+PAL=['#e6194b','#3cb44b','#4363d8','#f58231','#911eb4','#0891b2','#d946ef','#65a30d','#b45309','#0f766e','#be123c','#1d4ed8','#7c2d12','#4d7c0f','#6d28d9','#c2410c','#047857','#a21caf','#0369a1','#a16207','#15803d','#9f1239','#4338ca','#b91c1c']
+def ecol(t): return PAL[sum(ord(ch)*(i+7) for i,ch in enumerate(t))%len(PAL)]
 def esc(x): return html.escape(str(x),quote=True)
 cid=[1]
 def nid(): cid[0]+=1; return f'c{cid[0]}'
@@ -36,7 +38,7 @@ def page(name,lay,tset,extset,edges):
             table_cells(t,cx*S-w/2,(H-cy)*S-h/2,w,stub,out,ids)
     for rt,t,c,lg in edges:
         if rt in ids and t in ids:
-            st="edgeStyle=none;html=1;endArrow=ERmany;endFill=0;startArrow=ERone;startFill=0;strokeColor=#6b6b80;strokeWidth=1;fontSize=9;"+("dashed=1;strokeColor=#9ca3af;" if lg else "")
+            st="edgeStyle=none;html=1;endArrow=ERmany;endFill=0;startArrow=ERone;startFill=0;strokeColor="+ecol(rt)+";strokeWidth=1.6;fontSize=9;fontColor="+ecol(rt)+";"+("dashed=1;" if lg else "")
             out.append(f'<mxCell id="{nid()}" value="{esc(c)}" style="{st}" edge="1" parent="1" source="{ids[rt]}" target="{ids[t]}"><mxGeometry relative="1" as="geometry"/></mxCell>')
     return f'<diagram name="{esc(name)}" id="p{abs(hash(name))%10**8}"><mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="0" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0"><root><mxCell id="0"/><mxCell id="1" parent="0"/>{"".join(out)}</root></mxGraphModel></diagram>'
 pages=[]
