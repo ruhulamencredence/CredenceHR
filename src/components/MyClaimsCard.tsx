@@ -56,6 +56,8 @@ export const MyClaimsCard: React.FC<MyClaimsCardProps> = ({ token, onBack, refre
   // names instead of raw coordinates. Missing key = still loading; null = the
   // lookup failed/found nothing (falls back to the plain coordinates).
   const [addresses, setAddresses] = useState<Record<string, string | null>>({});
+  // In the phone app the server sends the last 3 months only (X-History-Limited).
+  const [limited, setLimited] = useState(false);
 
   // Live refresh: claim statuses update without a page reload.
   const liveTick = useLiveTick();
@@ -66,7 +68,10 @@ export const MyClaimsCard: React.FC<MyClaimsCardProps> = ({ token, onBack, refre
       if (liveTick === 0) setLoading(true);
       try {
         const res = await fetch(apiUrl('/api/claims/mine'), { headers: { Authorization: `Bearer ${token}` } });
-        if (res.ok && !cancelled) setClaims(await res.json());
+        if (res.ok && !cancelled) {
+          setLimited(res.headers.get('X-History-Limited') === '3-months');
+          setClaims(await res.json());
+        }
       } catch {
         // Offline/unreachable — just show the empty state below.
       } finally {
@@ -164,6 +169,7 @@ export const MyClaimsCard: React.FC<MyClaimsCardProps> = ({ token, onBack, refre
         </div>
       </div>
 
+      {limited && !loading && <p className="px-4 pb-1 text-[11px] text-slate-400">Showing the last 3 months here. Open CredenceHR on the website to see everything.</p>}
       {loading ? (
         <LoadingBlock />
       ) : shown.length === 0 ? (

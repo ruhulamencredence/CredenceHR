@@ -27,6 +27,7 @@
 // in server.ts's ensureSchemaMigrations(), same as every other table.
 
 import type { Express } from "express";
+import { isAppSession } from "./SessionSecurity";
 import { checkClaimBills, loadCategories, attachClaimItems, loadPolicy, dateWindow, lockedDates, dhakaDate, claimFiledOn } from "./BillClaimPolicy";
 import { claimEditState, claimRequests, recordClaimHistory, diffSnapshots, type ClaimEditMode } from "./ConveyanceClaimHistory";
 
@@ -1387,9 +1388,13 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
   }
 
   // The calling user's own submission history, most recent first — powers the
-  // "My Conveyance Claims" list on the Conveyance Bill Claim card.
+  // "My Conveyance Claims" list on the Conveyance Bill Claim card. In the phone
+  // app only the last 3 months are sent (plus any claim not yet settled, whatever
+  // its age); the website gets the whole history.
   app.get("/api/user-claims/mine", authenticateToken, requireConveyanceClaimAccess, async (req: any, res) => {
     try {
+      const inApp = isAppSession(req.user, req);
+      res.setHeader("X-History-Limited", inApp ? "3-months" : "none");
       const rows = await queryDB(
         `SELECT uc.id, uc.user_id, uc.claim_date, uc.from_date, uc.to_date, uc.category, uc.amount, uc.description,
                 uc.file_name, uc.file_mimetype, (uc.file_data IS NOT NULL) AS has_file,
@@ -1400,7 +1405,7 @@ export function registerConveyanceBillClaimRoutes(app: Express, deps: Conveyance
            LEFT JOIN users r ON r.id = uc.reviewed_by
            LEFT JOIN users fb ON fb.id = uc.filed_by
            LEFT JOIN conveyance_bill_items i ON i.user_claim_id = uc.id
-          WHERE uc.user_id = ?
+          WHERE uc.user_id = ?${inApp ? " AND (uc.status NOT IN ('approved', 'rejected') OR COALESCE(uc.claim_date, uc.created_at) >= NOW() - INTERVAL 3 MONTH)" : ""}
           ORDER BY uc.id DESC`,
         [req.user.id]
       );
