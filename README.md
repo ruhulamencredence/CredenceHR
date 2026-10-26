@@ -218,6 +218,25 @@ APK(s)** ক্লিক করে APK জেনারেট করুন। App
 npx capacitor-assets generate --android --iconBackgroundColor '#415EB4' --iconBackgroundColorDark '#415EB4'
 ```
 
+### Login পাতার "Android (APK)" বোতাম
+
+বোতামটা `/downloads/CredenceHR.apk` নামায় (`AndroidApkRoute.ts`)। ফাইলটা
+সার্ভারে রাখুন **অ্যাপ ফোল্ডারের `downloads/` ফোল্ডারে**
+(`<অ্যাপ ফোল্ডার>/downloads/CredenceHR.apk`, অথবা `.env`-এ `APK_DIR=` দিয়ে
+অন্য ফোল্ডার)। `dist/downloads`-এ রাখবেন না: পরের `npm run build` সেটা
+মুছে দেয়।
+
+- GitHub-এর **Android build** থেকে নামানো `CredenceHR-android-debug.zip`
+  খুলে ভেতরের `app-debug.apk`-কে `CredenceHR.apk` নাম দিয়ে রাখুন। zip-টাই
+  রাখলেও (`CredenceHR-android-debug.zip` নামে বা `CredenceHR.apk` নাম দিয়ে)
+  চলবে: সার্ভার ভেতর থেকে APK বের করে পাঠায়।
+- ফোন পায় `application/vnd.android.package-archive` ধরন আর
+  `CredenceHR.apk` নাম, তাই zip বা web পাতা হয়ে নামে না।
+- ফাইল না থাকলে বা সেটা APK না হলে 404 আর একটা লেখা আসে
+  (সার্ভারের log-এ কারণ লেখা থাকে)। আগের মতো web পাতা "CredenceHR.apk"
+  নামে নামে না।
+- পরীক্ষা: `npm run test:apk`
+
 ---
 
 ## 8. Troubleshooting
@@ -229,6 +248,7 @@ npx capacitor-assets generate --android --iconBackgroundColor '#415EB4' --iconBa
 | `Table 'xxx' doesn't exist` কোনো নতুন ফিচারে | `zk_devices`/`zk_attendance_logs` হলে ৫ নং ধাপ অনুসরণ করুন; অন্য টেবিল হলে সার্ভার একবার রিস্টার্ট দিন (self-healing migration আবার চলবে) |
 | APK তে লগইন/ডাটা লোড হচ্ছে না | Sign In স্ক্রিনে Server Address ঠিক দিয়েছেন কিনা দেখুন (PC এর LAN IP:PORT, একই WiFi তে থাকা লাগবে), Windows Firewall এ Node.js/পোর্ট 3000 allow করা আছে কিনা চেক করুন |
 | Employee Tracking কাজ করছে না (APK) | `capacitor.config.ts` এ `useLegacyBridge: true` আছে কিনা, ফোনে background location permission দেওয়া আছে কিনা দেখুন |
+| Web থেকে APK নামালে install হয় না / zip হয়ে নামে | ফাইলটা `<অ্যাপ ফোল্ডার>/downloads/CredenceHR.apk`-এ আছে কিনা দেখুন (৭ নং ধাপের শেষে)। `curl -I https://<domain>/downloads/CredenceHR.apk`-এ `Content-Type: application/vnd.android.package-archive` আসা উচিত; 404 এলে ফাইল নেই বা APK নয়, সার্ভারের log দেখুন |
 | Port 3000 already in use | `.env` এ `PORT` বদলে অন্য একটা ফ্রি পোর্ট দিন |
 
 ---

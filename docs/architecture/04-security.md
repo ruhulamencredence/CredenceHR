@@ -95,6 +95,7 @@
 - **CORS:** `CORS_ORIGINS` সেট করলে শুধু ওই ঠিকানা (টেস্টে `evil.example` পায় না)। **সেট না করলে সবাই ডাকতে পারে** ও সার্ভার চালুর সময় সতর্কবার্তা ছাপে (`WebSecurity.ts`)।
 - **Header (প্রতি উত্তরে):** `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`, `Content-Security-Policy: frame-ancestors 'self'; object-src 'none'; base-uri 'self'`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy` (ক্যামেরা, মাইক, লোকেশন শুধু নিজের); HTTPS হলে `Strict-Transport-Security`।
 - **CSRF:** token `Authorization` header-এ যায়, কুকিতে নয়; তাই ব্রাউজার নিজে থেকে অন্য সাইট থেকে অনুরোধ পাঠালে token যাবে না।
+- **Android app download (`/downloads/*.apk`, লগইন ছাড়াই খোলা):** শুধু `downloads/` (বা `APK_DIR`) ফোল্ডারের নির্দিষ্ট নামের ফাইল পাঠায়। নামে `/` বা `..` থাকলে 404, তাই ফোল্ডারের বাইরের ফাইল পাওয়া যায় না। ফাইলটা সত্যিই APK কিনা (ভেতরে `AndroidManifest.xml`) পরীক্ষা করে পাঠায়, নইলে 404। APK-কে ঘিরে থাকা zip-এর ভেতরের APK বের করে পাঠায়, অন্য কিছু নয় (`AndroidApkRoute.ts`, টেস্ট `npm run test:apk`)।
 - **ত্রুটির উত্তর:** সব `/api` উত্তর JSON; অজানা ঠিকানায় 404 `{error}`; ভাঙা JSON-এ 400 `{error}`; ভেতরের ত্রুটির বিবরণ বাইরে যায় না (`ApiErrors.ts`)।
 
 ---

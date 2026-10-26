@@ -272,6 +272,11 @@ details{margin:8px 0}a{color:#6d28d9}</style></head><body><nav><a class="" href=
 <td>✅</td>
 </tr>
 <tr>
+<td>লগইন পাতার APK download দিয়ে কি সার্ভারের অন্য ফাইল নামানো যায়?</td>
+<td>না। শুধু <code>downloads/</code> ফোল্ডারের <code>.apk</code> নামের ফাইল যায়, নামে <code>/</code> বা <code>..</code> থাকলে 404। ফাইলটা আসল Android APK না হলে পাঠানোই হয় না (<code>AndroidApkRoute.ts</code>, <code>npm run test:apk</code>)।</td>
+<td>✅</td>
+</tr>
+<tr>
 <td>লাইব্রেরির দুর্বলতা পরীক্ষা (<code>npm audit</code>)?</td>
 <td>নিয়মিত প্রক্রিয়া <strong>লিখিত নেই</strong>। (১৮ অক্টোবর "নিরাপত্তা আপডেট" commit আছে, প্রক্রিয়া হিসেবে নয়।)</td>
 <td>⚠️</td>

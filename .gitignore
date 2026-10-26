@@ -9,3 +9,7 @@ coverage/
 
 # Sign-in key made when JWT_SECRET is not set (JwtSecret.ts)
 .jwt-secret
+
+# The Android app the login page offers (AndroidApkRoute.ts) — put on the
+# server by hand, never committed.
+/downloads/

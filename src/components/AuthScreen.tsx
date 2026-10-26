@@ -587,7 +587,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
           {!isNativeApp && !ownerMode && (
             <a
               href="/downloads/CredenceHR.apk"
-              download
+              download="CredenceHR.apk"
+              type="application/vnd.android.package-archive"
               className="mt-5 flex items-center justify-center gap-2.5 py-3 px-5 rounded-2xl text-white transition-opacity hover:opacity-90"
               style={{ background: '#111318' }}
             >
