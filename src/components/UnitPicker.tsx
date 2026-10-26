@@ -27,7 +27,7 @@ export const UnitPicker: React.FC<{
   const [custom, setCustom] = useState(!!value.trim() && !known);
   if (custom) {
     return (
-      <div className="flex gap-1">
+      <div className="relative">
         <input
           value={value}
           onChange={(e) => onChange(e.target.value)}
@@ -36,7 +36,7 @@ export const UnitPicker: React.FC<{
           disabled={disabled}
           required={required}
           autoFocus={!value}
-          className={`${className} min-w-0 flex-1`}
+          className={`${className} pr-16`}
         />
         <button
           type="button"
@@ -45,7 +45,7 @@ export const UnitPicker: React.FC<{
             setCustom(false);
             onChange('pcs');
           }}
-          className="shrink-0 px-2 text-[11px] font-semibold text-slate-500 hover:text-slate-800"
+          className="absolute right-1.5 top-1/2 -translate-y-1/2 px-2.5 py-1 rounded-full text-[11px] font-semibold text-violet-700 bg-violet-50 hover:bg-violet-100"
           title="Pick from the list"
         >
           List

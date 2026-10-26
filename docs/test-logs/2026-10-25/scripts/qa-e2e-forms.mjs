@@ -174,7 +174,7 @@ await T('E2E-11', !!bb && bb.width >= vp.width - 40 && bb.height >= vp.height - 
 await page.getByLabel('Item name').first().fill('A4 Paper');
 await page.getByLabel('Purpose').first().fill('Printing');
 await page.getByLabel('Unit').first().selectOption('ream');
-await page.getByRole('button', { name: '+ Add Item' }).click();
+await page.getByRole('button', { name: 'Add another item' }).click();
 await page.getByLabel('Item name').nth(1).fill('Engine oil');
 await page.getByLabel('Purpose').nth(1).fill('Generator');
 await page.getByLabel('Unit').nth(1).selectOption('__other__');
