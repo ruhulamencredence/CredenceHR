@@ -2357,7 +2357,7 @@ async function startServer() {
       // companyContext.ts / CompanyRoutes.ts.
       let ctx: CompanyContext = { companyId: 1, groupId: 1 };
       try {
-        ctx = await resolveCompanyContext(queryDB, user, req.headers["x-company-id"]);
+        ctx = await resolveCompanyContext(queryDB, user, req.headers["x-company-id"], req.headers["x-company-scope"]);
       } catch {
         // falls back to company 1, same as before multi-company
       }

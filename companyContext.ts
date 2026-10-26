@@ -34,6 +34,12 @@ export interface CompanyContext {
   // Set by the Admin Panel module gates (server.ts adminScopeNext): looking
   // up or changing one record stays inside the active company.
   strict?: boolean;
+  // "All companies" mode (users.can_work_all_companies, the switcher's All
+  // companies entry): employees and their records of every company listed
+  // here — the ones this account may enter — are read and changed together,
+  // without switching. companyId stays the company new records go to and
+  // whose settings and Module Access apply.
+  companies?: number[];
   visiting?: boolean;
 }
 

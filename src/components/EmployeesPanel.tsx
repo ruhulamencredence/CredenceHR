@@ -12,6 +12,7 @@ import { RecordFields, useNameSuggestions, refreshNameSuggestions } from './HrOp
 import { confirmDialog } from '../lib/confirmDialog';
 import { LoadingBlock } from './LoadingBlock';
 import { passwordProblem, PASSWORD_HINT } from '../lib/passwordPolicy';
+import { useMyCompanies } from '../lib/company';
 
 // Add/Edit Employee modal tabs — Basic + Employee Info fields live under
 // "info", the rest mirror the reference HR system's own tab split (Status /
@@ -348,6 +349,11 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
   const [careerDrafts, setCareerDrafts] = useState<{ kind: 'experience' | 'education'; data: Record<string, any> }[]>([]);
   const [savedCareer, setSavedCareer] = useState<{ experience: any[]; education: any[] } | null>(null);
   const nameSuggestions = useNameSuggestions(token);
+  // All companies mode (switcher): the list mixes companies, so each row
+  // shows whose employee it is.
+  const myCompanies = useMyCompanies(token);
+  const companyCode = (id: any) =>
+    myCompanies?.all_companies ? myCompanies.companies.find((c) => c.id === Number(id ?? 1))?.short_code || null : null;
 
   // Supervisor tab — loaded on demand for the employee currently being
   // edited (a brand-new, not-yet-saved employee has no id yet, so the tab
@@ -1297,7 +1303,14 @@ export const EmployeesPanel: React.FC<EmployeesPanelProps> = ({ token, user }) =
                 {pageRows.map((emp) => (
                   <tr key={emp.id} className="hover:bg-slate-50/80 transition-colors">
                     <td className="px-4 py-3 whitespace-nowrap">
-                      <div className="font-semibold text-slate-900 text-xs">{emp.name}</div>
+                      <div className="font-semibold text-slate-900 text-xs">
+                        {emp.name}
+                        {companyCode((emp as any).company_id) && (
+                          <span className="ml-1.5 align-middle text-[9px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">
+                            {companyCode((emp as any).company_id)}
+                          </span>
+                        )}
+                      </div>
                       {emp.employee_id && (
                         <div className="text-[11px] text-slate-400 font-mono">{emp.employee_id}</div>
                       )}

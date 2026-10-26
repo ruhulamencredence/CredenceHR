@@ -26,6 +26,10 @@
 //            employee's record stays in the active company, so an HR Admin of
 //            one company can't reach a sister company's employee by id.
 //            Accounts (users) are still found group-wide — names only.
+//   all      "All companies" mode (ctx.companies, an explicit permission):
+//            the company scope widened to every company the account may
+//            enter — lists and single records alike. Settings, company-owned
+//            records and new rows stay with the active company.
 //
 // INSERTs into the tables that carry company_id get the active company, so a
 // new employee / department / branch / project created while working in a
@@ -266,13 +270,20 @@ const SINGLE_LOOKUP_RE = /\b(?:[A-Za-z_][A-Za-z0-9_]*\.)?(?:id|user_id|employee_
 
 const int = (n: number) => String(Math.trunc(Number(n)) || 1);
 
+// "company_id = 1" or, in All companies mode, "company_id IN (1, 4, 7)".
+function inCompanies(ctx: CompanyContext): string {
+  const list = (ctx.companies || []).map(int);
+  return list.length > 1 ? `IN (${list.join(", ")})` : `= ${int(ctx.companyId)}`;
+}
+
 function scopes(ctx: CompanyContext, group: boolean) {
   const cid = int(ctx.companyId);
   const gid = int(ctx.groupId);
+  const inc = inCompanies(ctx);
   const groupCompanies = `SELECT id FROM companies WHERE group_id = ${gid}`;
   const employees = group
     ? `SELECT * FROM all_employees WHERE company_id IN (${groupCompanies})`
-    : `SELECT * FROM all_employees WHERE company_id = ${cid} OR id IN (SELECT employee_id FROM employee_company_assignments WHERE company_id = ${cid} AND is_active = 1)`;
+    : `SELECT * FROM all_employees WHERE company_id ${inc} OR id IN (SELECT employee_id FROM employee_company_assignments WHERE company_id ${inc} AND is_active = 1)`;
   // Accounts that have no Employee record (e.g. an Admin) count in the
   // companies they may enter.
   const self = ctx.userId ? ` OR id = ${int(ctx.userId)}` : "";
@@ -283,11 +294,11 @@ function scopes(ctx: CompanyContext, group: boolean) {
     ? `SELECT id FROM users WHERE group_id = ${gid}${self}`
     : `SELECT user_id FROM (SELECT user_id FROM (${employees}) se WHERE se.user_id IS NOT NULL
        UNION SELECT a.user_id FROM user_company_access a
-         WHERE a.company_id = ${cid} AND a.user_id NOT IN (SELECT user_id FROM all_employees WHERE user_id IS NOT NULL)) scope_users`;
+         WHERE a.company_id ${inc} AND a.user_id NOT IN (SELECT user_id FROM all_employees WHERE user_id IS NOT NULL)) scope_users`;
   const shared = new Set(ctx.shared || []);
   const mother = ctx.motherId && ctx.motherId !== ctx.companyId ? int(ctx.motherId) : null;
   return {
-    company: (table: string) => (group ? `SELECT * FROM ${table} WHERE company_id IN (${groupCompanies})` : `SELECT * FROM ${table} WHERE company_id = ${cid}`),
+    company: (table: string) => (group ? `SELECT * FROM ${table} WHERE company_id IN (${groupCompanies})` : `SELECT * FROM ${table} WHERE company_id ${inc}`),
     config: (table: string) =>
       mother && shared.has(CONFIG_TABLES.get(table) || "")
         ? `SELECT * FROM ${table} WHERE company_id IN (${cid}, ${mother})`
@@ -304,7 +315,7 @@ function scopes(ctx: CompanyContext, group: boolean) {
       ? `SELECT * FROM users WHERE group_id = ${gid}${self}`
       : `SELECT * FROM users WHERE group_id = ${gid} AND (role = 'superadmin'
            OR id IN (SELECT user_id FROM (${employees}) su WHERE su.user_id IS NOT NULL)
-           OR id IN (SELECT user_id FROM user_company_access WHERE company_id = ${cid})
+           OR id IN (SELECT user_id FROM user_company_access WHERE company_id ${inc})
            ${mother ? "" : "OR id NOT IN (SELECT user_id FROM user_company_access)"})`
   };
 }
@@ -366,13 +377,14 @@ const WRITE_ALL_RE = /^\s*(UPDATE\s+`?([A-Za-z_][A-Za-z0-9_]*)`?\s+SET\b[\s\S]*|
 function writeGuard(table: string, ctx: CompanyContext): string | null {
   const gid = int(ctx.groupId);
   if (ctx.strict && !ctx.wholeGroup) {
-    // Admin Panel module request: only the active company's employees.
-    const cid = int(ctx.companyId);
-    const own = `(company_id = ${cid} OR id IN (SELECT employee_id FROM employee_company_assignments WHERE company_id = ${cid} AND is_active = 1))`;
+    // Admin Panel module request: only the active company's employees (or,
+    // in All companies mode, those of every company the account may enter).
+    const inc = inCompanies(ctx);
+    const own = `(company_id ${inc} OR id IN (SELECT employee_id FROM employee_company_assignments WHERE company_id ${inc} AND is_active = 1))`;
     if (table === "all_employees") return own;
     const emp = `SELECT id FROM all_employees WHERE ${own}`;
     if (EMPLOYEE_TABLES.has(table)) return `employee_id IN (${emp})`;
-    if (USER_TABLES.has(table)) return `user_id IN (SELECT user_id FROM all_employees WHERE ${own} AND user_id IS NOT NULL UNION SELECT user_id FROM user_company_access WHERE company_id = ${cid})`;
+    if (USER_TABLES.has(table)) return `user_id IN (SELECT user_id FROM all_employees WHERE ${own} AND user_id IS NOT NULL UNION SELECT user_id FROM user_company_access WHERE company_id ${inc})`;
   }
   if (CONFIG_TABLES.has(table) || OWN_TABLES.has(table)) return `company_id = ${int(ctx.companyId)}`;
   if (COMPANY_TABLES.has(table)) return `company_id IN (SELECT id FROM companies WHERE group_id = ${gid})`;

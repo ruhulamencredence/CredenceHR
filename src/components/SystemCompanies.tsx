@@ -45,6 +45,7 @@ interface AccessUser {
   default_company_id: number | null;
   module_counts: Record<number, number>;
   can_view_group_directory: boolean;
+  can_work_all_companies: boolean;
 }
 type Msg = { type: 'success' | 'error'; text: string } | null;
 
@@ -323,6 +324,15 @@ export const SystemCompanies: React.FC<{ token: string }> = ({ token }) => {
     }
   };
 
+  const saveAllCompanies = async (u: AccessUser, enabled: boolean) => {
+    try {
+      await api.put(`/api/system/company-access/${u.id}/all-companies`, { enabled });
+      setUsers((list) => (list || []).map((x) => (x.id === u.id ? { ...x, can_work_all_companies: enabled } : x)));
+    } catch (e: any) {
+      setMsg({ type: 'error', text: e.message });
+    }
+  };
+
   if (!companies) return <LoadingBlock />;
   const active = companies.filter((c) => c.is_active);
   const shown = (users || []).filter((u) => !q.trim() || [u.name, u.email].some((v) => String(v || '').toLowerCase().includes(q.trim().toLowerCase())));
@@ -463,6 +473,12 @@ export const SystemCompanies: React.FC<{ token: string }> = ({ token }) => {
                   <th className="px-3 py-2 text-center whitespace-nowrap" title="Employee Directory shows every company of the group, without switching company">
                     Whole-group directory
                   </th>
+                  <th
+                    className="px-3 py-2 text-center whitespace-nowrap"
+                    title="Open and change every company's employee records together (switcher → All companies), without switching company"
+                  >
+                    All companies mode
+                  </th>
                   <th />
                 </tr>
               </thead>
@@ -524,6 +540,16 @@ export const SystemCompanies: React.FC<{ token: string }> = ({ token }) => {
                           onChange={(e) => saveGroupDirectory(u, e.target.checked)}
                         />
                       </td>
+                      <td className="px-3 py-2 text-center">
+                        <input
+                          type="checkbox"
+                          aria-label={`${u.name} may use All companies mode`}
+                          checked={isSa || u.can_work_all_companies}
+                          disabled={isSa || u.company_ids.length < 2}
+                          title={!isSa && u.company_ids.length < 2 ? 'Give this account a second company first' : undefined}
+                          onChange={(e) => saveAllCompanies(u, e.target.checked)}
+                        />
+                      </td>
                       <td className="px-3 py-2 text-right">
                         {!isSa && active.length > 1 && (
                           <button type="button" className={btnGhost} onClick={() => setCopyFor(u)} title="Copy Module Access to other companies">
@@ -540,6 +566,9 @@ export const SystemCompanies: React.FC<{ token: string }> = ({ token }) => {
           <p className="text-[11px] text-slate-500">
             Module Access itself is set per company in Users → Module Access, while that company is selected in the header. The Superadmin can enter every company.
             “Whole-group directory”: Employee Directory lists the mother and every sister company's employees together, without switching company.
+            “All companies mode”: the header switcher gets an “All companies” entry — employees and their records (profile, bank accounts, leave, attendance…) of
+            every company ticked for the account are listed, opened and changed together. Payroll is still run per company, and settings and new records stay
+            with the company chosen in the switcher; picking one company works exactly as before.
           </p>
         </div>
       )}

@@ -107,7 +107,9 @@ export function registerEmployeeRoutes(app: Express, deps: RegisterEmployeeRoute
             phone: e.phone || null,
             is_active: !!Number(e.is_active),
             created_at: e.created_at,
-            user_id: e.user_id || null
+            user_id: e.user_id || null,
+            // Whose employee (the list mixes companies in All companies mode).
+            company_id: Number(e.company_id ?? 1)
           };
           for (const field of EMPLOYEE_EXT_FIELDS) {
             out[field] = (EMPLOYEE_BOOL_FIELDS as readonly string[]).includes(field)

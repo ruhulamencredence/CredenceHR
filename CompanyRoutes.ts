@@ -250,6 +250,9 @@ export async function ensureCompanySchema(dbPool: any): Promise<void> {
   await run("delivery_date_conditions group defaults", SEED_GROUP_DEFAULTS, ["ER_NO_SUCH_TABLE"]);
   // Employee Directory across every company of the group (EmployeeDirectoryRoutes.ts).
   await run("users.can_view_group_directory", "ALTER TABLE users ADD COLUMN can_view_group_directory TINYINT(1) NOT NULL DEFAULT 0", ["ER_DUP_FIELDNAME"]);
+  // "All companies" mode: open and change every company's employee records
+  // from one place, without switching. Off until a Superadmin ticks it.
+  await run("users.can_work_all_companies", "ALTER TABLE users ADD COLUMN can_work_all_companies TINYINT(1) NOT NULL DEFAULT 0", ["ER_DUP_FIELDNAME"]);
   await run("companies.shared_settings", "ALTER TABLE companies ADD COLUMN shared_settings TEXT NULL", ["ER_DUP_FIELDNAME"]);
 
   // Module Access per company: add the column, widen the unique key to
@@ -298,6 +301,9 @@ interface AccessInfo {
   // The system owner (users.is_platform_admin) — may also enter any other
   // group's companies (resolveCompanyContext).
   platform: boolean;
+  // May use "All companies" mode (users.can_work_all_companies; a
+  // Superadmin always may): every company in `allowed` at once.
+  allCompanies: boolean;
 }
 
 // Which kinds of settings a company uses from its mother company. Stored as a
@@ -383,7 +389,8 @@ export async function loadCompanyAccess(queryDB: QueryDB, user: { id: number; ro
     defaultId,
     motherId: Number(mother?.id ?? DEFAULT_COMPANY_ID),
     shared,
-    platform: Number(u?.is_platform_admin || 0) === 1
+    platform: Number(u?.is_platform_admin || 0) === 1,
+    allCompanies: role === "superadmin" || Number(u?.can_work_all_companies || 0) === 1
   };
   accessCache.set(Number(user.id), info);
   return info;
@@ -395,7 +402,7 @@ export async function loadCompanyAccess(queryDB: QueryDB, user: { id: number; ro
 // group's Superadmin (visiting), and the visit is recorded.
 const lastVisitLog = new Map<string, number>();
 const VISIT_LOG_EVERY_MS = 10 * 60 * 1000;
-export async function resolveCompanyContext(queryDB: QueryDB, user: { id: number; role?: string }, requested: any): Promise<CompanyContext> {
+export async function resolveCompanyContext(queryDB: QueryDB, user: { id: number; role?: string }, requested: any, scope?: any): Promise<CompanyContext> {
   const info = await loadCompanyAccess(queryDB, user);
   const want = Number(Array.isArray(requested) ? requested[0] : requested);
   if (want && !info.allowed.includes(want) && info.platform) {
@@ -416,7 +423,12 @@ export async function resolveCompanyContext(queryDB: QueryDB, user: { id: number
     }
   }
   const companyId = want && info.allowed.includes(want) ? want : info.defaultId;
-  return { companyId, groupId: info.groupId, motherId: info.motherId, shared: info.shared.get(companyId) || [], userId: Number(user.id) };
+  const ctx: CompanyContext = { companyId, groupId: info.groupId, motherId: info.motherId, shared: info.shared.get(companyId) || [], userId: Number(user.id) };
+  // All companies mode (X-Company-Scope: all) — only with the permission, and
+  // only over the companies this account may enter; otherwise ignored, and
+  // the request works in the one company as usual.
+  if (String(Array.isArray(scope) ? scope[0] : scope || "") === "all" && info.allCompanies && info.allowed.length > 1) ctx.companies = [...info.allowed];
+  return ctx;
 }
 
 // Companies of the group this request is working in.
@@ -594,6 +606,9 @@ export function registerCompanyRoutes(app: Express, deps: CompanyRouteDeps) {
         companies,
         default_company_id: visiting ? companies.find((c) => c.is_mother)?.id || companies[0]?.id : info.defaultId,
         active_company_id: activeCompanyId(),
+        // All companies mode: allowed for this account, and on for this request.
+        can_work_all_companies: !visiting && info.allCompanies && companies.length > 1,
+        all_companies: (companyStore.getStore()?.companies?.length || 0) > 1,
         visiting,
         home_company_id: info.defaultId,
         workspaces
@@ -941,6 +956,7 @@ export function registerCompanyRoutes(app: Express, deps: CompanyRouteDeps) {
               role: u.role,
               company_ids: u.role === "superadmin" ? [...companyIds] : mine.length ? mine.map((a) => Number(a.company_id)) : [motherId],
               can_view_group_directory: u.role === "superadmin" || !!Number(u.can_view_group_directory || 0),
+              can_work_all_companies: u.role === "superadmin" || !!Number(u.can_work_all_companies || 0),
               default_company_id: Number(mine.find((a) => Number(a.is_default) === 1)?.company_id || 0) || (mine.length ? Number(mine[0].company_id) : motherId),
               module_counts: modules
             };
@@ -990,6 +1006,27 @@ export function registerCompanyRoutes(app: Express, deps: CompanyRouteDeps) {
       const target = ((await queryDB("/*unscoped*/ SELECT id, group_id FROM users").catch(() => [])) || []).find((u: any) => Number(u.id) === userId);
       if (!target || Number(target.group_id ?? DEFAULT_GROUP_ID) !== groupId) throw bad("Account not found.", 404);
       await queryDB("UPDATE users SET can_view_group_directory = ? WHERE id = ?", [req.body?.enabled ? 1 : 0, userId]);
+      res.json({ success: true });
+    } catch (err) {
+      fail(res, err);
+    }
+  });
+
+  // All companies mode: this account's employee work (lists, records, edits)
+  // spans every company it may enter, without switching. Superadmin only.
+  app.put("/api/system/company-access/:userId/all-companies", authenticateToken, requireSuperAdmin, async (req: any, res) => {
+    try {
+      const groupId = await myGroup(req);
+      const userId = Number(req.params.userId);
+      const target = ((await queryDB("/*unscoped*/ SELECT id, group_id, role FROM users").catch(() => [])) || []).find((u: any) => Number(u.id) === userId);
+      if (!target || Number(target.group_id ?? DEFAULT_GROUP_ID) !== groupId) throw bad("Account not found.", 404);
+      const enabled = !!req.body?.enabled;
+      await queryDB("UPDATE users SET can_work_all_companies = ? WHERE id = ?", [enabled ? 1 : 0, userId]);
+      await queryDB(
+        "INSERT INTO user_access_audit (actor_user_id, target_user_id, action, detail) VALUES (?, ?, ?, ?)",
+        [req.user.id, userId, "all_companies", enabled ? "All companies mode turned on" : "All companies mode turned off"]
+      ).catch(() => {});
+      invalidateCompanyAccess(userId);
       res.json({ success: true });
     } catch (err) {
       fail(res, err);

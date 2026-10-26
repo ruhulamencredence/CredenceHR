@@ -3,14 +3,17 @@
 // and its modules there; the HR then switches to it and does the sister
 // company's HR work — employees, bank accounts, salaries, payroll, leave.
 // Someone without that access (qa-companies.mjs) still can't.
+// Then "All companies" mode (GH-10..): with the Superadmin's extra tick the
+// same HR opens and changes both companies' employee records from one place,
+// without switching; without the tick the X-Company-Scope header does nothing.
 // Usage: node qa-group-hr.mjs <out.json>
 import fs from 'fs';
 import { execFileSync } from 'child_process';
 const BASE = process.env.BASE || 'http://localhost:3100';
 const R = [];
 const T = (id, ok, name, detail = '') => { R.push({ id, status: ok ? 'PASS' : 'FAIL', name, detail: String(detail).slice(0, 400) }); console.log(`${ok ? 'PASS' : 'FAIL'} ${id} ${name}${!ok && detail ? '  — ' + String(detail).slice(0, 300) : ''}`); };
-async function api(t, m, p, b, company) {
-  const r = await fetch(BASE + p, { method: m, headers: { 'content-type': 'application/json', ...(t ? { authorization: `Bearer ${t}` } : {}), ...(company ? { 'x-company-id': String(company) } : {}) }, body: b !== undefined ? JSON.stringify(b) : undefined });
+async function api(t, m, p, b, company, scope) {
+  const r = await fetch(BASE + p, { method: m, headers: { 'content-type': 'application/json', ...(t ? { authorization: `Bearer ${t}` } : {}), ...(company ? { 'x-company-id': String(company) } : {}), ...(scope ? { 'x-company-scope': scope } : {}) }, body: b !== undefined ? JSON.stringify(b) : undefined });
   const x = await r.text(); let j; try { j = JSON.parse(x); } catch { j = x; } return { status: r.status, body: j };
 }
 const ok = (r) => r.status >= 200 && r.status < 300;
@@ -58,6 +61,48 @@ const l1 = await api(HR, 'GET', '/api/employees', undefined, 1);
 T('GH-08', ok(l1) && !has(l1.body, 'Bina Builders'), 'In the mother company: the list shows the mother company\'s employees', J(l1));
 const byId = await api(HR, 'GET', `/api/employees/${eBid}/payment-accounts`, undefined, 1);
 T('GH-09', !has(byId.body, '777000111'), 'In the mother company: a CBL record opened by id is not shown (switch to CBL for it)', J(byId));
+
+// ---- All companies mode -----------------------------------------------------
+const ALL = (t, m, p, b) => api(t, m, p, b, 1, 'all');
+// Without the permission the header changes nothing.
+const noPerm = await ALL(HR, 'GET', '/api/employees');
+const noPermAcc = await ALL(HR, 'GET', `/api/employees/${eBid}/payment-accounts`);
+const mineNo = await ALL(HR, 'GET', '/api/companies/mine');
+T('GH-10', !has(noPerm.body, 'Bina Builders') && !has(noPermAcc.body, '777000111') && mineNo.body.can_work_all_companies === false && mineNo.body.all_companies === false, 'Without the permission, "All companies" does nothing (no switcher entry, CBL stays out)', `${J(noPerm)}; mine ${JSON.stringify(mineNo.body).slice(0, 120)}`);
+const offByOther = await api(HR, 'PUT', `/api/system/company-access/${hid}/all-companies`, { enabled: true });
+T('GH-11', !ok(offByOther), 'HR cannot give themselves the permission (Superadmin only)', J(offByOther));
+
+const grant = await api(SA, 'PUT', `/api/system/company-access/${hid}/all-companies`, { enabled: true });
+const audit = sql(`SELECT COUNT(*) FROM user_access_audit WHERE target_user_id=${hid} AND action='all_companies'`);
+const mineYes = await ALL(HR, 'GET', '/api/companies/mine');
+T('GH-12', ok(grant) && mineYes.body.can_work_all_companies === true && mineYes.body.all_companies === true && Number(audit) >= 1, 'Superadmin ticks it: the switcher offers All companies, the change is in the access audit', `${J(grant)}; audit ${audit}`);
+// A mother-company employee to see alongside the CBL one.
+const eA = await api(SA, 'POST', '/api/employees', { name: 'Arif Mother', designation: 'Accountant', department_id: 1, joining_date: '2024-01-01', email: 'arif.mother@credence.test' }, 1);
+const both = await ALL(HR, 'GET', '/api/employees');
+T('GH-13', ok(both) && has(both.body, 'Bina Builders') && has(both.body, 'Arif Mother'), 'All companies: one list has the mother company\'s and CBL\'s employees', J(both));
+const accAll = await ALL(HR, 'GET', `/api/employees/${eBid}/payment-accounts`);
+T('GH-14', has(accAll.body, '777000111'), 'All companies: opens a CBL employee\'s bank account without switching', J(accAll));
+const edAll = await ALL(HR, 'PUT', `/api/employees/${eBid}`, { name: 'Bina Builders', designation: 'Project Engineer' });
+T('GH-15', ok(edAll) && sql(`SELECT designation FROM all_employees WHERE id=${eBid}`) === 'Project Engineer', 'All companies: changes a CBL employee without switching', J(edAll));
+const edA = await ALL(HR, 'PUT', `/api/employees/${eA.body.id}`, { name: 'Arif Mother', designation: 'Senior Accountant' });
+T('GH-16', ok(edA) && sql(`SELECT designation FROM all_employees WHERE id=${eA.body.id}`) === 'Senior Accountant', 'All companies: changes a mother-company employee in the same place', J(edA));
+const newE = await ALL(HR, 'POST', '/api/employees', { name: 'New In All Mode', designation: 'Officer', department_id: 1, joining_date: '2024-01-01', email: 'new.allmode@credence.test' });
+T('GH-17', ok(newE) && sql(`SELECT company_id FROM all_employees WHERE id=${newE.body.id || 0}`) === '1', 'All companies: a new employee goes to the company chosen in the switcher (mother)', `${J(newE)}; company ${sql(`SELECT company_id FROM all_employees WHERE id=${newE.body.id || 0}`)}`);
+const genAll = await ALL(HR, 'POST', '/api/payroll/generate', { employee_id: eBid, month_year: '2026-08', total_working_days: 26, present_days: 26, leave_days: 0, absent_days: 0 });
+T('GH-18', !ok(genAll), 'All companies: payroll is still run per company (CBL\'s salary is run in CBL)', J(genAll));
+// The usual way still works next to it.
+const one = await api(HR, 'GET', '/api/employees', undefined, B);
+T('GH-19', ok(one) && has(one.body, 'Bina Builders') && !has(one.body, 'Arif Mother'), 'Picking one company still shows just that company', J(one));
+// An account allowed only company 1 gets nothing more from the mode.
+const oid = (await api(SA, 'POST', '/api/users', { name: 'One Co HR', email: 'oneco.hr@credence.test', password: 'easy', role: 'admin' })).body.id;
+await api(SA, 'PUT', `/api/users/${oid}/module-permissions`, { modules: MODS }, 1);
+sql(`UPDATE users SET can_work_all_companies = 1 WHERE id = ${oid}`);
+const O = await login('oneco.hr@credence.test', 'easy');
+const oneOnly = await ALL(O, 'GET', '/api/employees');
+T('GH-20', ok(oneOnly) && !has(oneOnly.body, 'Bina Builders'), 'The mode only spans companies the account may enter (company 1 only → no CBL)', J(oneOnly));
+const revoke = await api(SA, 'PUT', `/api/system/company-access/${hid}/all-companies`, { enabled: false });
+const after = await ALL(HR, 'GET', '/api/employees');
+T('GH-21', ok(revoke) && !has(after.body, 'Bina Builders'), 'Superadmin unticks it: back to one company at a time straight away', J(after));
 
 const sum = { PASS: R.filter((r) => r.status === 'PASS').length, FAIL: R.filter((r) => r.status === 'FAIL').length };
 console.log('\nSUMMARY', JSON.stringify(sum));

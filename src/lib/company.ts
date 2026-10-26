@@ -17,6 +17,27 @@ import { useEffect, useState } from 'react';
 import { ACCOUNT_BLOCKED_EVENT, DEVICE_REVOKED_EVENT, SESSION_ENDED_EVENT } from './device';
 
 const KEY = 'credence_company_id';
+// "All companies" mode (an account the Superadmin allowed it): every API call
+// also carries X-Company-Scope: all; the server ignores it without the
+// permission. The company above stays the one new records go to.
+const ALL_KEY = 'credence_company_all';
+
+export function getAllCompaniesMode(): boolean {
+  try {
+    return localStorage.getItem(ALL_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function setAllCompaniesMode(on: boolean) {
+  try {
+    if (on) localStorage.setItem(ALL_KEY, '1');
+    else localStorage.removeItem(ALL_KEY);
+  } catch {
+    // storage unavailable — one company at a time
+  }
+}
 
 export function getActiveCompanyId(): number | null {
   try {
@@ -56,9 +77,11 @@ export function installCompanyHeader() {
         if (ended) window.dispatchEvent(new CustomEvent(SESSION_ENDED_EVENT, { detail: ended }));
         return res;
       });
-    if (!company || !sameOriginApi) return watch(original(input, init));
+    const all = getAllCompaniesMode();
+    if ((!company && !all) || !sameOriginApi) return watch(original(input, init));
     const headers = new Headers(init?.headers || (input instanceof Request ? input.headers : undefined));
-    if (!headers.has('X-Company-Id')) headers.set('X-Company-Id', String(company));
+    if (company && !headers.has('X-Company-Id')) headers.set('X-Company-Id', String(company));
+    if (all && !headers.has('X-Company-Scope')) headers.set('X-Company-Scope', 'all');
     return watch(original(input, { ...init, headers }));
   };
 }
@@ -82,6 +105,9 @@ export interface MyCompanies {
   companies: CompanyInfo[];
   default_company_id: number;
   active_company_id: number;
+  // All companies mode: allowed for this account / on right now.
+  can_work_all_companies?: boolean;
+  all_companies?: boolean;
   // The system owner working inside another group's workspace.
   visiting?: boolean;
   home_company_id?: number;
@@ -102,6 +128,8 @@ export function useMyCompanies(token: string | null) {
         cache = { token, data: d };
         // Keep the remembered company in step with what the server used.
         if (getActiveCompanyId() !== d.active_company_id) setActiveCompanyId(d.active_company_id);
+        // The permission was taken away: back to one company.
+        if (getAllCompaniesMode() && !d.all_companies) setAllCompaniesMode(false);
         setData(d);
       })
       .catch(() => {});
@@ -114,6 +142,16 @@ export function useMyCompanies(token: string | null) {
 
 // Switching company reloads the app so every screen loads that company's data.
 export function switchCompany(id: number) {
+  setAllCompaniesMode(false);
+  setActiveCompanyId(id);
+  cache = null;
+  window.location.reload();
+}
+
+// All companies mode: every company the account may enter at once; `id` is
+// the company new records go to (normally the one already selected).
+export function switchToAllCompanies(id: number) {
+  setAllCompaniesMode(true);
   setActiveCompanyId(id);
   cache = null;
   window.location.reload();
